@@ -30,11 +30,21 @@ class TaskBudgetData extends Model
 
     public function task(): BelongsTo
     {
-        return $this->belongsTo(EnquiryTask::class, 'enquiry_task_id');
+        return $this->belongsTo(\App\Modules\Projects\Models\EnquiryTask::class, 'enquiry_task_id');
+    }
+
+    public function enquiry_task(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Projects\Models\EnquiryTask::class, 'enquiry_task_id');
     }
 
     public function approvals(): HasMany
     {
         return $this->hasMany(BudgetApproval::class);
+    }
+
+    public function budgetAdditions(): HasMany
+    {
+        return $this->hasMany(BudgetAddition::class);
     }
 }

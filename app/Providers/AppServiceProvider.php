@@ -32,7 +32,7 @@ class AppServiceProvider extends ServiceProvider
 
         // Route model binding
         Route::bind('enquiry', function ($value) {
-            return \App\Models\Enquiry::findOrFail($value);
+            return \App\Models\ProjectEnquiry::findOrFail($value);
         });
     }
 }

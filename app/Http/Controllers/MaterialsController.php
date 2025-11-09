@@ -257,6 +257,7 @@ class MaterialsController extends Controller
                         'unit_of_measurement' => $materialData['unitOfMeasurement'],
                         'quantity' => $materialData['quantity'],
                         'is_included' => $materialData['isIncluded'] ?? true,
+                        'is_additional' => $materialData['isAdditional'] ?? false,  // ← ADD THIS LINE
                         'notes' => $materialData['notes'] ?? null,
                         'sort_order' => $materialData['sortOrder'] ?? 0,
                     ]);
@@ -264,6 +265,12 @@ class MaterialsController extends Controller
             }
 
             \DB::commit();
+
+            // Check for additional materials and create budget additions automatically
+            $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
+
+            // Update budget data with latest materials if budget exists
+            $this->syncMaterialsToBudget($taskId, $request->projectElements);
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData->fresh(['elements.materials'])),
@@ -524,6 +531,249 @@ class MaterialsController extends Controller
     }
 
     /**
+     * Sync materials data to budget whenever materials are updated
+     */
+    private function syncMaterialsToBudget(int $materialsTaskId, array $projectElements): void
+    {
+        try {
+            // Find the budget task for this enquiry
+            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($materialsTaskId);
+            if (!$materialsTask) {
+                \Log::warning('Materials task not found for budget sync', ['taskId' => $materialsTaskId]);
+                return;
+            }
+
+            $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
+                ->where('type', 'budget')
+                ->first();
+
+            if (!$budgetTask) {
+                \Log::info('No budget task found for enquiry - skipping materials sync', [
+                    'enquiryId' => $materialsTask->project_enquiry_id
+                ]);
+                return;
+            }
+
+            // Get budget data
+            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
+            if (!$budgetData) {
+                \Log::info('No budget data found - skipping materials sync', [
+                    'budgetTaskId' => $budgetTask->id
+                ]);
+                return;
+            }
+
+            // Always sync materials to budget, regardless of status
+            // This ensures budget always has the latest materials data
+            // Only skip if budget is completed AND manually modified (to preserve approved budget)
+            if ($budgetTask->status === 'completed' && $budgetData->materials_manually_modified) {
+                \Log::info('Budget is completed and manually modified - skipping automatic materials sync', [
+                    'budgetTaskId' => $budgetTask->id
+                ]);
+                return;
+            }
+
+            // Get materials data to sync
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)
+                ->with(['elements.materials'])
+                ->first();
+
+            if (!$materialsData) {
+                \Log::info('No materials data found - skipping materials sync', [
+                    'materialsTaskId' => $materialsTaskId
+                ]);
+                return;
+            }
+
+            // Transform materials for budget
+            $budgetMaterials = [];
+            foreach ($materialsData->elements as $element) {
+                // Skip elements that are not included
+                if (!$element->is_included) {
+                    continue;
+                }
+
+                $elementMaterials = [];
+
+                foreach ($element->materials as $material) {
+                    // Skip materials that are not included
+                    if (!$material->is_included) {
+                        continue;
+                    }
+
+                    // Skip materials marked as additional - they should only appear in additions tab
+                    if ($material->is_additional) {
+                        continue;
+                    }
+
+                    $elementMaterials[] = [
+                        'id' => (string) $material->id,
+                        'description' => $material->description,
+                        'unitOfMeasurement' => $material->unit_of_measurement,
+                        'quantity' => (float) $material->quantity,
+                        'isIncluded' => true, // Already filtered
+                        'unitPrice' => 0.0, // To be filled by budget user
+                        'totalPrice' => 0.0, // Calculated: quantity * unitPrice
+                        'isAddition' => false,
+                        'notes' => $material->notes,
+                        'category' => $element->category
+                    ];
+                }
+
+                // Only add element if it has materials
+                if (!empty($elementMaterials)) {
+                    $budgetMaterials[] = [
+                        'id' => (string) $element->id,
+                        'elementType' => $element->element_type,
+                        'name' => $element->name,
+                        'category' => $element->category,
+                        'materials' => $elementMaterials,
+                        'isIncluded' => true, // Already filtered
+                        'notes' => $element->notes
+                    ];
+                }
+            }
+
+            // Update budget with synced materials
+            $budgetData->update([
+                'materials_data' => $budgetMaterials,
+                'materials_imported_at' => now(),
+                'materials_imported_from_task' => $materialsTaskId,
+                'materials_manually_modified' => false,
+                'materials_import_metadata' => [
+                    'imported_at' => now()->toISOString(),
+                    'materials_task_id' => $materialsTaskId,
+                    'materials_task_title' => $materialsTask->title,
+                    'total_elements' => $materialsData->elements->count(),
+                    'total_materials' => $materialsData->elements->sum(function ($element) {
+                        return $element->materials->count();
+                    })
+                ],
+                'updated_at' => now()
+            ]);
+
+            \Log::info("Materials synced to budget successfully", [
+                'budget_task_id' => $budgetTask->id,
+                'materials_task_id' => $materialsTaskId,
+                'total_elements' => count($budgetMaterials),
+                'total_materials' => array_sum(array_map(function ($element) {
+                    return count($element['materials']);
+                }, $budgetMaterials))
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to sync materials to budget', [
+                'materialsTaskId' => $materialsTaskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+
+    /**
+     * Create budget additions for materials marked as additional
+     */
+    private function createBudgetAdditionsForAdditionalMaterials(int $materialsTaskId, array $projectElements): void
+    {
+        try {
+            // Find the budget task for this enquiry
+            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($materialsTaskId);
+            if (!$materialsTask) {
+                \Log::warning('Materials task not found for budget addition creation', ['taskId' => $materialsTaskId]);
+                return;
+            }
+
+            $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
+                ->where('type', 'budget')
+                ->first();
+
+            if (!$budgetTask) {
+                \Log::info('No budget task found for enquiry - skipping automatic budget additions', [
+                    'enquiryId' => $materialsTask->project_enquiry_id
+                ]);
+                return;
+            }
+
+            // Check if budget task is completed - if so, all new materials should be additions
+            $isBudgetCompleted = $budgetTask->status === 'completed';
+
+            // Get budget data
+            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
+            if (!$budgetData) {
+                \Log::info('No budget data found - skipping automatic budget additions', [
+                    'budgetTaskId' => $budgetTask->id
+                ]);
+                return;
+            }
+
+            // Process each element and its materials
+            foreach ($projectElements as $elementData) {
+                foreach ($elementData['materials'] as $materialData) {
+                    // If budget is completed, ALL new materials should be treated as additions
+                    // Otherwise, only materials explicitly marked as "additional"
+                    $shouldCreateAddition = $isBudgetCompleted ||
+                        (isset($materialData['isAdditional']) && $materialData['isAdditional']);
+
+                    if ($shouldCreateAddition) {
+                        // Check if this material already has a budget addition
+                        $existingAddition = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
+                            ->where('title', 'Additional: ' . $materialData['description'])
+                            ->where('status', '!=', 'rejected')
+                            ->first();
+
+                        if (!$existingAddition) {
+                            // Create new budget addition
+                            $additionTitle = $isBudgetCompleted
+                                ? 'Post-Budget Addition: ' . $materialData['description']
+                                : 'Additional: ' . $materialData['description'];
+
+                            $additionDescription = $isBudgetCompleted
+                                ? 'Automatically created from Materials Task after budget completion - Element: ' . $elementData['name']
+                                : 'Automatically created from Materials Task - Element: ' . $elementData['name'];
+
+                            \App\Models\BudgetAddition::create([
+                                'task_budget_data_id' => $budgetData->id,
+                                'title' => $additionTitle,
+                                'description' => $additionDescription,
+                                'materials' => [
+                                    [
+                                        'id' => 'auto_' . uniqid(),
+                                        'description' => $materialData['description'],
+                                        'unitOfMeasurement' => $materialData['unitOfMeasurement'],
+                                        'quantity' => $materialData['quantity'],
+                                        'unitPrice' => 0, // To be set in budget
+                                        'totalPrice' => 0,
+                                        'isAddition' => true
+                                    ]
+                                ],
+                                'labour' => [],
+                                'expenses' => [],
+                                'logistics' => [],
+                                'status' => 'pending_approval',
+                                'created_by' => auth()->id() ?? 1, // System or current user
+                            ]);
+
+                            \Log::info('Created automatic budget addition for material', [
+                                'material' => $materialData['description'],
+                                'budgetId' => $budgetData->id,
+                                'isPostBudgetAddition' => $isBudgetCompleted,
+                                'budgetStatus' => $budgetTask->status
+                            ]);
+                        }
+                    }
+                }
+            }
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to create automatic budget additions', [
+                'materialsTaskId' => $materialsTaskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+
+    /**
      * Format materials data for frontend
      */
     private function formatMaterialsData(TaskMaterialsData $materialsData): array
@@ -547,6 +797,7 @@ class MaterialsController extends Controller
                                 'unitOfMeasurement' => $material->unit_of_measurement,
                                 'quantity' => (float) $material->quantity,
                                 'isIncluded' => (bool) $material->is_included,
+                                'isAdditional' => (bool) $material->is_additional,  // ← ADD THIS LINE
                                 'notes' => $material->notes,
                                 'createdAt' => $material->created_at?->toISOString(),
                                 'updatedAt' => $material->updated_at?->toISOString(),

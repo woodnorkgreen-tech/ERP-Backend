@@ -190,5 +190,4 @@ class ProjectEnquiry extends Model
     }
 }
 
-// Alias for backward compatibility
-class_alias(ProjectEnquiry::class, 'App\Models\Enquiry');
+// Alias for backward compatibility removed - use ProjectEnquiry directly

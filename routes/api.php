@@ -144,6 +144,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/submit-approval', [App\Http\Controllers\BudgetController::class, 'submitForApproval']);
         Route::post('/import-materials', [App\Http\Controllers\BudgetController::class, 'importMaterials']);
         Route::get('/check-materials-update', [App\Http\Controllers\BudgetController::class, 'checkMaterialsUpdate']);
+
+        // Budget additions management
+        Route::get('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'index']);
+        Route::post('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'store']);
+        Route::get('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'show']);
+        Route::put('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'update']);
+        Route::post('/additions/{additionId}/approve', [App\Http\Controllers\BudgetAdditionController::class, 'approve']);
+        Route::delete('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'destroy']);
     });
 
     // Quote management routes
@@ -151,6 +159,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [App\Http\Controllers\QuoteController::class, 'getQuoteData']);
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'saveQuoteData']);
         Route::post('/import-budget', [App\Http\Controllers\QuoteController::class, 'importBudgetData']);
+    });
+
+    // Quote approval routes
+    Route::prefix('projects/tasks/{taskId}/approval')->group(function () {
+        Route::post('/', [App\Http\Controllers\QuoteController::class, 'submitApproval']);
     });
 
     // Get quote by enquiry ID (for frontend access)
@@ -224,8 +237,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
         Route::post('enquiries/{enquiry}/convert', [EnquiryController::class, 'convertToProject']);
-        // Manual project creation for existing enquiries (debugging)
-        Route::post('enquiries/{enquiry}/create-project', function (\App\Models\Enquiry $enquiry) {
+                // Manual project creation for existing enquiries (debugging)
+                Route::post('enquiries/{enquiry}/create-project', function (\App\Models\ProjectEnquiry $enquiry) {
             $workflowService = new \App\Modules\Projects\Services\EnquiryWorkflowService();
             $project = $workflowService->createProjectAndTasksForEnquiry($enquiry);
 

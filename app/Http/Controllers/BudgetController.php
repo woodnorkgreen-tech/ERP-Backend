@@ -754,6 +754,9 @@ class BudgetController extends Controller
     {
         $errors = [];
 
+        // Get approved budget additions for this task
+        $approvedAdditionsTotal = $this->getApprovedAdditionsTotal($data['taskId'] ?? null);
+
         // Validate materials totals match calculated values
         $calculatedMaterialsTotal = 0;
         foreach ($data['materials'] ?? [] as $element) {
@@ -769,8 +772,11 @@ class BudgetController extends Controller
             }
         }
 
-        if (abs($data['budgetSummary']['materialsTotal'] - $calculatedMaterialsTotal) > 0.01) {
-            $errors['materials_total_mismatch'] = 'Materials total does not match sum of individual material totals';
+        // Add approved additions to materials total for validation
+        $totalMaterialsWithAdditions = $calculatedMaterialsTotal + $approvedAdditionsTotal['materials'];
+
+        if (abs($data['budgetSummary']['materialsTotal'] - $totalMaterialsWithAdditions) > 0.01) {
+            $errors['materials_total_mismatch'] = 'Materials total does not match sum of individual material totals plus approved additions';
         }
 
         // Validate labour totals match calculated values
@@ -809,14 +815,22 @@ class BudgetController extends Controller
             $errors['logistics_total_mismatch'] = 'Logistics total does not match sum of individual logistics amounts';
         }
 
-        // Validate grand total
+        // Validate grand total (including approved additions)
         $expectedGrandTotal = $data['budgetSummary']['materialsTotal'] +
-                             $data['budgetSummary']['labourTotal'] +
-                             $data['budgetSummary']['expensesTotal'] +
-                             $data['budgetSummary']['logisticsTotal'];
+                              $data['budgetSummary']['labourTotal'] +
+                              $data['budgetSummary']['expensesTotal'] +
+                              $data['budgetSummary']['logisticsTotal'];
 
-        if (abs($data['budgetSummary']['grandTotal'] - $expectedGrandTotal) > 0.01) {
-            $errors['grand_total_mismatch'] = 'Grand total does not match sum of all category totals';
+        // Add all approved additions to expected grand total
+        $totalApprovedAdditions = $approvedAdditionsTotal['materials'] +
+                                  $approvedAdditionsTotal['labour'] +
+                                  $approvedAdditionsTotal['expenses'] +
+                                  $approvedAdditionsTotal['logistics'];
+
+        $expectedGrandTotalWithAdditions = $expectedGrandTotal + $totalApprovedAdditions;
+
+        if (abs($data['budgetSummary']['grandTotal'] - $expectedGrandTotalWithAdditions) > 0.01) {
+            $errors['grand_total_mismatch'] = 'Grand total does not match sum of all category totals plus approved additions';
         }
 
         // Validate budget status transitions
@@ -849,6 +863,91 @@ class BudgetController extends Controller
             'invalid_task_type', 'empty_materials_data' => 422,
             default => 400
         };
+    }
+
+    /**
+     * Get total amounts from approved budget additions for a task
+     */
+    private function getApprovedAdditionsTotal(?int $taskId): array
+    {
+        if (!$taskId) {
+            return [
+                'materials' => 0,
+                'labour' => 0,
+                'expenses' => 0,
+                'logistics' => 0
+            ];
+        }
+
+        try {
+            // Get the budget data for this task to find the budget ID
+            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
+            if (!$budgetData) {
+                return [
+                    'materials' => 0,
+                    'labour' => 0,
+                    'expenses' => 0,
+                    'logistics' => 0
+                ];
+            }
+
+            // Get approved additions for this budget
+            $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
+                ->where('status', 'approved')
+                ->get();
+
+            $totals = [
+                'materials' => 0,
+                'labour' => 0,
+                'expenses' => 0,
+                'logistics' => 0
+            ];
+
+            foreach ($approvedAdditions as $addition) {
+                // Sum materials
+                if ($addition->materials) {
+                    foreach ($addition->materials as $material) {
+                        $totals['materials'] += $material['totalPrice'] ?? 0;
+                    }
+                }
+
+                // Sum labour
+                if ($addition->labour) {
+                    foreach ($addition->labour as $labour) {
+                        $totals['labour'] += $labour['amount'] ?? 0;
+                    }
+                }
+
+                // Sum expenses
+                if ($addition->expenses) {
+                    foreach ($addition->expenses as $expense) {
+                        $totals['expenses'] += $expense['amount'] ?? 0;
+                    }
+                }
+
+                // Sum logistics
+                if ($addition->logistics) {
+                    foreach ($addition->logistics as $item) {
+                        $totals['logistics'] += $item['amount'] ?? 0;
+                    }
+                }
+            }
+
+            return $totals;
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to calculate approved additions total', [
+                'task_id' => $taskId,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'materials' => 0,
+                'labour' => 0,
+                'expenses' => 0,
+                'logistics' => 0
+            ];
+        }
     }
 
     /**

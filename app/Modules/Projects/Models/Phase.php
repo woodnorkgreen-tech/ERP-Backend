@@ -29,6 +29,6 @@ class Phase extends Model
     // Relationships
     public function projectEnquiry(): BelongsTo
     {
-        return $this->belongsTo(\App\Models\Enquiry::class, 'project_enquiry_id');
+        return $this->belongsTo(\App\Models\ProjectEnquiry::class, 'project_enquiry_id');
     }
 }

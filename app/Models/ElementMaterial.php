@@ -42,6 +42,7 @@ class ElementMaterial extends Model
         'unit_of_measurement',
         'quantity',
         'is_included',
+        'is_additional',  // ← ADD THIS LINE
         'notes',
         'sort_order'
     ];
@@ -49,6 +50,7 @@ class ElementMaterial extends Model
     protected $casts = [
         'quantity' => 'decimal:2',
         'is_included' => 'boolean',
+        'is_additional' => 'boolean',  // ← ADD THIS LINE
         'sort_order' => 'integer'
     ];
 
