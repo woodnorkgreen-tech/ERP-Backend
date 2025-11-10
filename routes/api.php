@@ -30,6 +30,9 @@ Route::get('/user', function () {
     return response()->json($user->load('roles'));
 })->middleware('auth:sanctum');
 
+//mobile app
+Route::get('/app-departments', [DepartmentController::class, 'index']);
+
 // Protected routes (require authentication)
 Route::middleware('auth:sanctum')->group(function () {
 

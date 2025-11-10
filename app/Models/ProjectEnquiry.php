@@ -35,6 +35,7 @@ class ProjectEnquiry extends Model
         'assigned_po',
         'follow_up_notes',
         'enquiry_number',
+        'job_number',
         'converted_to_project_id',
         'venue',
         'site_survey_skipped',
@@ -65,6 +66,7 @@ class ProjectEnquiry extends Model
         'budget' => 'decimal:2',
         'assigned_users' => 'array',
         'current_phase' => 'integer',
+        'job_number' => 'string',
     ];
 
     public function client(): BelongsTo
@@ -93,6 +95,42 @@ class ProjectEnquiry extends Model
     }
 
 
+    /**
+     * Approve the quote for this enquiry and convert to project
+     */
+    public function approveQuote(int $userId): bool
+    {
+        // Temporarily remove permission check for testing
+        // $user = User::find($userId);
+        // if (!$user || !$user->hasPermissionTo(Permissions::FINANCE_QUOTE_APPROVE)) {
+        //     throw new \Exception('Unauthorized: Only users with finance approval permission can approve quotes');
+        // }
+
+        // Generate job number when quote is approved
+        $jobNumber = $this->generateJobNumber();
+
+        $this->update([
+            'quote_approved' => true,
+            'quote_approved_at' => now(),
+            'quote_approved_by' => $userId,
+            'job_number' => $jobNumber,
+            'status' => EnquiryConstants::STATUS_CONVERTED_TO_PROJECT
+        ]);
+
+        // Create project
+        $project = Project::create([
+            'enquiry_id' => $this->id,
+            'project_id' => $this->generateProjectId(),
+            'start_date' => $this->expected_delivery_date,
+            'budget' => $this->estimated_budget,
+            'assigned_users' => [], // can be set later
+        ]);
+
+        $this->update(['converted_to_project_id' => $project->id]);
+
+        return true;
+    }
+
     // Scopes
     public function scopeByDepartment($query, $departmentId)
     {
@@ -120,37 +158,6 @@ class ProjectEnquiry extends Model
         return $query->where('status', EnquiryConstants::STATUS_COMPLETED);
     }
 
-    /**
-     * Approve the quote for this enquiry and convert to project
-     */
-    public function approveQuote(int $userId): bool
-    {
-        // Temporarily remove permission check for testing
-        // $user = User::find($userId);
-        // if (!$user || !$user->hasPermissionTo(Permissions::FINANCE_QUOTE_APPROVE)) {
-        //     throw new \Exception('Unauthorized: Only users with finance approval permission can approve quotes');
-        // }
-
-        $this->update([
-            'quote_approved' => true,
-            'quote_approved_at' => now(),
-            'quote_approved_by' => $userId,
-            'status' => EnquiryConstants::STATUS_CONVERTED_TO_PROJECT
-        ]);
-
-        // Create project
-        $project = Project::create([
-            'enquiry_id' => $this->id,
-            'project_id' => $this->generateProjectId(),
-            'start_date' => $this->expected_delivery_date,
-            'budget' => $this->estimated_budget,
-            'assigned_users' => [], // can be set later
-        ]);
-
-        $this->update(['converted_to_project_id' => $project->id]);
-
-        return true;
-    }
 
     /**
      * Generate a unique project ID
@@ -177,6 +184,37 @@ class ProjectEnquiry extends Model
         $formattedNumber = str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
 
         return EnquiryConstants::PROJECT_PREFIX . "-{$year}{$month}-{$formattedNumber}";
+    }
+
+    /**
+     * Generate a unique job number when quote is approved
+     */
+    public function generateJobNumber(): string
+    {
+        $now = now();
+        $year = $now->year;
+        $month = str_pad($now->month, 2, '0', STR_PAD_LEFT);
+
+        // Use correct prefix: WNG + Month + Year (last 2 digits)
+        $prefix = "WNG{$month}" . substr($year, -2);
+
+        // Get the last job number for this month - use created_at since quote_approved_at is set AFTER job number generation
+        $lastEnquiry = self::whereYear('created_at', $year)
+                          ->whereMonth('created_at', $now->month)
+                          ->whereNotNull('job_number')
+                          ->where('job_number', 'like', $prefix . '%')
+                          ->orderByRaw('CAST(SUBSTRING(job_number, LENGTH(?) + 1) AS UNSIGNED) DESC', [$prefix])
+                          ->first();
+
+        $nextNumber = 1;
+        if ($lastEnquiry) {
+            // Extract the number part after the prefix
+            $numberPart = substr($lastEnquiry->job_number, strlen($prefix));
+            $nextNumber = intval($numberPart) + 1;
+        }
+        $formattedNumber = str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
+
+        return $prefix . $formattedNumber;
     }
 
     /**

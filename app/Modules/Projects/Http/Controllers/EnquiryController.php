@@ -427,17 +427,6 @@ class EnquiryController extends Controller
         ]);
     }
 
-    public function updatePhase(Request $request, ProjectEnquiry $enquiry): JsonResponse
-    {
-
-        // Implementation for updating enquiry phase
-        // This might involve updating status or other phase-related fields
-        return response()->json([
-            'message' => 'Phase updated successfully',
-            'data' => $enquiry
-        ]);
-    }
-
     /**
      * @OA\Post(
      *     path="/api/projects/enquiries/{enquiry}/approve-quote",
@@ -465,18 +454,44 @@ class EnquiryController extends Controller
      */
     public function approveQuote(Request $request, ProjectEnquiry $enquiry): JsonResponse
     {
-        // Implementation for approving quote
-        $enquiry->update([
-            'quote_approved' => true,
-            'quote_approved_at' => now(),
-            'quote_approved_by' => Auth::id()
-        ]);
+        try {
+            // Call the model's approveQuote method which handles job number generation and project creation
+            $result = $enquiry->approveQuote(Auth::id());
 
+            if ($result) {
+                return response()->json([
+                    'message' => 'Quote approved successfully. Job number generated and project created.',
+                    'data' => $enquiry->fresh(['client', 'department'])
+                ]);
+            } else {
+                return response()->json([
+                    'message' => 'Failed to approve quote'
+                ], 500);
+            }
+        } catch (\Exception $e) {
+            \Log::error('Error approving quote', [
+                'enquiry_id' => $enquiry->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Error approving quote: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function updatePhase(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    {
+
+        // Implementation for updating enquiry phase
+        // This might involve updating status or other phase-related fields
         return response()->json([
-            'message' => 'Quote approved successfully',
+            'message' => 'Phase updated successfully',
             'data' => $enquiry
         ]);
     }
+
 
     /**
      * @OA\Post(
