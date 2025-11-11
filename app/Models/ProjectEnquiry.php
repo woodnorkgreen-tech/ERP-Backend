@@ -193,14 +193,12 @@ class ProjectEnquiry extends Model
     {
         $now = now();
         $year = $now->year;
-        $month = str_pad($now->month, 2, '0', STR_PAD_LEFT);
 
-        // Use correct prefix: WNG + Month + Year (last 2 digits)
-        $prefix = "WNG{$month}" . substr($year, -2);
+        // Use format: WNG-{year}-{sequential_number}
+        $prefix = "WNG-{$year}-";
 
-        // Get the last job number for this month - use created_at since quote_approved_at is set AFTER job number generation
+        // Get the last job number for this year
         $lastEnquiry = self::whereYear('created_at', $year)
-                          ->whereMonth('created_at', $now->month)
                           ->whereNotNull('job_number')
                           ->where('job_number', 'like', $prefix . '%')
                           ->orderByRaw('CAST(SUBSTRING(job_number, LENGTH(?) + 1) AS UNSIGNED) DESC', [$prefix])

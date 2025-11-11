@@ -134,25 +134,25 @@ class EnquiryControllerTest extends TestCase
     public function it_lists_enquiries()
     {
         // Create some test enquiries
-        Enquiry::create([
+        ProjectEnquiry::create([
             'date_received' => '2024-01-15',
             'client_name' => 'ABC Corporation',
             'project_name' => 'Project 1',
             'project_deliverables' => 'Deliverables 1',
             'contact_person' => 'John Doe',
             'status' => 'enquiry_logged',
-            'enquiry_number' => 'ENQ-2024-0001',
+            'enquiry_number' => 'WNG-11-2025-0001',
             'created_by' => auth()->id(),
         ]);
 
-        Enquiry::create([
+        ProjectEnquiry::create([
             'date_received' => '2024-01-16',
             'client_name' => 'XYZ Corp',
             'project_name' => 'Project 2',
             'project_deliverables' => 'Deliverables 2',
             'contact_person' => 'Jane Smith',
             'status' => 'client_registered',
-            'enquiry_number' => 'ENQ-2024-0002',
+            'enquiry_number' => 'WNG-11-2025-0002',
             'created_by' => auth()->id(),
         ]);
 
@@ -175,7 +175,7 @@ class EnquiryControllerTest extends TestCase
             'project_deliverables' => 'Test deliverables',
             'contact_person' => 'John Doe',
             'status' => 'enquiry_logged',
-            'enquiry_number' => 'ENQ-2024-0001',
+            'enquiry_number' => 'WNG-11-2025-0001',
             'created_by' => auth()->id(),
         ]);
 
@@ -195,14 +195,14 @@ class EnquiryControllerTest extends TestCase
     /** @test */
     public function it_updates_enquiry()
     {
-        $enquiry = Enquiry::create([
+        $enquiry = ProjectEnquiry::create([
             'date_received' => '2024-01-15',
             'client_name' => 'ABC Corporation',
             'project_name' => 'Test Project',
             'project_deliverables' => 'Test deliverables',
             'contact_person' => 'John Doe',
             'status' => 'enquiry_logged',
-            'enquiry_number' => 'ENQ-2024-0001',
+            'enquiry_number' => 'WNG-11-2025-0001',
             'created_by' => auth()->id(),
         ]);
 
@@ -232,14 +232,14 @@ class EnquiryControllerTest extends TestCase
     /** @test */
     public function it_deletes_enquiry()
     {
-        $enquiry = Enquiry::create([
+        $enquiry = ProjectEnquiry::create([
             'date_received' => '2024-01-15',
             'client_name' => 'ABC Corporation',
             'project_name' => 'Test Project',
             'project_deliverables' => 'Test deliverables',
             'contact_person' => 'John Doe',
             'status' => 'enquiry_logged',
-            'enquiry_number' => 'ENQ-2024-0001',
+            'enquiry_number' => 'WNG-11-2025-0001',
             'created_by' => auth()->id(),
         ]);
 

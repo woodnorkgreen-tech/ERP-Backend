@@ -3518,7 +3518,7 @@
                     },
                     "enquiry_number": {
                         "type": "string",
-                        "example": "ENQ-2024-0001"
+                        "example": "WNG-11-2025-001"
                     },
                     "title": {
                         "type": "string",

@@ -17,7 +17,7 @@ use App\Modules\Projects\Services\NotificationService;
  * @OA\Schema(
  *     schema="ProjectEnquiry",
  *     @OA\Property(property="id", type="integer", example=1),
- *     @OA\Property(property="enquiry_number", type="string", example="ENQ-2024-0001"),
+ *     @OA\Property(property="enquiry_number", type="string", example="WNG-11-2025-001"),
  *     @OA\Property(property="title", type="string", example="Office Branding Project"),
  *     @OA\Property(property="description", type="string", example="Complete branding solution for new office"),
  *     @OA\Property(property="status", type="string", enum={"draft","pending","in_progress","quote_approved","converted_to_project","cancelled"}),
@@ -45,10 +45,11 @@ class EnquiryController extends Controller
      */
     private function generateEnquiryNumber(): string
     {
+        $month = date('m');
         $year = date('Y');
-        $prefix = EnquiryConstants::ENQUIRY_PREFIX . '-' . $year . '-';
+        $prefix = EnquiryConstants::ENQUIRY_PREFIX . '-' . $month . '-' . $year . '-';
 
-        // Find the highest existing number for this year
+        // Find the highest existing number for this month/year
         $lastEnquiry = ProjectEnquiry::where('enquiry_number', 'like', $prefix . '%')
             ->orderByRaw('CAST(SUBSTRING(enquiry_number, LENGTH(?) + 1) AS UNSIGNED) DESC', [$prefix])
             ->first();
@@ -60,7 +61,7 @@ class EnquiryController extends Controller
             $nextNumber = intval($numberPart) + 1;
         }
 
-        return $prefix . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
+        return $prefix . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
     }
 
     /**

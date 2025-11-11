@@ -484,7 +484,7 @@ class MaterialsController extends Controller
                 \Log::warning('Task not found for materials structure', ['taskId' => $taskId]);
                 return [
                     'projectInfo' => [
-                        'projectId' => "ENQ-{$taskId}",
+                        'projectId' => "WNG-11-2025-{$taskId}",
                         'enquiryTitle' => 'Untitled Project',
                         'clientName' => 'Unknown Client',
                         'eventVenue' => 'Venue TBC',
@@ -498,7 +498,7 @@ class MaterialsController extends Controller
 
             return [
                 'projectInfo' => [
-                    'projectId' => $task->enquiry->enquiry_number ?? "ENQ-{$taskId}",
+                    'projectId' => $task->enquiry->enquiry_number ?? "WNG-11-2025-{$taskId}",
                     'enquiryTitle' => $task->enquiry->title ?? 'Untitled Project',
                     'clientName' => $task->enquiry->client->full_name ?? 'Unknown Client',
                     'eventVenue' => $task->enquiry->venue ?? 'Venue TBC',
@@ -517,7 +517,7 @@ class MaterialsController extends Controller
             // Return safe fallback
             return [
                 'projectInfo' => [
-                    'projectId' => "ENQ-{$taskId}",
+                    'projectId' => "WNG-11-2025-{$taskId}",
                     'enquiryTitle' => 'Untitled Project',
                     'clientName' => 'Unknown Client',
                     'eventVenue' => 'Venue TBC',

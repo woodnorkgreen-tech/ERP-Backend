@@ -394,7 +394,7 @@ class MaterialsController extends Controller
 
         return [
             'projectInfo' => [
-                'projectId' => $task->enquiry->enquiry_number ?? "ENQ-{$taskId}",
+                'projectId' => $task->enquiry->enquiry_number ?? "WNG-11-2025-{$taskId}",
                 'enquiryTitle' => $task->enquiry->title ?? 'Untitled Project',
                 'clientName' => $task->enquiry->client->full_name ?? 'Unknown Client',
                 'eventVenue' => $task->enquiry->venue ?? 'Venue TBC',
