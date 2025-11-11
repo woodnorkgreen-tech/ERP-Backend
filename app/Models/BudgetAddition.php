@@ -23,6 +23,14 @@ class BudgetAddition extends Model
         'approved_by',
         'approved_at',
         'approval_notes',
+        'budget_type',
+        'source_type',
+        'source_material_id',
+        'source_element_id',
+        'total_amount',
+        'rejection_reason',
+        'rejected_by',
+        'rejected_at',
     ];
 
     protected $casts = [
@@ -31,6 +39,8 @@ class BudgetAddition extends Model
         'expenses' => 'array',
         'logistics' => 'array',
         'approved_at' => 'datetime',
+        'total_amount' => 'decimal:2',
+        'rejected_at' => 'datetime',
     ];
 
     // Relationships
@@ -49,6 +59,21 @@ class BudgetAddition extends Model
         return $this->belongsTo(User::class, 'approved_by');
     }
 
+    public function sourceMaterial(): BelongsTo
+    {
+        return $this->belongsTo(ElementMaterial::class, 'source_material_id');
+    }
+
+    public function sourceElement(): BelongsTo
+    {
+        return $this->belongsTo(ProjectElement::class, 'source_element_id');
+    }
+
+    public function rejector(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'rejected_by');
+    }
+
     // Scopes
     public function scopePending($query)
     {
@@ -65,6 +90,11 @@ class BudgetAddition extends Model
         return $query->where('status', 'draft');
     }
 
+    public function scopeRejected($query)
+    {
+        return $query->where('status', 'rejected');
+    }
+
     // Helper methods
     public function isApproved(): bool
     {
@@ -74,6 +104,11 @@ class BudgetAddition extends Model
     public function isPending(): bool
     {
         return $this->status === 'pending_approval';
+    }
+
+    public function isRejected(): bool
+    {
+        return $this->status === 'rejected';
     }
 
     public function approve(int $userId, ?string $notes = null): bool
@@ -86,13 +121,13 @@ class BudgetAddition extends Model
         ]);
     }
 
-    public function reject(int $userId, ?string $notes = null): bool
+    public function reject(int $userId, ?string $reason = null): bool
     {
         return $this->update([
             'status' => 'rejected',
-            'approved_by' => $userId,
-            'approved_at' => now(),
-            'approval_notes' => $notes,
+            'rejected_by' => $userId,
+            'rejected_at' => now(),
+            'rejection_reason' => $reason,
         ]);
     }
 }

@@ -4,14 +4,20 @@ namespace App\Http\Controllers;
 
 use App\Models\BudgetAddition;
 use App\Models\TaskBudgetData;
+use App\Services\BudgetAdditionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class BudgetAdditionController extends Controller
 {
-    public function __construct()
+    protected $budgetAdditionService;
+
+    public function __construct(BudgetAdditionService $budgetAdditionService)
     {
+        $this->budgetAdditionService = $budgetAdditionService;
         // No permission restrictions for budget additions (for now)
     }
 
@@ -21,75 +27,10 @@ class BudgetAdditionController extends Controller
     public function index(int $taskId): JsonResponse
     {
         try {
-            // Find the budget data for this task
-            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-            if (!$budgetData) {
-                return response()->json([
-                    'data' => [],
-                    'message' => 'Budget additions retrieved successfully'
-                ]);
-            }
-
-            // First, get manually created additions
-            $manualAdditions = BudgetAddition::where('task_budget_data_id', $budgetData->id)
-                ->with(['creator', 'approver'])
-                ->orderBy('created_at', 'desc')
-                ->get();
-
-            // Then, get materials marked as "additionals" from the materials task
-            $materialsAdditions = $this->getMaterialsAdditions($budgetData->id);
-
-            // Filter out materials additions that have already been processed (approved or rejected)
-            // to avoid showing duplicates
-            $filteredMaterialsAdditions = collect($materialsAdditions)->filter(function ($materialsAddition) use ($manualAdditions) {
-                // Check if there's already a database record for this materials addition (approved or rejected)
-                $existingProcessed = $manualAdditions->first(function ($manualAddition) use ($materialsAddition) {
-                    // Extract the material ID from the virtual addition ID
-                    $virtualMaterialId = str_replace('materials_additional_', '', $materialsAddition['id']);
-
-                    // Check if this database addition contains the same material
-                    $dbMaterials = $manualAddition->materials ?? [];
-                    foreach ($dbMaterials as $dbMaterial) {
-                        if (isset($dbMaterial['id']) && $dbMaterial['id'] == $virtualMaterialId) {
-                            // Found matching material - check if it's approved/rejected
-                            return in_array($manualAddition->status, ['approved', 'rejected']);
-                        }
-                    }
-
-                    // Also check by title and description to catch edge cases
-                    if ($manualAddition->title === $materialsAddition['title'] &&
-                        $manualAddition->description === $materialsAddition['description'] &&
-                        in_array($manualAddition->status, ['approved', 'rejected'])) {
-                        return true;
-                    }
-
-                    return false;
-                });
-
-                // Only include if no processed database record exists for this material
-                return !$existingProcessed;
-            })->values();
-
-            // Combine both types of additions and remove any remaining duplicates
-            $allAdditions = collect($filteredMaterialsAdditions)->merge($manualAdditions)
-                ->unique(function ($addition) {
-                    // Create a unique key based on title, description, and status
-                    // For virtual additions, use the material ID as additional uniqueness
-                    $key = $addition['title'] . '|' . ($addition['description'] ?? '') . '|' . $addition['status'];
-
-                    // For materials additions, include the material ID to ensure uniqueness
-                    if (isset($addition['is_materials_additional']) && $addition['is_materials_additional']) {
-                        $materialId = str_replace('materials_additional_', '', $addition['id']);
-                        $key .= '|' . $materialId;
-                    }
-
-                    return $key;
-                })
-                ->sortByDesc('created_at')
-                ->values();
+            $additions = $this->budgetAdditionService->getForTask($taskId);
 
             return response()->json([
-                'data' => $allAdditions,
+                'data' => $additions,
                 'message' => 'Budget additions retrieved successfully'
             ]);
         } catch (\Exception $e) {
@@ -105,47 +46,19 @@ class BudgetAdditionController extends Controller
      */
     public function store(Request $request, int $taskId): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string|max:1000',
-            'materials' => 'nullable|array',
-            'labour' => 'nullable|array',
-            'expenses' => 'nullable|array',
-            'logistics' => 'nullable|array',
-            'status' => 'sometimes|in:draft,pending_approval'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
         try {
-            // Find the budget data for this task
-            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-            if (!$budgetData) {
-                return response()->json(['message' => 'Budget not found for this task'], 404);
-            }
-
-            $addition = BudgetAddition::create([
-                'task_budget_data_id' => $budgetData->id,
-                'title' => $request->title,
-                'description' => $request->description,
-                'materials' => $request->materials ?? [],
-                'labour' => $request->labour ?? [],
-                'expenses' => $request->expenses ?? [],
-                'logistics' => $request->logistics ?? [],
-                'status' => $request->status ?? 'draft',
-                'created_by' => auth()->id(),
-            ]);
+            $addition = $this->budgetAdditionService->create($taskId, $request->all());
 
             return response()->json([
-                'data' => $addition->load(['creator', 'approver']),
+                'data' => $addition,
                 'message' => 'Budget addition created successfully'
             ], 201);
 
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to create budget addition',
@@ -185,8 +98,15 @@ class BudgetAdditionController extends Controller
     /**
      * Update a budget addition
      */
-    public function update(Request $request, int $taskId, int $additionId): JsonResponse
+    public function update(Request $request, int $taskId, string $additionId): JsonResponse
     {
+        \Log::info('BudgetAdditionController::update - Starting', [
+            'taskId' => $taskId,
+            'additionId' => $additionId,
+            'requestData' => $request->all(),
+            'userId' => auth()->id()
+        ]);
+
         $validator = Validator::make($request->all(), [
             'title' => 'sometimes|string|max:255',
             'description' => 'nullable|string|max:1000',
@@ -198,6 +118,9 @@ class BudgetAdditionController extends Controller
         ]);
 
         if ($validator->fails()) {
+            \Log::warning('BudgetAdditionController::update - Validation failed', [
+                'errors' => $validator->errors()
+            ]);
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $validator->errors()
@@ -205,24 +128,68 @@ class BudgetAdditionController extends Controller
         }
 
         try {
+            // Handle virtual additions (from materials task) - create draft record if editing
+            if (str_starts_with($additionId, 'materials_additional_')) {
+                \Log::info('BudgetAdditionController::update - Handling virtual addition', [
+                    'additionId' => $additionId,
+                    'additionIdLength' => strlen($additionId)
+                ]);
+                return $this->updateVirtualAddition($request, $taskId, $additionId);
+            }
+
+            \Log::info('BudgetAdditionController::update - Handling regular database addition');
+
+            // Handle regular database additions
             // Find the budget data for this task
             $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
             if (!$budgetData) {
+                \Log::warning('BudgetAdditionController::update - Budget data not found', [
+                    'taskId' => $taskId
+                ]);
                 return response()->json(['message' => 'Budget not found for this task'], 404);
             }
 
+            \Log::info('BudgetAdditionController::update - Budget data found', [
+                'budgetDataId' => $budgetData->id
+            ]);
+
             $addition = BudgetAddition::where('task_budget_data_id', $budgetData->id)->findOrFail($additionId);
 
-            $addition->update($request->only([
+            \Log::info('BudgetAdditionController::update - Addition found', [
+                'additionId' => $addition->id,
+                'currentStatus' => $addition->status
+            ]);
+
+            $updateData = $request->only([
                 'title', 'description', 'materials', 'labour', 'expenses', 'logistics', 'status'
-            ]));
+            ]);
+
+            \Log::info('BudgetAdditionController::update - Updating addition', [
+                'updateData' => $updateData
+            ]);
+
+            $addition->update($updateData);
+
+            \Log::info('BudgetAdditionController::update - Addition updated successfully');
+
+            $freshAddition = $addition->fresh(['creator', 'approver']);
+
+            \Log::info('BudgetAdditionController::update - Fresh addition loaded', [
+                'freshAdditionId' => $freshAddition->id
+            ]);
 
             return response()->json([
-                'data' => $addition->fresh(['creator', 'approver']),
+                'data' => $freshAddition,
                 'message' => 'Budget addition updated successfully'
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('BudgetAdditionController::update - Exception occurred', [
+                'taskId' => $taskId,
+                'additionId' => $additionId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'message' => 'Failed to update budget addition',
                 'error' => $e->getMessage()
@@ -235,11 +202,12 @@ class BudgetAdditionController extends Controller
      */
     public function approve(Request $request, int $taskId, string $additionId): JsonResponse
     {
-        \Log::info('Budget addition approval request', [
+        \Log::info('BudgetAdditionController::approve - Request received', [
             'taskId' => $taskId,
             'additionId' => $additionId,
             'action' => $request->action,
-            'user' => auth()->id()
+            'user' => auth()->id(),
+            'requestData' => $request->all()
         ]);
 
         $validator = Validator::make($request->all(), [
@@ -248,7 +216,7 @@ class BudgetAdditionController extends Controller
         ]);
 
         if ($validator->fails()) {
-            \Log::warning('Budget addition approval validation failed', [
+            \Log::warning('BudgetAdditionController::approve - Validation failed', [
                 'errors' => $validator->errors(),
                 'taskId' => $taskId,
                 'additionId' => $additionId
@@ -260,99 +228,36 @@ class BudgetAdditionController extends Controller
         }
 
         try {
-            \Log::info('Processing budget addition approval', [
+            \Log::info('BudgetAdditionController::approve - Processing approval', [
                 'taskId' => $taskId,
                 'additionId' => $additionId,
-                'action' => $request->action
+                'action' => $request->action,
+                'isVirtualAddition' => str_starts_with($additionId, 'materials_additional_')
             ]);
-            // Handle virtual additions (from materials task) - they don't exist in DB yet
-            if (str_starts_with($additionId, 'materials_additional_')) {
-                \Log::info('Processing virtual materials addition', [
-                    'additionId' => $additionId,
-                    'action' => $request->action,
-                    'taskId' => $taskId
-                ]);
-
-                if ($request->action === 'approve') {
-                    // Find the budget data for this task
-                    $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-                    if (!$budgetData) {
-                        \Log::warning('Budget not found for task', ['taskId' => $taskId]);
-                        return response()->json(['message' => 'Budget not found for this task'], 404);
-                    }
-
-                    // Create actual database record for approved virtual addition
-                    $materialsAdditions = $this->getMaterialsAdditions($budgetData->id);
-                    $virtualAddition = collect($materialsAdditions)->firstWhere('id', $additionId);
-
-                    if (!$virtualAddition) {
-                        \Log::warning('Virtual addition not found', ['additionId' => $additionId]);
-                        return response()->json(['message' => 'Virtual addition not found'], 404);
-                    }
-
-                    \Log::info('Creating database record for approved virtual addition', [
-                        'title' => $virtualAddition['title'],
-                        'budgetId' => $budgetData->id
-                    ]);
-
-                    $newAddition = BudgetAddition::create([
-                        'task_budget_data_id' => $budgetData->id,
-                        'title' => $virtualAddition['title'],
-                        'description' => $virtualAddition['description'],
-                        'materials' => $virtualAddition['materials'],
-                        'labour' => $virtualAddition['labour'] ?? [],
-                        'expenses' => $virtualAddition['expenses'] ?? [],
-                        'logistics' => $virtualAddition['logistics'] ?? [],
-                        'status' => 'approved',
-                        'created_by' => auth()->id(), // System generated
-                        'approved_by' => auth()->id(),
-                        'approved_at' => now(),
-                        'approval_notes' => $request->notes,
-                    ]);
-
-                    \Log::info('Virtual addition approved and database record created', [
-                        'newAdditionId' => $newAddition->id
-                    ]);
-
-                    return response()->json([
-                        'data' => $newAddition->load(['creator', 'approver']),
-                        'message' => 'Budget addition approved successfully'
-                    ]);
-                } else {
-                    // For rejection of virtual additions, we don't create a DB record
-                    // Just return success - the virtual addition will be filtered out
-                    \Log::info('Virtual addition rejected', ['additionId' => $additionId]);
-                    return response()->json([
-                        'data' => null,
-                        'message' => 'Budget addition rejected'
-                    ]);
-                }
-            }
-
-            // Handle regular database additions
-            // Find the budget data for this task
-            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-            if (!$budgetData) {
-                return response()->json(['message' => 'Budget not found for this task'], 404);
-            }
-
-            $addition = BudgetAddition::where('task_budget_data_id', $budgetData->id)->findOrFail($additionId);
 
             if ($request->action === 'approve') {
-                $addition->approve(auth()->id(), $request->notes);
+                $addition = $this->budgetAdditionService->approve($taskId, $additionId, $request->notes);
                 $message = 'Budget addition approved successfully';
             } else {
-                $addition->reject(auth()->id(), $request->notes);
+                $addition = $this->budgetAdditionService->reject($taskId, $additionId, $request->notes);
                 $message = 'Budget addition rejected';
             }
 
+            \Log::info('BudgetAdditionController::approve - Approval processed successfully', [
+                'taskId' => $taskId,
+                'additionId' => $additionId,
+                'action' => $request->action,
+                'returnedAdditionId' => $addition->id ?? null,
+                'returnedAdditionStatus' => $addition->status ?? null
+            ]);
+
             return response()->json([
-                'data' => $addition->fresh(['creator', 'approver']),
+                'data' => $addition,
                 'message' => $message
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('Budget addition approval failed', [
+            \Log::error('BudgetAdditionController::approve - Approval failed', [
                 'taskId' => $taskId,
                 'additionId' => $additionId,
                 'action' => $request->action,
@@ -368,11 +273,87 @@ class BudgetAdditionController extends Controller
     }
 
     /**
+     * Create budget addition from materials task material
+     */
+    public function createFromMaterial(Request $request, int $taskId): JsonResponse
+    {
+        \Log::info('BudgetAdditionController::createFromMaterial called', [
+            'taskId' => $taskId,
+            'request_data' => $request->all()
+        ]);
+
+        $validator = Validator::make($request->all(), [
+            'material' => 'required|array',
+            'material.id' => 'required|string',
+            'material.description' => 'required|string',
+            'material.unitOfMeasurement' => 'required|string',
+            'material.quantity' => 'required|numeric|min:0',
+            'budget_type' => 'required|in:main,supplementary'
+        ]);
+
+        if ($validator->fails()) {
+            \Log::warning('BudgetAdditionController::createFromMaterial validation failed', [
+                'errors' => $validator->errors(),
+                'request_data' => $request->all()
+            ]);
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            \Log::info('BudgetAdditionController::createFromMaterial calling service', [
+                'taskId' => $taskId,
+                'material' => $request->material,
+                'budget_type' => $request->budget_type
+            ]);
+
+            $addition = $this->budgetAdditionService->createFromMaterial(
+                $taskId,
+                $request->material,
+                $request->budget_type
+            );
+
+            \Log::info('BudgetAdditionController::createFromMaterial success', [
+                'addition_id' => $addition->id,
+                'taskId' => $taskId
+            ]);
+
+            return response()->json([
+                'data' => $addition,
+                'message' => 'Budget addition created from material successfully'
+            ], 201);
+
+        } catch (\Exception $e) {
+            \Log::error('BudgetAdditionController::createFromMaterial failed', [
+                'taskId' => $taskId,
+                'material' => $request->material,
+                'budget_type' => $request->budget_type,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to create budget addition from material',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Delete a budget addition
      */
-    public function destroy(int $taskId, int $additionId): JsonResponse
+    public function destroy(int $taskId, string $additionId): JsonResponse
     {
         try {
+            // Handle virtual additions - they can't be deleted directly
+            if (str_starts_with($additionId, 'materials_additional_')) {
+                return response()->json([
+                    'message' => 'Cannot delete auto-detected additions. You can only approve or reject them.'
+                ], 422);
+            }
+
             // Find the budget data for this task
             $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
             if (!$budgetData) {
@@ -403,78 +384,202 @@ class BudgetAdditionController extends Controller
     }
 
     /**
-     * Get materials marked as "additionals" from the materials task
+     * Update a virtual addition by creating a draft record
      */
-    private function getMaterialsAdditions(int $budgetId): array
+    private function updateVirtualAddition(Request $request, int $taskId, string $additionId): JsonResponse
     {
+        \Log::info('BudgetAdditionController::updateVirtualAddition - Starting', [
+            'taskId' => $taskId,
+            'additionId' => $additionId,
+            'additionIdLength' => strlen($additionId),
+            'requestData' => $request->all(),
+            'userId' => Auth::id()
+        ]);
+
         try {
-            // Get the budget data to find the enquiry
-            $budgetData = \App\Models\TaskBudgetData::find($budgetId);
-            if (!$budgetData) {
-                return [];
+            \Log::info('BudgetAdditionController::updateVirtualAddition - Getting budget data');
+            $budgetData = $this->budgetAdditionService->getOrCreateBudgetData($taskId);
+            \Log::info('BudgetAdditionController::updateVirtualAddition - Budget data retrieved', [
+                'budgetDataId' => $budgetData->id
+            ]);
+
+            \Log::info('BudgetAdditionController::updateVirtualAddition - Getting materials additions');
+            // Get the virtual addition data
+            $materialsAdditions = $this->budgetAdditionService->getMaterialsAdditions($budgetData->id);
+            $virtualAddition = collect($materialsAdditions)->firstWhere('id', $additionId);
+            \Log::info('BudgetAdditionController::updateVirtualAddition - Virtual addition lookup result', [
+                'additionId' => $additionId,
+                'virtualAdditionFound' => $virtualAddition ? true : false,
+                'materialsAdditionsCount' => count($materialsAdditions)
+            ]);
+
+            if (!$virtualAddition) {
+                \Log::warning('BudgetAdditionController::updateVirtualAddition - Virtual addition not found', [
+                    'additionId' => $additionId,
+                    'availableIds' => collect($materialsAdditions)->pluck('id')->toArray()
+                ]);
+                return response()->json(['message' => 'Virtual addition not found'], 404);
             }
 
-            // Find the materials task for this enquiry
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $budgetData->enquiry_task->project_enquiry_id)
-                ->where('type', 'materials')
+            // Extract material ID from virtual addition ID
+            $materialId = str_replace('materials_additional_', '', $additionId);
+            \Log::info('BudgetAdditionController::updateVirtualAddition - Extracted material ID', [
+                'additionId' => $additionId,
+                'materialId' => $materialId
+            ]);
+
+            if (empty($materialId) || !is_numeric($materialId)) {
+                \Log::error('BudgetAdditionController::updateVirtualAddition - Material ID is empty or invalid', [
+                    'additionId' => $additionId,
+                    'materialId' => $materialId
+                ]);
+                return response()->json(['message' => 'Invalid virtual addition ID'], 400);
+            }
+
+            $materialId = (int) $materialId;
+
+            \Log::info('BudgetAdditionController::updateVirtualAddition - Checking for existing draft');
+            // Check if a draft record already exists for this material
+            $existingDraft = BudgetAddition::where('task_budget_data_id', $budgetData->id)
+                ->where('source_type', 'materials_additional')
+                ->where('source_material_id', $materialId)
+                ->where('status', 'draft')
                 ->first();
+            \Log::info('BudgetAdditionController::updateVirtualAddition - Existing draft check result', [
+                'existingDraftFound' => $existingDraft ? true : false,
+                'existingDraftId' => $existingDraft ? $existingDraft->id : null
+            ]);
 
-            if (!$materialsTask) {
-                return [];
-            }
+            if ($existingDraft) {
+                \Log::info('BudgetAdditionController::updateVirtualAddition - Updating existing draft');
+                // Prepare updated data
+                $updatedData = [
+                    'title' => $request->title ?? $existingDraft->title,
+                    'description' => $request->description ?? $existingDraft->description,
+                    'materials' => $request->materials ?? $existingDraft->materials,
+                    'labour' => $request->labour ?? $existingDraft->labour,
+                    'expenses' => $request->expenses ?? $existingDraft->expenses,
+                    'logistics' => $request->logistics ?? $existingDraft->logistics,
+                ];
+                \Log::info('BudgetAdditionController::updateVirtualAddition - Updated data prepared', [
+                    'updatedData' => $updatedData
+                ]);
 
-            // Get materials data
-            $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)
-                ->with(['elements.materials'])
-                ->first();
+                // Update existing draft
+                $existingDraft->update($updatedData);
+                \Log::info('BudgetAdditionController::updateVirtualAddition - Existing draft updated');
 
-            if (!$materialsData) {
-                return [];
-            }
+                // Recalculate total amount using the updated data directly
+                $totalAmount = $this->budgetAdditionService->calculateTotalAmount($updatedData);
+                $existingDraft->update(['total_amount' => $totalAmount]);
+                \Log::info('BudgetAdditionController::updateVirtualAddition - Total amount recalculated', [
+                    'totalAmount' => $totalAmount
+                ]);
 
-            $additions = [];
-
-            foreach ($materialsData->elements as $element) {
-                foreach ($element->materials as $material) {
-                    // Check if this material is marked as an "additional"
-                    // Look for the is_additional field in the material data
-                    if ($material->is_additional) {
-                        $additions[] = [
-                            'id' => 'materials_additional_' . $material->id,
-                            'title' => 'Additional: ' . $material->description,
-                            'description' => 'Automatically created from Materials Task - Element: ' . $element->name,
-                            'materials' => [
-                                [
-                                    'id' => (string) $material->id,
-                                    'description' => $material->description,
-                                    'unitOfMeasurement' => $material->unit_of_measurement,
-                                    'quantity' => (float) $material->quantity,
-                                    'unitPrice' => 0, // To be set in budget
-                                    'totalPrice' => 0,
-                                    'isAddition' => true
-                                ]
-                            ],
-                            'labour' => [],
-                            'expenses' => [],
-                            'logistics' => [],
-                            'status' => 'pending_approval', // Materials additions need approval
-                            'created_by' => null, // System generated
-                            'approved_by' => null,
-                            'created_at' => $material->created_at,
-                            'updated_at' => $material->updated_at,
-                            'is_materials_additional' => true, // Flag to identify source
-                            'source_element' => $element->name,
-                            'source_task' => $materialsTask->title
-                        ];
-                    }
+                return response()->json([
+                    'data' => $existingDraft->fresh(['creator', 'approver']),
+                    'message' => 'Virtual addition updated successfully'
+                ]);
+            } else {
+                \Log::info('BudgetAdditionController::updateVirtualAddition - Creating new draft record');
+                // Create new draft record
+                try {
+                    $totalAmount = $this->budgetAdditionService->calculateTotalAmount($request->all());
+                    $totalAmount = is_numeric($totalAmount) ? (float) $totalAmount : 0.0;
+                    \Log::info('BudgetAdditionController::updateVirtualAddition - Total amount calculated for new record', [
+                        'totalAmount' => $totalAmount
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::error('BudgetAdditionController::updateVirtualAddition - Failed to calculate total amount', [
+                        'error' => $e->getMessage(),
+                        'requestData' => $request->all()
+                    ]);
+                    $totalAmount = 0.0;
                 }
-            }
 
-            return $additions;
+                // Validate and sanitize the materials data
+                $materials = $request->materials ?? $virtualAddition['materials'] ?? [];
+                if (!is_array($materials)) {
+                    $materials = [];
+                }
+
+                // Ensure materials have required fields and proper types
+                $sanitizedMaterials = [];
+                foreach ($materials as $material) {
+                    if (!is_array($material)) continue;
+
+                    $sanitizedMaterials[] = [
+                        'id' => isset($material['id']) ? (string) $material['id'] : null,
+                        'description' => isset($material['description']) ? (string) $material['description'] : '',
+                        'quantity' => isset($material['quantity']) ? (float) $material['quantity'] : 0,
+                        'unit_price' => isset($material['unit_price']) ? (float) $material['unit_price'] : 0,
+                        'total_price' => isset($material['total_price']) ? (float) $material['total_price'] : 0,
+                    ];
+                }
+
+                $createData = [
+                    'task_budget_data_id' => $budgetData->id,
+                    'title' => $request->title ?? $virtualAddition['title'] ?? '',
+                    'description' => $request->description ?? $virtualAddition['description'] ?? null,
+                    'materials' => $sanitizedMaterials,
+                    'labour' => $request->labour ?? $virtualAddition['labour'] ?? [],
+                    'expenses' => $request->expenses ?? $virtualAddition['expenses'] ?? [],
+                    'logistics' => $request->logistics ?? $virtualAddition['logistics'] ?? [],
+                    'status' => 'draft',
+                    'budget_type' => 'supplementary',
+                    'source_type' => 'materials_additional',
+                    'source_material_id' => $materialId,
+                    'total_amount' => $totalAmount,
+                    'created_by' => Auth::id(),
+                ];
+
+                \Log::info('BudgetAdditionController::updateVirtualAddition - Creating new BudgetAddition', [
+                    'createData' => $createData,
+                    'authId' => Auth::id(),
+                    'authCheck' => Auth::check(),
+                    'user' => Auth::user() ? Auth::user()->only(['id', 'name', 'email']) : null
+                ]);
+
+                if (!Auth::id()) {
+                    \Log::error('BudgetAdditionController::updateVirtualAddition - Auth::id() is null!');
+                    throw new \Exception('User not authenticated');
+                }
+
+                try {
+                    $newAddition = BudgetAddition::create($createData);
+                    \Log::info('BudgetAdditionController::updateVirtualAddition - BudgetAddition created successfully', [
+                        'newAdditionId' => $newAddition->id
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::error('BudgetAdditionController::updateVirtualAddition - Failed to create BudgetAddition', [
+                        'createData' => $createData,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                    throw $e;
+                }
+                \Log::info('BudgetAdditionController::updateVirtualAddition - New draft record created', [
+                    'newAdditionId' => $newAddition->id
+                ]);
+
+                return response()->json([
+                    'data' => $newAddition->load(['creator', 'approver']),
+                    'message' => 'Virtual addition updated successfully'
+                ]);
+            }
 
         } catch (\Exception $e) {
-            \Log::error('Failed to get materials additions: ' . $e->getMessage());
-            return [];
+            \Log::error('BudgetAdditionController::updateVirtualAddition - Exception occurred', [
+                'taskId' => $taskId,
+                'additionId' => $additionId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'message' => 'Failed to update virtual addition',
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
+
 }

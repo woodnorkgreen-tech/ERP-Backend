@@ -151,6 +151,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Budget additions management
         Route::get('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'index']);
         Route::post('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'store']);
+        Route::post('/additions/from-material', [App\Http\Controllers\BudgetAdditionController::class, 'createFromMaterial']);
         Route::get('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'show']);
         Route::put('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'update']);
         Route::post('/additions/{additionId}/approve', [App\Http\Controllers\BudgetAdditionController::class, 'approve']);

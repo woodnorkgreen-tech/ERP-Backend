@@ -224,6 +224,84 @@ class QuoteController extends Controller
      }
 
     /**
+     * Get unit price for a material from budget data or approved additions
+     */
+    private function getBudgetMaterialPrice(TaskBudgetData $budgetData, $materialId): float
+    {
+        \Log::info("getBudgetMaterialPrice called", [
+            'materialId' => $materialId,
+            'budgetDataId' => $budgetData->id
+        ]);
+
+        // First check the main budget materials data
+        if ($budgetData->materials_data) {
+            foreach ($budgetData->materials_data as $element) {
+                foreach ($element['materials'] ?? [] as $material) {
+                    if (isset($material['id']) && $material['id'] == $materialId) {
+                        \Log::info("Found material in main budget data", [
+                            'materialId' => $materialId,
+                            'unitPrice' => $material['unitPrice'] ?? 0
+                        ]);
+                        return (float) ($material['unitPrice'] ?? 0);
+                    }
+                }
+            }
+        }
+
+        // If not found in main budget, check ALL budget additions (approved and draft)
+        // We check draft too because the user might have updated the price but not approved yet
+        $additions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
+            ->where('source_type', 'materials_additional')
+            ->whereIn('status', ['approved', 'draft']) // Include draft to get latest prices
+            ->orderBy('updated_at', 'desc') // Get most recent first
+            ->get();
+
+        \Log::info("Checking budget additions for material price", [
+            'materialId' => $materialId,
+            'additionsCount' => $additions->count()
+        ]);
+
+        foreach ($additions as $addition) {
+            // Check if this addition is for the material we're looking for
+            if ($addition->source_material_id == $materialId) {
+                if ($addition->materials) {
+                    foreach ($addition->materials as $material) {
+                        // Prioritize non-zero values, check both camelCase and snake_case
+                        $unitPrice = ($material['unitPrice'] ?? 0) > 0
+                            ? (float) $material['unitPrice']
+                            : (float) ($material['unit_price'] ?? 0);
+
+                        \Log::info("Checking material in addition", [
+                            'additionId' => $addition->id,
+                            'additionStatus' => $addition->status,
+                            'materialId' => $materialId,
+                            'material_unitPrice' => $material['unitPrice'] ?? null,
+                            'material_unit_price' => $material['unit_price'] ?? null,
+                            'calculated_unitPrice' => $unitPrice
+                        ]);
+
+                        if ($unitPrice > 0) {
+                            \Log::info("Found material price in budget addition", [
+                                'additionId' => $addition->id,
+                                'additionStatus' => $addition->status,
+                                'materialId' => $materialId,
+                                'unitPrice' => $unitPrice
+                            ]);
+                            return $unitPrice;
+                        }
+                    }
+                }
+            }
+        }
+
+        \Log::warning("No unit price found for material", [
+            'materialId' => $materialId
+        ]);
+
+        return 0.0;
+    }
+
+    /**
      * Transform budget data to quote format
      */
     private function transformBudgetToQuote(TaskBudgetData $budgetData, $approvedAdditions = null): array
@@ -244,7 +322,7 @@ class QuoteController extends Controller
                     $elementMaterials[] = [
                         'id' => $material['id'],
                         'description' => $material['description'],
-                        'unitOfMeasurement' => $material['unitOfMeasurement'],
+                        'unitOfMeasurement' => $material['unitOfMeasurement'] ?? $material['unit_of_measurement'] ?? '',
                         'quantity' => $material['quantity'],
                         'unitPrice' => $material['unitPrice'] ?? 0,
                         'totalPrice' => $material['totalPrice'] ?? 0,
@@ -277,20 +355,68 @@ class QuoteController extends Controller
                 if ($addition->materials) {
                     foreach ($addition->materials as $material) {
                         // Calculate totals for this material
+                        // Support both camelCase and snake_case field names
+                        // Prioritize non-zero values
                         $quantity = $material['quantity'] ?? 0;
-                        $unitPrice = $material['unitPrice'] ?? 0;
+                        $unitPrice = ($material['unitPrice'] ?? 0) > 0
+                            ? $material['unitPrice']
+                            : ($material['unit_price'] ?? 0);
+                        $totalPrice = ($material['totalPrice'] ?? 0) > 0
+                            ? $material['totalPrice']
+                            : (($material['total_price'] ?? 0) > 0
+                                ? $material['total_price']
+                                : ($quantity * $unitPrice));
+
+                        \Log::info("Processing addition material", [
+                            'addition_id' => $addition->id,
+                            'addition_status' => $addition->status,
+                            'material_id' => $material['id'] ?? null,
+                            'quantity' => $quantity,
+                            'unitPrice' => $unitPrice,
+                            'totalPrice' => $totalPrice,
+                            'source_type' => $addition->source_type,
+                            'source_material_id' => $addition->source_material_id,
+                            'material_data' => $material
+                        ]);
+
+                        // For materials_additional type, always get the latest price from the addition itself
+                        // (which was updated when the user edited the virtual addition)
+                        if ($addition->source_type === 'materials_additional' && $addition->source_material_id) {
+                            \Log::info("Getting latest unit price for materials_additional type", [
+                                'addition_id' => $addition->id,
+                                'source_material_id' => $addition->source_material_id,
+                                'current_unitPrice' => $unitPrice
+                            ]);
+
+                            // Get the latest price from budget additions (including draft updates)
+                            $latestPrice = $this->getBudgetMaterialPrice($budgetData, $addition->source_material_id);
+                            if ($latestPrice > 0) {
+                                \Log::info("Using latest unit price from budget addition", [
+                                    'source_material_id' => $addition->source_material_id,
+                                    'latest_price' => $latestPrice,
+                                    'original_price' => $unitPrice
+                                ]);
+                                $unitPrice = $latestPrice;
+                            } else {
+                                \Log::info("No updated price found, using addition's stored price", [
+                                    'source_material_id' => $addition->source_material_id,
+                                    'stored_price' => $unitPrice
+                                ]);
+                            }
+                        }
+
+                        // Recalculate totals with final unit price
                         $totalPrice = $quantity * $unitPrice;
                         $marginAmount = $totalPrice * 0.2; // 20% margin
                         $finalPrice = $totalPrice + $marginAmount;
 
-                        \Log::info("Processing addition material", [
+                        \Log::info("Final addition material calculations", [
                             'addition_id' => $addition->id,
-                            'material_id' => $material['id'],
-                            'quantity' => $quantity,
-                            'unitPrice' => $unitPrice,
-                            'totalPrice' => $totalPrice,
-                            'marginAmount' => $marginAmount,
-                            'finalPrice' => $finalPrice
+                            'material_id' => $material['id'] ?? null,
+                            'final_unitPrice' => $unitPrice,
+                            'final_totalPrice' => $totalPrice,
+                            'final_marginAmount' => $marginAmount,
+                            'final_finalPrice' => $finalPrice
                         ]);
 
                         $materials[] = [
@@ -301,7 +427,7 @@ class QuoteController extends Controller
                                 [
                                     'id' => $material['id'],
                                     'description' => $material['description'],
-                                    'unitOfMeasurement' => $material['unitOfMeasurement'],
+                                    'unitOfMeasurement' => $material['unitOfMeasurement'] ?? $material['unit_of_measurement'] ?? '',
                                     'quantity' => $quantity,
                                     'unitPrice' => $unitPrice,
                                     'totalPrice' => $totalPrice,
