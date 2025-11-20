@@ -32,12 +32,27 @@ Route::get('/user', function () {
     $user = auth()->user();
     return response()->json($user->load('roles'));
 })->middleware('auth:sanctum');
+//location apis
+Route::get('/locations', 'App\Http\Controllers\LocationController@index');
+Route::resource('/location', 'App\Http\Controllers\LocationController');
+Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
+Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
+Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
+Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
+Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
+Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 //mobile app
 Route::get('/app-departments', [DepartmentController::class, 'index']);
 
 // Protected routes (require authentication)
 Route::middleware('auth:sanctum')->group(function () {
+
+    Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
+    Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
+    Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
+    Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
+    Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 
     // User permissions and navigation
     Route::get('/user/permissions', function () {
@@ -409,4 +424,3 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 });
-
