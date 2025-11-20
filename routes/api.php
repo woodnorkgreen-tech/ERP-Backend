@@ -318,6 +318,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Site survey management
         Route::apiResource('site-surveys', SiteSurveyController::class); // Temporarily remove permissions for debugging
+        Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
 
         // Design asset management
         Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
@@ -327,7 +328,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/{asset}', [DesignAssetController::class, 'update']);
             Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
             Route::get('/{asset}/download', [DesignAssetController::class, 'download']);
+            Route::post('/{asset}/approve', [DesignAssetController::class, 'approve']);
+            Route::post('/{asset}/reject', [DesignAssetController::class, 'reject']);
         });
+
+
+
 
         // Notification management
         Route::get('notifications', function () {

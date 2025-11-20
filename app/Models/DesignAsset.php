@@ -39,6 +39,10 @@ class DesignAsset extends Model
         'approved_at' => 'datetime',
     ];
 
+    protected $appends = [
+        'file_url',
+    ];
+
     // Relationships
     public function enquiryTask(): BelongsTo
     {
@@ -93,7 +97,9 @@ class DesignAsset extends Model
     // Accessor for file URL
     public function getFileUrlAttribute(): string
     {
-        return asset('storage/' . $this->file_path);
+        // Remove 'public/' prefix from file_path if it exists
+        $path = str_replace('public/', '', $this->file_path);
+        return asset('storage/' . $path);
     }
 
     // Accessor for formatted file size

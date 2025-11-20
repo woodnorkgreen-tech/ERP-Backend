@@ -213,4 +213,55 @@ class DesignAssetController extends Controller
 
         return 'other';
     }
+
+    /**
+     * Approve a design asset.
+     */
+    public function approve($task, $asset)
+    {
+        // Manually resolve the DesignAsset model
+        $designAsset = DesignAsset::findOrFail($asset);
+        
+        // TODO: Add authorization policy when implemented
+        // $this->authorize('approve', $designAsset);
+
+        $designAsset->update([
+            'status' => 'approved',
+            'approved_by' => auth()->id(),
+            'approved_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Asset approved successfully',
+            'asset' => $designAsset->load(['uploader', 'approver'])
+        ]);
+    }
+
+    /**
+     * Reject a design asset.
+     */
+    public function reject(Request $request, $task, $asset)
+    {
+        // Manually resolve the DesignAsset model
+        $designAsset = DesignAsset::findOrFail($asset);
+        
+        // TODO: Add authorization policy when implemented
+        // $this->authorize('approve', $designAsset);
+
+        $request->validate([
+            'reason' => 'nullable|string|max:1000'
+        ]);
+
+        $designAsset->update([
+            'status' => 'rejected',
+            'approved_by' => auth()->id(),
+            'approved_at' => now(),
+            'rejection_reason' => $request->reason,
+        ]);
+
+        return response()->json([
+            'message' => 'Asset rejected successfully',
+            'asset' => $designAsset->load(['uploader', 'approver'])
+        ]);
+    }
 }

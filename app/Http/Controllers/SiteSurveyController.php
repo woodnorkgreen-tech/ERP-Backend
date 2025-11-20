@@ -213,4 +213,18 @@ class SiteSurveyController extends Controller
 
         return response()->json(['message' => 'Site survey deleted successfully']);
     }
+
+    /**
+     * Generate PDF for the specified site survey.
+     */
+    public function generatePDF(SiteSurvey $siteSurvey)
+    {
+        $siteSurvey->load('enquiry.client', 'enquiryTask');
+
+        $pdf = \PDF::loadView('pdf.site-survey', compact('siteSurvey'));
+
+        $filename = 'site-survey-' . $siteSurvey->id . '-' . now()->format('Y-m-d') . '.pdf';
+
+        return $pdf->download($filename);
+    }
 }
