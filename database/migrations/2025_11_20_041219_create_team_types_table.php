@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('team_types', function (Blueprint $table) {
             $table->id();
-            $table->string('type_key')->unique();
+            $table->string('type_key', 191)->unique();
             $table->string('name');
             $table->string('display_name');
             $table->text('description')->nullable();
