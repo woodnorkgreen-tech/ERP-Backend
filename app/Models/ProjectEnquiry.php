@@ -36,7 +36,6 @@ class ProjectEnquiry extends Model
         'follow_up_notes',
         'enquiry_number',
         'job_number',
-        'converted_to_project_id',
         'venue',
         'site_survey_skipped',
         'site_survey_skip_reason',
@@ -96,7 +95,7 @@ class ProjectEnquiry extends Model
 
 
     /**
-     * Approve the quote for this enquiry and convert to project
+     * Approve the quote for this enquiry
      */
     public function approveQuote(int $userId): bool
     {
@@ -114,19 +113,8 @@ class ProjectEnquiry extends Model
             'quote_approved_at' => now(),
             'quote_approved_by' => $userId,
             'job_number' => $jobNumber,
-            'status' => EnquiryConstants::STATUS_CONVERTED_TO_PROJECT
+            'status' => EnquiryConstants::STATUS_QUOTE_APPROVED
         ]);
-
-        // Create project
-        $project = Project::create([
-            'enquiry_id' => $this->id,
-            'project_id' => $this->generateProjectId(),
-            'start_date' => $this->expected_delivery_date,
-            'budget' => $this->estimated_budget,
-            'assigned_users' => [], // can be set later
-        ]);
-
-        $this->update(['converted_to_project_id' => $project->id]);
 
         return true;
     }

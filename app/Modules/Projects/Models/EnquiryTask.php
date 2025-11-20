@@ -59,6 +59,7 @@ class EnquiryTask extends Model
         'logistics' => 'Logistics',
         'stores' => 'Stores',
         'project_management' => 'Projects',
+        'teams' => 'Teams',
     ];
 
     // Relationships

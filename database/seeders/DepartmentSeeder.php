@@ -66,6 +66,12 @@ class DepartmentSeeder extends Seeder
                 'description' => 'Client acquisition, enquiry management, and marketing',
                 'budget' => 0.00,
                 'location' => ''
+            ],
+            [
+                'name' => 'Teams',
+                'description' => 'Team coordination and management',
+                'budget' => 0.00,
+                'location' => ''
             ]
         ];
 

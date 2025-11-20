@@ -88,7 +88,7 @@ class ProjectsReportingService
         $enquiries = $query->get();
 
         $totalEnquiries = $enquiries->count();
-        $convertedEnquiries = $enquiries->where('status', 'converted_to_project')->count();
+        $completedEnquiries = $enquiries->where('status', 'completed')->count();
         $cancelledEnquiries = $enquiries->where('status', 'cancelled')->count();
 
         $conversionRate = $totalEnquiries > 0 ? round(($convertedEnquiries / $totalEnquiries) * 100, 2) : 0;
@@ -100,11 +100,11 @@ class ProjectsReportingService
             'site_survey_completed' => $enquiries->where('status', 'site_survey_completed')->count(),
             'design_completed' => $enquiries->where('status', 'design_completed')->count(),
             'quote_approved' => $enquiries->where('status', 'quote_approved')->count(),
-            'converted_to_project' => $convertedEnquiries,
+            'completed' => $completedEnquiries,
         ];
 
-        // Average time to conversion
-        $avgConversionTime = $this->calculateAverageConversionTime($enquiries->where('status', 'converted_to_project'));
+        // Average time to completion (replacing conversion time)
+        $avgCompletionTime = $this->calculateAverageCompletionTime($enquiries->where('status', 'completed'));
 
         return [
             'total_enquiries' => $totalEnquiries,

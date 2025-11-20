@@ -25,6 +25,11 @@ class DatabaseSeeder extends Seeder
         // Seed clients
         $this->call(ClientSeeder::class);
 
+        // Seed team categories and types
+        $this->call(TeamCategoriesSeeder::class);
+        $this->call(TeamTypesSeeder::class);
+        $this->call(TeamCategoryTypesSeeder::class);
+
         // Create department-specific users
         $this->call([
             SuperAdminUserSeeder::class,

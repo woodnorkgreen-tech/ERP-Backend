@@ -57,17 +57,6 @@ class EnquiryWorkflowService
         }
     }
 
-    /**
-     * Create project and tasks for an enquiry (when converting to project)
-     */
-    public function createProjectAndTasksForEnquiry(ProjectEnquiry $enquiry)
-    {
-        // This would create a full project with all tasks
-        // For now, just return the enquiry as project creation logic might be elsewhere
-        Log::info("Project creation for enquiry {$enquiry->id} requested but not implemented yet");
-
-        return $enquiry;
-    }
 
 
     /**
@@ -451,22 +440,7 @@ class EnquiryWorkflowService
      */
     private function handleSpecialStatusCases(ProjectEnquiry $enquiry, string $newStatus): void
     {
-        // Auto-convert to project when quote is approved and all tasks are completed
-        if ($newStatus === EnquiryConstants::STATUS_QUOTE_APPROVED) {
-            $allTasksCompleted = EnquiryTask::where('project_enquiry_id', $enquiry->id)
-                ->where('status', '!=', 'completed')
-                ->doesntExist();
-
-            if ($allTasksCompleted) {
-                $enquiry->update([
-                    'status' => EnquiryConstants::STATUS_CONVERTED_TO_PROJECT,
-                    'quote_approved' => true,
-                    'quote_approved_at' => now(),
-                ]);
-
-                Log::info("Enquiry {$enquiry->id} automatically converted to project due to all tasks completion and quote approval");
-            }
-        }
+        // No special cases needed when project conversion is removed
     }
 
     /**

@@ -82,6 +82,11 @@ return [
             'type' => 'report',
             'notes' => 'Archive and generate reports'
         ],
+        [
+            'title' => 'Teams',
+            'type' => 'teams',
+            'notes' => 'Manage project teams'
+        ],
     ],
 
     /*

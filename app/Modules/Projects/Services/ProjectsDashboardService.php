@@ -113,8 +113,8 @@ class ProjectsDashboardService
      */
     public function getProjectMetrics(): array
     {
-        // For now, projects are enquiries that have been converted
-        $convertedProjects = ProjectEnquiry::where('status', 'converted_to_project')->count();
+        // For now, completed enquiries are considered completed projects
+        $completedProjects = ProjectEnquiry::where('status', 'completed')->count();
 
         $activeProjects = ProjectEnquiry::whereIn('status', ['planning', 'in_progress'])->count();
 
@@ -124,7 +124,7 @@ class ProjectsDashboardService
             ->sum('estimated_budget');
 
         $projectsByStatus = ProjectEnquiry::select('status', DB::raw('count(*) as count'))
-            ->whereIn('status', ['planning', 'in_progress', 'completed', 'converted_to_project'])
+            ->whereIn('status', ['planning', 'in_progress', 'completed', 'quote_approved'])
             ->groupBy('status')
             ->pluck('count', 'status')
             ->toArray();
@@ -504,11 +504,11 @@ class ProjectsDashboardService
     {
         $activeProjects = $enquiries->whereIn('status', ['planning', 'in_progress'])->count();
         $completedProjects = $enquiries->where('status', 'completed')->count();
-        $convertedProjects = $enquiries->where('status', 'converted_to_project')->count();
+        $approvedProjects = $enquiries->where('status', 'quote_approved')->count();
 
         $totalBudget = $enquiries->whereNotNull('estimated_budget')->sum('estimated_budget');
 
-        $projectsByStatus = $enquiries->whereIn('status', ['planning', 'in_progress', 'completed', 'converted_to_project'])
+        $projectsByStatus = $enquiries->whereIn('status', ['planning', 'in_progress', 'completed', 'quote_approved'])
             ->groupBy('status')
             ->map->count()
             ->toArray();

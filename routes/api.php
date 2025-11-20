@@ -16,9 +16,12 @@ use App\Modules\Projects\Http\Controllers\TaskController;
 use App\Modules\Projects\Http\Controllers\PhaseDepartmentalTaskController;
 use App\Http\Controllers\SiteSurveyController;
 use App\Http\Controllers\DesignAssetController;
+use App\Http\Controllers\ProcurementController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
+use App\Modules\Teams\Controllers\TeamsTaskController;
+use App\Modules\Teams\Controllers\TeamMemberController;
 use App\Constants\Permissions;
 
 
@@ -170,6 +173,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'submitApproval']);
     });
 
+    // Procurement management routes
+    Route::prefix('projects/tasks/{taskId}/procurement')->group(function () {
+        Route::get('/', [App\Http\Controllers\ProcurementController::class, 'getProcurementData']);
+        Route::post('/', [App\Http\Controllers\ProcurementController::class, 'saveProcurementData']);
+        Route::post('/import-budget', [App\Http\Controllers\ProcurementController::class, 'importBudgetData']);
+    });
+
+    // Procurement utility routes
+    Route::get('projects/procurement/vendor-suggestions', [App\Http\Controllers\ProcurementController::class, 'getVendorSuggestions']);
+
     // Get quote by enquiry ID (for frontend access)
     Route::get('projects/enquiries/{enquiryId}/quote', function ($enquiryId) {
         $quoteTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
@@ -192,6 +205,25 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Projects Module Routes
     Route::prefix('projects')->group(function () {
+        // Logistics Task Routes
+        Route::prefix('tasks/{taskId}/logistics')->group(function () {
+            Route::get('/', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'show']);
+            Route::post('/planning', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'savePlanning']);
+            Route::put('/team-confirmation', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTeamConfirmation']);
+            Route::get('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getTransportItems']);
+            Route::post('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'addTransportItem']);
+            Route::put('/transport-items/{itemId}', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTransportItem']);
+            Route::delete('/transport-items/{itemId}', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'deleteTransportItem']);
+            Route::post('/import-production-elements', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'importProductionElements']);
+            Route::get('/checklist', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklist']);
+            Route::post('/checklist', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateChecklist']);
+            Route::post('/checklist/generate', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateChecklist']);
+            Route::get('/checklist/stats', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklistStats']);
+        });
+
+        // Drivers endpoint for logistics
+        Route::get('/drivers', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getDrivers']);
+
         // Dashboard routes
         Route::get('dashboard', [DashboardController::class, 'dashboard']);
         Route::get('dashboard/enquiry-metrics', [DashboardController::class, 'enquiryMetrics']);
@@ -240,17 +272,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
-        Route::post('enquiries/{enquiry}/convert', [EnquiryController::class, 'convertToProject']);
-                // Manual project creation for existing enquiries (debugging)
-                Route::post('enquiries/{enquiry}/create-project', function (\App\Models\ProjectEnquiry $enquiry) {
-            $workflowService = new \App\Modules\Projects\Services\EnquiryWorkflowService();
-            $project = $workflowService->createProjectAndTasksForEnquiry($enquiry);
-
-            return response()->json([
-                'message' => 'Project and tasks created successfully',
-                'data' => $project->load('tasks.taskDefinition')
-            ]);
-        });
 
         // Departmental tasks management
         Route::get('departmental-tasks', [PhaseDepartmentalTaskController::class, 'index']); // No permission for debugging
@@ -310,6 +331,24 @@ Route::middleware('auth:sanctum')->group(function () {
             $notification->delete();
             return response()->json(['message' => 'Notification deleted successfully']);
         });
+    });
+
+    // Teams Module Routes
+    Route::prefix('tasks/{taskId}/teams')->group(function () {
+        Route::get('/', [TeamsTaskController::class, 'index']);
+        Route::post('/', [TeamsTaskController::class, 'store']);
+        Route::put('/{teamTaskId}', [TeamsTaskController::class, 'update']);
+        Route::delete('/{teamTaskId}', [TeamsTaskController::class, 'destroy']);
+        Route::post('/bulk-assign', [TeamsTaskController::class, 'bulkAssign']);
+    });
+    Route::get('team-types', [TeamsTaskController::class, 'getTeamTypes']);
+
+    // Team Members Routes
+    Route::prefix('tasks/teams/{teamTaskId}/members')->group(function () {
+        Route::get('/', [TeamMemberController::class, 'index']);
+        Route::post('/', [TeamMemberController::class, 'store']);
+        Route::put('/{memberId}', [TeamMemberController::class, 'update']);
+        Route::delete('/{memberId}', [TeamMemberController::class, 'destroy']);
     });
 
     // Finance Module Routes

@@ -20,7 +20,7 @@ use App\Modules\Projects\Services\NotificationService;
  *     @OA\Property(property="enquiry_number", type="string", example="WNG-11-2025-001"),
  *     @OA\Property(property="title", type="string", example="Office Branding Project"),
  *     @OA\Property(property="description", type="string", example="Complete branding solution for new office"),
- *     @OA\Property(property="status", type="string", enum={"draft","pending","in_progress","quote_approved","converted_to_project","cancelled"}),
+ *             @OA\Property(property="status", type="string", enum={"draft","pending","in_progress","quote_approved","completed","cancelled"}),
  *     @OA\Property(property="priority", type="string", enum={"low","medium","high","urgent"}),
  *     @OA\Property(property="client_id", type="integer"),
  *     @OA\Property(property="contact_person", type="string", example="John Smith"),
@@ -86,7 +86,7 @@ class EnquiryController extends Controller
      *         name="status",
      *         in="query",
      *         description="Filter by status",
-     *         @OA\Schema(type="string", enum={"draft","pending","in_progress","quote_approved","converted_to_project","cancelled"})
+     *         @OA\Schema(type="string", enum={"draft","pending","in_progress","quote_approved","completed","cancelled"})
      *     ),
      *     @OA\Parameter(
      *         name="client_id",
@@ -172,7 +172,7 @@ class EnquiryController extends Controller
      *             @OA\Property(property="project_scope", type="string", example="Logo design, signage, and interior branding"),
      *             @OA\Property(property="priority", type="string", enum={"low","medium","high","urgent"}, example="high"),
      *             @OA\Property(property="contact_person", type="string", example="John Smith"),
-     *             @OA\Property(property="status", type="string", enum={"draft","pending","in_progress","quote_approved","converted_to_project","cancelled"}, example="pending"),
+     *             @OA\Property(property="status", type="string", enum={"draft","pending","in_progress","quote_approved","completed","cancelled"}, example="pending"),
      *             @OA\Property(property="department_id", type="integer", nullable=true, example=1),
      *             @OA\Property(property="estimated_budget", type="number", format="float", nullable=true, example=50000.00),
      *             @OA\Property(property="venue", type="string", nullable=true, example="Downtown Office Building"),
@@ -312,7 +312,7 @@ class EnquiryController extends Controller
      *         @OA\JsonContent(
      *             @OA\Property(property="title", type="string", example="Updated Office Branding Project"),
      *             @OA\Property(property="description", type="string", example="Updated project description"),
-     *             @OA\Property(property="status", type="string", enum={"draft","pending","in_progress","quote_approved","converted_to_project","cancelled"}),
+     *     @OA\Property(property="status", type="string", enum={"draft","pending","in_progress","quote_approved","completed","cancelled"}),
      *             @OA\Property(property="priority", type="string", enum={"low","medium","high","urgent"}),
      *             @OA\Property(property="estimated_budget", type="number", format="float"),
      *             @OA\Property(property="expected_delivery_date", type="string", format="date"),
@@ -494,39 +494,4 @@ class EnquiryController extends Controller
     }
 
 
-    /**
-     * @OA\Post(
-     *     path="/api/projects/enquiries/{enquiry}/convert",
-     *     summary="Convert enquiry to project",
-     *     tags={"Enquiries"},
-     *     security={{"bearerAuth":{}}},
-     *     @OA\Parameter(
-     *         name="enquiry",
-     *         in="path",
-     *         required=true,
-     *         description="Enquiry ID",
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Enquiry converted to project successfully",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="message", type="string"),
-     *             @OA\Property(property="data", ref="#/components/schemas/ProjectEnquiry")
-     *         )
-     *     ),
-     *     @OA\Response(response=404, description="Enquiry not found"),
-     *     @OA\Response(response=401, description="Unauthorized")
-     * )
-     */
-    public function convertToProject(Request $request, ProjectEnquiry $enquiry): JsonResponse
-    {
-        // Implementation for converting to project
-        $enquiry->update(['status' => EnquiryConstants::STATUS_CONVERTED_TO_PROJECT]);
-
-        return response()->json([
-            'message' => 'Enquiry converted to project successfully',
-            'data' => $enquiry
-        ]);
-    }
 }
