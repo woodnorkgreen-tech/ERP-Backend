@@ -224,6 +224,9 @@ Route::middleware('auth:sanctum')->group(function () {
         // Drivers endpoint for logistics
         Route::get('/drivers', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getDrivers']);
 
+        // Logistics Log Routes
+        Route::apiResource('logistics-log', App\Http\Controllers\LogisticsLogController::class);
+
         // Dashboard routes
         Route::get('dashboard', [DashboardController::class, 'dashboard']);
         Route::get('dashboard/enquiry-metrics', [DashboardController::class, 'enquiryMetrics']);
