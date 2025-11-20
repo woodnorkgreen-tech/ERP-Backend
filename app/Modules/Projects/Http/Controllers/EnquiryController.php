@@ -120,7 +120,7 @@ class EnquiryController extends Controller
     public function index(Request $request): JsonResponse
     {
 
-        $query = ProjectEnquiry::with('client', 'department', 'enquiryTasks');
+        $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks');
 
         // Apply filters
         if ($request->has('search') && $request->search) {
@@ -209,6 +209,7 @@ class EnquiryController extends Controller
             'project_scope' => 'nullable|string',
             'priority' => 'nullable|string|in:' . implode(',', EnquiryConstants::getAllPriorities()),
             'contact_person' => 'required|string|max:255',
+            'project_officer_id' => 'nullable|integer|exists:users,id',
             'status' => 'required|string|in:' . implode(',', EnquiryConstants::getAllStatuses()),
             'department_id' => 'nullable|integer|exists:departments,id',
             'assigned_department' => 'nullable|string|max:255',
@@ -227,6 +228,17 @@ class EnquiryController extends Controller
             ], 422);
         }
 
+        // Validate project officer role if provided
+        if ($request->project_officer_id) {
+            $user = \App\Models\User::find($request->project_officer_id);
+            if (!$user || !$user->hasRole(['Project Officer', 'Project Manager'])) {
+                return response()->json([
+                    'message' => 'Invalid project officer assignment',
+                    'errors' => ['project_officer_id' => ['Selected user is not a valid project officer']]
+                ], 422);
+            }
+        }
+
         // Generate enquiry number
         $enquiryNumber = $this->generateEnquiryNumber();
 
@@ -239,6 +251,7 @@ class EnquiryController extends Controller
             'project_scope' => $request->project_scope,
             'priority' => $request->priority ?? EnquiryConstants::PRIORITY_MEDIUM,
             'contact_person' => $request->contact_person,
+            'project_officer_id' => $request->project_officer_id,
             'status' => $request->status,
             'department_id' => $request->department_id,
             'assigned_department' => $request->assigned_department,
@@ -258,7 +271,7 @@ class EnquiryController extends Controller
 
         return response()->json([
             'message' => 'Enquiry created successfully',
-            'data' => $enquiry->load('client', 'department', 'enquiryTasks'),
+            'data' => $enquiry->load('client', 'department', 'projectOfficer', 'enquiryTasks'),
         ], 201);
     }
 
@@ -290,7 +303,7 @@ class EnquiryController extends Controller
     public function show(ProjectEnquiry $enquiry): JsonResponse
     {
         return response()->json([
-            'data' => $enquiry->load('client', 'department', 'enquiryTasks'),
+            'data' => $enquiry->load('client', 'department', 'projectOfficer', 'enquiryTasks'),
             'message' => 'Enquiry retrieved successfully'
         ]);
     }
@@ -351,6 +364,7 @@ class EnquiryController extends Controller
             'project_scope' => 'nullable|string',
             'priority' => 'nullable|string|in:' . implode(',', EnquiryConstants::getAllPriorities()),
             'contact_person' => 'sometimes|nullable|string|max:255',
+            'project_officer_id' => 'nullable|integer|exists:users,id',
             'status' => 'sometimes|required|string|in:' . implode(',', EnquiryConstants::getAllStatuses()),
             'department_id' => 'nullable|integer|exists:departments,id',
             'assigned_department' => 'nullable|string|max:255',
@@ -369,6 +383,17 @@ class EnquiryController extends Controller
             ], 422);
         }
 
+        // Validate project officer role if provided
+        if ($request->has('project_officer_id') && $request->project_officer_id) {
+            $user = \App\Models\User::find($request->project_officer_id);
+            if (!$user || !$user->hasRole(['Project Officer', 'Project Manager'])) {
+                return response()->json([
+                    'message' => 'Invalid project officer assignment',
+                    'errors' => ['project_officer_id' => ['Selected user is not a valid project officer']]
+                ], 422);
+            }
+        }
+
         $enquiry->update($request->only([
             'date_received',
             'expected_delivery_date',
@@ -378,6 +403,7 @@ class EnquiryController extends Controller
             'project_scope',
             'priority',
             'contact_person',
+            'project_officer_id',
             'status',
             'department_id',
             'assigned_department',
@@ -391,7 +417,7 @@ class EnquiryController extends Controller
 
         return response()->json([
             'message' => 'Enquiry updated successfully',
-            'data' => $enquiry->load('client', 'department')
+            'data' => $enquiry->load('client', 'department', 'projectOfficer')
         ]);
     }
 

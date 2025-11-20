@@ -68,6 +68,7 @@ class LogisticsLogController extends Controller
                 'vehicle_allocated' => 'required|string|max:255',
                 'project_officer_incharge' => 'required|string|max:255',
                 'remarks' => 'nullable|string',
+                'status' => 'nullable|string|in:open,completed,closed',
             ]);
 
             if ($validator->fails()) {
@@ -85,6 +86,7 @@ class LogisticsLogController extends Controller
                 'vehicle_allocated' => $request->vehicle_allocated,
                 'project_officer_incharge' => $request->project_officer_incharge,
                 'remarks' => $request->remarks,
+                'status' => $request->status ?? 'open',
                 'created_by' => auth()->id(),
             ]);
 

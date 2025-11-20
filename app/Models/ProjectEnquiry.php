@@ -32,6 +32,7 @@ class ProjectEnquiry extends Model
         'estimated_budget',
         'project_deliverables',
         'contact_person',
+        'project_officer_id',
         'assigned_po',
         'follow_up_notes',
         'enquiry_number',
@@ -57,6 +58,7 @@ class ProjectEnquiry extends Model
         'expected_delivery_date' => 'date',
         'site_survey_skipped' => 'boolean',
         'assigned_po' => 'integer',
+        'project_officer_id' => 'integer',
         'quote_approved' => 'boolean',
         'quote_approved_at' => 'datetime',
         'estimated_budget' => 'decimal:2',
@@ -81,6 +83,11 @@ class ProjectEnquiry extends Model
     public function department(): BelongsTo
     {
         return $this->belongsTo(\App\Modules\HR\Models\Department::class);
+    }
+
+    public function projectOfficer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'project_officer_id');
     }
 
     public function project(): HasOne

@@ -276,6 +276,22 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
 
+        // Available project officers for enquiry assignment
+        Route::get('available-project-officers', function () {
+            $projectOfficers = \App\Models\User::whereHas('roles', function ($query) {
+                $query->where('name', 'Project Officer');
+            })
+            ->where('is_active', true)
+            ->select('id', 'name', 'email')
+            ->orderBy('name')
+            ->get();
+
+            return response()->json([
+                'data' => $projectOfficers,
+                'message' => 'Available project officers retrieved successfully'
+            ]);
+        });
+
         // Departmental tasks management
         Route::get('departmental-tasks', [PhaseDepartmentalTaskController::class, 'index']); // No permission for debugging
         Route::post('departmental-tasks', [PhaseDepartmentalTaskController::class, 'store']); // No permission for debugging
