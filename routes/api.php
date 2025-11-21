@@ -319,6 +319,9 @@ Route::middleware('auth:sanctum')->group(function () {
         // Site survey management
         Route::apiResource('site-surveys', SiteSurveyController::class); // Temporarily remove permissions for debugging
         Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
+        Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
+        Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
+
 
         // Materials management
             Route::get('tasks/{taskId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsData']);

@@ -222,7 +222,73 @@ class ProcurementService
      */
     public function getProcurementData(int $taskId): ?TaskProcurementData
     {
+        // Sync with budget data before returning
+        $this->syncProcurementWithBudget($taskId);
+        
         return TaskProcurementData::where('enquiry_task_id', $taskId)->first();
+    }
+
+    /**
+     * Sync procurement data with current budget data
+     */
+    private function syncProcurementWithBudget(int $taskId): void
+    {
+        try {
+            $procurementData = TaskProcurementData::where('enquiry_task_id', $taskId)->first();
+            
+            // If no procurement data exists yet, nothing to sync
+            if (!$procurementData || !$procurementData->budget_imported) {
+                return;
+            }
+
+            // Find the budget task
+            $task = EnquiryTask::find($taskId);
+            if (!$task) return;
+
+            $budgetTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
+                ->where('type', 'budget')
+                ->first();
+
+            if (!$budgetTask) return;
+
+            // Get latest budget data
+            $budgetData = TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
+            if (!$budgetData || empty($budgetData->materials_data)) return;
+
+            // Transform current budget data to fresh procurement items
+            $freshItems = $this->transformBudgetToProcurement($budgetData);
+            
+            // Index existing items by budgetItemId for easy lookup
+            $existingItemsMap = collect($procurementData->procurement_items ?? [])
+                ->keyBy('budgetItemId');
+
+            // Merge existing user-entered data into fresh items
+            $syncedItems = array_map(function ($item) use ($existingItemsMap) {
+                $existingItem = $existingItemsMap->get($item['budgetItemId']);
+                
+                if ($existingItem) {
+                    // Preserve user-entered fields
+                    $item['vendorName'] = $existingItem['vendorName'] ?? '';
+                    $item['availabilityStatus'] = $existingItem['availabilityStatus'] ?? 'available';
+                    $item['procurementNotes'] = $existingItem['procurementNotes'] ?? '';
+                    // Keep the original lastUpdated if it exists, or use now
+                    $item['lastUpdated'] = $existingItem['lastUpdated'] ?? now()->toISOString();
+                }
+                
+                return $item;
+            }, $freshItems);
+
+            // Update the procurement data
+            $procurementData->procurement_items = $syncedItems;
+            $procurementData->budget_summary = $this->createBudgetSummary($syncedItems);
+            $procurementData->save();
+
+            \Log::info("Synced procurement data with budget for task {$taskId}");
+
+        } catch (\Exception $e) {
+            \Log::error("Failed to sync procurement data with budget: " . $e->getMessage());
+            // We don't throw here to allow getProcurementData to return what it has even if sync fails
+        }
     }
 
     /**

@@ -60,6 +60,7 @@ class SiteSurvey extends Model
         'client_approval',
         'client_signature',
         'client_approval_date',
+        'survey_photos',
     ];
 
     protected $casts = [
@@ -71,6 +72,7 @@ class SiteSurvey extends Model
         'attendees' => 'array',
         'action_items' => 'array',
         'client_approval' => 'boolean',
+        'survey_photos' => 'array',
     ];
 
     public function enquiry(): BelongsTo

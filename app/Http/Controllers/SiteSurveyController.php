@@ -227,4 +227,141 @@ class SiteSurveyController extends Controller
 
         return $pdf->download($filename);
     }
+
+    /**
+     * Upload a photo for the survey
+     */
+    public function uploadPhoto(Request $request, int $taskId): JsonResponse
+    {
+        try {
+            $request->validate([
+                'photo' => 'required|image|mimes:jpeg,jpg,png|max:10240', // Max 10MB
+                'caption' => 'nullable|string|max:255'
+            ]);
+
+            // Find or create survey by task ID
+            $task = \App\Modules\Projects\Models\EnquiryTask::findOrFail($taskId);
+            
+            $survey = SiteSurvey::firstOrCreate(
+                ['enquiry_task_id' => $taskId],
+                [
+                    'project_enquiry_id' => $task->project_enquiry_id,
+                    'site_visit_date' => now()->format('Y-m-d'),
+                    'client_name' => 'To be filled',
+                    'location' => 'To be filled',
+                    'project_description' => 'To be filled',
+                    'status' => 'pending'
+                ]
+            );
+
+            // Get existing photos
+            $photos = $survey->survey_photos ?? [];
+
+            // Limit to 20 photos
+            if (count($photos) >= 20) {
+                return response()->json([
+                    'message' => 'Maximum 20 photos allowed per survey'
+                ], 422);
+            }
+
+            // Handle file upload
+            $file = $request->file('photo');
+            $uuid = \Illuminate\Support\Str::uuid();
+            $extension = $file->getClientOriginalExtension();
+            $filename = $uuid . '.' . $extension;
+            
+            // Create directory if it doesn't exist
+            $directory = 'surveys/task_' . $taskId;
+            $path = $file->storeAs($directory, $filename, 'public');
+
+            // Add photo metadata
+            $photoData = [
+                'id' => (string) $uuid,
+                'filename' => $file->getClientOriginalName(),
+                'path' => $path,
+                'url' => \Storage::url($path),
+                'size' => $file->getSize(),
+                'mime_type' => $file->getMimeType(),
+                'uploaded_at' => now()->toISOString(),
+                'caption' => $request->input('caption', '')
+            ];
+
+            $photos[] = $photoData;
+            $survey->survey_photos = $photos;
+            $survey->save();
+
+            return response()->json([
+                'message' => 'Photo uploaded successfully',
+                'photo' => $photoData
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Survey photo upload failed', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to upload photo',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a photo from the survey
+     */
+    public function deletePhoto(int $taskId, string $photoId): JsonResponse
+    {
+        try {
+            // Find survey by task ID
+            $survey = SiteSurvey::where('enquiry_task_id', $taskId)->firstOrFail();
+
+            // Get existing photos
+            $photos = $survey->survey_photos ?? [];
+
+            // Find and remove the photo
+            $photoIndex = null;
+            $photoToDelete = null;
+
+            foreach ($photos as $index => $photo) {
+                if ($photo['id'] === $photoId) {
+                    $photoIndex = $index;
+                    $photoToDelete = $photo;
+                    break;
+                }
+            }
+
+            if ($photoIndex === null) {
+                return response()->json([
+                    'message' => 'Photo not found'
+                ], 404);
+            }
+
+            // Delete file from storage
+            if (isset($photoToDelete['path'])) {
+                \Storage::disk('public')->delete($photoToDelete['path']);
+            }
+
+            // Remove from array
+            array_splice($photos, $photoIndex, 1);
+            $survey->survey_photos = $photos;
+            $survey->save();
+
+            return response()->json([
+                'message' => 'Photo deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Survey photo deletion failed', [
+                'taskId' => $taskId,
+                'photoId' => $photoId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to delete photo',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
+
