@@ -70,51 +70,7 @@ class ProjectsReportingService
         ];
     }
 
-    /**
-     * Get enquiry conversion analytics
-     */
-    public function generateConversionAnalytics(array $filters = []): array
-    {
-        $query = ProjectEnquiry::query();
 
-        // Apply date filters
-        if (isset($filters['start_date'])) {
-            $query->where('created_at', '>=', $filters['start_date']);
-        }
-        if (isset($filters['end_date'])) {
-            $query->where('created_at', '<=', $filters['end_date']);
-        }
-
-        $enquiries = $query->get();
-
-        $totalEnquiries = $enquiries->count();
-        $completedEnquiries = $enquiries->where('status', 'completed')->count();
-        $cancelledEnquiries = $enquiries->where('status', 'cancelled')->count();
-
-        $conversionRate = $totalEnquiries > 0 ? round(($convertedEnquiries / $totalEnquiries) * 100, 2) : 0;
-
-        // Conversion funnel
-        $funnel = [
-            'client_registered' => $enquiries->where('status', 'client_registered')->count(),
-            'enquiry_logged' => $enquiries->where('status', 'enquiry_logged')->count(),
-            'site_survey_completed' => $enquiries->where('status', 'site_survey_completed')->count(),
-            'design_completed' => $enquiries->where('status', 'design_completed')->count(),
-            'quote_approved' => $enquiries->where('status', 'quote_approved')->count(),
-            'completed' => $completedEnquiries,
-        ];
-
-        // Average time to completion (replacing conversion time)
-        $avgCompletionTime = $this->calculateAverageCompletionTime($enquiries->where('status', 'completed'));
-
-        return [
-            'total_enquiries' => $totalEnquiries,
-            'converted_enquiries' => $convertedEnquiries,
-            'cancelled_enquiries' => $cancelledEnquiries,
-            'conversion_rate' => $conversionRate,
-            'conversion_funnel' => $funnel,
-            'average_conversion_time_days' => $avgConversionTime,
-        ];
-    }
 
     /**
      * Get analytics summary
@@ -313,19 +269,7 @@ class ProjectsReportingService
         return round($totalVariance / $enquiriesWithBudget->count(), 2);
     }
 
-    /**
-     * Calculate average conversion time
-     */
-    private function calculateAverageConversionTime($convertedEnquiries): ?float
-    {
-        if ($convertedEnquiries->isEmpty()) return null;
 
-        $totalDays = $convertedEnquiries->sum(function ($enquiry) {
-            return Carbon::parse($enquiry->created_at)->diffInDays(Carbon::parse($enquiry->updated_at));
-        });
-
-        return round($totalDays / $convertedEnquiries->count(), 1);
-    }
 
     /**
      * Calculate average task completion time

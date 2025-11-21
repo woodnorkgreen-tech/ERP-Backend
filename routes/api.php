@@ -17,6 +17,7 @@ use App\Modules\Projects\Http\Controllers\PhaseDepartmentalTaskController;
 use App\Http\Controllers\SiteSurveyController;
 use App\Http\Controllers\DesignAssetController;
 use App\Http\Controllers\ProcurementController;
+use App\Http\Controllers\ProductionController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
@@ -185,6 +186,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Quote approval routes
     Route::prefix('projects/tasks/{taskId}/approval')->group(function () {
+        Route::get('/', [App\Http\Controllers\QuoteController::class, 'getApprovalData']);
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'submitApproval']);
     });
 
@@ -197,6 +199,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Procurement utility routes
     Route::get('projects/procurement/vendor-suggestions', [App\Http\Controllers\ProcurementController::class, 'getVendorSuggestions']);
+
+    // Production management routes
+    Route::prefix('projects/tasks/{taskId}/production')->group(function () {
+        Route::get('/', [App\Http\Controllers\ProductionController::class, 'getProductionData']);
+        Route::put('/', [App\Http\Controllers\ProductionController::class, 'saveProductionData']);
+        Route::post('/import-materials', [App\Http\Controllers\ProductionController::class, 'importMaterialsData']);
+        Route::post('/generate-checkpoints', [App\Http\Controllers\ProductionController::class, 'generateQualityCheckpoints']);
+    });
 
     // Get quote by enquiry ID (for frontend access)
     Route::get('projects/enquiries/{enquiryId}/quote', function ($enquiryId) {

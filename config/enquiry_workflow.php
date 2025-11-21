@@ -48,11 +48,6 @@ return [
             'notes' => 'Manage procurement and inventory'
         ],
         [
-            'title' => 'Project Conversion',
-            'type' => 'conversion',
-            'notes' => 'Convert enquiry to project'
-        ],
-        [
             'title' => 'Production',
             'type' => 'production',
             'notes' => 'Handle production activities'

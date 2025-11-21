@@ -34,17 +34,32 @@ class QuoteController extends Controller
 
             // Load client data for existing quotes
             $task = EnquiryTask::with('enquiry.client')->find($taskId);
+            
+            // Transform to camelCase for frontend
+            $quoteArray = [
+                'projectInfo' => $quoteData->project_info,
+                'budgetImported' => $quoteData->budget_imported,
+                'materials' => $quoteData->materials,
+                'labour' => $quoteData->labour,
+                'expenses' => $quoteData->expenses,
+                'logistics' => $quoteData->logistics,
+                'margins' => $quoteData->margins,
+                'discountAmount' => $quoteData->discount_amount,
+                'vatPercentage' => $quoteData->vat_percentage,
+                'vatEnabled' => $quoteData->vat_enabled,
+                'totals' => $quoteData->totals,
+                'status' => $quoteData->status,
+                'createdAt' => $quoteData->created_at,
+                'updatedAt' => $quoteData->updated_at,
+            ];
+            
+            // Update client name if available
             if ($task && $task->enquiry && $task->enquiry->client) {
-                $quoteArray = $quoteData->toArray();
                 $quoteArray['projectInfo']['clientName'] = $task->enquiry->client->full_name ?? 'Unknown Client';
-                return response()->json([
-                    'data' => $quoteArray,
-                    'message' => 'Quote data retrieved successfully'
-                ]);
             }
-
+            
             return response()->json([
-                'data' => $quoteData->toArray(),
+                'data' => $quoteArray,
                 'message' => 'Quote data retrieved successfully'
             ]);
         } catch (\Exception $e) {
@@ -631,6 +646,60 @@ class QuoteController extends Controller
             'logistics' => $logistics,
             'totals' => $totals
         ];
+    }
+
+    /**
+     * Get quote approval data for a task
+     */
+    public function getApprovalData(int $taskId): JsonResponse
+    {
+        try {
+            // Get the task
+            $task = EnquiryTask::find($taskId);
+            if (!$task) {
+                return response()->json(['message' => 'Task not found'], 404);
+            }
+
+            // Get approval record
+            $approval = \DB::table('quote_approvals')
+                ->where('task_id', $taskId)
+                ->first();
+
+            if (!$approval) {
+                return response()->json([
+                    'message' => 'No approval data found for this task',
+                    'data' => null
+                ], 404);
+            }
+
+            // Decode quote data
+            $quoteData = json_decode($approval->quote_data, true);
+
+            return response()->json([
+                'data' => [
+                    'approvalStatus' => $approval->approval_status,
+                    'approvedBy' => $approval->approved_by,
+                    'approvalDate' => $approval->approval_date,
+                    'rejectionReason' => $approval->rejection_reason,
+                    'comments' => $approval->comments,
+                    'quoteAmount' => $approval->quote_amount,
+                    'quoteData' => $quoteData,
+                    'createdAt' => $approval->created_at,
+                    'updatedAt' => $approval->updated_at,
+                ],
+                'message' => 'Approval data retrieved successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error("Failed to retrieve approval data for task {$taskId}", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'message' => 'Failed to retrieve approval data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
