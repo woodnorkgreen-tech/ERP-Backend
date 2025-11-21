@@ -34,6 +34,19 @@ class BudgetController extends Controller
                 ], 404);
             }
 
+            // Get materials task approval status
+            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $budgetData->task->project_enquiry_id ?? 0)
+                ->where('type', 'materials')
+                ->first();
+            
+            $materialsApprovalStatus = null;
+            if ($materialsTask) {
+                $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->first();
+                if ($materialsData) {
+                    $materialsApprovalStatus = $materialsData->project_info['approval_status'] ?? null;
+                }
+            }
+
             // Transform the response to match frontend expectations
             $response = [
                 'projectInfo' => $budgetData->project_info,
@@ -48,7 +61,8 @@ class BudgetController extends Controller
                     'importedFromTask' => $budgetData->materials_imported_from_task,
                     'manuallyModified' => $budgetData->materials_manually_modified ?? false,
                     'importMetadata' => $budgetData->materials_import_metadata
-                ]
+                ],
+                'materialsApprovalStatus' => $materialsApprovalStatus
             ];
 
             return response()->json([
@@ -71,7 +85,10 @@ class BudgetController extends Controller
         try {
             $data = $request->validate([
                 'projectInfo' => 'sometimes|array',
-                'materials' => 'required|array',
+                'materials' => 'sometimes|array',
+                'labour' => 'sometimes|array',
+                'expenses' => 'sometimes|array',
+                'logistics' => 'sometimes|array',
                 'budgetSummary' => 'sometimes|array',
                 'lastImportDate' => 'sometimes|date'
             ]);

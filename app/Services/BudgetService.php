@@ -32,14 +32,29 @@ class BudgetService
             throw new \InvalidArgumentException('Task must be a budget task');
         }
 
-        // Update or create budget data
+        // Retrieve existing budget data if any
+        $existing = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
+
+        // Merge incoming data with existing data, preserving existing values when not provided
+        $projectInfo = $data['projectInfo'] ?? ($existing ? $existing->project_info : []);
+        $materials = $data['materials'] ?? ($existing ? $existing->materials_data : []);
+        $labour = $data['labour'] ?? ($existing ? $existing->labour_data : []);
+        $expenses = $data['expenses'] ?? ($existing ? $existing->expenses_data : []);
+        $logistics = $data['logistics'] ?? ($existing ? $existing->logistics_data : []);
+        $budgetSummary = $data['budgetSummary'] ?? ($existing ? $existing->budget_summary : []);
+        $lastImportDate = $data['lastImportDate'] ?? ($existing ? $existing->last_import_date : now());
+
+        // Update or create budget data with merged values
         $budgetData = TaskBudgetData::updateOrCreate(
             ['enquiry_task_id' => $taskId],
             [
-                'project_info' => $data['projectInfo'] ?? [],
-                'materials_data' => $data['materials'] ?? [],
-                'budget_summary' => $data['budgetSummary'] ?? [],
-                'last_import_date' => isset($data['lastImportDate']) ? $data['lastImportDate'] : now()
+                'project_info' => $projectInfo,
+                'materials_data' => $materials,
+                'labour_data' => $labour,
+                'expenses_data' => $expenses,
+                'logistics_data' => $logistics,
+                'budget_summary' => $budgetSummary,
+                'last_import_date' => $lastImportDate,
             ]
         );
 
@@ -72,6 +87,15 @@ class BudgetService
 
         if (!$materialsData) {
             throw new \Exception('Materials data not found. Please complete the materials task first.');
+        }
+
+        // Check approval status - ONLY import if fully approved
+        $projectInfo = $materialsData->project_info ?? [];
+        $approvalStatus = $projectInfo['approval_status'] ?? [];
+        $isApproved = $approvalStatus['all_approved'] ?? false;
+
+        if (!$isApproved) {
+            throw new \Exception('Materials must be fully approved by all departments before importing into budget.');
         }
 
         // Transform materials data to budget format

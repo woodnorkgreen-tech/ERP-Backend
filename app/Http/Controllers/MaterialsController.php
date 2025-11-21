@@ -225,10 +225,44 @@ class MaterialsController extends Controller
             // Use database transactions for data integrity
             \DB::beginTransaction();
 
+            // Get existing materials data to compare for changes
+            $existingMaterialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+            $existingProjectInfo = $existingMaterialsData ? $existingMaterialsData->project_info : [];
+            $existingApprovalStatus = $existingProjectInfo['approval_status'] ?? null;
+            
+            // Determine if materials content has actually changed
+            $materialsChanged = $this->haveMaterialsChanged($existingMaterialsData, $request->projectElements);
+
+            // Reset approval status ONLY if materials have actually changed
+            $projectInfo = $request->projectInfo;
+            if ($materialsChanged && $existingApprovalStatus) {
+                \Log::info('Materials content changed - resetting approval status', ['taskId' => $taskId]);
+                $projectInfo['approval_status'] = [
+                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
+                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
+                    'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
+                    'all_approved' => false,
+                    'last_approval_at' => null
+                ];
+            } elseif (!$materialsChanged && $existingApprovalStatus) {
+                // Preserve existing approval status if materials haven't changed
+                \Log::info('Materials unchanged - preserving approval status', ['taskId' => $taskId]);
+                $projectInfo['approval_status'] = $existingApprovalStatus;
+            } else {
+                // Initialize approval status for new materials data
+                $projectInfo['approval_status'] = [
+                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                    'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                    'all_approved' => false,
+                    'last_approval_at' => null
+                ];
+            }
+
             $materialsData = TaskMaterialsData::updateOrCreate(
                 ['enquiry_task_id' => $taskId],
                 [
-                    'project_info' => $request->projectInfo,
+                    'project_info' => $projectInfo,
                     'updated_at' => now()
                 ]
             );
@@ -563,16 +597,6 @@ class MaterialsController extends Controller
                 return;
             }
 
-            // Always sync materials to budget, regardless of status
-            // This ensures budget always has the latest materials data
-            // Only skip if budget is completed AND manually modified (to preserve approved budget)
-            if ($budgetTask->status === 'completed' && $budgetData->materials_manually_modified) {
-                \Log::info('Budget is completed and manually modified - skipping automatic materials sync', [
-                    'budgetTaskId' => $budgetTask->id
-                ]);
-                return;
-            }
-
             // Get materials data to sync
             $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)
                 ->with(['elements.materials'])
@@ -581,6 +605,19 @@ class MaterialsController extends Controller
             if (!$materialsData) {
                 \Log::info('No materials data found - skipping materials sync', [
                     'materialsTaskId' => $materialsTaskId
+                ]);
+                return;
+            }
+
+            // Check approval status - ONLY sync if fully approved
+            $projectInfo = $materialsData->project_info ?? [];
+            $approvalStatus = $projectInfo['approval_status'] ?? [];
+            $isApproved = $approvalStatus['all_approved'] ?? false;
+
+            if (!$isApproved) {
+                \Log::info('Materials not fully approved - skipping automatic budget sync', [
+                    'materialsTaskId' => $materialsTaskId,
+                    'approvalStatus' => $approvalStatus
                 ]);
                 return;
             }
@@ -634,9 +671,51 @@ class MaterialsController extends Controller
                 }
             }
 
-            // Update budget with synced materials
+            // Merge with existing budget data to preserve prices
+            $existingMaterials = $budgetData->materials_data ?? [];
+            
+            // Create a lookup map of existing materials by element and material description
+            $existingPricesMap = [];
+            foreach ($existingMaterials as $existingElement) {
+                $elementKey = $existingElement['elementType'] . '_' . $existingElement['name'];
+                foreach ($existingElement['materials'] ?? [] as $existingMaterial) {
+                    $materialKey = $elementKey . '_' . $existingMaterial['description'];
+                    $existingPricesMap[$materialKey] = [
+                        'unitPrice' => $existingMaterial['unitPrice'] ?? 0.0,
+                        'totalPrice' => $existingMaterial['totalPrice'] ?? 0.0,
+                    ];
+                }
+            }
+            
+            // Merge new materials with existing price data
+            $mergedMaterials = [];
+            foreach ($budgetMaterials as $newElement) {
+                $elementKey = $newElement['elementType'] . '_' . $newElement['name'];
+                $mergedElement = $newElement;
+                
+                foreach ($mergedElement['materials'] as &$newMaterial) {
+                    $materialKey = $elementKey . '_' . $newMaterial['description'];
+                    
+                    // If this material existed before, preserve its prices
+                    if (isset($existingPricesMap[$materialKey])) {
+                        $newMaterial['unitPrice'] = $existingPricesMap[$materialKey]['unitPrice'];
+                        // Recalculate total price with new quantity but existing unit price
+                        $newMaterial['totalPrice'] = $newMaterial['quantity'] * $newMaterial['unitPrice'];
+                        
+                        \Log::info('Preserved price for material', [
+                            'material' => $newMaterial['description'],
+                            'unitPrice' => $newMaterial['unitPrice'],
+                            'quantity' => $newMaterial['quantity']
+                        ]);
+                    }
+                }
+                
+                $mergedMaterials[] = $mergedElement;
+            }
+
+            // Update budget with merged materials data
             $budgetData->update([
-                'materials_data' => $budgetMaterials,
+                'materials_data' => $mergedMaterials,
                 'materials_imported_at' => now(),
                 'materials_imported_from_task' => $materialsTaskId,
                 'materials_manually_modified' => false,
@@ -681,6 +760,21 @@ class MaterialsController extends Controller
             if (!$materialsTask) {
                 \Log::warning('Materials task not found for budget addition creation', ['taskId' => $materialsTaskId]);
                 return;
+            }
+
+            // Check approval status - ONLY create additions if fully approved
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)->first();
+            if ($materialsData) {
+                $projectInfo = $materialsData->project_info ?? [];
+                $approvalStatus = $projectInfo['approval_status'] ?? [];
+                $isApproved = $approvalStatus['all_approved'] ?? false;
+
+                if (!$isApproved) {
+                    \Log::info('Materials not fully approved - skipping automatic budget additions', [
+                        'materialsTaskId' => $materialsTaskId
+                    ]);
+                    return;
+                }
             }
 
             $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
@@ -797,7 +891,7 @@ class MaterialsController extends Controller
                                 'unitOfMeasurement' => $material->unit_of_measurement,
                                 'quantity' => (float) $material->quantity,
                                 'isIncluded' => (bool) $material->is_included,
-                                'isAdditional' => (bool) $material->is_additional,  // ← ADD THIS LINE
+                'isAdditional' => (bool) $material->is_additional,  // ← ADD THIS LINE
                                 'notes' => $material->notes,
                                 'createdAt' => $material->created_at?->toISOString(),
                                 'updatedAt' => $material->updated_at?->toISOString(),
@@ -822,5 +916,251 @@ class MaterialsController extends Controller
                 'availableElements' => []
             ];
         }
+    }
+
+    /**
+     * Approve materials for a specific department
+     *
+     * @param int $taskId Materials task ID
+     * @param string $department Department name (design, production, finance)
+     */
+    public function approveMaterials(Request $request, int $taskId, string $department): JsonResponse
+    {
+        $validator = Validator::make(['department' => $department], [
+            'department' => 'required|in:design,production,finance'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Invalid department',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+
+            if (!$materialsData) {
+                return response()->json([
+                    'message' => 'Materials data not found for this task'
+                ], 404);
+            }
+
+            // Get current approval status from project_info
+            $projectInfo = $materialsData->project_info ?? [];
+            $approvalStatus = $projectInfo['approval_status'] ?? [
+                'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                'all_approved' => false,
+                'last_approval_at' => null
+            ];
+
+            // Update approval for this department
+            $user = auth()->user();
+            $approvalStatus[$department] = [
+                'approved' => true,
+                'approved_by' => $user->id,
+                'approved_by_name' => $user->name,
+                'approved_at' => now()->toISOString(),
+                'comments' => $request->input('comments', '')
+            ];
+
+            // Check if all departments approved
+            $allApproved = $approvalStatus['design']['approved'] &&
+                           $approvalStatus['production']['approved'] &&
+                           $approvalStatus['finance']['approved'];
+
+            $approvalStatus['all_approved'] = $allApproved;
+            if ($allApproved) {
+                $approvalStatus['last_approval_at'] = now()->toISOString();
+            }
+
+            // Update project info with new approval status
+            $projectInfo['approval_status'] = $approvalStatus;
+            $materialsData->update(['project_info' => $projectInfo]);
+
+            // If fully approved, trigger budget sync and additions creation
+            if ($allApproved) {
+                \Log::info('Materials fully approved - triggering budget sync', ['taskId' => $taskId]);
+
+                // Reconstruct projectElements for additions creation (needs camelCase)
+                $materialsData->load('elements.materials');
+                $projectElements = $materialsData->elements->map(function($element) {
+                    return [
+                        'name' => $element->name,
+                        'materials' => $element->materials->map(function($material) {
+                            return [
+                                'description' => $material->description,
+                                'unitOfMeasurement' => $material->unit_of_measurement,
+                                'quantity' => $material->quantity,
+                                'isAdditional' => (bool) $material->is_additional
+                            ];
+                        })->toArray()
+                    ];
+                })->toArray();
+
+                $this->createBudgetAdditionsForAdditionalMaterials($taskId, $projectElements);
+                $this->syncMaterialsToBudget($taskId, []); // Pass empty array as it fetches from DB
+            }
+
+            return response()->json([
+                'message' => ucfirst($department) . ' approval recorded successfully',
+                'approval_status' => $approvalStatus
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to approve materials', [
+                'taskId' => $taskId,
+                'department' => $department,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to approve materials',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get approval status for materials
+     *
+     * @param int $taskId Materials task ID
+     */
+    public function getApprovalStatus(int $taskId): JsonResponse
+    {
+        try {
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+
+            if (!$materialsData) {
+                // Return default approval structure if no materials data exists
+                return response()->json([
+                    'approval_status' => [
+                        'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                        'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                        'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                        'all_approved' => false,
+                        'last_approval_at' => null
+                    ],
+                    'pending' => ['design', 'production', 'finance']
+                ]);
+            }
+
+            $projectInfo = $materialsData->project_info ?? [];
+            $approvalStatus = $projectInfo['approval_status'] ?? [
+                'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                'all_approved' => false,
+                'last_approval_at' => null
+            ];
+
+            // Calculate pending departments
+            $pending = [];
+            foreach (['design', 'production', 'finance'] as $dept) {
+                if (!($approvalStatus[$dept]['approved'] ?? false)) {
+                    $pending[] = $dept;
+                }
+            }
+
+            return response()->json([
+                'approval_status' => $approvalStatus,
+                'pending' => $pending,
+                'all_approved' => $approvalStatus['all_approved'] ?? false
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to get approval status', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to get approval status',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Check if materials content has actually changed
+     * Compares existing materials data with incoming project elements
+     * 
+     * @param TaskMaterialsData|null $existingData
+     * @param array $newProjectElements
+     * @return bool
+     */
+    private function haveMaterialsChanged(?TaskMaterialsData $existingData, array $newProjectElements): bool
+    {
+        // If no existing data, this is a new entry (not a change)
+        if (!$existingData) {
+            return false;
+        }
+
+        // Load existing elements with materials
+        $existingData->load('elements.materials');
+        $existingElements = $existingData->elements;
+
+        // Quick check: different number of elements = changed
+        if ($existingElements->count() !== count($newProjectElements)) {
+            \Log::info('Materials changed: different element count', [
+                'existing' => $existingElements->count(),
+                'new' => count($newProjectElements)
+            ]);
+            return true;
+        }
+
+        // Create a normalized representation of existing materials for comparison
+        $existingNormalized = [];
+        foreach ($existingElements as $element) {
+            $elementKey = $element->element_type . '_' . $element->name;
+            $existingNormalized[$elementKey] = [
+                'element_type' => $element->element_type,
+                'name' => $element->name,
+                'category' => $element->category,
+                'materials' => $element->materials->map(function($material) {
+                    return [
+                        'description' => $material->description,
+                        'unit_of_measurement' => $material->unit_of_measurement,
+                        'quantity' => (float) $material->quantity,
+                        'is_additional' => (bool) $material->is_additional
+                    ];
+                })->sortBy('description')->values()->toArray()
+            ];
+        }
+
+        // Create a normalized representation of new materials
+        $newNormalized = [];
+        foreach ($newProjectElements as $element) {
+            $elementKey = $element['elementType'] . '_' . $element['name'];
+            $materials = $element['materials'] ?? [];
+            usort($materials, function($a, $b) {
+                return strcmp($a['description'] ?? '', $b['description'] ?? '');
+            });
+            
+            $newNormalized[$elementKey] = [
+                'element_type' => $element['elementType'],
+                'name' => $element['name'],
+                'category' => $element['category'],
+                'materials' => array_map(function($material) {
+                    return [
+                        'description' => $material['description'],
+                        'unit_of_measurement' => $material['unitOfMeasurement'],
+                        'quantity' => (float) $material['quantity'],
+                        'is_additional' => (bool) ($material['isAdditional'] ?? false)
+                    ];
+                }, $materials)
+            ];
+        }
+
+        // Compare normalized data
+        $changed = json_encode($existingNormalized) !== json_encode($newNormalized);
+        
+        if ($changed) {
+            \Log::info('Materials changed: content differs');
+        }
+        
+        return $changed;
     }
 }

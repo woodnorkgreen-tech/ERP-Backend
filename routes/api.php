@@ -320,6 +320,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('site-surveys', SiteSurveyController::class); // Temporarily remove permissions for debugging
         Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
 
+        // Materials management
+            Route::get('tasks/{taskId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsData']);
+            Route::post('tasks/{taskId}/materials', [App\Http\Controllers\MaterialsController::class, 'saveMaterialsData']);
+            Route::get('enquiries/{enquiryId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsByEnquiry']);
+            Route::get('element-templates', [App\Http\Controllers\MaterialsController::class, 'getElementTemplates']);
+            Route::post('element-templates', [App\Http\Controllers\MaterialsController::class, 'createElementTemplate']);
+            
+            // Materials approval endpoints
+            Route::post('tasks/{taskId}/materials/approve/{department}', [App\Http\Controllers\MaterialsController::class, 'approveMaterials']);
+            Route::get('tasks/{taskId}/materials/approval-status', [App\Http\Controllers\MaterialsController::class, 'getApprovalStatus']);
+
         // Design asset management
         Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('/', [DesignAssetController::class, 'index']);
