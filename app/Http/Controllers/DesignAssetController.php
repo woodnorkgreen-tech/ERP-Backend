@@ -101,13 +101,15 @@ class DesignAssetController extends Controller
     /**
      * Remove the specified design asset.
      */
-    public function destroy(DesignAsset $asset)
+    public function destroy($task, DesignAsset $asset)
     {
         // TODO: Add authorization policy when implemented
         // $this->authorize('delete', $asset);
 
-        // Delete file from storage
-        Storage::disk('public')->delete($asset->file_path);
+        // Delete file from storage if it exists
+        if ($asset->file_path && Storage::disk('public')->exists($asset->file_path)) {
+            Storage::disk('public')->delete($asset->file_path);
+        }
 
         $asset->delete();
 
