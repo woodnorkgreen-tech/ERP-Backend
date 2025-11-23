@@ -182,6 +182,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [App\Http\Controllers\QuoteController::class, 'getQuoteData']);
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'saveQuoteData']);
         Route::post('/import-budget', [App\Http\Controllers\QuoteController::class, 'importBudgetData']);
+        Route::get('/budget-status', [App\Http\Controllers\QuoteController::class, 'checkBudgetStatus']);
+        Route::get('/changes-preview', [App\Http\Controllers\QuoteController::class, 'previewBudgetChanges']);
+        Route::post('/smart-merge', [App\Http\Controllers\QuoteController::class, 'smartMergeBudget']);
     });
 
     // Quote approval routes
