@@ -189,31 +189,67 @@ class ProductionService
      */
     public function generateQualityCheckpoints(int $taskId): array
     {
-        $productionData = TaskProductionData::where('task_id', $taskId)->firstOrFail();
+        Log::info("Generating quality checkpoints for task {$taskId}");
         
-        // Clear existing checkpoints
-        ProductionQualityCheckpoint::where('production_data_id', $productionData->id)->delete();
+        try {
+            $productionData = TaskProductionData::where('task_id', $taskId)->firstOrFail();
+            Log::info("Found production data: {$productionData->id}");
+            
+            // Clear existing checkpoints
+            ProductionQualityCheckpoint::where('production_data_id', $productionData->id)->delete();
+            Log::info("Cleared existing checkpoints");
 
-        // Get unique categories from production elements
-        $categories = ProductionElement::where('production_data_id', $productionData->id)
-            ->select('category')
-            ->distinct()
-            ->pluck('category');
+            // Get unique categories from production elements
+            $categories = ProductionElement::where('production_data_id', $productionData->id)
+                ->select('category')
+                ->distinct()
+                ->pluck('category');
+            
+            Log::info("Found categories: " . $categories->toJson());
 
-        $checkpoints = [];
-        foreach ($categories as $category) {
-            $checkpoint = ProductionQualityCheckpoint::create([
-                'production_data_id' => $productionData->id,
-                'category_id' => $category,
-                'category_name' => $this->formatCategoryName($category),
-                'status' => 'pending',
-                'priority' => 'medium',
-            ]);
+            $checkpoints = [];
+            foreach ($categories as $category) {
+                Log::info("Creating checkpoint for category: " . ($category ?? 'NULL'));
+                
+                if (empty($category)) {
+                    Log::warning("Skipping empty category");
+                    continue;
+                }
 
-            $checkpoints[] = $checkpoint;
+                $checkpoint = ProductionQualityCheckpoint::create([
+                    'production_data_id' => $productionData->id,
+                    'category_id' => $category,
+                    'category_name' => $this->formatCategoryName($category),
+                    'status' => 'pending',
+                    'priority' => 'medium',
+                ]);
+
+                $checkpoints[] = $checkpoint;
+            }
+            
+            Log::info("Generated " . count($checkpoints) . " checkpoints");
+
+            // Transform to match frontend expectations (camelCase)
+            return array_map(function ($checkpoint) {
+                return [
+                    'id' => (string)$checkpoint->id,
+                    'categoryId' => $checkpoint->category_id,
+                    'categoryName' => $checkpoint->category_name,
+                    'status' => $checkpoint->status,
+                    'qualityScore' => $checkpoint->quality_score,
+                    'checkedBy' => $checkpoint->checked_by,
+                    'checkedAt' => $checkpoint->checked_at?->toISOString(),
+                    'priority' => $checkpoint->priority,
+                    'notes' => $checkpoint->notes,
+                    'createdAt' => $checkpoint->created_at->toISOString(),
+                    'updatedAt' => $checkpoint->updated_at->toISOString(),
+                ];
+            }, $checkpoints);
+        } catch (\Exception $e) {
+            Log::error("Error in generateQualityCheckpoints: " . $e->getMessage());
+            Log::error($e->getTraceAsString());
+            throw $e;
         }
-
-        return $checkpoints->toArray();
     }
 
     /**

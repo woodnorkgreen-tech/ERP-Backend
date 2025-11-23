@@ -94,7 +94,24 @@ class TaskController extends Controller
         \Log::info("[DEBUG] getAllEnquiryTasks called, user: " . Auth::id());
 
         try {
-            $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy');
+            $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
+
+            $user = Auth::user();
+            // Check if user has privileged role
+            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
+                \Log::info('[TASK FILTER] Non-privileged user detected', [
+                    'user_id' => $user->id,
+                    'user_roles' => $user->roles->pluck('name'),
+                    'filtering_by_assigned_users' => $user->id
+                ]);
+                // Use the pivot table relationship to filter tasks
+                $query->assignedToUser($user->id);
+            } else {
+                \Log::info('[TASK FILTER] Privileged user - no filtering', [
+                    'user_id' => $user->id,
+                    'user_roles' => $user->roles->pluck('name')
+                ]);
+            }
 
             // Apply filters if provided
             if ($request->has('status') && $request->status) {
@@ -125,6 +142,38 @@ class TaskController extends Controller
             }
 
             $tasks = $query->orderBy('id')->get(); // Order by ID for consistent ordering
+
+            // Enrich material tasks with approval status
+            $tasks->each(function ($task) {
+                if ($task->type === 'materials') {
+                    $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
+                    
+                    if ($materialsData) {
+                        $approvalStatus = $materialsData->project_info['approval_status'] ?? [];
+                        
+                        // Count approvals
+                        $totalApprovals = 0;
+                        $departments = ['design', 'production', 'finance'];
+                        foreach ($departments as $dept) {
+                            if (isset($approvalStatus[$dept]['approved']) && $approvalStatus[$dept]['approved']) {
+                                $totalApprovals++;
+                            }
+                        }
+                        
+                        $task->material_approval = [
+                            'needs_approval' => !($approvalStatus['all_approved'] ?? false),
+                            'approved_count' => $totalApprovals,
+                            'total_count' => 3,
+                            'all_approved' => $approvalStatus['all_approved'] ?? false,
+                            'departments' => [
+                                'design' => $approvalStatus['design']['approved'] ?? false,
+                                'production' => $approvalStatus['production']['approved'] ?? false,
+                                'finance' => $approvalStatus['finance']['approved'] ?? false,
+                            ]
+                        ];
+                    }
+                }
+            });
 
             \Log::info("[DEBUG] getAllEnquiryTasks retrieved " . $tasks->count() . " tasks");
 
@@ -171,10 +220,48 @@ class TaskController extends Controller
         \Log::info("[DEBUG] getEnquiryTasks called for enquiryId: {$enquiryId}, user: " . Auth::id());
 
         try {
-            $tasks = EnquiryTask::where('project_enquiry_id', $enquiryId)
-                ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy')
-                ->orderBy('id') // Order by ID for consistent ordering
-                ->get();
+            $query = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
+
+            $user = Auth::user();
+            // Check if user has privileged role
+            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
+                $query->assignedToUser($user->id);
+            }
+
+            $tasks = $query->orderBy('id')->get(); // Order by ID for consistent ordering
+
+            // Enrich material tasks with approval status
+            $tasks->each(function ($task) {
+                if ($task->type === 'materials') {
+                    $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
+                    
+                    if ($materialsData) {
+                        $approvalStatus = $materialsData->project_info['approval_status'] ?? [];
+                        
+                        // Count approvals
+                        $totalApprovals = 0;
+                        $departments = ['design', 'production', 'finance'];
+                        foreach ($departments as $dept) {
+                            if (isset($approvalStatus[$dept]['approved']) && $approvalStatus[$dept]['approved']) {
+                                $totalApprovals++;
+                            }
+                        }
+                        
+                        $task->material_approval = [
+                            'needs_approval' => !($approvalStatus['all_approved'] ?? false),
+                            'approved_count' => $totalApprovals,
+                            'total_count' => 3,
+                            'all_approved' => $approvalStatus['all_approved'] ?? false,
+                            'departments' => [
+                                'design' => $approvalStatus['design']['approved'] ?? false,
+                                'production' => $approvalStatus['production']['approved'] ?? false,
+                                'finance' => $approvalStatus['finance']['approved'] ?? false,
+                            ]
+                        ];
+                    }
+                }
+            });
 
             \Log::info("[DEBUG] getEnquiryTasks retrieved " . $tasks->count() . " tasks for enquiry {$enquiryId}");
             foreach ($tasks as $task) {
@@ -227,6 +314,11 @@ class TaskController extends Controller
             // Filter tasks by user's department
             $user = Auth::user();
             $query->where('department_id', $user->department_id);
+
+            // Check if user has privileged role
+            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
+                $query->assignedToUser($user->id);
+            }
 
             $tasks = $query->orderBy('created_at', 'desc')->paginate(15);
 

@@ -87,7 +87,8 @@ class EnquiryWorkflowService
 
 
     /**
-     * Manually assign an enquiry task to a department and user
+     * Manually assign an enquiry task to a department and user(s)
+     * Supports assigning multiple users to the same task
      */
     public function assignEnquiryTask(int $taskId, int $assignedUserId, int $assignedByUserId, array $assignmentData = []): EnquiryTask
     {
@@ -98,11 +99,11 @@ class EnquiryWorkflowService
         // Validate assignment rules
         $this->validateTaskAssignment($task, $assignedUser, $assignmentData);
 
-        // Update task with assignment data
+        // Update task with assignment data (for backward compatibility and department tracking)
         $updateData = [
             'department_id' => $assignedUser->department_id,
             'assigned_by' => $assignedByUserId,
-            'assigned_to' => $assignedUserId,
+            'assigned_to' => $assignedUserId, // Keep for backward compatibility
             'assigned_at' => now(),
         ];
 
@@ -119,6 +120,14 @@ class EnquiryWorkflowService
         }
 
         $task->update($updateData);
+
+        // Add user to the pivot table (supports multiple users)
+        $task->assignedUsers()->syncWithoutDetaching([
+            $assignedUserId => [
+                'assigned_by' => $assignedByUserId,
+                'assigned_at' => now(),
+            ]
+        ]);
 
         // Create assignment history
         TaskAssignmentHistory::create([
@@ -184,7 +193,7 @@ class EnquiryWorkflowService
             throw new \Exception("Cannot reassign unassigned task");
         }
 
-        if ($task->assigned_by === $newAssignedUserId) {
+        if ($task->assigned_to === $newAssignedUserId) {
             throw new \Exception("Cannot reassign to the same user");
         }
 
@@ -194,10 +203,10 @@ class EnquiryWorkflowService
             'assigned_to' => $newAssignedUserId,
             'assigned_by' => $reassignedByUserId,
             'assigned_at' => now(),
-            'notes' => "Reassigned from user {$task->assigned_by}. Reason: {$reason}",
+            'notes' => "Reassigned from user {$task->assigned_to}. Reason: {$reason}",
         ]);
 
-        // Update task assignment
+        // Update task assignment (backward compatibility)
         $task->update([
             'department_id' => $newAssignedUser->department_id,
             'assigned_by' => $reassignedByUserId,
@@ -205,7 +214,15 @@ class EnquiryWorkflowService
             'assigned_at' => now(),
         ]);
 
-        Log::info("Task {$taskId} reassigned from user {$task->assigned_by} to user {$newAssignedUserId} by user {$reassignedByUserId}");
+        // Add new user to pivot table and keep existing assignees
+        $task->assignedUsers()->syncWithoutDetaching([
+            $newAssignedUserId => [
+                'assigned_by' => $reassignedByUserId,
+                'assigned_at' => now(),
+            ]
+        ]);
+
+        Log::info("Task {$taskId} reassigned to include user {$newAssignedUserId} by user {$reassignedByUserId}");
 
         return $task;
     }
@@ -280,8 +297,13 @@ class EnquiryWorkflowService
      */
     private function sendOverdueNotifications(EnquiryTask $task): void
     {
-        // Send notification to assigned user if exists
-        if ($task->assigned_to) {
+        // Send notification to all assigned users (supports multiple)
+        foreach ($task->assignedUsers as $assignedUser) {
+            $this->notificationService->sendTaskOverdueNotification($task, $assignedUser);
+        }
+
+        // Fallback to assigned_to column if pivot table is empty (backward compatibility)
+        if ($task->assignedUsers->isEmpty() && $task->assigned_to) {
             $assignedUser = User::find($task->assigned_to);
             if ($assignedUser) {
                 $this->notificationService->sendTaskOverdueNotification($task, $assignedUser);
@@ -309,13 +331,21 @@ class EnquiryWorkflowService
         $tasksDueSoon = EnquiryTask::where('due_date', '>=', now())
             ->where('due_date', '<=', now()->addDays($dueSoonDays))
             ->where('status', '!=', 'completed')
-            ->whereNotNull('assigned_to')
+            ->with('assignedUsers') // Eager load assigned users
             ->get();
 
         foreach ($tasksDueSoon as $task) {
-            $assignedUser = User::find($task->assigned_to);
-            if ($assignedUser) {
+            // Notify all assigned users
+            foreach ($task->assignedUsers as $assignedUser) {
                 $this->notificationService->sendTaskDueSoonNotification($task, $assignedUser);
+            }
+
+            // Fallback for backward compatibility
+            if ($task->assignedUsers->isEmpty() && $task->assigned_to) {
+                $assignedUser = User::find($task->assigned_to);
+                if ($assignedUser) {
+                    $this->notificationService->sendTaskDueSoonNotification($task, $assignedUser);
+                }
             }
         }
 

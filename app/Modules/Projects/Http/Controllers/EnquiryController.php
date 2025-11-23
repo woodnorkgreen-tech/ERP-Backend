@@ -120,7 +120,7 @@ class EnquiryController extends Controller
     public function index(Request $request): JsonResponse
     {
 
-        $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks');
+        $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo');
 
         // Apply filters
         if ($request->has('search') && $request->search) {
@@ -341,6 +341,11 @@ class EnquiryController extends Controller
             'department',
             'projectOfficer',
             'enquiryTasks' => function ($query) {
+                $user = Auth::user();
+                // Check if user has privileged role
+                if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
+                    $query->where('assigned_to', $user->id);
+                }
                 $query->with(['assignedUser', 'taskData']);
             }
         ]);

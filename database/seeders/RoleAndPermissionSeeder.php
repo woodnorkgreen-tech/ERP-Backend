@@ -111,5 +111,31 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::ENQUIRY_READ, Permissions::DEPARTMENT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
             Permissions::TASK_ASSIGN, Permissions::USER_READ, Permissions::DASHBOARD_PROJECTS
         ]);
+
+        // Operational Roles (Production, Logistics, Stores, Procurement)
+        // These roles have access to projects module until their dedicated modules are developed
+        $productionRole = Role::firstOrCreate(['name' => 'Production'], ['description' => 'Production and manufacturing operations']);
+        $productionRole->givePermissionTo([
+            Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
+            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW
+        ]);
+
+        $logisticsRole = Role::firstOrCreate(['name' => 'Logistics'], ['description' => 'Logistics and delivery coordination']);
+        $logisticsRole->givePermissionTo([
+            Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
+            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW
+        ]);
+
+        $storesRole = Role::firstOrCreate(['name' => 'Stores'], ['description' => 'Inventory and stores management']);
+        $storesRole->givePermissionTo([
+            Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
+            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW
+        ]);
+
+        $procurementRole = Role::firstOrCreate(['name' => 'Procurement'], ['description' => 'Procurement and sourcing operations']);
+        $procurementRole->givePermissionTo([
+            Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
+            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW
+        ]);
     }
 }

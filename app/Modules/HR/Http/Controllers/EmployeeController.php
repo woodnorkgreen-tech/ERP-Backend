@@ -73,12 +73,12 @@ class EmployeeController
             'department_id' => 'required|exists:departments,id',
             'position' => 'required|string|max:255',
             'hire_date' => 'required|date',
-            'salary' => 'nullable|numeric|min:0',
+
             'status' => ['required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
             'employment_type' => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],
             'manager_id' => 'nullable|exists:employees,id',
             'address' => 'nullable|string',
-            'date_of_birth' => 'nullable|date',
+
             'emergency_contact' => 'nullable|array',
             'emergency_contact.name' => 'nullable|string|max:255',
             'emergency_contact.relationship' => 'nullable|string|max:255',
@@ -134,12 +134,12 @@ class EmployeeController
             'department_id' => 'sometimes|required|exists:departments,id',
             'position' => 'sometimes|required|string|max:255',
             'hire_date' => 'sometimes|required|date',
-            'salary' => 'nullable|numeric|min:0',
+
             'status' => ['sometimes', 'required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
             'employment_type' => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],
             'manager_id' => 'nullable|exists:employees,id',
             'address' => 'nullable|string',
-            'date_of_birth' => 'nullable|date',
+
             'emergency_contact' => 'nullable|array',
             'performance_rating' => 'nullable|numeric|min:0|max:5',
             'last_review_date' => 'nullable|date',

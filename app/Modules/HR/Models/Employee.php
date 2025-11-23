@@ -20,12 +20,12 @@ class Employee extends Model
         'department_id',
         'position',
         'hire_date',
-        'salary',
+
         'status',
         'employment_type',
         'manager_id',
         'address',
-        'date_of_birth',
+
         'emergency_contact',
         'performance_rating',
         'last_review_date'
@@ -33,8 +33,8 @@ class Employee extends Model
 
     protected $casts = [
         'hire_date' => 'date',
-        'salary' => 'decimal:2',
-        'date_of_birth' => 'date',
+
+
         'emergency_contact' => 'array',
         'performance_rating' => 'decimal:1',
         'last_review_date' => 'date'

@@ -99,6 +99,21 @@ class EnquiryTask extends Model
         return $this->hasMany(\App\Models\TaskAssignmentHistory::class, 'enquiry_task_id');
     }
 
+    /**
+     * Many-to-many relationship for multiple user assignments
+     * This is the primary way to check task assignments
+     */
+    public function assignedUsers()
+    {
+        return $this->belongsToMany(
+            \App\Models\User::class,
+            'enquiry_task_user',
+            'enquiry_task_id',
+            'user_id'
+        )->withPivot('assigned_by', 'assigned_at')->withTimestamps();
+    }
+
+
     public function designAssets()
     {
         return $this->hasMany(\App\Models\DesignAsset::class, 'enquiry_task_id');
@@ -155,6 +170,17 @@ class EnquiryTask extends Model
     {
         return $query->where('due_date', '<', now())->where('status', '!=', 'completed');
     }
+
+    /**
+     * Scope to filter tasks by assigned user (uses pivot table)
+     */
+    public function scopeAssignedToUser($query, $userId)
+    {
+        return $query->whereHas('assignedUsers', function($q) use ($userId) {
+            $q->where('users.id', $userId);
+        });
+    }
+
 
     // Helper method to get department for task type
     public function getMappedDepartment()
