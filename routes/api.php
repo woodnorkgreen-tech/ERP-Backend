@@ -185,6 +185,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/budget-status', [App\Http\Controllers\QuoteController::class, 'checkBudgetStatus']);
         Route::get('/changes-preview', [App\Http\Controllers\QuoteController::class, 'previewBudgetChanges']);
         Route::post('/smart-merge', [App\Http\Controllers\QuoteController::class, 'smartMergeBudget']);
+        Route::post('/version', [App\Http\Controllers\QuoteController::class, 'createVersion']);
+        Route::get('/versions', [App\Http\Controllers\QuoteController::class, 'getVersions']);
+        Route::get('/version/{versionId}', [App\Http\Controllers\QuoteController::class, 'getVersion']);
+        Route::post('/restore/{versionId}', [App\Http\Controllers\QuoteController::class, 'restoreVersion']);
     });
 
     // Quote approval routes

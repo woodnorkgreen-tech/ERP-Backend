@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\TaskQuoteData;
 use App\Models\TaskBudgetData;
+use App\Models\QuoteVersion;
 use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -1131,5 +1132,91 @@ class QuoteController extends Controller
             ],
             'status' => 'draft'
         ];
+    }
+    public function createVersion(Request $request, $taskId)
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        $quoteData = $task->quoteData;
+
+        if (!$quoteData) {
+            return response()->json(['message' => 'Quote not found'], 404);
+        }
+
+        $latestVersion = $quoteData->versions()->max('version_number') ?? 0;
+        $newVersionNumber = $latestVersion + 1;
+
+        $version = $quoteData->versions()->create([
+            'version_number' => $newVersionNumber,
+            'label' => $request->input('label', 'Version ' . $newVersionNumber),
+            'data' => $quoteData->toArray(),
+            'created_by' => auth()->id() ?? 1 // Fallback for dev
+        ]);
+
+        return response()->json([
+            'message' => 'Version created successfully',
+            'data' => $version
+        ]);
+    }
+
+    public function getVersions($taskId)
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        $quoteData = $task->quoteData;
+
+        if (!$quoteData) {
+            return response()->json(['data' => []]);
+        }
+
+        $versions = $quoteData->versions()
+            ->with('creator')
+            ->orderBy('version_number', 'desc')
+            ->get()
+            ->map(function ($version) {
+                return [
+                    'id' => $version->id,
+                    'version_number' => $version->version_number,
+                    'label' => $version->label,
+                    'created_at' => $version->created_at,
+                    'created_by_name' => $version->creator->name ?? 'Unknown'
+                ];
+            });
+
+        return response()->json(['data' => $versions]);
+    }
+
+    public function getVersion($taskId, $versionId)
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        $quoteData = $task->quoteData;
+        $version = QuoteVersion::findOrFail($versionId);
+
+        if ($version->task_quote_data_id !== $quoteData->id) {
+            return response()->json(['message' => 'Invalid version for this quote'], 400);
+        }
+
+        return response()->json(['data' => $version]);
+    }
+
+    public function restoreVersion($taskId, $versionId)
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        $quoteData = $task->quoteData;
+        $version = QuoteVersion::findOrFail($versionId);
+
+        if ($version->task_quote_data_id !== $quoteData->id) {
+            return response()->json(['message' => 'Invalid version for this quote'], 400);
+        }
+
+        $restoredData = $version->data;
+        
+        // Exclude fields that shouldn't be overwritten
+        $dataToUpdate = collect($restoredData)->except(['id', 'created_at', 'updated_at', 'task_id'])->toArray();
+        
+        $quoteData->update($dataToUpdate);
+
+        return response()->json([
+            'message' => 'Quote restored to version ' . $version->version_number,
+            'data' => $quoteData
+        ]);
     }
 }

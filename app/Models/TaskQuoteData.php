@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TaskQuoteData extends Model
 {
@@ -54,5 +55,10 @@ class TaskQuoteData extends Model
     public function enquiryTask(): BelongsTo
     {
         return $this->belongsTo(\App\Modules\Projects\Models\EnquiryTask::class, 'enquiry_task_id');
+    }
+
+    public function versions(): HasMany
+    {
+        return $this->hasMany(\App\Models\QuoteVersion::class, 'task_quote_data_id'); // Assuming QuoteVersion model is in App\Models
     }
 }
