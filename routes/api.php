@@ -246,6 +246,18 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/checklist/stats', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklistStats']);
         });
 
+        // Archival Task Routes (Project Memorial Report)
+        Route::prefix('tasks/{taskId}/archival')->group(function () {
+            Route::get('/', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'index']);
+            Route::post('/', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'store']);
+            Route::put('/{reportId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'update']);
+            Route::delete('/{reportId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'destroy']);
+            Route::post('/{reportId}/attachments', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'uploadAttachment']);
+            Route::delete('/{reportId}/attachments/{attachmentId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'deleteAttachment']);
+            Route::get('/auto-populate', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'autoPopulate']);
+            Route::post('/{reportId}/status', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'changeStatus']);
+        });
+
         // Drivers endpoint for logistics
         Route::get('/drivers', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getDrivers']);
 
