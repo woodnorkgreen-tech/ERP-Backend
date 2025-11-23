@@ -111,7 +111,13 @@ class ProcurementController extends Controller
                 'procurementItems' => 'required|array',
                 'procurementItems.*.budgetItemId' => 'required|string',
                 'procurementItems.*.description' => 'required|string',
-                'procurementItems.*.availabilityStatus' => 'sometimes|in:available,ordered,received,hired,cancelled',
+                'procurementItems.*.stockStatus' => 'sometimes|in:in_stock,partial_stock,out_of_stock,pending_check',
+                'procurementItems.*.stockQuantity' => 'sometimes|numeric|min:0',
+                'procurementItems.*.procurementStatus' => 'sometimes|in:not_needed,pending,ordered,received,cancelled',
+                'procurementItems.*.purchaseQuantity' => 'sometimes|numeric|min:0',
+                'procurementItems.*.purchaseOrderNumber' => 'sometimes|nullable|string',
+                'procurementItems.*.expectedDeliveryDate' => 'sometimes|nullable|date',
+                'procurementItems.*.availabilityStatus' => 'sometimes|string', // Kept for backward compatibility but less strict
                 'budgetSummary' => 'sometimes|array',
                 'lastImportDate' => 'sometimes|date'
             ]);

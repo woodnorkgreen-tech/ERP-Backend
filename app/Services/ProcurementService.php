@@ -145,7 +145,13 @@ class ProcurementService
 
                     // Procurement-specific data (initialized with defaults)
                     'vendorName' => '',
-                    'availabilityStatus' => 'available',
+                    'availabilityStatus' => 'available', // Keep for backward compatibility
+                    'stockStatus' => 'pending_check',
+                    'stockQuantity' => 0,
+                    'procurementStatus' => 'not_needed', // Default, will be updated based on stock
+                    'purchaseQuantity' => 0,
+                    'purchaseOrderNumber' => '',
+                    'expectedDeliveryDate' => null,
                     'procurementNotes' => '',
                     'lastUpdated' => now()->toISOString(),
 
@@ -270,6 +276,12 @@ class ProcurementService
                     // Preserve user-entered fields
                     $item['vendorName'] = $existingItem['vendorName'] ?? '';
                     $item['availabilityStatus'] = $existingItem['availabilityStatus'] ?? 'available';
+                    $item['stockStatus'] = $existingItem['stockStatus'] ?? 'pending_check';
+                    $item['stockQuantity'] = $existingItem['stockQuantity'] ?? 0;
+                    $item['procurementStatus'] = $existingItem['procurementStatus'] ?? 'not_needed';
+                    $item['purchaseQuantity'] = $existingItem['purchaseQuantity'] ?? 0;
+                    $item['purchaseOrderNumber'] = $existingItem['purchaseOrderNumber'] ?? '';
+                    $item['expectedDeliveryDate'] = $existingItem['expectedDeliveryDate'] ?? null;
                     $item['procurementNotes'] = $existingItem['procurementNotes'] ?? '';
                     // Keep the original lastUpdated if it exists, or use now
                     $item['lastUpdated'] = $existingItem['lastUpdated'] ?? now()->toISOString();
@@ -309,8 +321,12 @@ class ProcurementService
                 throw new \InvalidArgumentException('Each procurement item must have a description');
             }
 
-            if (!in_array($item['availabilityStatus'] ?? '', ['available', 'ordered', 'received', 'hired', 'cancelled'])) {
-                throw new \InvalidArgumentException('Invalid availability status for procurement item');
+            if (isset($item['stockStatus']) && !in_array($item['stockStatus'], ['in_stock', 'partial_stock', 'out_of_stock', 'pending_check'])) {
+                throw new \InvalidArgumentException('Invalid stock status for procurement item');
+            }
+
+            if (isset($item['procurementStatus']) && !in_array($item['procurementStatus'], ['not_needed', 'pending', 'ordered', 'received', 'cancelled'])) {
+                throw new \InvalidArgumentException('Invalid procurement status for procurement item');
             }
         }
     }
