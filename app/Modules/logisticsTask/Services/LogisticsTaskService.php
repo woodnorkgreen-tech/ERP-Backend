@@ -197,9 +197,10 @@ class LogisticsTaskService
                 if (!$productionTask) {
                     \Log::warning('No production task found for enquiry', [
                         'enquiryId' => $enquiryId,
-                        'availableTasks' => EnquiryTask::where('enquiry_id', $enquiryId)->pluck('task_type')->toArray()
+                        'availableTasks' => EnquiryTask::where('project_enquiry_id', $enquiryId)->pluck('type')->toArray()
                     ]);
-                    throw new \Exception('Production task not found for this enquiry. Please ensure a production task exists and has been completed.');
+                    // Return empty array instead of throwing exception
+                    return [];
                 }
 
                 \Log::info('Found production task', [
@@ -216,7 +217,8 @@ class LogisticsTaskService
                     \Log::warning('No production data found for production task', [
                         'productionTaskId' => $productionTask->id
                     ]);
-                    throw new \Exception('No production data found. Please ensure the production task has been completed with production elements.');
+                    // Return empty array instead of throwing exception
+                    return [];
                 }
 
                 $elementCount = $productionData->productionElements->count();

@@ -178,6 +178,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Quote management routes
+    Route::post('projects/tasks/{taskId}/quote/version', [App\Http\Controllers\QuoteController::class, 'createVersion']);
     Route::prefix('projects/tasks/{taskId}/quote')->group(function () {
         Route::get('/', [App\Http\Controllers\QuoteController::class, 'getQuoteData']);
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'saveQuoteData']);

@@ -1135,6 +1135,8 @@ class QuoteController extends Controller
     }
     public function createVersion(Request $request, $taskId)
     {
+        \Log::info("createVersion called for task ID: {$taskId}");
+        
         $task = EnquiryTask::findOrFail($taskId);
         $quoteData = $task->quoteData;
 
