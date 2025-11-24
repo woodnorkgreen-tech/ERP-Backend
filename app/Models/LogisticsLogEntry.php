@@ -12,6 +12,7 @@ class LogisticsLogEntry extends Model
         'site',
         'loading_time',
         'departure',
+        'setdown_time',
         'vehicle_allocated',
         'project_officer_incharge',
         'remarks',
@@ -22,6 +23,7 @@ class LogisticsLogEntry extends Model
     protected $casts = [
         'loading_time' => 'datetime',
         'departure' => 'datetime',
+        'setdown_time' => 'datetime',
         'status' => 'string',
     ];
 

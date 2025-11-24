@@ -18,6 +18,11 @@ class LogisticsLogController extends Controller
             $query = LogisticsLogEntry::with(['projectEnquiry', 'creator'])
                 ->orderBy('created_at', 'desc');
 
+            // Filter by project_id if provided
+            if ($request->has('project_id')) {
+                $query->where('project_enquiry_id', $request->project_id);
+            }
+
             // Apply pagination
             $perPage = $request->get('per_page', 15);
             $entries = $query->paginate($perPage);
@@ -30,6 +35,7 @@ class LogisticsLogController extends Controller
                     'site' => $entry->site,
                     'loading_time' => $entry->loading_time?->toISOString(),
                     'departure' => $entry->departure?->toISOString(),
+                    'setdown_time' => $entry->setdown_time?->toISOString(),
                     'vehicle_allocated' => $entry->vehicle_allocated,
                     'project_officer_incharge' => $entry->project_officer_incharge,
                     'remarks' => $entry->remarks,
@@ -65,6 +71,7 @@ class LogisticsLogController extends Controller
                 'site' => 'required|string|max:255',
                 'loading_time' => 'required|date',
                 'departure' => 'required|date',
+                'setdown_time' => 'nullable|date',
                 'vehicle_allocated' => 'required|string|max:255',
                 'project_officer_incharge' => 'required|string|max:255',
                 'remarks' => 'nullable|string',
@@ -83,6 +90,7 @@ class LogisticsLogController extends Controller
                 'site' => $request->site,
                 'loading_time' => $request->loading_time,
                 'departure' => $request->departure,
+                'setdown_time' => $request->setdown_time,
                 'vehicle_allocated' => $request->vehicle_allocated,
                 'project_officer_incharge' => $request->project_officer_incharge,
                 'remarks' => $request->remarks,
@@ -101,6 +109,7 @@ class LogisticsLogController extends Controller
                     'site' => $entry->site,
                     'loading_time' => $entry->loading_time?->toISOString(),
                     'departure' => $entry->departure?->toISOString(),
+                    'setdown_time' => $entry->setdown_time?->toISOString(),
                     'vehicle_allocated' => $entry->vehicle_allocated,
                     'project_officer_incharge' => $entry->project_officer_incharge,
                     'remarks' => $entry->remarks,
@@ -135,6 +144,7 @@ class LogisticsLogController extends Controller
                     'site' => $logisticsLogEntry->site,
                     'loading_time' => $logisticsLogEntry->loading_time?->toISOString(),
                     'departure' => $logisticsLogEntry->departure?->toISOString(),
+                    'setdown_time' => $logisticsLogEntry->setdown_time?->toISOString(),
                     'vehicle_allocated' => $logisticsLogEntry->vehicle_allocated,
                     'project_officer_incharge' => $logisticsLogEntry->project_officer_incharge,
                     'remarks' => $logisticsLogEntry->remarks,
@@ -171,6 +181,7 @@ class LogisticsLogController extends Controller
                 'site' => 'sometimes|string|max:255',
                 'loading_time' => 'sometimes|date',
                 'departure' => 'sometimes|date',
+                'setdown_time' => 'nullable|date',
                 'vehicle_allocated' => 'sometimes|string|max:255',
                 'project_officer_incharge' => 'sometimes|string|max:255',
                 'remarks' => 'nullable|string',
@@ -189,15 +200,19 @@ class LogisticsLogController extends Controller
             }
 
             $updateData = $request->only([
-                'project_enquiry_id',
                 'site',
                 'loading_time',
                 'departure',
+                'setdown_time',
                 'vehicle_allocated',
                 'project_officer_incharge',
                 'remarks',
                 'status',
             ]);
+
+            if ($request->has('project_id')) {
+                $updateData['project_enquiry_id'] = $request->project_id;
+            }
 
             \Log::info('Updating logistics entry', [
                 'entry_id' => $logisticsLogEntry->id,
