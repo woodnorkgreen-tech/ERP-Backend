@@ -399,8 +399,18 @@ class LogisticsTaskService
      */
     private function getProjectIdFromTask(int $taskId): ?int
     {
-        // Return null to avoid foreign key constraint issues
-        // Project ID can be set later when project is created
+        $task = EnquiryTask::find($taskId);
+        if (!$task) return null;
+        
+        $enquiry = $task->enquiry;
+        if (!$enquiry) return null;
+        
+        // Query projects table directly using the correct foreign key 'enquiry_id'
+        $project = \App\Models\Project::where('enquiry_id', $enquiry->id)->first();
+        if ($project) {
+            return $project->id;
+        }
+        
         return null;
     }
 

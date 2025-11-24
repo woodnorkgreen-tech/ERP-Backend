@@ -177,6 +177,11 @@ class LogisticsTaskController extends Controller
     public function addTransportItem(Request $request, int $taskId): JsonResponse
     {
         try {
+            \Log::info('[addTransportItem] Request received', [
+                'task_id' => $taskId,
+                'data' => $request->all()
+            ]);
+
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
                 'description' => 'nullable|string|max:1000',
@@ -188,13 +193,27 @@ class LogisticsTaskController extends Controller
                 'special_handling' => 'nullable|string|max:500',
             ]);
 
+            \Log::info('[addTransportItem] Validation passed', ['validated' => $validated]);
+
             $item = $this->logisticsService->addTransportItem($taskId, $validated);
+
+            \Log::info('[addTransportItem] Item created successfully', ['item_id' => $item->id]);
 
             return response()->json([
                 'message' => 'Transport item added successfully',
                 'data' => $item
             ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            \Log::error('[addTransportItem] Validation failed', [
+                'errors' => $e->errors()
+            ]);
+            throw $e;
         } catch (\Exception $e) {
+            \Log::error('[addTransportItem] Failed to add transport item', [
+                'task_id' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'message' => 'Failed to add transport item',
                 'error' => $e->getMessage()
