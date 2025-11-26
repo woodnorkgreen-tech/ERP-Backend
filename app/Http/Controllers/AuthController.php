@@ -93,7 +93,8 @@ class AuthController extends Controller
 
         \Log::info('Validation passed for login', ['email' => $request->email]);
 
-        $user = User::where('email', $request->email)->first();
+        // Load user WITH roles relationship
+        $user = User::with('roles')->where('email', $request->email)->first();
 
         if (!$user) {
             \Log::warning('User not found', ['email' => $request->email]);
@@ -113,9 +114,12 @@ class AuthController extends Controller
 
         \Log::info('Token created successfully', ['email' => $request->email, 'user_id' => $user->id]);
 
-        return response()->json(['user' => $user, 'token' => $token]);
+        // Return user with role information
+        return response()->json([
+            'user' => $user,
+            'token' => $token
+        ]);
     }
-
     /**
      * @OA\Post(
      *     path="/logout",
@@ -131,4 +135,3 @@ class AuthController extends Controller
         return response()->json(['message' => 'Logged out']);
     }
 }
-

@@ -14,6 +14,7 @@ class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable, HasRoles;
+      protected $with = ['roles'];
 
     protected $guard_name = 'web';
 
