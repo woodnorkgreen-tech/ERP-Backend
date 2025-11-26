@@ -157,6 +157,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('projects/tasks/{taskId}/materials')->group(function () {
         Route::get('/', [App\Http\Controllers\MaterialsController::class, 'getMaterialsData']);
         Route::post('/', [App\Http\Controllers\MaterialsController::class, 'saveMaterialsData']);
+        
+        // Material versioning routes
+        Route::post('/versions', [App\Http\Controllers\MaterialsController::class, 'createMaterialVersion']);
+        Route::get('/versions', [App\Http\Controllers\MaterialsController::class, 'getMaterialVersions']);
+        Route::post('/versions/{versionId}/restore', [App\Http\Controllers\MaterialsController::class, 'restoreMaterialVersion']);
+        
+        // Element deletion route
+        Route::delete('/elements/{elementId}', [App\Http\Controllers\MaterialsController::class, 'deleteElement']);
     });
 
     // Budget management routes
@@ -166,6 +174,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/submit-approval', [App\Http\Controllers\BudgetController::class, 'submitForApproval']);
         Route::post('/import-materials', [App\Http\Controllers\BudgetController::class, 'importMaterials']);
         Route::get('/check-materials-update', [App\Http\Controllers\BudgetController::class, 'checkMaterialsUpdate']);
+
+        // Budget versioning routes
+        Route::post('/versions', [App\Http\Controllers\BudgetController::class, 'createBudgetVersion']);
+        Route::get('/versions', [App\Http\Controllers\BudgetController::class, 'getBudgetVersions']);
+        Route::post('/versions/{versionId}/restore', [App\Http\Controllers\BudgetController::class, 'restoreBudgetVersion']);
 
         // Budget additions management
         Route::get('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'index']);
@@ -178,7 +191,6 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Quote management routes
-    Route::post('projects/tasks/{taskId}/quote/version', [App\Http\Controllers\QuoteController::class, 'createVersion']);
     Route::prefix('projects/tasks/{taskId}/quote')->group(function () {
         Route::get('/', [App\Http\Controllers\QuoteController::class, 'getQuoteData']);
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'saveQuoteData']);
@@ -186,16 +198,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/budget-status', [App\Http\Controllers\QuoteController::class, 'checkBudgetStatus']);
         Route::get('/changes-preview', [App\Http\Controllers\QuoteController::class, 'previewBudgetChanges']);
         Route::post('/smart-merge', [App\Http\Controllers\QuoteController::class, 'smartMergeBudget']);
-        Route::post('/version', [App\Http\Controllers\QuoteController::class, 'createVersion']);
+        
+        // Quote versioning routes (standardized to match materials/budget pattern)
+        Route::post('/versions', [App\Http\Controllers\QuoteController::class, 'createVersion']);
         Route::get('/versions', [App\Http\Controllers\QuoteController::class, 'getVersions']);
+        Route::post('/versions/{versionId}/restore', [App\Http\Controllers\QuoteController::class, 'restoreVersion']);
+        
+        // Legacy routes (keep for backward compatibility)
+        Route::post('/version', [App\Http\Controllers\QuoteController::class, 'createVersion']);
         Route::get('/version/{versionId}', [App\Http\Controllers\QuoteController::class, 'getVersion']);
         Route::post('/restore/{versionId}', [App\Http\Controllers\QuoteController::class, 'restoreVersion']);
     });
 
     // Quote approval routes
     Route::prefix('projects/tasks/{taskId}/approval')->group(function () {
-        Route::get('/', [App\Http\Controllers\QuoteController::class, 'getApprovalData']);
-        Route::post('/', [App\Http\Controllers\QuoteController::class, 'submitApproval']);
+        Route::post('/', [App\Http\Controllers\QuoteController::class, 'saveApproval']);
     });
 
     // Procurement management routes

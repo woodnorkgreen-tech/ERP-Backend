@@ -29,6 +29,12 @@ class TaskQuoteData extends Model
         'vat_enabled',
         'totals',
         'status',
+        'approval_status',
+        'approved_by',
+        'approval_date',
+        'rejection_reason',
+        'approval_comments',
+        'quote_amount',
         'created_at',
         'updated_at'
     ];
@@ -48,6 +54,8 @@ class TaskQuoteData extends Model
         'vat_percentage' => 'decimal:2',
         'vat_enabled' => 'boolean',
         'totals' => 'array',
+        'approval_date' => 'date',
+        'quote_amount' => 'decimal:2',
         'created_at' => 'datetime',
         'updated_at' => 'datetime'
     ];

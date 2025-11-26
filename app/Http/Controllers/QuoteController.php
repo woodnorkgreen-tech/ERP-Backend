@@ -1221,4 +1221,81 @@ class QuoteController extends Controller
             'data' => $quoteData
         ]);
     }
+
+    /**
+     * Save quote approval data
+     */
+    public function saveApproval(Request $request, int $taskId): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'approval_status' => 'required|in:approved,rejected,pending',
+            'rejection_reason' => 'required_if:approval_status,rejected',
+            'approved_by' => 'required|string',
+            'approval_date' => 'required|date',
+            'quote_amount' => 'required|numeric|min:0',
+            'comments' => 'nullable|string',
+            'quote_data' => 'required|array'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            // Get or create the quote data record for this task
+            $quoteData = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+
+            if (!$quoteData) {
+                // Create new quote data if it doesn't exist
+                $quoteData = TaskQuoteData::create([
+                    'enquiry_task_id' => $taskId,
+                    'project_info' => $request->quote_data['projectInfo'] ?? [],
+                    'materials' => $request->quote_data['materials'] ?? [],
+                    'labour' => $request->quote_data['labour'] ?? [],
+                    'expenses' => $request->quote_data['expenses'] ?? [],
+                    'logistics' => $request->quote_data['logistics'] ?? [],
+                    'margins' => $request->quote_data['margins'] ?? ['materials' => 20, 'labour' => 0, 'expenses' => 0, 'logistics' => 0],
+                    'totals' => $request->quote_data['totals'] ?? [],
+                    'discount_amount' => $request->quote_data['discountAmount'] ?? 0,
+                    'vat_percentage' => $request->quote_data['vatPercentage'] ?? 16,
+                    'vat_enabled' => $request->quote_data['vatEnabled'] ?? true,
+                    'budget_imported' => $request->quote_data['budgetImported'] ?? false,
+                    'status' => $request->approval_status
+                ]);
+            }
+
+            // Update quote status based on approval
+            $quoteData->update([
+                'status' => $request->approval_status,
+                'approval_status' => $request->approval_status,
+                'approved_by' => $request->approved_by,
+                'approval_date' => $request->approval_date,
+                'rejection_reason' => $request->approval_status === 'rejected' ? $request->rejection_reason : null,
+                'approval_comments' => $request->comments,
+                'quote_amount' => $request->quote_amount,
+                'updated_at' => now()
+            ]);
+
+            return response()->json([
+                'data' => $quoteData->fresh(),
+                'message' => 'Quote approval saved successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to save quote approval', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to save approval data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
+

@@ -1001,7 +1001,8 @@ class MaterialsController extends Controller
                 })->toArray();
 
                 $this->createBudgetAdditionsForAdditionalMaterials($taskId, $projectElements);
-                $this->syncMaterialsToBudget($taskId, []); // Pass empty array as it fetches from DB
+                // REMOVED: Automatic budget sync - users must manually click "Refresh from MATERIAL" button
+                // $this->syncMaterialsToBudget($taskId, []); 
             }
 
             return response()->json([
@@ -1162,5 +1163,339 @@ class MaterialsController extends Controller
         }
         
         return $changed;
+    }
+
+    /**
+     * Create a new material list version
+     * Captures a complete snapshot of the current material list state
+     */
+    public function createMaterialVersion(Request $request, int $taskId): JsonResponse
+    {
+        \Log::info("createMaterialVersion called for task ID: {$taskId}");
+        
+        try {
+            // Get materials data with all related data
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)
+                ->with(['elements.materials'])
+                ->first();
+
+            if (!$materialsData) {
+                return response()->json(['message' => 'Materials data not found'], 404);
+            }
+
+            // Calculate next version number
+            $latestVersion = $materialsData->versions()->max('version_number') ?? 0;
+            $newVersionNumber = $latestVersion + 1;
+
+            // Build complete snapshot
+            $snapshot = [
+                'project_info' => $materialsData->project_info,
+                'elements' => $materialsData->elements->map(function ($element) {
+                    return [
+                        'id' => $element->id,
+                        'template_id' => $element->template_id,
+                        'element_type' => $element->element_type,
+                        'name' => $element->name,
+                        'category' => $element->category,
+                        'dimensions' => $element->dimensions,
+                        'is_included' => $element->is_included,
+                        'sort_order' => $element->sort_order,
+                        'notes' => $element->notes,
+                        'materials' => $element->materials->map(function ($material) {
+                            return [
+                                'id' => $material->id,
+                                'description' => $material->description,
+                                'unit_of_measurement' => $material->unit_of_measurement,
+                                'quantity' => $material->quantity,
+                                'is_included' => $material->is_included,
+                                'is_additional' => $material->is_additional ?? false,
+                                'notes' => $material->notes,
+                                'sort_order' => $material->sort_order,
+                            ];
+                        })->toArray()
+                    ];
+                })->toArray()
+            ];
+
+            // Create version with use statement at the top
+            $version = $materialsData->versions()->create([
+                'version_number' => $newVersionNumber,
+                'label' => $request->input('label', 'Version ' . $newVersionNumber . ' - ' . now()->format('M d, Y h:i A')),
+                'data' => $snapshot,
+                'created_by' => auth()->id() ?? 1, // Fallback for dev
+                'source_updated_at' => $materialsData->updated_at,
+            ]);
+
+            \Log::info('Material version created successfully', [
+                'version_id' => $version->id,
+                'version_number' => $newVersionNumber,
+                'task_id' => $taskId
+            ]);
+
+            return response()->json([
+                'message' => 'Version created successfully',
+                'data' => [
+                    'id' => $version->id,
+                    'version_number' => $version->version_number,
+                    'label' => $version->label,
+                    'created_at' => $version->created_at,
+                    'created_by_name' => $version->creator->name ?? 'Unknown'
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to create material version', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to create version',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all versions for a material list
+     */
+    public function getMaterialVersions(int $taskId): JsonResponse
+    {
+        try {
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+
+            if (!$materialsData) {
+                return response()->json(['data' => []]);
+            }
+
+            $versions = $materialsData->versions()
+                ->with('creator')
+                ->orderBy('version_number', 'desc')
+                ->get()
+                ->map(function ($version) {
+                    return [
+                        'id' => $version->id,
+                        'version_number' => $version->version_number,
+                        'label' => $version->label,
+                        'created_at' => $version->created_at,
+                        'created_by_name' => $version->creator->name ?? 'Unknown',
+                        'source_updated_at' => $version->source_updated_at,
+                    ];
+                });
+
+            return response()->json(['data' => $versions]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to get material versions', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to retrieve versions',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore a material list to a specific version
+     * Implements conflict detection and approval reset per success criteria
+     */
+    public function restoreMaterialVersion(int $taskId, int $versionId): JsonResponse
+    {
+        try {
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+            
+            if (!$materialsData) {
+                return response()->json(['message' => 'Materials data not found'], 404);
+            }
+
+            $version = \App\Models\MaterialVersion::find($versionId);
+            
+            if (!$version) {
+                return response()->json(['message' => 'Version not found'], 404);
+            }
+
+            // Validate version belongs to this material list
+            if ($version->task_materials_data_id !== $materialsData->id) {
+                return response()->json(['message' => 'Invalid version for this material list'], 400);
+            }
+
+            // CONFLICT DETECTION: Check if source data changed since version was created
+            $hasChanged = false;
+            $changeWarning = null;
+            if ($version->source_updated_at && $materialsData->updated_at) {
+                if ($materialsData->updated_at->gt($version->source_updated_at)) {
+                    $hasChanged = true;
+                    $changeWarning = 'Warning: Materials have been modified since this version was created. Restoring will overwrite current changes.';
+                    \Log::warning('Restoring version with newer source data', [
+                        'version_updated' => $version->source_updated_at,
+                        'current_updated' => $materialsData->updated_at
+                    ]);
+                }
+            }
+
+            $restoredData = $version->data;
+
+            // Delete all existing elements and materials (cascade will handle materials)
+            \DB::transaction(function () use ($materialsData, $restoredData) {
+                // Delete existing elements (materials will cascade delete)
+                $materialsData->elements()->delete();
+
+                // Recreate elements from snapshot
+                foreach ($restoredData['elements'] as $elementData) {
+                    $element = $materialsData->elements()->create([
+                        'template_id' => $elementData['template_id'] ?? null,
+                        'element_type' => $elementData['element_type'],
+                        'name' => $elementData['name'],
+                        'category' => $elementData['category'],
+                        'dimensions' => $elementData['dimensions'] ?? null,
+                        'is_included' => $elementData['is_included'] ?? true,
+                        'sort_order' => $elementData['sort_order'] ?? 0,
+                        'notes' => $elementData['notes'] ?? null,
+                    ]);
+
+                    // Recreate materials for this element
+                    foreach ($elementData['materials'] as $materialData) {
+                        $element->materials()->create([
+                            'description' => $materialData['description'],
+                            'unit_of_measurement' => $materialData['unit_of_measurement'],
+                            'quantity' => $materialData['quantity'],
+                            'is_included' => $materialData['is_included'] ?? true,
+                            'is_additional' => $materialData['is_additional'] ?? false,
+                            'notes' => $materialData['notes'] ?? null,
+                            'sort_order' => $materialData['sort_order'] ?? 0,
+                        ]);
+                    }
+                }
+
+                // Update project_info but RESET APPROVAL STATUS (Success Criteria #6)
+                $projectInfo = $restoredData['project_info'];
+                
+                // Reset all approvals to draft
+                $projectInfo['approval_status'] = [
+                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                    'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                    'all_approved' => false,
+                    'last_approval_at' => null,
+                    'restored_from_version' => $elementData['version_number'] ?? null,
+                    'restored_at' => now()->toISOString(),
+                    'restored_by' => auth()->user()->name ?? 'System'
+                ];
+
+                $materialsData->update([
+                    'project_info' => $projectInfo
+                ]);
+            });
+
+            \Log::info('Material version restored successfully', [
+                'task_id' => $taskId,
+                'version_id' => $versionId,
+                'version_number' => $version->version_number,
+                'had_conflicts' => $hasChanged
+            ]);
+
+            // Reload data to return fresh snapshot
+            $materialsData->load('elements.materials');
+
+            return response()->json([
+                'message' => 'Materials restored to version ' . $version->version_number . ($hasChanged ? ' (with conflicts)' : ''),
+                'warning' => $changeWarning,
+                'data' => $this->formatMaterialsData($materialsData),
+                'approvals_reset' => true
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to restore material version', [
+                'taskId' => $taskId,
+                'versionId' => $versionId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to restore version',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a project element and all its materials
+     */
+    public function deleteElement(int $taskId, int $elementId): JsonResponse
+    {
+        try {
+            // Find the task materials data
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+            
+            if (!$materialsData) {
+                return response()->json([
+                    'message' => 'Task materials data not found'
+                ], 404);
+            }
+
+            // Find the element
+            $element = ProjectElement::where('task_materials_data_id', $materialsData->id)
+                ->where('id', $elementId)
+                ->first();
+
+            if (!$element) {
+                return response()->json([
+                    'message' => 'Element not found'
+                ], 404);
+            }
+
+            // Check if approvals exist in project_info and reset them if necessary
+            $projectInfo = $materialsData->project_info ?? [];
+            $approvalStatus = $projectInfo['approval_status'] ?? null;
+            $approvalsReset = false;
+
+            if ($approvalStatus) {
+                // Check if any department is approved
+                $hasApprovals = ($approvalStatus['design']['approved'] ?? false) ||
+                               ($approvalStatus['production']['approved'] ?? false) ||
+                               ($approvalStatus['finance']['approved'] ?? false);
+
+                if ($hasApprovals) {
+                    // Reset approvals
+                    $projectInfo['approval_status'] = [
+                        'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                        'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                        'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                        'all_approved' => false,
+                        'last_approval_at' => null
+                    ];
+                    
+                    $materialsData->project_info = $projectInfo;
+                    $materialsData->save();
+                    $approvalsReset = true;
+                }
+            }
+
+            // Delete element (materials will cascade delete due to foreign key)
+            $element->delete();
+
+            return response()->json([
+                'message' => 'Element deleted successfully',
+                'approvals_reset' => $approvalsReset
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('Error deleting element', [
+                'task_id' => $taskId,
+                'element_id' => $elementId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to delete element',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
     }
 }

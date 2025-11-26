@@ -13,7 +13,7 @@ class TaskBudgetData extends Model
         'labour_data', 'expenses_data', 'logistics_data',
         'budget_summary', 'status', 'materials_imported_at',
         'materials_imported_from_task', 'materials_manually_modified',
-        'materials_import_metadata'
+        'materials_import_metadata', 'last_import_date'
     ];
 
     protected $casts = [
@@ -25,7 +25,8 @@ class TaskBudgetData extends Model
         'budget_summary' => 'array',
         'materials_imported_at' => 'datetime',
         'materials_manually_modified' => 'boolean',
-        'materials_import_metadata' => 'array'
+        'materials_import_metadata' => 'array',
+        'last_import_date' => 'datetime'
     ];
 
     public function task(): BelongsTo
@@ -46,5 +47,10 @@ class TaskBudgetData extends Model
     public function budgetAdditions(): HasMany
     {
         return $this->hasMany(BudgetAddition::class);
+    }
+
+    public function versions(): HasMany
+    {
+        return $this->hasMany(BudgetVersion::class)->orderBy('version_number', 'desc');
     }
 }

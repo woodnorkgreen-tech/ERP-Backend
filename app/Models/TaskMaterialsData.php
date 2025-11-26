@@ -47,4 +47,9 @@ class TaskMaterialsData extends Model
     {
         return $this->hasMany(ProjectElement::class)->orderBy('sort_order');
     }
+
+    public function versions(): HasMany
+    {
+        return $this->hasMany(MaterialVersion::class)->orderBy('version_number', 'desc');
+    }
 }
