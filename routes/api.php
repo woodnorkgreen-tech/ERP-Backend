@@ -18,6 +18,8 @@ use App\Http\Controllers\SiteSurveyController;
 use App\Http\Controllers\DesignAssetController;
 use App\Http\Controllers\ProcurementController;
 use App\Http\Controllers\ProductionController;
+use App\Http\Controllers\HandoverSurveyController;
+use App\Http\Controllers\API\PublicHandoverController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
@@ -25,6 +27,21 @@ use App\Modules\Teams\Controllers\TeamsTaskController;
 use App\Modules\Teams\Controllers\TeamMemberController;
 use App\Constants\Permissions;
 
+
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register API routes for your application. These
+| routes are loaded by the RouteServiceProvider and all of them will
+| be assigned to the "api" middleware group. Make something great!
+|
+*/
+
+// Public routes for Client Handover
+Route::get('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'show']);
+Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'store']);
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
@@ -233,6 +250,91 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/generate-checkpoints', [App\Http\Controllers\ProductionController::class, 'generateQualityCheckpoints']);
     });
 
+    // Handover management routes
+    Route::prefix('projects/tasks/{taskId}/handover')->group(function () {
+        Route::get('/survey', [HandoverSurveyController::class, 'show']);
+        Route::post('/survey', [HandoverSurveyController::class, 'store']);
+        Route::delete('/survey', [HandoverSurveyController::class, 'destroy']);
+        Route::post('/survey/generate-token', [HandoverSurveyController::class, 'generateToken']);
+    });
+
+    // Logistics management routes
+    Route::prefix('projects/tasks/{taskId}/logistics')->group(function () {
+        Route::get('/', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'show']);
+        Route::post('/planning', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'savePlanning']);
+        Route::post('/team-confirmation', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTeamConfirmation']);
+        Route::put('/assign-team', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'assignTeam']);
+        
+        // Transport items
+        Route::get('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getTransportItems']);
+        Route::post('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'addTransportItem']);
+        Route::put('/transport-items/{itemId}', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTransportItem']);
+        Route::delete('/transport-items/{itemId}', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'deleteTransportItem']);
+        Route::post('/transport-items/import', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'importProductionElements']);
+        
+        // Checklist
+        Route::get('/checklist', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklist']);
+        Route::post('/checklist', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateChecklist']);
+        Route::post('/checklist/generate', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateChecklist']);
+    });
+
+    // Logistics utility routes
+    Route::get('logistics/drivers', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getDrivers']);
+
+    // Setup Task management routes
+    Route::prefix('projects/tasks/{taskId}/setup')->group(function () {
+        Route::get('/', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'show']);
+        Route::post('/documentation', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'saveDocumentation']);
+        
+        // Photos
+        Route::post('/photos', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'uploadPhoto']);
+        Route::delete('/photos/{photoId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deletePhoto']);
+        
+        // Issues
+        Route::post('/issues', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'addIssue']);
+        Route::put('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'updateIssue']);
+        Route::delete('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deleteIssue']);
+    });
+
+    // Setdown Task management routes
+    Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
+        Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
+        Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);
+        
+        // Photos
+        Route::post('/photos', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'uploadPhoto']);
+        Route::delete('/photos/{photoId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deletePhoto']);
+        
+        // Issues
+        Route::post('/issues', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'addIssue']);
+        Route::put('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateIssue']);
+        Route::delete('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deleteIssue']);
+    });
+
+    // Teams management routes
+    Route::prefix('projects/tasks/{taskId}/teams')->group(function () {
+        // Team CRUD operations
+        Route::get('/', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'index']);
+        Route::post('/', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'store']);
+        Route::put('/{teamTaskId}', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'update']);
+        Route::delete('/{teamTaskId}', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'destroy']);
+        
+        // Bulk assign teams
+        Route::post('/bulk-assign', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'bulkAssign']);
+        
+        // Team member management
+        Route::prefix('/{teamTaskId}/members')->group(function () {
+            Route::get('/', [App\Modules\Teams\Controllers\TeamMemberController::class, 'index']);
+            Route::post('/', [App\Modules\Teams\Controllers\TeamMemberController::class, 'store']);
+            Route::put('/{memberId}', [App\Modules\Teams\Controllers\TeamMemberController::class, 'update']);
+            Route::delete('/{memberId}', [App\Modules\Teams\Controllers\TeamMemberController::class, 'destroy']);
+        });
+    });
+
+    // Team categories and types (helper routes)
+    Route::get('/teams/categories', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'getTeamCategories']);
+    Route::get('/teams/types', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'getTeamTypes']);
+
     // Get quote by enquiry ID (for frontend access)
     Route::get('projects/enquiries/{enquiryId}/quote', function ($enquiryId) {
         $quoteTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
@@ -249,6 +351,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // Element templates
     Route::get('projects/element-templates', [App\Http\Controllers\MaterialsController::class, 'getElementTemplates']);
     Route::post('projects/element-templates', [App\Http\Controllers\MaterialsController::class, 'createElementTemplate']);
+
+    // Element types management
+    Route::get('projects/element-types', [App\Http\Controllers\API\ElementTypeController::class, 'index']);
+    Route::post('projects/element-types', [App\Http\Controllers\API\ElementTypeController::class, 'store']);
+    Route::get('projects/element-types/{id}', [App\Http\Controllers\API\ElementTypeController::class, 'show']);
+    Route::put('projects/element-types/{id}', [App\Http\Controllers\API\ElementTypeController::class, 'update']);
+    Route::delete('projects/element-types/{id}', [App\Http\Controllers\API\ElementTypeController::class, 'destroy']);
 
     // Get materials by enquiry ID (for budget import)
     Route::get('projects/enquiries/{enquiryId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsByEnquiry']);
@@ -434,23 +543,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 
-    // Teams Module Routes
-    Route::prefix('tasks/{taskId}/teams')->group(function () {
-        Route::get('/', [TeamsTaskController::class, 'index']);
-        Route::post('/', [TeamsTaskController::class, 'store']);
-        Route::put('/{teamTaskId}', [TeamsTaskController::class, 'update']);
-        Route::delete('/{teamTaskId}', [TeamsTaskController::class, 'destroy']);
-        Route::post('/bulk-assign', [TeamsTaskController::class, 'bulkAssign']);
-    });
-    Route::get('team-types', [TeamsTaskController::class, 'getTeamTypes']);
 
-    // Team Members Routes
-    Route::prefix('tasks/teams/{teamTaskId}/members')->group(function () {
-        Route::get('/', [TeamMemberController::class, 'index']);
-        Route::post('/', [TeamMemberController::class, 'store']);
-        Route::put('/{memberId}', [TeamMemberController::class, 'update']);
-        Route::delete('/{memberId}', [TeamMemberController::class, 'destroy']);
-    });
 
     // Finance Module Routes
     Route::prefix('finance')->group(function () {

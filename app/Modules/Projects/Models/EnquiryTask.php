@@ -124,6 +124,11 @@ class EnquiryTask extends Model
         return $this->hasOne(\App\Models\TaskQuoteData::class, 'enquiry_task_id');
     }
 
+    public function handoverSurvey()
+    {
+        return $this->hasOne(\App\Models\HandoverSurvey::class, 'task_id');
+    }
+
     // Scopes
     public function scopePending($query)
     {

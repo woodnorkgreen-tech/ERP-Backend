@@ -11,9 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('archival_setup_items', function (Blueprint $table) {
-            $table->id();
-            $table->timestamps();
+        Schema::table('handover_surveys', function (Blueprint $table) {
+            $table->string('access_token', 64)->nullable()->unique()->after('task_id');
         });
     }
 
@@ -22,6 +21,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('archival_setup_items');
+        Schema::table('handover_surveys', function (Blueprint $table) {
+            $table->dropColumn('access_token');
+        });
     }
 };

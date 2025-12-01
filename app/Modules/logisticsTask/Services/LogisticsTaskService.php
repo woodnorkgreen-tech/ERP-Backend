@@ -107,6 +107,33 @@ class LogisticsTaskService
     }
 
     /**
+     * Assign a team to a logistics task
+     */
+    public function assignTeam(int $taskId, int $teamTaskId): LogisticsTask
+    {
+        return DB::transaction(function () use ($taskId, $teamTaskId) {
+            // Verify team exists
+            $team = \App\Modules\Teams\Models\TeamsTask::findOrFail($teamTaskId);
+            
+            $logisticsTask = LogisticsTask::firstOrCreate(
+                ['task_id' => $taskId],
+                [
+                    'project_id' => $this->getProjectIdFromTask($taskId),
+                    'created_by' => auth()->id(),
+                ]
+            );
+
+            $logisticsTask->update([
+                'team_id' => $teamTaskId,
+                'updated_by' => auth()->id(),
+            ]);
+
+            return $logisticsTask->fresh(['team.category', 'team.teamType', 'team.members']);
+        });
+    }
+
+
+    /**
      * Get transport items for a task
      */
     public function getTransportItems(int $taskId): array

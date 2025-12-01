@@ -66,7 +66,8 @@ class TeamsTaskService
 
                 $createData = [
                     'task_id' => $taskId,
-                    'project_id' => $task->project_enquiry_id, // Use project_enquiry_id from EnquiryTask
+                    // Removed 'project_id' as it causes FK constraint violation
+                    // Task ID already provides project context through enquiry_tasks table
                     'category_id' => $data['category_id'],
                     'team_type_id' => $data['team_type_id'],
                     'status' => 'pending',

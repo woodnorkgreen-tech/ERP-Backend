@@ -127,4 +127,22 @@ class TeamsTaskController extends Controller
             ], 500);
         }
     }
+
+    public function getTeamCategories(): JsonResponse
+    {
+        try {
+            $categories = TeamCategory::with('types')->get();
+
+            return response()->json([
+                'message' => 'Team categories retrieved successfully',
+                'data' => $categories
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching team categories: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to retrieve team categories',
+                'data' => []
+            ], 500);
+        }
+    }
 }

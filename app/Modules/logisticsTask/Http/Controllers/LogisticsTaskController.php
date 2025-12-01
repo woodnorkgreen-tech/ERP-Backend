@@ -152,6 +152,31 @@ class LogisticsTaskController extends Controller
     }
 
     /**
+     * Assign a team to a logistics task
+     */
+    public function assignTeam(Request $request, int $taskId): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'team_task_id' => 'required|integer|exists:teams_tasks,id',
+            ]);
+
+            $logisticsTask = $this->logisticsService->assignTeam($taskId, $validated['team_task_id']);
+
+            return response()->json([
+                'message' => 'Team assigned successfully',
+                'data' => $logisticsTask
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to assign team',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+    /**
      * Get transport items for a task
      */
     public function getTransportItems(int $taskId): JsonResponse

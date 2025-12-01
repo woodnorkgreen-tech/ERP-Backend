@@ -15,7 +15,7 @@ class TeamMemberController extends Controller
         private TeamMemberService $memberService
     ) {}
 
-    public function index(int $teamTaskId): JsonResponse
+    public function index(int $taskId, int $teamTaskId): JsonResponse
     {
         $members = $this->memberService->getTeamMembers($teamTaskId);
 
@@ -25,7 +25,7 @@ class TeamMemberController extends Controller
         ]);
     }
 
-    public function store(StoreTeamMemberRequest $request, int $teamTaskId): JsonResponse
+    public function store(StoreTeamMemberRequest $request, int $taskId, int $teamTaskId): JsonResponse
     {
         $member = $this->memberService->addMember($teamTaskId, $request->validated());
 
@@ -35,7 +35,7 @@ class TeamMemberController extends Controller
         ], 201);
     }
 
-    public function update(UpdateTeamMemberRequest $request, int $teamTaskId, int $memberId): JsonResponse
+    public function update(UpdateTeamMemberRequest $request, int $taskId, int $teamTaskId, int $memberId): JsonResponse
     {
         $member = $this->memberService->updateMember($memberId, $request->validated());
 
@@ -45,7 +45,7 @@ class TeamMemberController extends Controller
         ]);
     }
 
-    public function destroy(int $teamTaskId, int $memberId): JsonResponse
+    public function destroy(int $taskId, int $teamTaskId, int $memberId): JsonResponse
     {
         $this->memberService->removeMember($memberId);
 

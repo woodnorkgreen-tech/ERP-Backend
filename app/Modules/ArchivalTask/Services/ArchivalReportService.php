@@ -185,58 +185,41 @@ class ArchivalReportService
     public function autoPopulateData(int $taskId): array
     {
         $task = EnquiryTask::with([
-            'projectEnquiry',
-            'productionData',
-            'siteSurvey',
-            'logisticsTask'
+            'enquiry.projectOfficer',
+            'enquiry.client'
         ])->findOrFail($taskId);
 
         $data = [];
 
         // From Project Enquiry
-        if ($task->projectEnquiry) {
-            $data['client_name'] = $task->projectEnquiry->client_name;
-            $data['project_code'] = $task->projectEnquiry->project_number;
-            $data['site_location'] = $task->projectEnquiry->event_location;
-        }
-
-        // From Production Data
-        if ($task->productionData) {
-            $data['production_start_date'] = $task->productionData->production_start_date;
+        if ($task->enquiry) {
+            // Client name from relationship (use company_name or full_name)
+            if ($task->enquiry->client) {
+                $data['client_name'] = $task->enquiry->client->company_name ?? $task->enquiry->client->full_name;
+            }
             
-            // Extract materials from production elements
-            $materials = [];
-            foreach ($task->productionData->production_elements ?? [] as $element) {
-                if (!empty($element['material'])) {
-                    $materials[] = $element['material'];
-                }
+            // Project code from job_number or enquiry_number
+            $data['project_code'] = $task->enquiry->job_number ?? $task->enquiry->enquiry_number;
+            
+            // Site location from venue field
+            $data['site_location'] = $task->enquiry->venue;
+            
+            // Project officer
+            if ($task->enquiry->projectOfficer) {
+                $data['project_officer'] = $task->enquiry->projectOfficer->name;
             }
-            if (!empty($materials)) {
-                $data['materials_used_in_production'] = implode(', ', array_unique($materials));
+            
+            // Format dates to Y-m-d for HTML date inputs
+            if ($task->enquiry->start_date) {
+                $data['start_date'] = $task->enquiry->start_date->format('Y-m-d');
             }
-        }
-
-        // From Logistics Task
-        if ($task->logisticsTask) {
-            // Team information
-            if ($task->logisticsTask->team_members) {
-                $teamMembers = json_decode($task->logisticsTask->team_members, true);
-                if (!empty($teamMembers)) {
-                    $data['setup_team_assigned'] = implode(', ', array_column($teamMembers, 'name'));
-                }
+            
+            $endDate = $task->enquiry->end_date ?? $task->enquiry->expected_delivery_date;
+            if ($endDate) {
+                $data['end_date'] = $endDate->format('Y-m-d');
             }
-
-            // Transport items → Setup items
-            $setupItems = [];
-            foreach ($task->logisticsTask->transportItems ?? [] as $item) {
-                $setupItems[] = [
-                    'deliverable_item' => $item->name ?? $item->description,
-                    'status' => 'pending',
-                ];
-            }
-            if (!empty($setupItems)) {
-                $data['setup_items'] = $setupItems;
-            }
+            
+            $data['project_scope'] = $task->enquiry->project_scope ?? $task->enquiry->description;
         }
 
         return $data;
