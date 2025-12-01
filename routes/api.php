@@ -60,6 +60,7 @@ Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store
 Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
 Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
 Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
+
 //mobile app
 Route::get('/app-departments', [DepartmentController::class, 'index']);
 
@@ -72,6 +73,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
     Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 
+    // Event Calendar Routes
+    // Get all events
+    Route::get('/events', 'App\Http\Controllers\EventController@index');
+    
+    // Get single event
+    Route::get('/events/{id}', 'App\Http\Controllers\EventController@show');
+    
+    // Save new event
+    Route::post('/events/save', 'App\Http\Controllers\EventController@save');
+    
+    // Update event
+    Route::post('/events/update', 'App\Http\Controllers\EventController@update');
+    
+    // Delete event
+    Route::post('/events/delete', 'App\Http\Controllers\EventController@delete');
+    
+    // Get events by date range
+    Route::post('/events/range', 'App\Http\Controllers\EventController@getByDateRange');
     // User permissions and navigation
     Route::get('/user/permissions', function () {
         return response()->json([
