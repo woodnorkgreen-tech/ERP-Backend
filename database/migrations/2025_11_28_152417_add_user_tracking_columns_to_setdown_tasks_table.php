@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::table('setdown_tasks', function (Blueprint $table) {
             if (!Schema::hasColumn('setdown_tasks', 'created_by')) {
-                $table->foreignId('created_by')->after('completion_notes')->constrained('users');
+                $table->foreignId('created_by')->nullable()->constrained('users');
             }
             if (!Schema::hasColumn('setdown_tasks', 'updated_by')) {
                 $table->foreignId('updated_by')->nullable()->after('created_by')->constrained('users');
