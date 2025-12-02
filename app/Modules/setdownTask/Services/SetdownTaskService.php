@@ -47,6 +47,8 @@ class SetdownTaskService
                     'project_id' => $this->getProjectIdFromTask($taskId),
                     'documentation' => [],
                     'issues' => [],
+                    'created_by' => auth()->id(),
+                    'updated_by' => auth()->id(),
                 ]
             );
 
@@ -67,19 +69,36 @@ class SetdownTaskService
     public function uploadPhoto(int $taskId, UploadedFile $file, ?string $description = null): array
     {
         return DB::transaction(function () use ($taskId, $file, $description) {
+            \Log::info('Service: uploadPhoto started', [
+                'taskId' => $taskId,
+                'fileName' => $file->getClientOriginalName(),
+                'fileSize' => $file->getSize(),
+                'description' => $description
+            ]);
+
+            // Get project ID
+            $projectId = $this->getProjectIdFromTask($taskId);
+            \Log::info('Service: Got project ID', ['projectId' => $projectId]);
+
             // Ensure setdown task exists
+            \Log::info('Service: Creating/finding setdown task...');
             $setdownTask = SetdownTask::firstOrCreate(
                 ['task_id' => $taskId],
                 [
-                    'project_id' => $this->getProjectIdFromTask($taskId),
+                    'project_id' => $projectId,
                     'documentation' => [],
                     'issues' => [],
+                    'created_by' => auth()->id(),
+                    'updated_by' => auth()->id(),
                 ]
             );
+            \Log::info('Service: Setdown task ready', ['setdown_task_id' => $setdownTask->id]);
 
             // Store the file
+            \Log::info('Service: Storing file...');
             $filename = time() . '_' . $file->getClientOriginalName();
             $path = $file->storeAs('setdown_photos', $filename, 'public');
+            \Log::info('Service: File stored', ['path' => $path]);
 
             // Create photo record
             $photo = [
@@ -93,6 +112,7 @@ class SetdownTaskService
                 'uploaded_at' => now()->toISOString(),
             ];
 
+            \Log::info('Service: Adding photo to documentation...');
             // Add photo to documentation
             $documentation = $setdownTask->documentation ?? [];
             $photos = $documentation['photos'] ?? [];
@@ -102,6 +122,7 @@ class SetdownTaskService
             $setdownTask->documentation = $documentation;
             $setdownTask->save();
 
+            \Log::info('Service: Photo upload complete!', ['photo_id' => $photo['id']]);
             return $photo;
         });
     }
@@ -151,6 +172,8 @@ class SetdownTaskService
                     'project_id' => $this->getProjectIdFromTask($taskId),
                     'documentation' => [],
                     'issues' => [],
+                    'created_by' => auth()->id(),
+                    'updated_by' => auth()->id(),
                 ]
             );
 

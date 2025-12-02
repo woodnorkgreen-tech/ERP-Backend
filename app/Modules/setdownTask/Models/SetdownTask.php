@@ -16,6 +16,8 @@ class SetdownTask extends Model
         'project_id',
         'documentation',
         'issues',
+        'created_by',
+        'updated_by',
     ];
 
     protected $casts = [
