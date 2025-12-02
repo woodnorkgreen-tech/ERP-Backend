@@ -13,72 +13,52 @@ class AnnouncementController extends Controller
      * Get all announcements for the authenticated user.
      */
     public function index(Request $request)
-    {
-        $user = auth()->user();
+{
+    $user = auth()->user();
 
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'User not authenticated'
-            ], 401);
-        }
-
-        if (!$user->employee_id && !$user->department_id) {
-            return response()->json([
-                'success' => true,
-                'data' => []
-            ]);
-        }
-
-        $announcements = Announcement::with(['fromUser', 'toEmployee', 'toDepartment', 'readByUsers'])
-            ->forUser($user)
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(function ($announcement) use ($user) {
-                $isCreator = $announcement->from_user_id === $user->id;
-                
-                return [
-                    'id' => $announcement->id,
-                    'message' => $announcement->message,
-                    'from_name' => $announcement->from_name,
-                    'to_name' => $announcement->to_name,
-                    'type' => $announcement->type,
-                    'created_at' => $announcement->created_at->format('M d, Y'),
-                    'is_read' => $announcement->isReadBy($user->id),
-                    'is_creator' => $isCreator, // ✅ Add this
-                    'read_count' => $announcement->readByUsers->count(), // ✅ Add this
-                    'recipient_has_read' => $isCreator ? $announcement->hasBeenReadByRecipients() : null, // ✅ Add this
-                ];
-            });
-
+    if (!$user) {
         return response()->json([
-            'success' => true,
-            'data' => $announcements
-        ]);
+            'success' => false,
+            'message' => 'User not authenticated'
+        ], 401);
     }
 
-    /**
-     * Store a new announcement.
-     */
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'message' => 'required|string',
-            'from_user_id' => 'required|exists:users,id',
-            'type' => 'required|in:employee,department',
-            'to_employee_id' => 'required_if:type,employee|nullable|exists:employees,id',
-            'to_department_id' => 'required_if:type,department|nullable|exists:departments,id'
-        ]);
+    // Get announcements where user is creator OR recipient
+    $announcements = Announcement::with(['fromUser', 'toEmployee', 'toDepartment', 'readByUsers'])
+        ->where(function($query) use ($user) {
+            $query->where('from_user_id', $user->id); // Created by user
+            
+            // OR sent to user (if they have employee_id or department_id)
+            if ($user->employee_id || $user->department_id) {
+                $query->orWhereHas('announcement', function($q) use ($user) {
+                    // This should use your forUser scope
+                });
+            }
+        })
+        ->orderBy('created_at', 'desc')
+        ->get()
+        ->map(function ($announcement) use ($user) {
+            $isCreator = $announcement->from_user_id === $user->id;
+            
+            return [
+                'id' => $announcement->id,
+                'message' => $announcement->message,
+                'from_name' => $announcement->from_name,
+                'to_name' => $announcement->to_name,
+                'type' => $announcement->type,
+                'created_at' => $announcement->created_at->format('M d, Y'),
+                'is_read' => $announcement->isReadBy($user->id),
+                'is_creator' => $isCreator,
+                'read_count' => $announcement->readByUsers->count(),
+                'recipient_has_read' => $isCreator ? $announcement->hasBeenReadByRecipients() : null,
+            ];
+        });
 
-        $announcement = Announcement::create($validated);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Announcement created successfully',
-            'data' => $announcement->load(['fromUser', 'toEmployee', 'toDepartment'])
-        ], 201);
-    }
-
+    return response()->json([
+        'success' => true,
+        'data' => $announcements
+    ]);
+}
     /**
      * Mark announcement as read.
      */
