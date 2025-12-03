@@ -35,6 +35,7 @@ class SetupTaskPhoto extends Model
     // Accessor for photo URL
     public function getUrlAttribute(): string
     {
-        return url('storage/' . $this->path);
+        // Use absolute path with /system prefix for production hosting
+        return '/system/storage/' . $this->path;
     }
 }

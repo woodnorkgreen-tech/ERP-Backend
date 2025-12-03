@@ -47,6 +47,8 @@ class SetdownTaskService
                     'project_id' => $this->getProjectIdFromTask($taskId),
                     'documentation' => [],
                     'issues' => [],
+                    'created_by' => auth()->id(),
+                    'updated_by' => auth()->id(),
                 ]
             );
 
@@ -67,19 +69,36 @@ class SetdownTaskService
     public function uploadPhoto(int $taskId, UploadedFile $file, ?string $description = null): array
     {
         return DB::transaction(function () use ($taskId, $file, $description) {
+            \Log::info('Service: uploadPhoto started', [
+                'taskId' => $taskId,
+                'fileName' => $file->getClientOriginalName(),
+                'fileSize' => $file->getSize(),
+                'description' => $description
+            ]);
+
+            // Get project ID
+            $projectId = $this->getProjectIdFromTask($taskId);
+            \Log::info('Service: Got project ID', ['projectId' => $projectId]);
+
             // Ensure setdown task exists
+            \Log::info('Service: Creating/finding setdown task...');
             $setdownTask = SetdownTask::firstOrCreate(
                 ['task_id' => $taskId],
                 [
-                    'project_id' => $this->getProjectIdFromTask($taskId),
+                    'project_id' => $projectId,
                     'documentation' => [],
                     'issues' => [],
+                    'created_by' => auth()->id(),
+                    'updated_by' => auth()->id(),
                 ]
             );
+            \Log::info('Service: Setdown task ready', ['setdown_task_id' => $setdownTask->id]);
 
             // Store the file
+            \Log::info('Service: Storing file...');
             $filename = time() . '_' . $file->getClientOriginalName();
             $path = $file->storeAs('setdown_photos', $filename, 'public');
+            \Log::info('Service: File stored', ['path' => $path]);
 
             // Create photo record
             $photo = [
@@ -87,12 +106,13 @@ class SetdownTaskService
                 'filename' => $filename,
                 'original_filename' => $file->getClientOriginalName(),
                 'path' => $path,
-                'url' => url('storage/' . $path),
+                'url' => '/system/storage/' . $path,
                 'description' => $description,
                 'uploaded_by' => auth()->user()->name ?? 'Unknown',
                 'uploaded_at' => now()->toISOString(),
             ];
 
+            \Log::info('Service: Adding photo to documentation...');
             // Add photo to documentation
             $documentation = $setdownTask->documentation ?? [];
             $photos = $documentation['photos'] ?? [];
@@ -102,6 +122,7 @@ class SetdownTaskService
             $setdownTask->documentation = $documentation;
             $setdownTask->save();
 
+            \Log::info('Service: Photo upload complete!', ['photo_id' => $photo['id']]);
             return $photo;
         });
     }
@@ -151,6 +172,8 @@ class SetdownTaskService
                     'project_id' => $this->getProjectIdFromTask($taskId),
                     'documentation' => [],
                     'issues' => [],
+                    'created_by' => auth()->id(),
+                    'updated_by' => auth()->id(),
                 ]
             );
 
@@ -246,5 +269,65 @@ class SetdownTaskService
     {
         $task = \App\Modules\Projects\Models\EnquiryTask::find($taskId);
         return $task?->project_enquiry_id;
+    }
+
+    /**
+     * Get or create checklist for a setdown task
+     */
+    public function getOrCreateChecklist(int $taskId): array
+    {
+        $setdownTask = SetdownTask::firstOrCreate(
+            ['task_id' => $taskId],
+            [
+                'project_id' => $this->getProjectIdFromTask($taskId),
+                'documentation' => [],
+                'issues' => [],
+                'created_by' => auth()->id(),
+                'updated_by' => auth()->id(),
+            ]
+        );
+
+        $checklist = \App\Modules\setdownTask\Models\SetdownChecklist::firstOrCreate(
+            ['setdown_task_id' => $setdownTask->id],
+            [
+                'checklist_data' => \App\Modules\setdownTask\Models\SetdownChecklist::getDefaultChecklistData(),
+                'completed_count' => 0,
+                'total_count' => 14,
+                'completion_percentage' => 0,
+                'created_by' => auth()->id()
+            ]
+        );
+
+        return [
+            'id' => $checklist->id,
+            'setdown_task_id' => $checklist->setdown_task_id,
+            'checklist_data' => $checklist->checklist_data,
+            'completed_count' => $checklist->completed_count,
+            'total_count' => $checklist->total_count,
+            'completion_percentage' => $checklist->completion_percentage,
+            'completed_at' => $checklist->completed_at
+        ];
+    }
+
+    /**
+     * Update a checklist item's completion status
+     */
+    public function updateChecklistItem(int $taskId, int $itemId, bool $completed): array
+    {
+        $setdownTask = SetdownTask::where('task_id', $taskId)->firstOrFail();
+        $checklist = \App\Modules\setdownTask\Models\SetdownChecklist::where('setdown_task_id', $setdownTask->id)->firstOrFail();
+
+        $checklist->updateItem($itemId, $completed);
+        $checklist->updated_by = auth()->id();
+        $checklist->save();
+
+        return [
+            'id' => $checklist->id,
+            'checklist_data' => $checklist->checklist_data,
+            'completed_count' => $checklist->completed_count,
+            'total_count' => $checklist->total_count,
+            'completion_percentage' => $checklist->completion_percentage,
+            'completed_at' => $checklist->completed_at
+        ];
     }
 }

@@ -38,65 +38,59 @@ class EventController extends Controller
     /**
      * Save a new event
      */
-    public function save(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'event_name' => 'required|string|max:255',
-                'start_time' => 'required|date',
-                'end_time' => 'required|date|after:start_time',
-                'color' => 'required|string',
-                'is_all_day' => 'nullable|boolean',
-                'notes' => 'nullable|string',
-                'is_public' => 'nullable|boolean',
-            ]);
+   public function save(Request $request)
+{
+    try {
+        $validated = $request->validate([
+            'event_name' => 'required|string|max:255',
+            'start_time' => 'required|date',
+            'end_time' => 'required|date|after:start_time',
+            'color' => 'required|string',
+            'is_all_day' => 'nullable|boolean',
+            'notes' => 'nullable|string',
+            'is_public' => 'nullable|boolean',
+        ]);
 
-            $user = Auth::user();
-            
-            // Only HR can create public events
-            if (($validated['is_public'] ?? false) && $user->department_id != 4) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'Only HR can create public events'
-                ], 403);
-            }
-
-            DB::beginTransaction();
-
-            $event = Event::create([
-                'user_id' => $user->id,
-                'event_name' => $validated['event_name'],
-                'start_time' => $validated['start_time'],
-                'end_time' => $validated['end_time'],
-                'color' => $validated['color'],
-                'is_all_day' => $validated['is_all_day'] ?? false,
-                'notes' => $validated['notes'] ?? '',
-                'is_public' => $validated['is_public'] ?? false,
-            ]);
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Event created successfully',
-                'data' => new EventResource($event->load('user'))
-            ], 201);
-
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        $user = Auth::user();
+        
+        // Only HR can create public events - Check by ROLE, not department
+        if (($validated['is_public'] ?? false) && !$user->hasRole('HR')) {
             return response()->json([
                 'success' => false,
-                'error' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'error' => 'Failed to create event',
-                'message' => $e->getMessage()
-            ], 500);
+                'error' => 'Only HR can create public events'
+            ], 403);
         }
+
+        DB::beginTransaction();
+
+        $event = Event::create([
+            'user_id' => $user->id,
+            'event_name' => $validated['event_name'],
+            'start_time' => $validated['start_time'],
+            'end_time' => $validated['end_time'],
+            'color' => $validated['color'],
+            'is_all_day' => $validated['is_all_day'] ?? false,
+            'notes' => $validated['notes'] ?? '',
+            'is_public' => $validated['is_public'] ?? false,
+        ]);
+
+        DB::commit();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Event created successfully',
+            'data' => new EventResource($event->load('user'))
+        ], 201);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json([
+            'success' => false,
+            'error' => 'Failed to create event',
+            'message' => $e->getMessage()
+        ], 500);
     }
+}
 
     /**
      * Update an existing event

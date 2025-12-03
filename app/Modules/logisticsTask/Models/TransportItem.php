@@ -17,6 +17,8 @@ class TransportItem extends Model
         'quantity',
         'unit',
         'category',
+        'main_category',
+        'element_category',
         'source',
         'weight',
         'special_handling',
