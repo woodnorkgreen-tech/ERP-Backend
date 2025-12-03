@@ -270,4 +270,64 @@ class SetdownTaskService
         $task = \App\Modules\Projects\Models\EnquiryTask::find($taskId);
         return $task?->project_enquiry_id;
     }
+
+    /**
+     * Get or create checklist for a setdown task
+     */
+    public function getOrCreateChecklist(int $taskId): array
+    {
+        $setdownTask = SetdownTask::firstOrCreate(
+            ['task_id' => $taskId],
+            [
+                'project_id' => $this->getProjectIdFromTask($taskId),
+                'documentation' => [],
+                'issues' => [],
+                'created_by' => auth()->id(),
+                'updated_by' => auth()->id(),
+            ]
+        );
+
+        $checklist = \App\Modules\setdownTask\Models\SetdownChecklist::firstOrCreate(
+            ['setdown_task_id' => $setdownTask->id],
+            [
+                'checklist_data' => \App\Modules\setdownTask\Models\SetdownChecklist::getDefaultChecklistData(),
+                'completed_count' => 0,
+                'total_count' => 14,
+                'completion_percentage' => 0,
+                'created_by' => auth()->id()
+            ]
+        );
+
+        return [
+            'id' => $checklist->id,
+            'setdown_task_id' => $checklist->setdown_task_id,
+            'checklist_data' => $checklist->checklist_data,
+            'completed_count' => $checklist->completed_count,
+            'total_count' => $checklist->total_count,
+            'completion_percentage' => $checklist->completion_percentage,
+            'completed_at' => $checklist->completed_at
+        ];
+    }
+
+    /**
+     * Update a checklist item's completion status
+     */
+    public function updateChecklistItem(int $taskId, int $itemId, bool $completed): array
+    {
+        $setdownTask = SetdownTask::where('task_id', $taskId)->firstOrFail();
+        $checklist = \App\Modules\setdownTask\Models\SetdownChecklist::where('setdown_task_id', $setdownTask->id)->firstOrFail();
+
+        $checklist->updateItem($itemId, $completed);
+        $checklist->updated_by = auth()->id();
+        $checklist->save();
+
+        return [
+            'id' => $checklist->id,
+            'checklist_data' => $checklist->checklist_data,
+            'completed_count' => $checklist->completed_count,
+            'total_count' => $checklist->total_count,
+            'completion_percentage' => $checklist->completion_percentage,
+            'completed_at' => $checklist->completed_at
+        ];
+    }
 }

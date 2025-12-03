@@ -328,6 +328,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/issues', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'addIssue']);
         Route::put('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateIssue']);
         Route::delete('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deleteIssue']);
+        
+        // Checklist
+        Route::get('/checklist', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'getChecklist']);
+        Route::patch('/checklist/items/{itemId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateChecklistItem']);
     });
 
     // Teams management routes

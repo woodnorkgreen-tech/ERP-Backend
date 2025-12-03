@@ -220,4 +220,54 @@ class SetdownTaskController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get or create checklist for setdown task
+     */
+    public function getChecklist(int $taskId)
+    {
+        try {
+            $checklist = $this->setdownService->getOrCreateChecklist($taskId);
+
+            return response()->json([
+                'message' => 'Checklist retrieved successfully',
+                'data' => $checklist
+            ]);
+        } catch (\Exception $e) {
+            \Log::error(' Error getting checklist:', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Failed to get checklist',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update a checklist item
+     */
+    public function updateChecklistItem(Request $request, int $taskId, int $itemId)
+    {
+        try {
+            $request->validate([
+                'completed' => 'required|boolean'
+            ]);
+
+            $checklist = $this->setdownService->updateChecklistItem(
+                $taskId,
+                $itemId,
+                $request->input('completed')
+            );
+
+            return response()->json([
+                'message' => 'Checklist item updated successfully',
+                'data' => $checklist
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error updating checklist item:', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Failed to update checklist item',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
