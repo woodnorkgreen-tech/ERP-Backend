@@ -12,6 +12,8 @@ use App\Modules\Projects\Services\EnquiryWorkflowService;
 use App\Modules\Projects\Services\NotificationService;
 use App\Models\TaskAssignmentHistory;
 use App\Constants\Permissions;
+use App\Modules\UniversalTask\Services\TaskService as UniversalTaskService;
+use App\Modules\UniversalTask\Models\Task as UniversalTask;
 
 /**
  * @OA\Schema(
@@ -35,11 +37,16 @@ class TaskController extends Controller
 {
     protected EnquiryWorkflowService $workflowService;
     protected NotificationService $notificationService;
+    protected UniversalTaskService $universalTaskService;
 
-    public function __construct(EnquiryWorkflowService $workflowService, NotificationService $notificationService)
-    {
+    public function __construct(
+        EnquiryWorkflowService $workflowService,
+        NotificationService $notificationService,
+        UniversalTaskService $universalTaskService
+    ) {
         $this->workflowService = $workflowService;
         $this->notificationService = $notificationService;
+        $this->universalTaskService = $universalTaskService;
     }
 
     /**
@@ -862,6 +869,119 @@ class TaskController extends Controller
             \Log::error("[DEBUG] updateEnquiryTask failed for task {$taskId}: " . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to update task',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get Universal Tasks associated with a project
+     */
+    public function getProjectUniversalTasks(int $projectId): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+
+            // Get Universal Tasks associated with this project
+            $universalTasks = UniversalTask::where('taskable_type', 'App\Models\Project')
+                ->where('taskable_id', $projectId)
+                ->with(['department', 'assignedUser', 'creator', 'subtasks'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'data' => $universalTasks,
+                'message' => 'Project Universal Tasks retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve project Universal Tasks',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Create a Universal Task from project context
+     */
+    public function createProjectUniversalTask(Request $request, int $projectId): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'task_type' => 'nullable|string|max:50',
+            'priority' => 'nullable|string|in:low,medium,high,urgent',
+            'department_id' => 'nullable|exists:departments,id',
+            'assigned_user_id' => 'nullable|exists:users,id',
+            'estimated_hours' => 'nullable|numeric|min:0',
+            'due_date' => 'nullable|date|after:today',
+            'tags' => 'nullable|array',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $user = Auth::user();
+
+            // Prepare task data with project context
+            $taskData = array_merge($request->all(), [
+                'taskable_type' => 'App\Models\Project',
+                'taskable_id' => $projectId,
+                'created_by' => $user->id,
+            ]);
+
+            $universalTask = $this->universalTaskService->createTask($taskData, $user->id);
+
+            return response()->json([
+                'data' => $universalTask->load(['department', 'assignedUser', 'creator']),
+                'message' => 'Universal Task created successfully for project'
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to create Universal Task',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get Universal Tasks for current user's department
+     */
+    public function getDepartmentUniversalTasks(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+
+            $query = UniversalTask::with(['department', 'assignedUser', 'creator', 'taskable'])
+                ->where('department_id', $user->department_id);
+
+            // Apply filters
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            if ($request->has('priority')) {
+                $query->where('priority', $request->priority);
+            }
+
+            if ($request->has('assigned_user_id')) {
+                $query->where('assigned_user_id', $request->assigned_user_id);
+            }
+
+            $universalTasks = $query->orderBy('created_at', 'desc')->paginate(15);
+
+            return response()->json([
+                'data' => $universalTasks,
+                'message' => 'Department Universal Tasks retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve department Universal Tasks',
                 'error' => $e->getMessage()
             ], 500);
         }

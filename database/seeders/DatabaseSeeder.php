@@ -40,5 +40,8 @@ class DatabaseSeeder extends Seeder
             ProjectsUserSeeder::class,
         ]);
 
+        // Seed Universal Task System data
+        $this->call(UniversalTaskSeeder::class);
+
     }
 }
