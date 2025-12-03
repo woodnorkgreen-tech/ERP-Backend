@@ -62,7 +62,6 @@ Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementCont
 Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 
 
-
 //mobile app
 Route::get('/app-departments', [DepartmentController::class, 'index']);
 
@@ -317,7 +316,24 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deleteIssue']);
     });
 
-   
+    // Setdown Task management routes
+    Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
+        Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
+        Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);
+        
+        // Photos
+        Route::post('/photos', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'uploadPhoto']);
+        Route::delete('/photos/{photoId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deletePhoto']);
+        
+        // Issues
+        Route::post('/issues', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'addIssue']);
+        Route::put('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateIssue']);
+        Route::delete('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deleteIssue']);
+        
+        // Checklist
+        Route::get('/checklist', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'getChecklist']);
+        Route::patch('/checklist/items/{itemId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateChecklistItem']);
+    });
 
     // Teams management routes
     Route::prefix('projects/tasks/{taskId}/teams')->group(function () {
