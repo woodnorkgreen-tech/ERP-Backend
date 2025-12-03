@@ -60,7 +60,45 @@ Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store
 Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
 Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
 Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
+//to be removed later
+ Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
+        Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
+        Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);
+        
+        // Photos
+        Route::post('/photos', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'uploadPhoto']);
+        Route::delete('/photos/{photoId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deletePhoto']);
+        
+        // Issues
+        Route::post('/issues', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'addIssue']);
+        Route::put('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateIssue']);
+        Route::delete('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deleteIssue']);
+        
+        // Checklist
+        Route::get('/checklist', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'getChecklist']);
+        Route::patch('/checklist/items/{itemId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateChecklistItem']);
+    });
 
+
+    // Setup Task management routes
+    Route::prefix('projects/tasks/{taskId}/setup')->group(function () {
+        Route::get('/', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'show']);
+        Route::post('/documentation', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'saveDocumentation']);
+        
+        // Photos
+        Route::post('/photos', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'uploadPhoto']);
+        Route::delete('/photos/{photoId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deletePhoto']);
+        
+        // Issues
+        Route::post('/issues', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'addIssue']);
+        Route::put('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'updateIssue']);
+        Route::delete('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deleteIssue']);
+    });
+        // Site survey management
+        Route::apiResource('site-surveys', SiteSurveyController::class); // Temporarily remove permissions for debugging
+        Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
+        Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
+        Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
 
 //mobile app
 Route::get('/app-departments', [DepartmentController::class, 'index']);
