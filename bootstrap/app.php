@@ -25,5 +25,17 @@ return Application::configure(basePath: dirname(__DIR__))
 
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Handle unauthenticated requests for API
+        $exceptions->renderable(function (\Illuminate\Auth\AuthenticationException $e, \Illuminate\Http\Request $request) {
+            // If it's an API request (Accept: application/json or /api/* route), return JSON  
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'message' => 'Unauthenticated. Please login again.',
+                    'error' => 'Token expired or invalid'
+                ], 401);
+            }
+            
+            // For web requests, use default behavior (redirect to login)
+            return null;
+        });
     })->create();
