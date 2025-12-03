@@ -23,6 +23,11 @@ return Application::configure(basePath: dirname(__DIR__))
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);
 
+        // Exclude API routes from CSRF verification for mobile app
+        $middleware->validateCsrfTokens(except: [
+            'api/*',  // Exclude all API routes from CSRF
+        ]);
+
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Handle unauthenticated requests for API
