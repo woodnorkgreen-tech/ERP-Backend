@@ -304,4 +304,39 @@ class ClientController
             'data' => $client
         ]);
     }
+
+    /**
+     * @OA\Delete(
+     *     path="/api/clientservice/clients/{id}",
+     *     summary="Delete a client",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         description="Client ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Client deleted successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string")
+     *         )
+     *     ),
+     *     @OA\Response(response=404, description="Client not found"),
+     *     @OA\Response(response=401, description="Unauthorized"),
+     *     @OA\Response(response=403, description="Forbidden - Insufficient permissions")
+     * )
+     */
+    public function destroy($id): JsonResponse
+    {
+        $client = Client::findOrFail($id);
+        $client->delete();
+
+        return response()->json([
+            'message' => 'Client deleted successfully'
+        ]);
+    }
 }

@@ -214,6 +214,8 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('permission:' . Permissions::CLIENT_UPDATE);
         Route::patch('clients/{client}/toggle-status', [ClientController::class, 'toggleStatus'])
             ->middleware('permission:' . Permissions::CLIENT_UPDATE);
+        Route::delete('clients/{client}', [ClientController::class, 'destroy'])
+            ->middleware('permission:' . Permissions::CLIENT_DELETE);
 
         // Enquiry management
         Route::get('enquiries', [ClientServiceEnquiryController::class, 'index'])
