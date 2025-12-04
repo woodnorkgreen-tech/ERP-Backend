@@ -100,6 +100,44 @@ Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementControlle
         Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
         Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
 
+        // Task management routes
+        Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
+        Route::get('tasks/{taskId}', [TaskController::class, 'show']);
+        Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus']);
+        Route::put('tasks/{taskId}/assign', [TaskController::class, 'assignTask']);
+        Route::put('tasks/{taskId}', [TaskController::class, 'update']);
+        Route::get('enquiries/{enquiryId}/tasks', [TaskController::class, 'getEnquiryTasks']);
+        Route::get('all-enquiry-tasks', [TaskController::class, 'getAllEnquiryTasks']);
+
+        // Enquiry task assignment routes
+        Route::post('enquiry-tasks/{task}/assign', [TaskController::class, 'assignEnquiryTask']);
+        Route::put('enquiry-tasks/{task}/reassign', [TaskController::class, 'reassignEnquiryTask']);
+        Route::get('enquiry-tasks/{task}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
+        Route::put('enquiry-tasks/{task}', [TaskController::class, 'updateEnquiryTask']);
+
+        // Project management
+        Route::get('projects', function () {
+            $query = \App\Modules\Projects\Models\Project::with('enquiry.client');
+
+            if (request()->has('enquiry_id')) {
+                $query->where('enquiry_id', request()->enquiry_id);
+            }
+
+            return response()->json([
+                'data' => $query->get(),
+                'message' => 'Projects retrieved successfully'
+            ]);
+        }); // No permission for debugging
+
+        // Enquiry management
+        Route::get('enquiries', [EnquiryController::class, 'index']);
+        Route::get('enquiries/{enquiry}', [EnquiryController::class, 'show']);
+        Route::post('enquiries', [EnquiryController::class, 'store']);
+        Route::put('enquiries/{enquiry}', [EnquiryController::class, 'update']);
+        Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
+        Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
+        Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
+
 //mobile app
 Route::get('/app-departments', [DepartmentController::class, 'index']);
 
