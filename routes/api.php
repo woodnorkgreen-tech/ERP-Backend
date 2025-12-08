@@ -240,7 +240,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/versions', [App\Http\Controllers\MaterialsController::class, 'getMaterialVersions']);
         Route::post('/versions/{versionId}/restore', [App\Http\Controllers\MaterialsController::class, 'restoreMaterialVersion']);
         
-        // Element deletion route
+        // Excel template download and upload
+        Route::get('/template/download', [App\Http\Controllers\MaterialsController::class, 'downloadTemplate']);
+        Route::post('/template/upload', [App\Http\Controllers\MaterialsController::class, 'uploadTemplate']);
+
+        // Delete element
         Route::delete('/elements/{elementId}', [App\Http\Controllers\MaterialsController::class, 'deleteElement']);
     });
 
