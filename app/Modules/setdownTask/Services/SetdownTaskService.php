@@ -106,7 +106,7 @@ class SetdownTaskService
                 'filename' => $filename,
                 'original_filename' => $file->getClientOriginalName(),
                 'path' => $path,
-                'url' => '/storage/' . $path,
+                'url' => '/system/storage/' . $path,
                 'description' => $description,
                 'uploaded_by' => auth()->user()->name ?? 'Unknown',
                 'uploaded_at' => now()->toISOString(),
