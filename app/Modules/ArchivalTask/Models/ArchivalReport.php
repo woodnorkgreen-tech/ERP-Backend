@@ -143,7 +143,7 @@ class ArchivalReport extends Model
             if (isset($attachment['path'])) {
                 return [
                     ...$attachment,
-                    'url' => \Storage::disk('public')->url($attachment['path']),
+                    'url' => '/storage/' . $attachment['path'],
                 ];
             }
             return $attachment;

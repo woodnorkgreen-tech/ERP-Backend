@@ -35,6 +35,6 @@ class SetupTaskPhoto extends Model
     // Accessor for photo URL
     public function getUrlAttribute(): string
     {
-        return \Storage::disk('public')->url($this->path);
+        return '/storage/' . $this->path;
     }
 }
