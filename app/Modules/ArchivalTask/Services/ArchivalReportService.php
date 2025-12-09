@@ -149,7 +149,7 @@ class ArchivalReportService
 
         return [
             ...$attachmentData,
-                'url' => '/system/storage/' . $path,
+                'url' => storage_url($path),
         ];
     }
 

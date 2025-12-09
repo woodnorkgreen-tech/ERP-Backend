@@ -143,7 +143,7 @@ class ArchivalReport extends Model
             if (isset($attachment['path'])) {
                 return [
                     ...$attachment,
-                    'url' => '/system/storage/' . $attachment['path'],
+                    'url' => storage_url($attachment['path']),
                 ];
             }
             return $attachment;

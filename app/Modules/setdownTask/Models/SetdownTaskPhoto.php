@@ -35,6 +35,6 @@ class SetdownTaskPhoto extends Model
     // Accessor for photo URL
     public function getUrlAttribute(): string
     {
-        return '/system/storage/' . $this->path;
+        return storage_url($this->path);
     }
 }

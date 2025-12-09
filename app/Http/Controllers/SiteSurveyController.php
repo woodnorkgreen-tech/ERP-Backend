@@ -279,7 +279,7 @@ class SiteSurveyController extends Controller
                 'id' => (string) $uuid,
                 'filename' => $file->getClientOriginalName(),
                 'path' => $path,
-                'url' => '/system/storage/' . $path,
+                'url' => storage_url($path),
                 'size' => $file->getSize(),
                 'mime_type' => $file->getMimeType(),
                 'uploaded_at' => now()->toISOString(),
