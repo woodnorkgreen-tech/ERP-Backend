@@ -35,7 +35,6 @@ class SetdownTaskPhoto extends Model
     // Accessor for photo URL
     public function getUrlAttribute(): string
     {
-        // Use absolute path with /system prefix for production hosting
-        return '/system/storage/' . $this->path;
+        return \Storage::disk('public')->url($this->path);
     }
 }
