@@ -72,7 +72,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard metrics'
             ], 403);
@@ -115,7 +115,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard metrics'
             ], 403);
@@ -143,7 +143,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard metrics'
             ], 403);
@@ -192,7 +192,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard activities'
             ], 403);
@@ -221,7 +221,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard alerts'
             ], 403);
@@ -270,7 +270,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard'
             ], 403);
@@ -304,7 +304,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard filtering'
             ], 403);
@@ -361,7 +361,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard export'
             ], 403);
@@ -421,7 +421,7 @@ class DashboardController extends Controller
     {
         // Check permissions
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer'])) {
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
             return response()->json([
                 'message' => 'Unauthorized access to dashboard export'
             ], 403);

@@ -118,7 +118,7 @@ class ProjectsDashboardService
 
         $activeProjects = ProjectEnquiry::whereIn('status', ['planning', 'in_progress'])->count();
 
-        $completedProjects = ProjectEnquiry::where('status', 'completed')->count();
+        $convertedProjects = ProjectEnquiry::where('status', 'quote_approved')->count();
 
         $totalBudget = ProjectEnquiry::whereNotNull('estimated_budget')
             ->sum('estimated_budget');
@@ -504,7 +504,7 @@ class ProjectsDashboardService
     {
         $activeProjects = $enquiries->whereIn('status', ['planning', 'in_progress'])->count();
         $completedProjects = $enquiries->where('status', 'completed')->count();
-        $approvedProjects = $enquiries->where('status', 'quote_approved')->count();
+        $convertedProjects = $enquiries->where('status', 'quote_approved')->count();
 
         $totalBudget = $enquiries->whereNotNull('estimated_budget')->sum('estimated_budget');
 

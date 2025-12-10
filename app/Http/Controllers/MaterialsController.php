@@ -1498,4 +1498,152 @@ class MaterialsController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Download Excel template for materials upload
+     *
+     * @OA\Get(
+     *     path="/api/projects/tasks/{taskId}/materials/template/download",
+     *     tags={"Materials"},
+     *     summary="Download Excel template for materials upload",
+     *     description="Generates and downloads an Excel template with instructions, project info, and data entry sheet",
+     *     security={{"sanctum":{}}},
+     *     @OA\Parameter(
+     *         name="taskId",
+     *         in="path",
+     *         required=true,
+     *         description="Task ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Template downloaded successfully",
+     *         @OA\MediaType(
+     *             mediaType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Failed to generate template",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="error", type="string")
+     *         )
+     *     )
+     * )
+     */
+    public function downloadTemplate(int $taskId)
+    {
+        try {
+            $export = new \App\Modules\Projects\Exports\MaterialsTemplateExport($taskId);
+            
+            // Get task info for filename
+            $task = \App\Modules\Projects\Models\EnquiryTask::with('enquiry')->findOrFail($taskId);
+            $enquiryNumber = $task->enquiry->enquiry_number ?? 'TASK' . $taskId;
+            $filename = "Materials_Template_{$enquiryNumber}_" . now()->format('Ymd') . ".xlsx";
+            
+            return \Maatwebsite\Excel\Facades\Excel::download($export, $filename);
+            
+        } catch (\Exception $e) {
+            \Log::error('Failed to generate materials template', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'message' => 'Failed to generate template',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Upload and validate Excel template
+     *
+     * @OA\Post(
+     *     path="/api/projects/tasks/{taskId}/materials/template/upload",
+     *     tags={"Materials"},
+     *     summary="Upload Excel template for validation",
+     *     description="Uploads and validates an Excel file, returns preview data with errors/warnings",
+     *     security={{"sanctum":{}}},
+     *     @OA\Parameter(
+     *         name="taskId",
+     *         in="path",
+     *         required=true,
+     *         description="Task ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\MediaType(
+     *             mediaType="multipart/form-data",
+     *             @OA\Schema(
+     *                 @OA\Property(
+     *                     property="file",
+     *                     type="string",
+     *                     format="binary",
+     *                     description="Excel file to upload"
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="File validated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean"),
+     *             @OA\Property(property="preview", type="object"),
+     *             @OA\Property(property="stats", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validation failed",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean"),
+             *             @OA\Property(property="message", type="string")
+     *         )
+     *     )
+     * )
+     */
+    public function uploadTemplate(Request $request, int $taskId): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|mimes:xlsx,xls|max:5120', // 5MB max
+        ]);
+        
+        try {
+            // Import and parse the Excel file
+            $import = new \App\Modules\Projects\Imports\MaterialsTemplateImport($taskId);
+            \Maatwebsite\Excel\Facades\Excel::import($import, $request->file('file'));
+            
+            // Get preview data
+            $previewData = $import->getPreviewData();
+            
+            // Check if there are blocking errors
+            $hasBlockingErrors = count($previewData['errors']) > 0;
+            
+            return response()->json([
+                'success' => !$hasBlockingErrors,
+                'preview' => $previewData,
+                'stats' => $previewData['stats'],
+                'message' => $hasBlockingErrors 
+                    ? 'File has errors that must be fixed before importing' 
+                    : 'File validated successfully',
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Failed to process materials template upload', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to process file: ' . ($e->getMessage() ?: 'Unknown error'),
+            ], 422);
+        }
+    }
 }

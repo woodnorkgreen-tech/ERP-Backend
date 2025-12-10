@@ -46,17 +46,28 @@ class EmployeeController
             });
         }
 
-        $employees = $query->paginate($request->get('per_page', 15));
-
-        return response()->json([
-            'data' => $employees->items(),
-            'meta' => [
-                'current_page' => $employees->currentPage(),
-                'per_page' => $employees->perPage(),
-                'total' => $employees->total(),
-                'last_page' => $employees->lastPage(),
-            ]
-        ]);
+        // Check if pagination is requested
+        if ($request->has('per_page')) {
+            // Return paginated results
+            $employees = $query->paginate($request->get('per_page', 15));
+            
+            return response()->json([
+                'data' => $employees->items(),
+                'meta' => [
+                    'current_page' => $employees->currentPage(),
+                    'per_page' => $employees->perPage(),
+                    'total' => $employees->total(),
+                    'last_page' => $employees->lastPage(),
+                    'from' => $employees->firstItem(),
+                    'to' => $employees->lastItem(),
+                ]
+            ]);
+        } else {
+            // Return all employees (no pagination)
+            $employees = $query->get();
+            
+            return response()->json($employees);
+        }
     }
 
     /**
