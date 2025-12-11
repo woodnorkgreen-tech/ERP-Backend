@@ -535,7 +535,7 @@ class TaskController extends Controller
             'task_description' => 'nullable|string',
             'priority' => 'nullable|string|in:low,medium,high,urgent',
             'estimated_hours' => 'nullable|numeric|min:0',
-            'due_date' => 'nullable|date|after:today',
+            'due_date' => 'nullable|date|after:yesterday', // Allow today
             'notes' => 'nullable|string',
         ]);
 
@@ -914,7 +914,7 @@ class TaskController extends Controller
             'department_id' => 'nullable|exists:departments,id',
             'assigned_user_id' => 'nullable|exists:users,id',
             'estimated_hours' => 'nullable|numeric|min:0',
-            'due_date' => 'nullable|date|after:today',
+            'due_date' => 'nullable|date|after:yesterday', // Allow today
             'tags' => 'nullable|array',
         ]);
 

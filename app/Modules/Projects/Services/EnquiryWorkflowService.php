@@ -173,7 +173,8 @@ class EnquiryWorkflowService
         // Validate due date if provided
         if (isset($assignmentData['due_date']) && $assignmentData['due_date']) {
             $dueDate = \Carbon\Carbon::parse($assignmentData['due_date']);
-            if ($dueDate->isPast()) {
+            // Allow today and future dates, block only dates before today
+            if ($dueDate->isBefore(now()->startOfDay())) {
                 throw new \Exception("Due date cannot be in the past");
             }
         }
