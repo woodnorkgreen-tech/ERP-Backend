@@ -104,8 +104,8 @@ class TaskController extends Controller
             $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
 
             $user = Auth::user();
-            // Check if user has privileged role
-            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
+            // Check if user has privileged role (can see all tasks)
+            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
                 \Log::info('[TASK FILTER] Non-privileged user detected', [
                     'user_id' => $user->id,
                     'user_roles' => $user->roles->pluck('name'),
@@ -231,8 +231,8 @@ class TaskController extends Controller
                 ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
 
             $user = Auth::user();
-            // Check if user has privileged role
-            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
+            // Check if user has privileged role (can see all tasks)
+            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
                 $query->assignedToUser($user->id);
             }
 
@@ -322,8 +322,8 @@ class TaskController extends Controller
             $user = Auth::user();
             $query->where('department_id', $user->department_id);
 
-            // Check if user has privileged role
-            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
+            // Check if user has privileged role (can see all tasks)
+            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
                 $query->assignedToUser($user->id);
             }
 

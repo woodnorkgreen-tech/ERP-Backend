@@ -41,10 +41,17 @@ class RoleAndPermissionSeeder extends Seeder
 
         $clientServiceRole = Role::firstOrCreate(['name' => 'Client Service'], ['description' => 'Client acquisition and enquiry management']);
         $clientServiceRole->givePermissionTo([
-            Permissions::USER_READ, Permissions::DEPARTMENT_READ, Permissions::CLIENT_CREATE,
-            Permissions::CLIENT_READ,
+            // User & Department
+            Permissions::USER_READ, Permissions::DEPARTMENT_READ,
+            // Client Management
+            Permissions::CLIENT_CREATE, Permissions::CLIENT_READ,
+            // Enquiry Management
             Permissions::ENQUIRY_CREATE, Permissions::ENQUIRY_READ, Permissions::ENQUIRY_UPDATE,
-            Permissions::TASK_READ, Permissions::DASHBOARD_VIEW
+            // Project & Task Access (same as Project Officer)
+            Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS,
+            Permissions::TASK_READ, Permissions::TASK_UPDATE, Permissions::TASK_ASSIGN,
+            // Dashboard
+            Permissions::DASHBOARD_VIEW, Permissions::DASHBOARD_PROJECTS
         ]);
 
         $managerRole = Role::firstOrCreate(['name' => 'Manager'], ['description' => 'Department management']);
