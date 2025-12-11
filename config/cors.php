@@ -21,11 +21,13 @@ return [
     'http://localhost:5173',
     'http://localhost:5175',
     'https://www.woodnorkgreen.co.ke',
+    'https://woodnorkgreen.co.ke',  // Without www
     'http://127.0.0.1:5173', // Alternative localhost format
 ],
-
+'allowed_origins_patterns' => [],
 'allowed_headers' => ['*'],
+'exposed_headers' => ['*'],
+'max_age' => 0,
 'supports_credentials' => true,
-
 
 ];
