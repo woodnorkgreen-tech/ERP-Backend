@@ -119,6 +119,16 @@ class MaterialsController extends Controller
      *     )
      * )
      */
+    public function getMaterialsConfig(): JsonResponse
+    {
+        return response()->json([
+            'element_types' => config('materials.element_types', []),
+            'categories' => config('materials.categories', []),
+            'units' => config('materials.units', []),
+            'included_options' => config('materials.included_options', []),
+        ]);
+    }
+
     public function getMaterialsByEnquiry(int $enquiryId): JsonResponse
     {
         try {

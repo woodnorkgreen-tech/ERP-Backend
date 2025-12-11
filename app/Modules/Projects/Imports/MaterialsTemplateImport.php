@@ -217,15 +217,16 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
             }
         }
         
-        // Validate category
-        $validCategories = ['production', 'hire', 'outsourced'];
+        // Validate category using config
+        $validCategories = config('materials.categories', ['production', 'hire', 'outsourced']);
         if (!empty($rowData['category']) && !in_array(strtolower($rowData['category']), $validCategories)) {
-            $this->parent->addError($rowNumber, "Invalid category: '{$rowData['category']}'. Must be one of: production, hire, outsourced");
+            $categoriesList = implode(', ', $validCategories);
+            $this->parent->addError($rowNumber, "Invalid category: '{$rowData['category']}'. Must be one of: {$categoriesList}");
             $valid = false;
         }
         
-        // Validate element type (allow custom types but warn)
-        $knownTypes = ['stage', 'backdrop', 'skirting', 'flooring', 'trussing', 'décor', 'lighting', 'sound', 'chairs', 'tables', 'signage', 'custom'];
+        // Validate element type using config (allow custom types but warn)
+        $knownTypes = config('materials.element_types', ['stage', 'backdrop', 'skirting', 'flooring', 'trussing', 'décor', 'lighting', 'sound', 'chairs', 'tables', 'signage', 'custom']);
         if (!empty($rowData['element_type']) && !in_array(strtolower($rowData['element_type']), $knownTypes)) {
             $this->parent->addWarning($rowNumber, "Unknown element type: '{$rowData['element_type']}'. Will be treated as custom type.");
         }
@@ -265,8 +266,8 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
             $this->parent->addWarning($rowNumber, "Invalid 'Included' value. Must be YES or NO. Defaulting to YES.");
         }
         
-        // Validate unit (allow custom units but warn)
-        $knownUnits = ['pcs', 'ltrs', 'mtrs', 'sqm', 'pks', 'kgs', 'custom'];
+        // Validate unit using config (allow custom units but warn)
+        $knownUnits = array_map('strtolower', config('materials.units', ['pcs', 'ltrs', 'mtrs', 'sqm', 'pks', 'kgs', 'custom']));
         if (!empty($rowData['unit']) && !in_array(strtolower($rowData['unit']), $knownUnits)) {
             $this->parent->addWarning($rowNumber, "Unknown unit: '{$rowData['unit']}'. Will be accepted as custom unit.");
         }

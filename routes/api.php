@@ -595,6 +595,9 @@ Route::middleware('auth:sanctum')->group(function () {
             // Materials approval endpoints
             Route::post('tasks/{taskId}/materials/approve/{department}', [App\Http\Controllers\MaterialsController::class, 'approveMaterials']);
             Route::get('tasks/{taskId}/materials/approval-status', [App\Http\Controllers\MaterialsController::class, 'getApprovalStatus']);
+            
+            // Materials configuration
+            Route::get('materials/config', [App\Http\Controllers\MaterialsController::class, 'getMaterialsConfig']);
 
         // Design asset management
         Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {

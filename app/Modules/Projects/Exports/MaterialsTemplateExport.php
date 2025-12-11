@@ -309,13 +309,19 @@ class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, Wi
     
     private function addDataValidations(Worksheet $sheet)
     {
+        // Get dropdown values from config
+        $elementTypes = implode(',', config('materials.element_types', []));
+        $categories = implode(',', config('materials.categories', []));
+        $units = implode(',', config('materials.units', []));
+        $includedOptions = implode(',', config('materials.included_options', []));
+        
         // Element Type dropdown (Column B)
         $elementTypeValidation = $sheet->getCell('B2')->getDataValidation();
         $elementTypeValidation->setType(DataValidation::TYPE_LIST);
         $elementTypeValidation->setErrorStyle(DataValidation::STYLE_STOP);
         $elementTypeValidation->setAllowBlank(true);
         $elementTypeValidation->setShowDropDown(true);
-        $elementTypeValidation->setFormula1('"stage,backdrop,skirting,flooring,trussing,décor,lighting,sound,chairs,tables,signage,custom"');
+        $elementTypeValidation->setFormula1("\"{$elementTypes}\"");
         $elementTypeValidation->setPrompt('Select element type from list');
         
         // Copy validation down
@@ -329,7 +335,7 @@ class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, Wi
         $categoryValidation->setErrorStyle(DataValidation::STYLE_STOP);
         $categoryValidation->setAllowBlank(true);
         $categoryValidation->setShowDropDown(true);
-        $categoryValidation->setFormula1('"production,hire,outsourced"');
+        $categoryValidation->setFormula1("\"{$categories}\"");
         $categoryValidation->setPrompt('Select category');
         
         for ($row = 2; $row <= 200; $row++) {
@@ -342,7 +348,7 @@ class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, Wi
         $unitValidation->setErrorStyle(DataValidation::STYLE_STOP);
         $unitValidation->setAllowBlank(false);
         $unitValidation->setShowDropDown(true);
-        $unitValidation->setFormula1('"Pcs,Ltrs,Mtrs,sqm,Pks,Kgs,custom"');
+        $unitValidation->setFormula1("\"{$units}\"");
         $unitValidation->setPrompt('Select unit of measurement');
         
         for ($row = 2; $row <= 200; $row++) {
@@ -355,7 +361,7 @@ class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, Wi
         $includedValidation->setErrorStyle(DataValidation::STYLE_STOP);
         $includedValidation->setAllowBlank(false);
         $includedValidation->setShowDropDown(true);
-        $includedValidation->setFormula1('"YES,NO"');
+        $includedValidation->setFormula1("\"{$includedOptions}\"");
         $includedValidation->setPrompt('Is this included?');
         
         for ($row = 2; $row <= 200; $row++) {
