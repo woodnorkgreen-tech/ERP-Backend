@@ -309,11 +309,23 @@ class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, Wi
     
     private function addDataValidations(Worksheet $sheet)
     {
-        // Get dropdown values from config
-        $elementTypes = implode(',', config('materials.element_types', []));
-        $categories = implode(',', config('materials.categories', []));
-        $units = implode(',', config('materials.units', []));
-        $includedOptions = implode(',', config('materials.included_options', []));
+        // Get dropdown values from config with robust fallbacks
+        $elementTypes = implode(',', config('materials.element_types', [
+            'stage', 'backdrop', 'skirting', 'flooring', 'trussing', 'décor', 
+            'lighting', 'sound', 'chairs', 'tables', 'signage', 'custom'
+        ]));
+        
+        $categories = implode(',', config('materials.categories', [
+            'production', 'hire', 'outsourced'
+        ]));
+        
+        $units = implode(',', config('materials.units', [
+            'Pcs', 'Ltrs', 'Mtrs', 'sqm', 'Pks', 'Kgs', 'custom'
+        ]));
+        
+        $includedOptions = implode(',', config('materials.included_options', [
+            'YES', 'NO'
+        ]));
         
         // Element Type dropdown (Column B)
         $elementTypeValidation = $sheet->getCell('B2')->getDataValidation();
