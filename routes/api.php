@@ -42,6 +42,19 @@ use App\Constants\Permissions;
 // Public routes for Client Handover
 Route::get('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'show']);
 Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'store']);
+Route::get('/storage/{path}', function ($path) {
+    $file = storage_path('app/public/' . $path);
+    
+    if (!file_exists($file)) {
+        abort(404);
+    }
+    
+    $mimeType = mime_content_type($file);
+    return response()->file($file, [
+        'Content-Type' => $mimeType,
+        'Cache-Control' => 'public, max-age=31536000',
+    ]);
+})->where('path', '.*');
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
