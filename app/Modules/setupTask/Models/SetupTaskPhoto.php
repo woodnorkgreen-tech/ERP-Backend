@@ -33,8 +33,8 @@ class SetupTaskPhoto extends Model
     }
 
     // Accessor for photo URL
-    public function getUrlAttribute(): string
-    {
-        return storage_url($this->path);
-    }
+  public function getUrlAttribute(): string
+{
+    return url('api/storage/' . $this->path); // ✅ Added 'api/'
+}
 }
