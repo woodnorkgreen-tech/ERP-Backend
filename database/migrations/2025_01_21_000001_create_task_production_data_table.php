@@ -11,22 +11,24 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('task_production_data', function (Blueprint $table) {
-            $table->id();
-            $table->unsignedBigInteger('task_id');
-            $table->boolean('materials_imported')->default(false);
-            $table->timestamp('last_materials_import_date')->nullable();
-            $table->timestamps();
+        if (!Schema::hasTable('task_production_data')) {
+            Schema::create('task_production_data', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('task_id');
+                $table->boolean('materials_imported')->default(false);
+                $table->timestamp('last_materials_import_date')->nullable();
+                $table->timestamps();
 
-            // Foreign key constraint
-            $table->foreign('task_id')
-                  ->references('id')
-                  ->on('enquiry_tasks')
-                  ->onDelete('cascade');
+                // Foreign key constraint
+                $table->foreign('task_id')
+                      ->references('id')
+                      ->on('enquiry_tasks')
+                      ->onDelete('cascade');
 
-            // Unique constraint - one production data per task
-            $table->unique('task_id', 'unique_task_production');
-        });
+                // Unique constraint - one production data per task
+                $table->unique('task_id', 'unique_task_production');
+            });
+        }
     }
 
     /**
