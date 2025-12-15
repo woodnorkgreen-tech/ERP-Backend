@@ -11,27 +11,29 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('production_completion_criteria', function (Blueprint $table) {
-            $table->id();
-            $table->unsignedBigInteger('production_data_id');
-            $table->text('description');
-            $table->enum('category', ['production', 'quality', 'documentation', 'approval']);
-            $table->boolean('met')->default(false);
-            $table->boolean('is_custom')->default(false);
-            $table->text('notes')->nullable();
-            $table->timestamp('completed_at')->nullable();
-            $table->timestamps();
+        if (!Schema::hasTable('production_completion_criteria')) {
+            Schema::create('production_completion_criteria', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('production_data_id');
+                $table->text('description');
+                $table->enum('category', ['production', 'quality', 'documentation', 'approval']);
+                $table->boolean('met')->default(false);
+                $table->boolean('is_custom')->default(false);
+                $table->text('notes')->nullable();
+                $table->timestamp('completed_at')->nullable();
+                $table->timestamps();
 
-            // Foreign key constraint
-            $table->foreign('production_data_id')
-                  ->references('id')
-                  ->on('task_production_data')
-                  ->onDelete('cascade');
+                // Foreign key constraint
+                $table->foreign('production_data_id')
+                      ->references('id')
+                      ->on('task_production_data')
+                      ->onDelete('cascade');
 
-            // Indexes
-            $table->index('category');
-            $table->index('met');
-        });
+                // Indexes
+                $table->index('category');
+                $table->index('met');
+            });
+        }
     }
 
     /**
