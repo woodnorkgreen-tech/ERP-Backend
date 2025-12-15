@@ -95,9 +95,9 @@ class DesignAsset extends Model
     }
 
     // Accessor for file URL
-   public function getFileUrlAttribute(): string
+  public function getFileUrlAttribute(): string
 {
-    return url('storage/' . $this->file_path);
+    return url('api/storage/' . $this->file_path);
 }
 
     // Accessor for formatted file size
