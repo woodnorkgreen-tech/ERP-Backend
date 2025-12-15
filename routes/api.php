@@ -612,17 +612,21 @@ Route::middleware('auth:sanctum')->group(function () {
             // Materials configuration
             Route::get('materials/config', [App\Http\Controllers\MaterialsController::class, 'getMaterialsConfig']);
 
-        // Design asset management
-        Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
-            Route::get('/', [DesignAssetController::class, 'index']);
-            Route::post('/', [DesignAssetController::class, 'store']);
-            Route::get('/{asset}', [DesignAssetController::class, 'show']);
-            Route::put('/{asset}', [DesignAssetController::class, 'update']);
-            Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
-            Route::get('/{asset}/download', [DesignAssetController::class, 'download']);
-            Route::post('/{asset}/approve', [DesignAssetController::class, 'approve']);
-            Route::post('/{asset}/reject', [DesignAssetController::class, 'reject']);
-        });
+       // Design asset management
+Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
+    Route::get('/', [DesignAssetController::class, 'index']);
+    Route::post('/', [DesignAssetController::class, 'store']);
+    
+    // Specific routes FIRST
+    Route::get('/{asset}/download', [DesignAssetController::class, 'download']);
+    Route::post('/{asset}/approve', [DesignAssetController::class, 'approve']);
+    Route::post('/{asset}/reject', [DesignAssetController::class, 'reject']);
+    
+    // Generic routes LAST
+    Route::get('/{asset}', [DesignAssetController::class, 'show']);
+    Route::put('/{asset}', [DesignAssetController::class, 'update']);
+    Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
+});
 
 
 

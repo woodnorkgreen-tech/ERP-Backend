@@ -231,30 +231,33 @@ class DesignAssetService
     /**
      * Extract metadata from file
      */
-    private function extractFileMetadata($file): array
-    {
-        $metadata = [
-            'extension' => $file->getClientOriginalExtension(),
-            'encoding' => $file->getEncoding(),
-        ];
+   /**
+ * Extract metadata from file
+ */
+private function extractFileMetadata($file): array
+{
+    $metadata = [
+        'extension' => $file->getClientOriginalExtension(),
+        // Remove this line - getEncoding() doesn't exist on UploadedFile
+        // 'encoding' => $file->getEncoding(),
+    ];
 
-        // Extract image metadata if applicable
-        if (str_starts_with($file->getMimeType(), 'image/')) {
-            try {
-                $imageInfo = getimagesize($file->getRealPath());
-                if ($imageInfo) {
-                    $metadata['width'] = $imageInfo[0];
-                    $metadata['height'] = $imageInfo[1];
-                    $metadata['bits'] = $imageInfo['bits'] ?? null;
-                }
-            } catch (\Exception $e) {
-                // Ignore metadata extraction errors
+    // Extract image metadata if applicable
+    if (str_starts_with($file->getMimeType(), 'image/')) {
+        try {
+            $imageInfo = getimagesize($file->getRealPath());
+            if ($imageInfo) {
+                $metadata['width'] = $imageInfo[0];
+                $metadata['height'] = $imageInfo[1];
+                $metadata['bits'] = $imageInfo['bits'] ?? null;
             }
+        } catch (\Exception $e) {
+            // Ignore metadata extraction errors
         }
-
-        return $metadata;
     }
 
+    return $metadata;
+}
     /**
      * Auto-detect category based on filename
      */

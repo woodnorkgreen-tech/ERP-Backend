@@ -119,17 +119,16 @@ class DesignAssetController extends Controller
     /**
      * Download the specified design asset.
      */
-    public function download(DesignAsset $asset)
-    {
-        // TODO: Add authorization policy when implemented
-        // $this->authorize('view', $asset);
-
-        if (!Storage::disk('public')->exists($asset->file_path)) {
-            abort(404, 'File not found');
-        }
-
-        return Storage::disk('public')->download($asset->file_path, $asset->original_name);
+   public function download($task, $asset)
+{
+    $asset = DesignAsset::findOrFail($asset);
+    
+    if (!Storage::disk('public')->exists($asset->file_path)) {
+        abort(404, 'File not found');
     }
+
+    return Storage::disk('public')->download($asset->file_path, $asset->original_name);
+}
 
     /**
      * Process file upload and create asset record.
