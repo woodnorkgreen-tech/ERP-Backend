@@ -25,6 +25,14 @@ class EventResource extends JsonResource
             'is_public' => $this->is_public,
             'created_by' => (string) $this->user_id,
             'created_by_name' => $this->user->name ?? 'Unknown',
+            
+            // Meeting minutes fields
+            'is_minute' => $this->is_minute ?? false,
+            'agenda' => $this->agenda ?? '',
+            'recipient_type' => $this->recipient_type ?? 'all',
+            'attendees' => $this->attendees ?? [],
+            'department_ids' => $this->department_ids ?? [],
+            
             'created_at' => $this->created_at->toIso8601String(),
             'updated_at' => $this->updated_at->toIso8601String(),
             

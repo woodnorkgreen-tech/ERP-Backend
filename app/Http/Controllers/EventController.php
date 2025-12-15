@@ -38,7 +38,7 @@ class EventController extends Controller
     /**
      * Save a new event
      */
-   public function save(Request $request)
+  public function save(Request $request)
 {
     try {
         $validated = $request->validate([
@@ -49,11 +49,18 @@ class EventController extends Controller
             'is_all_day' => 'nullable|boolean',
             'notes' => 'nullable|string',
             'is_public' => 'nullable|boolean',
+            'is_minute' => 'nullable|boolean',
+            'agenda' => 'nullable|string',
+            'recipient_type' => 'nullable|string|in:all,employee,department',
+            'attendees' => 'nullable|array',
+            'attendees.*' => 'integer',
+            'department_ids' => 'nullable|array',
+            'department_ids.*' => 'integer',
         ]);
 
         $user = Auth::user();
         
-        // Only HR can create public events - Check by ROLE, not department
+        // Only HR can create public events
         if (($validated['is_public'] ?? false) && !$user->hasRole('HR')) {
             return response()->json([
                 'success' => false,
@@ -72,13 +79,18 @@ class EventController extends Controller
             'is_all_day' => $validated['is_all_day'] ?? false,
             'notes' => $validated['notes'] ?? '',
             'is_public' => $validated['is_public'] ?? false,
+            'is_minute' => $validated['is_minute'] ?? false,
+            'agenda' => $validated['agenda'] ?? '',
+            'recipient_type' => $validated['recipient_type'] ?? 'all',
+            'attendees' => $validated['attendees'] ?? [],
+            'department_ids' => $validated['department_ids'] ?? [],
         ]);
 
         DB::commit();
 
         return response()->json([
             'success' => true,
-            'message' => 'Event created successfully',
+            'message' => $validated['is_minute'] ? 'Meeting created successfully' : 'Event created successfully',
             'data' => new EventResource($event->load('user'))
         ], 201);
 
@@ -91,7 +103,6 @@ class EventController extends Controller
         ], 500);
     }
 }
-
     /**
      * Update an existing event
      */

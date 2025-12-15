@@ -18,6 +18,11 @@ class Event extends Model
         'is_all_day',
         'notes',
         'is_public',
+        'is_minute',
+        'agenda',
+        'recipient_type',
+        'attendees',
+        'department_ids',
     ];
 
     protected $casts = [
@@ -25,51 +30,66 @@ class Event extends Model
         'end_time' => 'datetime',
         'is_all_day' => 'boolean',
         'is_public' => 'boolean',
+        'is_minute' => 'boolean',
+        'attendees' => 'array',
+        'department_ids' => 'array',
     ];
 
     protected $appends = ['created_by_name'];
 
-    // Relationship with User
     public function user()
     {
         return $this->belongsTo(User::class);
     }
 
-    // Accessor for created_by_name
     public function getCreatedByNameAttribute()
     {
         return $this->user ? $this->user->name : 'Unknown';
     }
 
-    // Scope for public events
     public function scopePublic($query)
     {
         return $query->where('is_public', true);
     }
 
-    // Scope for user's personal events
     public function scopeForUser($query, $userId)
     {
         return $query->where('user_id', $userId);
     }
 
-    // Scope for visible events (public + user's own)
-    public function scopeVisibleTo($query, $userId)
-    {
-        return $query->where('is_public', true)
-                     ->orWhere('user_id', $userId);
-    }
-
-    // Check if user can delete this event
+  public function scopeVisibleTo($query, $userId)
+{
+    $user = \App\Models\User::find($userId);
+    
+    return $query->where(function($q) use ($userId, $user) {
+        $q->where('is_public', true)
+          ->orWhere('user_id', $userId)
+          ->orWhere(function($query) use ($userId, $user) {
+              // Meeting minutes for everyone
+              $query->where('is_minute', true)
+                    ->where('recipient_type', 'all');
+          })
+          ->orWhere(function($query) use ($userId) {
+              // Meeting minutes sent to specific employees
+              $query->where('is_minute', true)
+                    ->where('recipient_type', 'employee')
+                    ->whereJsonContains('attendees', $userId);
+          })
+          ->orWhere(function($query) use ($user) {
+              // Meeting minutes sent to user's department
+              $query->where('is_minute', true)
+                    ->where('recipient_type', 'department')
+                    ->whereJsonContains('department_ids', (int)$user->department_id);
+          });
+    });
+}
     public function canBeDeletedBy($user)
     {
-        // User owns the event OR user is HR (department_id = 4)
-        return $this->user_id === $user->id || $user->department_id == 4;
+        return $this->user_id === $user->id || $user->hasRole('HR');
     }
 
-    // Check if user can edit this event
     public function canBeEditedBy($user)
     {
-        return $this->user_id === $user->id || $user->department_id == 4;
+        return $this->user_id === $user->id || $user->hasRole('HR');
     }
 }
