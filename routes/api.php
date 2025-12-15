@@ -107,6 +107,24 @@ Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementControlle
         Route::put('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'updateIssue']);
         Route::delete('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deleteIssue']);
     });
+
+    // Archival Task management routes
+    Route::prefix('projects/tasks/{taskId}/archival')->group(function () {
+        Route::get('/', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'index']);
+        Route::post('/', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'store']);
+        Route::put('/{reportId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'update']);
+        Route::delete('/{reportId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'destroy']);
+        Route::get('/auto-populate', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'autoPopulate']);
+        Route::post('/{reportId}/status', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'changeStatus']);
+        
+        // PDF
+        Route::get('/{reportId}/pdf', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'generatePdf']);
+        
+        // Attachments
+        Route::post('/{reportId}/attachments', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'uploadAttachment']);
+        Route::delete('/{reportId}/attachments/{attachmentId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'deleteAttachment']);
+    });
+
         // Site survey management
         Route::apiResource('site-surveys', SiteSurveyController::class); // Temporarily remove permissions for debugging
         Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);

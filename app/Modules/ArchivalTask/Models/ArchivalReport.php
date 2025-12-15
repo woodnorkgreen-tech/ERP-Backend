@@ -71,6 +71,19 @@ class ArchivalReport extends Model
         'items_condition_returned',
         'site_clearance_status',
         'outstanding_items',
+        // Checklist
+        'checklist_ppt',
+        'checklist_cutlist',
+        'checklist_site_survey_form',
+        'checklist_project_budget_file',
+        'checklist_material_list',
+        'checklist_qc_checklist',
+        'checklist_setup_setdown',
+        'checklist_client_feedback',
+        // Records
+        'archive_reference',
+        'archive_location',
+        'retention_period',
         // Section 8: Attachments
         'attachments',
         // Section 9: Signatures
@@ -100,6 +113,15 @@ class ArchivalReport extends Model
         'delivered_on_schedule' => 'boolean',
         'delivery_issues' => 'boolean',
         'client_confidence' => 'boolean',
+        'client_confidence' => 'boolean',
+        'checklist_ppt' => 'boolean',
+        'checklist_cutlist' => 'boolean',
+        'checklist_site_survey_form' => 'boolean',
+        'checklist_project_budget_file' => 'boolean',
+        'checklist_material_list' => 'boolean',
+        'checklist_qc_checklist' => 'boolean',
+        'checklist_setup_setdown' => 'boolean',
+        'checklist_client_feedback' => 'boolean',
         'attachments' => 'array',
     ];
 

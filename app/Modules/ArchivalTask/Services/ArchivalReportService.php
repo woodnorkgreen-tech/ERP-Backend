@@ -22,6 +22,15 @@ class ArchivalReportService
     }
 
     /**
+     * Get archival report by ID
+     */
+    public function getReportById(int $reportId): ?ArchivalReport
+    {
+        return ArchivalReport::with(['setupItems', 'itemPlacements', 'creator'])
+            ->find($reportId);
+    }
+
+    /**
      * Create a new archival report
      */
     public function createReport(int $taskId, array $data): ArchivalReport

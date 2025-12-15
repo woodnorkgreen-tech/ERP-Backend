@@ -6,6 +6,7 @@ use App\Modules\ArchivalTask\Services\ArchivalReportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class ArchivalReportController extends Controller
 {
@@ -198,6 +199,32 @@ class ArchivalReportController extends Controller
     }
 
     /**
+     * Generate PDF for the report
+     */
+    public function generatePdf(int $taskId, int $reportId)
+    {
+        try {
+            $report = $this->service->getReportById($reportId);
+            
+            if (!$report) {
+                return response()->json(['message' => 'Report not found'], 404);
+            }
+
+            // Load view with data
+            // Since we don't have the view yet, we might error if we run this.
+            // But we will create the view next.
+            $pdf = Pdf::loadView('reports.archival', ['report' => $report]);
+            
+            return $pdf->download('archival-report-' . $reportId . '.pdf');
+        } catch (\Exception $e) {
+             return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get validation rules
      */
     protected function getValidationRules(bool $isCreate = true): array
@@ -271,6 +298,21 @@ class ArchivalReportController extends Controller
             'project_officer_sign_date' => 'nullable|date',
             'reviewed_by' => 'nullable|string|max:255',
             'reviewer_sign_date' => 'nullable|date',
+
+            // Checklist
+            'checklist_ppt' => 'nullable|boolean',
+            'checklist_cutlist' => 'nullable|boolean',
+            'checklist_site_survey_form' => 'nullable|boolean',
+            'checklist_project_budget_file' => 'nullable|boolean',
+            'checklist_material_list' => 'nullable|boolean',
+            'checklist_qc_checklist' => 'nullable|boolean',
+            'checklist_setup_setdown' => 'nullable|boolean',
+            'checklist_client_feedback' => 'nullable|boolean',
+            
+            // Record Management
+            'archive_reference' => 'nullable|string',
+            'archive_location' => 'nullable|string',
+            'retention_period' => 'nullable|string',
             
             // Status
             'status' => 'nullable|in:draft,submitted,approved',
