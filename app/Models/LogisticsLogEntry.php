@@ -14,6 +14,7 @@ class LogisticsLogEntry extends Model
         'departure',
         'setdown_time',
         'vehicle_allocated',
+        'driver',
         'project_officer_incharge',
         'remarks',
         'status',
