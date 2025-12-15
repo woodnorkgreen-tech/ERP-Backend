@@ -241,7 +241,7 @@ class SiteSurveyController extends Controller
 
             // Find or create survey by task ID
             $task = \App\Modules\Projects\Models\EnquiryTask::findOrFail($taskId);
-            
+
             $survey = SiteSurvey::firstOrCreate(
                 ['enquiry_task_id' => $taskId],
                 [
@@ -269,7 +269,7 @@ class SiteSurveyController extends Controller
             $uuid = \Illuminate\Support\Str::uuid();
             $extension = $file->getClientOriginalExtension();
             $filename = $uuid . '.' . $extension;
-            
+
             // Create directory if it doesn't exist
             $directory = 'surveys/task_' . $taskId;
             $path = $file->storeAs($directory, $filename, 'public');
@@ -279,7 +279,7 @@ class SiteSurveyController extends Controller
                 'id' => (string) $uuid,
                 'filename' => $file->getClientOriginalName(),
                 'path' => $path,
-               'url' => url('api/storage/' . $path),
+                'url' => url('api/storage/' . $path),
                 'size' => $file->getSize(),
                 'mime_type' => $file->getMimeType(),
                 'uploaded_at' => now()->toISOString(),
@@ -364,4 +364,3 @@ class SiteSurveyController extends Controller
         }
     }
 }
-
