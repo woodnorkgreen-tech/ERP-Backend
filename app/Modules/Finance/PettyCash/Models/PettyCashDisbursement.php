@@ -37,6 +37,7 @@ class PettyCashDisbursement extends Model
         'created_by',
         'voided_by',
         'voided_at',
+        'tax',
     ];
 
     /**

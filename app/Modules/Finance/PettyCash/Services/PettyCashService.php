@@ -152,12 +152,21 @@ class PettyCashService
         
         if (!$balance->hasSufficientBalance($amount)) {
             throw new Exception(
-                "Insufficient balance. Current balance: KES " . number_format($balance->getCurrentBalance(), 2) . 
+                "Insufficient balance. Current balance: KES " . number_format($balance->getCurrentBalance(), 2) .
                 ", Required: KES " . number_format($amount, 2)
             );
         }
-
+        
         return true;
+    }
+
+    /**
+     * Check if there's sufficient balance for a disbursement (returns boolean).
+     */
+    public function hasSufficientBalance(float $amount): bool
+    {
+        $balance = $this->repository->getCurrentBalance();
+        return $balance->hasSufficientBalance($amount);
     }
 
     /**

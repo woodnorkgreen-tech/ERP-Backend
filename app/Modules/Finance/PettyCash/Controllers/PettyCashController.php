@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
+use App\Modules\Finance\PettyCash\Imports\PettyCashDisbursementImport;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Validator;
+use Maatwebsite\Excel\Excel;
 use Exception;
 
 class PettyCashController extends Controller
@@ -385,6 +388,57 @@ class PettyCashController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to recalculate balance',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Upload Excel file with disbursement data.
+     */
+    public function uploadExcel(Request $request): JsonResponse
+    {
+        try {
+            // Validate file upload
+            $validator = Validator::make($request->all(), [
+                'file' => 'required|file|mimes:xlsx,xls|max:10240', // Max 10MB
+            ], [
+                'file.required' => 'Please upload an Excel file',
+                'file.mimes' => 'Only Excel files (.xlsx, .xls) are allowed',
+                'file.max' => 'File size must be less than 10MB',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $file = $request->file('file');
+
+            // Process the Excel file
+            $import = new PettyCashDisbursementImport($this->service);
+            $import->import($file);
+
+            $results = $import->getResults();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Excel file processed successfully',
+                'data' => [
+                    'total_rows' => $results['total_rows'],
+                    'processed_rows' => $results['processed_rows'],
+                    'successful_imports' => $results['successful_imports'],
+                    'failed_rows' => $results['failed_rows'],
+                    'duplicates' => $results['duplicates'],
+                ],
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to process Excel file',
                 'error' => $e->getMessage(),
             ], 500);
         }
