@@ -20,11 +20,13 @@ class ProductionQualityCheckpoint extends Model
         'checked_at',
         'priority',
         'notes',
+        'checklist',
     ];
 
     protected $casts = [
         'quality_score' => 'integer',
         'checked_at' => 'datetime',
+        'checklist' => 'array',
     ];
 
     /**

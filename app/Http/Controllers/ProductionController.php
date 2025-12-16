@@ -132,4 +132,30 @@ class ProductionController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Delete all quality checkpoints for a task
+     * 
+     * @param int $taskId
+     * @return JsonResponse
+     */
+    public function deleteQualityCheckpoints(int $taskId): JsonResponse
+    {
+        try {
+            $this->productionService->deleteQualityCheckpoints($taskId);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Quality checkpoints cleared successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to delete quality checkpoints: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to delete quality checkpoints',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

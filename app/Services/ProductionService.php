@@ -253,6 +253,24 @@ class ProductionService
     }
 
     /**
+     * Delete all quality checkpoints for a task
+     */
+    public function deleteQualityCheckpoints(int $taskId): void
+    {
+        try {
+            $productionData = TaskProductionData::where('task_id', $taskId)->first();
+            
+            if ($productionData) {
+                ProductionQualityCheckpoint::where('production_data_id', $productionData->id)->delete();
+                Log::info("Deleted all quality checkpoints for task {$taskId}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error deleting quality checkpoints: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
      * Format production data for API response
      */
     private function formatProductionDataResponse(EnquiryTask $task, TaskProductionData $productionData): array
@@ -303,6 +321,7 @@ class ProductionService
                     'checkedAt' => $checkpoint->checked_at?->toISOString(),
                     'priority' => $checkpoint->priority,
                     'notes' => $checkpoint->notes,
+                    'checklist' => $checkpoint->checklist,
                     'createdAt' => $checkpoint->created_at->toISOString(),
                     'updatedAt' => $checkpoint->updated_at->toISOString(),
                 ];
@@ -343,18 +362,34 @@ class ProductionService
     private function updateQualityCheckpoints(int $productionDataId, array $checkpoints): void
     {
         foreach ($checkpoints as $checkpointData) {
-            if (isset($checkpointData['id'])) {
+            if (isset($checkpointData['id']) && is_numeric($checkpointData['id'])) {
                 $checkpoint = ProductionQualityCheckpoint::find($checkpointData['id']);
                 if ($checkpoint && $checkpoint->production_data_id === $productionDataId) {
                     $checkpoint->update([
                         'status' => $checkpointData['status'] ?? $checkpoint->status,
-                        'quality_score' => $checkpointData['qualityScore'] ?? $checkpoint->quality_score,
-                        'checked_by' => $checkpointData['checkedBy'] ?? $checkpoint->checked_by,
-                        'checked_at' => isset($checkpointData['checkedAt']) ? now() : $checkpoint->checked_at,
+                        'quality_score' => $checkpointData['quality_score'] ?? $checkpoint->quality_score, // snake_case expected from input
+                        'checked_by' => $checkpointData['checked_by'] ?? $checkpoint->checked_by,
+                        'checked_at' => isset($checkpointData['checked_at']) ? now() : $checkpoint->checked_at,
                         'priority' => $checkpointData['priority'] ?? $checkpoint->priority,
                         'notes' => $checkpointData['notes'] ?? $checkpoint->notes,
+                        'checklist' => $checkpointData['checklist'] ?? $checkpoint->checklist,
                     ]);
                 }
+            } else {
+                // Create new checkpoint
+                ProductionQualityCheckpoint::create([
+                    'production_data_id' => $productionDataId,
+                    'category_id' => $checkpointData['categoryId'] ?? $checkpointData['category_id'] ?? 'general-' . uniqid(), // Handle both camel and snake case, ensure not null
+                    'category_name' => $checkpointData['categoryName'] ?? $checkpointData['category_name'] ?? 'General',
+                    'status' => $checkpointData['status'] ?? 'pending',
+                    'priority' => $checkpointData['priority'] ?? 'medium',
+                    'quality_score' => $checkpointData['qualityScore'] ?? $checkpointData['quality_score'] ?? 0,
+                    'checked_by' => $checkpointData['checkedBy'] ?? $checkpointData['checked_by'] ?? null,
+                    'checked_at' => isset($checkpointData['checkedAt']) ? now() : null,
+                    'checked_at' => isset($checkpointData['checkedAt']) ? now() : null,
+                    'notes' => $checkpointData['notes'] ?? null,
+                    'checklist' => $checkpointData['checklist'] ?? null,
+                ]);
             }
         }
     }
@@ -411,7 +446,7 @@ class ProductionService
     private function updateCompletionCriteria(int $productionDataId, array $criteria): void
     {
         foreach ($criteria as $criterionData) {
-            if (isset($criterionData['id'])) {
+            if (isset($criterionData['id']) && is_numeric($criterionData['id'])) {
                 $criterion = ProductionCompletionCriterion::find($criterionData['id']);
                 if ($criterion && $criterion->production_data_id === $productionDataId) {
                     $met = $criterionData['met'] ?? $criterion->met;
@@ -423,6 +458,18 @@ class ProductionService
                         'completed_at' => $met ? now() : null,
                     ]);
                 }
+            } else {
+                // Create new criterion
+                $met = $criterionData['met'] ?? false;
+                ProductionCompletionCriterion::create([
+                    'production_data_id' => $productionDataId,
+                    'description' => $criterionData['description'] ?? 'New Criterion',
+                    'category' => $criterionData['category'] ?? 'production',
+                    'met' => $met,
+                    'is_custom' => $criterionData['is_custom'] ?? true, // Default to true if not specified (likely user added)
+                    'notes' => $criterionData['notes'] ?? null,
+                    'completed_at' => $met ? now() : null,
+                ]);
             }
         }
     }

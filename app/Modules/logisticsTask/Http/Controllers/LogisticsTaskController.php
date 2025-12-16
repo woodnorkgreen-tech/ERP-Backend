@@ -8,6 +8,9 @@ use App\Modules\logisticsTask\Services\TransportItemService;
 use App\Modules\logisticsTask\Services\LogisticsChecklistService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Barryvdh\DomPDF\Facade\Pdf;
+use App\Modules\Projects\Models\EnquiryTask;
 
 class LogisticsTaskController extends Controller
 {
@@ -415,6 +418,56 @@ class LogisticsTaskController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to retrieve checklist statistics',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate PDF report
+     */
+    public function generatePdf(int $taskId)
+    {
+        try {
+            Log::info("Generating PDF for logistics task {$taskId}");
+            
+            $data = $this->logisticsService->getLogisticsForTask($taskId);
+            
+            if (!$data) {
+                Log::warning("No logistics data found for task {$taskId}");
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No logistics data found. Please add logistics planning details first.'
+                ], 404);
+            }
+
+            $task = EnquiryTask::with(['enquiry.client', 'enquiry.project'])->findOrFail($taskId);
+            
+            Log::info("Generating PDF with data", [
+                'has_planning' => isset($data['planning']),
+                'has_transport' => isset($data['transport_items']),
+                'has_checklist' => isset($data['checklist'])
+            ]);
+            
+            $pdf = Pdf::loadView('reports.logistics', [
+                'data' => $data,
+                'task' => $task,
+                'project' => $task->enquiry->project ?? null,
+                'client' => $task->enquiry->client ?? null
+            ]);
+            
+            $projectCode = optional($task->enquiry->project)->project_id ?? $task->enquiry->enquiry_number ?? $taskId;
+            $filename = 'logistics-report-' . $projectCode . '.pdf';
+            
+            Log::info("PDF generated successfully for task {$taskId}");
+            return $pdf->download($filename);
+        } catch (\Exception $e) {
+            Log::error("Failed to generate PDF for task {$taskId}: " . $e->getMessage());
+            Log::error($e->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate PDF report',
                 'error' => $e->getMessage()
             ], 500);
         }

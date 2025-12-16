@@ -504,6 +504,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Logistics Task Routes
         Route::prefix('tasks/{taskId}/logistics')->group(function () {
             Route::get('/', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'show']);
+            Route::get('/pdf', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generatePdf']);
             Route::post('/planning', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'savePlanning']);
             Route::put('/team-confirmation', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTeamConfirmation']);
             Route::get('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getTransportItems']);
@@ -527,6 +528,15 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/{reportId}/attachments/{attachmentId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'deleteAttachment']);
             Route::get('/auto-populate', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'autoPopulate']);
             Route::post('/{reportId}/status', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'changeStatus']);
+        });
+
+        // Production Task Routes
+        Route::prefix('tasks/{taskId}/production')->group(function () {
+            Route::get('/', [App\Http\Controllers\ProductionController::class, 'getProductionData']);
+            Route::put('/', [App\Http\Controllers\ProductionController::class, 'saveProductionData']);
+            Route::post('/import-materials', [App\Http\Controllers\ProductionController::class, 'importMaterialsData']);
+            Route::post('/generate-checkpoints', [App\Http\Controllers\ProductionController::class, 'generateQualityCheckpoints']);
+            Route::delete('/quality-checkpoints', [App\Http\Controllers\ProductionController::class, 'deleteQualityCheckpoints']);
         });
 
         // Drivers endpoint for logistics
