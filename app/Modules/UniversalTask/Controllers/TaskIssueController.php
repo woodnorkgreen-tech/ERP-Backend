@@ -21,29 +21,53 @@ class TaskIssueController
     }
 
     /**
-     * Display a listing of issues for a specific task.
+     * Display a listing of issues, optionally filtered by task.
      */
-    public function index(Task $task): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $user = Auth::user();
 
-        // Check if user can view the task
-        if (!$this->permissionService->canView($user, $task)) {
-            $this->permissionService->logPermissionDenial($user, 'view_task_issues', $task);
+        // Check basic read permission
+        if (!$this->permissionService->canView($user)) {
             return response()->json([
                 'success' => false,
                 'error' => [
                     'code' => 'INSUFFICIENT_PERMISSIONS',
-                    'message' => 'You do not have permission to view issues for this task.',
+                    'message' => 'You do not have permission to view issues.',
                 ]
             ], 403);
         }
 
         try {
-            $issues = $task->issues()
-                ->with(['reporter', 'assignee', 'resolver'])
-                ->orderBy('reported_at', 'desc')
-                ->paginate(25);
+            $query = TaskIssue::with(['task', 'reporter', 'assignee', 'resolver']);
+
+            // Apply permission filters - only show issues for tasks user can access
+            $accessibleDepartments = $this->permissionService->getAccessibleDepartments($user);
+            if (!empty($accessibleDepartments)) {
+                $query->whereHas('task', function ($taskQuery) use ($accessibleDepartments) {
+                    $taskQuery->whereIn('department_id', $accessibleDepartments);
+                });
+            }
+
+            // Filter by task_id if provided
+            if ($request->has('task_id') && $request->task_id) {
+                $query->where('task_id', $request->task_id);
+
+                // Additional check: ensure user can view the specific task
+                $task = Task::find($request->task_id);
+                if ($task && !$this->permissionService->canView($user, $task)) {
+                    $this->permissionService->logPermissionDenial($user, 'view_task_issues', $task);
+                    return response()->json([
+                        'success' => false,
+                        'error' => [
+                            'code' => 'INSUFFICIENT_PERMISSIONS',
+                            'message' => 'You do not have permission to view issues for this task.',
+                        ]
+                    ], 403);
+                }
+            }
+
+            $issues = $query->orderBy('reported_at', 'desc')->paginate(25);
 
             return response()->json([
                 'success' => true,
@@ -55,7 +79,7 @@ class TaskIssueController
                 'success' => false,
                 'error' => [
                     'code' => 'INTERNAL_ERROR',
-                    'message' => 'An error occurred while retrieving task issues.',
+                    'message' => 'An error occurred while retrieving issues.',
                 ]
             ], 500);
         }
@@ -64,27 +88,16 @@ class TaskIssueController
     /**
      * Store a newly created issue.
      */
-    public function store(Request $request, Task $task): JsonResponse
+    public function store(Request $request): JsonResponse
     {
         $user = Auth::user();
 
-        // Check if user can view the task (basic requirement for logging issues)
-        if (!$this->permissionService->canView($user, $task)) {
-            $this->permissionService->logPermissionDenial($user, 'create_task_issue', $task);
-            return response()->json([
-                'success' => false,
-                'error' => [
-                    'code' => 'INSUFFICIENT_PERMISSIONS',
-                    'message' => 'You do not have permission to log issues for this task.',
-                ]
-            ], 403);
-        }
-
         // Validate request data
         $validator = Validator::make($request->all(), [
+            'task_id' => 'required|exists:tasks,id',
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'issue_type' => ['required', Rule::in(['blocker', 'technical', 'resource', 'dependency', 'general'])],
+            'issue_type' => ['required', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'other'])],
             'severity' => ['required', Rule::in(['critical', 'high', 'medium', 'low'])],
             'assigned_to' => 'nullable|exists:users,id',
         ]);
@@ -98,6 +111,30 @@ class TaskIssueController
                     'details' => $validator->errors(),
                 ]
             ], 422);
+        }
+
+        // Get the task and check permissions
+        $task = Task::find($request->task_id);
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'NOT_FOUND',
+                    'message' => 'Task not found.',
+                ]
+            ], 404);
+        }
+
+        // Check if user can view the task (basic requirement for logging issues)
+        if (!$this->permissionService->canView($user, $task)) {
+            $this->permissionService->logPermissionDenial($user, 'create_task_issue', $task);
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'INSUFFICIENT_PERMISSIONS',
+                    'message' => 'You do not have permission to log issues for this task.',
+                ]
+            ], 403);
         }
 
         try {
@@ -136,24 +173,13 @@ class TaskIssueController
     /**
      * Display the specified issue.
      */
-    public function show(Task $task, TaskIssue $issue): JsonResponse
+    public function show(TaskIssue $issue): JsonResponse
     {
-        // Ensure the issue belongs to the task
-        if ($issue->task_id !== $task->id) {
-            return response()->json([
-                'success' => false,
-                'error' => [
-                    'code' => 'NOT_FOUND',
-                    'message' => 'Issue not found for this task.',
-                ]
-            ], 404);
-        }
-
         $user = Auth::user();
 
-        // Check if user can view the task
-        if (!$this->permissionService->canView($user, $task)) {
-            $this->permissionService->logPermissionDenial($user, 'view_task_issue', $task);
+        // Check if user can view the task that this issue belongs to
+        if (!$this->permissionService->canView($user, $issue->task)) {
+            $this->permissionService->logPermissionDenial($user, 'view_task_issue', $issue->task);
             return response()->json([
                 'success' => false,
                 'error' => [
@@ -185,24 +211,13 @@ class TaskIssueController
     /**
      * Update the specified issue.
      */
-    public function update(Request $request, Task $task, TaskIssue $issue): JsonResponse
+    public function update(Request $request, TaskIssue $issue): JsonResponse
     {
-        // Ensure the issue belongs to the task
-        if ($issue->task_id !== $task->id) {
-            return response()->json([
-                'success' => false,
-                'error' => [
-                    'code' => 'NOT_FOUND',
-                    'message' => 'Issue not found for this task.',
-                ]
-            ], 404);
-        }
-
         $user = Auth::user();
 
-        // Check if user can view the task
-        if (!$this->permissionService->canView($user, $task)) {
-            $this->permissionService->logPermissionDenial($user, 'update_task_issue', $task);
+        // Check if user can view the task that this issue belongs to
+        if (!$this->permissionService->canView($user, $issue->task)) {
+            $this->permissionService->logPermissionDenial($user, 'update_task_issue', $issue->task);
             return response()->json([
                 'success' => false,
                 'error' => [
@@ -216,7 +231,7 @@ class TaskIssueController
         $validator = Validator::make($request->all(), [
             'title' => 'sometimes|required|string|max:255',
             'description' => 'sometimes|required|string',
-            'issue_type' => ['sometimes', 'required', Rule::in(['blocker', 'technical', 'resource', 'dependency', 'general'])],
+            'issue_type' => ['sometimes', 'required', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'other'])],
             'severity' => ['sometimes', 'required', Rule::in(['critical', 'high', 'medium', 'low'])],
             'status' => ['sometimes', 'required', Rule::in(['open', 'in_progress', 'resolved', 'closed'])],
             'assigned_to' => 'nullable|exists:users,id',
@@ -260,24 +275,13 @@ class TaskIssueController
     /**
      * Resolve the specified issue.
      */
-    public function resolve(Request $request, Task $task, TaskIssue $issue): JsonResponse
+    public function resolve(Request $request, TaskIssue $issue): JsonResponse
     {
-        // Ensure the issue belongs to the task
-        if ($issue->task_id !== $task->id) {
-            return response()->json([
-                'success' => false,
-                'error' => [
-                    'code' => 'NOT_FOUND',
-                    'message' => 'Issue not found for this task.',
-                ]
-            ], 404);
-        }
-
         $user = Auth::user();
 
-        // Check if user can view the task
-        if (!$this->permissionService->canView($user, $task)) {
-            $this->permissionService->logPermissionDenial($user, 'resolve_task_issue', $task);
+        // Check if user can view the task that this issue belongs to
+        if (!$this->permissionService->canView($user, $issue->task)) {
+            $this->permissionService->logPermissionDenial($user, 'resolve_task_issue', $issue->task);
             return response()->json([
                 'success' => false,
                 'error' => [
@@ -349,7 +353,7 @@ class TaskIssueController
             'per_page' => 'nullable|integer|min:1|max:100',
             'search' => 'nullable|string|max:255',
             'severity' => ['nullable', Rule::in(['critical', 'high', 'medium', 'low'])],
-            'issue_type' => ['nullable', Rule::in(['blocker', 'technical', 'resource', 'dependency', 'general'])],
+            'issue_type' => ['nullable', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'other'])],
             'status' => ['nullable', Rule::in(['open', 'in_progress', 'resolved', 'closed'])],
             'task_id' => 'nullable|exists:tasks,id',
             'reported_by' => 'nullable|exists:users,id',

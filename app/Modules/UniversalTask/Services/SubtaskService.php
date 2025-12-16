@@ -2,6 +2,7 @@
 
 namespace App\Modules\UniversalTask\Services;
 
+use App\Models\User;
 use App\Modules\UniversalTask\Models\Task;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -13,10 +14,10 @@ class SubtaskService
      *
      * @param Task $parentTask The parent task
      * @param array $subtaskData Subtask data
-     * @param int $userId User creating the subtask
+     * @param User $user User creating the subtask
      * @return Task The created subtask
      */
-    public function createSubtask(Task $parentTask, array $subtaskData, int $userId): Task
+    public function createSubtask(Task $parentTask, array $subtaskData, User $user): Task
     {
         // Ensure parent_task_id is set
         $subtaskData['parent_task_id'] = $parentTask->id;
@@ -31,7 +32,7 @@ class SubtaskService
 
         // Use TaskService to create the subtask
         $taskService = app(TaskService::class);
-        $subtask = $taskService->createTask($subtaskData, $userId);
+        $subtask = $taskService->createTask($subtaskData, $user);
 
         // Update parent completion percentage
         $this->updateParentCompletionPercentage($parentTask);
@@ -39,7 +40,7 @@ class SubtaskService
         Log::info('Subtask created successfully', [
             'parent_task_id' => $parentTask->id,
             'subtask_id' => $subtask->id,
-            'created_by' => $userId,
+            'created_by' => $user->id,
         ]);
 
         return $subtask;

@@ -2,6 +2,7 @@
 
 namespace App\Modules\UniversalTask\Services;
 
+use App\Models\User;
 use App\Modules\UniversalTask\Models\Task;
 use App\Modules\UniversalTask\Models\TaskAssignment;
 use App\Modules\UniversalTask\Models\TaskHistory;
@@ -31,20 +32,35 @@ class TaskService
      * Create a new task with validation and context handling.
      *
      * @param array $data Task data
-     * @param int $userId User creating the task
+     * @param User $user User creating the task
      * @return Task The created task
      * @throws \Illuminate\Validation\ValidationException
      */
-    public function createTask(array $data, int $userId): Task
+    public function createTask(array $data, User $user): Task
     {
         // Validate task data
         $validatedData = $this->validateTaskData($data, 'create');
 
         // Add creator
-        $validatedData['created_by'] = $userId;
+        $validatedData['created_by'] = $user->id;
 
         // Set default status if not provided
         $validatedData['status'] = $validatedData['status'] ?? 'pending';
+
+        // Set default department if not provided (use user's department or first available)
+        if (!isset($validatedData['department_id']) || empty($validatedData['department_id'])) {
+            $validatedData['department_id'] = $user->department_id ?? 1; // Default to department 1 if user has no department
+        }
+
+        // Auto-assign to creator if no assignee specified
+        if (!isset($validatedData['assigned_user_id']) || empty($validatedData['assigned_user_id'])) {
+            $validatedData['assigned_user_id'] = $user->id;
+        }
+
+        // Set default due date (7 days from now) if not provided
+        if (!isset($validatedData['due_date']) || empty($validatedData['due_date'])) {
+            $validatedData['due_date'] = now()->addDays(7)->toDateString();
+        }
 
         DB::beginTransaction();
 
@@ -62,10 +78,17 @@ class TaskService
             // Clear cache for the new task
             $this->taskRepository->clearTaskCache($task);
 
+            // If this is a subtask, clear cache for the parent task too
+            if ($task->parent_task_id) {
+                $this->taskRepository->clearAllTaskCaches();
+            }
+
             Log::info('Task created successfully', [
                 'task_id' => $task->id,
                 'title' => $task->title,
-                'created_by' => $userId,
+                'created_by' => $user->id,
+                'assigned_to' => $task->assigned_user_id,
+                'due_date' => $task->due_date,
             ]);
 
             return $task;
@@ -75,7 +98,7 @@ class TaskService
 
             Log::error('Task creation failed', [
                 'data' => $data,
-                'user_id' => $userId,
+                'user_id' => $user->id,
                 'error' => $e->getMessage(),
             ]);
 
@@ -103,6 +126,10 @@ class TaskService
             // Track changes for history
             $changes = $this->getTaskChanges($task, $validatedData);
 
+            // Store old parent for cache clearing
+            $oldParentId = $task->parent_task_id;
+            $newParentId = $validatedData['parent_task_id'] ?? null;
+
             // Update the task
             $task->update($validatedData);
 
@@ -120,6 +147,11 @@ class TaskService
 
             // Clear cache for the updated task
             $this->taskRepository->clearTaskCache($task);
+
+            // Clear all caches if parent changed
+            if ($oldParentId !== $newParentId) {
+                $this->taskRepository->clearAllTaskCaches();
+            }
 
             Log::info('Task updated successfully', [
                 'task_id' => $task->id,
@@ -155,16 +187,21 @@ class TaskService
         DB::beginTransaction();
 
         try {
+            // Record deletion in history BEFORE deleting the task
+            $this->recordTaskHistory($task, ['deleted' => true], $userId, 'deleted');
+
             // Soft delete the task (cascade will handle relationships due to foreign keys)
             $task->delete();
-
-            // Record deletion in history
-            $this->recordTaskHistory($task, ['deleted' => true], $userId, 'deleted');
 
             DB::commit();
 
             // Clear cache for the deleted task
             $this->taskRepository->clearTaskCache($task);
+
+            // If this was a subtask, clear all caches
+            if ($task->parent_task_id) {
+                $this->taskRepository->clearAllTaskCaches();
+            }
 
             Log::info('Task deleted successfully', [
                 'task_id' => $task->id,
@@ -372,13 +409,13 @@ class TaskService
             'assigned_user_id' => 'nullable|exists:users,id',
             'estimated_hours' => 'nullable|numeric|min:0',
             'actual_hours' => 'nullable|numeric|min:0',
-            'due_date' => 'nullable|date|after_or_equal:today',
+            'due_date' => 'required|date|after_or_equal:today', // Make due_date required
             'blocked_reason' => 'nullable|string',
             'tags' => 'nullable|array',
             'metadata' => 'nullable|array',
         ];
 
-        // For updates, make fields optional
+        // For updates, make fields optional except for required ones
         if ($operation === 'update') {
             foreach ($rules as $field => $rule) {
                 if (!isset($data[$field])) {
@@ -492,8 +529,7 @@ class TaskService
             'task_id' => $task->id,
             'user_id' => $userId,
             'action' => $action,
-            'changes' => $changes,
-            'timestamp' => now(),
+            'metadata' => $changes,
         ]);
     }
 

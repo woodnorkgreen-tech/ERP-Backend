@@ -3,7 +3,6 @@
 namespace App\Modules\UniversalTask\Models;
 
 use App\Models\User;
-use App\Modules\HR\Models\Department;
 use App\Modules\UniversalTask\Models\Contexts\LogisticsTaskContext;
 use App\Modules\UniversalTask\Models\Contexts\DesignTaskContext;
 use App\Modules\UniversalTask\Models\Contexts\FinanceTaskContext;
@@ -57,6 +56,28 @@ class Task extends Model
         'completion_percentage' => 'decimal:2',
     ];
 
+    /**
+     * Default attribute values for the model.
+     *
+     * @var array
+     */
+    protected $attributes = [
+        'status' => 'pending',
+        'priority' => 'medium',
+        'estimated_hours' => 0,
+        'actual_hours' => 0,
+        'completion_percentage' => 0,
+        'tags' => '[]',
+        'metadata' => '{}',
+    ];
+
+    /**
+     * The attributes that should be appended to the model's array form.
+     *
+     * @var array
+     */
+    protected $appends = ['subtasks_count'];
+
     // ==================== Relationships ====================
 
     /**
@@ -64,7 +85,7 @@ class Task extends Model
      */
     public function department(): BelongsTo
     {
-        return $this->belongsTo(Department::class);
+        return $this->belongsTo('App\Modules\HR\Models\Department');
     }
 
     /**
@@ -327,12 +348,22 @@ class Task extends Model
     // ==================== Methods ====================
 
     /**
+     * Get the subtasks count attribute.
+     *
+     * @return int
+     */
+    public function getSubtasksCountAttribute(): int
+    {
+        return $this->subtasks()->count();
+    }
+
+    /**
      * Calculate completion percentage based on subtasks.
      */
     public function calculateCompletionPercentage(): float
     {
         $subtasks = $this->subtasks;
-        
+
         if ($subtasks->isEmpty()) {
             return $this->status === 'completed' ? 100.0 : 0.0;
         }

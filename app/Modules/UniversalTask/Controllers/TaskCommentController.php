@@ -25,9 +25,41 @@ class TaskCommentController
     /**
      * Display a listing of comments for a task.
      */
-    public function index(Task $task): JsonResponse
+    public function index(Request $request): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
+
+        // Debug: Log authentication status
+        \Log::info('TaskCommentController@index - User authentication check', [
+            'user_id' => $user ? $user->id : null,
+            'task_id' => $task->id,
+            'authenticated' => $user !== null
+        ]);
+
+        // Check if user is authenticated
+        if (!$user) {
+            \Log::error('TaskCommentController@index - User not authenticated');
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'UNAUTHENTICATED',
+                    'message' => 'Authentication required to view comments.',
+                ]
+            ], 401);
+        }
 
         // Check view permission for the task
         if (!$this->permissionService->canView($user, $task)) {
@@ -66,9 +98,45 @@ class TaskCommentController
     /**
      * Store a newly created comment.
      */
-    public function store(Request $request, Task $task): JsonResponse
+    public function store(Request $request): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
+
+        // Debug: Check authentication and task details
+        \Log::info('Comment creation attempt for task ID: ' . $taskId, [
+            'user_id' => $user ? $user->id : null,
+            'authenticated' => $user !== null
+        ]);
+
+        // Check if user is authenticated
+        if (!$user) {
+            \Log::error('Comment creation failed - User not authenticated for task ID: ' . $taskId);
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'UNAUTHENTICATED',
+                    'message' => 'Authentication required to create comments.',
+                ]
+            ], 401);
+        }
+
+        \Log::info('Task found: ' . $task->id . ' - ' . $task->title, [
+            'user_id' => $user->id,
+            'user_name' => $user->name
+        ]);
 
         // Check view permission for the task (required to comment)
         if (!$this->permissionService->canView($user, $task)) {
@@ -101,6 +169,15 @@ class TaskCommentController
         // If replying to a comment, ensure the parent comment belongs to the same task
         if ($request->parent_comment_id) {
             $parentComment = TaskComment::find($request->parent_comment_id);
+            if (!$parentComment) {
+                return response()->json([
+                    'success' => false,
+                    'error' => [
+                        'code' => 'INVALID_PARENT',
+                        'message' => 'Parent comment not found.',
+                    ]
+                ], 404);
+            }
             if ($parentComment->task_id !== $task->id) {
                 return response()->json([
                     'success' => false,
@@ -151,8 +228,21 @@ class TaskCommentController
     /**
      * Display the specified comment.
      */
-    public function show(Task $task, TaskComment $comment): JsonResponse
+    public function show(Request $request, TaskComment $comment): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
 
         // Ensure comment belongs to the task
@@ -199,8 +289,21 @@ class TaskCommentController
     /**
      * Update the specified comment.
      */
-    public function update(Request $request, Task $task, TaskComment $comment): JsonResponse
+    public function update(Request $request, TaskComment $comment): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
 
         // Ensure comment belongs to the task
@@ -268,8 +371,21 @@ class TaskCommentController
     /**
      * Remove the specified comment.
      */
-    public function destroy(Task $task, TaskComment $comment): JsonResponse
+    public function destroy(Request $request, TaskComment $comment): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
 
         // Ensure comment belongs to the task
@@ -316,11 +432,11 @@ class TaskCommentController
     /**
      * Create a reply to a comment.
      */
-    public function reply(Request $request, Task $task, TaskComment $comment): JsonResponse
+    public function reply(Request $request, TaskComment $comment): JsonResponse
     {
         // Reuse the store method but force the parent_comment_id
         $request->merge(['parent_comment_id' => $comment->id]);
 
-        return $this->store($request, $task);
+        return $this->store($request);
     }
 }

@@ -148,7 +148,15 @@ class TaskRepository
      */
     public function getTasks(array $params = [], ?User $user = null): LengthAwarePaginator
     {
-        $query = Task::with(['department', 'assignedUser', 'creator', 'parentTask']);
+        $query = Task::with(['department', 'assignedUser.employee', 'creator', 'parentTask'])
+                    ->withCount('subtasks');
+
+        // Include both parent tasks and subtasks in main list by default
+        // Only filter for specific parent_task_id when explicitly requested
+        if (isset($params['parent_task_id'])) {
+            $query->where('parent_task_id', $params['parent_task_id']);
+        }
+        // else: include all tasks (both parents and subtasks)
 
         // Apply search
         if (isset($params['search']) && !empty($params['search'])) {
@@ -279,7 +287,7 @@ class TaskRepository
      */
     public function advancedSearch(array $params = []): LengthAwarePaginator
     {
-        $query = Task::with(['department', 'assignedUser', 'creator', 'parentTask', 'subtasks']);
+        $query = Task::with(['department', 'assignedUser.employee', 'creator', 'parentTask', 'subtasks']);
 
         // Apply search with more fields
         if (isset($params['search']) && !empty($params['search'])) {

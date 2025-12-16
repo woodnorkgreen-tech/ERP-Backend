@@ -27,7 +27,7 @@ return new class extends Migration
                 'cancelled', 
                 'overdue'
             ])->default('pending');
-            $table->enum('priority', ['low', 'medium', 'high', 'critical'])->default('medium');
+            $table->enum('priority', ['low', 'medium', 'high', 'critical', 'urgent'])->default('medium');
             
             // Hierarchical relationship
             $table->foreignId('parent_task_id')->nullable()->constrained('tasks')->onDelete('cascade');
