@@ -15,25 +15,56 @@ class EventController extends Controller
      * Returns public events + user's personal events
      */
     public function index()
-    {
-        try {
-            $events = Event::visibleTo(Auth::id())
-                ->with('user:id,name')
-                ->orderBy('start_time')
-                ->get();
+{
+    try {
+        $user = Auth::user();
+        $userId = $user->id;
+        $employeeId = $user->employee_id; // Get the employee_id
+        $isHR = $user->hasRole('HR');
 
-            return response()->json([
-                'success' => true,
-                'data' => EventResource::collection($events)
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Failed to fetch events',
-                'message' => $e->getMessage()
-            ], 500);
-        }
+        // Get all events and meetings based on visibility rules
+        $events = Event::where(function ($query) use ($userId, $employeeId, $isHR) {
+            if ($isHR) {
+                // HR sees everything
+                $query->whereRaw('1=1');
+            } else {
+                $query->where(function ($q) use ($userId, $employeeId) {
+                    // 1. Events/meetings created by the user
+                    $q->where('user_id', $userId)
+                    
+                    // 2. Public events
+                    ->orWhere('is_public', true)
+                    
+                    // 3. Meetings where user is an attendee (using employee_id)
+                    ->orWhere(function ($subQuery) use ($employeeId) {
+                        $subQuery->where('is_minute', true)
+                            ->where(function ($attendeeQuery) use ($employeeId) {
+                                // Meeting for all employees
+                                $attendeeQuery->where('recipient_type', 'all')
+                                
+                                // OR user is in the attendees array (using employee_id)
+                                ->orWhereJsonContains('attendees', $employeeId);
+                            });
+                    });
+                });
+            }
+        })
+        ->with('user:id,name')
+        ->orderBy('start_time')
+        ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => EventResource::collection($events)
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => 'Failed to fetch events',
+            'message' => $e->getMessage()
+        ], 500);
     }
+}
 
     /**
      * Save a new event
