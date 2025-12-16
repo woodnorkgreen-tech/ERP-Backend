@@ -18,40 +18,27 @@ class EventController extends Controller
 {
     try {
         $user = Auth::user();
-        $userId = $user->id;
-        $employeeId = $user->employee_id; // Get the employee_id
         $isHR = $user->hasRole('HR');
 
-        // Get all events and meetings based on visibility rules
-        $events = Event::where(function ($query) use ($userId, $employeeId, $isHR) {
-            if ($isHR) {
-                // HR sees everything
-                $query->whereRaw('1=1');
-            } else {
-                $query->where(function ($q) use ($userId, $employeeId) {
-                    // 1. Events/meetings created by the user
-                    $q->where('user_id', $userId)
-                    
-                    // 2. Public events
-                    ->orWhere('is_public', true)
-                    
-                    // 3. Meetings where user is an attendee (using employee_id)
-                    ->orWhere(function ($subQuery) use ($employeeId) {
-                        $subQuery->where('is_minute', true)
-                            ->where(function ($attendeeQuery) use ($employeeId) {
-                                // Meeting for all employees
-                                $attendeeQuery->where('recipient_type', 'all')
-                                
-                                // OR user is in the attendees array (using employee_id)
-                                ->orWhereJsonContains('attendees', $employeeId);
-                            });
-                    });
-                });
-            }
-        })
-        ->with('user:id,name')
-        ->orderBy('start_time')
-        ->get();
+        // If HR, return ALL events and meetings
+        if ($isHR) {
+            $events = Event::with('user:id,name')
+                ->orderBy('start_time')
+                ->get();
+        } else {
+            // For regular users, return:
+            // 1. All public events
+            // 2. Events/meetings they created
+            // 3. ALL meetings (is_minute = true) - let Flutter filter by employee_id
+            $events = Event::where(function ($query) use ($user) {
+                $query->where('is_public', true)              // Public events
+                    ->orWhere('user_id', $user->id)           // Created by user
+                    ->orWhere('is_minute', true);             // All meetings
+            })
+            ->with('user:id,name')
+            ->orderBy('start_time')
+            ->get();
+        }
 
         return response()->json([
             'success' => true,
