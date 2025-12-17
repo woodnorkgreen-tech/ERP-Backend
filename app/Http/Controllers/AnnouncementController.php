@@ -12,7 +12,7 @@ class AnnouncementController extends Controller
     /**
      * Get all announcements for the authenticated user.
      */
-   public function index(Request $request)
+  public function index(Request $request)
 {
     $user = auth()->user();
 
@@ -28,7 +28,8 @@ class AnnouncementController extends Controller
         ->orderBy('created_at', 'desc')
         ->get()
         ->map(function ($announcement) use ($user) {
-            $isCreator = $announcement->from_user_id === $user->id;
+            // ✅ FIX: Cast to int for proper comparison
+            $isCreator = (int)$announcement->from_user_id === (int)$user->id;
             
             return [
                 'id' => $announcement->id,
@@ -40,7 +41,6 @@ class AnnouncementController extends Controller
                 'is_read' => !$isCreator ? $announcement->isReadBy($user->id) : false,
                 'is_creator' => $isCreator,
                 'read_count' => $announcement->readByUsers->count(),
-                // ✅ ALWAYS calculate recipient_has_read for everyone
                 'recipient_has_read' => $announcement->hasBeenReadByRecipients(),
             ];
         });
