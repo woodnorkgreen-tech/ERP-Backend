@@ -260,7 +260,7 @@ class SampleTaskSeeder extends Seeder
                 'task_id' => $createdTasks[6]->id,
                 'title' => 'Security Consultant Delay',
                 'description' => 'The external security consultant is delayed and we need to adjust our timeline.',
-                'issue_type' => 'blocker',
+                'issue_type' => 'bug',
                 'severity' => 'high',
                 'status' => 'open',
                 'reported_by' => $users->first()->id,

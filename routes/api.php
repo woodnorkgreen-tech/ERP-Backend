@@ -55,7 +55,19 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
-
+Route::prefix('hrr')->group(function () {
+    // Employee management
+    Route::apiResource('employees', EmployeeController::class);
+    
+    // Department management
+    Route::get('departments', [DepartmentController::class, 'index']);
+    Route::post('departments', [DepartmentController::class, 'store']);
+    Route::get('departments/{department}', [DepartmentController::class, 'show']);
+    Route::put('departments/{department}', [DepartmentController::class, 'update']);
+    Route::patch('departments/{department}', [DepartmentController::class, 'update']);
+    Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
+});
+ 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');

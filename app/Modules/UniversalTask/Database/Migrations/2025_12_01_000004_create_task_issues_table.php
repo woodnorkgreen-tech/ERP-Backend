@@ -16,7 +16,7 @@ return new class extends Migration
             $table->foreignId('task_id')->constrained('tasks')->onDelete('cascade');
             $table->string('title');
             $table->text('description')->nullable();
-            $table->enum('issue_type', ['blocker', 'technical', 'resource', 'dependency', 'general'])->default('general');
+            $table->enum('issue_type', ['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'blocker', 'other'])->default('bug');
             $table->enum('severity', ['critical', 'high', 'medium', 'low'])->default('medium');
             $table->enum('status', ['open', 'in_progress', 'resolved', 'closed'])->default('open');
             $table->foreignId('reported_by')->constrained('users')->onDelete('cascade');

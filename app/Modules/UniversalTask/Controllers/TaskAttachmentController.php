@@ -24,8 +24,21 @@ class TaskAttachmentController
     /**
      * Display a listing of attachments for a task.
      */
-    public function index(Task $task): JsonResponse
+    public function index(Request $request): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
 
         // Check view permission for the task
@@ -64,8 +77,21 @@ class TaskAttachmentController
     /**
      * Store a newly uploaded attachment.
      */
-    public function store(Request $request, Task $task): JsonResponse
+    public function store(Request $request): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
 
         // Check edit permission for the task (required to upload attachments)
@@ -142,8 +168,21 @@ class TaskAttachmentController
     /**
      * Display the specified attachment.
      */
-    public function show(Task $task, TaskAttachment $attachment): JsonResponse
+    public function show(Request $request, TaskAttachment $attachment): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
 
         // Ensure attachment belongs to the task
@@ -190,8 +229,15 @@ class TaskAttachmentController
     /**
      * Download the specified attachment.
      */
-    public function download(Task $task, TaskAttachment $attachment): StreamedResponse
+    public function download(Request $request, TaskAttachment $attachment): StreamedResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            abort(404, 'Task not found.');
+        }
+
         $user = Auth::user();
 
         // Ensure attachment belongs to the task
@@ -218,8 +264,21 @@ class TaskAttachmentController
     /**
      * Remove the specified attachment.
      */
-    public function destroy(Task $task, TaskAttachment $attachment): JsonResponse
+    public function destroy(Request $request, TaskAttachment $attachment): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
 
         // Ensure attachment belongs to the task
@@ -272,8 +331,21 @@ class TaskAttachmentController
     /**
      * Get all versions of an attachment.
      */
-    public function getVersions(Task $task, string $filename): JsonResponse
+    public function getVersions(Request $request, string $filename): JsonResponse
     {
+        $taskId = $request->route('task');
+        $task = Task::find($taskId);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'TASK_NOT_FOUND',
+                    'message' => 'The specified task does not exist.',
+                ]
+            ], 404);
+        }
+
         $user = Auth::user();
 
         // Check view permission for the task
