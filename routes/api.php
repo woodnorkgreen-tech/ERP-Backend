@@ -55,7 +55,29 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
-
+ Route::prefix('hrr')->group(function () {
+        // Employee management
+        Route::apiResource('employees', EmployeeController::class)->middleware([
+            'index' => 'permission:' . Permissions::EMPLOYEE_READ,
+            'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
+            'show' => 'permission:' . Permissions::EMPLOYEE_READ,
+            'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
+            'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
+        ]);
+        // Department management
+        Route::get('departments', [DepartmentController::class, 'index'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
+        Route::post('departments', [DepartmentController::class, 'store'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_CREATE);
+        Route::get('departments/{department}', [DepartmentController::class, 'show'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
+        Route::put('departments/{department}', [DepartmentController::class, 'update'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
+        Route::patch('departments/{department}', [DepartmentController::class, 'update'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
+        Route::delete('departments/{department}', [DepartmentController::class, 'destroy'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_DELETE);
+    });
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
