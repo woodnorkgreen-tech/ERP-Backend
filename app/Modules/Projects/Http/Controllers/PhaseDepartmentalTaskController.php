@@ -11,8 +11,13 @@ use Illuminate\Routing\Controller;
 
 class PhaseDepartmentalTaskController extends Controller
 {
+    public function __construct(
+        protected \App\Modules\Projects\Services\NotificationService $notificationService
+    ) {}
+
     public function index(Request $request): JsonResponse
     {
+        // ... (existing implementation)
         $query = EnquiryTask::with('enquiry', 'department', 'assignedUser');
 
         // Filter by enquiry if provided
@@ -64,10 +69,20 @@ class PhaseDepartmentalTaskController extends Controller
             'task_description' => $request->task_description,
             'priority' => $request->priority,
             'assigned_to' => $request->assigned_to,
+            // Ensure compat with assigned_user_id
+            'assigned_user_id' => $request->assigned_to,
             'due_date' => $request->due_date,
             'status' => 'pending',
             'created_by' => Auth::id(),
         ]);
+
+        // Send notification if assigned
+        if ($task->assigned_user_id) {
+            $assignedUser = \App\Models\User::find($task->assigned_user_id);
+            if ($assignedUser) {
+                $this->notificationService->sendEnquiryTaskAssignment($task, $assignedUser, Auth::user());
+            }
+        }
 
         return response()->json([
             'message' => 'Departmental task created successfully',
@@ -101,14 +116,37 @@ class PhaseDepartmentalTaskController extends Controller
             ], 422);
         }
 
-        $task->update($request->only([
+        $oldStatus = $task->status;
+        $oldAssignee = $task->assigned_user_id;
+
+        $updateData = $request->only([
             'task_name',
             'task_description',
             'priority',
             'assigned_to',
             'due_date',
             'status',
-        ]));
+        ]);
+
+        // Map assigned_to to assigned_user_id for consistency
+        if (isset($updateData['assigned_to'])) {
+            $updateData['assigned_user_id'] = $updateData['assigned_to'];
+        }
+
+        $task->update($updateData);
+
+        // Notify on Reassignment
+        if (isset($updateData['assigned_user_id']) && $updateData['assigned_user_id'] != $oldAssignee) {
+            $assignedUser = \App\Models\User::find($updateData['assigned_user_id']);
+            if ($assignedUser) {
+                 $this->notificationService->sendEnquiryTaskAssignment($task, $assignedUser, Auth::user(), true);
+            }
+        }
+
+        // Notify on Completion
+        if ($task->status === 'completed' && $oldStatus !== 'completed') {
+             $this->notificationService->sendEnquiryTaskCompleted($task, Auth::user());
+        }
 
         return response()->json([
             'message' => 'Departmental task updated successfully',
@@ -142,6 +180,7 @@ class PhaseDepartmentalTaskController extends Controller
 
         $action = $request->action;
         $updates = [];
+        $user = Auth::user();
 
         switch ($action) {
             case 'start':
@@ -157,12 +196,22 @@ class PhaseDepartmentalTaskController extends Controller
             case 'reassign':
                 if ($request->has('assigned_to')) {
                     $updates['assigned_to'] = $request->assigned_to;
+                    $updates['assigned_user_id'] = $request->assigned_to;
                 }
                 break;
         }
 
         if (!empty($updates)) {
             $task->update($updates);
+
+            if ($action === 'complete') {
+                $this->notificationService->sendEnquiryTaskCompleted($task, $user);
+            } elseif ($action === 'reassign' && isset($updates['assigned_user_id'])) {
+                $assignedUser = \App\Models\User::find($updates['assigned_user_id']);
+                if ($assignedUser) {
+                    $this->notificationService->sendEnquiryTaskAssignment($task, $assignedUser, $user, true);
+                }
+            }
         }
 
         return response()->json([

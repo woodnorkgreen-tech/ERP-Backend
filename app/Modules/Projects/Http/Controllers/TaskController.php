@@ -401,8 +401,14 @@ class TaskController extends Controller
             $user = Auth::user();
 
             \Log::info("[DEBUG] updateTaskStatus calling workflowService->updateTaskStatus for task {$taskId} with status {$request->status}");
-            $updatedTask = $this->workflowService->updateTaskStatus($taskId, $request->status, $user->id);
-            \Log::info("[DEBUG] updateTaskStatus workflow service returned task with status: {$updatedTask->status}");
+        $updatedTask = $this->workflowService->updateTaskStatus($taskId, $request->status, $user->id);
+        \Log::info("[DEBUG] updateTaskStatus workflow service returned task with status: {$updatedTask->status}");
+
+        // Send notification if task is completed
+        if ($request->status === 'completed' && $task->status !== 'completed') {
+            $this->notificationService->sendEnquiryTaskCompleted($updatedTask, $user);
+            \Log::info("[DEBUG] Sent task completion notification for task {$taskId}");
+        }
 
             // Update notes if provided
             if ($request->has('notes')) {
@@ -652,8 +658,8 @@ class TaskController extends Controller
 
             \Log::info("[DEBUG] assignEnquiryTask workflow service returned task: {$task->id}, status: {$task->status}, assigned_by: " . ($task->assigned_by ?? 'null'));
 
-            // Send notification
-            $this->notificationService->sendTaskAssignmentNotification($task, $assignedUser, $user);
+            // Send notification (for task assignment)
+        $this->notificationService->sendEnquiryTaskAssignment($task, $assignedUser, $user, false);
 
             $loadedTask = $task->load('department', 'assignedBy', 'assignedTo', 'assignmentHistory');
             \Log::info("[DEBUG] assignEnquiryTask loaded task with relationships, history count: " . ($loadedTask->assignmentHistory ? $loadedTask->assignmentHistory->count() : 0));
@@ -764,8 +770,8 @@ class TaskController extends Controller
                 $request->reason
             );
 
-            // Send notification to new assignee
-            $this->notificationService->sendTaskAssignmentNotification($task, $newAssignedUser, $user);
+            // Send notification to new assignee (reassignment)
+        $this->notificationService->sendEnquiryTaskAssignment($task, $newAssignedUser, $user, true);
 
             return response()->json([
                 'data' => $task->load('department', 'assignedBy', 'assignmentHistory'),

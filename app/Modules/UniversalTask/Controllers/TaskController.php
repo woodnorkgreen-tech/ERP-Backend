@@ -22,11 +22,88 @@ class TaskController
     public function __construct(
         TaskService $taskService,
         TaskPermissionService $permissionService,
-        TaskRepository $taskRepository
+        TaskRepository $taskRepository,
+        protected \App\Modules\Projects\Services\NotificationService $notificationService
     ) {
         $this->taskService = $taskService;
         $this->permissionService = $permissionService;
         $this->taskRepository = $taskRepository;
+        $this->notificationService = $notificationService;
+    }
+
+    // ... (existing code)
+
+    /**
+     * Update task status.
+     */
+    public function updateStatus(Request $request, Task $task): JsonResponse
+    {
+        // ... (existing validation and permission checks)
+
+        try {
+            $oldStatus = $task->status;
+            
+            $task = $this->taskService->updateStatus(
+                $task,
+                $request->status,
+                $user->id,
+                $request->notes
+            );
+
+            // Send completion notification if task wasn't completed before
+            if ($request->status === 'completed' && $oldStatus !== 'completed') {
+                $this->notificationService->sendUniversalTaskCompleted($task, $user);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Task status updated successfully.',
+                'data' => $task,
+            ]);
+
+        } catch (\InvalidArgumentException $e) {
+            // ... (existing catch)
+        } catch (\Exception $e) {
+            // ... (existing catch)
+        }
+    }
+
+    /**
+     * Assign task to users.
+     */
+    public function assign(Request $request, Task $task): JsonResponse
+    {
+        // ... (existing validation)
+
+        // Check assignment permissions for all users
+        $assignees = User::whereIn('id', $request->user_ids)->get();
+        // ... (existing permission checking loop)
+
+        try {
+            $assignmentData = [
+                'user_ids' => $request->user_ids,
+                'role' => $request->role,
+                'replace_existing' => $request->get('replace_existing', false),
+            ];
+
+            $task = $this->taskService->assignTask($task, $assignmentData, $user->id);
+
+            // Send notifications to assignees
+            foreach ($assignees as $assignee) {
+                // If the current user assigned themselves, maybe don't notify? 
+                // Or standard behavior is to notify anyway to confirm assignment.
+                $this->notificationService->sendUniversalTaskAssignment($task, $assignee, $user);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Task assigned successfully.',
+                'data' => $task->load('assignments.user'),
+            ]);
+
+        } catch (\Exception $e) {
+            // ... (existing catch)
+        }
     }
 
     /**

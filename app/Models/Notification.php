@@ -16,6 +16,8 @@ class Notification extends Model
         'title',
         'message',
         'data',
+        'notifiable_type',
+        'notifiable_id',
         'is_read',
         'read_at',
     ];
@@ -30,6 +32,14 @@ class Notification extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Get the notifiable entity (task) that this notification relates to
+     */
+    public function notifiable()
+    {
+        return $this->morphTo();
     }
 
     // Scopes

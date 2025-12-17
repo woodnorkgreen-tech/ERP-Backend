@@ -539,6 +539,16 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/quality-checkpoints', [App\Http\Controllers\ProductionController::class, 'deleteQualityCheckpoints']);
         });
 
+        // Notification Routes
+        Route::prefix('projects')->group(function () {
+            Route::get('/notifications', [App\Http\Controllers\NotificationController::class, 'index']);
+        });
+        Route::prefix('notifications')->group(function () {
+            Route::put('/{id}/read', [App\Http\Controllers\NotificationController::class, 'markAsRead']);
+            Route::put('/mark-all-read', [App\Http\Controllers\NotificationController::class, 'markAllAsRead']);
+            Route::delete('/{id}', [App\Http\Controllers\NotificationController::class, 'destroy']);
+        });
+
         // Drivers endpoint for logistics
         Route::get('/drivers', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getDrivers']);
 
