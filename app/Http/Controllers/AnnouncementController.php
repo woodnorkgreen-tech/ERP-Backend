@@ -23,7 +23,6 @@ class AnnouncementController extends Controller
         ], 401);
     }
 
-    // Use the forUser scope you already have
     $announcements = Announcement::with(['fromUser', 'toEmployee', 'toDepartment', 'readByUsers'])
         ->forUser($user)
         ->orderBy('created_at', 'desc')
@@ -38,7 +37,7 @@ class AnnouncementController extends Controller
                 'to_name' => $announcement->to_name,
                 'type' => $announcement->type,
                 'created_at' => $announcement->created_at->format('M d, Y'),
-                'is_read' => $announcement->isReadBy($user->id),
+                'is_read' => !$isCreator ? $announcement->isReadBy($user->id) : false,
                 'is_creator' => $isCreator,
                 'read_count' => $announcement->readByUsers->count(),
                 'recipient_has_read' => $isCreator ? $announcement->hasBeenReadByRecipients() : null,
@@ -50,7 +49,6 @@ class AnnouncementController extends Controller
         'data' => $announcements
     ]);
 }
-
 /**
  * Create a new announcement.
  */
