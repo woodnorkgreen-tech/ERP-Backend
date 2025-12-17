@@ -55,7 +55,7 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
- Route::prefix('hrr')->group(function () {
+ Route::prefix('hrr')->withoutMiddleware(['auth:sanctum'])->group(function () {
         // Employee management
         Route::apiResource('employees', EmployeeController::class)->middleware([
             'index' => 'permission:' . Permissions::EMPLOYEE_READ,
