@@ -175,12 +175,13 @@ public function store(Request $request)
 
         $announcement = Announcement::findOrFail($id);
 
-        if ($announcement->from_user_id !== $user->id) {
-            return response()->json([
-                'success' => false,
-                'message' => 'You are not authorized to delete this announcement'
-            ], 403);
-        }
+       // In destroy method
+if ((int)$announcement->from_user_id !== (int)$user->id) {
+    return response()->json([
+        'success' => false,
+        'message' => 'You are not authorized to delete this announcement'
+    ], 403);
+}
 
         $announcement->delete();
 
