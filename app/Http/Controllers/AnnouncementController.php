@@ -40,7 +40,8 @@ class AnnouncementController extends Controller
                 'is_read' => !$isCreator ? $announcement->isReadBy($user->id) : false,
                 'is_creator' => $isCreator,
                 'read_count' => $announcement->readByUsers->count(),
-                'recipient_has_read' => $isCreator ? $announcement->hasBeenReadByRecipients() : null,
+                // ✅ ALWAYS calculate recipient_has_read for everyone
+                'recipient_has_read' => $announcement->hasBeenReadByRecipients(),
             ];
         });
 
