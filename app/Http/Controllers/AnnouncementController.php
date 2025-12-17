@@ -12,7 +12,7 @@ class AnnouncementController extends Controller
     /**
      * Get all announcements for the authenticated user.
      */
-    public function index(Request $request)
+   public function index(Request $request)
 {
     $user = auth()->user();
 
@@ -23,18 +23,9 @@ class AnnouncementController extends Controller
         ], 401);
     }
 
-    // Get announcements where user is creator OR recipient
+    // Use the forUser scope you already have
     $announcements = Announcement::with(['fromUser', 'toEmployee', 'toDepartment', 'readByUsers'])
-        ->where(function($query) use ($user) {
-            $query->where('from_user_id', $user->id); // Created by user
-            
-            // OR sent to user (if they have employee_id or department_id)
-            if ($user->employee_id || $user->department_id) {
-                $query->orWhereHas('announcement', function($q) use ($user) {
-                    // This should use your forUser scope
-                });
-            }
-        })
+        ->forUser($user)
         ->orderBy('created_at', 'desc')
         ->get()
         ->map(function ($announcement) use ($user) {
