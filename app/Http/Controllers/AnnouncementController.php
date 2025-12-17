@@ -59,6 +59,43 @@ class AnnouncementController extends Controller
         'data' => $announcements
     ]);
 }
+
+/**
+ * Create a new announcement.
+ */
+public function store(Request $request)
+{
+    $user = auth()->user();
+
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'User not authenticated'
+        ], 401);
+    }
+
+    $validated = $request->validate([
+        'message' => 'required|string',
+        'from_user_id' => 'required|integer',
+        'type' => 'required|in:employee,department',
+        'to_employee_id' => 'required_if:type,employee|integer|nullable',
+        'to_department_id' => 'required_if:type,department|integer|nullable',
+    ]);
+
+    $announcement = Announcement::create([
+        'message' => $validated['message'],
+        'from_user_id' => $validated['from_user_id'],
+        'type' => $validated['type'],
+        'to_employee_id' => $validated['to_employee_id'] ?? null,
+        'to_department_id' => $validated['to_department_id'] ?? null,
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Announcement created successfully',
+        'data' => $announcement
+    ]);
+}
     /**
      * Mark announcement as read.
      */
