@@ -65,15 +65,15 @@ public function store(Request $request)
 
     $validated = $request->validate([
         'message' => 'required|string',
-        'from_user_id' => 'required|integer',
         'type' => 'required|in:employee,department',
         'to_employee_id' => 'required_if:type,employee|integer|nullable',
         'to_department_id' => 'required_if:type,department|integer|nullable',
     ]);
 
+    // ✅ Use authenticated user's ID, NOT from request
     $announcement = Announcement::create([
         'message' => $validated['message'],
-        'from_user_id' => $validated['from_user_id'],
+        'from_user_id' => $user->id,  // ✅ Use auth user, not request
         'type' => $validated['type'],
         'to_employee_id' => $validated['to_employee_id'] ?? null,
         'to_department_id' => $validated['to_department_id'] ?? null,
