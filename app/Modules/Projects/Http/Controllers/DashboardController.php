@@ -165,6 +165,34 @@ class DashboardController extends Controller
     }
 
     /**
+     * Get financial metrics for dashboard
+     */
+    public function financialMetrics(Request $request): JsonResponse
+    {
+        // Check permissions
+        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
+            return response()->json([
+                'message' => 'Unauthorized access to dashboard metrics'
+            ], 403);
+        }
+
+        try {
+            $metrics = $this->dashboardService->getFinancialMetrics();
+
+            return response()->json([
+                'data' => $metrics,
+                'message' => 'Financial metrics retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve financial metrics',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * @OA\Get(
      *     path="/api/projects/dashboard/recent-activities",
      *     summary="Get recent activities for dashboard",
@@ -281,6 +309,7 @@ class DashboardController extends Controller
                 'enquiry_metrics' => $this->dashboardService->getEnquiryMetrics(),
                 'task_metrics' => $this->dashboardService->getTaskMetrics(),
                 'project_metrics' => $this->dashboardService->getProjectMetrics(),
+                'financial_metrics' => $this->dashboardService->getFinancialMetrics(),
                 'recent_activities' => $this->dashboardService->getRecentActivities(10),
                 'alerts' => $this->dashboardService->getAlerts(),
             ];

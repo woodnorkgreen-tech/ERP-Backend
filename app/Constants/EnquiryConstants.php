@@ -82,13 +82,7 @@ class EnquiryConstants
         ];
     }
 
-    /**
-     * Get statuses that allow conversion to project
-     */
-    public static function getConvertibleStatuses(): array
-    {
-        return [self::STATUS_QUOTE_APPROVED];
-    }
+
 
     /**
      * Get active statuses (for filtering)

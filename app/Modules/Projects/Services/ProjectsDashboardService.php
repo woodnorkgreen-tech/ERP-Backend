@@ -142,7 +142,6 @@ class ProjectsDashboardService
             'total_projects' => $convertedProjects + $activeProjects + $completedProjects,
             'active_projects' => $activeProjects,
             'completed_projects' => $completedProjects,
-            'converted_enquiries' => $convertedProjects,
             'total_budget' => $totalBudget,
             'projects_by_status' => $projectsByStatus,
             'average_duration_days' => $averageProjectDuration,
@@ -209,6 +208,46 @@ class ProjectsDashboardService
             ->toArray();
 
         return $phases;
+    }
+
+    /**
+     * Get financial metrics for dashboard
+     */
+    public function getFinancialMetrics(): array
+    {
+        try {
+            $relevantStatuses = ['quote_approved', 'planning', 'in_progress', 'completed'];
+            
+            $projects = ProjectEnquiry::whereIn('status', $relevantStatuses)->get();
+            
+            $revenue = $projects->sum('estimated_budget') ?? 0;
+            // Assuming 'budget' represents the internal cost/allocated budget. 
+            // If null, we might assume a default margin or 0 cost (which inflates profit).
+            // Let's assume if budget is 0, cost is 70% of revenue for estimation if revenue > 0
+            $cost = $projects->sum('budget') ?? 0;
+            
+            if ($cost == 0 && $revenue > 0) {
+                $cost = $revenue * 0.70;
+            }
+            
+            $profit = $revenue - $cost;
+            $margin = $revenue > 0 ? round(($profit / $revenue) * 100, 1) : 0;
+            
+            return [
+                'revenue' => $revenue,
+                'cost' => $cost,
+                'profit' => $profit,
+                'margin' => $margin,
+            ];
+        } catch (\Exception $e) {
+            \Log::error('Error calculating financial metrics: ' . $e->getMessage());
+            return [
+                'revenue' => 0,
+                'cost' => 0,
+                'profit' => 0,
+                'margin' => 0,
+            ];
+        }
     }
 
     /**
@@ -517,7 +556,6 @@ class ProjectsDashboardService
             'total_projects' => $enquiries->count(),
             'active_projects' => $activeProjects,
             'completed_projects' => $completedProjects,
-            'converted_enquiries' => $convertedProjects,
             'total_budget' => $totalBudget,
             'projects_by_status' => $projectsByStatus,
         ];

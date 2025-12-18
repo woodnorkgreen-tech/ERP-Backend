@@ -572,6 +572,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('dashboard/enquiry-metrics', [DashboardController::class, 'enquiryMetrics']);
         Route::get('dashboard/task-metrics', [DashboardController::class, 'taskMetrics']);
         Route::get('dashboard/project-metrics', [DashboardController::class, 'projectMetrics']);
+        Route::get('dashboard/financial-metrics', [DashboardController::class, 'financialMetrics']);
         Route::get('dashboard/recent-activities', [DashboardController::class, 'recentActivities']);
         Route::get('dashboard/alerts', [DashboardController::class, 'alerts']);
         Route::post('dashboard/filter', [DashboardController::class, 'filterDashboard']);
