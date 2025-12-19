@@ -48,6 +48,11 @@ return [
             'notes' => 'Manage procurement and inventory'
         ],
         [
+            'title' => 'Teams',
+            'type' => 'teams',
+            'notes' => 'Manage project teams'
+        ],
+        [
             'title' => 'Production',
             'type' => 'production',
             'notes' => 'Handle production activities'
@@ -77,11 +82,7 @@ return [
             'type' => 'report',
             'notes' => 'Archive and generate reports'
         ],
-        [
-            'title' => 'Teams',
-            'type' => 'teams',
-            'notes' => 'Manage project teams'
-        ],
+
     ],
 
     /*

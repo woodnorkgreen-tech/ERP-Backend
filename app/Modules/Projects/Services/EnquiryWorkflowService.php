@@ -229,6 +229,42 @@ class EnquiryWorkflowService
     }
 
     /**
+     * Release task back to the pool (Unassign)
+     */
+    public function releaseTask(int $taskId, int $releasedByUserId, ?string $reason = null): EnquiryTask
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        
+        if (!$task->assigned_to) {
+            throw new \Exception("Task is already unassigned");
+        }
+
+        $previousAssigneeId = $task->assigned_to;
+        
+        // Create history entry
+        TaskAssignmentHistory::create([
+            'enquiry_task_id' => $task->id,
+            'assigned_to' => null,
+            'assigned_by' => $releasedByUserId,
+            'assigned_at' => now(),
+            'notes' => "Task released to pool. Reason: " . ($reason ?? 'No reason provided'),
+        ]);
+
+        // Clear assignment
+        $task->update([
+            'assigned_to' => null,
+            // We keep department_id so it stays in the correct pool
+        ]);
+        
+        // Remove from pivot table
+        $task->assignedUsers()->detach($previousAssigneeId);
+
+        Log::info("Task {$taskId} released (handover) by user {$releasedByUserId}");
+
+        return $task->fresh();
+    }
+
+    /**
      * Create a manual enquiry task
      */
     public function createManualEnquiryTask(int $enquiryId, array $taskData, int $createdByUserId): EnquiryTask

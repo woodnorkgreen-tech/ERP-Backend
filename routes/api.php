@@ -86,6 +86,8 @@ Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@
 Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
 Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 //to be removed later
+// Protected Project & Task Routes
+Route::middleware('auth:sanctum')->group(function () {
  Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
         Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
         Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);
@@ -155,8 +157,9 @@ Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementControlle
         // Enquiry task assignment routes
         Route::post('enquiry-tasks/{task}/assign', [TaskController::class, 'assignEnquiryTask']);
         Route::put('enquiry-tasks/{task}/reassign', [TaskController::class, 'reassignEnquiryTask']);
-        Route::get('enquiry-tasks/{task}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
-        Route::put('enquiry-tasks/{task}', [TaskController::class, 'updateEnquiryTask']);
+        Route::put('enquiry-tasks/{taskId}/release', [TaskController::class, 'releaseEnquiryTask']);
+        Route::get('enquiry-tasks/{taskId}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
+        Route::put('enquiry-tasks/{taskId}', [TaskController::class, 'updateEnquiryTask']);
 
         // Project management
         Route::get('projects', function () {
@@ -180,6 +183,7 @@ Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementControlle
         Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
+});
 
 //mobile app
 Route::get('/app-departments', [DepartmentController::class, 'index']);
@@ -591,6 +595,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Enquiry task assignment routes
         Route::post('enquiry-tasks/{taskId}/assign', [TaskController::class, 'assignEnquiryTask']);
         Route::put('enquiry-tasks/{taskId}/reassign', [TaskController::class, 'reassignEnquiryTask']);
+        Route::put('enquiry-tasks/{taskId}/release', [TaskController::class, 'releaseEnquiryTask']);
         Route::get('enquiry-tasks/{taskId}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
         Route::put('enquiry-tasks/{taskId}', [TaskController::class, 'updateEnquiryTask']);
 
