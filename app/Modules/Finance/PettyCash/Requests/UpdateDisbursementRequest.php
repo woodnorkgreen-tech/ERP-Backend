@@ -77,6 +77,11 @@ class UpdateDisbursementRequest extends FormRequest
                 'string',
                 'max:255',
             ],
+            'tax' => [
+                'sometimes',
+                'string',
+                Rule::in(['etr', 'no_etr']),
+            ],
         ];
     }
 
@@ -100,6 +105,7 @@ class UpdateDisbursementRequest extends FormRequest
             'job_number.max' => 'Job number cannot exceed 255 characters.',
             'payment_method.in' => 'The selected payment method is invalid.',
             'transaction_code.max' => 'Transaction code cannot exceed 255 characters.',
+            'tax.in' => 'The selected tax option is invalid.',
         ];
     }
 

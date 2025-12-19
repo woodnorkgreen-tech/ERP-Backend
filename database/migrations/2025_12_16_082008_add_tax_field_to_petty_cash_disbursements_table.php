@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('petty_cash_disbursements', function (Blueprint $table) {
-            //
+            $table->enum('tax', ['etr', 'no_etr'])->default('etr')->after('project_name');
         });
     }
 
@@ -22,7 +22,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('petty_cash_disbursements', function (Blueprint $table) {
-            //
+            $table->dropColumn('tax');
         });
     }
 };
