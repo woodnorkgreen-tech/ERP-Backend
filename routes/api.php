@@ -589,10 +589,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('all-enquiry-tasks', [TaskController::class, 'getAllEnquiryTasks']);
 
         // Enquiry task assignment routes
-        Route::post('enquiry-tasks/{task}/assign', [TaskController::class, 'assignEnquiryTask']);
-        Route::put('enquiry-tasks/{task}/reassign', [TaskController::class, 'reassignEnquiryTask']);
-        Route::get('enquiry-tasks/{task}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
-        Route::put('enquiry-tasks/{task}', [TaskController::class, 'updateEnquiryTask']);
+        Route::post('enquiry-tasks/{taskId}/assign', [TaskController::class, 'assignEnquiryTask']);
+        Route::put('enquiry-tasks/{taskId}/reassign', [TaskController::class, 'reassignEnquiryTask']);
+        Route::get('enquiry-tasks/{taskId}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
+        Route::put('enquiry-tasks/{taskId}', [TaskController::class, 'updateEnquiryTask']);
 
         // Project management
         Route::get('projects', function () {

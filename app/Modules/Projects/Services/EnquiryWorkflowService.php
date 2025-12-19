@@ -155,9 +155,9 @@ class EnquiryWorkflowService
         }
 
         // Check if user belongs to a department
-        if (!$assignedUser->department_id) {
-            throw new \Exception("Cannot assign task to user without department");
-        }
+        // if (!$assignedUser->department_id) {
+        //     throw new \Exception("Cannot assign task to user without department");
+        // }
 
         // Check for duplicate assignments in same department (optional - can be configured)
         $existingTasks = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)

@@ -3,11 +3,11 @@
 namespace App\Modules\Projects\Services;
 
 use App\Models\Notification;
+use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Modules\UniversalTask\Models\Task as UniversalTask;
 use Illuminate\Support\Facades\Log;
-
 class NotificationService
 {
     /**
@@ -245,11 +245,43 @@ class NotificationService
     }
 
     /**
+     * Send notification when a new enquiry is created
+     */
+    public function sendEnquiryCreatedNotification(ProjectEnquiry $enquiry, User $recipient): void
+    {
+        try {
+            Notification::create([
+                'user_id' => $recipient->id,
+                'type' => 'enquiry_created',
+                'title' => 'New Project Enquiry',
+                'message' => "New enquiry '{$enquiry->title}' (#{$enquiry->enquiry_number}) has been created",
+                'notifiable_type' => ProjectEnquiry::class,
+                'notifiable_id' => $enquiry->id,
+                'data' => [
+                    'enquiry_id' => $enquiry->id,
+                    'enquiry_title' => $enquiry->title,
+                    'enquiry_number' => $enquiry->enquiry_number,
+                    'client_name' => $enquiry->client ? $enquiry->client->full_name : 'Unknown Client',
+                    'created_by' => $enquiry->creator ? $enquiry->creator->name : 'Unknown User',
+                    'priority' => $enquiry->priority,
+                    'date_received' => $enquiry->date_received?->toISOString(),
+                ],
+            ]);
+
+            Log::info("Enquiry created notification sent", [
+                'enquiry_id' => $enquiry->id,
+                'recipient_id' => $recipient->id
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Failed to send enquiry created notification: " . $e->getMessage());
+        }
+    }
+
+    /**
      * Send notification when Enquiry Task is completed
      */
     public function sendEnquiryTaskCompleted(EnquiryTask $task, User $completedBy): void
-    {
-        try {
+    {        try {
             // Notify task creator
             if ($task->created_by && $task->created_by !== $completedBy->id) {
                 $creator = User::find($task->created_by);

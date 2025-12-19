@@ -112,7 +112,17 @@ class TaskController extends Controller
                     'filtering_by_assigned_users' => $user->id
                 ]);
                 // Use the pivot table relationship to filter tasks
-                $query->assignedToUser($user->id);
+                // Allow users to see tasks assigned to them OR unassigned tasks in their department (Task Pool)
+                $query->where(function($q) use ($user) {
+                    $q->assignedToUser($user->id)
+                      ->orWhere(function($poolQ) use ($user) {
+                          if ($user->department_id) {
+                              $poolQ->where('department_id', $user->department_id)
+                                    ->whereNull('assigned_user_id')
+                                    ->doesntHave('assignedUsers');
+                          }
+                      });
+                });
             } else {
                 \Log::info('[TASK FILTER] Privileged user - no filtering', [
                     'user_id' => $user->id,
@@ -233,7 +243,17 @@ class TaskController extends Controller
             $user = Auth::user();
             // Check if user has privileged role (can see all tasks)
             if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
-                $query->assignedToUser($user->id);
+                // Allow users to see tasks assigned to them OR unassigned tasks in their department (Task Pool)
+                $query->where(function($q) use ($user) {
+                    $q->assignedToUser($user->id)
+                      ->orWhere(function($poolQ) use ($user) {
+                          if ($user->department_id) {
+                              $poolQ->where('department_id', $user->department_id)
+                                    ->whereNull('assigned_user_id')
+                                    ->doesntHave('assignedUsers');
+                          }
+                      });
+                });
             }
 
             $tasks = $query->orderBy('id')->get(); // Order by ID for consistent ordering
@@ -616,6 +636,7 @@ class TaskController extends Controller
      */
     public function assignEnquiryTask(Request $request, int $taskId): JsonResponse
     {
+        \Log::info("[DEBUG] assignEnquiryTask HIT with ID: {$taskId} from User " . Auth::id());
 
         // Permissions temporarily removed - will be implemented soon
         $user = Auth::user();
@@ -639,12 +660,12 @@ class TaskController extends Controller
             \Log::info("[DEBUG] assignEnquiryTask found assigned user: {$assignedUser->id} ({$assignedUser->name}), department: " . ($assignedUser->department_id ?? 'null'));
 
             // Additional validation: assigned user must have a department
-            if (!$assignedUser->department_id) {
-                \Log::warning("[DEBUG] assignEnquiryTask failed: assigned user {$assignedUser->id} has no department");
-                return response()->json([
-                    'message' => 'Cannot assign task to user without department'
-                ], 422);
-            }
+            // if (!$assignedUser->department_id) {
+            //     \Log::warning("[DEBUG] assignEnquiryTask failed: assigned user {$assignedUser->id} has no department");
+            //     return response()->json([
+            //         'message' => 'Cannot assign task to user without department'
+            //     ], 422);
+            // }
 
             $assignmentData = array_filter([
                 'priority' => $request->priority,
@@ -757,11 +778,11 @@ class TaskController extends Controller
             $newAssignedUser = \App\Models\User::findOrFail($request->new_assigned_user_id);
 
             // Additional validation: new assigned user must have a department
-            if (!$newAssignedUser->department_id) {
-                return response()->json([
-                    'message' => 'Cannot reassign task to user without department'
-                ], 422);
-            }
+            // if (!$newAssignedUser->department_id) {
+            //     return response()->json([
+            //         'message' => 'Cannot reassign task to user without department'
+            //     ], 422);
+            // }
 
             $task = $this->workflowService->reassignEnquiryTask(
                 $taskId,
