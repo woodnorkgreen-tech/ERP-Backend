@@ -272,6 +272,39 @@ class DashboardController extends Controller
 
     /**
      * @OA\Get(
+     *     path="/api/projects/dashboard/command-center",
+     *     summary="Get Project Command Center data",
+     *     tags={"Dashboard"},
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Response(response=200, description="Success"),
+     *     @OA\Response(response=403, description="Unauthorized")
+     * )
+     */
+    public function commandCenter(Request $request): JsonResponse
+    {
+         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
+            return response()->json([
+                'message' => 'Unauthorized access to command center'
+            ], 403);
+        }
+
+         try {
+             $data = $this->dashboardService->getCommandCenterData();
+             return response()->json([
+                 'data' => $data,
+                 'message' => 'Command Center data retrieved'
+             ]);
+         } catch (\Exception $e) {
+             return response()->json([
+                 'message' => 'Failed to retrieve command center data',
+                 'error' => $e->getMessage()
+             ], 500);
+         }
+    }
+
+    /**
+     * @OA\Get(
      *     path="/api/projects/dashboard",
      *     summary="Get comprehensive dashboard data",
      *     tags={"Dashboard"},

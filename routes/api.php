@@ -572,6 +572,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('logistics-log', App\Http\Controllers\LogisticsLogController::class);
 
         // Dashboard routes
+        Route::get('dashboard/command-center', [DashboardController::class, 'commandCenter']);
         Route::get('dashboard', [DashboardController::class, 'dashboard']);
         Route::get('dashboard/enquiry-metrics', [DashboardController::class, 'enquiryMetrics']);
         Route::get('dashboard/task-metrics', [DashboardController::class, 'taskMetrics']);
