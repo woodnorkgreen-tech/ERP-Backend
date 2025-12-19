@@ -11,7 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
-use Maatwebsite\Excel\Excel;
+use Maatwebsite\Excel\Facades\Excel as ExcelFacade;
 use Exception;
 
 class PettyCashController extends Controller
@@ -420,7 +420,7 @@ class PettyCashController extends Controller
 
             // Process the Excel file
             $import = new PettyCashDisbursementImport($this->service);
-            $import->import($file);
+            ExcelFacade::import($import, $file);
 
             $results = $import->getResults();
 

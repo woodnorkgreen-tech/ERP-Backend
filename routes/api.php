@@ -731,6 +731,10 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('summary', [PettyCashController::class, 'summary']);
             Route::get('analytics', [PettyCashController::class, 'analytics']);
 
+            // Excel upload route
+            Route::post('upload-excel', [PettyCashController::class, 'uploadExcel'])
+                ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
+
             // Statistics and validation routes
             Route::get('statistics', [PettyCashTopUpController::class, 'statistics']);
             Route::get('payment-methods', [PettyCashTopUpController::class, 'paymentMethods']);

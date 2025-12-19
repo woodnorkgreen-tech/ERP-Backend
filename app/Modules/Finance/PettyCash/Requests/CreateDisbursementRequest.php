@@ -77,6 +77,11 @@ class CreateDisbursementRequest extends FormRequest
                 'max:255',
                 'required_unless:payment_method,cash',
             ],
+            'tax' => [
+                'required',
+                'string',
+                Rule::in(['etr', 'no_etr']),
+            ],
         ];
     }
 
@@ -108,6 +113,8 @@ class CreateDisbursementRequest extends FormRequest
             'payment_method.in' => 'The selected payment method is invalid.',
             'transaction_code.required_unless' => 'Transaction code is required for non-cash payments.',
             'transaction_code.max' => 'Transaction code cannot exceed 255 characters.',
+            'tax.required' => 'Please select a tax option.',
+            'tax.in' => 'The selected tax option is invalid.',
         ];
     }
 
