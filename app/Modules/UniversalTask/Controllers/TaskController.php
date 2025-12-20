@@ -4,6 +4,7 @@ namespace App\Modules\UniversalTask\Controllers;
 
 use App\Models\User;
 use App\Modules\UniversalTask\Models\Task;
+use App\Modules\UniversalTask\Models\TaskAssignment;
 use App\Modules\UniversalTask\Services\TaskService;
 use App\Modules\UniversalTask\Services\TaskPermissionService;
 use App\Modules\UniversalTask\Repositories\TaskRepository;
@@ -249,7 +250,8 @@ class TaskController
                 'parentTask',
                 'subtasks',
                 'dependencies',
-                'assignments',
+                'assignments.user',
+                'assignments.assignedBy',
                 'issues',
                 'comments',
                 'attachments',
@@ -258,7 +260,6 @@ class TaskController
                 'designContext',
                 'financeContext',
             ]);
-
             return response()->json([
                 'success' => true,
                 'data' => $task,
@@ -461,7 +462,7 @@ class TaskController
     }
 
     /**
-     * Assign task to users.
+     * Assign task to users with roles.
      */
     public function assign(Request $request, $taskId): JsonResponse
     {
@@ -469,9 +470,11 @@ class TaskController
 
         // Validate request
         $validator = Validator::make($request->all(), [
-            'user_ids' => 'required|array|min:1',
-            'user_ids.*' => 'exists:users,id',
-            'role' => 'nullable|string|max:50',
+            'assignments' => 'required|array|min:1',
+            'assignments.*.user_id' => 'required|exists:users,id',
+            'assignments.*.role' => 'nullable|string|max:50',
+            'assignments.*.is_primary' => 'nullable|boolean',
+            'assignments.*.expires_at' => 'nullable|date|after:now',
             'replace_existing' => 'nullable|boolean',
         ]);
 
@@ -490,7 +493,9 @@ class TaskController
             $task = Task::findOrFail($taskId);
 
             // Check assignment permissions for all users AFTER loading the task
-            $assignees = User::whereIn('id', $request->user_ids)->get();
+            $userIds = collect($request->assignments)->pluck('user_id')->toArray();
+            $assignees = User::whereIn('id', $userIds)->get();
+            
             foreach ($assignees as $assignee) {
                 if (!$this->permissionService->canAssign($user, $task, $assignee)) {
                     $this->permissionService->logPermissionDenial($user, 'assign_task', $task, ['assignee_id' => $assignee->id]);
@@ -503,9 +508,9 @@ class TaskController
                     ], 403);
                 }
             }
+            
             $assignmentData = [
-                'user_ids' => $request->user_ids,
-                'role' => $request->role,
+                'assignments' => $request->assignments,
                 'replace_existing' => $request->get('replace_existing', false),
             ];
 
@@ -523,6 +528,123 @@ class TaskController
                 'error' => [
                     'code' => 'ASSIGNMENT_FAILED',
                     'message' => 'Failed to assign task: ' . $e->getMessage(),
+                ]
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all assignees for a task.
+     */
+    public function getAssignees($taskId): JsonResponse
+    {
+        $user = Auth::user();
+
+        try {
+            $task = Task::findOrFail($taskId);
+
+            // Check view permission AFTER loading the task
+            if (!$this->permissionService->canView($user, $task)) {
+                $this->permissionService->logPermissionDenial($user, 'view_task_assignees', $task);
+                return response()->json([
+                    'success' => false,
+                    'error' => [
+                        'code' => 'INSUFFICIENT_PERMISSIONS',
+                        'message' => 'You do not have permission to view this task\'s assignees.',
+                    ]
+                ], 403);
+            }
+
+            $assignees = $task->getAssigneesWithRoles();
+
+            return response()->json([
+                'success' => true,
+                'data' => $assignees,
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'INTERNAL_ERROR',
+                    'message' => 'An error occurred while retrieving task assignees.',
+                ]
+            ], 500);
+        }
+    }
+
+    /**
+     * Remove a specific assignee from a task.
+     */
+    public function removeAssignee($taskId, $assignmentId): JsonResponse
+    {
+        $user = Auth::user();
+
+        try {
+            $task = Task::findOrFail($taskId);
+            $assignment = TaskAssignment::findOrFail($assignmentId);
+
+            // Verify the assignment belongs to this task
+            if ($assignment->task_id !== $task->id) {
+                return response()->json([
+                    'success' => false,
+                    'error' => [
+                        'code' => 'INVALID_REQUEST',
+                        'message' => 'The specified assignment does not belong to this task.',
+                    ]
+                ], 400);
+            }
+
+            // Check assignment permissions
+            if (!$this->permissionService->canAssign($user, $task, $assignment->user)) {
+                $this->permissionService->logPermissionDenial($user, 'remove_assignee', $task, ['assignee_id' => $assignment->user->id]);
+                return response()->json([
+                    'success' => false,
+                    'error' => [
+                        'code' => 'INSUFFICIENT_PERMISSIONS',
+                        'message' => 'You do not have permission to remove this assignee from the task.',
+                    ]
+                ], 403);
+            }
+
+            // If removing the primary assignee, we need to update the task's assigned_user_id
+            if ($assignment->is_primary) {
+                // Find another assignee to be the primary
+                $newPrimary = $task->assignments()->where('id', '!=', $assignment->id)->first();
+                if ($newPrimary) {
+                    $newPrimary->is_primary = true;
+                    $newPrimary->save();
+                    $task->assigned_user_id = $newPrimary->user_id;
+                    $task->save();
+                } else {
+                    // No other assignees, clear the assigned_user_id
+                    $task->assigned_user_id = null;
+                    $task->save();
+                }
+            }
+
+            $assignment->delete();
+
+            // Record removal in history
+            $this->taskService->recordTaskHistory($task, [
+                'removed_assignee' => $assignment->user_id,
+                'role' => $assignment->role,
+            ], $user->id, 'unassigned');
+
+            // Clear cache for the assigned task
+            $this->taskService->clearTaskCache($task);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Assignee removed successfully.',
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'UNASSIGNMENT_FAILED',
+                    'message' => 'Failed to remove assignee: ' . $e->getMessage(),
                 ]
             ], 500);
         }

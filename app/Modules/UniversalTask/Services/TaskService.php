@@ -224,18 +224,17 @@ class TaskService
     }
 
     /**
-     * Assign a task to users with notification triggering.
+     * Assign a task to users with roles and temporary assignments.
      *
      * @param Task $task The task to assign
-     * @param array $assignmentData Assignment data (user_ids, role, etc.)
+     * @param array $assignmentData Assignment data (assignments array with user_id, role, etc.)
      * @param int $assignerId User making the assignment
      * @return Task The updated task
      */
     public function assignTask(Task $task, array $assignmentData, int $assignerId): Task
     {
-        $userIds = $assignmentData['user_ids'] ?? [];
-        $role = $assignmentData['role'] ?? null;
-
+        $assignments = $assignmentData['assignments'] ?? [];
+        
         DB::beginTransaction();
 
         try {
@@ -245,41 +244,63 @@ class TaskService
             }
 
             // Create new assignments
-            $assignments = [];
-            foreach ($userIds as $index => $userId) {
-                $assignments[] = TaskAssignment::create([
+            $createdAssignments = [];
+            $primaryAssigneeId = null;
+            
+            foreach ($assignments as $assignment) {
+                $userId = $assignment['user_id'];
+                $role = $assignment['role'] ?? null;
+                $isPrimary = $assignment['is_primary'] ?? false;
+                $expiresAt = isset($assignment['expires_at']) ? Carbon::parse($assignment['expires_at']) : null;
+                
+                // Set the first primary assignee as the task's assigned_user_id
+                if ($isPrimary && !$primaryAssigneeId) {
+                    $primaryAssigneeId = $userId;
+                }
+                
+                $createdAssignments[] = TaskAssignment::create([
                     'task_id' => $task->id,
                     'user_id' => $userId,
                     'assigned_by' => $assignerId,
                     'assigned_at' => now(),
                     'role' => $role,
-                    'is_primary' => $index === 0, // First user is primary
+                    'is_primary' => $isPrimary,
+                    'expires_at' => $expiresAt,
                 ]);
             }
 
             // Update task's assigned_user_id to primary assignee
-            if (!empty($userIds)) {
-                $task->assigned_user_id = $userIds[0];
+            if ($primaryAssigneeId) {
+                $task->assigned_user_id = $primaryAssigneeId;
                 $task->save();
+            } else if (!empty($assignments)) {
+                // If no primary assignee specified, use the first assignee
+                $firstAssigneeId = $assignments[0]['user_id'];
+                $task->assigned_user_id = $firstAssigneeId;
+                $task->save();
+                
+                // Update the first assignment to be primary
+                $firstAssignment = $createdAssignments[0];
+                $firstAssignment->is_primary = true;
+                $firstAssignment->save();
             }
 
             // Record assignment in history
             $this->recordTaskHistory($task, [
-                'assigned_users' => $userIds,
-                'assignment_role' => $role,
+                'assignments' => $assignments,
             ], $assignerId, 'assigned');
 
             DB::commit();
 
             // Trigger notification event
-            Event::dispatch(new TaskAssigned($task, $assignments, $assignerId));
+            Event::dispatch(new TaskAssigned($task, $createdAssignments, $assignerId));
 
             // Clear cache for the assigned task
             $this->taskRepository->clearTaskCache($task);
 
             Log::info('Task assigned successfully', [
                 'task_id' => $task->id,
-                'assigned_users' => $userIds,
+                'assignments' => $assignments,
                 'assigned_by' => $assignerId,
             ]);
 
@@ -417,12 +438,14 @@ class TaskService
 
         // For updates, make fields optional except for required ones
         if ($operation === 'update') {
+            // Only validate fields that are actually provided in the update request
+            $updateRules = [];
             foreach ($rules as $field => $rule) {
-                if (!isset($data[$field])) {
-                    continue;
+                if (isset($data[$field])) {
+                    $updateRules[$field] = $rule;
                 }
-                // Keep required fields required for updates if provided
             }
+            $rules = $updateRules;
         }
 
         return Validator::make($data, $rules)->validate();
@@ -523,7 +546,7 @@ class TaskService
      * @param int $userId
      * @param string $action
      */
-    protected function recordTaskHistory(Task $task, array $changes, int $userId, string $action = 'updated'): void
+    public function recordTaskHistory(Task $task, array $changes, int $userId, string $action = 'updated'): void
     {
         TaskHistory::create([
             'task_id' => $task->id,
@@ -542,6 +565,16 @@ class TaskService
     {
         // This is handled by the status update, but we can add additional logic here
         // like sending overdue notifications
+    }
+
+    /**
+     * Clear task cache.
+     *
+     * @param Task $task
+     */
+    public function clearTaskCache(Task $task): void
+    {
+        $this->taskRepository->clearTaskCache($task);
     }
 
     /**

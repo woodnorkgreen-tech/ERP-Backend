@@ -642,6 +642,97 @@ class Task extends Model
     }
 
     /**
+     * Get the primary assignee for this task.
+     */
+    public function getPrimaryAssignee(): ?User
+    {
+        $primaryAssignment = $this->assignments()->where('is_primary', true)->first();
+        return $primaryAssignment ? $primaryAssignment->user : null;
+    }
+
+    /**
+     * Get all assignees for this task with their roles.
+     */
+    public function getAssigneesWithRoles()
+    {
+        return $this->assignments()->with('user')->get()->map(function ($assignment) {
+            return [
+                'user' => $assignment->user,
+                'role' => $assignment->role,
+                'is_primary' => $assignment->is_primary,
+                'assigned_at' => $assignment->assigned_at,
+                'expires_at' => $assignment->expires_at,
+                'is_expired' => $assignment->isExpired(),
+                'is_active' => $assignment->isActive(),
+            ];
+        });
+    }
+
+    /**
+     * Get all active assignees for this task.
+     */
+    public function getActiveAssignees()
+    {
+        return $this->assignments()->active()->with('user')->get()->pluck('user');
+    }
+
+    /**
+     * Check if a user is assigned to this task.
+     */
+    public function isAssignedTo(int $userId): bool
+    {
+        return $this->assignments()->where('user_id', $userId)->exists();
+    }
+
+    /**
+     * Check if a user has a specific role in this task.
+     */
+    public function hasRole(int $userId, string $role): bool
+    {
+        return $this->assignments()->where('user_id', $userId)->where('role', $role)->exists();
+    }
+
+    /**
+     * Get users assigned with a specific role.
+     */
+    public function getUsersWithRole(string $role)
+    {
+        return $this->assignments()->where('role', $role)->with('user')->get()->pluck('user');
+    }
+
+    /**
+     * Get the captain/primary assignee for this task.
+     */
+    public function getCaptain(): ?User
+    {
+        return $this->getPrimaryAssignee();
+    }
+
+    /**
+     * Get technicians assigned to this task.
+     */
+    public function getTechnicians()
+    {
+        return $this->getUsersWithRole('technician');
+    }
+
+    /**
+     * Get active assignments for this task.
+     */
+    public function activeAssignments()
+    {
+        return $this->assignments()->active();
+    }
+
+    /**
+     * Get expired assignments for this task.
+     */
+    public function expiredAssignments()
+    {
+        return $this->assignments()->expired();
+    }
+
+    /**
      * Boot the model and register model events.
      */
     protected static function boot()

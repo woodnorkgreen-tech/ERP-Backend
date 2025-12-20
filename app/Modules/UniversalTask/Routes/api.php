@@ -46,6 +46,11 @@ Route::prefix('api/universal-tasks')->middleware(['auth:sanctum', 'throttle:60,1
     // Route::delete('tasks/{task}/dependencies/{dependency}', [TaskController::class, 'removeDependency']);
     // Route::get('tasks/{task}/dependency-chain', [TaskController::class, 'getDependencyChain']);
 
+    // ==================== Task Assignments ====================
+    Route::post('tasks/{task}/assign', [TaskController::class, 'assign']);
+    Route::get('tasks/{task}/assignees', [TaskController::class, 'getAssignees']);
+    Route::delete('tasks/{task}/assignees/{assignment}', [TaskController::class, 'removeAssignee']);
+
     // ==================== Task Issues ====================
     Route::apiResource('issues', TaskIssueController::class)->parameters(['issues' => 'issue']);
     Route::patch('issues/{issue}/resolve', [TaskIssueController::class, 'resolve']);

@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Carbon\Carbon;
 
 class TaskAssignment extends Model
 {
@@ -20,10 +21,12 @@ class TaskAssignment extends Model
         'assigned_at',
         'role',
         'is_primary',
+        'expires_at',
     ];
 
     protected $casts = [
         'assigned_at' => 'datetime',
+        'expires_at' => 'datetime',
         'is_primary' => 'boolean',
     ];
 
@@ -53,7 +56,44 @@ class TaskAssignment extends Model
         return $this->belongsTo(User::class, 'assigned_by');
     }
 
+    // ==================== Scopes ====================
+
+    /**
+     * Scope a query to only include active assignments (not expired).
+     */
+    public function scopeActive($query)
+    {
+        return $query->where(function ($q) {
+            $q->whereNull('expires_at')
+              ->orWhere('expires_at', '>', now());
+        });
+    }
+
+    /**
+     * Scope a query to only include expired assignments.
+     */
+    public function scopeExpired($query)
+    {
+        return $query->where('expires_at', '<=', now());
+    }
+
     // ==================== Methods ====================
+
+    /**
+     * Check if the assignment is expired.
+     */
+    public function isExpired(): bool
+    {
+        return $this->expires_at && $this->expires_at->isPast();
+    }
+
+    /**
+     * Check if the assignment is active.
+     */
+    public function isActive(): bool
+    {
+        return !$this->isExpired();
+    }
 
     /**
      * Boot the model and register model events.
