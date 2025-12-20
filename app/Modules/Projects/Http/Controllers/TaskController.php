@@ -104,21 +104,9 @@ class TaskController extends Controller
             $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
 
             $user = Auth::user();
-            // Check if user has privileged role (can see all tasks)
-            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
-                \Log::info('[TASK FILTER] Non-privileged user detected', [
-                    'user_id' => $user->id,
-                    'user_roles' => $user->roles->pluck('name'),
-                    'filtering_by_assigned_users' => $user->id
-                ]);
-                // Use the pivot table relationship to filter tasks
-                $query->assignedToUser($user->id);
-            } else {
-                \Log::info('[TASK FILTER] Privileged user - no filtering', [
-                    'user_id' => $user->id,
-                    'user_roles' => $user->roles->pluck('name')
-                ]);
-            }
+            $user = Auth::user();
+            // Full visibility for all users (transparency)
+            \Log::info('[TASK LIST] Retrieving all tasks for user', ['user_id' => $user->id]);
 
             // Apply filters if provided
             if ($request->has('status') && $request->status) {
@@ -231,10 +219,8 @@ class TaskController extends Controller
                 ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
 
             $user = Auth::user();
-            // Check if user has privileged role (can see all tasks)
-            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
-                $query->assignedToUser($user->id);
-            }
+            $user = Auth::user();
+            // Full visibility for all users (transparency)
 
             $tasks = $query->orderBy('id')->get(); // Order by ID for consistent ordering
 
@@ -320,12 +306,13 @@ class TaskController extends Controller
 
             // Filter tasks by user's department
             $user = Auth::user();
-            $query->where('department_id', $user->department_id);
+            // Removed strict departmental filter to allow full visibility across departments
+            // $query->where('department_id', $user->department_id);
 
-            // Check if user has privileged role (can see all tasks)
-            if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
-                $query->assignedToUser($user->id);
-            }
+            // Removed privileged role check to allow standard users to see all tasks
+            // if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
+            //    $query->assignedToUser($user->id);
+            // }
 
             $tasks = $query->orderBy('created_at', 'desc')->paginate(15);
 
@@ -396,13 +383,36 @@ class TaskController extends Controller
 
         try {
             $task = EnquiryTask::findOrFail($taskId);
-            \Log::info("[DEBUG] updateTaskStatus found task {$taskId}, current status: {$task->status}, title: {$task->title}, type: {$task->type}");
-
             $user = Auth::user();
 
+            // Strict Access Control
+            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'Client Service']);
+            
+            // Department Check Removed - All users can see tasks (Transparency)
+            // if (!$hasSpecialAccess && $task->department_id && $task->department_id !== $user->department_id) {
+            //    return response()->json(['message' => 'Unauthorized: Task belongs to another department'], 403);
+            // }
+
+            // Lock Check
+            $assigneeId = $task->assigned_to ?? $task->assigned_user_id;
+            if (!$hasSpecialAccess && $assigneeId && $assigneeId !== $user->id) {
+                 $task->loadMissing('assignedUsers');
+                 if (!$task->assignedUsers->contains($user->id)) {
+                     return response()->json(['message' => 'Action Denied: Task is locked by another user.'], 403);
+                 }
+            }
+
+            \Log::info("[DEBUG] updateTaskStatus found task {$taskId}, current status: {$task->status}, title: {$task->title}, type: {$task->type}");
+
             \Log::info("[DEBUG] updateTaskStatus calling workflowService->updateTaskStatus for task {$taskId} with status {$request->status}");
-            $updatedTask = $this->workflowService->updateTaskStatus($taskId, $request->status, $user->id);
-            \Log::info("[DEBUG] updateTaskStatus workflow service returned task with status: {$updatedTask->status}");
+        $updatedTask = $this->workflowService->updateTaskStatus($taskId, $request->status, $user->id);
+        \Log::info("[DEBUG] updateTaskStatus workflow service returned task with status: {$updatedTask->status}");
+
+        // Send notification if task is completed
+        if ($request->status === 'completed' && $task->status !== 'completed') {
+            $this->notificationService->sendEnquiryTaskCompleted($updatedTask, $user);
+            \Log::info("[DEBUG] Sent task completion notification for task {$taskId}");
+        }
 
             // Update notes if provided
             if ($request->has('notes')) {
@@ -504,13 +514,35 @@ class TaskController extends Controller
             $task = EnquiryTask::with('enquiry', 'department', 'assignedUser', 'creator')
                 ->findOrFail($taskId);
 
-            // Check if task belongs to user's department
+            // Security Check
             $user = Auth::user();
-            if ($task->department_id !== $user->department_id) {
-                return response()->json([
-                    'message' => 'Unauthorized to view tasks in this department'
-                ], 403);
+            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'Client Service']);
+
+            // 1. Department Check: Standard users can only see tasks in their department
+            // Removed for Transparency - All users need to see all tasks
+            // if (!$hasSpecialAccess && $task->department_id && $task->department_id !== $user->department_id) {
+            //    return response()->json([
+            //        'message' => 'Unauthorized: This task belongs to another department'
+            //    ], 403);
+            // }
+
+            // Lock Check (Calculation only - do not block view)
+            $assigneeId = $task->assigned_to ?? $task->assigned_user_id;
+            $isLocked = false;
+            $lockedByUser = null;
+
+            if (!$hasSpecialAccess && $assigneeId && $assigneeId !== $user->id) {
+                 // Secondary check for multi-user assignment via pivot table
+                 $task->loadMissing('assignedUsers');
+                 if (!$task->assignedUsers->contains($user->id)) {
+                     $isLocked = true;
+                     $lockedByUser = $task->assignedTo ?? ($task->assignedUser ?? null);
+                 }
             }
+
+            // Append lock status to task
+            $task->is_locked_for_user = $isLocked;
+            $task->locked_by_user = $lockedByUser;
 
             return response()->json([
                 'data' => $task,
@@ -551,6 +583,23 @@ class TaskController extends Controller
 
             // Department check temporarily removed - will be implemented soon
             $user = Auth::user();
+
+            // Strict Access Control for Updates
+            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'Client Service']);
+            
+            // Department Check Removed for Transparency
+            // if (!$hasSpecialAccess && $task->department_id && $task->department_id !== $user->department_id) {
+            //    return response()->json(['message' => 'Unauthorized: Task belongs to another department'], 403);
+            // }
+
+            // Lock Check
+            $assigneeId = $task->assigned_to ?? $task->assigned_user_id;
+            if (!$hasSpecialAccess && $assigneeId && $assigneeId !== $user->id) {
+                 $task->loadMissing('assignedUsers');
+                 if (!$task->assignedUsers->contains($user->id)) {
+                     return response()->json(['message' => 'Action Denied: Task is locked by another user.'], 403);
+                 }
+            }
 
             $task->update($request->only([
                 'task_description',
@@ -610,6 +659,7 @@ class TaskController extends Controller
      */
     public function assignEnquiryTask(Request $request, int $taskId): JsonResponse
     {
+        \Log::info("[DEBUG] assignEnquiryTask HIT with ID: {$taskId} from User " . Auth::id());
 
         // Permissions temporarily removed - will be implemented soon
         $user = Auth::user();
@@ -633,12 +683,12 @@ class TaskController extends Controller
             \Log::info("[DEBUG] assignEnquiryTask found assigned user: {$assignedUser->id} ({$assignedUser->name}), department: " . ($assignedUser->department_id ?? 'null'));
 
             // Additional validation: assigned user must have a department
-            if (!$assignedUser->department_id) {
-                \Log::warning("[DEBUG] assignEnquiryTask failed: assigned user {$assignedUser->id} has no department");
-                return response()->json([
-                    'message' => 'Cannot assign task to user without department'
-                ], 422);
-            }
+            // if (!$assignedUser->department_id) {
+            //     \Log::warning("[DEBUG] assignEnquiryTask failed: assigned user {$assignedUser->id} has no department");
+            //     return response()->json([
+            //         'message' => 'Cannot assign task to user without department'
+            //     ], 422);
+            // }
 
             $assignmentData = array_filter([
                 'priority' => $request->priority,
@@ -652,8 +702,8 @@ class TaskController extends Controller
 
             \Log::info("[DEBUG] assignEnquiryTask workflow service returned task: {$task->id}, status: {$task->status}, assigned_by: " . ($task->assigned_by ?? 'null'));
 
-            // Send notification
-            $this->notificationService->sendTaskAssignmentNotification($task, $assignedUser, $user);
+            // Send notification (for task assignment)
+        $this->notificationService->sendEnquiryTaskAssignment($task, $assignedUser, $user, false);
 
             $loadedTask = $task->load('department', 'assignedBy', 'assignedTo', 'assignmentHistory');
             \Log::info("[DEBUG] assignEnquiryTask loaded task with relationships, history count: " . ($loadedTask->assignmentHistory ? $loadedTask->assignmentHistory->count() : 0));
@@ -751,11 +801,11 @@ class TaskController extends Controller
             $newAssignedUser = \App\Models\User::findOrFail($request->new_assigned_user_id);
 
             // Additional validation: new assigned user must have a department
-            if (!$newAssignedUser->department_id) {
-                return response()->json([
-                    'message' => 'Cannot reassign task to user without department'
-                ], 422);
-            }
+            // if (!$newAssignedUser->department_id) {
+            //     return response()->json([
+            //         'message' => 'Cannot reassign task to user without department'
+            //     ], 422);
+            // }
 
             $task = $this->workflowService->reassignEnquiryTask(
                 $taskId,
@@ -764,8 +814,8 @@ class TaskController extends Controller
                 $request->reason
             );
 
-            // Send notification to new assignee
-            $this->notificationService->sendTaskAssignmentNotification($task, $newAssignedUser, $user);
+            // Send notification to new assignee (reassignment)
+        $this->notificationService->sendEnquiryTaskAssignment($task, $newAssignedUser, $user, true);
 
             return response()->json([
                 'data' => $task->load('department', 'assignedBy', 'assignmentHistory'),
@@ -774,6 +824,57 @@ class TaskController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to reassign task',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * @OA\Put(
+     *     path="/api/projects/enquiry-tasks/{taskId}/release",
+     *     summary="Release task back to pool (Handover)",
+     *     tags={"Tasks"},
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Response(response=200, description="Task released successfully"),
+     *     @OA\Response(response=403, description="Unauthorized")
+     * )
+     */
+    public function releaseEnquiryTask(Request $request, int $taskId): JsonResponse
+    {
+        $user = Auth::user();
+
+        $validator = Validator::make($request->all(), [
+            'reason' => 'nullable|string|max:500',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $task = EnquiryTask::findOrFail($taskId);
+            
+            // Check permissions: Must be assignee OR Admin/Manager
+            $isAssignee = $task->assigned_to == $user->id;
+            $isAdmin = $user->hasRole(['Super Admin', 'Project Manager']);
+
+            if (!$isAssignee && !$isAdmin) {
+                return response()->json(['message' => 'Unauthorized to release this task'], 403);
+            }
+
+            $task = $this->workflowService->releaseTask($taskId, $user->id, $request->reason);
+
+            return response()->json([
+                'data' => $task->load('department', 'assignedBy'),
+                'message' => 'Task released to pool successfully'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("Failed to release task: " . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to release task',
                 'error' => $e->getMessage()
             ], 500);
         }

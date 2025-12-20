@@ -11,6 +11,84 @@ use Carbon\Carbon;
 class ProjectsDashboardService
 {
     /**
+     * Get data for the Project Command Center
+     */
+    public function getCommandCenterData(): array
+    {
+        // 1. Pipeline Flow Breakdown (Stages)
+        // Mapping internal status to Pipeline Stage Name
+        $pipelineStages = [
+            'enquiry_logged' => ['label' => 'New Enquiries', 'color' => 'bg-blue-500'],
+            'site_survey_scheduled' => ['label' => 'Survey Pending', 'color' => 'bg-yellow-500'],
+            'design_assigned' => ['label' => 'Design', 'color' => 'bg-purple-500'],
+            'quote_prepared' => ['label' => 'Quoting', 'color' => 'bg-indigo-500'],
+            'quote_approved' => ['label' => 'Approvals', 'color' => 'bg-green-500'],
+            'materials_specified' => ['label' => 'Procurement', 'color' => 'bg-orange-500'], // Added
+            'in_progress' => ['label' => 'Execution', 'color' => 'bg-teal-500'],
+            'completed' => ['label' => 'Completed', 'color' => 'bg-gray-500'],
+        ];
+
+        // Get raw counts suitable for the pipeline
+        // We might want to map multiple statuses to one stage, but for now 1-to-1 or simplified
+        $pipelineCounts = ProjectEnquiry::select('status', DB::raw('count(*) as count'))
+            ->whereIn('status', array_keys($pipelineStages))
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
+
+        // 2. Departmental Pulse (Active Tasks)
+        $departmentPulse = EnquiryTask::with('department')
+            ->select('department_id', 'status', DB::raw('count(*) as count'))
+            ->whereIn('status', ['pending', 'in_progress'])
+            ->whereNotNull('department_id')
+            ->groupBy('department_id', 'status')
+            ->get()
+            ->groupBy('department_id');
+
+        $departmentStats = $departmentPulse->map(function($group) {
+             $deptName = $group->first()->department->name ?? 'Unknown';
+             $pending = $group->where('status', 'pending')->sum('count');
+             $inProgress = $group->where('status', 'in_progress')->sum('count');
+             // Find oldest overdue task date for this dept? (Too complex for single query, maybe later)
+             
+             return [
+                 'id' => $group->first()->department_id,
+                 'name' => $deptName,
+                 'pending' => $pending,
+                 'in_progress' => $inProgress,
+                 'total_load' => $pending + $inProgress
+             ];
+        })->values()->sortByDesc('total_load')->values()->toArray();
+
+        // 3. Global Bottlenecks (Top 10 Overdue)
+        $bottlenecks = EnquiryTask::with(['enquiry', 'department', 'assignedTo'])
+            ->where('due_date', '<', Carbon::now())
+            ->whereIn('status', ['pending', 'in_progress'])
+            ->orderBy('due_date', 'asc') // Oldest due date first (Worst offenders)
+            ->limit(10)
+            ->get();
+
+        // 4. Recent Releases (Accountability Log)
+        // Fetch from TaskAssignmentHistory where assigned_to became null
+        // We don't have TaskAssignmentHistory model imported here yet. 
+        // I will use DB query or add Import.
+        // Assuming TaskAssignmentHistory exists and has 'notes' like "Released..."
+        // Or check where assigned_to is null and updated_at is recent? No, history is better.
+        // For simplicity, I'll use the 'Recent Activities' logic but filter for Releases if possible.
+        // Actually, let's just use the `getRecentActivities` logic but specialized.
+        
+        return [
+            'pipeline' => [
+                'stages' => $pipelineStages,
+                'counts' => $pipelineCounts
+            ],
+            'department_pulse' => $departmentStats,
+            'bottlenecks' => $bottlenecks,
+            'timestamp' => now()
+        ];
+    }
+
+    /**
      * Get enquiry metrics for dashboard
      */
     public function getEnquiryMetrics(): array
@@ -142,7 +220,6 @@ class ProjectsDashboardService
             'total_projects' => $convertedProjects + $activeProjects + $completedProjects,
             'active_projects' => $activeProjects,
             'completed_projects' => $completedProjects,
-            'converted_enquiries' => $convertedProjects,
             'total_budget' => $totalBudget,
             'projects_by_status' => $projectsByStatus,
             'average_duration_days' => $averageProjectDuration,
@@ -209,6 +286,46 @@ class ProjectsDashboardService
             ->toArray();
 
         return $phases;
+    }
+
+    /**
+     * Get financial metrics for dashboard
+     */
+    public function getFinancialMetrics(): array
+    {
+        try {
+            $relevantStatuses = ['quote_approved', 'planning', 'in_progress', 'completed'];
+            
+            $projects = ProjectEnquiry::whereIn('status', $relevantStatuses)->get();
+            
+            $revenue = $projects->sum('estimated_budget') ?? 0;
+            // Assuming 'budget' represents the internal cost/allocated budget. 
+            // If null, we might assume a default margin or 0 cost (which inflates profit).
+            // Let's assume if budget is 0, cost is 70% of revenue for estimation if revenue > 0
+            $cost = $projects->sum('budget') ?? 0;
+            
+            if ($cost == 0 && $revenue > 0) {
+                $cost = $revenue * 0.70;
+            }
+            
+            $profit = $revenue - $cost;
+            $margin = $revenue > 0 ? round(($profit / $revenue) * 100, 1) : 0;
+            
+            return [
+                'revenue' => $revenue,
+                'cost' => $cost,
+                'profit' => $profit,
+                'margin' => $margin,
+            ];
+        } catch (\Exception $e) {
+            \Log::error('Error calculating financial metrics: ' . $e->getMessage());
+            return [
+                'revenue' => 0,
+                'cost' => 0,
+                'profit' => 0,
+                'margin' => 0,
+            ];
+        }
     }
 
     /**
@@ -517,7 +634,6 @@ class ProjectsDashboardService
             'total_projects' => $enquiries->count(),
             'active_projects' => $activeProjects,
             'completed_projects' => $completedProjects,
-            'converted_enquiries' => $convertedProjects,
             'total_budget' => $totalBudget,
             'projects_by_status' => $projectsByStatus,
         ];

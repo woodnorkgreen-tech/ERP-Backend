@@ -165,6 +165,34 @@ class DashboardController extends Controller
     }
 
     /**
+     * Get financial metrics for dashboard
+     */
+    public function financialMetrics(Request $request): JsonResponse
+    {
+        // Check permissions
+        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
+            return response()->json([
+                'message' => 'Unauthorized access to dashboard metrics'
+            ], 403);
+        }
+
+        try {
+            $metrics = $this->dashboardService->getFinancialMetrics();
+
+            return response()->json([
+                'data' => $metrics,
+                'message' => 'Financial metrics retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve financial metrics',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * @OA\Get(
      *     path="/api/projects/dashboard/recent-activities",
      *     summary="Get recent activities for dashboard",
@@ -244,6 +272,39 @@ class DashboardController extends Controller
 
     /**
      * @OA\Get(
+     *     path="/api/projects/dashboard/command-center",
+     *     summary="Get Project Command Center data",
+     *     tags={"Dashboard"},
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Response(response=200, description="Success"),
+     *     @OA\Response(response=403, description="Unauthorized")
+     * )
+     */
+    public function commandCenter(Request $request): JsonResponse
+    {
+         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
+            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
+            return response()->json([
+                'message' => 'Unauthorized access to command center'
+            ], 403);
+        }
+
+         try {
+             $data = $this->dashboardService->getCommandCenterData();
+             return response()->json([
+                 'data' => $data,
+                 'message' => 'Command Center data retrieved'
+             ]);
+         } catch (\Exception $e) {
+             return response()->json([
+                 'message' => 'Failed to retrieve command center data',
+                 'error' => $e->getMessage()
+             ], 500);
+         }
+    }
+
+    /**
+     * @OA\Get(
      *     path="/api/projects/dashboard",
      *     summary="Get comprehensive dashboard data",
      *     tags={"Dashboard"},
@@ -281,6 +342,7 @@ class DashboardController extends Controller
                 'enquiry_metrics' => $this->dashboardService->getEnquiryMetrics(),
                 'task_metrics' => $this->dashboardService->getTaskMetrics(),
                 'project_metrics' => $this->dashboardService->getProjectMetrics(),
+                'financial_metrics' => $this->dashboardService->getFinancialMetrics(),
                 'recent_activities' => $this->dashboardService->getRecentActivities(10),
                 'alerts' => $this->dashboardService->getAlerts(),
             ];

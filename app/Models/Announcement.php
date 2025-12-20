@@ -134,10 +134,22 @@ class Announcement extends Model
             $q->where('user_id', $userId);
         });
     }
-    public function hasBeenReadByRecipients(): bool
+public function hasBeenReadByRecipients(): bool
 {
-    return $this->readByUsers()
-        ->where('user_id', '!=', $this->from_user_id)
-        ->exists();
+    if ($this->type === 'employee') {
+        // Check if the specific employee read it
+        $recipientUser = \App\Models\User::where('employee_id', $this->to_employee_id)->first();
+        if ($recipientUser) {
+            return $this->isReadBy($recipientUser->id);
+        }
+    } elseif ($this->type === 'department') {
+        // Check if any user in the department read it
+        $departmentUsers = \App\Models\User::where('department_id', $this->to_department_id)->pluck('id');
+        return $this->readByUsers()
+            ->whereIn('user_id', $departmentUsers)
+            ->exists();
+    }
+    
+    return false;
 }
 }

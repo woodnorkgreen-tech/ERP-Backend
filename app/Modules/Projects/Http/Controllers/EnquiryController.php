@@ -146,7 +146,29 @@ class EnquiryController extends Controller
             $query->where('department_id', $request->department_id);
         }
 
-        $enquiries = $query->orderBy('created_at', 'desc')->paginate(EnquiryConstants::PAGINATION_PER_PAGE);
+        if ($request->has('assigned_to_me') && filter_var($request->assigned_to_me, FILTER_VALIDATE_BOOLEAN)) {
+            $query->where('project_officer_id', Auth::id());
+        }
+
+        // Apply sorting
+        $sortBy = $request->input('sort_by', 'created_at');
+        $sortOrder = $request->input('sort_order', 'desc');
+        $allowedSorts = ['created_at', 'expected_delivery_date', 'estimated_budget', 'title', 'priority'];
+
+        if (in_array($sortBy, $allowedSorts)) {
+            if ($sortBy === 'priority') {
+                // Custom sort for priority: Urgent (1) -> Low (4)
+                // ASC = Urgent First, DESC = Low First
+                $direction = strtolower($sortOrder) === 'asc' ? 'ASC' : 'DESC';
+                $query->orderByRaw("FIELD(priority, 'urgent', 'high', 'medium', 'low') $direction");
+            } else {
+                $query->orderBy($sortBy, $sortOrder);
+            }
+        } else {
+            $query->orderBy('created_at', 'desc');
+        }
+
+        $enquiries = $query->paginate(EnquiryConstants::PAGINATION_PER_PAGE);
 
         return response()->json([
             'data' => $enquiries,

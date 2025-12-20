@@ -131,6 +131,53 @@ class EnquiryControllerTest extends TestCase
     }
 
     /** @test */
+    public function it_sends_notification_when_enquiry_is_created()
+    {
+        // Create a user with Project Manager role
+        $projectManager = User::factory()->create();
+        $projectManagerRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Project Manager']);
+        $projectManager->assignRole($projectManagerRole);
+
+        // Create another user (admin)
+        $admin = User::factory()->create();
+        $adminRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Super Admin']);
+        $admin->assignRole($adminRole);
+
+        // Create a test client first
+        $client = \App\Modules\ClientService\Models\Client::factory()->create();
+
+        $enquiryData = [
+            'date_received' => '2024-01-15',
+            'expected_delivery_date' => '2024-02-15',
+            'client_id' => $client->id,
+            'title' => 'Notification Test Project',
+            'description' => 'Test project for notification functionality',
+            'project_scope' => 'Full project development',
+            'contact_person' => 'John Doe',
+            'status' => 'enquiry_logged',
+            'venue' => 'Online',
+            'site_survey_skipped' => false,
+        ];
+
+        $response = $this->postJson('/api/clientservice/enquiries', $enquiryData);
+
+        $response->assertStatus(201);
+
+        // Check that notifications were created for both users
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $projectManager->id,
+            'type' => 'enquiry_created',
+            'title' => 'New Project Enquiry',
+        ]);
+
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $admin->id,
+            'type' => 'enquiry_created',
+            'title' => 'New Project Enquiry',
+        ]);
+    }
+
+    /** @test */
     public function it_lists_enquiries()
     {
         // Create some test enquiries
@@ -254,6 +301,4 @@ class EnquiryControllerTest extends TestCase
             'id' => $enquiry->id,
         ]);
     }
-
-
 }
