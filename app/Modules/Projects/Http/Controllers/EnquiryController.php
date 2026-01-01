@@ -228,7 +228,7 @@ class EnquiryController extends Controller
             'title' => 'required|string|max:255',
             'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias
             'description' => 'nullable|string',
-            'project_scope' => 'nullable|string',
+            'project_scope' => 'nullable', // Allow array or string
             'priority' => 'nullable|string|in:' . implode(',', EnquiryConstants::getAllPriorities()),
             'contact_person' => 'required|string|max:255',
             'project_officer_id' => 'nullable|integer|exists:users,id',
@@ -612,7 +612,7 @@ class EnquiryController extends Controller
             'title' => 'sometimes|required|string|max:255',
             'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias
             'description' => 'sometimes|nullable|string',
-            'project_scope' => 'nullable|string',
+            'project_scope' => 'nullable', // Allow array or string
             'priority' => 'nullable|string|in:' . implode(',', EnquiryConstants::getAllPriorities()),
             'contact_person' => 'sometimes|nullable|string|max:255',
             'project_officer_id' => 'nullable|integer|exists:users,id',

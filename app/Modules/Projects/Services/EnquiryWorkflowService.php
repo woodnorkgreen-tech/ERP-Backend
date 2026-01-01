@@ -36,13 +36,24 @@ class EnquiryWorkflowService
             $taskTemplates = config('enquiry_workflow.task_templates', []);
 
             foreach ($taskTemplates as $template) {
+                $status = 'pending';
+                $notes = $template['notes'] ?? 'Complete this task';
+
+                // Handle skipped site survey
+                if ($template['type'] === 'site-survey' && $enquiry->site_survey_skipped) {
+                    $status = 'completed';
+                    $reason = $enquiry->site_survey_skip_reason ?? 'No reason provided';
+                    $notes = "Site Survey skipped. Reason: {$reason}";
+                    Log::info("Auto-completing site survey task for enquiry {$enquiry->id} (Skipped by user)");
+                }
+
                 EnquiryTask::create([
                     'project_enquiry_id' => $enquiry->id,
                     'title' => $template['title'],
                     'type' => $template['type'],
-                    'status' => 'pending',
+                    'status' => $status,
                     'priority' => EnquiryConstants::PRIORITY_MEDIUM,
-                    'notes' => $template['notes'] ?? 'Complete this task',
+                    'notes' => $notes,
                     'created_by' => $enquiry->created_by,
                 ]);
 

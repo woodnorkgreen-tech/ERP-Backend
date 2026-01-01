@@ -66,6 +66,7 @@ class ProjectEnquiry extends Model
         'end_date' => 'date',
         'budget' => 'decimal:2',
         'assigned_users' => 'array',
+        'project_scope' => 'array',
         'current_phase' => 'integer',
         'job_number' => 'string',
     ];
