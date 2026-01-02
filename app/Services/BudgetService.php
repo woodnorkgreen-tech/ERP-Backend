@@ -90,13 +90,16 @@ class BudgetService
             throw new \Exception('Materials data not found. Please complete the materials task first.');
         }
 
-        // Check approval status - ONLY import if fully approved
+        // Check approval status - we log if not approved but allow the import
         $projectInfo = $materialsData->project_info ?? [];
         $approvalStatus = $projectInfo['approval_status'] ?? [];
         $isApproved = $approvalStatus['all_approved'] ?? false;
 
         if (!$isApproved) {
-            throw new \Exception('Materials must be fully approved by all departments before importing into budget.');
+            \Log::info('Importing unapproved materials into budget', [
+                'taskId' => $taskId,
+                'materialsTaskId' => $materialsTask->id
+            ]);
         }
 
         // Get existing budget data (if any)
@@ -160,21 +163,31 @@ class BudgetService
                         'preserved_unit_price' => $existingMaterial['unitPrice'] ?? 0
                     ]);
                     
-                    // PRESERVE pricing data
-                    $mergedElement['materials'][$materialIndex]['unitPrice'] = $existingMaterial['unitPrice'] ?? 0;
-                    $mergedElement['materials'][$materialIndex]['totalPrice'] = $existingMaterial['totalPrice'] ?? 0;
+                    // PRESERVE pricing data ONLY if it's non-zero
+                    $existingUnitPrice = (float) ($existingMaterial['unitPrice'] ?? 0);
+                    
+                    if ($existingUnitPrice > 0) {
+                        $mergedElement['materials'][$materialIndex]['unitPrice'] = $existingUnitPrice;
+                        $mergedElement['materials'][$materialIndex]['totalPrice'] = $existingUnitPrice * $newQty;
+                        
+                        \Log::info('Preserved existing budget price during import', [
+                            'description' => $newMaterial['description'],
+                            'price' => $existingUnitPrice
+                        ]);
+                    } else {
+                        // Keep the new price (already set in $newBudgetMaterials from library cost)
+                        $mergedElement['materials'][$materialIndex]['totalPrice'] = (float)$newMaterial['unitPrice'] * $newQty;
+                        
+                        \Log::info('Using new library price as budget price was 0', [
+                            'description' => $newMaterial['description'],
+                            'price' => $newMaterial['unitPrice']
+                        ]);
+                    }
                     
                     // Track if quantity changed (for user awareness)
-                    $oldQty = $existingMaterial['quantity'] ?? 0;
-                    $newQty = $newMaterial['quantity'] ?? 0;
-                    
                     if ($oldQty != $newQty) {
                         $mergedElement['materials'][$materialIndex]['_quantityChanged'] = true;
                         $mergedElement['materials'][$materialIndex]['_oldQuantity'] = $oldQty;
-                        
-                        // Recalculate total price with new quantity
-                        $unitPrice = $existingMaterial['unitPrice'] ?? 0;
-                        $mergedElement['materials'][$materialIndex]['totalPrice'] = $unitPrice * $newQty;
                     }
                     
                     // Mark as processed
@@ -413,8 +426,8 @@ class BudgetService
     {
         $budgetMaterials = [];
 
-        // Load elements with their materials using the relationship
-        $elements = $materialsData->elements()->with('materials')->get();
+        // Load elements with their materials and linked library materials
+        $elements = $materialsData->elements()->with('materials.libraryMaterial')->get();
 
         if ($elements->isEmpty()) {
             \Log::warning('No elements found for materials data', [
@@ -442,8 +455,8 @@ class BudgetService
                     'description' => $material->description ?? '',
                     'unitOfMeasurement' => $material->unit_of_measurement ?? 'Pcs',
                     'quantity' => $material->quantity ?? 0,
-                    'unitPrice' => 0, // To be filled in budget task
-                    'totalPrice' => 0, // To be calculated
+                    'unitPrice' => (float)($material->unit_cost ?: ($material->libraryMaterial->unit_cost ?? 0)),
+                    'totalPrice' => (float)($material->unit_cost ?: ($material->libraryMaterial->unit_cost ?? 0)) * (float)($material->quantity ?? 0),
                     'isIncluded' => true
                 ];
             }

@@ -297,11 +297,13 @@ class MaterialsController extends Controller
                 foreach ($elementData['materials'] as $materialData) {
                     ElementMaterial::create([
                         'project_element_id' => $element->id,
+                        'library_material_id' => $materialData['libraryMaterialId'] ?? null,
                         'description' => $materialData['description'],
                         'unit_of_measurement' => $materialData['unitOfMeasurement'],
                         'quantity' => $materialData['quantity'],
+                        'unit_cost' => $materialData['unitCost'] ?? null,
                         'is_included' => $materialData['isIncluded'] ?? true,
-                        'is_additional' => $materialData['isAdditional'] ?? false,  // ← ADD THIS LINE
+                        'is_additional' => $materialData['isAdditional'] ?? false,
                         'notes' => $materialData['notes'] ?? null,
                         'sort_order' => $materialData['sortOrder'] ?? 0,
                     ]);
@@ -389,6 +391,7 @@ class MaterialsController extends Controller
                         'defaultMaterials' => $template->materials->map(function ($material) {
                             return [
                                 'id' => $material->id,
+                                'libraryMaterialId' => $material->library_material_id,
                                 'description' => $material->description,
                                 'unitOfMeasurement' => $material->unit_of_measurement,
                                 'defaultQuantity' => $material->default_quantity,
@@ -495,9 +498,11 @@ class MaterialsController extends Controller
             foreach ($request->defaultMaterials as $materialData) {
                 ElementTemplateMaterial::create([
                     'element_template_id' => $template->id,
+                    'library_material_id' => $materialData['libraryMaterialId'] ?? null,
                     'description' => $materialData['description'],
                     'unit_of_measurement' => $materialData['unitOfMeasurement'],
                     'default_quantity' => $materialData['defaultQuantity'],
+                    'unit_cost' => $materialData['unitCost'] ?? null,
                     'is_default_included' => $materialData['isDefaultIncluded'] ?? true,
                     'sort_order' => $materialData['order'] ?? 0
                 ]);
@@ -609,7 +614,7 @@ class MaterialsController extends Controller
 
             // Get materials data to sync
             $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)
-                ->with(['elements.materials'])
+                ->with(['elements.materials.libraryMaterial'])
                 ->first();
 
             if (!$materialsData) {
@@ -619,18 +624,11 @@ class MaterialsController extends Controller
                 return;
             }
 
-            // Check approval status - ONLY sync if fully approved
+            // NOTE: We allow syncing even if not fully approved to provide live updates to the budget.
+            // But we track approval status for informational purposes.
             $projectInfo = $materialsData->project_info ?? [];
             $approvalStatus = $projectInfo['approval_status'] ?? [];
             $isApproved = $approvalStatus['all_approved'] ?? false;
-
-            if (!$isApproved) {
-                \Log::info('Materials not fully approved - skipping automatic budget sync', [
-                    'materialsTaskId' => $materialsTaskId,
-                    'approvalStatus' => $approvalStatus
-                ]);
-                return;
-            }
 
             // Transform materials for budget
             $budgetMaterials = [];
@@ -659,8 +657,8 @@ class MaterialsController extends Controller
                         'unitOfMeasurement' => $material->unit_of_measurement,
                         'quantity' => (float) $material->quantity,
                         'isIncluded' => true, // Already filtered
-                        'unitPrice' => 0.0, // To be filled by budget user
-                        'totalPrice' => 0.0, // Calculated: quantity * unitPrice
+                        'unitPrice' => $price = (float)($material->unit_cost ?: ($material->libraryMaterial->unit_cost ?? 0.0)), // Use best available price
+                        'totalPrice' => $price * (float) $material->quantity, // Calculated from resolved price
                         'isAddition' => false,
                         'notes' => $material->notes,
                         'category' => $element->category
@@ -687,12 +685,16 @@ class MaterialsController extends Controller
             // Create a lookup map of existing materials by element and material description
             $existingPricesMap = [];
             foreach ($existingMaterials as $existingElement) {
-                $elementKey = $existingElement['elementType'] . '_' . $existingElement['name'];
+                $normalizedElemName = strtolower(preg_replace('/\s+/', '_', trim($existingElement['name'] ?? '')));
+                $elementKey = ($existingElement['elementType'] ?? 'custom') . '_' . $normalizedElemName;
+                
                 foreach ($existingElement['materials'] ?? [] as $existingMaterial) {
-                    $materialKey = $elementKey . '_' . $existingMaterial['description'];
+                    $normalizedDesc = strtolower(preg_replace('/[^a-z0-9_]/', '', str_replace(' ', '_', trim($existingMaterial['description'] ?? ''))));
+                    $materialKey = $elementKey . '_' . $normalizedDesc;
                     $existingPricesMap[$materialKey] = [
                         'unitPrice' => $existingMaterial['unitPrice'] ?? 0.0,
                         'totalPrice' => $existingMaterial['totalPrice'] ?? 0.0,
+                        'quantity' => $existingMaterial['quantity'] ?? 0.0,
                     ];
                 }
             }
@@ -700,32 +702,77 @@ class MaterialsController extends Controller
             // Merge new materials with existing price data
             $mergedMaterials = [];
             foreach ($budgetMaterials as $newElement) {
-                $elementKey = $newElement['elementType'] . '_' . $newElement['name'];
+                $normalizedElemName = strtolower(preg_replace('/\s+/', '_', trim($newElement['name'] ?? '')));
+                $elementKey = ($newElement['elementType'] ?? 'custom') . '_' . $normalizedElemName;
                 $mergedElement = $newElement;
                 
                 foreach ($mergedElement['materials'] as &$newMaterial) {
-                    $materialKey = $elementKey . '_' . $newMaterial['description'];
+                    $normalizedDesc = strtolower(preg_replace('/[^a-z0-9_]/', '', str_replace(' ', '_', trim($newMaterial['description'] ?? ''))));
+                    $materialKey = $elementKey . '_' . $normalizedDesc;
                     
-                    // If this material existed before, preserve its prices
+                    // If this material existed before, preserve its prices ONLY if it has a non-zero price
                     if (isset($existingPricesMap[$materialKey])) {
-                        $newMaterial['unitPrice'] = $existingPricesMap[$materialKey]['unitPrice'];
-                        // Recalculate total price with new quantity but existing unit price
-                        $newMaterial['totalPrice'] = $newMaterial['quantity'] * $newMaterial['unitPrice'];
+                        $existingUnitPrice = (float) ($existingPricesMap[$materialKey]['unitPrice'] ?? 0.0);
+                        $oldQty = (float) ($existingPricesMap[$materialKey]['quantity'] ?? 0.0); // Assuming quantity might be in existing map
+                        $newQty = (float) $newMaterial['quantity'];
+
+                        // PRESERVE pricing data ONLY if it's non-zero
+                        if ($existingUnitPrice > 0) {
+                            $newMaterial['unitPrice'] = $existingUnitPrice;
+                            
+                            \Log::info('Preserved existing non-zero price for material', [
+                                'material' => $newMaterial['description'],
+                                'unitPrice' => $newMaterial['unitPrice']
+                            ]);
+                        } else {
+                            // Keep the new price (already set from library cost)
+                            \Log::info('Updated zero price with new library cost', [
+                                'material' => $newMaterial['description'],
+                                'newPrice' => $newMaterial['unitPrice']
+                            ]);
+                        }
                         
-                        \Log::info('Preserved price for material', [
-                            'material' => $newMaterial['description'],
-                            'unitPrice' => $newMaterial['unitPrice'],
-                            'quantity' => $newMaterial['quantity']
-                        ]);
+                        // Recalculate total price with current unit price and new quantity
+                        $newMaterial['totalPrice'] = $newMaterial['quantity'] * $newMaterial['unitPrice'];
+
+                        // Track if quantity changed (for user awareness)
+                        if ($oldQty != $newQty) {
+                            $newMaterial['_quantityChanged'] = true;
+                            $newMaterial['_oldQuantity'] = $oldQty;
+                        }
                     }
                 }
                 
                 $mergedMaterials[] = $mergedElement;
             }
 
+            // Recalculate materials total for the summary
+            $materialsTotal = 0;
+            foreach ($mergedMaterials as $element) {
+                foreach ($element['materials'] ?? [] as $material) {
+                    $materialsTotal += (float) ($material['totalPrice'] ?? 0);
+                }
+            }
+
+            // Update budget with merged materials data and new summary
+            $currentSummary = $budgetData->budget_summary ?? [
+                'materialsTotal' => 0,
+                'labourTotal' => 0,
+                'expensesTotal' => 0,
+                'logisticsTotal' => 0,
+                'grandTotal' => 0
+            ];
+            
+            $currentSummary['materialsTotal'] = $materialsTotal;
+            $currentSummary['grandTotal'] = $materialsTotal + 
+                                          ($currentSummary['labourTotal'] ?? 0) + 
+                                          ($currentSummary['expensesTotal'] ?? 0) + 
+                                          ($currentSummary['logisticsTotal'] ?? 0);
+
             // Update budget with merged materials data
             $budgetData->update([
                 'materials_data' => $mergedMaterials,
+                'budget_summary' => $currentSummary,
                 'materials_imported_at' => now(),
                 'materials_imported_from_task' => $materialsTaskId,
                 'materials_manually_modified' => false,
@@ -845,8 +892,8 @@ class MaterialsController extends Controller
                                         'description' => $materialData['description'],
                                         'unitOfMeasurement' => $materialData['unitOfMeasurement'],
                                         'quantity' => $materialData['quantity'],
-                                        'unitPrice' => 0, // To be set in budget
-                                        'totalPrice' => 0,
+                                        'unitPrice' => (float) ($materialData['unitCost'] ?? 0),
+                                        'totalPrice' => (float) (($materialData['unitCost'] ?? 0) * $materialData['quantity']),
                                         'isAddition' => true
                                     ]
                                 ],
@@ -897,11 +944,13 @@ class MaterialsController extends Controller
                         'materials' => $element->materials->map(function ($material) {
                             return [
                                 'id' => (string) $material->id,
+                                'libraryMaterialId' => $material->library_material_id,
                                 'description' => $material->description,
                                 'unitOfMeasurement' => $material->unit_of_measurement,
                                 'quantity' => (float) $material->quantity,
+                                'unitCost' => $material->unit_cost !== null ? (float) $material->unit_cost : null,
                                 'isIncluded' => (bool) $material->is_included,
-                'isAdditional' => (bool) $material->is_additional,  // ← ADD THIS LINE
+                                'isAdditional' => (bool) $material->is_additional,
                                 'notes' => $material->notes,
                                 'createdAt' => $material->created_at?->toISOString(),
                                 'updatedAt' => $material->updated_at?->toISOString(),
@@ -1011,8 +1060,10 @@ class MaterialsController extends Controller
                 })->toArray();
 
                 $this->createBudgetAdditionsForAdditionalMaterials($taskId, $projectElements);
-                // REMOVED: Automatic budget sync - users must manually click "Refresh from MATERIAL" button
-                // $this->syncMaterialsToBudget($taskId, []); 
+                
+                // Automatic budget sync on final approval
+                \Log::info('Final approval received - syncing latest materials to budget', ['taskId' => $taskId]);
+                $this->syncMaterialsToBudget($taskId, $projectElements); 
             }
 
             return response()->json([

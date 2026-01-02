@@ -36,15 +36,19 @@ class ElementTemplateMaterial extends Model
 
     protected $fillable = [
         'element_template_id',
+        'library_material_id',
         'description',
         'unit_of_measurement',
         'default_quantity',
+        'unit_cost',
         'is_default_included',
         'sort_order'
     ];
 
     protected $casts = [
+        'library_material_id' => 'integer',
         'default_quantity' => 'decimal:2',
+        'unit_cost' => 'decimal:2',
         'is_default_included' => 'boolean',
         'sort_order' => 'integer'
     ];
@@ -52,5 +56,10 @@ class ElementTemplateMaterial extends Model
     public function template(): BelongsTo
     {
         return $this->belongsTo(ElementTemplate::class, 'element_template_id');
+    }
+
+    public function libraryMaterial(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\MaterialsLibrary\Models\LibraryMaterial::class, 'library_material_id');
     }
 }

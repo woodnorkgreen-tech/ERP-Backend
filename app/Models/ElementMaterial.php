@@ -38,24 +38,33 @@ class ElementMaterial extends Model
 
     protected $fillable = [
         'project_element_id',
+        'library_material_id',
         'description',
         'unit_of_measurement',
         'quantity',
+        'unit_cost',
         'is_included',
-        'is_additional',  // ← ADD THIS LINE
+        'is_additional',
         'notes',
         'sort_order'
     ];
 
     protected $casts = [
+        'library_material_id' => 'integer',
         'quantity' => 'decimal:2',
+        'unit_cost' => 'decimal:2',
         'is_included' => 'boolean',
-        'is_additional' => 'boolean',  // ← ADD THIS LINE
+        'is_additional' => 'boolean',
         'sort_order' => 'integer'
     ];
 
     public function element(): BelongsTo
     {
         return $this->belongsTo(ProjectElement::class, 'project_element_id');
+    }
+
+    public function libraryMaterial(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\MaterialsLibrary\Models\LibraryMaterial::class, 'library_material_id');
     }
 }
