@@ -41,6 +41,11 @@ class ArchivalReportService
             $itemPlacements = $data['item_placements'] ?? [];
             unset($data['setup_items'], $data['item_placements']);
 
+            // Transform project_scope array to JSON string if it's an array
+            if (isset($data['project_scope']) && is_array($data['project_scope'])) {
+                $data['project_scope'] = json_encode($data['project_scope']);
+            }
+
             // Create main report
             $report = ArchivalReport::create([
                 'enquiry_task_id' => $taskId,
@@ -77,6 +82,11 @@ class ArchivalReportService
             $setupItems = $data['setup_items'] ?? null;
             $itemPlacements = $data['item_placements'] ?? null;
             unset($data['setup_items'], $data['item_placements']);
+
+            // Transform project_scope array to JSON string if it's an array
+            if (isset($data['project_scope']) && is_array($data['project_scope'])) {
+                $data['project_scope'] = json_encode($data['project_scope']);
+            }
 
             // Update main report
             $report->update($data);

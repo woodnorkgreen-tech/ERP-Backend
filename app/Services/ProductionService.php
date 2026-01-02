@@ -10,6 +10,7 @@ use App\Models\TaskMaterialsData;
 use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Models\TaskProcurementData;
 
 class ProductionService
 {
@@ -277,6 +278,23 @@ class ProductionService
     {
         $enquiry = $task->enquiry;
         
+        // Fetch linked procurement data for the separate tab
+        $relatedProcurementItems = [];
+        try {
+            $procurementTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
+                ->where('type', 'procurement')
+                ->first();
+            
+            if ($procurementTask) {
+                $procData = TaskProcurementData::where('enquiry_task_id', $procurementTask->id)->first();
+                if ($procData && $procData->procurement_items) {
+                    $relatedProcurementItems = $procData->procurement_items;
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('ProductionService: Failed to fetch procurement data: ' . $e->getMessage());
+        }
+
         return [
             'productionData' => [
                 'id' => $productionData->id,
@@ -295,6 +313,9 @@ class ProductionService
                 'estimatedBudget' => $enquiry->estimated_budget,
                 'contactPerson' => $enquiry->contact_person ?? 'TBC',
             ],
+            // Return raw procurement items for the unified view tab
+            'relatedProcurementItems' => $relatedProcurementItems,
+            
             'productionElements' => $productionData->productionElements->map(function ($element) {
                 return [
                     'id' => (string)$element->id,

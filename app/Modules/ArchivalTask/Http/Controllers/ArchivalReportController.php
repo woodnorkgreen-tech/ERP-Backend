@@ -43,15 +43,39 @@ class ArchivalReportController extends Controller
     public function store(Request $request, int $taskId): JsonResponse
     {
         try {
+            \Log::info("Archival Report Store - Task ID: {$taskId}", [
+                'request_data' => $request->all()
+            ]);
+            
             $validated = $request->validate($this->getValidationRules());
             
+            \Log::info("Archival Report Store - Validation passed", [
+                'validated_keys' => array_keys($validated)
+            ]);
+            
             $report = $this->service->createReport($taskId, $validated);
+            
+            \Log::info("Archival Report Store - Success", ['report_id' => $report->id]);
             
             return response()->json([
                 'data' => $report,
                 'message' => 'Report created successfully'
             ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            \Log::error("Archival Report Store - Validation Error", [
+                'task_id' => $taskId,
+                'errors' => $e->errors()
+            ]);
+            throw $e;
         } catch (\Exception $e) {
+            \Log::error("Archival Report Store - Exception", [
+                'task_id' => $taskId,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'message' => 'Failed to create report',
                 'error' => $e->getMessage()
@@ -65,15 +89,41 @@ class ArchivalReportController extends Controller
     public function update(Request $request, int $taskId, int $reportId): JsonResponse
     {
         try {
+            \Log::info("Archival Report Update - Task ID: {$taskId}, Report ID: {$reportId}", [
+                'request_data' => $request->all()
+            ]);
+            
             $validated = $request->validate($this->getValidationRules(false));
             
+            \Log::info("Archival Report Update - Validation passed", [
+                'validated_keys' => array_keys($validated)
+            ]);
+            
             $report = $this->service->updateReport($reportId, $validated);
+            
+            \Log::info("Archival Report Update - Success", ['report_id' => $report->id]);
             
             return response()->json([
                 'data' => $report,
                 'message' => 'Report updated successfully'
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            \Log::error("Archival Report Update - Validation Error", [
+                'task_id' => $taskId,
+                'report_id' => $reportId,
+                'errors' => $e->errors()
+            ]);
+            throw $e;
         } catch (\Exception $e) {
+            \Log::error("Archival Report Update - Exception", [
+                'task_id' => $taskId,
+                'report_id' => $reportId,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'message' => 'Failed to update report',
                 'error' => $e->getMessage()

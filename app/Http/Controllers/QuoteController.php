@@ -212,7 +212,7 @@ class QuoteController extends Controller
                      'expenses' => $quoteData['expenses'],
                      'logistics' => $quoteData['logistics'],
                      'margins' => [
-                         'materials' => 20,
+                         'materials' => 60,
                          'labour' => 0,
                          'expenses' => 0,
                          'logistics' => 0
@@ -397,46 +397,37 @@ class QuoteController extends Controller
                 return response()->json(['message' => 'No budget data found'], 404);
             }
 
+            // Get fresh data from budget
             $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)->where('status', 'approved')->get();
             $newQuoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions);
 
-            $customMargins = $quoteData->custom_margins ?? [];
+            // MERGE LOGIC:
+            // We want to keep the NEW budget structure (items, quantities, costs)
+            // But preserve the OLD quote customizations (margins, days)
             
-            if (count($customMargins) > 0) {
-                foreach ($newQuoteData['materials'] as &$element) {
-                    foreach ($element['materials'] as &$material) {
-                        $key = 'material_' . $material['id'];
-                        if (isset($customMargins[$key])) {
-                            $material['marginPercentage'] = $customMargins[$key];
-                            $material['marginAmount'] = $material['totalPrice'] * ($customMargins[$key] / 100);
-                            $material['finalPrice'] = $material['totalPrice'] + $material['marginAmount'];
-                        }
-                    }
-                    
-                    $element['baseTotal'] = array_sum(array_column($element['materials'], 'totalPrice'));
-                    $element['marginAmount'] = array_sum(array_column($element['materials'], 'marginAmount'));
-                    $element['finalTotal'] = array_sum(array_column($element['materials'], 'finalPrice'));
-                }
-            }
-
+            $existingMaterials = $quoteData->materials ?? [];
+            $mergedMaterials = $this->mergeQuoteMaterials($existingMaterials, $newQuoteData['materials']);
+            
             // Force margins to 0 for non-material categories as per requirement
             // This ensures existing quotes with old defaults are updated
             $margins = $quoteData->margins ?? [];
             $margins['labour'] = 0;
             $margins['expenses'] = 0;
             $margins['logistics'] = 0;
-            // Ensure materials margin exists (default to 20 if missing)
-            $margins['materials'] = $margins['materials'] ?? 20;
+            // Ensure materials margin exists (default to 60 if missing)
+            $margins['materials'] = $margins['materials'] ?? 60;
 
+            // Recalculate summary totals based on the merged materials
+            $newQuoteData['materials'] = $mergedMaterials;
             $totals = $this->recalculateTotals($newQuoteData, $margins);
 
             $quoteData->update([
-                'materials' => $newQuoteData['materials'],
-                'labour' => $newQuoteData['labour'],
+                'materials' => $mergedMaterials,
+                'labour' => $newQuoteData['labour'], // Labour/Expenses/Logistics usually reset as they don't have complex margins yet
                 'expenses' => $newQuoteData['expenses'],
                 'logistics' => $newQuoteData['logistics'],
                 'totals' => $totals,
-                'margins' => $margins, // Save updated margins
+                'margins' => $margins, 
                 'budget_imported_at' => now(),
                 'budget_updated_at' => $budgetData->updated_at,
                 'budget_version' => 'v_' . $budgetData->id . '_' . $budgetData->updated_at->format('YmdHis'),
@@ -450,6 +441,64 @@ class QuoteController extends Controller
             \Log::error("Failed to smart merge budget for task {$taskId}: " . $e->getMessage());
             return response()->json(['message' => 'Failed to merge budget data', 'error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Merge existing material customization into new budget structure
+     */
+    private function mergeQuoteMaterials(array $existingMaterials, array $newMaterials): array
+    {
+        $existingMap = [];
+        // Flatten existing materials to map by ID
+        foreach ($existingMaterials as $element) {
+            foreach ($element['materials'] ?? [] as $material) {
+                if (isset($material['id'])) {
+                    $existingMap[$material['id']] = $material;
+                }
+            }
+        }
+
+        foreach ($newMaterials as &$element) {
+            foreach ($element['materials'] as &$material) {
+                if (isset($existingMap[$material['id']])) {
+                    $existing = $existingMap[$material['id']];
+                    
+                    // PRESERVE CUSTOMIZATIONS
+                    
+                    // 1. Margin Percentage
+                    $material['marginPercentage'] = $existing['marginPercentage'] ?? 60;
+                    
+                    // 2. Days (if present in existing)
+                    $material['days'] = $existing['days'] ?? 1;
+                    
+                    // Note: Quantity and UnitPrice come from the NEW budget (source of truth)
+                    // But we recalculate totals based on these new values + preserved modifiers
+                    
+                    // Recalculate Total Price = Qty * UnitPrice * Days
+                    $material['totalPrice'] = $material['quantity'] * $material['unitPrice'] * $material['days'];
+                    
+                    // Recalculate Margin Amount = TotalPrice * Margin%
+                    $material['marginAmount'] = $material['totalPrice'] * ($material['marginPercentage'] / 100);
+                    
+                    // Recalculate Final Price
+                    $material['finalPrice'] = $material['totalPrice'] + $material['marginAmount'];
+                    
+                   // \Log::info("Merged material {$material['id']}: Preserved margin {$material['marginPercentage']}% and days {$material['days']}");
+                }
+            }
+            
+            // Re-sum element totals
+            $element['baseTotal'] = array_sum(array_column($element['materials'], 'totalPrice'));
+            $element['marginAmount'] = array_sum(array_column($element['materials'], 'marginAmount'));
+            $element['finalTotal'] = array_sum(array_column($element['materials'], 'finalPrice'));
+            
+            // Recalculate element global margin % for display
+            $element['marginPercentage'] = $element['baseTotal'] > 0 
+                ? ($element['marginAmount'] / $element['baseTotal'] * 100) 
+                : 60;
+        }
+
+        return $newMaterials;
     }
 
     /**
@@ -603,12 +652,13 @@ class QuoteController extends Controller
                         'description' => $material['description'],
                         'unitOfMeasurement' => $material['unitOfMeasurement'] ?? $material['unit_of_measurement'] ?? '',
                         'quantity' => $material['quantity'],
+                        'days' => 1, // Default days
                         'unitPrice' => $material['unitPrice'] ?? 0,
                         'totalPrice' => $material['totalPrice'] ?? 0,
                         'isAddition' => $material['isAddition'] ?? false,
-                        'marginPercentage' => 20, // Default margin
-                        'marginAmount' => ($material['totalPrice'] ?? 0) * 0.2,
-                        'finalPrice' => ($material['totalPrice'] ?? 0) * 1.2
+                        'marginPercentage' => 60, // Default margin
+                        'marginAmount' => ($material['totalPrice'] ?? 0) * 0.6,
+                        'finalPrice' => ($material['totalPrice'] ?? 0) * 1.6
                     ];
                 }
 
@@ -618,7 +668,7 @@ class QuoteController extends Controller
                     'name' => $element['name'],
                     'materials' => $elementMaterials,
                     'baseTotal' => array_sum(array_column($elementMaterials, 'totalPrice')),
-                    'marginPercentage' => 20,
+                    'marginPercentage' => 60,
                     'marginAmount' => array_sum(array_column($elementMaterials, 'marginAmount')),
                     'finalTotal' => array_sum(array_column($elementMaterials, 'finalPrice'))
                 ];
@@ -686,7 +736,7 @@ class QuoteController extends Controller
 
                         // Recalculate totals with final unit price
                         $totalPrice = $quantity * $unitPrice;
-                        $marginAmount = $totalPrice * 0.2; // 20% margin
+                        $marginAmount = $totalPrice * 0.6; // 60% margin
                         $finalPrice = $totalPrice + $marginAmount;
 
                         \Log::info("Final addition material calculations", [
@@ -708,16 +758,17 @@ class QuoteController extends Controller
                                     'description' => $material['description'],
                                     'unitOfMeasurement' => $material['unitOfMeasurement'] ?? $material['unit_of_measurement'] ?? '',
                                     'quantity' => $quantity,
+                                    'days' => 1,
                                     'unitPrice' => $unitPrice,
                                     'totalPrice' => $totalPrice,
                                     'isAddition' => true,
-                                    'marginPercentage' => 20,
+                                    'marginPercentage' => 60,
                                     'marginAmount' => $marginAmount,
                                     'finalPrice' => $finalPrice
                                 ]
                             ],
                             'baseTotal' => $totalPrice,
-                            'marginPercentage' => 20,
+                            'marginPercentage' => 60,
                             'marginAmount' => $marginAmount,
                             'finalTotal' => $finalPrice
                         ];
@@ -1227,6 +1278,8 @@ class QuoteController extends Controller
      */
     public function saveApproval(Request $request, int $taskId): JsonResponse
     {
+        \Log::info("API: saveApproval called for task {$taskId}", $request->all());
+
         $validator = Validator::make($request->all(), [
             'approval_status' => 'required|in:approved,rejected,pending',
             'rejection_reason' => 'required_if:approval_status,rejected',
@@ -1238,6 +1291,7 @@ class QuoteController extends Controller
         ]);
 
         if ($validator->fails()) {
+            \Log::warning("API: saveApproval validation failed for task {$taskId}", $validator->errors()->toArray());
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $validator->errors()
@@ -1245,19 +1299,43 @@ class QuoteController extends Controller
         }
 
         try {
-            // Get or create the quote data record for this task
-            $quoteData = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+            \Log::info("Starting saveApproval logic for task {$taskId}");
+            
+            // Find the Approval Task first to get the enquiry ID
+            $approvalTask = EnquiryTask::find($taskId);
+            if (!$approvalTask) {
+                \Log::error("Approval task {$taskId} not found");
+                return response()->json(['message' => 'Approval task not found'], 404);
+            }
+            
+            \Log::info("Found approval task, enquiry ID: {$approvalTask->project_enquiry_id}");
+
+            // Find the ORIGINAL Quote Task for this enquiry
+            $originalQuoteTask = EnquiryTask::where('project_enquiry_id', $approvalTask->project_enquiry_id)
+                ->where('type', 'quote')
+                ->first();
+                
+            if (!$originalQuoteTask) {
+                \Log::error("Original quote task not found for enquiry {$approvalTask->project_enquiry_id}");
+                return response()->json(['message' => 'Original quote task not found'], 404);
+            }
+
+            \Log::info("Found original quote task: {$originalQuoteTask->id}");
+
+            // Get the quote data record for the ORIGINAL task
+            $quoteData = TaskQuoteData::where('enquiry_task_id', $originalQuoteTask->id)->first();
 
             if (!$quoteData) {
-                // Create new quote data if it doesn't exist
+                \Log::info("Quote data missing, creating new record for task {$originalQuoteTask->id}");
+                // Create new quote data if it doesn't exist (using the data sent from frontend)
                 $quoteData = TaskQuoteData::create([
-                    'enquiry_task_id' => $taskId,
+                    'enquiry_task_id' => $originalQuoteTask->id, // Correctly target the Original Quote Task
                     'project_info' => $request->quote_data['projectInfo'] ?? [],
                     'materials' => $request->quote_data['materials'] ?? [],
                     'labour' => $request->quote_data['labour'] ?? [],
                     'expenses' => $request->quote_data['expenses'] ?? [],
                     'logistics' => $request->quote_data['logistics'] ?? [],
-                    'margins' => $request->quote_data['margins'] ?? ['materials' => 20, 'labour' => 0, 'expenses' => 0, 'logistics' => 0],
+                    'margins' => $request->quote_data['margins'] ?? ['materials' => 60, 'labour' => 0, 'expenses' => 0, 'logistics' => 0],
                     'totals' => $request->quote_data['totals'] ?? [],
                     'discount_amount' => $request->quote_data['discountAmount'] ?? 0,
                     'vat_percentage' => $request->quote_data['vatPercentage'] ?? 16,
@@ -1265,6 +1343,8 @@ class QuoteController extends Controller
                     'budget_imported' => $request->quote_data['budgetImported'] ?? false,
                     'status' => $request->approval_status
                 ]);
+            } else {
+                 \Log::info("Found existing quote data: {$quoteData->id}");
             }
 
             // Update quote status based on approval
@@ -1278,6 +1358,8 @@ class QuoteController extends Controller
                 'quote_amount' => $request->quote_amount,
                 'updated_at' => now()
             ]);
+            
+            \Log::info("Successfully updated quote data {$quoteData->id} with status {$request->approval_status}");
 
             return response()->json([
                 'data' => $quoteData->fresh(),
