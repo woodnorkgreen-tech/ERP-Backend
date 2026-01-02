@@ -373,39 +373,89 @@ class MaterialsController extends Controller
     public function getElementTemplates(): JsonResponse
     {
         try {
+            // 1. Get all predefined templates with their materials
             $templates = ElementTemplate::where('is_active', true)
                 ->with('materials')
                 ->orderBy('sort_order')
                 ->get();
 
+            // 2. Get all element types to capture custom ones or those without templates
+            $elementTypes = \App\Models\ElementType::orderBy('order')
+                ->orderBy('display_name')
+                ->get();
+
+            // 3. Merge them - Templates take priority as they have material data
+            $templateNames = $templates->pluck('name')->toArray();
+            
+            $unifiedList = $templates->map(function ($template) {
+                return [
+                    'id' => 'tmpl_' . $template->id,
+                    'name' => $template->name,
+                    'display_name' => $template->display_name,
+                    'displayName' => $template->display_name,
+                    'description' => $template->description,
+                    'category' => $template->category,
+                    'color' => $template->color,
+                    'order' => $template->sort_order,
+                    'is_predefined' => true,
+                    'materials' => $template->materials->map(function ($material) {
+                        return [
+                            'id' => $material->id,
+                            'library_material_id' => $material->library_material_id,
+                            'libraryMaterialId' => $material->library_material_id,
+                            'description' => $material->description,
+                            'unit_of_measurement' => $material->unit_of_measurement,
+                            'unitOfMeasurement' => $material->unit_of_measurement,
+                            'default_quantity' => $material->default_quantity,
+                            'defaultQuantity' => $material->default_quantity,
+                            'is_default_included' => $material->is_default_included,
+                            'isDefaultIncluded' => $material->is_default_included,
+                            'unit_cost' => $material->unit_cost,
+                            'unitCost' => $material->unit_cost,
+                            'order' => $material->sort_order,
+                        ];
+                    }),
+                    'defaultMaterials' => $template->materials->map(function ($material) {
+                        return [
+                            'id' => $material->id,
+                            'description' => $material->description,
+                            'unitOfMeasurement' => $material->unit_of_measurement,
+                            'defaultQuantity' => $material->default_quantity,
+                            'isDefaultIncluded' => $material->is_default_included,
+                            'unitCost' => $material->unit_cost,
+                        ];
+                    })
+                ];
+            });
+
+            // Add element types that don't have a template record
+            foreach ($elementTypes as $type) {
+                if (!in_array($type->name, $templateNames)) {
+                    $unifiedList->push([
+                        'id' => 'type_' . $type->id,
+                        'name' => $type->name,
+                        'display_name' => $type->display_name,
+                        'displayName' => $type->display_name,
+                        'description' => '',
+                        'category' => $type->category,
+                        'color' => 'blue',
+                        'order' => $type->order,
+                        'is_predefined' => $type->is_predefined,
+                        'materials' => [],
+                        'defaultMaterials' => []
+                    ]);
+                }
+            }
+
             return response()->json([
-                'data' => $templates->map(function ($template) {
-                    return [
-                        'id' => $template->name,
-                        'name' => $template->name,
-                        'displayName' => $template->display_name,
-                        'description' => $template->description,
-                        'category' => $template->category,
-                        'color' => $template->color,
-                        'order' => $template->sort_order,
-                        'defaultMaterials' => $template->materials->map(function ($material) {
-                            return [
-                                'id' => $material->id,
-                                'libraryMaterialId' => $material->library_material_id,
-                                'description' => $material->description,
-                                'unitOfMeasurement' => $material->unit_of_measurement,
-                                'defaultQuantity' => $material->default_quantity,
-                                'isDefaultIncluded' => $material->is_default_included,
-                                'order' => $material->sort_order,
-                            ];
-                        })
-                    ];
-                }),
-                'message' => 'Element templates retrieved successfully'
+                'success' => true,
+                'data' => $unifiedList,
+                'message' => 'Element templates and types retrieved successfully'
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to retrieve element templates',
+                'success' => false,
+                'message' => 'Failed to retrieve element types',
                 'error' => $e->getMessage()
             ], 500);
         }
