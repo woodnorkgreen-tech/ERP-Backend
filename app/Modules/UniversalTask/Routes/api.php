@@ -25,7 +25,7 @@ use App\Modules\UniversalTask\Controllers\TaskSavedViewController;
 
 // Note: using explicit rate limit (60 req/min) instead of named limiter 'api'
 // to avoid MissingRateLimiterException in apps without a configured RateLimiter::for('api')
-Route::prefix('api/universal-tasks')->middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
+Route::prefix('api/universal-tasks')->middleware(['api', 'auth:sanctum', 'throttle:60,1'])->group(function () {
 
     // ==================== Task Routes ====================
     Route::apiResource('tasks', TaskController::class);
