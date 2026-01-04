@@ -78,8 +78,13 @@ class EnquiryWorkflowService
         $task = EnquiryTask::findOrFail($taskId);
 
         $oldStatus = $task->status;
-        $task->status = $status;
+        
+        // Hard Gate Validation for Completion
+        if ($status === 'completed') {
+            $this->validateTaskCompletion($task);
+        }
 
+        $task->status = $status;
         $task->save();
 
         Log::info("Task {$taskId} status changed from {$oldStatus} to {$status}");
@@ -87,9 +92,12 @@ class EnquiryWorkflowService
         // Handle enquiry status progression based on task completion
         if ($status === 'completed') {
             $this->handleEnquiryStatusProgression($task);
+            $this->handleTaskSpecificTransitions($task, $status);
         } elseif ($oldStatus === 'completed' && $status !== 'completed') {
             // Handle status reversion when task is reopened
             $this->handleEnquiryStatusReversion($task);
+        } elseif ($status === 'in_progress') {
+            $this->handleTaskSpecificTransitions($task, $status);
         }
 
         return $task;
@@ -571,5 +579,169 @@ class EnquiryWorkflowService
 
         // If no tasks are completed, return initial status
         return EnquiryConstants::STATUS_NEW;
+    }
+
+    /**
+     * Validate if a task is ready to be marked as completed
+     */
+    private function validateTaskCompletion(EnquiryTask $task): void
+    {
+        // 1. Production Validation
+        if ($task->type === 'production') {
+            $prodData = \App\Models\TaskProductionData::where('task_id', $task->id)->first();
+            if ($prodData) {
+                $unmet = \App\Models\ProductionCompletionCriterion::where('production_data_id', $prodData->id)
+                    ->where('met', false)
+                    ->get();
+                
+                if ($unmet->isNotEmpty()) {
+                    $criteriaNames = $unmet->pluck('description')->join(', ');
+                    throw new \Exception("Cannot complete Production task. Mandatory criteria unmet: {$criteriaNames}");
+                }
+            }
+        }
+
+        // 2. Materials Validation (Approvals)
+        if ($task->type === 'materials') {
+            $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
+            if ($materialsData) {
+                $status = $materialsData->project_info['approval_status'] ?? [];
+                if (!($status['all_approved'] ?? false)) {
+                    throw new \Exception("Cannot complete Materials task. All department approvals (Design, Production, Finance) are required.");
+                }
+            }
+        }
+
+        // 3. Procurement Validation (Items Received)
+        if ($task->type === 'procurement') {
+            $pending = \App\Models\TaskProcurementData::where('enquiry_task_id', $task->id)
+                ->whereHas('procurementItems', function($q) {
+                    $q->where('status', '!=', 'received');
+                })->first();
+
+            if ($pending) {
+                $count = $pending->procurementItems()->where('status', '!=', 'received')->count();
+                throw new \Exception("Cannot complete Procurement task. There are {$count} items still pending receipt.");
+            }
+        }
+
+        // 4. Site Survey Validation (Evidence Captured)
+        if ($task->type === 'site-survey') {
+            $survey = \App\Models\SiteSurvey::where('enquiry_task_id', $task->id)->first();
+            if (!$survey) {
+                throw new \Exception("Cannot complete Site Survey. No survey record has been created for this task.");
+            }
+            
+            $photos = $survey->survey_photos ?? [];
+            if (empty($photos)) {
+                throw new \Exception("Cannot complete Site Survey. At least one survey photo/image is required as evidence.");
+            }
+        }
+
+        // 5. Design Validation (Assets Uploaded)
+        if ($task->type === 'design') {
+            $attachments = \App\Models\DesignAsset::where('enquiry_task_id', $task->id)->count();
+            if ($attachments === 0) {
+                throw new \Exception("Cannot complete Design task. At least one design asset or conceptual layout must be attached.");
+            }
+        }
+
+        // 6. Setup/Setdown Validation (Issues Resolved)
+        if (in_array($task->type, ['setup', 'setdown'])) {
+            $isSetup = $task->type === 'setup';
+            $metaModel = $isSetup ? \App\Modules\setupTask\Models\SetupTask::class : \App\Modules\setdownTask\Models\SetdownTask::class;
+            $issueModel = $isSetup ? \App\Modules\setupTask\Models\SetupTaskIssue::class : \App\Modules\setdownTask\Models\SetdownTaskIssue::class;
+            $fk = $isSetup ? 'setup_task_id' : 'setdown_task_id';
+
+            $metaRecord = $metaModel::where('task_id', $task->id)->first();
+            if ($metaRecord) {
+                $unresolved = $issueModel::where($fk, $metaRecord->id)
+                    ->where('status', '!=', 'resolved')
+                    ->count();
+                
+                if ($unresolved > 0) {
+                    throw new \Exception("Cannot complete {$task->type}. All reported {$task->type} issues ({$unresolved}) must be resolved first.");
+                }
+            }
+        }
+
+        // 7. Budget Validation
+        if ($task->type === 'budget') {
+            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $task->id)->first();
+            if (!$budgetData) {
+                throw new \Exception("Cannot complete Budget task. Budget data is missing. Please save the budget before completing.");
+            }
+
+            $summary = $budgetData->budget_summary ?? [];
+            $total = (float)($summary['grandTotal'] ?? 0);
+            if ($total <= 0) {
+                throw new \Exception("Cannot complete Budget task. The total budget amount must be greater than zero. Please add items to your budget.");
+            }
+        }
+
+        // 8. Quote Validation
+        if ($task->type === 'quote') {
+            $quoteData = \App\Models\TaskQuoteData::where('enquiry_task_id', $task->id)->first();
+            if (!$quoteData) {
+                throw new \Exception("Cannot complete Quote Preparation task. Quote data is missing. Please prepare the quote before completing.");
+            }
+            if (!$quoteData->budget_imported) {
+                throw new \Exception("Cannot complete Quote Preparation task. Budget data has not been imported. Please sync the budget first.");
+            }
+        }
+
+        // 9. Quote Approval Validation
+        if ($task->type === 'quote_approval') {
+            Log::info("Validating quote approval completion for task {$task->id}");
+            $approval = \DB::table('quote_approvals')->where('task_id', $task->id)->first();
+            Log::info("Quote approval record found: " . ($approval ? 'yes' : 'no'));
+            if ($approval) {
+                Log::info("Approval status: {$approval->approval_status}");
+            }
+            if (!$approval || $approval->approval_status === 'pending') {
+                throw new \Exception("Cannot complete Quote Approval task. A final decision (Approved/Rejected) is required.");
+            }
+        }
+    }
+
+    /**
+     * Handle transitions for specific task types (e.g. Handover, Production)
+     */
+    private function handleTaskSpecificTransitions(EnquiryTask $task, string $status): void
+    {
+        // 1. Client Handover Initialization
+        // When Production is done OR Setup is done OR Handover task is started
+        $triggerTypes = ['production', 'setup', 'handover'];
+        
+        if (in_array($task->type, $triggerTypes) && ($status === 'completed' || ($task->type === 'handover' && $status === 'in_progress'))) {
+            $this->initializeHandoverSurvey($task);
+        }
+    }
+
+    /**
+     * Initialize Handover Survey and Access Token
+     */
+    private function initializeHandoverSurvey(EnquiryTask $task): void
+    {
+        // Find the actual handover task for this enquiry
+        $handoverTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
+            ->where('type', 'handover')
+            ->first();
+
+        if (!$handoverTask) return;
+
+        // Check if survey already exists
+        $exists = \App\Models\HandoverSurvey::where('task_id', $handoverTask->id)->exists();
+        if ($exists) return;
+
+        // Create the survey and token
+        \App\Models\HandoverSurvey::create([
+            'task_id' => $handoverTask->id,
+            'access_token' => \Illuminate\Support\Str::random(32),
+            'submitted' => false,
+            'question_config_snapshot' => config('survey_questions'),
+        ]);
+
+        Log::info("Auto-initialized Handover Survey for Enquiry {$task->project_enquiry_id} via task {$task->type}");
     }
 }

@@ -93,7 +93,7 @@ class ProjectEnquiry extends Model
 
     public function project(): HasOne
     {
-        return $this->hasOne(Project::class);
+        return $this->hasOne(Project::class, 'enquiry_id');
     }
 
     public function enquiryTasks(): HasMany
@@ -123,6 +123,19 @@ class ProjectEnquiry extends Model
             'job_number' => $jobNumber,
             'status' => EnquiryConstants::STATUS_QUOTE_APPROVED
         ]);
+
+        // Automatically convert to a formal Project/Mission
+        Project::firstOrCreate(
+            ['enquiry_id' => $this->id],
+            [
+                'project_id' => $this->generateProjectId(),
+                'start_date' => $this->start_date ?? now(),
+                'end_date' => $this->end_date ?? $this->expected_delivery_date,
+                'budget' => $this->budget ?? $this->estimated_budget,
+                'status' => 'planning',
+                'assigned_users' => $this->assigned_users
+            ]
+        );
 
         return true;
     }

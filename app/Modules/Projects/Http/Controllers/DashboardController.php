@@ -329,9 +329,19 @@ class DashboardController extends Controller
      */
     public function dashboard(Request $request): JsonResponse
     {
-        // Check permissions
+        // Check permissions - Allow all project-related roles
+        $allowedRoles = [
+            'Super Admin', 'Admin', 'Project Manager', 'Project Officer', 'HR',
+            'Designer', 'Procurement', 'Production', 'Logistics', 'Stores', 'Accounts', 'Client Service', 'Costing'
+        ];
+
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
+            !Auth::user()->hasRole($allowedRoles)) {
+            \Log::warning('Unauthorized dashboard access attempt', [
+                'user_id' => Auth::id(),
+                'user_name' => Auth::user()->name,
+                'roles' => Auth::user()->getRoleNames()
+            ]);
             return response()->json([
                 'message' => 'Unauthorized access to dashboard'
             ], 403);
@@ -345,6 +355,9 @@ class DashboardController extends Controller
                 'financial_metrics' => $this->dashboardService->getFinancialMetrics(),
                 'recent_activities' => $this->dashboardService->getRecentActivities(10),
                 'alerts' => $this->dashboardService->getAlerts(),
+                'suggestions' => $this->dashboardService->getSuggestions(),
+                'command_center_data' => $this->dashboardService->getCommandCenterData(),
+                'metadata' => $this->dashboardService->getMetadata(),
             ];
 
             return response()->json([

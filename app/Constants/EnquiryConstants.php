@@ -90,6 +90,15 @@ class EnquiryConstants
     public static function getActiveStatuses(): array
     {
         return [
+            self::STATUS_CLIENT_REGISTERED,
+            self::STATUS_ENQUIRY_LOGGED,
+            self::STATUS_SITE_SURVEY_COMPLETED,
+            self::STATUS_DESIGN_COMPLETED,
+            self::STATUS_DESIGN_APPROVED,
+            self::STATUS_MATERIALS_SPECIFIED,
+            self::STATUS_BUDGET_CREATED,
+            self::STATUS_QUOTE_PREPARED,
+            self::STATUS_QUOTE_APPROVED,
             self::STATUS_PLANNING,
             self::STATUS_IN_PROGRESS,
         ];

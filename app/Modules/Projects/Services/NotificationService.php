@@ -278,6 +278,14 @@ class NotificationService
     }
 
     /**
+     * Alias for sendEnquiryTaskCompleted to match controller usage
+     */
+    public function sendTaskCompletedNotification(EnquiryTask $task, User $completedBy): void
+    {
+        $this->sendEnquiryTaskCompleted($task, $completedBy);
+    }
+
+    /**
      * Send notification when Enquiry Task is completed
      */
     public function sendEnquiryTaskCompleted(EnquiryTask $task, User $completedBy): void

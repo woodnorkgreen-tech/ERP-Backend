@@ -1279,6 +1279,9 @@ class QuoteController extends Controller
     public function saveApproval(Request $request, int $taskId): JsonResponse
     {
         \Log::info("API: saveApproval called for task {$taskId}", $request->all());
+        \Log::info("DEBUG: Checking if quote_approvals record exists before saveApproval for task {$taskId}");
+        $existingApproval = \DB::table('quote_approvals')->where('task_id', $taskId)->first();
+        \Log::info("DEBUG: Existing quote_approvals record: " . ($existingApproval ? 'yes' : 'no'));
 
         $validator = Validator::make($request->all(), [
             'approval_status' => 'required|in:approved,rejected,pending',
@@ -1360,6 +1363,10 @@ class QuoteController extends Controller
             ]);
             
             \Log::info("Successfully updated quote data {$quoteData->id} with status {$request->approval_status}");
+
+            // DEBUG: Check if quote_approvals record was created
+            $approvalAfter = \DB::table('quote_approvals')->where('task_id', $taskId)->first();
+            \Log::info("DEBUG: quote_approvals record after saveApproval: " . ($approvalAfter ? 'yes' : 'no'));
 
             return response()->json([
                 'data' => $quoteData->fresh(),

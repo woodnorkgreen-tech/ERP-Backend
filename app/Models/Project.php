@@ -34,11 +34,11 @@ class Project extends Model
 
     public function enquiry(): BelongsTo
     {
-        return $this->belongsTo(Enquiry::class);
+        return $this->belongsTo(ProjectEnquiry::class, 'enquiry_id');
     }
 
     public function projectTasks(): HasMany
     {
-        return $this->hasMany(\App\Modules\Projects\Models\ProjectTask::class);
+        return $this->hasMany(\App\Modules\Projects\Models\EnquiryTask::class, 'project_enquiry_id', 'enquiry_id');
     }
 }
