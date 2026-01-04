@@ -109,57 +109,94 @@ class ProjectsDashboardService
      */
     public function getEnquiryMetrics(): array
     {
-        \Log::info('Calculating Enquiry Metrics');
-        $totalEnquiries = ProjectEnquiry::count();
-        $statusBreakdown = ProjectEnquiry::select('status', DB::raw('count(*) as count'))
-            ->groupBy('status')
-            ->pluck('count', 'status')
-            ->toArray();
+        try {
+            \Log::info('Calculating Enquiry Metrics');
+            $totalEnquiries = ProjectEnquiry::count();
+            $statusBreakdown = ProjectEnquiry::select('status', DB::raw('count(*) as count'))
+                ->groupBy('status')
+                ->pluck('count', 'status')
+                ->toArray();
 
-        $monthlyTrend = ProjectEnquiry::select(
-                DB::raw('year(created_at) as year'),
-                DB::raw('month(created_at) as month'),
-                DB::raw('count(*) as count')
-            )
-            ->where('created_at', '>=', Carbon::now()->subMonths(12))
-            ->groupBy('year', 'month')
-            ->orderBy('year', 'asc')
-            ->orderBy('month', 'asc')
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'month' => Carbon::create()->month($item->month)->format('M'),
-                    'count' => (int)$item->count
-                ];
-            })->toArray();
+            $monthlyTrend = ProjectEnquiry::select(
+                    DB::raw('year(created_at) as year'),
+                    DB::raw('month(created_at) as month'),
+                    DB::raw('count(*) as count')
+                )
+                ->where('created_at', '>=', Carbon::now()->subMonths(12))
+                ->groupBy('year', 'month')
+                ->orderBy('year', 'asc')
+                ->orderBy('month', 'asc')
+                ->get()
+                ->map(function ($item) {
+                    try {
+                        $monthNum = (int)$item->month; // Ensure it's an integer
+                        // Safe Carbon usage: create date with numeric month
+                        $monthName = Carbon::create(null, $monthNum, 1)->format('M');
+                        return [
+                            'month' => $monthName,
+                            'count' => (int)$item->count
+                        ];
+                    } catch (\Exception $e) {
+                        \Log::warning('Error formatting month in trend', [
+                            'month' => $item->month,
+                            'error' => $e->getMessage()
+                        ]);
+                        return [
+                            'month' => 'Unknown',
+                            'count' => (int)$item->count
+                        ];
+                    }
+                })->toArray();
 
-        $priorityDistribution = ProjectEnquiry::select('priority', DB::raw('count(*) as count'))
-            ->whereNotNull('priority')
-            ->groupBy('priority')
-            ->pluck('count', 'priority')
-            ->toArray();
+            $priorityDistribution = ProjectEnquiry::select('priority', DB::raw('count(*) as count'))
+                ->whereNotNull('priority')
+                ->groupBy('priority')
+                ->pluck('count', 'priority')
+                ->toArray();
 
-        // Safer department distribution
-        $departmentCounts = ProjectEnquiry::whereNotNull('department_id')
-            ->select('department_id', DB::raw('count(*) as count'))
-            ->groupBy('department_id')
-            ->get()
-            ->mapWithKeys(function ($item) {
-                $dept = \App\Modules\HR\Models\Department::find($item->department_id);
-                $name = $dept ? $dept->name : 'Direct Enquiry';
-                return [$name => (int)$item->count];
-            })
-            ->toArray();
+            // Safer department distribution
+            $departmentCounts = ProjectEnquiry::whereNotNull('department_id')
+                ->select('department_id', DB::raw('count(*) as count'))
+                ->groupBy('department_id')
+                ->get()
+                ->mapWithKeys(function ($item) {
+                    try {
+                        $dept = \App\Modules\HR\Models\Department::find($item->department_id);
+                        $name = $dept ? $dept->name : 'Direct Enquiry';
+                        return [$name => (int)$item->count];
+                    } catch (\Exception $e) {
+                        \Log::warning('Error fetching department for enquiry metrics', [
+                            'department_id' => $item->department_id,
+                            'error' => $e->getMessage()
+                        ]);
+                        return ['Direct Enquiry' => (int)$item->count];
+                    }
+                })
+                ->toArray();
 
-        \Log::info('Enquiry Metrics calculated', ['total' => $totalEnquiries]);
+            \Log::info('Enquiry Metrics calculated', ['total' => $totalEnquiries]);
 
-        return [
-            'total_enquiries' => $totalEnquiries,
-            'status_breakdown' => $statusBreakdown,
-            'monthly_trend' => $monthlyTrend,
-            'priority_distribution' => $priorityDistribution,
-            'department_distribution' => $departmentCounts,
-        ];
+            return [
+                'total_enquiries' => $totalEnquiries,
+                'status_breakdown' => $statusBreakdown,
+                'monthly_trend' => $monthlyTrend,
+                'priority_distribution' => $priorityDistribution,
+                'department_distribution' => $departmentCounts,
+            ];
+        } catch (\Exception $e) {
+            \Log::error('Error calculating enquiry metrics', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            // Return safe defaults
+            return [
+                'total_enquiries' => 0,
+                'status_breakdown' => [],
+                'monthly_trend' => [],
+                'priority_distribution' => [],
+                'department_distribution' => [],
+            ];
+        }
     }
 
     /**
@@ -310,7 +347,20 @@ class ProjectsDashboardService
         if ($completedProjects->isEmpty()) return null;
 
         $totalDays = $completedProjects->sum(function ($project) {
-            return Carbon::parse($project->created_at)->diffInDays(Carbon::parse($project->updated_at));
+            try {
+                if (!$project->created_at || !$project->updated_at) {
+                    return 0;
+                }
+                return Carbon::parse($project->created_at)->diffInDays(Carbon::parse($project->updated_at));
+            } catch (\Exception $e) {
+                \Log::warning('Error calculating duration for project', [
+                    'project_id' => $project->id,
+                    'created_at' => $project->created_at,
+                    'updated_at' => $project->updated_at,
+                    'error' => $e->getMessage()
+                ]);
+                return 0;
+            }
         });
 
         return round($totalDays / $completedProjects->count(), 1);
@@ -356,53 +406,61 @@ class ProjectsDashboardService
         \Log::info('Calculating Financial Metrics');
         try {
             $relevantStatuses = [
-                'design_completed', 
-                'design_approved', 
-                'materials_specified', 
-                'budget_created', 
-                'quote_prepared', 
-                'quote_approved', 
-                'planning', 
-                'in_progress', 
+                'design_completed',
+                'design_approved',
+                'materials_specified',
+                'budget_created',
+                'quote_prepared',
+                'quote_approved',
+                'planning',
+                'in_progress',
                 'completed'
             ];
 
             $projectIds = ProjectEnquiry::whereIn('status', $relevantStatuses)
                 ->pluck('id')
                 ->toArray();
-            
+
             \Log::info('Financial Metrics - Found projects', ['count' => count($projectIds)]);
 
             // 1. Revenue Analysis
             // Projected Revenue: Sum of estimated_budget for all relevant projects
             $projectedRevenue = (float)ProjectEnquiry::whereIn('id', $projectIds)->sum('estimated_budget');
-            
+
             // Approved Revenue: Sum of approved quotes
             $approvedRevenue = (float)DB::table('task_quote_data')
                 ->join('enquiry_tasks', 'task_quote_data.enquiry_task_id', '=', 'enquiry_tasks.id')
                 ->whereIn('enquiry_tasks.project_enquiry_id', $projectIds)
                 ->where('task_quote_data.status', 'approved')
                 ->sum('quote_amount');
-            
+
             \Log::info('Financial Metrics - Revenue', ['projected' => $projectedRevenue, 'approved' => $approvedRevenue]);
 
             // Effective Revenue for dashboard display (prioritize approved, fallback to projected)
             // But for a realistic dashboard, we might want to show both or a smart mix.
             // Let's use Approved for the main card if it exists, otherwise projected.
             // Actually, let's use the Sum of (Approved for those that have it, Projected for those that dont)
-            
+
             $effectiveRevenue = 0;
             $projectsWithBudget = ProjectEnquiry::whereIn('id', $projectIds)->get();
             foreach ($projectsWithBudget as $p) {
-                $qTotal = DB::table('task_quote_data')
-                    ->join('enquiry_tasks', 'task_quote_data.enquiry_task_id', '=', 'enquiry_tasks.id')
-                    ->where('enquiry_tasks.project_enquiry_id', $p->id)
-                    ->where('task_quote_data.status', 'approved')
-                    ->sum('quote_amount');
-                
-                if ($qTotal > 0) {
-                    $effectiveRevenue += (float)$qTotal;
-                } else {
+                try {
+                    $qTotal = DB::table('task_quote_data')
+                        ->join('enquiry_tasks', 'task_quote_data.enquiry_task_id', '=', 'enquiry_tasks.id')
+                        ->where('enquiry_tasks.project_enquiry_id', $p->id)
+                        ->where('task_quote_data.status', 'approved')
+                        ->sum('quote_amount');
+
+                    if ($qTotal > 0) {
+                        $effectiveRevenue += (float)$qTotal;
+                    } else {
+                        $effectiveRevenue += (float)($p->estimated_budget ?? 0);
+                    }
+                } catch (\Exception $e) {
+                    \Log::warning('Error calculating revenue for project', [
+                        'project_id' => $p->id,
+                        'error' => $e->getMessage()
+                    ]);
                     $effectiveRevenue += (float)($p->estimated_budget ?? 0);
                 }
             }
@@ -410,7 +468,7 @@ class ProjectsDashboardService
             // 2. Cost Analysis
             // Budgeted Cost: Sum of budget field or budget tasks
             $budgetedCost = (float)ProjectEnquiry::whereIn('id', $projectIds)->sum('budget');
-            
+
             $taskBudgets = 0;
             $budgets = DB::table('task_budget_data')
                 ->join('enquiry_tasks', 'task_budget_data.enquiry_task_id', '=', 'enquiry_tasks.id')
@@ -419,10 +477,17 @@ class ProjectsDashboardService
                 ->get();
 
             foreach ($budgets as $b) {
-                $summary = is_string($b->budget_summary) ? json_decode($b->budget_summary, true) : $b->budget_summary;
-                $taskBudgets += (float)($summary['grandTotal'] ?? 0);
+                try {
+                    $summary = is_string($b->budget_summary) ? json_decode($b->budget_summary, true) : $b->budget_summary;
+                    $taskBudgets += (float)($summary['grandTotal'] ?? 0);
+                } catch (\Exception $e) {
+                    \Log::warning('Error parsing budget summary', [
+                        'budget_summary' => $b->budget_summary,
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
-            
+
             \Log::info('Financial Metrics - Costs', ['field_sum' => $budgetedCost, 'task_sum' => $taskBudgets]);
 
             $effectiveCost = $taskBudgets > 0 ? $taskBudgets : $budgetedCost;
@@ -441,7 +506,10 @@ class ProjectsDashboardService
                 'margin' => $margin,
             ];
         } catch (\Exception $e) {
-            \Log::error('Error calculating financial metrics: ' . $e->getMessage());
+            \Log::error('Error calculating financial metrics', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return [
                 'revenue' => 0,
                 'approved_revenue' => 0,
@@ -876,7 +944,16 @@ class ProjectsDashboardService
 
         // Monthly trend for filtered data
         $monthlyTrend = $enquiries->groupBy(function ($enquiry) {
-            return $enquiry->created_at->format('M Y');
+            try {
+                return $enquiry->created_at ? $enquiry->created_at->format('M Y') : 'Unknown';
+            } catch (\Exception $e) {
+                \Log::warning('Error formatting date for enquiry', [
+                    'enquiry_id' => $enquiry->id,
+                    'created_at' => $enquiry->created_at,
+                    'error' => $e->getMessage()
+                ]);
+                return 'Unknown';
+            }
         })->map->count()->toArray();
 
         return [

@@ -692,12 +692,7 @@ class EnquiryWorkflowService
 
         // 9. Quote Approval Validation
         if ($task->type === 'quote_approval') {
-            Log::info("Validating quote approval completion for task {$task->id}");
             $approval = \DB::table('quote_approvals')->where('task_id', $task->id)->first();
-            Log::info("Quote approval record found: " . ($approval ? 'yes' : 'no'));
-            if ($approval) {
-                Log::info("Approval status: {$approval->approval_status}");
-            }
             if (!$approval || $approval->approval_status === 'pending') {
                 throw new \Exception("Cannot complete Quote Approval task. A final decision (Approved/Rejected) is required.");
             }

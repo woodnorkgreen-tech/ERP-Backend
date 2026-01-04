@@ -335,6 +335,18 @@ class DashboardController extends Controller
             'Designer', 'Procurement', 'Production', 'Logistics', 'Stores', 'Accounts', 'Client Service', 'Costing'
         ];
 
+        \Log::info('Dashboard access attempt', [
+            'user_id' => Auth::id(),
+            'user_name' => Auth::user()->name ?? 'Unknown',
+            'roles' => Auth::user()->getRoleNames(),
+            'permissions' => Auth::user()->getAllPermissions()->pluck('name')->toArray(),
+            'has_dashboard_permission' => Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS),
+            'has_allowed_role' => Auth::user()->hasRole($allowedRoles),
+            'ip' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'timestamp' => now()
+        ]);
+
         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
             !Auth::user()->hasRole($allowedRoles)) {
             \Log::warning('Unauthorized dashboard access attempt', [
@@ -348,6 +360,7 @@ class DashboardController extends Controller
         }
 
         try {
+            \Log::info('Dashboard data fetch started', ['user_id' => Auth::id()]);
             $data = [
                 'enquiry_metrics' => $this->dashboardService->getEnquiryMetrics(),
                 'task_metrics' => $this->dashboardService->getTaskMetrics(),
@@ -365,6 +378,14 @@ class DashboardController extends Controller
                 'message' => 'Dashboard data retrieved successfully'
             ]);
         } catch (\Exception $e) {
+            \Log::error('Dashboard data fetch failed', [
+                'user_id' => Auth::id(),
+                'error_message' => $e->getMessage(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'stack_trace' => $e->getTraceAsString(),
+                'timestamp' => now()
+            ]);
             return response()->json([
                 'message' => 'Failed to retrieve dashboard data',
                 'error' => $e->getMessage()

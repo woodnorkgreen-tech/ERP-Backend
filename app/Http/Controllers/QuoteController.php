@@ -1279,9 +1279,6 @@ class QuoteController extends Controller
     public function saveApproval(Request $request, int $taskId): JsonResponse
     {
         \Log::info("API: saveApproval called for task {$taskId}", $request->all());
-        \Log::info("DEBUG: Checking if quote_approvals record exists before saveApproval for task {$taskId}");
-        $existingApproval = \DB::table('quote_approvals')->where('task_id', $taskId)->first();
-        \Log::info("DEBUG: Existing quote_approvals record: " . ($existingApproval ? 'yes' : 'no'));
 
         $validator = Validator::make($request->all(), [
             'approval_status' => 'required|in:approved,rejected,pending',
@@ -1361,12 +1358,25 @@ class QuoteController extends Controller
                 'quote_amount' => $request->quote_amount,
                 'updated_at' => now()
             ]);
-            
-            \Log::info("Successfully updated quote data {$quoteData->id} with status {$request->approval_status}");
 
-            // DEBUG: Check if quote_approvals record was created
-            $approvalAfter = \DB::table('quote_approvals')->where('task_id', $taskId)->first();
-            \Log::info("DEBUG: quote_approvals record after saveApproval: " . ($approvalAfter ? 'yes' : 'no'));
+            // Create or update approval record in quote_approvals table (required for validation)
+            \DB::table('quote_approvals')->updateOrInsert(
+                ['task_id' => $taskId],
+                [
+                    'enquiry_id' => $approvalTask->project_enquiry_id,
+                    'approval_status' => $request->approval_status,
+                    'approved_by' => $request->approved_by,
+                    'approval_date' => $request->approval_date,
+                    'rejection_reason' => $request->approval_status === 'rejected' ? $request->rejection_reason : null,
+                    'comments' => $request->comments,
+                    'quote_amount' => $request->quote_amount,
+                    'quote_data' => json_encode($request->quote_data),
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]
+            );
+
+            \Log::info("Successfully updated quote data {$quoteData->id} with status {$request->approval_status} and created quote_approvals record");
 
             return response()->json([
                 'data' => $quoteData->fresh(),
