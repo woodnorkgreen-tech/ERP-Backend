@@ -17,7 +17,7 @@ use App\Modules\Projects\Services\NotificationService;
  * @OA\Schema(
  *     schema="ProjectEnquiry",
  *     @OA\Property(property="id", type="integer", example=1),
- *     @OA\Property(property="enquiry_number", type="string", example="WNG-11-2025-001"),
+ *     @OA\Property(property="enquiry_number", type="string", example="ENQ-11-2025-001"),
  *     @OA\Property(property="title", type="string", example="Office Branding Project"),
  *     @OA\Property(property="description", type="string", example="Complete branding solution for new office"),
  *             @OA\Property(property="status", type="string", enum={"draft","pending","in_progress","quote_approved","completed","cancelled"}),

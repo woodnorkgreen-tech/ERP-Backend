@@ -58,7 +58,7 @@ class EnquiryService
     private function generateEnquiryNumber(): string
     {
         $count = ProjectEnquiry::count() + 1;
-        return 'WNG-' . date('m') . '-' . date('Y') . '-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+        return \App\Constants\EnquiryConstants::ENQUIRY_PREFIX . '-' . date('m') . '-' . date('Y') . '-' . str_pad($count, 3, '0', STR_PAD_LEFT);
     }
 
     private function startWorkflowForEnquiry(ProjectEnquiry $enquiry): void

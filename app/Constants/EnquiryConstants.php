@@ -39,7 +39,7 @@ class EnquiryConstants
     ];
 
     // Enquiry number prefix
-    const ENQUIRY_PREFIX = 'WNG';
+    const ENQUIRY_PREFIX = 'ENQ';
 
     // Project ID prefix
     const PROJECT_PREFIX = 'WNG';

@@ -177,22 +177,24 @@ class ProjectEnquiry extends Model
         $year = $now->year;
         $month = str_pad($now->month, 2, '0', STR_PAD_LEFT);
 
+        // Use format: WNG-MM-YYYY-NNN (e.g., WNG-01-2026-001)
+        $prefix = EnquiryConstants::PROJECT_PREFIX . "-{$month}-{$year}-";
+
         // Get the last project number for this month
-        $lastProject = Project::whereYear('created_at', $year)
-                              ->whereMonth('created_at', $now->month)
-                              ->orderByRaw('CAST(SUBSTRING(project_id, LENGTH(?) + 1) AS UNSIGNED) DESC', [EnquiryConstants::PROJECT_PREFIX . "-{$year}{$month}-"])
+        $lastProject = Project::where('project_id', 'like', $prefix . '%')
+                              ->orderByRaw('CAST(SUBSTRING(project_id, LENGTH(?) + 1) AS UNSIGNED) DESC', [$prefix])
                               ->first();
 
         $nextNumber = 1;
         if ($lastProject) {
             // Extract the number part after the prefix
-            $prefix = EnquiryConstants::PROJECT_PREFIX . "-{$year}{$month}-";
-            $numberPart = substr($lastProject->project_id, strlen($prefix));
+            $prefixLen = strlen($prefix);
+            $numberPart = substr($lastProject->project_id, $prefixLen);
             $nextNumber = intval($numberPart) + 1;
         }
         $formattedNumber = str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
 
-        return EnquiryConstants::PROJECT_PREFIX . "-{$year}{$month}-{$formattedNumber}";
+        return $prefix . $formattedNumber;
     }
 
     /**
@@ -202,14 +204,13 @@ class ProjectEnquiry extends Model
     {
         $now = now();
         $year = $now->year;
+        $month = str_pad($now->month, 2, '0', STR_PAD_LEFT);
 
-        // Use format: WNG-{year}-{sequential_number}
-        $prefix = "WNG-{$year}-";
+        // Use format: WNG-MM-YYYY-NNN (e.g., WNG-01-2026-001)
+        $prefix = EnquiryConstants::PROJECT_PREFIX . "-{$month}-{$year}-";
 
-        // Get the last job number for this year
-        $lastEnquiry = self::whereYear('created_at', $year)
-                          ->whereNotNull('job_number')
-                          ->where('job_number', 'like', $prefix . '%')
+        // Get the last job number for this prefix (monthly reset)
+        $lastEnquiry = self::where('job_number', 'like', $prefix . '%')
                           ->orderByRaw('CAST(SUBSTRING(job_number, LENGTH(?) + 1) AS UNSIGNED) DESC', [$prefix])
                           ->first();
 

@@ -112,6 +112,12 @@ class ProjectsDashboardService
         try {
             \Log::info('Calculating Enquiry Metrics');
             $totalEnquiries = ProjectEnquiry::count();
+            
+            // Conversion metrics
+            $convertedCount = ProjectEnquiry::whereNotNull('job_number')->count();
+            $unconvertedCount = ProjectEnquiry::whereNull('job_number')->where('status', '!=', 'cancelled')->count();
+            $conversionRate = $totalEnquiries > 0 ? round(($convertedCount / $totalEnquiries) * 100, 2) : 0;
+
             $statusBreakdown = ProjectEnquiry::select('status', DB::raw('count(*) as count'))
                 ->groupBy('status')
                 ->pluck('count', 'status')
@@ -178,6 +184,9 @@ class ProjectsDashboardService
 
             return [
                 'total_enquiries' => $totalEnquiries,
+                'converted_to_project' => $convertedCount,
+                'remaining_enquiries' => $unconvertedCount,
+                'conversion_rate' => $conversionRate,
                 'status_breakdown' => $statusBreakdown,
                 'monthly_trend' => $monthlyTrend,
                 'priority_distribution' => $priorityDistribution,
@@ -191,6 +200,9 @@ class ProjectsDashboardService
             // Return safe defaults
             return [
                 'total_enquiries' => 0,
+                'converted_to_project' => 0,
+                'remaining_enquiries' => 0,
+                'conversion_rate' => 0,
                 'status_breakdown' => [],
                 'monthly_trend' => [],
                 'priority_distribution' => [],
@@ -280,8 +292,8 @@ class ProjectsDashboardService
         // Active projects are anything that's been approved and is being worked on
         $activeProjects = ProjectEnquiry::whereIn('status', ['planning', 'in_progress', 'materials_specified', 'budget_created', 'quote_approved'])->count();
 
-        // Converted projects are enquiries that moved past the initial phases
-        $convertedProjects = ProjectEnquiry::whereNotIn('status', ['enquiry_logged', 'client_registered', 'cancelled'])->count();
+        // Converted projects are enquiries that have been formally assigned a job number
+        $convertedProjects = ProjectEnquiry::whereNotNull('job_number')->count();
 
         $totalBudget = ProjectEnquiry::whereNotNull('estimated_budget')
             ->sum('estimated_budget');
