@@ -193,41 +193,23 @@ class ClientController
     }
     /**
      * @OA\Get(
-     *     path="/api/clientservice/clients",
-     *     summary="Get all clients with pagination",
-     *     tags={"Clients"},
-     *     security={{"bearerAuth":{}}},
-     *     @OA\Parameter(
-     *         name="page",
-     *         in="query",
-     *         description="Page number",
-     *         @OA\Schema(type="integer", default=1)
-     *     ),
-     *     @OA\Parameter(
-     *         name="per_page",
-     *         in="query",
-     *         description="Items per page",
-     *         @OA\Schema(type="integer", default=15)
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Clients retrieved successfully",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="data", type="object",
-     *                 @OA\Property(property="data", type="array", @OA\Items(ref="#/components/schemas/Client")),
-     *                 @OA\Property(property="current_page", type="integer"),
-     *                 @OA\Property(property="last_page", type="integer"),
-     *                 @OA\Property(property="per_page", type="integer"),
-     *                 @OA\Property(property="total", type="integer")
-     *             )
-     *         )
-     *     ),
-     *     @OA\Response(response=401, description="Unauthorized")
-     * )
+      *     path="/api/clientservice/clients",
+      *     summary="Get all clients",
+      *     tags={"Clients"},
+      *     security={{"bearerAuth":{}}},
+      *     @OA\Response(
+      *         response=200,
+      *         description="Clients retrieved successfully",
+      *         @OA\JsonContent(
+      *             @OA\Property(property="data", type="array", @OA\Items(ref="#/components/schemas/Client"))
+      *         )
+      *     ),
+      *     @OA\Response(response=401, description="Unauthorized")
+      * )
      */
     public function index(): JsonResponse
     {
-        $clients = Client::paginate(15);
+        $clients = Client::all();
 
         return response()->json([
             'data' => $clients
