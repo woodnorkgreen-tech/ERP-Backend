@@ -368,7 +368,9 @@ class TaskService
 
             // Update parent completion percentage if this is a subtask
             if ($task->parent_task_id) {
-                $this->updateParentCompletionPercentage($task->parentTask);
+                // Determine the correct user ID to use for the parent update
+                // If it's a system action (userId=0) or we want to attribute it to the user who updated the subtask
+                $this->updateParentCompletionPercentage($task->parentTask, $userId);
             }
 
             DB::commit();
@@ -578,15 +580,41 @@ class TaskService
     }
 
     /**
-     * Update parent task's completion percentage.
+     * Update parent task's completion percentage and check for auto-completion.
      *
      * @param Task $parentTask
+     * @param int $userId
      */
-    protected function updateParentCompletionPercentage(Task $parentTask): void
+    protected function updateParentCompletionPercentage(Task $parentTask, int $userId): void
     {
         if ($parentTask) {
-            $parentTask->completion_percentage = $parentTask->calculateCompletionPercentage();
+            $percentage = $parentTask->calculateCompletionPercentage();
+            $parentTask->completion_percentage = $percentage;
             $parentTask->save();
+
+            // Auto-complete parent if all subtasks are done
+            if ($percentage >= 100.0 && $parentTask->status !== 'completed') {
+                // Double check for any non-completed subtasks to be safe
+                $hasIncomplete = $parentTask->subtasks()->where('status', '!=', 'completed')->exists();
+                
+                if (!$hasIncomplete) {
+                    $this->updateStatus(
+                        $parentTask, 
+                        'completed', 
+                        $userId, 
+                        'Auto-completed: All subtasks finished'
+                    );
+                }
+            } 
+            // Auto-reopen parent if it was completed but now has incomplete subtasks
+            elseif ($percentage < 100.0 && $parentTask->status === 'completed') {
+                $this->updateStatus(
+                    $parentTask, 
+                    'in_progress', 
+                    $userId, 
+                    'Auto-reopened: Subtask marked as incomplete'
+                );
+            }
         }
     }
 }
