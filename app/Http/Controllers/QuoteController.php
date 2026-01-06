@@ -33,34 +33,11 @@ class QuoteController extends Controller
                 ]);
             }
 
-            // Load client data for existing quotes
+            // Load task with enquiry and client relationship
             $task = EnquiryTask::with('enquiry.client')->find($taskId);
-            
-            // Transform to camelCase for frontend
-            $quoteArray = [
-                'projectInfo' => $quoteData->project_info,
-                'budgetImported' => $quoteData->budget_imported,
-                'materials' => $quoteData->materials,
-                'labour' => $quoteData->labour,
-                'expenses' => $quoteData->expenses,
-                'logistics' => $quoteData->logistics,
-                'margins' => $quoteData->margins,
-                'discountAmount' => $quoteData->discount_amount,
-                'vatPercentage' => $quoteData->vat_percentage,
-                'vatEnabled' => $quoteData->vat_enabled,
-                'totals' => $quoteData->totals,
-                'status' => $quoteData->status,
-                'createdAt' => $quoteData->created_at,
-                'updatedAt' => $quoteData->updated_at,
-            ];
-            
-            // Update client name if available
-            if ($task && $task->enquiry && $task->enquiry->client) {
-                $quoteArray['projectInfo']['clientName'] = $task->enquiry->client->full_name ?? 'Unknown Client';
-            }
-            
+
             return response()->json([
-                'data' => $quoteArray,
+                'data' => $this->formatQuoteResponse($quoteData, $task),
                 'message' => 'Quote data retrieved successfully'
             ]);
         } catch (\Exception $e) {
@@ -123,7 +100,7 @@ class QuoteController extends Controller
             );
 
             return response()->json([
-                'data' => $quoteData->fresh(),
+                'data' => $this->formatQuoteResponse($quoteData->fresh()),
                 'message' => 'Quote data saved successfully'
             ]);
 
@@ -229,7 +206,7 @@ class QuoteController extends Controller
              \Log::info("Quote data imported successfully for task: {$taskId}");
 
              return response()->json([
-                 'data' => $quote->fresh(),
+                 'data' => $this->formatQuoteResponse($quote->fresh(), $task),
                  'message' => 'Budget data imported successfully'
              ]);
 
@@ -435,7 +412,10 @@ class QuoteController extends Controller
             ]);
 
             \Log::info("Smart merge completed for task {$taskId}");
-            return response()->json(['data' => $quoteData->fresh(), 'message' => 'Budget data merged successfully']);
+            return response()->json([
+                'data' => $this->formatQuoteResponse($quoteData->fresh(), $task), 
+                'message' => 'Budget data merged successfully'
+            ]);
 
         } catch (\Exception $e) {
             \Log::error("Failed to smart merge budget for task {$taskId}: " . $e->getMessage());
@@ -949,7 +929,9 @@ class QuoteController extends Controller
             'vatAmount' => round($vatAmount, 2),
             'grandTotal' => round($grandTotal, 2),
             'totalMargin' => round($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin, 2),
-            'overallMarginPercentage' => $subtotal > 0 ? round(($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin) / ($materialsBase + $labourBase + $expensesBase + $logisticsBase) * 100, 2) : 0
+            'overallMarginPercentage' => ($materialsBase + $labourBase + $expensesBase + $logisticsBase) > 0 
+                ? round(($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin) / ($materialsBase + $labourBase + $expensesBase + $logisticsBase) * 100, 2) 
+                : 0,
         ];
 
         \Log::info("Totals calculated successfully", $totals);
@@ -1359,6 +1341,9 @@ class QuoteController extends Controller
                 'updated_at' => now()
             ]);
 
+            // Load the original quote task again for the formatter
+            $task = EnquiryTask::find($originalQuoteTask->id);
+
             // Create or update approval record in quote_approvals table (required for validation)
             \DB::table('quote_approvals')->updateOrInsert(
                 ['task_id' => $taskId],
@@ -1379,7 +1364,7 @@ class QuoteController extends Controller
             \Log::info("Successfully updated quote data {$quoteData->id} with status {$request->approval_status} and created quote_approvals record");
 
             return response()->json([
-                'data' => $quoteData->fresh(),
+                'data' => $this->formatQuoteResponse($quoteData->fresh(), $task),
                 'message' => 'Quote approval saved successfully'
             ]);
 
@@ -1395,6 +1380,45 @@ class QuoteController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Format quote data for frontend response (camelCase)
+     */
+    private function formatQuoteResponse(TaskQuoteData $quoteData, ?EnquiryTask $task = null): array
+    {
+        $response = [
+            'projectInfo' => $quoteData->project_info,
+            'budgetImported' => $quoteData->budget_imported,
+            'budgetImportedAt' => $quoteData->budget_imported_at,
+            'budgetUpdatedAt' => $quoteData->budget_updated_at,
+            'budgetVersion' => $quoteData->budget_version,
+            'materials' => $quoteData->materials,
+            'labour' => $quoteData->labour,
+            'expenses' => $quoteData->expenses,
+            'logistics' => $quoteData->logistics,
+            'margins' => $quoteData->margins,
+            'customMargins' => $quoteData->custom_margins ?? [],
+            'discountAmount' => (float) ($quoteData->discount_amount ?? 0),
+            'vatPercentage' => (float) ($quoteData->vat_percentage ?? 16),
+            'vatEnabled' => (bool) ($quoteData->vat_enabled ?? true),
+            'totals' => $quoteData->totals,
+            'status' => $quoteData->status,
+            'approvedBy' => $quoteData->approved_by,
+            'approvalDate' => $quoteData->approval_date ? $quoteData->approval_date->format('Y-m-d') : null,
+            'rejectionReason' => $quoteData->rejection_reason,
+            'approvalComments' => $quoteData->approval_comments,
+            'quoteAmount' => (float) ($quoteData->quote_amount ?? 0),
+            'createdAt' => $quoteData->created_at,
+            'updatedAt' => $quoteData->updated_at,
+        ];
+
+        // Ensure client name is up to date if task is provided
+        if ($task && $task->enquiry && $task->enquiry->client) {
+            $response['projectInfo']['clientName'] = $task->enquiry->client->full_name ?? 'Unknown Client';
+        }
+
+        return $response;
     }
 }
 
