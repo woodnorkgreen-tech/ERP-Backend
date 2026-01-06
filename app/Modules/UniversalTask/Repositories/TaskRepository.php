@@ -151,12 +151,18 @@ class TaskRepository
         $query = Task::with(['department', 'assignedUser.employee', 'creator', 'parentTask'])
                     ->withCount('subtasks');
 
-        // Include both parent tasks and subtasks in main list by default
-        // Only filter for specific parent_task_id when explicitly requested
+        // By default, exclude subtasks from main list (show only top-level tasks)
+        // Include subtasks only when explicitly requested
         if (isset($params['parent_task_id'])) {
+            // If filtering by specific parent, show its subtasks
             $query->where('parent_task_id', $params['parent_task_id']);
+        } elseif (isset($params['include_subtasks']) && $params['include_subtasks']) {
+            // If explicitly requested, include all tasks (both parents and subtasks)
+            // No filter needed - show everything
+        } else {
+            // Default: show only top-level tasks (exclude subtasks)
+            $query->whereNull('parent_task_id');
         }
-        // else: include all tasks (both parents and subtasks)
 
         // Apply search
         if (isset($params['search']) && !empty($params['search'])) {

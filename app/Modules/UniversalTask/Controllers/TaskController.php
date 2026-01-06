@@ -72,6 +72,7 @@ class TaskController
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'tags' => 'nullable|array',
             'overdue' => 'nullable|boolean',
+            'include_subtasks' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
