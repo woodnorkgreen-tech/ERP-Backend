@@ -12,6 +12,8 @@ use App\Modules\Projects\Services\EnquiryWorkflowService;
 use App\Constants\Permissions;
 use App\Constants\EnquiryConstants;
 use App\Modules\Projects\Services\NotificationService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * @OA\Schema(
@@ -215,10 +217,28 @@ class EnquiryController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        Log::info('Enquiry store request received', [
+            'user_id' => Auth::id(),
+            'payload' => $request->except(['project_scope']), // Avoid logging large arrays if possible
+        ]);
 
         // Handle field name alias for enquiry_title
         if ($request->has('enquiry_title') && !$request->has('title')) {
             $request->merge(['title' => $request->enquiry_title]);
+        }
+
+        // Sanitize nullable IDs (Handle empty strings from frontend Selects)
+        if ($request->has('client_id') && $request->client_id === '') {
+            $request->merge(['client_id' => null]);
+        }
+        if ($request->has('project_officer_id') && $request->project_officer_id === '') {
+            $request->merge(['project_officer_id' => null]);
+        }
+        if ($request->has('department_id') && $request->department_id === '') {
+            $request->merge(['department_id' => null]);
+        }
+        if ($request->has('assigned_po') && $request->assigned_po === '') {
+            $request->merge(['assigned_po' => null]);
         }
 
         $validator = Validator::make($request->all(), [
@@ -244,6 +264,7 @@ class EnquiryController extends Controller
         ]);
 
         if ($validator->fails()) {
+            Log::warning('Enquiry validation failed', ['errors' => $validator->errors()]);
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $validator->errors()
@@ -253,7 +274,8 @@ class EnquiryController extends Controller
         // Validate project officer role if provided
         if ($request->project_officer_id) {
             $user = \App\Models\User::find($request->project_officer_id);
-            if (!$user || !$user->hasRole(['Project Officer', 'Project Manager'])) {
+            if (!$user || !$user->hasAnyRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
+                 Log::warning('Invalid project officer role', ['user_id' => $request->project_officer_id]);
                 return response()->json([
                     'message' => 'Invalid project officer assignment',
                     'errors' => ['project_officer_id' => ['Selected user is not a valid project officer']]
@@ -261,40 +283,62 @@ class EnquiryController extends Controller
             }
         }
 
-        // Generate enquiry number
-        $enquiryNumber = $this->generateEnquiryNumber();
+        try {
+            DB::beginTransaction();
 
-        $enquiry = ProjectEnquiry::create([
-            'date_received' => $request->date_received,
-            'expected_delivery_date' => $request->expected_delivery_date,
-            'client_id' => $request->client_id,
-            'title' => $request->title,
-            'description' => $request->description,
-            'project_scope' => $request->project_scope,
-            'priority' => $request->priority ?? EnquiryConstants::PRIORITY_MEDIUM,
-            'contact_person' => $request->contact_person,
-            'project_officer_id' => $request->project_officer_id,
-            'status' => $request->status,
-            'department_id' => $request->department_id,
-            'assigned_department' => $request->assigned_department,
-            'project_deliverables' => $request->project_deliverables,
-            'assigned_po' => $request->assigned_po,
-            'follow_up_notes' => $request->follow_up_notes,
-            'enquiry_number' => $enquiryNumber,
-            'venue' => $request->venue,
-            'site_survey_skipped' => $request->site_survey_skipped ?? false,
-            'site_survey_skip_reason' => $request->site_survey_skip_reason,
-            'created_by' => Auth::id(),
-        ]);
+            // Generate enquiry number
+            $enquiryNumber = $this->generateEnquiryNumber();
+            Log::info('Generated enquiry number', ['enquiry_number' => $enquiryNumber]);
 
-        // Create workflow tasks for the enquiry
-        $workflowService = new EnquiryWorkflowService($this->notificationService);
-        $workflowService->createWorkflowTasksForEnquiry($enquiry);
+            $enquiry = ProjectEnquiry::create([
+                'date_received' => $request->date_received,
+                'expected_delivery_date' => $request->expected_delivery_date,
+                'client_id' => $request->client_id,
+                'title' => $request->title,
+                'description' => $request->description,
+                'project_scope' => $request->project_scope,
+                'priority' => $request->priority ?? EnquiryConstants::PRIORITY_MEDIUM,
+                'contact_person' => $request->contact_person,
+                'project_officer_id' => $request->project_officer_id,
+                'status' => $request->status,
+                'department_id' => $request->department_id,
+                'assigned_department' => $request->assigned_department,
+                'project_deliverables' => $request->project_deliverables,
+                'assigned_po' => $request->assigned_po,
+                'follow_up_notes' => $request->follow_up_notes,
+                'enquiry_number' => $enquiryNumber,
+                'venue' => $request->venue,
+                'site_survey_skipped' => $request->site_survey_skipped ?? false,
+                'site_survey_skip_reason' => $request->site_survey_skip_reason,
+                'created_by' => Auth::id(),
+            ]);
 
-        return response()->json([
-            'message' => 'Enquiry created successfully',
-            'data' => $enquiry->load('client', 'department', 'projectOfficer', 'enquiryTasks'),
-        ], 201);
+            Log::info('Enquiry record created', ['id' => $enquiry->id]);
+
+            // Create workflow tasks for the enquiry
+            $workflowService = new EnquiryWorkflowService($this->notificationService);
+            $workflowService->createWorkflowTasksForEnquiry($enquiry);
+
+            DB::commit();
+            Log::info('Enquiry creation transaction committed successfully');
+
+            return response()->json([
+                'message' => 'Enquiry created successfully',
+                'data' => $enquiry->load('client', 'department', 'projectOfficer', 'enquiryTasks'),
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Enquiry creation failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to create enquiry. Please check system logs for details.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal Server Error'
+            ], 500);
+        }
     }
 
     /**
