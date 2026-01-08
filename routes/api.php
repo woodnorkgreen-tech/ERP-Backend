@@ -130,6 +130,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{reportId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'destroy']);
         Route::get('/auto-populate', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'autoPopulate']);
         Route::post('/{reportId}/status', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'changeStatus']);
+        Route::get('/{reportId}/analyze', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'analyze']);
         
         // PDF
         Route::get('/{reportId}/pdf', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'generatePdf']);
@@ -544,6 +545,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/{reportId}/attachments/{attachmentId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'deleteAttachment']);
             Route::get('/auto-populate', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'autoPopulate']);
             Route::post('/{reportId}/status', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'changeStatus']);
+            Route::get('/{reportId}/analyze', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'analyze']);
         });
 
         // Production Task Routes

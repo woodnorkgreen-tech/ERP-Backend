@@ -275,6 +275,26 @@ class ArchivalReportController extends Controller
     }
 
     /**
+     * Analyze report and generate insights
+     */
+    public function analyze(int $taskId, int $reportId): JsonResponse
+    {
+        try {
+            $analysis = $this->service->analyzeReport($reportId);
+            
+            return response()->json([
+                'data' => $analysis,
+                'message' => 'Report analyzed successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to analyze report',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get validation rules
      */
     protected function getValidationRules(bool $isCreate = true): array

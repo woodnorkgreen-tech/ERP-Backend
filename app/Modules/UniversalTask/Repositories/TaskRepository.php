@@ -130,8 +130,8 @@ class TaskRepository
             $query->orderByRaw("FIELD(priority, 'urgent', 'high', 'medium', 'low') {$sortDirection}");
         } elseif ($sortBy === 'status') {
             // Custom status sorting: pending > in_progress > review > completed > cancelled
-            $statusOrder = ['pending' => 5, 'in_progress' => 4, 'review' => 3, 'completed' => 2, 'cancelled' => 1, 'blocked' => 0, 'overdue' => -1];
-            $query->orderByRaw("FIELD(status, 'pending', 'in_progress', 'review', 'completed', 'cancelled', 'blocked', 'overdue') {$sortDirection}");
+            $statusOrder = ['pending' => 5, 'in_progress' => 4, 'review' => 3, 'completed' => 2, 'skipped' => 2, 'cancelled' => 1, 'blocked' => 0, 'overdue' => -1];
+            $query->orderByRaw("FIELD(status, 'pending', 'in_progress', 'review', 'completed', 'skipped', 'cancelled', 'blocked', 'overdue') {$sortDirection}");
         } else {
             $query->orderBy($sortBy, $sortDirection);
         }
@@ -263,7 +263,7 @@ class TaskRepository
 
         $stats = $query->selectRaw('
             COUNT(*) as total_tasks,
-            SUM(CASE WHEN status = "completed" THEN 1 ELSE 0 END) as completed_tasks,
+            SUM(CASE WHEN status = "completed" OR status = "skipped" THEN 1 ELSE 0 END) as completed_tasks,
             SUM(CASE WHEN status = "in_progress" THEN 1 ELSE 0 END) as in_progress_tasks,
             SUM(CASE WHEN status = "pending" THEN 1 ELSE 0 END) as pending_tasks,
             SUM(CASE WHEN status = "blocked" THEN 1 ELSE 0 END) as blocked_tasks,

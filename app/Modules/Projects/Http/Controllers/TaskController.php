@@ -369,7 +369,7 @@ class TaskController extends Controller
         \Log::info("[DEBUG] updateTaskStatus called for task {$taskId} with status: {$request->status}");
 
         $validator = Validator::make($request->all(), [
-            'status' => 'required|string|in:pending,in_progress,completed,cancelled',
+            'status' => 'required|string|in:pending,in_progress,completed,cancelled,skipped',
             'notes' => 'nullable|string',
         ]);
 
@@ -925,7 +925,7 @@ class TaskController extends Controller
             'priority' => 'nullable|string|in:low,medium,high,urgent',
             'due_date' => 'nullable|date|after:yesterday', // Allow today
             'notes' => 'nullable|string|max:1000',
-            'status' => 'nullable|string|in:pending,in_progress,completed',
+            'status' => 'nullable|string|in:pending,in_progress,completed,cancelled,skipped',
         ]);
 
         if ($validator->fails()) {

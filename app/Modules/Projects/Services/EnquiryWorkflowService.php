@@ -84,6 +84,11 @@ class EnquiryWorkflowService
             $this->validateTaskCompletion($task);
         }
 
+        // If task is skipped, we mark it as completed but bypass validation
+        if ($status === 'skipped') {
+            $status = 'completed';
+        }
+
         $task->status = $status;
         $task->save();
 
@@ -93,7 +98,7 @@ class EnquiryWorkflowService
         if ($status === 'completed') {
             $this->handleEnquiryStatusProgression($task);
             $this->handleTaskSpecificTransitions($task, $status);
-        } elseif ($oldStatus === 'completed' && $status !== 'completed') {
+        } elseif (in_array($oldStatus, ['completed', 'skipped']) && $status !== 'completed') {
             // Handle status reversion when task is reopened
             $this->handleEnquiryStatusReversion($task);
         } elseif ($status === 'in_progress') {
@@ -508,7 +513,7 @@ class EnquiryWorkflowService
 
         $completedTasks = EnquiryTask::where('project_enquiry_id', $enquiry->id)
             ->whereIn('type', $requiredTasks)
-            ->where('status', 'completed')
+            ->whereIn('status', ['completed', 'skipped'])
             ->pluck('type')
             ->toArray();
 
@@ -556,7 +561,7 @@ class EnquiryWorkflowService
     {
         // Get all completed tasks for this enquiry
         $completedTasks = EnquiryTask::where('project_enquiry_id', $enquiry->id)
-            ->where('status', 'completed')
+            ->whereIn('status', ['completed', 'skipped'])
             ->pluck('type')
             ->toArray();
 
@@ -708,7 +713,7 @@ class EnquiryWorkflowService
         // When Production is done OR Setup is done OR Handover task is started
         $triggerTypes = ['production', 'setup', 'handover'];
         
-        if (in_array($task->type, $triggerTypes) && ($status === 'completed' || ($task->type === 'handover' && $status === 'in_progress'))) {
+        if (in_array($task->type, $triggerTypes) && (in_array($status, ['completed', 'skipped']) || ($task->type === 'handover' && $status === 'in_progress'))) {
             $this->initializeHandoverSurvey($task);
         }
     }

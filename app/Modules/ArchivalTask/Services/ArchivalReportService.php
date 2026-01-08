@@ -266,4 +266,112 @@ class ArchivalReportService
             ->get()
             ->toArray();
     }
+
+    /**
+     * Analyze report and generate insights
+     */
+    public function analyzeReport(int $reportId): array
+    {
+        $report = ArchivalReport::findOrFail($reportId);
+        
+        $analysis = [
+            'action_plan' => [],
+            'root_causes' => [],
+            'best_practices' => [],
+            'lessons_learnt' => [],
+            'recommendations' => [],
+            'summary_score' => 0, // 0-100
+        ];
+
+        // --- 1. Root Cause Analysis ---
+        if ($report->delays_occurred) {
+            $analysis['root_causes'][] = "Project Delays: " . ($report->delay_reasons ?? 'Unspecified reasons');
+            $analysis['lessons_learnt'][] = "Investigate and mitigate sources of delay: " . ($report->delay_reasons ?? 'N/A');
+        }
+
+        if ($report->procurement_challenges) {
+            $analysis['root_causes'][] = "Procurement Issues: " . $report->procurement_challenges;
+            $analysis['action_plan'][] = "Review supplier list and procurement lead times.";
+        }
+
+        if ($report->delivery_issues) {
+            $analysis['root_causes'][] = "Delivery Complications: " . ($report->delivery_notes ?? 'Check delivery logs');
+        }
+
+        if ($report->client_satisfaction === 'unsatisfied') {
+            $analysis['root_causes'][] = "Client Dissatisfaction: " . ($report->client_remarks ?? 'Review client feedback meetings');
+        }
+
+        // --- 2. Action Plan Generation ---
+        // Checklist Compliance
+        $checklistItems = [
+            'checklist_site_survey_form' => 'Conduct mandatory site surveys before mobilization.',
+            'checklist_qc_checklist' => 'Enforce Quality Control (QC) checklist completion prior to dispatch.',
+            'checklist_client_feedback' => 'Ensure formal client feedback form is signed off.',
+            'checklist_setup_setdown' => 'Verify setup/setdown protocols are followed.'
+        ];
+
+        foreach ($checklistItems as $field => $action) {
+            if (!$report->$field) {
+                $analysis['action_plan'][] = $action;
+            }
+        }
+
+        // Performance based actions
+        if ($report->cleanliness_rating === 'poor' || $report->cleanliness_rating === 'fair') {
+            $analysis['action_plan'][] = "Retrain team on site cleanliness and waste disposal standards.";
+        }
+
+        if ($report->print_clarity_rating === 'poor' || $report->printworks_accuracy_rating === 'poor') {
+            $analysis['action_plan'][] = "Audit print vendors or internal print quality assurance processes.";
+        }
+
+        // --- 3. Best Practices & Successes ---
+        if ($report->site_organization === 'excellent') {
+            $analysis['best_practices'][] = "Site Organization: Maintained high standards of site layout and safety.";
+        }
+
+        if ($report->team_coordination === 'good') {
+            $analysis['best_practices'][] = "Team Coordination: Effective communication and role allocation observed.";
+        }
+
+        if ($report->delivered_on_schedule && !$report->delays_occurred) {
+            $analysis['best_practices'][] = "Time Management: Project executed and delivered strictly on schedule.";
+        }
+
+        if ($report->client_rating === 'excellent' || $report->client_satisfaction === 'satisfied') {
+            $analysis['best_practices'][] = "Client Relations: Strong client confidence and satisfaction achieved.";
+        }
+
+        // --- 4. Lessons Learnt ---
+        if ($report->setup_aligned_to_schedule === false) {
+            $analysis['lessons_learnt'][] = "Setup Schedule Mismatch: Future schedules should factor in buffer time for site realities.";
+        }
+
+        if ($report->items_sourced_externally && $report->procurement_challenges) {
+            $analysis['lessons_learnt'][] = "External Sourcing Risk: Develop backup options for critical external items.";
+        }
+
+        // --- 5. Recommendations (General) ---
+        if (!empty($report->recommendations_action_points)) {
+            $analysis['recommendations'][] = $report->recommendations_action_points;
+        }
+
+        if (count($analysis['root_causes']) > 0) {
+            $analysis['recommendations'][] = "Conduct a post-mortem meeting to address identified root causes.";
+        }
+
+        // --- 6. Scoring (Simple Heuristic) ---
+        $score = 100;
+        if ($report->delays_occurred) $score -= 10;
+        if ($report->delivery_issues) $score -= 10;
+        if ($report->client_satisfaction === 'unsatisfied') $score -= 20;
+        if ($report->cleanliness_rating === 'poor') $score -= 10;
+        if ($report->cleanliness_rating === 'fair') $score -= 5;
+        if (!$report->checklist_qc_checklist) $score -= 10;
+
+        $analysis['summary_score'] = max(0, $score);
+
+        return $analysis;
+    }
 }

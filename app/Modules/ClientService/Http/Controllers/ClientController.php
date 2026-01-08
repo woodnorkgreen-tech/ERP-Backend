@@ -79,7 +79,7 @@ class ClientController
         $validator = Validator::make($request->all(), [
             'full_name' => 'required|string|max:255',
             'contact_person' => 'nullable|string|max:255',
-            'email' => 'required|email|unique:clients,email',
+            'email' => 'required|regex:/^.+@.+\..+$/i|unique:clients,email',
             'phone' => 'required|string|max:20',
             'alt_contact' => 'nullable|string|max:20',
             'address' => 'required|string',
@@ -160,7 +160,7 @@ class ClientController
         $validator = Validator::make($request->all(), [
             'full_name' => 'required|string|max:255',
             'contact_person' => 'nullable|string|max:255',
-            'email' => 'required|email|unique:clients,email,' . $id,
+            'email' => 'required|regex:/^.+@.+\..+$/i|unique:clients,email,' . $id,
             'phone' => 'required|string|max:20',
             'alt_contact' => 'nullable|string|max:20',
             'address' => 'required|string',
