@@ -234,10 +234,35 @@ class ClientController
      */
     public function index(Request $request): JsonResponse
     {
+        $query = Client::query();
+
+        // Search Filter
+        if ($request->has('search') && $request->search) {
+            $searchTerm = $request->search;
+            $query->where(function ($q) use ($searchTerm) {
+                $q->where('full_name', 'like', "%{$searchTerm}%")
+                  ->orWhere('email', 'like', "%{$searchTerm}%")
+                  ->orWhere('contact_person', 'like', "%{$searchTerm}%");
+            });
+        }
+
+        // Status Filter
+        if ($request->has('status') && $request->status) {
+            $query->where('status', $request->status);
+        }
+
+        // Company Filter
+        if ($request->has('company') && $request->company) {
+            $query->where('company_name', 'like', "%{$request->company}%");
+        }
+
+        // Order by latest
+        $query->latest();
+
         // Check if pagination is requested
-        if ($request->has('paginate') && $request->paginate) {
+        if ($request->has('paginate') && $request->paginate == 'true') {
             $perPage = $request->input('per_page', 15);
-            $clients = Client::paginate($perPage);
+            $clients = $query->paginate($perPage);
 
             return response()->json([
                 'data' => $clients
@@ -245,7 +270,7 @@ class ClientController
         }
 
         // Return all clients for dropdowns and other uses
-        $clients = Client::all();
+        $clients = $query->get();
 
         return response()->json([
             'data' => $clients
