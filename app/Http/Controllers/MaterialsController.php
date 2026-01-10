@@ -20,9 +20,12 @@ use Illuminate\Support\Facades\Validator;
  */
 class MaterialsController extends Controller
 {
-    public function __construct()
+    protected $procurementService;
+
+    public function __construct(\App\Services\ProcurementService $procurementService)
     {
         $this->middleware('permission:' . \App\Constants\Permissions::TASK_UPDATE);
+        $this->procurementService = $procurementService;
     }
 
     /**
@@ -280,8 +283,16 @@ class MaterialsController extends Controller
             // Delete existing elements and materials (cascade delete will handle materials)
             $materialsData->elements()->delete();
 
+            $idMapping = [];
+
             // Save new elements and materials
-            foreach ($request->projectElements as $elementData) {
+            foreach ($request->projectElements as $index => $elementData) {
+                // Log incoming ID for debugging
+                \Log::debug("Saving Element [$index]", [
+                    'name' => $elementData['name'],
+                    'incoming_id' => $elementData['id'] ?? 'NULL'
+                ]);
+
                 $element = ProjectElement::create([
                     'task_materials_data_id' => $materialsData->id,
                     'template_id' => $elementData['templateId'] ?? null,
@@ -294,8 +305,10 @@ class MaterialsController extends Controller
                     'sort_order' => $elementData['sortOrder'] ?? 0,
                 ]);
 
-                foreach ($elementData['materials'] as $materialData) {
-                    ElementMaterial::create([
+                $materialMapping = [];
+
+                foreach ($elementData['materials'] as $matIndex => $materialData) {
+                    $material = ElementMaterial::create([
                         'project_element_id' => $element->id,
                         'library_material_id' => $materialData['libraryMaterialId'] ?? null,
                         'description' => $materialData['description'],
@@ -307,6 +320,19 @@ class MaterialsController extends Controller
                         'notes' => $materialData['notes'] ?? null,
                         'sort_order' => $materialData['sortOrder'] ?? 0,
                     ]);
+
+                    $oldMatId = isset($materialData['id']) ? (string)$materialData['id'] : null;
+                    if ($oldMatId && !str_starts_with($oldMatId, 'temp_') && !str_starts_with($oldMatId, 'new_')) {
+                        $materialMapping[(string)$material->id] = $oldMatId;
+                    }
+                }
+
+                $oldElemId = isset($elementData['id']) ? (string)$elementData['id'] : null;
+                if ($oldElemId && !str_starts_with($oldElemId, 'temp_') && !str_starts_with($oldElemId, 'new_')) {
+                    $idMapping[(string)$element->id] = [
+                        'old_id' => $oldElemId,
+                        'materials' => $materialMapping
+                    ];
                 }
             }
 
@@ -316,7 +342,21 @@ class MaterialsController extends Controller
             $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
 
             // Update budget data with latest materials if budget exists
-            $this->syncMaterialsToBudget($taskId, $request->projectElements);
+            $this->syncMaterialsToBudget($taskId, $request->projectElements, $idMapping);
+
+            // Trigger Procurement Sync immediately using the ID Mapping
+            // This ensures meaningful Procurement data is preserved even if Budget IDs changed
+            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($taskId);
+            if ($materialsTask) {
+                $procurementTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
+                    ->where('type', 'procurement')
+                    ->first();
+                
+                if ($procurementTask) {
+                    \Log::info("Triggering Procurement Sync from Materials Save", ['procurementTaskId' => $procurementTask->id]);
+                    $this->procurementService->syncWithBudget($procurementTask->id, $idMapping);
+                }
+            }
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData->fresh(['elements.materials'])),
@@ -632,7 +672,7 @@ class MaterialsController extends Controller
     /**
      * Sync materials data to budget whenever materials are updated
      */
-    private function syncMaterialsToBudget(int $materialsTaskId, array $projectElements): void
+    private function syncMaterialsToBudget(int $materialsTaskId, array $projectElements, array $idMapping = []): void
     {
         try {
             // Find the budget task for this enquiry
@@ -674,13 +714,36 @@ class MaterialsController extends Controller
                 return;
             }
 
-            // NOTE: We allow syncing even if not fully approved to provide live updates to the budget.
-            // But we track approval status for informational purposes.
-            $projectInfo = $materialsData->project_info ?? [];
-            $approvalStatus = $projectInfo['approval_status'] ?? [];
-            $isApproved = $approvalStatus['all_approved'] ?? false;
+            // --- BUILD INDEXES OF EXISTING BUDGET DATA ---
+            $existingMaterials = $budgetData->materials_data ?? [];
+            $budgetElementsById = []; // Key: IDString -> ElementData
+            $budgetMaterialsById = []; // Key: IDString -> MaterialData
+            
+            // Fallbacks for content matching (if IDs fail)
+            $budgetElementsByKey = []; // Key: Name|Type -> ElementData
+            $budgetMaterialsByKey = []; // Key: ElemKey|MatDesc -> MaterialData
 
-            // Transform materials for budget
+            foreach ($existingMaterials as $existingElem) {
+                if (isset($existingElem['id'])) {
+                    $budgetElementsById[(string)$existingElem['id']] = $existingElem;
+                }
+                
+                // Fallback Key for Element
+                $elemKey = strtolower(trim($existingElem['name'] ?? '')) . '|' . strtolower($existingElem['elementType'] ?? 'custom');
+                $budgetElementsByKey[$elemKey] = $existingElem;
+
+                foreach ($existingElem['materials'] ?? [] as $existingMat) {
+                    if (isset($existingMat['id'])) {
+                        $budgetMaterialsById[(string)$existingMat['id']] = $existingMat;
+                    }
+                    
+                    // Fallback Key for Material
+                    $matKey = $elemKey . '|' . strtolower(trim($existingMat['description'] ?? ''));
+                    $budgetMaterialsByKey[$matKey] = $existingMat;
+                }
+            }
+
+            // --- TRANSFORM MATERIALS FOR BUDGET ---
             $budgetMaterials = [];
             foreach ($materialsData->elements as $element) {
                 // Skip elements that are not included
@@ -688,123 +751,127 @@ class MaterialsController extends Controller
                     continue;
                 }
 
+                // Resolve matching budget element
+                $matchingBudgetElem = null;
+
+                // A. Try ID Mapping (New ID -> Old ID -> Budget Lookup)
+                $oldElementId = null;
+                if (isset($idMapping[(string)$element->id])) {
+                    $oldElementId = $idMapping[(string)$element->id]['old_id'];
+                }
+                
+                if ($oldElementId) {
+                    $matchingBudgetElem = $budgetElementsById[(string)$oldElementId] ?? null;
+                    if (!$matchingBudgetElem) {
+                        \Log::warning("Materials Sync: Element ID match failed", ['new' => $element->id, 'old' => $oldElementId]);
+                    }
+                }
+
+                // B. Try Fallback Key (if ID match failed)
+                if (!$matchingBudgetElem) {
+                    $newElemKey = strtolower(trim($element->name)) . '|' . strtolower($element->element_type);
+                    $matchingBudgetElem = $budgetElementsByKey[$newElemKey] ?? null;
+                }
+
                 $elementMaterials = [];
-
                 foreach ($element->materials as $material) {
-                    // Skip materials that are not included
-                    if (!$material->is_included) {
+                    // Skip materials that are not included or marked additional
+                    if (!$material->is_included || $material->is_additional) {
                         continue;
                     }
 
-                    // Skip materials marked as additional - they should only appear in additions tab
-                    if ($material->is_additional) {
-                        continue;
+                    // Resolve price and existing data
+                    $unitPrice = 0.0;
+                    $hasCustomPrice = false;
+                    $oldQty = 0.0;
+                    
+                    // Resolve matching budget material
+                    $matchingBudgetMat = null;
+                    
+                    // A. Try ID Mapping
+                    $oldMaterialId = null;
+                    if (isset($idMapping[(string)$element->id]['materials'][(string)$material->id])) {
+                        $oldMaterialId = $idMapping[(string)$element->id]['materials'][(string)$material->id];
                     }
 
-                    $elementMaterials[] = [
-                        'id' => (string) $material->id,
+                    if ($oldMaterialId) {
+                        $matchingBudgetMat = $budgetMaterialsById[(string)$oldMaterialId] ?? null;
+                        if (!$matchingBudgetMat) {
+                             \Log::warning("Materials Sync: Material ID match failed", ['new' => $material->id, 'old' => $oldMaterialId]);
+                        }
+                    }
+
+                    // B. Try Fallback Key
+                    if (!$matchingBudgetMat) {
+                         // Construct key using CURRENT element details + Material Description
+                         $currentElemKey = strtolower(trim($element->name)) . '|' . strtolower($element->element_type);
+                         $newMatKey = $currentElemKey . '|' . strtolower(trim($material->description));
+                         $matchingBudgetMat = $budgetMaterialsByKey[$newMatKey] ?? null;
+                    }
+
+                    if ($matchingBudgetMat) {
+                         $oldPrice = (float)($matchingBudgetMat['unitPrice'] ?? 0);
+                         // Preserve price if it was set
+                         if ($oldPrice > 0) {
+                             $unitPrice = $oldPrice;
+                             $hasCustomPrice = true;
+                             \Log::info('Preserved price via ' . ($matchingBudgetMat['id'] === $oldMaterialId ? 'ID' : 'Content'), [
+                                 'material' => $material->description,
+                                 'price' => $unitPrice
+                             ]);
+                         }
+                         $oldQty = (float)($matchingBudgetMat['quantity'] ?? 0);
+                    }
+
+                    // If no custom price found/preserved, use library/default
+                    if (!$hasCustomPrice) {
+                        $unitPrice = (float)($material->unit_cost ?: ($material->libraryMaterial->unit_cost ?? 0.0));
+                    }
+
+                    $newMaterialData = [
+                        'id' => (string) $material->id, // Use NEW ID to keep budget fresh
                         'description' => $material->description,
                         'unitOfMeasurement' => $material->unit_of_measurement,
                         'quantity' => (float) $material->quantity,
-                        'isIncluded' => true, // Already filtered
-                        'unitPrice' => $price = (float)($material->unit_cost ?: ($material->libraryMaterial->unit_cost ?? 0.0)), // Use best available price
-                        'totalPrice' => $price * (float) $material->quantity, // Calculated from resolved price
+                        'isIncluded' => true,
+                        'unitPrice' => $unitPrice,
+                        'totalPrice' => $unitPrice * (float) $material->quantity,
                         'isAddition' => false,
                         'notes' => $material->notes,
                         'category' => $element->category
                     ];
+
+                    // Track quantity changes for user awareness
+                    if ($hasCustomPrice && abs($oldQty - (float)$material->quantity) > 0.001) {
+                         $newMaterialData['_quantityChanged'] = true;
+                         $newMaterialData['_oldQuantity'] = $oldQty;
+                    }
+
+                    $elementMaterials[] = $newMaterialData;
                 }
 
-                // Only add element if it has materials
                 if (!empty($elementMaterials)) {
                     $budgetMaterials[] = [
-                        'id' => (string) $element->id,
+                        'id' => (string) $element->id, // Use NEW ID
                         'elementType' => $element->element_type,
                         'name' => $element->name,
                         'category' => $element->category,
                         'materials' => $elementMaterials,
-                        'isIncluded' => true, // Already filtered
+                        'isIncluded' => true,
                         'notes' => $element->notes
                     ];
                 }
             }
 
-            // Merge with existing budget data to preserve prices
-            $existingMaterials = $budgetData->materials_data ?? [];
-            
-            // Create a lookup map of existing materials by element and material description
-            $existingPricesMap = [];
-            foreach ($existingMaterials as $existingElement) {
-                $normalizedElemName = strtolower(preg_replace('/\s+/', '_', trim($existingElement['name'] ?? '')));
-                $elementKey = ($existingElement['elementType'] ?? 'custom') . '_' . $normalizedElemName;
-                
-                foreach ($existingElement['materials'] ?? [] as $existingMaterial) {
-                    $normalizedDesc = strtolower(preg_replace('/[^a-z0-9_]/', '', str_replace(' ', '_', trim($existingMaterial['description'] ?? ''))));
-                    $materialKey = $elementKey . '_' . $normalizedDesc;
-                    $existingPricesMap[$materialKey] = [
-                        'unitPrice' => $existingMaterial['unitPrice'] ?? 0.0,
-                        'totalPrice' => $existingMaterial['totalPrice'] ?? 0.0,
-                        'quantity' => $existingMaterial['quantity'] ?? 0.0,
-                    ];
-                }
-            }
-            
-            // Merge new materials with existing price data
-            $mergedMaterials = [];
-            foreach ($budgetMaterials as $newElement) {
-                $normalizedElemName = strtolower(preg_replace('/\s+/', '_', trim($newElement['name'] ?? '')));
-                $elementKey = ($newElement['elementType'] ?? 'custom') . '_' . $normalizedElemName;
-                $mergedElement = $newElement;
-                
-                foreach ($mergedElement['materials'] as &$newMaterial) {
-                    $normalizedDesc = strtolower(preg_replace('/[^a-z0-9_]/', '', str_replace(' ', '_', trim($newMaterial['description'] ?? ''))));
-                    $materialKey = $elementKey . '_' . $normalizedDesc;
-                    
-                    // If this material existed before, preserve its prices ONLY if it has a non-zero price
-                    if (isset($existingPricesMap[$materialKey])) {
-                        $existingUnitPrice = (float) ($existingPricesMap[$materialKey]['unitPrice'] ?? 0.0);
-                        $oldQty = (float) ($existingPricesMap[$materialKey]['quantity'] ?? 0.0); // Assuming quantity might be in existing map
-                        $newQty = (float) $newMaterial['quantity'];
-
-                        // PRESERVE pricing data ONLY if it's non-zero
-                        if ($existingUnitPrice > 0) {
-                            $newMaterial['unitPrice'] = $existingUnitPrice;
-                            
-                            \Log::info('Preserved existing non-zero price for material', [
-                                'material' => $newMaterial['description'],
-                                'unitPrice' => $newMaterial['unitPrice']
-                            ]);
-                        } else {
-                            // Keep the new price (already set from library cost)
-                            \Log::info('Updated zero price with new library cost', [
-                                'material' => $newMaterial['description'],
-                                'newPrice' => $newMaterial['unitPrice']
-                            ]);
-                        }
-                        
-                        // Recalculate total price with current unit price and new quantity
-                        $newMaterial['totalPrice'] = $newMaterial['quantity'] * $newMaterial['unitPrice'];
-
-                        // Track if quantity changed (for user awareness)
-                        if ($oldQty != $newQty) {
-                            $newMaterial['_quantityChanged'] = true;
-                            $newMaterial['_oldQuantity'] = $oldQty;
-                        }
-                    }
-                }
-                
-                $mergedMaterials[] = $mergedElement;
-            }
-
-            // Recalculate materials total for the summary
+            // Recalculate materials total
             $materialsTotal = 0;
-            foreach ($mergedMaterials as $element) {
+            foreach ($budgetMaterials as $element) {
                 foreach ($element['materials'] ?? [] as $material) {
                     $materialsTotal += (float) ($material['totalPrice'] ?? 0);
                 }
             }
 
-            // Update budget with merged materials data and new summary
+            // Update budget
             $currentSummary = $budgetData->budget_summary ?? [
                 'materialsTotal' => 0,
                 'labourTotal' => 0,
@@ -819,9 +886,8 @@ class MaterialsController extends Controller
                                           ($currentSummary['expensesTotal'] ?? 0) + 
                                           ($currentSummary['logisticsTotal'] ?? 0);
 
-            // Update budget with merged materials data
             $budgetData->update([
-                'materials_data' => $mergedMaterials,
+                'materials_data' => $budgetMaterials,
                 'budget_summary' => $currentSummary,
                 'materials_imported_at' => now(),
                 'materials_imported_from_task' => $materialsTaskId,
@@ -830,21 +896,17 @@ class MaterialsController extends Controller
                     'imported_at' => now()->toISOString(),
                     'materials_task_id' => $materialsTaskId,
                     'materials_task_title' => $materialsTask->title,
-                    'total_elements' => $materialsData->elements->count(),
-                    'total_materials' => $materialsData->elements->sum(function ($element) {
-                        return $element->materials->count();
-                    })
+                    'total_elements' => count($budgetMaterials),
+                    'total_materials' => array_sum(array_map(function ($element) {
+                        return count($element['materials']);
+                    }, $budgetMaterials))
                 ],
                 'updated_at' => now()
             ]);
 
-            \Log::info("Materials synced to budget successfully", [
-                'budget_task_id' => $budgetTask->id,
-                'materials_task_id' => $materialsTaskId,
-                'total_elements' => count($budgetMaterials),
-                'total_materials' => array_sum(array_map(function ($element) {
-                    return count($element['materials']);
-                }, $budgetMaterials))
+            \Log::info("Materials synced to budget successfully (ID Mapping Active)", [
+                'taskId' => $materialsTaskId,
+                'idMappingCount' => count($idMapping)
             ]);
 
         } catch (\Exception $e) {

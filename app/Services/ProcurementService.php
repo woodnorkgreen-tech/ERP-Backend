@@ -229,15 +229,18 @@ class ProcurementService
     public function getProcurementData(int $taskId): ?TaskProcurementData
     {
         // Sync with budget data before returning
-        $this->syncProcurementWithBudget($taskId);
+        $this->syncWithBudget($taskId);
         
         return TaskProcurementData::where('enquiry_task_id', $taskId)->first();
     }
 
     /**
      * Sync procurement data with current budget data
+     * 
+     * @param int $taskId Procurement Task ID
+     * @param array $idMapping Optional mapping of New IDs to Old IDs (from Materials update)
      */
-    private function syncProcurementWithBudget(int $taskId): void
+    public function syncWithBudget(int $taskId, array $idMapping = []): void
     {
         try {
             $procurementData = TaskProcurementData::where('enquiry_task_id', $taskId)->first();
@@ -267,24 +270,83 @@ class ProcurementService
             // Index existing items by budgetItemId for easy lookup
             $existingItemsMap = collect($procurementData->procurement_items ?? [])
                 ->keyBy('budgetItemId');
+            
+            // Also index existing items by a composite key of element name and description
+            // Use grouping to handle duplicates (e.g. multiple 'Stage|Legs' items)
+            $existingItemsByContent = [];
+            foreach ($procurementData->procurement_items ?? [] as $item) {
+                // strict normalization to match MaterialsController
+                $elem = strtolower(preg_replace('/[^a-z0-9]/', '', trim($item['elementName'] ?? '')));
+                $desc = strtolower(preg_replace('/[^a-z0-9]/', '', trim($item['description'] ?? '')));
+                $key = "{$elem}|{$desc}";
+                
+                if (!isset($existingItemsByContent[$key])) {
+                    $existingItemsByContent[$key] = [];
+                }
+                $existingItemsByContent[$key][] = $item;
+            }
+
+            // Flatten ID mapping for easy material lookup: NewID -> OldID
+            $materialIdMap = [];
+            foreach ($idMapping as $elemMap) {
+                foreach ($elemMap['materials'] ?? [] as $newId => $oldId) {
+                    $materialIdMap[(string)$newId] = (string)$oldId;
+                }
+            }
+            
+            \Log::info("Procurement Sync: Starting for Task {$taskId}", [
+                'fresh_items' => count($freshItems),
+                'existing_items' => count($procurementData->procurement_items ?? []),
+                'id_map_entries' => count($materialIdMap)
+            ]);
 
             // Merge existing user-entered data into fresh items
-            $syncedItems = array_map(function ($item) use ($existingItemsMap) {
-                $existingItem = $existingItemsMap->get($item['budgetItemId']);
+            $syncedItems = array_map(function ($item) use ($existingItemsMap, $existingItemsByContent, $materialIdMap) {
+                $existingItem = null;
+                $matchType = 'None';
+                $newId = (string)$item['budgetItemId'];
+
+                // 1. Try finding by ID Mapping (New ID -> Old ID -> Existing Item)
+                if (isset($materialIdMap[$newId])) {
+                    $oldId = $materialIdMap[$newId];
+                    $existingItem = $existingItemsMap->get($oldId);
+                    if ($existingItem) $matchType = 'MappedID';
+                }
+
+                // 2. Try finding by stable ID (if ID didn't change)
+                if (!$existingItem) {
+                    $existingItem = $existingItemsMap->get($newId);
+                    if ($existingItem) $matchType = 'DirectID';
+                }
+                
+                // 3. Try finding by content (Name + Description)
+                if (!$existingItem) {
+                    $elem = strtolower(preg_replace('/[^a-z0-9]/', '', trim($item['elementName'] ?? '')));
+                    $desc = strtolower(preg_replace('/[^a-z0-9]/', '', trim($item['description'] ?? '')));
+                    $key = "{$elem}|{$desc}";
+                    
+                    if (isset($existingItemsByContent[$key]) && !empty($existingItemsByContent[$key])) {
+                        $existingItem = array_shift($existingItemsByContent[$key]);
+                        if ($existingItem) $matchType = 'Content';
+                    }
+                }
                 
                 if ($existingItem) {
-                    // Preserve user-entered fields
+                    // CRITICAL: Preserve all user-entered procurement fields
                     $item['vendorName'] = $existingItem['vendorName'] ?? '';
-                    $item['availabilityStatus'] = $existingItem['availabilityStatus'] ?? 'available';
                     $item['stockStatus'] = $existingItem['stockStatus'] ?? 'pending_check';
                     $item['stockQuantity'] = $existingItem['stockQuantity'] ?? 0;
                     $item['procurementStatus'] = $existingItem['procurementStatus'] ?? 'not_needed';
                     $item['purchaseQuantity'] = $existingItem['purchaseQuantity'] ?? 0;
                     $item['purchaseOrderNumber'] = $existingItem['purchaseOrderNumber'] ?? '';
-                    $item['expectedDeliveryDate'] = $existingItem['expectedDeliveryDate'] ?? null;
                     $item['procurementNotes'] = $existingItem['procurementNotes'] ?? '';
-                    // Keep the original lastUpdated if it exists, or use now
+                    
+                    // Also preserve these secondary fields
+                    $item['availabilityStatus'] = $existingItem['availabilityStatus'] ?? 'available';
+                    $item['expectedDeliveryDate'] = $existingItem['expectedDeliveryDate'] ?? null;
                     $item['lastUpdated'] = $existingItem['lastUpdated'] ?? now()->toISOString();
+                } else {
+                    \Log::debug("Procurement Sync: No match found for item", ['element' => $item['elementName'], 'material' => $item['description']]);
                 }
                 
                 return $item;
