@@ -111,6 +111,12 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
         $rowNumber = 2; // Start at 2 because of header row
         
         foreach ($rows as $row) {
+            // Skip empty rows
+            if ($this->isEmptyRow($row)) {
+                $rowNumber++;
+                continue;
+            }
+
             $this->processRow($rowNumber, $row);
             $rowNumber++;
         }
@@ -120,46 +126,62 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
             $this->saveCurrentElement($rowNumber);
         }
     }
+
+    private function isEmptyRow($row)
+    {
+        // Check if all relevant fields are empty
+        return empty($row['element_id']) && 
+               empty($row['type']) && empty($row['element_type']) &&
+               empty($row['material_particular']) && empty($row['particular_description']); 
+    }
     
     private function processRow($rowNumber, $row)
     {
-        // Convert row to array with expected keys
+        // Normalizing keys to handle both Old and New Template headers
+        // New Template: element_id, type, w_m, material_particular, qty
+        // Old Template: element_id, element_type, width_m, particular_description, quantity
+        
+        $elementId = trim($row['element_id'] ?? '');
+        
         $rowData = [
-            'element_id' => trim($row['element_id'] ?? ''),
-            'element_type' => trim($row['element_type'] ?? ''),
+            'element_id' => $elementId,
+            'element_type' => trim($row['type'] ?? $row['element_type'] ?? ''),
             'element_name' => trim($row['element_name'] ?? ''),
             'category' => trim($row['category'] ?? ''),
-            'width' => $row['width_m'] ?? '',
-            'length' => $row['length_m'] ?? '',
-            'height' => $row['height_m'] ?? '',
-            'particular_description' => trim($row['particular_description'] ?? ''),
+            // Dimensions
+            'width' => $row['w_m'] ?? $row['width_m'] ?? 0,
+            'length' => $row['l_m'] ?? $row['length_m'] ?? 0,
+            'height' => $row['h_m'] ?? $row['height_m'] ?? 0,
+            // Particulars
+            'particular_description' => trim($row['material_particular'] ?? $row['particular_description'] ?? ''),
             'unit' => trim($row['unit'] ?? ''),
-            'quantity' => $row['quantity'] ?? '',
+            'quantity' => $row['qty'] ?? $row['quantity'] ?? 0,
             'included' => strtoupper(trim($row['included'] ?? '')),
             'notes' => trim($row['notes'] ?? ''),
         ];
         
         // Check if this row starts a new element (has Element ID)
-        $hasElementId = !empty($rowData['element_id']);
+        $hasElementId = !empty($elementId);
         
         if ($hasElementId) {
             // Save previous element before starting new one
             if ($this->currentElement !== null) {
-                $this->saveCurrentElement($rowNumber);
+                $this->saveCurrentElement($rowNumber - 1); // Save associated with previous row
             }
             
             // Validate element header
             $elementValidation = $this->validateElementHeader($rowNumber, $rowData);
             
             if (!$elementValidation['valid']) {
-                // Skip this element if header is invalid
+                // If header is invalid, we can't properly start an element.
+                // We reset state so we don't attach particulars to a broken element.
                 $this->currentElement = null;
                 $this->currentElementId = null;
-                return;
+                return; 
             }
             
             // Start new element
-            $this->currentElementId = $rowData['element_id'];
+            $this->currentElementId = $elementId;
             $this->currentElement = [
                 'id' => $this->currentElementId,
                 'type' => $rowData['element_type'],
@@ -176,9 +198,17 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
         }
         
         // Add particular if description exists
+        // Note: A row can describe an element AND contain the first particular (which is typical for 1-line elements)
+        // OR it can be a child row with just particular details.
+        
         if (!empty($rowData['particular_description'])) {
             if ($this->currentElement === null) {
-                $this->parent->addError($rowNumber, "Particular found without element header. Fill element columns first.");
+                // Orphaned particular?
+                // If this row had an element ID but failed validation, we already returned.
+                // If this row has NO element ID and NO current element, it's truly an orphan.
+                if (!$hasElementId) {
+                    $this->parent->addError($rowNumber, "Found material '{$rowData['particular_description']}' but no Element defined. Please ensure the first row has an Element ID.");
+                }
                 return;
             }
             
@@ -205,7 +235,7 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
         // Required fields
         $requiredFields = [
             'element_id' => 'Element ID',
-            'element_type' => 'Element Type',
+            'element_type' => 'Type', // Updated label
             'element_name' => 'Element Name',
             'category' => 'Category',
         ];
@@ -228,14 +258,7 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
         // Validate element type using config (allow custom types but warn)
         $knownTypes = config('materials.element_types', ['stage', 'backdrop', 'skirting', 'flooring', 'trussing', 'décor', 'lighting', 'sound', 'chairs', 'tables', 'signage', 'custom']);
         if (!empty($rowData['element_type']) && !in_array(strtolower($rowData['element_type']), $knownTypes)) {
-            $this->parent->addWarning($rowNumber, "Unknown element type: '{$rowData['element_type']}'. Will be treated as custom type.");
-        }
-        
-        // Validate dimensions are numeric
-        foreach (['width', 'length', 'height'] as $dim) {
-            if (!empty($rowData[$dim]) && !is_numeric($rowData[$dim])) {
-                $this->parent->addWarning($rowNumber, ucfirst($dim) . " is not numeric. Will be set to 0.");
-            }
+            $this->parent->addWarning($rowNumber, "Unknown type: '{$rowData['element_type']}'. Will be treated as custom.");
         }
         
         return ['valid' => $valid];
@@ -247,29 +270,24 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
         
         // Required fields
         if (empty($rowData['particular_description'])) {
-            $this->parent->addError($rowNumber, "Particular description is required");
+            $this->parent->addError($rowNumber, "Material description is required");
             $valid = false;
         }
         
         if (empty($rowData['unit'])) {
-            $this->parent->addError($rowNumber, "Unit is required for particular");
+            $this->parent->addError($rowNumber, "Unit is required");
             $valid = false;
         }
         
         if (empty($rowData['quantity']) || !is_numeric($rowData['quantity']) || floatval($rowData['quantity']) <= 0) {
-            $this->parent->addError($rowNumber, "Quantity must be a number greater than 0");
+            $this->parent->addError($rowNumber, "Qty must be > 0");
             $valid = false;
         }
         
-        // Validate 'included' field
-        if (!in_array($rowData['included'], ['YES', 'NO', ''])) {
-            $this->parent->addWarning($rowNumber, "Invalid 'Included' value. Must be YES or NO. Defaulting to YES.");
-        }
-        
-        // Validate unit using config (allow custom units but warn)
-        $knownUnits = array_map('strtolower', config('materials.units', ['pcs', 'ltrs', 'mtrs', 'sqm', 'pks', 'kgs', 'custom']));
+        // Validate unit
+        $knownUnits = array_map('strtolower', config('materials.units', ['pcs', 'ltrs', 'mtrs', 'sqm', 'pks', 'kgs', 'custom', 'set', 'days', 'hrs']));
         if (!empty($rowData['unit']) && !in_array(strtolower($rowData['unit']), $knownUnits)) {
-            $this->parent->addWarning($rowNumber, "Unknown unit: '{$rowData['unit']}'. Will be accepted as custom unit.");
+            $this->parent->addWarning($rowNumber, "Unknown unit: '{$rowData['unit']}'");
         }
         
         return ['valid' => $valid];
@@ -277,9 +295,12 @@ class MaterialsDataImport implements ToCollection, WithHeadingRow
     
     private function saveCurrentElement($rowNumber)
     {
+        // Use row number of the element itself for error reporting
+        $reportRow = $this->currentElement['row_number'] ?? $rowNumber;
+
         // Validate: Element must have at least 1 particular
         if (empty($this->currentElement['particulars'])) {
-            $this->parent->addError($this->currentElement['row_number'], "Element '{$this->currentElement['id']}' has no particulars/materials");
+            $this->parent->addError($reportRow, "Element '{$this->currentElement['id']}' has no materials defined.");
             return;
         }
         

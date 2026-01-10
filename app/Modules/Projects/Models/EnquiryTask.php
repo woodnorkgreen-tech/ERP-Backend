@@ -48,6 +48,11 @@ class EnquiryTask extends Model
         'assigned_at' => 'datetime',
     ];
 
+    /**
+     * Relationships to always load
+     */
+    protected $with = ['assignedTo', 'assignedUser'];
+
     // Task type to department mapping
     const TASK_TYPE_DEPARTMENT_MAPPING = [
         'site-survey' => 'Client Service',

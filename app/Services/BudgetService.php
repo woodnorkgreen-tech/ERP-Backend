@@ -150,16 +150,18 @@ class BudgetService
             foreach ($newElement['materials'] ?? [] as $materialIndex => $newMaterial) {
                 $materialKey = $this->getMaterialKey($newMaterial);
                 $fullKey = $elementKey . '::' . $materialKey;
+                $newQty = $newMaterial['quantity'] ?? 0;
                 
                 // Check if this material existed before
                 if (isset($existingMap[$fullKey])) {
                     $existingMaterial = $existingMap[$fullKey];
+                    $oldQty = $existingMaterial['quantity'] ?? 0;
                     
                     \Log::debug('Material matched', [
                         'key' => $fullKey,
                         'description' => $newMaterial['description'] ?? 'N/A',
-                        'old_qty' => $existingMaterial['quantity'] ?? 0,
-                        'new_qty' => $newMaterial['quantity'] ?? 0,
+                        'old_qty' => $oldQty,
+                        'new_qty' => $newQty,
                         'preserved_unit_price' => $existingMaterial['unitPrice'] ?? 0
                     ]);
                     
@@ -196,10 +198,10 @@ class BudgetService
                     \Log::debug('New material detected', [
                         'key' => $fullKey,
                         'description' => $newMaterial['description'] ?? 'N/A',
-                        'quantity' => $newMaterial['quantity'] ?? 0
+                        'quantity' => $newQty
                     ]);
                 }
-                // else: New material - keep default unitPrice = 0 from transform
+                // else: New material - keep default unitPrice = 0 from transform or library
             }
 
             $merged[] = $mergedElement;

@@ -15,21 +15,36 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Font;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
-use Illuminate\Support\Collection;
 use App\Modules\Projects\Models\EnquiryTask;
+use Illuminate\Support\Collection;
 
 class MaterialsTemplateExport implements WithMultipleSheets
 {
     protected $task;
     protected $enquiry;
+    protected $referenceData;
     
     public function __construct($taskId)
     {
         $this->task = EnquiryTask::with('enquiry.client')->findOrFail($taskId);
         $this->enquiry = $this->task->enquiry;
+        
+        // Prepare centralized reference data
+        $this->referenceData = [
+            'element_types' => config('materials.element_types', [
+                'stage', 'backdrop', 'skirting', 'flooring', 'trussing', 'décor', 
+                'lighting', 'sound', 'chairs', 'tables', 'signage', 'custom'
+            ]),
+            'categories' => config('materials.categories', [
+                'production', 'hire', 'outsourced'
+            ]),
+            'units' => config('materials.units', [
+                'Pcs', 'Ltrs', 'Mtrs', 'sqm', 'Pks', 'Kgs', 'custom', 'set', 'days', 'hrs'
+            ]),
+            'boolean_options' => ['YES', 'NO']
+        ];
     }
     
     public function sheets(): array
@@ -37,13 +52,56 @@ class MaterialsTemplateExport implements WithMultipleSheets
         return [
             new InstructionsSheet(),
             new ProjectInfoSheet($this->enquiry),
-            new MaterialsDataSheet(),
+            new ReferencesSheet($this->referenceData), // New dynamic reference sheet
+            new MaterialsDataSheet($this->referenceData), // Pass data to main sheet
         ];
     }
 }
 
 /**
- * Instructions Sheet - Read-only guide for users
+ * References Sheet - Hidden sheet storing dropdown options
+ */
+class ReferencesSheet implements FromCollection, WithTitle, ShouldAutoSize
+{
+    protected $data; // Renamed from $options to avoid conflict
+
+    public function __construct(array $data)
+    {
+        $this->data = $data;
+    }
+
+    public function title(): string
+    {
+        return 'Reference Data';
+    }
+
+    public function collection()
+    {
+        // Transpose data into columns for easier named range reference
+        $maxRows = max(
+            count($this->data['element_types']),
+            count($this->data['categories']),
+            count($this->data['units']),
+            count($this->data['boolean_options'])
+        );
+
+        $rows = [['Element Types', 'Categories', 'Units', 'Yes/No']]; // Headers
+
+        for ($i = 0; $i < $maxRows; $i++) {
+            $rows[] = [
+                $this->data['element_types'][$i] ?? null,
+                $this->data['categories'][$i] ?? null,
+                $this->data['units'][$i] ?? null,
+                $this->data['boolean_options'][$i] ?? null,
+            ];
+        }
+
+        return collect($rows);
+    }
+}
+
+/**
+ * Instructions Sheet - visual guide
  */
 class InstructionsSheet implements FromCollection, WithHeadings, WithStyles, WithTitle, ShouldAutoSize
 {
@@ -55,47 +113,30 @@ class InstructionsSheet implements FromCollection, WithHeadings, WithStyles, Wit
     public function collection()
     {
         return collect([
-            ['HOW TO USE THIS TEMPLATE'],
+            ['MATERIALS UPLOAD TEMPLATE GUIDE'],
             [''],
-            ['STEP 1: Go to "Materials Data" sheet'],
+            ['1. STRUCTURE'],
+            ['This template uses a parent-child structure:'],
+            ['• PARENT ROWS (Dark Blue): Define the Element (e.g., "Main Stage")'],
+            ['• CHILD ROWS (Light Blue): Define specific materials needed for that element (e.g., "Plywood", "Screws")'],
             [''],
-            ['STEP 2: Fill in your materials using the Empty Cell Continuation method:'],
-            ['  • First row of each element: Fill ALL element columns + first particular'],
-            ['  • Additional particulars: LEAVE element columns EMPTY, fill only particular columns'],
-            ['  • Start new element: Fill ALL element columns again with new Element ID'],
+            ['2. HOW TO FIll'],
+            ['Column A (Element ID) controls the structure.'],
+            ['• NEW ELEMENT: Enter a unique ID (E.g., E001) in Column A. Fill Columns B-G.'],
+            ['• ADD MATERIALS: Leave Column A EMPTY. Fill details in Columns H-L.'],
             [''],
-            ['EXAMPLE:'],
-            ['Row 1: E001 | stage | Main Stage | production | 6 | 8 | 0.6 | Stage Boards | Pcs | 8 | YES'],
-            ['Row 2: [empty cells for element] | Stage Legs | Pcs | 16 | YES'],
-            ['Row 3: [empty cells for element] | Stage Screws | Pcs | 32 | YES'],
-            ['Row 4: E002 | backdrop | Backdrop 1 | hire | 3 | 4 | 0 | Fabric | Mtrs | 12 | YES'],
+            ['3. EXAMPLE'],
+            ['| ID   | Type  | Name       | ... | Material       | Qty | Unit |'],
+            ['| E001 | stage | Main Stage | ... | Plywood 18mm | 10  | Pcs  | (Parent Row)'],
+            ['|      |       |            | ... | 2x4 Timber   | 20  | Pcs  | (Child Row)'],
+            ['|      |       |            | ... | Black Paint  | 5   | Ltrs | (Child Row)'],
+            ['| E002 | sound | PA System  | ... | Speakers     | 2   | Set  | (New Element)'],
             [''],
-            ['IMPORTANT RULES:'],
-            ['✓ Element ID must be unique (E001, E002, E003...)'],
-            ['✓ Each element needs at least 1 particular'],
-            ['✓ Use dropdown values where provided'],
-            ['✓ Quantities must be greater than 0'],
-            ['✓ First data row MUST be an element header'],
-            [''],
-            ['TIPS:'],
-            ['• Copy and paste rows to duplicate similar elements'],
-            ['• Use Excel row grouping to collapse/expand elements'],
-            ['• Delete sample data before adding your own'],
-            ['• Save file before uploading'],
-            [''],
-            ['FIELD DESCRIPTIONS:'],
-            [''],
-            ['Element ID: Unique identifier (E001, E002, etc.)'],
-            ['Element Type: Type from dropdown (stage, backdrop, skirting, etc.)'],
-            ['Element Name: Your custom name for the element'],
-            ['Category: production, hire, or outsourced'],
-            ['Width/Length/Height: Dimensions in meters (can be 0)'],
-            [''],
-            ['Particular Description: Name of the material/component'],
-            ['Unit: Unit of measurement from dropdown'],
-            ['Quantity: Amount needed (must be > 0)'],
-            ['Included: YES or NO'],
-            ['Notes: Optional additional information'],
+            ['4. IMPORTANT NOTES'],
+            ['• Green Headers = Element Details (Fill once per element)'],
+            ['• Orange Headers = Material Details (Fill for every item)'],
+            ['• Do not delete or reorder columns.'],
+            ['• Use the provided dropdown lists for Units and Categories.'],
         ]);
     }
     
@@ -106,33 +147,24 @@ class InstructionsSheet implements FromCollection, WithHeadings, WithStyles, Wit
     
     public function styles(Worksheet $sheet)
     {
-        // Title row
         $sheet->getStyle('A1')->applyFromArray([
-            'font' => ['bold' => true, 'size' => 14, 'color' => ['rgb' => 'FFFFFF']],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1F4788']],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
+            'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '2C5282']], // Dark Blue
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
         ]);
         
-        // Section headers
-        foreach ([3, 10, 16, 19, 27] as $row) {
-            $sheet->getStyle("A{$row}")->applyFromArray([
-                'font' => ['bold' => true, 'size' => 11],
-            ]);
-        }
-        
-        // Protect sheet
-        $sheet->getProtection()->setSheet(true);
-        
-        return [
-            1 => ['font' => ['bold' => true]],
-        ];
+        $sheet->getStyle('A3:A19')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => '2B6CB0']],
+        ]);
+
+        return [];
     }
 }
 
 /**
- * Project Info Sheet - Auto-filled project details (read-only)
+ * Project Info Sheet - Read-only context
  */
-class ProjectInfoSheet implements FromCollection, WithHeadings, WithStyles, WithTitle, ShouldAutoSize
+class ProjectInfoSheet implements FromCollection, WithStyles, WithTitle, ShouldAutoSize
 {
     protected $enquiry;
     
@@ -149,55 +181,38 @@ class ProjectInfoSheet implements FromCollection, WithHeadings, WithStyles, With
     public function collection()
     {
         return collect([
-            ['PROJECT INFORMATION'],
-            [''],
-            ['Enquiry Number:', $this->enquiry->enquiry_number ?? 'N/A'],
-            ['Project Title:', $this->enquiry->title ?? 'N/A'],
-            ['Client Name:', $this->enquiry->client->full_name ?? 'N/A'],
-            ['Venue:', $this->enquiry->venue ?? 'N/A'],
-            ['Expected Delivery Date:', $this->enquiry->expected_delivery_date ?? 'N/A'],
-            [''],
-            ['Template Generated:', now()->format('Y-m-d H:i:s')],
-            [''],
-            ['NOTE: This information is read-only. Fill your materials in the "Materials Data" sheet.'],
+            ['PROJECT CONTEXT'],
+            ['Enquiry #', $this->enquiry->enquiry_number ?? 'N/A'],
+            ['Project', $this->enquiry->title ?? 'N/A'],
+            ['Client', $this->enquiry->client->full_name ?? 'N/A'],
+            ['Generated', now()->format('d M Y, h:i A')],
         ]);
     }
-    
-    public function headings(): array
-    {
-        return [];
-    }
-    
+
     public function styles(Worksheet $sheet)
     {
-        // Title
-        $sheet->getStyle('A1')->applyFromArray([
+         $sheet->getStyle('A1')->applyFromArray([
             'font' => ['bold' => true, 'size' => 14, 'color' => ['rgb' => 'FFFFFF']],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1F4788']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '2C5282']],
         ]);
-        
-        // Labels (column A)
-        $sheet->getStyle('A3:A9')->applyFromArray([
-            'font' => ['bold' => true],
-        ]);
-        
-        // Values (column B)
-        $sheet->getStyle('B3:B9')->applyFromArray([
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E7E6E6']],
-        ]);
-        
-        // Protect sheet
-        $sheet->getProtection()->setSheet(true);
+        $sheet->getStyle('A2:A5')->applyFromArray(['font' => ['bold' => true]]);
         
         return [];
     }
 }
 
 /**
- * Materials Data Sheet - Main data entry area
+ * Materials Data Sheet - Main Input
  */
 class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, WithColumnWidths, WithTitle, WithEvents
 {
+    protected $referenceData; // Renamed from $options to avoid conflict
+
+    public function __construct(array $data)
+    {
+        $this->referenceData = $data;
+    }
+
     public function title(): string
     {
         return 'Materials Data';
@@ -205,19 +220,19 @@ class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, Wi
     
     public function collection()
     {
-        // Sample data rows to show format
         return collect([
-            // Element 1 with particulars (sample)
-            ['E001', 'stage', 'Main Stage (SAMPLE)', 'production', 6, 8, 0.6, 'Stage Boards', 'Pcs', 8, 'YES', 'Delete this sample data'],
-            ['', '', '', '', '', '', '', 'Stage Legs', 'Pcs', 16, 'YES', ''],
-            ['', '', '', '', '', '', '', 'Stage Screws', 'Pcs', 32, 'YES', ''],
-            ['', '', '', '', '', '', '', 'Carpet', 'sqm', 48, 'YES', ''],
-            // Element 2 with particulars (sample)
-            ['E002', 'backdrop', 'Backdrop 1 (SAMPLE)', 'hire', 3, 4, 0, 'Fabric', 'Mtrs', 12, 'YES', 'Delete this sample data'],
-            ['', '', '', '', '', '', '', 'Frame', 'Pcs', 4, 'YES', ''],
-            ['', '', '', '', '', '', '', 'Clips', 'Pcs', 20, 'YES', ''],
-            // Empty rows for user data
-            ['', '', '', '', '', '', '', '', '', '', '', 'Add your data here →'],
+            // Example Row 1: Parent
+            ['E001', 'stage', 'Main Stage Platform', 'production', 6, 8, 0.6, 'Stage Deck 8x4', 'Pcs', 4, 'YES', 'Example Data - Delete Me'],
+            // Example Row 2: Child
+            ['', '', '', '', '', '', '', 'Stage Legs 60cm', 'Pcs', 16, 'YES', ''],
+            // Example Row 3: Child
+            ['', '', '', '', '', '', '', 'Velcro Skirting', 'Mtrs', 20, 'YES', ''],
+            // Spacer
+            ['', '', '', '', '', '', '', '', '', '', '', ''],
+            // Example Row 4: New Parent
+            ['E002', 'sound', 'DJ Booth Monitor', 'hire', 0, 0, 0, 'Active Monitor Speaker', 'Pcs', 2, 'YES', ''],
+             // Empty rows for start
+            ['', '', '', '', '', '', '', '', '', '', '', ''],
             ['', '', '', '', '', '', '', '', '', '', '', ''],
             ['', '', '', '', '', '', '', '', '', '', '', ''],
         ]);
@@ -226,69 +241,47 @@ class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, Wi
     public function headings(): array
     {
         return [
-            'Element ID',
-            'Element Type',
-            'Element Name',
-            'Category',
-            'Width (m)',
-            'Length (m)',  
-            'Height (m)',
-            'Particular Description',
-            'Unit',
-            'Quantity',
-            'Included',
-            'Notes'
+            'Element ID', 'Type', 'Element Name', 'Category', 'W (m)', 'L (m)', 'H (m)', // Element Group
+            'Material / Particular', 'Unit', 'Qty', 'Included', 'Notes' // Material Group
         ];
     }
     
     public function columnWidths(): array
     {
         return [
-            'A' => 12,  // Element ID
-            'B' => 15,  // Element Type
-            'C' => 25,  // Element Name
-            'D' => 12,  // Category
-            'E' => 10,  // Width
-            'F' => 10,  // Length
-            'G' => 10,  // Height
-            'H' => 30,  // Particular Description
-            'I' => 10,  // Unit
-            'J' => 10,  // Quantity
-            'K' => 10,  // Included
-            'L' => 20,  // Notes
+            'A' => 12, 'B' => 15, 'C' => 25, 'D' => 15, 'E' => 8, 'F' => 8, 'G' => 8, // Element
+            'H' => 35, 'I' => 10, 'J' => 10, 'K' => 10, 'L' => 25 // Material
         ];
     }
     
     public function styles(Worksheet $sheet)
     {
-        // Header row styling
-        $sheet->getStyle('A1:L1')->applyFromArray([
-            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 11],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1F4788']],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
-            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN]],
+        // 1. HEADER STYLING
+        // Element Columns (A-G): Greenish Blue
+        $sheet->getStyle('A1:G1')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '319795']], // Teal-500
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
         
-        // Sample data styling
-        $sheet->getStyle('A2:L8')->applyFromArray([
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFF2CC']], // Light yellow
+        // Material Columns (H-L): Warm Orange
+        $sheet->getStyle('H1:L1')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'DD6B20']], // Orange-500
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
-        
-        // Element header rows (rows with Element ID filled)
-        $sheet->getStyle('A2:L2')->applyFromArray([
-            'font' => ['bold' => true],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'D9E1F2']], // Light blue
+
+        // 2. DATA BORDERS
+        $sheet->getStyle('A1:L100')->applyFromArray([
+            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'E2E8F0']]],
         ]);
-        $sheet->getStyle('A6:L6')->applyFromArray([
-            'font' => ['bold' => true],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'D9E1F2']],
+
+        // 3. VISUAL SEPARATION COLUMN
+        // Add a thick border between Element (G) and Material (H) columns
+        $sheet->getStyle('G1:G100')->applyFromArray([
+            'borders' => ['right' => ['borderStyle' => Border::BORDER_MEDIUM, 'color' => ['rgb' => 'A0AEC0']]],
         ]);
-        
-        // Borders
-        $sheet->getStyle('A1:L200')->applyFromArray([
-            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'CCCCCC']]],
-        ]);
-        
+
         return [];
     }
     
@@ -297,87 +290,39 @@ class MaterialsDataSheet implements FromCollection, WithHeadings, WithStyles, Wi
         return [
             AfterSheet::class => function(AfterSheet $event) {
                 $sheet = $event->sheet->getDelegate();
+                $sheet->freezePane('A2'); // Freeze header
                 
-                // Data validations for dropdowns
-                $this->addDataValidations($sheet);
-                
-                // Freeze header row
-                $sheet->freezePane('A2');
+                // DATA VALIDATION USING REFERENCE SHEET
+                // Row count in reference sheet
+                $refRowCount = 50; 
+
+                // 1. Element Type (Column B) -> Reference Data!A2:A$refRowCount
+                $this->addValidation($sheet, 'B2:B500', "'Reference Data'!\$A\$2:\$A\$$refRowCount", 'Select Type');
+
+                // 2. Category (Column D) -> Reference Data!B2:B$refRowCount
+                $this->addValidation($sheet, 'D2:D500', "'Reference Data'!\$B\$2:\$B\$$refRowCount", 'Select Category');
+
+                // 3. Unit (Column I) -> Reference Data!C2:C$refRowCount
+                $this->addValidation($sheet, 'I2:I500', "'Reference Data'!\$C\$2:\$C\$$refRowCount", 'Select Unit');
+
+                // 4. Included (Column K) -> Reference Data!D2:D$refRowCount
+                $this->addValidation($sheet, 'K2:K500', "'Reference Data'!\$D\$2:\$D\$$refRowCount", 'Yes/No');
             },
         ];
     }
-    
-    private function addDataValidations(Worksheet $sheet)
+
+    private function addValidation($sheet, $range, $formula, $prompt)
     {
-        // Get dropdown values from config with robust fallbacks
-        $elementTypes = implode(',', config('materials.element_types', [
-            'stage', 'backdrop', 'skirting', 'flooring', 'trussing', 'décor', 
-            'lighting', 'sound', 'chairs', 'tables', 'signage', 'custom'
-        ]));
+        $validation = $sheet->getCell(explode(':', $range)[0])->getDataValidation();
+        $validation->setType(DataValidation::TYPE_LIST);
+        $validation->setErrorStyle(DataValidation::STYLE_INFORMATION);
+        $validation->setAllowBlank(true);
+        $validation->setShowDropDown(true);
+        $validation->setFormula1($formula);
+        $validation->setShowInputMessage(true);
+        $validation->setPromptTitle('Valid Option');
+        $validation->setPrompt($prompt);
         
-        $categories = implode(',', config('materials.categories', [
-            'production', 'hire', 'outsourced'
-        ]));
-        
-        $units = implode(',', config('materials.units', [
-            'Pcs', 'Ltrs', 'Mtrs', 'sqm', 'Pks', 'Kgs', 'custom'
-        ]));
-        
-        $includedOptions = implode(',', config('materials.included_options', [
-            'YES', 'NO'
-        ]));
-        
-        // Element Type dropdown (Column B)
-        $elementTypeValidation = $sheet->getCell('B2')->getDataValidation();
-        $elementTypeValidation->setType(DataValidation::TYPE_LIST);
-        $elementTypeValidation->setErrorStyle(DataValidation::STYLE_STOP);
-        $elementTypeValidation->setAllowBlank(true);
-        $elementTypeValidation->setShowDropDown(true);
-        $elementTypeValidation->setFormula1("\"{$elementTypes}\"");
-        $elementTypeValidation->setPrompt('Select element type from list');
-        
-        // Copy validation down
-        for ($row = 2; $row <= 200; $row++) {
-            $sheet->getCell("B{$row}")->setDataValidation(clone $elementTypeValidation);
-        }
-        
-        // Category dropdown (Column D)
-        $categoryValidation = $sheet->getCell('D2')->getDataValidation();
-        $categoryValidation->setType(DataValidation::TYPE_LIST);
-        $categoryValidation->setErrorStyle(DataValidation::STYLE_STOP);
-        $categoryValidation->setAllowBlank(true);
-        $categoryValidation->setShowDropDown(true);
-        $categoryValidation->setFormula1("\"{$categories}\"");
-        $categoryValidation->setPrompt('Select category');
-        
-        for ($row = 2; $row <= 200; $row++) {
-            $sheet->getCell("D{$row}")->setDataValidation(clone $categoryValidation);
-        }
-        
-        // Unit dropdown (Column I)
-        $unitValidation = $sheet->getCell('I2')->getDataValidation();
-        $unitValidation->setType(DataValidation::TYPE_LIST);
-        $unitValidation->setErrorStyle(DataValidation::STYLE_STOP);
-        $unitValidation->setAllowBlank(false);
-        $unitValidation->setShowDropDown(true);
-        $unitValidation->setFormula1("\"{$units}\"");
-        $unitValidation->setPrompt('Select unit of measurement');
-        
-        for ($row = 2; $row <= 200; $row++) {
-            $sheet->getCell("I{$row}")->setDataValidation(clone $unitValidation);
-        }
-        
-        // Included dropdown (Column K)
-        $includedValidation = $sheet->getCell('K2')->getDataValidation();
-        $includedValidation->setType(DataValidation::TYPE_LIST);
-        $includedValidation->setErrorStyle(DataValidation::STYLE_STOP);
-        $includedValidation->setAllowBlank(false);
-        $includedValidation->setShowDropDown(true);
-        $includedValidation->setFormula1("\"{$includedOptions}\"");
-        $includedValidation->setPrompt('Is this included?');
-        
-        for ($row = 2; $row <= 200; $row++) {
-            $sheet->getCell("K{$row}")->setDataValidation(clone $includedValidation);
-        }
+        $sheet->setDataValidation($range, $validation);
     }
 }

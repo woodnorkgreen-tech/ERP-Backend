@@ -101,12 +101,24 @@ class TaskController extends Controller
         \Log::info("[DEBUG] getAllEnquiryTasks called, user: " . Auth::id());
 
         try {
-            $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
+            $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedUser', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
 
             $user = Auth::user();
-            $user = Auth::user();
-            // Full visibility for all users (transparency)
-            \Log::info('[TASK LIST] Retrieving all tasks for user', ['user_id' => $user->id]);
+            
+            // Strict Access Control
+            // If NOT Project Officer, Project Manager, or Super Admin, only show assigned tasks.
+            if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
+                 \Log::info('[TASK LIST] Restricting tasks for standard user', ['user_id' => $user->id]);
+                 $query->where(function($q) use ($user) {
+                     $q->where('assigned_to', $user->id)
+                       ->orWhere('assigned_user_id', $user->id)
+                       ->orWhereHas('assignedUsers', function($subQ) use ($user) {
+                           $subQ->where('users.id', $user->id);
+                       });
+                 });
+            } else {
+                 \Log::info('[TASK LIST] Full access granted to privileged user', ['user_id' => $user->id, 'role' => $user->roles->pluck('name')]);
+            }
 
             // Apply filters if provided
             if ($request->has('status') && $request->status) {
@@ -219,8 +231,17 @@ class TaskController extends Controller
                 ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
 
             $user = Auth::user();
-            $user = Auth::user();
-            // Full visibility for all users (transparency)
+            
+            // Strict Access Control
+            if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
+                 $query->where(function($q) use ($user) {
+                     $q->where('assigned_to', $user->id)
+                       ->orWhere('assigned_user_id', $user->id)
+                       ->orWhereHas('assignedUsers', function($subQ) use ($user) {
+                           $subQ->where('users.id', $user->id);
+                       });
+                 });
+            }
 
             $tasks = $query->orderBy('id')->get(); // Order by ID for consistent ordering
 
@@ -306,8 +327,17 @@ class TaskController extends Controller
 
             // Filter tasks by user's department
             $user = Auth::user();
-            // Removed strict departmental filter to allow full visibility across departments
-            // $query->where('department_id', $user->department_id);
+
+            // Strict Access Control
+            if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
+                 $query->where(function($q) use ($user) {
+                     $q->where('assigned_to', $user->id)
+                       ->orWhere('assigned_user_id', $user->id)
+                       ->orWhereHas('assignedUsers', function($subQ) use ($user) {
+                           $subQ->where('users.id', $user->id);
+                       });
+                 });
+            }
 
             // Removed privileged role check to allow standard users to see all tasks
             // if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
@@ -386,7 +416,7 @@ class TaskController extends Controller
             $user = Auth::user();
 
             // Strict Access Control
-            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'Client Service']);
+            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer']);
             
             // Department Check Removed - All users can see tasks (Transparency)
             // if (!$hasSpecialAccess && $task->department_id && $task->department_id !== $user->department_id) {
@@ -465,12 +495,30 @@ class TaskController extends Controller
 
             $task->update([
                 'assigned_user_id' => $request->assigned_user_id,
+                'assigned_to' => $request->assigned_user_id, // Backward compatibility
                 'assigned_at' => now(),
                 'assigned_by' => $user->id,
             ]);
 
+            // Refresh the model to get updated relationships
+            $task = $task->fresh(['enquiry', 'department', 'assignedUser', 'assignedTo']);
+
+            \Log::info('[ASSIGN TASK DEBUG]', [
+                'task_id' => $task->id,
+                'assigned_user_id' => $task->assigned_user_id,
+                'assigned_to' => $task->assigned_to,
+                'assignedUser' => $task->assignedUser ? [
+                    'id' => $task->assignedUser->id,
+                    'name' => $task->assignedUser->name
+                ] : null,
+                'assignedTo' => $task->assignedTo ? [
+                    'id' => $task->assignedTo->id,
+                    'name' => $task->assignedTo->name
+                ] : null,
+            ]);
+
             return response()->json([
-                'data' => $task->load('enquiry', 'department', 'assignedUser'),
+                'data' => $task,
                 'message' => 'Task assigned successfully'
             ]);
         } catch (\Exception $e) {
@@ -516,15 +564,23 @@ class TaskController extends Controller
 
             // Security Check
             $user = Auth::user();
-            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'Client Service']);
+            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer']);
 
-            // 1. Department Check: Standard users can only see tasks in their department
-            // Removed for Transparency - All users need to see all tasks
-            // if (!$hasSpecialAccess && $task->department_id && $task->department_id !== $user->department_id) {
-            //    return response()->json([
-            //        'message' => 'Unauthorized: This task belongs to another department'
-            //    ], 403);
-            // }
+            // 1. Strict Access Check: Standard users can only see tasks assigned to them
+            if (!$hasSpecialAccess) {
+                 // Load assignedUsers relationship if not loaded
+                 $task->loadMissing('assignedUsers');
+                 
+                 $isAssigned = ($task->assigned_to == $user->id) || 
+                               ($task->assigned_user_id == $user->id) ||
+                               $task->assignedUsers->contains('id', $user->id);
+
+                 if (!$isAssigned) {
+                     return response()->json([
+                        'message' => 'Unauthorized: You do not have permission to view this task.'
+                     ], 403);
+                 }
+            }
 
             // Lock Check (Calculation only - do not block view)
             $assigneeId = $task->assigned_to ?? $task->assigned_user_id;
@@ -585,7 +641,7 @@ class TaskController extends Controller
             $user = Auth::user();
 
             // Strict Access Control for Updates
-            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'Client Service']);
+            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer']);
             
             // Department Check Removed for Transparency
             // if (!$hasSpecialAccess && $task->department_id && $task->department_id !== $user->department_id) {

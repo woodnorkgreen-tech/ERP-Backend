@@ -283,7 +283,7 @@ class QuoteController extends Controller
             }
 
             $task = EnquiryTask::find($taskId);
-           $budgetTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
+            $budgetTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
                 ->where('type', 'budget')
                 ->first();
 
@@ -385,24 +385,31 @@ class QuoteController extends Controller
             $existingMaterials = $quoteData->materials ?? [];
             $mergedMaterials = $this->mergeQuoteMaterials($existingMaterials, $newQuoteData['materials']);
             
-            // Force margins to 0 for non-material categories as per requirement
-            // This ensures existing quotes with old defaults are updated
+            // Merge items categories to preserve margins
+            $mergedLabour = $this->mergeSimpleItems($quoteData->labour ?? [], $newQuoteData['labour']);
+            $mergedExpenses = $this->mergeSimpleItems($quoteData->expenses ?? [], $newQuoteData['expenses']);
+            $mergedLogistics = $this->mergeSimpleItems($quoteData->logistics ?? [], $newQuoteData['logistics']);
+            
+            // Preserve global margins if they exist, otherwise use defaults
             $margins = $quoteData->margins ?? [];
-            $margins['labour'] = 0;
-            $margins['expenses'] = 0;
-            $margins['logistics'] = 0;
-            // Ensure materials margin exists (default to 60 if missing)
             $margins['materials'] = $margins['materials'] ?? 60;
+            $margins['labour'] = $margins['labour'] ?? 0;
+            $margins['expenses'] = $margins['expenses'] ?? 0;
+            $margins['logistics'] = $margins['logistics'] ?? 0;
 
-            // Recalculate summary totals based on the merged materials
+            // Update newQuoteData with merged items
             $newQuoteData['materials'] = $mergedMaterials;
+            $newQuoteData['labour'] = $mergedLabour;
+            $newQuoteData['expenses'] = $mergedExpenses;
+            $newQuoteData['logistics'] = $mergedLogistics;
+
             $totals = $this->recalculateTotals($newQuoteData, $margins);
 
             $quoteData->update([
                 'materials' => $mergedMaterials,
-                'labour' => $newQuoteData['labour'], // Labour/Expenses/Logistics usually reset as they don't have complex margins yet
-                'expenses' => $newQuoteData['expenses'],
-                'logistics' => $newQuoteData['logistics'],
+                'labour' => $mergedLabour, 
+                'expenses' => $mergedExpenses,
+                'logistics' => $mergedLogistics,
                 'totals' => $totals,
                 'margins' => $margins, 
                 'budget_imported_at' => now(),
@@ -428,42 +435,53 @@ class QuoteController extends Controller
      */
     private function mergeQuoteMaterials(array $existingMaterials, array $newMaterials): array
     {
-        $existingMap = [];
-        // Flatten existing materials to map by ID
+        $existingIdMap = [];
+        $existingDescMap = [];
+        
+        // Map existing items by ID and by normalized Description
         foreach ($existingMaterials as $element) {
             foreach ($element['materials'] ?? [] as $material) {
-                if (isset($material['id'])) {
-                    $existingMap[$material['id']] = $material;
+                if (!empty($material['id'])) {
+                    $existingIdMap[(string)$material['id']] = $material;
+                }
+                $descKey = trim($material['description'] ?? '');
+                if (!empty($descKey)) {
+                    $existingDescMap[$descKey] = $material;
                 }
             }
         }
 
+        // 1. Process New Materials from Budget
         foreach ($newMaterials as &$element) {
             foreach ($element['materials'] as &$material) {
-                if (isset($existingMap[$material['id']])) {
-                    $existing = $existingMap[$material['id']];
-                    
+                $match = null;
+                $mid = (string)($material['id'] ?? '');
+                $mdesc = trim($material['description'] ?? '');
+
+                // Try to find a match in the existing Quote
+                if (!empty($mid) && isset($existingIdMap[$mid])) {
+                    $match = $existingIdMap[$mid];
+                } elseif (!empty($mdesc) && isset($existingDescMap[$mdesc])) {
+                    $match = $existingDescMap[$mdesc];
+                }
+
+                if ($match) {
                     // PRESERVE CUSTOMIZATIONS
+                    $material['marginPercentage'] = $match['marginPercentage'] ?? 60;
+                    $material['days'] = $match['days'] ?? 1;
                     
-                    // 1. Margin Percentage
-                    $material['marginPercentage'] = $existing['marginPercentage'] ?? 60;
+                    if (!empty($match['description'])) {
+                        $material['description'] = $match['description'];
+                    }
                     
-                    // 2. Days (if present in existing)
-                    $material['days'] = $existing['days'] ?? 1;
-                    
-                    // Note: Quantity and UnitPrice come from the NEW budget (source of truth)
-                    // But we recalculate totals based on these new values + preserved modifiers
-                    
-                    // Recalculate Total Price = Qty * UnitPrice * Days
-                    $material['totalPrice'] = $material['quantity'] * $material['unitPrice'] * $material['days'];
-                    
-                    // Recalculate Margin Amount = TotalPrice * Margin%
+                    // Recalculate
+                    $material['totalPrice'] = $material['quantity'] * $material['unitPrice'] * ($material['days'] ?? 1);
                     $material['marginAmount'] = $material['totalPrice'] * ($material['marginPercentage'] / 100);
-                    
-                    // Recalculate Final Price
                     $material['finalPrice'] = $material['totalPrice'] + $material['marginAmount'];
                     
-                   // \Log::info("Merged material {$material['id']}: Preserved margin {$material['marginPercentage']}% and days {$material['days']}");
+                    // Remove from maps to avoid duplication
+                    if (!empty($match['id'])) unset($existingIdMap[(string)$match['id']]);
+                    unset($existingDescMap[trim($match['description'] ?? '')]);
                 }
             }
             
@@ -471,14 +489,85 @@ class QuoteController extends Controller
             $element['baseTotal'] = array_sum(array_column($element['materials'], 'totalPrice'));
             $element['marginAmount'] = array_sum(array_column($element['materials'], 'marginAmount'));
             $element['finalTotal'] = array_sum(array_column($element['materials'], 'finalPrice'));
-            
-            // Recalculate element global margin % for display
-            $element['marginPercentage'] = $element['baseTotal'] > 0 
-                ? ($element['marginAmount'] / $element['baseTotal'] * 100) 
-                : 60;
+            $element['marginPercentage'] = $element['baseTotal'] > 0 ? ($element['marginAmount'] / $element['baseTotal'] * 100) : 60;
+        }
+
+        // 2. Add back items that ONLY exist in the Quote (Manual additions or unique edits)
+        // We only add orphans that haven't been matched by ID OR Description
+        foreach ($existingIdMap as $orphan) {
+            $orphanDesc = trim($orphan['description'] ?? '');
+            if (isset($existingDescMap[$orphanDesc])) {
+                // Find element and add back
+                foreach ($newMaterials as &$newElement) {
+                    if ($newElement['id'] === ($orphan['element_id'] ?? null)) {
+                        $newElement['materials'][] = $orphan;
+                        unset($existingDescMap[$orphanDesc]);
+                        continue 2;
+                    }
+                }
+                // Fallback: Add to first element or keep as-is if element mapping fails
+                if (!empty($newMaterials)) {
+                    $newMaterials[0]['materials'][] = $orphan;
+                }
+            }
         }
 
         return $newMaterials;
+    }
+
+    /**
+     * Merge simple items (Expenses, Logistics) to preserve margins
+     */
+    private function mergeSimpleItems(array $existingItems, array $newItems): array
+    {
+        $existingIdMap = [];
+        $existingDescMap = [];
+
+        foreach ($existingItems as $item) {
+            if (!empty($item['id'])) {
+                $existingIdMap[(string)$item['id']] = $item;
+            }
+            $descKey = trim($item['description'] ?? $item['type'] ?? '');
+            if (!empty($descKey)) {
+                $existingDescMap[$descKey] = $item;
+            }
+        }
+
+        foreach ($newItems as &$item) {
+            $match = null;
+            $iid = (string)($item['id'] ?? '');
+            $idesc = trim($item['description'] ?? $item['type'] ?? '');
+
+            if (!empty($iid) && isset($existingIdMap[$iid])) {
+                $match = $existingIdMap[$iid];
+            } elseif (!empty($idesc) && isset($existingDescMap[$idesc])) {
+                $match = $existingDescMap[$idesc];
+            }
+
+            if ($match) {
+                $item['marginPercentage'] = $match['marginPercentage'] ?? 0;
+                
+                if (!empty($match['type'])) $item['type'] = $match['type'];
+                if (!empty($match['description'])) $item['description'] = $match['description'];
+                
+                $baseAmount = $item['amount'] ?? 0;
+                $item['marginAmount'] = $baseAmount * ($item['marginPercentage'] / 100);
+                $item['finalPrice'] = $baseAmount + $item['marginAmount'];
+                
+                if (!empty($match['id'])) unset($existingIdMap[(string)$match['id']]);
+                unset($existingDescMap[trim($match['description'] ?? $match['type'] ?? '')]);
+            }
+        }
+
+        // Add back genuine orphans (manually added items that don't exist in budget)
+        foreach ($existingIdMap as $orphan) {
+            $orphanDesc = trim($orphan['description'] ?? $orphan['type'] ?? '');
+            if (isset($existingDescMap[$orphanDesc])) {
+                $newItems[] = $orphan;
+            }
+        }
+
+        return $newItems;
     }
 
     /**
@@ -1421,4 +1510,3 @@ class QuoteController extends Controller
         return $response;
     }
 }
-
