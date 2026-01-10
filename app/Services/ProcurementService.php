@@ -208,6 +208,12 @@ class ProcurementService
         // Validate data
         $this->validateProcurementData($data);
 
+        \Log::info("Saving Procurement Data for Task {$taskId}", [
+            'items_count' => count($data['procurementItems'] ?? []),
+            'sample_item_vendor' => $data['procurementItems'][0]['vendorName'] ?? 'N/A',
+            'sample_item_id' => $data['procurementItems'][0]['budgetItemId'] ?? 'N/A'
+        ]);
+
         // Update or create procurement data
         $procurementData = TaskProcurementData::updateOrCreate(
             ['enquiry_task_id' => $taskId],
@@ -295,9 +301,11 @@ class ProcurementService
             }
             
             \Log::info("Procurement Sync: Starting for Task {$taskId}", [
-                'fresh_items' => count($freshItems),
-                'existing_items' => count($procurementData->procurement_items ?? []),
-                'id_map_entries' => count($materialIdMap)
+                'fresh_items_count' => count($freshItems),
+                'existing_items_count' => count($procurementData->procurement_items ?? []),
+                'id_map_entries' => count($materialIdMap),
+                'existing_map_keys_sample' => collect($existingItemsMap)->keys()->take(5),
+                'existing_content_first' => !empty($existingItemsByContent) ? array_key_first($existingItemsByContent) : 'empty'
             ]);
 
             // Merge existing user-entered data into fresh items

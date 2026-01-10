@@ -72,7 +72,7 @@ class TaskProcurementData extends Model
         }
 
         return collect($this->procurement_items)->filter(function ($item) {
-            return in_array($item['availability_status'] ?? '', ['received', 'hired']);
+            return in_array($item['availabilityStatus'] ?? '', ['received', 'hired']);
         })->count();
     }
 
@@ -88,7 +88,7 @@ class TaskProcurementData extends Model
             ];
         }
 
-        $counts = collect($this->procurement_items)->countBy('availability_status');
+        $counts = collect($this->procurement_items)->countBy('availabilityStatus');
 
         return [
             'available' => $counts->get('available', 0),
