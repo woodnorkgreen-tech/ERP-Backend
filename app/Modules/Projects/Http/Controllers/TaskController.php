@@ -115,6 +115,38 @@ class TaskController extends Controller
                        ->orWhereHas('assignedUsers', function($subQ) use ($user) {
                            $subQ->where('users.id', $user->id);
                        });
+
+                     // Specific requirement: Designers see unassigned Design & Materials tasks by default
+                     if ($user->hasRole('Designer')) {
+                        $q->orWhere(function($sq) {
+                            $sq->whereNull('assigned_to')
+                               ->whereIn('type', ['design', 'materials']);
+                        });
+                     }
+
+                     // Specific requirement: Costings/Accounts see unassigned Materials, Budget, Quote, Quote Approval tasks
+                     if ($user->hasRole(['Costing', 'Accounts'])) {
+                        $q->orWhere(function($sq) {
+                            $sq->whereNull('assigned_to')
+                               ->whereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
+                        });
+                     }
+
+                     // Specific requirement: Stores/Procurement see unassigned Budget, Procurement tasks
+                     if ($user->hasRole(['Stores', 'Procurement'])) {
+                        $q->orWhere(function($sq) {
+                            $sq->whereNull('assigned_to')
+                               ->whereIn('type', ['budget', 'procurement']);
+                        });
+                     }
+
+                     // Specific requirement: Production see unassigned Materials, Teams, Production tasks
+                     if ($user->hasRole('Production')) {
+                        $q->orWhere(function($sq) {
+                            $sq->whereNull('assigned_to')
+                               ->whereIn('type', ['materials', 'teams', 'production']);
+                        });
+                     }
                  });
             } else {
                  \Log::info('[TASK LIST] Full access granted to privileged user', ['user_id' => $user->id, 'role' => $user->roles->pluck('name')]);
@@ -130,7 +162,41 @@ class TaskController extends Controller
             }
 
             if ($request->has('assigned_user_id') && $request->assigned_user_id) {
-                $query->where('assigned_to', $request->assigned_user_id);
+                $query->where(function($q) use ($request, $user) {
+                    $q->where('assigned_to', $request->assigned_user_id);
+                    
+                    // Specific requirement: Designers see unassigned Design & Materials tasks by default
+                    if ($user->hasRole('Designer')) {
+                        $q->orWhere(function($sq) {
+                            $sq->whereNull('assigned_to')
+                               ->whereIn('type', ['design', 'materials']);
+                        });
+                    }
+
+                    // Specific requirement: Costings/Accounts see unassigned Materials, Budget, Quote, Quote Approval tasks
+                    if ($user->hasRole(['Costing', 'Accounts'])) {
+                        $q->orWhere(function($sq) {
+                            $sq->whereNull('assigned_to')
+                               ->whereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
+                        });
+                    }
+
+                    // Specific requirement: Stores/Procurement see unassigned Budget, Procurement tasks
+                    if ($user->hasRole(['Stores', 'Procurement'])) {
+                        $q->orWhere(function($sq) {
+                            $sq->whereNull('assigned_to')
+                               ->whereIn('type', ['budget', 'procurement']);
+                        });
+                    }
+
+                    // Specific requirement: Production see unassigned Materials, Teams, Production tasks
+                    if ($user->hasRole('Production')) {
+                        $q->orWhere(function($sq) {
+                            $sq->whereNull('assigned_to')
+                               ->whereIn('type', ['materials', 'teams', 'production']);
+                        });
+                    }
+                });
             }
 
             if ($request->has('enquiry_id') && $request->enquiry_id) {
@@ -485,9 +551,22 @@ class TaskController extends Controller
         try {
             $task = EnquiryTask::findOrFail($taskId);
 
-            // Check if task belongs to user's department
+            // Security check: Must belong to department OR have the specialized role for this task type
             $user = Auth::user();
-            if ($task->department_id !== $user->department_id) {
+            $isAdmin = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer']);
+            
+            $canClaimByRole = false;
+            if ($user->hasRole('Designer') && in_array($task->type, ['design', 'materials'])) {
+                $canClaimByRole = true;
+            } elseif ($user->hasRole(['Costing', 'Accounts']) && in_array($task->type, ['materials', 'budget', 'quote', 'quote_approval'])) {
+                $canClaimByRole = true;
+            } elseif ($user->hasRole(['Stores', 'Procurement']) && in_array($task->type, ['budget', 'procurement'])) {
+                $canClaimByRole = true;
+            } elseif ($user->hasRole('Production') && in_array($task->type, ['materials', 'teams', 'production'])) {
+                $canClaimByRole = true;
+            }
+
+            if (!$isAdmin && !$canClaimByRole && $task->department_id && $task->department_id !== $user->department_id) {
                 return response()->json([
                     'message' => 'Unauthorized to assign tasks in this department'
                 ], 403);
@@ -575,7 +654,23 @@ class TaskController extends Controller
                                ($task->assigned_user_id == $user->id) ||
                                $task->assignedUsers->contains('id', $user->id);
 
-                 if (!$isAssigned) {
+                 // Specific requirement: Allow access to unassigned tasks for specific roles
+                 $isUnassigned = !$task->assigned_to && !$task->assigned_user_id;
+                 $canViewUnassigned = false;
+                 
+                 if ($isUnassigned) {
+                     if ($user->hasRole('Designer') && in_array($task->type, ['design', 'materials'])) {
+                         $canViewUnassigned = true;
+                     } elseif ($user->hasRole(['Costing', 'Accounts']) && in_array($task->type, ['materials', 'budget', 'quote', 'quote_approval'])) {
+                         $canViewUnassigned = true;
+                     } elseif ($user->hasRole(['Stores', 'Procurement']) && in_array($task->type, ['budget', 'procurement'])) {
+                         $canViewUnassigned = true;
+                     } elseif ($user->hasRole('Production') && in_array($task->type, ['materials', 'teams', 'production'])) {
+                         $canViewUnassigned = true;
+                     }
+                 }
+
+                 if (!$isAssigned && !$canViewUnassigned) {
                      return response()->json([
                         'message' => 'Unauthorized: You do not have permission to view this task.'
                      ], 403);
