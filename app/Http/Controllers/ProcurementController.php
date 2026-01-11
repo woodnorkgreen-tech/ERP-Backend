@@ -118,6 +118,8 @@ class ProcurementController extends Controller
                 'procurementItems.*.purchaseOrderNumber' => 'sometimes|nullable|string',
                 'procurementItems.*.expectedDeliveryDate' => 'sometimes|nullable|date',
                 'procurementItems.*.availabilityStatus' => 'sometimes|string', // Kept for backward compatibility but less strict
+                'procurementItems.*.vendorName' => 'sometimes|nullable|string',
+                'procurementItems.*.procurementNotes' => 'sometimes|nullable|string',
                 'budgetSummary' => 'sometimes|array',
                 'lastImportDate' => 'sometimes|date'
             ]);

@@ -151,6 +151,11 @@ class ProductionService
                 throw new \Exception('Production data not found. Please import materials first.');
             }
 
+            // Update production elements
+            if (isset($data['production_elements']) && is_array($data['production_elements'])) {
+                $this->updateProductionElements($productionData->id, $data['production_elements']);
+            }
+
             // Update quality checkpoints
             if (isset($data['quality_control']) && is_array($data['quality_control'])) {
                 $this->updateQualityCheckpoints($productionData->id, $data['quality_control']);
@@ -375,6 +380,42 @@ class ProductionService
                 ];
             })->toArray(),
         ];
+    }
+
+    /**
+     * Update production elements
+     */
+    private function updateProductionElements(int $productionDataId, array $elements): void
+    {
+        foreach ($elements as $elementData) {
+            if (isset($elementData['id']) && is_numeric($elementData['id'])) {
+                $element = ProductionElement::find($elementData['id']);
+                if ($element && $element->production_data_id === $productionDataId) {
+                    $element->update([
+                        'status' => $elementData['status'] ?? $element->status,
+                        'notes' => $elementData['notes'] ?? $element->notes,
+                        'quantity' => $elementData['quantity'] ?? $element->quantity,
+                        'unit' => $elementData['unit'] ?? $element->unit,
+                        'name' => $elementData['name'] ?? $element->name,
+                        'category' => $elementData['category'] ?? $element->category,
+                        'specifications' => $elementData['specifications'] ?? $element->specifications,
+                    ]);
+                }
+            } else {
+                // Create new element
+                ProductionElement::create([
+                    'production_data_id' => $productionDataId,
+                    'name' => $elementData['name'] ?? 'New Element',
+                    'category' => $elementData['category'] ?? 'general',
+                    'quantity' => $elementData['quantity'] ?? 0,
+                    'unit' => $elementData['unit'] ?? 'pcs',
+                    'status' => $elementData['status'] ?? 'pending',
+                    'notes' => $elementData['notes'] ?? null,
+                    'specifications' => $elementData['specifications'] ?? null,
+                    'material_id' => $elementData['material_id'] ?? null,
+                ]);
+            }
+        }
     }
 
     /**
