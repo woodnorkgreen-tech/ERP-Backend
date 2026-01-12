@@ -325,6 +325,11 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('permission:' . Permissions::ENQUIRY_UPDATE);
         Route::delete('enquiries/{enquiry}', [ClientServiceEnquiryController::class, 'destroy'])
             ->middleware('permission:' . Permissions::ENQUIRY_DELETE);
+        // Lead management
+        Route::get('leads', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'index'])
+            ->middleware('permission:' . Permissions::ENQUIRY_READ);
+        Route::post('leads/{lead}/convert', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'convert'])
+            ->middleware('permission:' . Permissions::ENQUIRY_UPDATE);
     });
 
     // Materials management routes
