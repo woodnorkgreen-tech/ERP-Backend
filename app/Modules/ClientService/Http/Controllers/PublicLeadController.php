@@ -39,8 +39,9 @@ class PublicLeadController extends Controller
             'email' => 'required|email|max:255',
             'phone' => 'required|string|max:20',
             'company_name' => 'nullable|string|max:255',
-            'service_interest' => 'required|integer|exists:departments,id',
+            'service_interest' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'how_did_you_hear' => 'nullable|string|max:255',
             'source' => 'nullable|string|max:255',
         ]);
 
@@ -57,8 +58,9 @@ class PublicLeadController extends Controller
                 'email' => $request->email,
                 'phone' => $request->phone,
                 'company_name' => $request->company_name,
-                'department_id' => $request->service_interest,
+                'service_interest' => $request->service_interest,
                 'description' => $request->description,
+                'how_did_you_hear' => $request->how_did_you_hear,
                 'source' => $request->source ?? 'Public Form',
                 'status' => 'new',
             ]);
@@ -94,7 +96,7 @@ class PublicLeadController extends Controller
                         'email' => $lead->email,
                         'phone' => $lead->phone,
                         'customer_type' => $lead->company_name ? 'Corporate' : 'Individual',
-                        'lead_source' => $lead->source,
+                        'lead_source' => $lead->how_did_you_hear ?? $lead->source,
                         'status' => 'Lead',
                         'is_active' => true,
                     ]);
@@ -105,10 +107,10 @@ class PublicLeadController extends Controller
                     'date_received' => now(),
                     'client_id' => $client->id,
                     'title' => 'Lead Conversion: ' . ($lead->company_name ?? $lead->full_name),
-                    'description' => $lead->description,
+                    'description' => "Interested in: {$lead->service_interest}\n\nClient Notes: {$lead->description}",
                     'priority' => EnquiryConstants::PRIORITY_MEDIUM,
                     'status' => EnquiryConstants::STATUS_CLIENT_REGISTERED,
-                    'department_id' => $lead->department_id,
+                    'department_id' => null, // Manual assignment required
                     'contact_person' => $lead->full_name,
                 ]);
 
