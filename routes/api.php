@@ -39,6 +39,10 @@ use App\Constants\Permissions;
 |
 */
 
+// Public routes for Lead Capture Form
+Route::get('public/services', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'getServices']);
+Route::post('public/leads', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'store']);
+
 // Public routes for Client Handover
 Route::get('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'show']);
 Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'store']);
