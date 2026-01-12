@@ -148,6 +148,17 @@ class EnquiryController extends Controller
             $query->where('department_id', $request->department_id);
         }
 
+        if ($request->has('view')) {
+            $view = $request->view;
+            $projectStatuses = ['quote_approved', 'planning', 'in_progress', 'completed', 'cancelled'];
+            
+            if ($view === 'projects') {
+                $query->whereIn('status', $projectStatuses);
+            } else if ($view === 'enquiries') {
+                $query->whereNotIn('status', $projectStatuses);
+            }
+        }
+
         if ($request->has('assigned_to_me') && filter_var($request->assigned_to_me, FILTER_VALIDATE_BOOLEAN)) {
             $query->where('project_officer_id', Auth::id());
         }

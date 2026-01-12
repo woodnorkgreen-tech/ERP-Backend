@@ -45,7 +45,7 @@ class EnquiryConstants
     const PROJECT_PREFIX = 'WNG';
 
     // Pagination default
-    const PAGINATION_PER_PAGE = 10;
+    const PAGINATION_PER_PAGE = 15;
 
     /**
      * Get all enquiry statuses
