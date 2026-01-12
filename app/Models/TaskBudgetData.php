@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TaskBudgetData extends Model
 {
+    use \App\Traits\LogsActions;
     protected $fillable = [
         'enquiry_task_id', 'project_info', 'materials_data',
         'labour_data', 'expenses_data', 'logistics_data',

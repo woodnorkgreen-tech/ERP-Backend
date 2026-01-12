@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TaskQuoteData extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\LogsActions;
 
     protected $fillable = [
         'enquiry_task_id',
@@ -35,6 +35,7 @@ class TaskQuoteData extends Model
         'rejection_reason',
         'approval_comments',
         'quote_amount',
+        'viewer_settings',
         'created_at',
         'updated_at'
     ];
@@ -56,6 +57,7 @@ class TaskQuoteData extends Model
         'totals' => 'array',
         'approval_date' => 'date',
         'quote_amount' => 'decimal:2',
+        'viewer_settings' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime'
     ];

@@ -24,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class TaskProcurementData extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\LogsActions;
 
     protected $fillable = [
         'enquiry_task_id',

@@ -92,6 +92,9 @@ Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementControlle
 //to be removed later
 // Protected Project & Task Routes
 Route::middleware('auth:sanctum')->group(function () {
+    // Action Logs
+    Route::get('/logs/{type}/{id}', [App\Http\Controllers\ActionLogController::class, 'index']);
+
  Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
         Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
         Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);

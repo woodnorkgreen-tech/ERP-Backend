@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TaskProductionData extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\LogsActions;
 
     protected $table = 'task_production_data';
 

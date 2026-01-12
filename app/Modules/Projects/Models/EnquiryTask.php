@@ -9,7 +9,7 @@ use App\Modules\HR\Models\Department;
 
 class EnquiryTask extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\LogsActions;
 
     protected $table = 'enquiry_tasks';
 

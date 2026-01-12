@@ -69,7 +69,8 @@ class QuoteController extends Controller
             'vatPercentage' => 'numeric|min:0|max:100',
             'vatEnabled' => 'boolean',
             'totals' => 'required|array',
-            'status' => 'required|in:draft,pending,approved,rejected'
+            'status' => 'required|in:draft,pending,approved,rejected',
+            'viewerSettings' => 'nullable|array'
         ]);
 
         if ($validator->fails()) {
@@ -95,6 +96,7 @@ class QuoteController extends Controller
                     'vat_enabled' => $request->vatEnabled ?? true,
                     'totals' => $request->totals,
                     'status' => $request->status,
+                    'viewer_settings' => $request->viewerSettings ?? [],
                     'updated_at' => now()
                 ]
             );
@@ -175,15 +177,54 @@ class QuoteController extends Controller
              \Log::info("Transformed budget data, creating/updating quote");
 
              // Create or update quote with imported data
-             $quote = TaskQuoteData::updateOrCreate(
-                 ['enquiry_task_id' => $taskId],
-                 [
+             $existingQuote = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+             if ($existingQuote) {
+                 \Log::info("Merging new budget into existing quote {$existingQuote->id}");
+                 
+                 $existingMaterials = $existingQuote->materials ?? [];
+                 $mergedMaterials = $this->mergeQuoteMaterials($existingMaterials, $quoteData['materials']);
+                 
+                 // Merge items categories to preserve margins
+                 $mergedLabour = $this->mergeSimpleItems($existingQuote->labour ?? [], $quoteData['labour']);
+                 $mergedExpenses = $this->mergeSimpleItems($existingQuote->expenses ?? [], $quoteData['expenses']);
+                 $mergedLogistics = $this->mergeSimpleItems($existingQuote->logistics ?? [], $quoteData['logistics']);
+                 
+                 // Preserve global margins if they exist, otherwise use defaults
+                 $margins = $existingQuote->margins ?? ['materials' => 60, 'labour' => 0, 'expenses' => 0, 'logistics' => 0];
+
+                 // Update quote data for recalculation
+                 $tempQuoteData = $quoteData;
+                 $tempQuoteData['materials'] = $mergedMaterials;
+                 $tempQuoteData['labour'] = $mergedLabour;
+                 $tempQuoteData['expenses'] = $mergedExpenses;
+                 $tempQuoteData['logistics'] = $mergedLogistics;
+
+                 $totals = $this->recalculateTotals($tempQuoteData, $margins);
+                 
+                 $existingQuote->update([
                      'project_info' => $budgetData->project_info,
                      'budget_imported' => true,
                      'budget_imported_at' => now(),
                      'budget_updated_at' => $budgetData->updated_at,
                      'budget_version' => 'v_' . $budgetData->id . '_' . $budgetData->updated_at->format('YmdHis'),
-                     'custom_margins' => [], // Initialize empty
+                     'materials' => $mergedMaterials,
+                     'labour' => $mergedLabour,
+                     'expenses' => $mergedExpenses,
+                     'logistics' => $mergedLogistics,
+                     'totals' => $totals,
+                    'viewer_settings' => $existingQuote->viewer_settings ?? [],
+                    'updated_at' => now()
+                 ]);
+                 $quote = $existingQuote;
+             } else {
+                 $quote = TaskQuoteData::create([
+                     'enquiry_task_id' => $taskId,
+                     'project_info' => $budgetData->project_info,
+                     'budget_imported' => true,
+                     'budget_imported_at' => now(),
+                     'budget_updated_at' => $budgetData->updated_at,
+                     'budget_version' => 'v_' . $budgetData->id . '_' . $budgetData->updated_at->format('YmdHis'),
+                     'custom_margins' => [],
                      'materials' => $quoteData['materials'],
                      'labour' => $quoteData['labour'],
                      'expenses' => $quoteData['expenses'],
@@ -200,8 +241,8 @@ class QuoteController extends Controller
                      'totals' => $quoteData['totals'],
                      'status' => 'draft',
                      'updated_at' => now()
-                 ]
-             );
+                 ]);
+             }
 
              \Log::info("Quote data imported successfully for task: {$taskId}");
 
@@ -430,17 +471,23 @@ class QuoteController extends Controller
         }
     }
 
-    /**
-     * Merge existing material customization into new budget structure
-     */
     private function mergeQuoteMaterials(array $existingMaterials, array $newMaterials): array
     {
         $existingIdMap = [];
         $existingDescMap = [];
+        $existingElementMap = [];
         
         // Map existing items by ID and by normalized Description
         foreach ($existingMaterials as $element) {
+            $eId = (string)($element['id'] ?? '');
+            if (!empty($eId)) {
+                $existingElementMap[$eId] = $element;
+            }
+            
             foreach ($element['materials'] ?? [] as $material) {
+                // Track which element this material belongs to
+                $material['element_id'] = $element['id'];
+                
                 if (!empty($material['id'])) {
                     $existingIdMap[(string)$material['id']] = $material;
                 }
@@ -451,8 +498,10 @@ class QuoteController extends Controller
             }
         }
 
+        $newElementIds = [];
         // 1. Process New Materials from Budget
         foreach ($newMaterials as &$element) {
+            $newElementIds[$element['id']] = true;
             foreach ($element['materials'] as &$material) {
                 $match = null;
                 $mid = (string)($material['id'] ?? '');
@@ -466,7 +515,7 @@ class QuoteController extends Controller
                 }
 
                 if ($match) {
-                    // PRESERVE CUSTOMIZATIONS
+                    // PRESERVE MATERIAL CUSTOMIZATIONS
                     $material['marginPercentage'] = $match['marginPercentage'] ?? 60;
                     $material['days'] = $match['days'] ?? 1;
                     
@@ -474,8 +523,8 @@ class QuoteController extends Controller
                         $material['description'] = $match['description'];
                     }
                     
-                    // Recalculate
-                    $material['totalPrice'] = $material['quantity'] * $material['unitPrice'] * ($material['days'] ?? 1);
+                    // Recalculate material prices
+                    $material['totalPrice'] = ($material['quantity'] ?? 0) * ($material['unitPrice'] ?? 0) * ($material['days'] ?? 1);
                     $material['marginAmount'] = $material['totalPrice'] * ($material['marginPercentage'] / 100);
                     $material['finalPrice'] = $material['totalPrice'] + $material['marginAmount'];
                     
@@ -485,31 +534,28 @@ class QuoteController extends Controller
                 }
             }
             
-            // Re-sum element totals
-            $element['baseTotal'] = array_sum(array_column($element['materials'], 'totalPrice'));
-            $element['marginAmount'] = array_sum(array_column($element['materials'], 'marginAmount'));
-            $element['finalTotal'] = array_sum(array_column($element['materials'], 'finalPrice'));
-            $element['marginPercentage'] = $element['baseTotal'] > 0 ? ($element['marginAmount'] / $element['baseTotal'] * 100) : 60;
-        }
-
-        // 2. Add back items that ONLY exist in the Quote (Manual additions or unique edits)
-        // We only add orphans that haven't been matched by ID OR Description
-        foreach ($existingIdMap as $orphan) {
-            $orphanDesc = trim($orphan['description'] ?? '');
-            if (isset($existingDescMap[$orphanDesc])) {
-                // Find element and add back
-                foreach ($newMaterials as &$newElement) {
-                    if ($newElement['id'] === ($orphan['element_id'] ?? null)) {
-                        $newElement['materials'][] = $orphan;
-                        unset($existingDescMap[$orphanDesc]);
-                        continue 2;
-                    }
-                }
-                // Fallback: Add to first element or keep as-is if element mapping fails
-                if (!empty($newMaterials)) {
-                    $newMaterials[0]['materials'][] = $orphan;
-                }
+            // PRESERVE ELEMENT-LEVEL CUSTOMIZATIONS (Header Qty & Description)
+            $eId = (string)($element['id'] ?? '');
+            $oldElement = (!empty($eId) && isset($existingElementMap[$eId])) ? $existingElementMap[$eId] : null;
+            
+            if ($oldElement) {
+                // If it existed before, keep the user's manual adjustments
+                $element['quantity'] = $oldElement['quantity'] ?? 1;
+                $element['description'] = $oldElement['description'] ?? '';
+            } else {
+                // For new elements from budget, initialize with defaults
+                $element['quantity'] = $element['quantity'] ?? 1;
+                $element['description'] = $element['description'] ?? '';
             }
+
+            // Re-sum element totals and apply ELEMENT QUANTITY scaling
+            $sumBase = array_sum(array_column($element['materials'], 'totalPrice'));
+            $sumMargin = array_sum(array_column($element['materials'], 'marginAmount'));
+            
+            $element['baseTotal'] = (float)$sumBase * (float)$element['quantity'];
+            $element['marginAmount'] = (float)$sumMargin * (float)$element['quantity'];
+            $element['finalTotal'] = $element['baseTotal'] + $element['marginAmount'];
+            $element['marginPercentage'] = $element['baseTotal'] > 0 ? ($element['marginAmount'] / $element['baseTotal'] * 100) : 60;
         }
 
         return $newMaterials;
@@ -556,14 +602,6 @@ class QuoteController extends Controller
                 
                 if (!empty($match['id'])) unset($existingIdMap[(string)$match['id']]);
                 unset($existingDescMap[trim($match['description'] ?? $match['type'] ?? '')]);
-            }
-        }
-
-        // Add back genuine orphans (manually added items that don't exist in budget)
-        foreach ($existingIdMap as $orphan) {
-            $orphanDesc = trim($orphan['description'] ?? $orphan['type'] ?? '');
-            if (isset($existingDescMap[$orphanDesc])) {
-                $newItems[] = $orphan;
             }
         }
 
@@ -735,11 +773,13 @@ class QuoteController extends Controller
                     'id' => $element['id'],
                     'templateId' => $element['templateId'] ?? null,
                     'name' => $element['name'],
+                    'description' => $element['description'] ?? '',
+                    'quantity' => $element['quantity'] ?? 1,
                     'materials' => $elementMaterials,
-                    'baseTotal' => array_sum(array_column($elementMaterials, 'totalPrice')),
+                    'baseTotal' => array_sum(array_column($elementMaterials, 'totalPrice')) * ($element['quantity'] ?? 1),
                     'marginPercentage' => 60,
-                    'marginAmount' => array_sum(array_column($elementMaterials, 'marginAmount')),
-                    'finalTotal' => array_sum(array_column($elementMaterials, 'finalPrice'))
+                    'marginAmount' => array_sum(array_column($elementMaterials, 'marginAmount')) * ($element['quantity'] ?? 1),
+                    'finalTotal' => array_sum(array_column($elementMaterials, 'finalPrice')) * ($element['quantity'] ?? 1)
                 ];
             }
         }
@@ -821,6 +861,8 @@ class QuoteController extends Controller
                             'id' => 'addition_' . $addition->id . '_material_' . $material['id'],
                             'templateId' => null,
                             'name' => 'Budget Addition: ' . $addition->title,
+                            'description' => '',
+                            'quantity' => 1,
                             'materials' => [
                                 [
                                     'id' => $material['id'],
@@ -1275,6 +1317,11 @@ class QuoteController extends Controller
             'data' => $quoteData->toArray(),
             'created_by' => auth()->id() ?? 1 // Fallback for dev
         ]);
+        
+        $quoteData->recordCustomAction('version_created', [
+            'version_number' => $newVersionNumber,
+            'label' => $version->label
+        ]);
 
         return response()->json([
             'message' => 'Version created successfully',
@@ -1477,6 +1524,7 @@ class QuoteController extends Controller
     private function formatQuoteResponse(TaskQuoteData $quoteData, ?EnquiryTask $task = null): array
     {
         $response = [
+            'id' => $quoteData->id,
             'projectInfo' => $quoteData->project_info,
             'budgetImported' => $quoteData->budget_imported,
             'budgetImportedAt' => $quoteData->budget_imported_at,
@@ -1493,6 +1541,10 @@ class QuoteController extends Controller
             'vatEnabled' => (bool) ($quoteData->vat_enabled ?? true),
             'totals' => $quoteData->totals,
             'status' => $quoteData->status,
+            'viewerSettings' => $quoteData->viewer_settings ?? [
+                'descriptions' => (object)[],
+                'overrides' => (object)[]
+            ],
             'approvedBy' => $quoteData->approved_by,
             'approvalDate' => $quoteData->approval_date ? $quoteData->approval_date->format('Y-m-d') : null,
             'rejectionReason' => $quoteData->rejection_reason,

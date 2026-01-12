@@ -27,7 +27,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class TaskMaterialsData extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\LogsActions;
 
     protected $fillable = [
         'enquiry_task_id',
