@@ -59,7 +59,7 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
-Route::prefix('hrr')->group(function () {
+Route::prefix('hr')->group(function () {
     // Employee management
     Route::apiResource('employees', EmployeeController::class);
     
@@ -657,11 +657,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('departmental-tasks/{task}/action', [PhaseDepartmentalTaskController::class, 'performAction']); // No permission for debugging
         Route::get('departmental-tasks-stats', [PhaseDepartmentalTaskController::class, 'getStats']); // No permission for debugging
 
-        // Site survey management
-        Route::apiResource('site-surveys', SiteSurveyController::class); // Temporarily remove permissions for debugging
-        Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
-        Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
-        Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
+        
 
 
         // Materials management
