@@ -61,10 +61,11 @@ class QuoteController extends Controller
             'expenses' => 'present|array',
             'logistics' => 'present|array',
             'margins' => 'required|array',
-            'margins.materials' => 'numeric|min:0|max:100',
-            'margins.labour' => 'numeric|min:0|max:100',
-            'margins.expenses' => 'numeric|min:0|max:100',
-            'margins.logistics' => 'numeric|min:0|max:100',
+            'margins.materials' => 'numeric|min:0|max:1000', // Allow up to 1000% just in case
+            'margins.labour' => 'numeric|min:0|max:1000',
+            'margins.expenses' => 'numeric|min:0|max:1000',
+            'margins.logistics' => 'numeric|min:0|max:1000',
+            'customMargins' => 'nullable|array',
             'discountAmount' => 'numeric|min:0',
             'vatPercentage' => 'numeric|min:0|max:100',
             'vatEnabled' => 'boolean',
@@ -91,6 +92,7 @@ class QuoteController extends Controller
                     'expenses' => $request->expenses,
                     'logistics' => $request->logistics,
                     'margins' => $request->margins,
+                    'custom_margins' => $request->customMargins ?? [],
                     'discount_amount' => $request->discountAmount ?? 0,
                     'vat_percentage' => $request->vatPercentage ?? 16,
                     'vat_enabled' => $request->vatEnabled ?? true,
@@ -172,7 +174,14 @@ class QuoteController extends Controller
                  ->get();
 
              // Transform budget data to quote format including approved additions
-             $quoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions);
+             // Default margins for initial import should match frontend defaults (60%)
+             $defaultMargins = [
+                 'materials' => 60,
+                 'labour' => 60,
+                 'expenses' => 60,
+                 'logistics' => 60
+             ];
+             $quoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions, $defaultMargins);
 
              \Log::info("Transformed budget data, creating/updating quote");
 
@@ -417,26 +426,32 @@ class QuoteController extends Controller
 
             // Get fresh data from budget
             $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)->where('status', 'approved')->get();
-            $newQuoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions);
+            // Get current margins to use as baseline for new items
+            $currentMargins = $quoteData->margins ?? [
+                'materials' => 60,
+                'labour' => 60,
+                'expenses' => 60,
+                'logistics' => 60
+            ];
+
+            // Get fresh data from budget, initialized with current margins
+            $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)->where('status', 'approved')->get();
+            $newQuoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions, $currentMargins);
 
             // MERGE LOGIC:
             // We want to keep the NEW budget structure (items, quantities, costs)
             // But preserve the OLD quote customizations (margins, days)
             
             $existingMaterials = $quoteData->materials ?? [];
-            $mergedMaterials = $this->mergeQuoteMaterials($existingMaterials, $newQuoteData['materials']);
+            $mergedMaterials = $this->mergeQuoteMaterials($existingMaterials, $newQuoteData['materials'], $currentMargins['materials'] ?? 60);
             
             // Merge items categories to preserve margins
-            $mergedLabour = $this->mergeSimpleItems($quoteData->labour ?? [], $newQuoteData['labour']);
-            $mergedExpenses = $this->mergeSimpleItems($quoteData->expenses ?? [], $newQuoteData['expenses']);
-            $mergedLogistics = $this->mergeSimpleItems($quoteData->logistics ?? [], $newQuoteData['logistics']);
+            $mergedLabour = $this->mergeSimpleItems($quoteData->labour ?? [], $newQuoteData['labour'], $currentMargins['labour'] ?? 0);
+            $mergedExpenses = $this->mergeSimpleItems($quoteData->expenses ?? [], $newQuoteData['expenses'], $currentMargins['expenses'] ?? 0);
+            $mergedLogistics = $this->mergeSimpleItems($quoteData->logistics ?? [], $newQuoteData['logistics'], $currentMargins['logistics'] ?? 0);
             
             // Preserve global margins if they exist, otherwise use defaults
-            $margins = $quoteData->margins ?? [];
-            $margins['materials'] = $margins['materials'] ?? 60;
-            $margins['labour'] = $margins['labour'] ?? 0;
-            $margins['expenses'] = $margins['expenses'] ?? 0;
-            $margins['logistics'] = $margins['logistics'] ?? 0;
+            $margins = $currentMargins;
 
             // Update newQuoteData with merged items
             $newQuoteData['materials'] = $mergedMaterials;
@@ -471,7 +486,7 @@ class QuoteController extends Controller
         }
     }
 
-    private function mergeQuoteMaterials(array $existingMaterials, array $newMaterials): array
+    private function mergeQuoteMaterials(array $existingMaterials, array $newMaterials, float $defaultMargin = 60): array
     {
         $existingIdMap = [];
         $existingDescMap = [];
@@ -516,7 +531,7 @@ class QuoteController extends Controller
 
                 if ($match) {
                     // PRESERVE MATERIAL CUSTOMIZATIONS
-                    $material['marginPercentage'] = $match['marginPercentage'] ?? 60;
+                    $material['marginPercentage'] = $match['marginPercentage'] ?? $defaultMargin;
                     $material['days'] = $match['days'] ?? 1;
                     
                     if (!empty($match['description'])) {
@@ -531,6 +546,12 @@ class QuoteController extends Controller
                     // Remove from maps to avoid duplication
                     if (!empty($match['id'])) unset($existingIdMap[(string)$match['id']]);
                     unset($existingDescMap[trim($match['description'] ?? '')]);
+                } else {
+                    // Ensure even new items use the category default if it was changed
+                    $material['marginPercentage'] = $defaultMargin;
+                    $material['totalPrice'] = ($material['quantity'] ?? 0) * ($material['unitPrice'] ?? 0) * ($material['days'] ?? 1);
+                    $material['marginAmount'] = $material['totalPrice'] * ($material['marginPercentage'] / 100);
+                    $material['finalPrice'] = $material['totalPrice'] + $material['marginAmount'];
                 }
             }
             
@@ -542,6 +563,10 @@ class QuoteController extends Controller
                 // If it existed before, keep the user's manual adjustments
                 $element['quantity'] = $oldElement['quantity'] ?? 1;
                 $element['description'] = $oldElement['description'] ?? '';
+                // Also preserve custom name if edited
+                if (!empty($oldElement['name']) && $oldElement['name'] !== $element['name']) {
+                    $element['name'] = $oldElement['name'];
+                }
             } else {
                 // For new elements from budget, initialize with defaults
                 $element['quantity'] = $element['quantity'] ?? 1;
@@ -564,7 +589,7 @@ class QuoteController extends Controller
     /**
      * Merge simple items (Expenses, Logistics) to preserve margins
      */
-    private function mergeSimpleItems(array $existingItems, array $newItems): array
+    private function mergeSimpleItems(array $existingItems, array $newItems, float $defaultMargin = 0): array
     {
         $existingIdMap = [];
         $existingDescMap = [];
@@ -591,17 +616,29 @@ class QuoteController extends Controller
             }
 
             if ($match) {
-                $item['marginPercentage'] = $match['marginPercentage'] ?? 0;
+                $item['marginPercentage'] = $match['marginPercentage'] ?? $defaultMargin;
+                
+                // Preserve user-defined quantity and days if they were modified in the quote
+                if (isset($match['quantity'])) $item['quantity'] = $match['quantity'];
+                if (isset($match['days'])) $item['days'] = $match['days'];
                 
                 if (!empty($match['type'])) $item['type'] = $match['type'];
                 if (!empty($match['description'])) $item['description'] = $match['description'];
                 
-                $baseAmount = $item['amount'] ?? 0;
+                $baseAmount = ($item['amount'] ?? 0) > 0 ? $item['amount'] : ( ($item['unitRate'] ?? 0) * ($item['quantity'] ?? 1) );
+                $item['amount'] = $baseAmount;
                 $item['marginAmount'] = $baseAmount * ($item['marginPercentage'] / 100);
                 $item['finalPrice'] = $baseAmount + $item['marginAmount'];
                 
                 if (!empty($match['id'])) unset($existingIdMap[(string)$match['id']]);
                 unset($existingDescMap[trim($match['description'] ?? $match['type'] ?? '')]);
+            } else {
+                // Apply default margin to new items if it was changed at category level
+                $item['marginPercentage'] = $defaultMargin;
+                $baseAmount = ($item['amount'] ?? 0) > 0 ? $item['amount'] : ( ($item['unitRate'] ?? 0) * ($item['quantity'] ?? 1) );
+                $item['amount'] = $baseAmount;
+                $item['marginAmount'] = $baseAmount * ($item['marginPercentage'] / 100);
+                $item['finalPrice'] = $baseAmount + $item['marginAmount'];
             }
         }
 
@@ -739,9 +776,14 @@ class QuoteController extends Controller
     /**
      * Transform budget data to quote format
      */
-    private function transformBudgetToQuote(TaskBudgetData $budgetData, $approvedAdditions = null): array
+    private function transformBudgetToQuote(TaskBudgetData $budgetData, $approvedAdditions = null, ?array $preferredMargins = null): array
     {
         \Log::info("Starting budget data transformation");
+
+        $m_margin = $preferredMargins['materials'] ?? 60;
+        $l_margin = $preferredMargins['labour'] ?? 0;
+        $e_margin = $preferredMargins['expenses'] ?? 0;
+        $lo_margin = $preferredMargins['logistics'] ?? 0;
 
         $materials = [];
         $labour = [];
@@ -754,6 +796,8 @@ class QuoteController extends Controller
             foreach ($budgetData->materials_data as $element) {
                 $elementMaterials = [];
                 foreach ($element['materials'] as $material) {
+                    $totalPrice = $material['totalPrice'] ?? 0;
+                    $marginAmount = $totalPrice * ($m_margin / 100);
                     $elementMaterials[] = [
                         'id' => $material['id'],
                         'description' => $material['description'],
@@ -761,13 +805,16 @@ class QuoteController extends Controller
                         'quantity' => $material['quantity'],
                         'days' => 1, // Default days
                         'unitPrice' => $material['unitPrice'] ?? 0,
-                        'totalPrice' => $material['totalPrice'] ?? 0,
+                        'totalPrice' => $totalPrice,
                         'isAddition' => $material['isAddition'] ?? false,
-                        'marginPercentage' => 60, // Default margin
-                        'marginAmount' => ($material['totalPrice'] ?? 0) * 0.6,
-                        'finalPrice' => ($material['totalPrice'] ?? 0) * 1.6
+                        'marginPercentage' => $m_margin,
+                        'marginAmount' => $marginAmount,
+                        'finalPrice' => $totalPrice + $marginAmount
                     ];
                 }
+
+                $sumBase = array_sum(array_column($elementMaterials, 'totalPrice')) * ($element['quantity'] ?? 1);
+                $sumMargin = array_sum(array_column($elementMaterials, 'marginAmount')) * ($element['quantity'] ?? 1);
 
                 $materials[] = [
                     'id' => $element['id'],
@@ -776,10 +823,10 @@ class QuoteController extends Controller
                     'description' => $element['description'] ?? '',
                     'quantity' => $element['quantity'] ?? 1,
                     'materials' => $elementMaterials,
-                    'baseTotal' => array_sum(array_column($elementMaterials, 'totalPrice')) * ($element['quantity'] ?? 1),
-                    'marginPercentage' => 60,
-                    'marginAmount' => array_sum(array_column($elementMaterials, 'marginAmount')) * ($element['quantity'] ?? 1),
-                    'finalTotal' => array_sum(array_column($elementMaterials, 'finalPrice')) * ($element['quantity'] ?? 1)
+                    'baseTotal' => $sumBase,
+                    'marginPercentage' => $m_margin,
+                    'marginAmount' => $sumMargin,
+                    'finalTotal' => $sumBase + $sumMargin
                 ];
             }
         }
@@ -845,7 +892,7 @@ class QuoteController extends Controller
 
                         // Recalculate totals with final unit price
                         $totalPrice = $quantity * $unitPrice;
-                        $marginAmount = $totalPrice * 0.6; // 60% margin
+                        $marginAmount = $totalPrice * ($m_margin / 100);
                         $finalPrice = $totalPrice + $marginAmount;
 
                         \Log::info("Final addition material calculations", [
@@ -873,13 +920,13 @@ class QuoteController extends Controller
                                     'unitPrice' => $unitPrice,
                                     'totalPrice' => $totalPrice,
                                     'isAddition' => true,
-                                    'marginPercentage' => 60,
+                                    'marginPercentage' => $m_margin,
                                     'marginAmount' => $marginAmount,
                                     'finalPrice' => $finalPrice
                                 ]
                             ],
                             'baseTotal' => $totalPrice,
-                            'marginPercentage' => 60,
+                            'marginPercentage' => $m_margin,
                             'marginAmount' => $marginAmount,
                             'finalTotal' => $finalPrice
                         ];
@@ -888,8 +935,9 @@ class QuoteController extends Controller
 
                 // Add labour from approved additions
                 if ($addition->labour) {
-                    $labour = array_merge($labour, array_map(function ($item) {
+                    $labour = array_merge($labour, array_map(function ($item) use ($l_margin) {
                         $amount = $item['amount'] ?? (($item['quantity'] ?? 1) * ($item['unitRate'] ?? 0));
+                        $marginAmount = $amount * ($l_margin / 100);
                         return [
                             'id' => $item['id'],
                             'type' => $item['type'] ?? 'Labour',
@@ -899,18 +947,18 @@ class QuoteController extends Controller
                             'amount' => $amount,
                             'isAddition' => true,
                             'category' => $item['category'] ?? 'Additional Labour',
-                            'marginPercentage' => 0,
-                            'marginAmount' => 0,
-                            'finalPrice' => $amount
+                            'marginPercentage' => $l_margin,
+                            'marginAmount' => $marginAmount,
+                            'finalPrice' => $amount + $marginAmount
                         ];
                     }, $addition->labour));
                 }
 
                 // Add expenses from approved additions
                 if ($addition->expenses) {
-                    $expenses = array_merge($expenses, array_map(function ($item) {
+                    $expenses = array_merge($expenses, array_map(function ($item) use ($e_margin) {
                         $amount = $item['amount'] ?? 0;
-                        $marginAmount = 0; // 0% margin
+                        $marginAmount = $amount * ($e_margin / 100);
                         $finalPrice = $amount + $marginAmount;
                         return [
                             'id' => $item['id'],
@@ -918,7 +966,7 @@ class QuoteController extends Controller
                             'category' => $item['category'] ?? 'Additional Expense',
                             'amount' => $amount,
                             'isAddition' => true,
-                            'marginPercentage' => 0,
+                            'marginPercentage' => $e_margin,
                             'marginAmount' => $marginAmount,
                             'finalPrice' => $finalPrice
                         ];
@@ -927,9 +975,9 @@ class QuoteController extends Controller
 
                 // Add logistics from approved additions
                 if ($addition->logistics) {
-                    $logistics = array_merge($logistics, array_map(function ($item) {
+                    $logistics = array_merge($logistics, array_map(function ($item) use ($lo_margin) {
                         $amount = $item['amount'] ?? (($item['quantity'] ?? 1) * ($item['unitRate'] ?? 0));
-                        $marginAmount = 0; // 0% margin
+                        $marginAmount = $amount * ($lo_margin / 100);
                         $finalPrice = $amount + $marginAmount;
                         return [
                             'id' => $item['id'],
@@ -940,7 +988,7 @@ class QuoteController extends Controller
                             'unitRate' => $item['unitRate'] ?? $amount,
                             'amount' => $amount,
                             'isAddition' => true,
-                            'marginPercentage' => 0,
+                            'marginPercentage' => $lo_margin,
                             'marginAmount' => $marginAmount,
                             'finalPrice' => $finalPrice
                         ];
@@ -952,7 +1000,8 @@ class QuoteController extends Controller
         // Transform labour (no individual margins)
         if ($budgetData->labour_data) {
             \Log::info("Transforming labour data: " . count($budgetData->labour_data) . " items");
-            $labour = array_map(function ($item) {
+            $labour = array_map(function ($item) use ($l_margin) {
+                $marginAmount = $item['amount'] * ($l_margin / 100);
                 return [
                     'id' => $item['id'],
                     'type' => $item['type'],
@@ -962,9 +1011,9 @@ class QuoteController extends Controller
                     'amount' => $item['amount'],
                     'isAddition' => $item['isAddition'] ?? false,
                     'category' => $item['category'] ?? 'General',
-                    'marginPercentage' => 0,
-                    'marginAmount' => 0,
-                    'finalPrice' => $item['amount']
+                    'marginPercentage' => $l_margin,
+                    'marginAmount' => $marginAmount,
+                    'finalPrice' => $item['amount'] + $marginAmount
                 ];
             }, $budgetData->labour_data);
         }
@@ -972,16 +1021,17 @@ class QuoteController extends Controller
         // Transform expenses with margins
         if ($budgetData->expenses_data) {
             \Log::info("Transforming expenses data: " . count($budgetData->expenses_data) . " items");
-            $expenses = array_map(function ($item) {
+            $expenses = array_map(function ($item) use ($e_margin) {
+                $marginAmount = $item['amount'] * ($e_margin / 100);
                 return [
                     'id' => $item['id'],
                     'description' => $item['description'],
                     'category' => $item['category'],
                     'amount' => $item['amount'],
                     'isAddition' => $item['isAddition'] ?? false,
-                    'marginPercentage' => 0,
-                    'marginAmount' => 0,
-                    'finalPrice' => $item['amount']
+                    'marginPercentage' => $e_margin,
+                    'marginAmount' => $marginAmount,
+                    'finalPrice' => $item['amount'] + $marginAmount
                 ];
             }, $budgetData->expenses_data);
         }
@@ -989,7 +1039,8 @@ class QuoteController extends Controller
         // Transform logistics with margins
         if ($budgetData->logistics_data) {
             \Log::info("Transforming logistics data: " . count($budgetData->logistics_data) . " items");
-            $logistics = array_map(function ($item) {
+            $logistics = array_map(function ($item) use ($lo_margin) {
+                $marginAmount = $item['amount'] * ($lo_margin / 100);
                 return [
                     'id' => $item['id'],
                     'vehicleReg' => $item['vehicleReg'] ?? '',
@@ -999,9 +1050,9 @@ class QuoteController extends Controller
                     'unitRate' => $item['unitRate'],
                     'amount' => $item['amount'],
                     'isAddition' => $item['isAddition'] ?? false,
-                    'marginPercentage' => 0,
-                    'marginAmount' => 0,
-                    'finalPrice' => $item['amount']
+                    'marginPercentage' => $lo_margin,
+                    'marginAmount' => $marginAmount,
+                    'finalPrice' => $item['amount'] + $marginAmount
                 ];
             }, $budgetData->logistics_data);
         }
