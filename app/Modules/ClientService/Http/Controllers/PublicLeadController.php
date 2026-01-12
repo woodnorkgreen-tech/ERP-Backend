@@ -46,6 +46,10 @@ class PublicLeadController extends Controller
         ]);
 
         if ($validator->fails()) {
+            \Log::warning('Public Lead Validation Failed:', [
+                'errors' => $validator->errors()->toArray(),
+                'input' => $request->all()
+            ]);
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $validator->errors()
