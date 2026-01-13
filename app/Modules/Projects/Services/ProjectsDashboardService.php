@@ -561,8 +561,8 @@ class ProjectsDashboardService
                 'urgent' => 'Urgent'
             ],
             'currency' => [
-                'symbol' => '$',
-                'code' => 'USD'
+                'symbol' => 'Ksh',
+                'code' => 'KES'
             ],
             'thresholds' => [
                 'workload' => self::WORKLOAD_THRESHOLD,

@@ -175,7 +175,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Project management
         Route::get('projects', function () {
-            $query = \App\Modules\Projects\Models\Project::with('enquiry.client');
+            $query = \App\Models\Project::with('enquiry.client');
 
             if (request()->has('enquiry_id')) {
                 $query->where('enquiry_id', request()->enquiry_id);
@@ -626,7 +626,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Project management
         Route::get('projects', function () {
-            $query = \App\Modules\Projects\Models\Project::with('enquiry.client');
+            $query = \App\Models\Project::with('enquiry.client');
 
             if (request()->has('enquiry_id')) {
                 $query->where('enquiry_id', request()->enquiry_id);
