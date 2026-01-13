@@ -328,6 +328,12 @@ Route::middleware('auth:sanctum')->group(function () {
         // Lead management
         Route::get('leads', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'index'])
             ->middleware('permission:' . Permissions::ENQUIRY_READ);
+        Route::get('leads/{lead}', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'show'])
+            ->middleware('permission:' . Permissions::ENQUIRY_READ);
+        Route::put('leads/{lead}', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'update'])
+            ->middleware('permission:' . Permissions::ENQUIRY_UPDATE);
+        Route::delete('leads/{lead}', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'destroy'])
+            ->middleware('permission:' . Permissions::ENQUIRY_DELETE);
         Route::post('leads/{lead}/convert', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'convert'])
             ->middleware('permission:' . Permissions::ENQUIRY_UPDATE);
     });
