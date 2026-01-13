@@ -24,7 +24,6 @@ class MaterialsController extends Controller
 
     public function __construct(\App\Services\ProcurementService $procurementService)
     {
-        $this->middleware('permission:' . \App\Constants\Permissions::TASK_UPDATE);
         $this->procurementService = $procurementService;
     }
 
