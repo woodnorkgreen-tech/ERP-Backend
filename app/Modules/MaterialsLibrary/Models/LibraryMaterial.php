@@ -120,4 +120,12 @@ class LibraryMaterial extends Model
     // Removed custom getAttribute to avoid potential conflicts with Eloquent accessor logic
 
     // Removed incompatible methods to use default Eloquent behavior
+
+    /**
+     * Link to the Stock level managed in Procurement & Stores
+     */
+    public function stock(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(\App\Modules\ProcurementStores\Models\Stock::class, 'material_id');
+    }
 }
