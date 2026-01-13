@@ -489,14 +489,7 @@ class TaskController extends Controller
             //    return response()->json(['message' => 'Unauthorized: Task belongs to another department'], 403);
             // }
 
-            // Lock Check
-            $assigneeId = $task->assigned_to ?? $task->assigned_user_id;
-            if (!$hasSpecialAccess && $assigneeId && $assigneeId !== $user->id) {
-                 $task->loadMissing('assignedUsers');
-                 if (!$task->assignedUsers->contains($user->id)) {
-                     return response()->json(['message' => 'Action Denied: Task is locked by another user.'], 403);
-                 }
-            }
+            // Lock Check Removed - Users can edit any task regardless of assignment
 
             \Log::info("[DEBUG] updateTaskStatus found task {$taskId}, current status: {$task->status}, title: {$task->title}, type: {$task->type}");
 
@@ -645,51 +638,11 @@ class TaskController extends Controller
             $user = Auth::user();
             $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer']);
 
-            // 1. Strict Access Check: Standard users can only see tasks assigned to them
-            if (!$hasSpecialAccess) {
-                 // Load assignedUsers relationship if not loaded
-                 $task->loadMissing('assignedUsers');
-                 
-                 $isAssigned = ($task->assigned_to == $user->id) || 
-                               ($task->assigned_user_id == $user->id) ||
-                               $task->assignedUsers->contains('id', $user->id);
+            // Strict Access Check Removed - Users can view any task in the system
 
-                 // Specific requirement: Allow access to unassigned tasks for specific roles
-                 $isUnassigned = !$task->assigned_to && !$task->assigned_user_id;
-                 $canViewUnassigned = false;
-                 
-                 if ($isUnassigned) {
-                     if ($user->hasRole('Designer') && in_array($task->type, ['design', 'materials'])) {
-                         $canViewUnassigned = true;
-                     } elseif ($user->hasRole(['Costing', 'Accounts']) && in_array($task->type, ['materials', 'budget', 'quote', 'quote_approval'])) {
-                         $canViewUnassigned = true;
-                     } elseif ($user->hasRole(['Stores', 'Procurement']) && in_array($task->type, ['budget', 'procurement'])) {
-                         $canViewUnassigned = true;
-                     } elseif ($user->hasRole('Production') && in_array($task->type, ['materials', 'teams', 'production'])) {
-                         $canViewUnassigned = true;
-                     }
-                 }
-
-                 if (!$isAssigned && !$canViewUnassigned) {
-                     return response()->json([
-                        'message' => 'Unauthorized: You do not have permission to view this task.'
-                     ], 403);
-                 }
-            }
-
-            // Lock Check (Calculation only - do not block view)
-            $assigneeId = $task->assigned_to ?? $task->assigned_user_id;
+            // Lock Check Removed - Tasks are no longer locked based on assignment
             $isLocked = false;
             $lockedByUser = null;
-
-            if (!$hasSpecialAccess && $assigneeId && $assigneeId !== $user->id) {
-                 // Secondary check for multi-user assignment via pivot table
-                 $task->loadMissing('assignedUsers');
-                 if (!$task->assignedUsers->contains($user->id)) {
-                     $isLocked = true;
-                     $lockedByUser = $task->assignedTo ?? ($task->assignedUser ?? null);
-                 }
-            }
 
             // Append lock status to task
             $task->is_locked_for_user = $isLocked;
@@ -743,14 +696,7 @@ class TaskController extends Controller
             //    return response()->json(['message' => 'Unauthorized: Task belongs to another department'], 403);
             // }
 
-            // Lock Check
-            $assigneeId = $task->assigned_to ?? $task->assigned_user_id;
-            if (!$hasSpecialAccess && $assigneeId && $assigneeId !== $user->id) {
-                 $task->loadMissing('assignedUsers');
-                 if (!$task->assignedUsers->contains($user->id)) {
-                     return response()->json(['message' => 'Action Denied: Task is locked by another user.'], 403);
-                 }
-            }
+            // Lock Check Removed - Users can edit any task regardless of assignment
 
             $task->update($request->only([
                 'task_description',
