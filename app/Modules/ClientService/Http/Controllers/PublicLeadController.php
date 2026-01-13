@@ -137,6 +137,35 @@ class PublicLeadController extends Controller
         }
     }
 
+    public function show(PublicLead $lead): JsonResponse
+    {
+        return response()->json($lead->load('department', 'processedBy'));
+    }
+
+    public function update(Request $request, PublicLead $lead): JsonResponse
+    {
+        $request->validate([
+            'status' => 'required|string|in:new,processed,archived,ignored',
+        ]);
+
+        $lead->update($request->only('status'));
+
+        return response()->json([
+            'message' => 'Lead updated successfully',
+            'data' => $lead
+        ]);
+    }
+
+    public function destroy(PublicLead $lead): JsonResponse
+    {
+        try {
+            $lead->delete();
+            return response()->json(['message' => 'Lead deleted successfully']);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Failed to delete lead: ' . $e->getMessage()], 500);
+        }
+    }
+
     public function getServices(): JsonResponse
     {
         $services = Department::select('id', 'name', 'description')->get();
