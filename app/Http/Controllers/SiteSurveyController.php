@@ -114,7 +114,13 @@ class SiteSurveyController extends Controller
             }
         }
 
-        $siteSurvey = SiteSurvey::create($validated);
+        $siteSurvey = SiteSurvey::updateOrCreate(
+            [
+                'project_enquiry_id' => $validated['project_enquiry_id'],
+                'enquiry_task_id' => $validated['enquiry_task_id'] ?? null
+            ],
+            $validated
+        );
 
         return response()->json($siteSurvey->load('enquiry.client', 'enquiryTask'), 201);
     }

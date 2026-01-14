@@ -38,6 +38,7 @@ class PettyCashDisbursement extends Model
         'voided_by',
         'voided_at',
         'tax',
+        'date_disbursed',
     ];
 
     /**
@@ -52,6 +53,7 @@ class PettyCashDisbursement extends Model
             'voided_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
+            'date_disbursed' => 'date',
         ];
     }
 
@@ -196,6 +198,13 @@ class PettyCashDisbursement extends Model
                     // Disbursement was reactivated, subtract amount from balance
                     $disbursement->updateBalance('subtract');
                 }
+            }
+        });
+
+        // Update balance when disbursement is deleted
+        static::deleted(function ($disbursement) {
+            if ($disbursement->status === 'active') {
+                $disbursement->updateBalance('add');
             }
         });
     }

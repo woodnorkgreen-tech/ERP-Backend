@@ -138,13 +138,125 @@ class ProcurementStoresController extends Controller
     }
 
     /**
-     * Fetch recent stock movement logs
+     * Update fixed stock settings (Min Level, Location)
      */
-    public function inventoryLogs(): JsonResponse
+    public function updateStockSettings(\Illuminate\Http\Request $request): JsonResponse
     {
-        $logs = \App\Modules\ProcurementStores\Models\InventoryLog::with(['material', 'user'])
-            ->orderBy('created_at', 'desc')
-            ->limit(50)
+        $request->validate([
+            'material_id' => 'required|exists:library_materials,id',
+            'min_stock_level' => 'nullable|numeric|min:0',
+            'location_bin' => 'nullable|string|max:50',
+            'warehouse_code' => 'nullable|string|max:20'
+        ]);
+
+        $stock = \App\Modules\ProcurementStores\Models\Stock::firstOrCreate(
+            ['material_id' => $request->material_id],
+            ['quantity_on_hand' => 0, 'quantity_reserved' => 0]
+        );
+
+        if ($request->has('min_stock_level')) {
+            $stock->min_stock_level = $request->min_stock_level;
+        }
+        if ($request->has('location_bin')) {
+            $stock->location_bin = $request->location_bin;
+        }
+        if ($request->has('warehouse_code')) {
+            $stock->warehouse_code = $request->warehouse_code;
+        }
+
+        $stock->save();
+
+        return response()->json([
+            'message' => 'Stock settings updated successfully',
+            'data' => $stock,
+            'status' => 'success'
+        ]);
+    }
+
+    /**
+     * Process a stock return (Add back to inventory from project)
+     */
+    public function returns(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $request->validate([
+            'material_id' => 'required|exists:library_materials,id',
+            'quantity' => 'required|numeric|min:0.01',
+            'project_id' => 'nullable|exists:projects,id',
+            'notes' => 'nullable|string'
+        ]);
+
+        $service = new \App\Modules\ProcurementStores\Services\InventoryService();
+        $log = $service->adjustStock(
+            $request->material_id, 
+            $request->quantity, 
+            'return', 
+            $request->all()
+        );
+
+        return response()->json([
+            'message' => 'Material returned successfully',
+            'data' => $log,
+            'status' => 'success'
+        ]);
+    }
+
+    /**
+     * Mark stock as defective (Deduct from inventory)
+     */
+    public function markDefective(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $request->validate([
+            'material_id' => 'required|exists:library_materials,id',
+            'quantity' => 'required|numeric|min:0.01',
+            'notes' => 'required|string|min:5'
+        ]);
+
+        $service = new \App\Modules\ProcurementStores\Services\InventoryService();
+        
+        // Check if we have enough stock to mark as defective
+        $stock = \App\Modules\ProcurementStores\Models\Stock::where('material_id', $request->material_id)->first();
+        if (!$stock || $stock->quantity_on_hand < $request->quantity) {
+            return response()->json([
+                'message' => 'Insufficient stock on hand to mark as defective',
+                'status' => 'error'
+            ], 422);
+        }
+
+        $log = $service->adjustStock(
+            $request->material_id, 
+            -$request->quantity, // Negative for defective removal
+            'defective', 
+            $request->all()
+        );
+
+        return response()->json([
+            'message' => 'Stock marked as defective and removed from inventory',
+            'data' => $log,
+            'status' => 'success'
+        ]);
+    }
+
+    /**
+     * Fetch recent stock movement logs with filtering
+     */
+    public function inventoryLogs(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $query = \App\Modules\ProcurementStores\Models\InventoryLog::with(['material', 'user']);
+
+        if ($request->filled('type')) {
+            $query->where('type', $request->type);
+        }
+
+        if ($request->filled('material_id')) {
+            $query->where('material_id', $request->material_id);
+        }
+
+        if ($request->filled('project_id')) {
+            $query->where('project_id', $request->project_id);
+        }
+
+        $logs = $query->orderBy('created_at', 'desc')
+            ->limit(200)
             ->get();
 
         return response()->json([
