@@ -43,6 +43,24 @@ class EnquiryController extends Controller
     }
 
     /**
+     * Get a list of approved projects with WNG- job numbers
+     */
+    public function approvedWngList(): JsonResponse
+    {
+        $projects = ProjectEnquiry::where('quote_approved', true)
+            ->whereNotNull('job_number')
+            ->select('id', 'job_number', 'project_id', 'title')
+            ->orderBy('job_number', 'desc')
+            ->take(100)
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $projects
+        ]);
+    }
+
+    /**
      * Generate a unique enquiry number
      */
     private function generateEnquiryNumber(): string

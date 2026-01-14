@@ -45,7 +45,7 @@ class SiteSurvey extends Model
         'color_scheme',
         'brand_guidelines',
         'special_instructions',
-        'set_up-date',
+        'set_up_date',
         'set_down_date',
         'milestones',
         'safety_conditions',
@@ -65,7 +65,7 @@ class SiteSurvey extends Model
 
     protected $casts = [
         'site_visit_date' => 'date',
-        'set_up-date' => 'datetime',
+        'set_up_date' => 'datetime',
         'set_down_date' => 'datetime',
         'prepared_date' => 'date',
         'client_approval_date' => 'date',

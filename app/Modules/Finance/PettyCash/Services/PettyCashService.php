@@ -127,6 +127,26 @@ class PettyCashService
     }
 
     /**
+     * Delete a disbursement and restore balance.
+     */
+    public function deleteDisbursement(PettyCashDisbursement $disbursement): bool
+    {
+        DB::beginTransaction();
+
+        try {
+            // Delete the disbursement (balance will be updated automatically via model events)
+            $result = $disbursement->delete();
+
+            DB::commit();
+
+            return $result;
+        } catch (Exception $e) {
+            DB::rollBack();
+            throw new Exception('Failed to delete disbursement: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Get current balance with status information.
      */
     public function getCurrentBalanceInfo(): array
@@ -290,6 +310,11 @@ class PettyCashService
             if (empty($data[$field])) {
                 $errors[$field] = "The {$field} field is required.";
             }
+        }
+
+        // Validate date_disbursed if provided
+        if (!empty($data['date_disbursed']) && !strtotime($data['date_disbursed'])) {
+            $errors['date_disbursed'] = 'Invalid date format for date disbursed.';
         }
 
         // Validate amount

@@ -205,6 +205,36 @@ class PettyCashController extends Controller
     }
 
     /**
+     * Delete the specified disbursement.
+     */
+    public function destroy(int $id): JsonResponse
+    {
+        try {
+            $disbursement = $this->repository->findDisbursement($id);
+
+            if (!$disbursement) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Disbursement not found',
+                ], 404);
+            }
+
+            $this->service->deleteDisbursement($disbursement);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Disbursement deleted successfully',
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete disbursement',
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
      * Get hierarchical transaction view (top-ups with disbursements).
      */
     public function transactions(Request $request): JsonResponse

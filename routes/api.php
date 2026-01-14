@@ -639,6 +639,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }); // No permission for debugging
 
         // Enquiry management
+        Route::get('approved-wng', [EnquiryController::class, 'approvedWngList']);
         Route::get('enquiries', [EnquiryController::class, 'index']);
         Route::get('enquiries/{enquiry}', [EnquiryController::class, 'show']);
         Route::post('enquiries', [EnquiryController::class, 'store']);
@@ -761,14 +762,15 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::post('disbursements', [PettyCashController::class, 'store']);
             Route::get('disbursements/{id}', [PettyCashController::class, 'show']);
             Route::put('disbursements/{id}', [PettyCashController::class, 'update']);
+            Route::delete('disbursements/{id}', [PettyCashController::class, 'destroy']);
             Route::post('disbursements/{id}/void', [PettyCashController::class, 'void']);
 
             // Top-up management routes
             Route::get('top-ups', [PettyCashTopUpController::class, 'index']);
             Route::post('top-ups', [PettyCashTopUpController::class, 'store']);
-            Route::get('top-ups/{id}', [PettyCashTopUpController::class, 'show']);
             Route::get('top-ups/available', [PettyCashTopUpController::class, 'available'])
                 ->withoutMiddleware(['auth:sanctum']);
+            Route::get('top-ups/{id}', [PettyCashTopUpController::class, 'show']);
             Route::get('top-ups/{id}/available-balance', [PettyCashTopUpController::class, 'availableBalance']);
 
             // Balance and transaction routes
