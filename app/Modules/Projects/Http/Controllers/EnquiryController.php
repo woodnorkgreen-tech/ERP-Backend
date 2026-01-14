@@ -44,13 +44,20 @@ class EnquiryController extends Controller
 
     /**
      * Get a list of approved projects with WNG- job numbers
+     * Sorted by latest first (WNG-01-2026-010, WNG-01-2026-009, etc.)
      */
     public function approvedWngList(): JsonResponse
     {
         $projects = ProjectEnquiry::where('quote_approved', true)
             ->whereNotNull('job_number')
             ->select('id', 'job_number', 'project_id', 'title')
-            ->orderBy('job_number', 'desc')
+            // Sort by Year DESC, Month DESC, Sequential Number DESC
+            // Format: WNG-MM-YYYY-NNN
+            ->orderByRaw('
+                CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 3), "-", -1) AS UNSIGNED) DESC,
+                CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 2), "-", -1) AS UNSIGNED) DESC,
+                CAST(SUBSTRING_INDEX(job_number, "-", -1) AS UNSIGNED) DESC
+            ')
             ->take(100)
             ->get();
 
@@ -184,7 +191,13 @@ class EnquiryController extends Controller
         // Apply sorting
         $sortBy = $request->input('sort_by', 'created_at');
         $sortOrder = $request->input('sort_order', 'desc');
-        $allowedSorts = ['created_at', 'expected_delivery_date', 'estimated_budget', 'title', 'priority'];
+        $allowedSorts = ['created_at', 'expected_delivery_date', 'estimated_budget', 'title', 'priority', 'job_number'];
+        
+        // Special handling: When viewing projects (approved enquiries), default sort by job_number if not specified
+        $isProjectsView = $request->has('view') && $request->view === 'projects';
+        if ($isProjectsView && !$request->has('sort_by')) {
+            $sortBy = 'job_number';
+        }
 
         if (in_array($sortBy, $allowedSorts)) {
             if ($sortBy === 'priority') {
@@ -192,6 +205,15 @@ class EnquiryController extends Controller
                 // ASC = Urgent First, DESC = Low First
                 $direction = strtolower($sortOrder) === 'asc' ? 'ASC' : 'DESC';
                 $query->orderByRaw("FIELD(priority, 'urgent', 'high', 'medium', 'low') $direction");
+            } elseif ($sortBy === 'job_number') {
+                // Custom numerical sort for job_number (WNG-MM-YYYY-NNN format)
+                // Sort by Year DESC, Month DESC, Sequential Number DESC for latest first
+                $direction = strtolower($sortOrder) === 'desc' ? 'DESC' : 'ASC';
+                $query->orderByRaw("
+                    CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, '-', 3), '-', -1) AS UNSIGNED) $direction,
+                    CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, '-', 2), '-', -1) AS UNSIGNED) $direction,
+                    CAST(SUBSTRING_INDEX(job_number, '-', -1) AS UNSIGNED) $direction
+                ");
             } else {
                 $query->orderBy($sortBy, $sortOrder);
             }
