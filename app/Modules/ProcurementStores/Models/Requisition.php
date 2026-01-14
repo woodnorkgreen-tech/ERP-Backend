@@ -1,0 +1,110 @@
+<?php
+
+namespace App\Modules\ProcurementStores\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class Requisition extends Model
+{
+    use HasFactory;
+
+    protected $connection = 'mysql';
+
+    protected $fillable = [
+        'requisition_number',
+        'date',
+        'requested_by_type',
+        'project_id',
+        'employee_id',
+        'department_id',
+        'urgency',
+        'status',
+        'submitted_at',
+        'approved_at',
+        'approved_by',
+        'rejection_reason',
+        'user_id',
+    ];
+
+    protected $casts = [
+        'date' => 'date',
+        'submitted_at' => 'datetime',
+        'approved_at' => 'datetime',
+    ];
+
+    public function items()
+    {
+        return $this->hasMany(RequisitionItem::class);
+    }
+
+    public function project()
+    {
+        return $this->belongsTo('App\Modules\Projects\Models\Project', 'project_id');
+    }
+
+    public function employee()
+    {
+        return $this->belongsTo('App\Modules\HR\Models\Employee', 'employee_id');
+    }
+
+    public function department()
+    {
+        return $this->belongsTo('App\Modules\HR\Models\Department', 'department_id');
+    }
+
+    public function createdBy()
+    {
+        return $this->belongsTo('App\Models\User', 'user_id');
+    }
+
+    public function approvedBy()
+    {
+        return $this->belongsTo('App\Models\User', 'approved_by');
+    }
+
+    public function submitForApproval()
+    {
+        $this->update([
+            'status' => 'pending_approval',
+            'submitted_at' => now()
+        ]);
+    }
+
+    public function approve($userId)
+    {
+        $this->update([
+            'status' => 'approved',
+            'approved_at' => now(),
+            'approved_by' => $userId
+        ]);
+    }
+
+    public function reject($userId, $reason)
+    {
+        $this->update([
+            'status' => 'rejected',
+            'approved_by' => $userId,
+            'rejection_reason' => $reason
+        ]);
+    }
+
+    public static function generateRequisitionNumber()
+    {
+        $year = date('Y');
+        $prefix = "PR-{$year}-";
+        
+        $lastRequisition = self::where('requisition_number', 'like', "{$prefix}%")
+            ->orderBy('requisition_number', 'desc')
+            ->first();
+        
+        if ($lastRequisition) {
+            $lastNumber = (int) substr($lastRequisition->requisition_number, -4);
+            $newNumber = $lastNumber + 1;
+        } else {
+            $newNumber = 1;
+        }
+        
+        return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+    }
+}

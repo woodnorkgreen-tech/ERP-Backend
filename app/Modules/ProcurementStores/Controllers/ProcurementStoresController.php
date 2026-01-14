@@ -1,8 +1,8 @@
 <?php
 
 namespace App\Modules\ProcurementStores\Controllers;
-
 use App\Http\Controllers\Controller;
+
 use Illuminate\Http\JsonResponse;
 
 class ProcurementStoresController extends Controller
