@@ -7,6 +7,7 @@ use App\Modules\logisticsTask\Models\TransportItem;
 use App\Modules\logisticsTask\Models\LogisticsChecklist;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Models\TaskProductionData;
+use App\Models\TaskMaterialsData;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;
 
@@ -204,7 +205,7 @@ class LogisticsTaskService
     }
 
     /**
-     * Import production elements as transport items
+     * Import production elements as transport items (Sourced from Materials Task)
      */
     public function importProductionElements(int $taskId): array
     {
@@ -214,52 +215,49 @@ class LogisticsTaskService
                 $task = EnquiryTask::findOrFail($taskId);
                 $enquiryId = $task->project_enquiry_id;
 
-                \Log::info('Importing production elements', [
+                \Log::info('Importing elements from Materials Task', [
                     'taskId' => $taskId,
                     'enquiryId' => $enquiryId,
-                    'taskType' => $task->type ?? 'unknown'
                 ]);
 
-                // Find the production task in the same enquiry
-                $productionTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
-                    ->where('type', 'production')
+                // Find the materials task in the same enquiry
+                $materialsTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                    ->where('type', 'materials')
                     ->first();
 
-                if (!$productionTask) {
-                    \Log::warning('No production task found for enquiry', [
+                if (!$materialsTask) {
+                    \Log::warning('No materials task found for enquiry', [
                         'enquiryId' => $enquiryId,
-                        'availableTasks' => EnquiryTask::where('project_enquiry_id', $enquiryId)->pluck('type')->toArray()
                     ]);
-                    // Return empty array instead of throwing exception
                     return [];
                 }
 
-                \Log::info('Found production task', [
-                    'productionTaskId' => $productionTask->id,
-                    'productionTaskStatus' => $productionTask->status
+                \Log::info('Found materials task', [
+                    'materialsTaskId' => $materialsTask->id,
                 ]);
 
-                // Get production data
-                $productionData = TaskProductionData::where('task_id', $productionTask->id)
-                    ->with('productionElements')
+                // Get materials data
+                $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)
+                    ->with('elements')
                     ->first();
 
-                if (!$productionData) {
-                    \Log::warning('No production data found for production task', [
-                        'productionTaskId' => $productionTask->id
+                if (!$materialsData) {
+                    \Log::warning('No materials data found for materials task', [
+                        'materialsTaskId' => $materialsTask->id
                     ]);
-                    // Return empty array instead of throwing exception
                     return [];
                 }
 
-                $elementCount = $productionData->productionElements->count();
-                \Log::info('Found production data', [
-                    'productionDataId' => $productionData->id,
+                $elements = $materialsData->elements; // ProjectElements
+                $elementCount = $elements->count();
+                
+                \Log::info('Found materials data', [
+                    'materialsDataId' => $materialsData->id,
                     'elementCount' => $elementCount
                 ]);
 
                 if ($elementCount === 0) {
-                    \Log::info('No production elements to import');
+                    \Log::info('No elements to import');
                     return [];
                 }
 
@@ -280,26 +278,47 @@ class LogisticsTaskService
 
                 $importedItems = [];
 
-                // Import each production element
-                foreach ($productionData->productionElements as $element) {
+                // Import each project element
+                foreach ($elements as $element) {
+                    // Only import if included
+                    if (!$element->is_included) {
+                        continue;
+                    }
+
                     // Skip if already imported
                     if (in_array($element->name, $existingItems)) {
-                        \Log::info('Skipping duplicate production element', [
+                        \Log::info('Skipping duplicate element', [
                             'elementName' => $element->name
                         ]);
                         continue;
                     }
 
                     try {
+                        // Construct description from notes and dimensions
+                        $descriptionParts = [];
+                        if ($element->notes) $descriptionParts[] = $element->notes;
+                        if ($element->dimensions && is_array($element->dimensions)) {
+                            $dimStr = implode(' x ', array_filter($element->dimensions));
+                            if ($dimStr) $descriptionParts[] = "Dimensions: " . $dimStr;
+                        }
+                        $description = implode("\n", $descriptionParts);
+
+                        // Determine category mapping
+                        $mainCategory = 'PRODUCTION';
+                        if ($element->category === 'hire') {
+                            $mainCategory = 'STORES';
+                        }
+                        // Default to PRODUCTION for 'production' and 'outsourced'
+
                         $transportItem = $logisticsTask->transportItems()->create([
                             'name' => $element->name,
-                            'description' => $element->specifications ?? $element->notes,
-                            'quantity' => $element->quantity,
-                            'unit' => $element->unit,
-                            'category' => 'production',
-                            'main_category' => 'PRODUCTION',
+                            'description' => $description ?: null,
+                            'quantity' => 1, // Default quantity for project element
+                            'unit' => 'item',
+                            'category' => 'production', // Internal category
+                            'main_category' => $mainCategory,
                             'element_category' => $element->category,
-                            'source' => 'production_element_' . $element->id,
+                            'source' => 'project_element_' . $element->id,
                             'weight' => null,
                             'special_handling' => null,
                             'created_by' => auth()->id(),
@@ -319,12 +338,12 @@ class LogisticsTaskService
                             'special_handling' => $transportItem->special_handling,
                         ];
 
-                        \Log::info('Imported production element', [
+                        \Log::info('Imported project element', [
                             'elementName' => $element->name,
                             'transportItemId' => $transportItem->id
                         ]);
                     } catch (\Exception $e) {
-                        \Log::error('Failed to create transport item for production element', [
+                        \Log::error('Failed to create transport item for project element', [
                             'elementId' => $element->id,
                             'elementName' => $element->name,
                             'error' => $e->getMessage()
@@ -333,14 +352,14 @@ class LogisticsTaskService
                     }
                 }
 
-                \Log::info('Successfully imported production elements', [
+                \Log::info('Successfully imported elements from Materials Task', [
                     'importedCount' => count($importedItems),
                     'taskId' => $taskId
                 ]);
 
                 return $importedItems;
             } catch (\Exception $e) {
-                \Log::error('Failed to import production elements', [
+                \Log::error('Failed to import elements from Materials Task', [
                     'taskId' => $taskId,
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString()
