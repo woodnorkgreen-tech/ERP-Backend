@@ -761,6 +761,9 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::delete('disbursements/{id}', [PettyCashController::class, 'destroy']);
             Route::post('disbursements/{id}/void', [PettyCashController::class, 'void']);
 
+            // Projects reference for job numbers
+            Route::get('projects', [PettyCashController::class, 'getProjects']);
+
             // Top-up management routes
             Route::get('top-ups', [PettyCashTopUpController::class, 'index']);
             Route::post('top-ups', [PettyCashTopUpController::class, 'store']);

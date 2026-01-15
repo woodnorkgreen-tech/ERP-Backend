@@ -26,6 +26,31 @@ class PettyCashController extends Controller
     }
 
     /**
+     * Get approved projects list for petty cash forms
+     * Proxies to the Projects module logic to ensure consistent data access
+     */
+    public function getProjects(): JsonResponse
+    {
+        // Re-use the exact same logic from EnquiryController for consistency
+        // Sort by Job Number: Year DESC, Month DESC, Sequence DESC
+        $projects = \App\Models\ProjectEnquiry::where('quote_approved', true)
+            ->whereNotNull('job_number')
+            ->select('id', 'job_number', 'project_id', 'title')
+            ->orderByRaw('
+                CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 3), "-", -1) AS UNSIGNED) DESC,
+                CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 2), "-", -1) AS UNSIGNED) DESC,
+                CAST(SUBSTRING_INDEX(job_number, "-", -1) AS UNSIGNED) DESC
+            ')
+            ->take(100)
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $projects
+        ]);
+    }
+
+    /**
      * Display a listing of disbursements.
      */
     public function index(Request $request): JsonResponse
