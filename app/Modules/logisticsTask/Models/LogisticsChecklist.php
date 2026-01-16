@@ -43,17 +43,6 @@ class LogisticsChecklist extends Model
         return $this->belongsTo(\App\Models\User::class, 'updated_by');
     }
 
-    // Helper methods
-    public function getChecklistDataAttribute($value)
-    {
-        return json_decode($value, true) ?? [];
-    }
-
-    public function setChecklistDataAttribute($value)
-    {
-        $this->attributes['checklist_data'] = json_encode($value ?? []);
-    }
-
     public function getCompletionPercentageAttribute()
     {
         $data = $this->checklist_data;

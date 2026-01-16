@@ -355,6 +355,8 @@ class LogisticsTaskController extends Controller
                 'items.*.item_name' => 'required|string|max:255',
                 'items.*.status' => 'required|in:present,missing,coming_later',
                 'items.*.notes' => 'nullable|string|max:500',
+                'items.*.checkedBy' => 'nullable|string|max:255',
+                'items.*.checkedAt' => 'nullable|date',
                 'teams' => 'required|array',
                 'teams.workshop' => 'boolean',
                 'teams.setup' => 'boolean',
@@ -375,7 +377,15 @@ class LogisticsTaskController extends Controller
                 'message' => 'Checklist updated successfully',
                 'data' => $checklist
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            \Log::error('Validation failed for checklist update', [
+                'errors' => $e->errors(),
+                'data' => $request->all()
+            ]);
+            throw $e;
         } catch (\Exception $e) {
+            \Log::error('Failed to update checklist: ' . $e->getMessage());
+            \Log::error($e->getTraceAsString());
             return response()->json([
                 'message' => 'Failed to update checklist',
                 'error' => $e->getMessage()

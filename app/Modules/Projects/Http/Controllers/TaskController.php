@@ -116,36 +116,24 @@ class TaskController extends Controller
                            $subQ->where('users.id', $user->id);
                        });
 
-                     // Specific requirement: Designers see unassigned Design & Materials tasks by default
+                     // Specific requirement: Designers see ALL Design & Materials tasks
                      if ($user->hasRole('Designer')) {
-                        $q->orWhere(function($sq) {
-                            $sq->whereNull('assigned_to')
-                               ->whereIn('type', ['design', 'materials']);
-                        });
+                        $q->orWhereIn('type', ['design', 'materials']);
                      }
 
-                     // Specific requirement: Costings/Accounts see unassigned Materials, Budget, Quote, Quote Approval tasks
+                     // Specific requirement: Costings/Accounts see ALL Materials, Budget, Quote, Quote Approval tasks
                      if ($user->hasRole(['Costing', 'Accounts'])) {
-                        $q->orWhere(function($sq) {
-                            $sq->whereNull('assigned_to')
-                               ->whereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
-                        });
+                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
                      }
 
-                     // Specific requirement: Stores/Procurement see unassigned Budget, Procurement tasks
+                     // Specific requirement: Stores/Procurement see ALL Budget, Procurement tasks
                      if ($user->hasRole(['Stores', 'Procurement'])) {
-                        $q->orWhere(function($sq) {
-                            $sq->whereNull('assigned_to')
-                               ->whereIn('type', ['budget', 'procurement']);
-                        });
+                        $q->orWhereIn('type', ['budget', 'procurement']);
                      }
 
-                     // Specific requirement: Production see unassigned Materials, Teams, Production tasks
+                     // Specific requirement: Production see ALL Materials, Teams, Production tasks
                      if ($user->hasRole('Production')) {
-                        $q->orWhere(function($sq) {
-                            $sq->whereNull('assigned_to')
-                               ->whereIn('type', ['materials', 'teams', 'production']);
-                        });
+                        $q->orWhereIn('type', ['materials', 'teams', 'production']);
                      }
                  });
             } else {
@@ -306,6 +294,26 @@ class TaskController extends Controller
                        ->orWhereHas('assignedUsers', function($subQ) use ($user) {
                            $subQ->where('users.id', $user->id);
                        });
+
+                     // Specific requirement: Designers see ALL Design & Materials tasks
+                     if ($user->hasRole('Designer')) {
+                        $q->orWhereIn('type', ['design', 'materials']);
+                     }
+
+                     // Specific requirement: Costings/Accounts see ALL Materials, Budget, Quote, Quote Approval tasks
+                     if ($user->hasRole(['Costing', 'Accounts'])) {
+                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
+                     }
+
+                     // Specific requirement: Stores/Procurement see ALL Budget, Procurement tasks
+                     if ($user->hasRole(['Stores', 'Procurement'])) {
+                        $q->orWhereIn('type', ['budget', 'procurement']);
+                     }
+
+                     // Specific requirement: Production see ALL Materials, Teams, Production tasks
+                     if ($user->hasRole('Production')) {
+                        $q->orWhereIn('type', ['materials', 'teams', 'production']);
+                     }
                  });
             }
 
@@ -402,6 +410,26 @@ class TaskController extends Controller
                        ->orWhereHas('assignedUsers', function($subQ) use ($user) {
                            $subQ->where('users.id', $user->id);
                        });
+
+                     // Specific requirement: Designers see ALL Design & Materials tasks
+                     if ($user->hasRole('Designer')) {
+                        $q->orWhereIn('type', ['design', 'materials']);
+                     }
+
+                     // Specific requirement: Costings/Accounts see ALL Materials, Budget, Quote, Quote Approval tasks
+                     if ($user->hasRole(['Costing', 'Accounts'])) {
+                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
+                     }
+
+                     // Specific requirement: Stores/Procurement see ALL Budget, Procurement tasks
+                     if ($user->hasRole(['Stores', 'Procurement'])) {
+                        $q->orWhereIn('type', ['budget', 'procurement']);
+                     }
+
+                     // Specific requirement: Production see ALL Materials, Teams, Production tasks
+                     if ($user->hasRole('Production')) {
+                        $q->orWhereIn('type', ['materials', 'teams', 'production']);
+                     }
                  });
             }
 
@@ -1063,14 +1091,14 @@ class TaskController extends Controller
                 'data' => $task->load('assignedBy', 'assignmentHistory'),
                 'message' => 'Task updated successfully'
             ]);
-        } catch (\Exception $e) {
-            \Log::error("[DEBUG] updateEnquiryTask failed for task {$taskId}: " . $e->getMessage());
-            return response()->json([
-                'message' => 'Failed to update task',
-                'error' => $e->getMessage()
-            ], 400);
-        }
+        } catch (\Throwable $e) {
+        \Log::error("[DEBUG] updateEnquiryTask failed for task {$taskId}: " . $e->getMessage());
+        return response()->json([
+            'message' => 'Failed to update task',
+            'error' => $e->getMessage()
+        ], 500);
     }
+}
 
     /**
      * Get Universal Tasks associated with a project

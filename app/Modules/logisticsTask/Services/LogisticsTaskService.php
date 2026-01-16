@@ -238,7 +238,7 @@ class LogisticsTaskService
 
                 // Get materials data
                 $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)
-                    ->with('elements')
+                    ->with(['elements.materials.libraryMaterial'])
                     ->first();
 
                 if (!$materialsData) {
@@ -285,44 +285,81 @@ class LogisticsTaskService
                         continue;
                     }
 
-                    // Skip if already imported
-                    if (in_array($element->name, $existingItems)) {
-                        \Log::info('Skipping duplicate element', [
-                            'elementName' => $element->name
-                        ]);
-                        continue;
+                    // Construct description from notes, dimensions, and materials (particulars)
+                    $descriptionParts = [];
+                    if ($element->notes) $descriptionParts[] = $element->notes;
+                    if ($element->dimensions && is_array($element->dimensions)) {
+                        $dimStr = implode(' x ', array_filter($element->dimensions));
+                        if ($dimStr) $descriptionParts[] = "Dimensions: " . $dimStr;
                     }
 
+                    // Add materials (particulars)
+                    if ($element->materials && $element->materials->count() > 0) {
+                        $materialParts = ["Particulars:"];
+                        foreach ($element->materials as $mat) {
+                            $matName = $mat->description;
+                            if (!$matName && $mat->libraryMaterial) {
+                                $matName = $mat->libraryMaterial->name;
+                            }
+                            $qty = $mat->quantity + 0; // trim trailing zeros
+                            $unit = $mat->unit_of_measurement;
+                            $materialParts[] = "- {$qty} {$unit} {$matName}";
+                        }
+                        $descriptionParts[] = implode("\n", $materialParts);
+                    }
+                    
+                    $description = implode("\n\n", $descriptionParts);
+
+                    // Determine category mapping
+                    $mainCategory = 'PRODUCTION';
+                    if ($element->category === 'hire') {
+                        $mainCategory = 'STORES';
+                    }
+                    
+                    // Check if item exists by source
+                    $existingItem = $logisticsTask->transportItems()
+                        ->where('source', 'project_element_' . $element->id)
+                        ->first();
+
                     try {
-                        // Construct description from notes and dimensions
-                        $descriptionParts = [];
-                        if ($element->notes) $descriptionParts[] = $element->notes;
-                        if ($element->dimensions && is_array($element->dimensions)) {
-                            $dimStr = implode(' x ', array_filter($element->dimensions));
-                            if ($dimStr) $descriptionParts[] = "Dimensions: " . $dimStr;
-                        }
-                        $description = implode("\n", $descriptionParts);
+                        if ($existingItem) {
+                            // Update existing item
+                            $existingItem->update([
+                                'name' => $element->name, // Update name in case it changed
+                                'description' => $description ?: null,
+                                'element_category' => $element->category,
+                                // We generally don't want to overwrite manual edits to quantity unless requested,
+                                // but for now, let's keep user edits to quantity unless it was 0? 
+                                // Actually, let's just update description and name to be safe.
+                            ]);
+                            $transportItem = $existingItem;
+                            
+                            \Log::info('Updated project element', [
+                                'elementName' => $element->name,
+                                'transportItemId' => $transportItem->id
+                            ]);
+                        } else {
+                            // Create new item
+                             // Default to PRODUCTION for 'production' and 'outsourced'
+                            $transportItem = $logisticsTask->transportItems()->create([
+                                'name' => $element->name,
+                                'description' => $description ?: null,
+                                'quantity' => 1, // Default quantity for project element
+                                'unit' => 'item',
+                                'category' => 'production', // Internal category
+                                'main_category' => $mainCategory,
+                                'element_category' => $element->category,
+                                'source' => 'project_element_' . $element->id,
+                                'weight' => null,
+                                'special_handling' => null,
+                                'created_by' => auth()->id(),
+                            ]);
 
-                        // Determine category mapping
-                        $mainCategory = 'PRODUCTION';
-                        if ($element->category === 'hire') {
-                            $mainCategory = 'STORES';
+                            \Log::info('Imported project element', [
+                                'elementName' => $element->name,
+                                'transportItemId' => $transportItem->id
+                            ]);
                         }
-                        // Default to PRODUCTION for 'production' and 'outsourced'
-
-                        $transportItem = $logisticsTask->transportItems()->create([
-                            'name' => $element->name,
-                            'description' => $description ?: null,
-                            'quantity' => 1, // Default quantity for project element
-                            'unit' => 'item',
-                            'category' => 'production', // Internal category
-                            'main_category' => $mainCategory,
-                            'element_category' => $element->category,
-                            'source' => 'project_element_' . $element->id,
-                            'weight' => null,
-                            'special_handling' => null,
-                            'created_by' => auth()->id(),
-                        ]);
 
                         $importedItems[] = [
                             'id' => $transportItem->id,
@@ -380,7 +417,7 @@ class LogisticsTaskService
             return $this->getEmptyChecklistStructure();
         }
 
-        return $this->formatChecklistData($logisticsTask->checklist);
+        return $this->formatChecklistData($logisticsTask->checklist->first());
     }
 
     /**
@@ -397,7 +434,7 @@ class LogisticsTaskService
                 ]
             );
 
-            $checklist = $logisticsTask->checklist()->firstOrCreate(
+            $checklist = LogisticsChecklist::firstOrCreate(
                 ['logistics_task_id' => $logisticsTask->id],
                 ['created_by' => auth()->id()]
             );
@@ -442,6 +479,11 @@ class LogisticsTaskService
                 'ppe' => false,
                 'first_aid' => false,
                 'fire_extinguisher' => false,
+            ],
+            'equipment' => [
+                'tools' => false,
+                'vehicles' => false,
+                'communication' => false,
             ],
         ];
 
@@ -503,6 +545,11 @@ class LogisticsTaskService
                 'first_aid' => false,
                 'fire_extinguisher' => false,
             ],
+            'equipment' => [
+                'tools' => false,
+                'vehicles' => false,
+                'communication' => false,
+            ],
         ];
     }
 
@@ -515,6 +562,16 @@ class LogisticsTaskService
             return $this->getEmptyChecklistStructure();
         }
 
-        return $checklist->checklist_data ?? $this->getEmptyChecklistStructure();
+        $data = $checklist->checklist_data;
+
+        // Handle potential double-encoding or string format legacy data
+        if (is_string($data)) {
+            $decoded = json_decode($data, true);
+            if (is_array($decoded)) {
+                $data = $decoded;
+            }
+        }
+
+        return is_array($data) ? $data : $this->getEmptyChecklistStructure();
     }
 }

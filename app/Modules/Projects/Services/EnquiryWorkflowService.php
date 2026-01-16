@@ -541,6 +541,11 @@ class EnquiryWorkflowService
     {
         $enquiry = $task->enquiry;
 
+        if (!$enquiry) {
+            Log::warning("Cannot revert enquiry status for task {$task->id}: Enquiry not found.");
+            return;
+        }
+
         // Recalculate the appropriate status based on completed tasks
         $newStatus = $this->calculateEnquiryStatusFromTasks($enquiry);
 
@@ -583,7 +588,7 @@ class EnquiryWorkflowService
         }
 
         // If no tasks are completed, return initial status
-        return EnquiryConstants::STATUS_NEW;
+        return EnquiryConstants::STATUS_ENQUIRY_LOGGED;
     }
 
     /**
