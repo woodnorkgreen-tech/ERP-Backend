@@ -434,15 +434,17 @@ class LogisticsTaskService
                 ]
             );
 
-            $checklist = LogisticsChecklist::firstOrCreate(
-                ['logistics_task_id' => $logisticsTask->id],
-                ['created_by' => auth()->id()]
+            $checklist = LogisticsChecklist::firstOrNew(
+                ['logistics_task_id' => $logisticsTask->id]
             );
 
-            $checklist->update([
-                'checklist_data' => $data,
-                'updated_by' => auth()->id(),
-            ]);
+            if (!$checklist->exists) {
+                $checklist->created_by = auth()->id();
+            }
+
+            $checklist->checklist_data = $data;
+            $checklist->updated_by = auth()->id();
+            $checklist->save();
 
             return $checklist->fresh();
         });
