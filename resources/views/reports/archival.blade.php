@@ -17,13 +17,13 @@
         }
         
         /* Typography & Colors */
-        .text-green-500 { color: #10b981; }
+        .text-cyan-500 { color: #06b6d4; }
         .text-red-600 { color: #dc2626; }
         .text-gray-600 { color: #4b5563; }
         .text-gray-700 { color: #374151; }
         .text-gray-900 { color: #111827; }
         
-        .bg-green-500 { background-color: #10b981; color: white; }
+        .bg-cyan-500 { background-color: #06b6d4; color: white; }
         .bg-gray-200 { background-color: #e5e7eb; }
         .bg-gray-100 { background-color: #f3f4f6; }
         .bg-white { background-color: #ffffff; }
@@ -37,7 +37,7 @@
         .mb-4 { margin-bottom: 15px; }
         
         .section-header {
-            background-color: #10b981;
+            background-color: #06b6d4;
             color: white;
             padding: 4px 8px;
             font-weight: bold;
@@ -63,7 +63,7 @@
         
         .data-table { width: 100%; border-collapse: collapse; font-size: 10px; }
         .data-table th {
-            background-color: #10b981;
+            background-color: #06b6d4;
             color: white;
             font-weight: bold;
             text-align: left;
@@ -86,7 +86,7 @@
             display: inline-block; width: 10px; height: 10px; border: 1px solid #6b7280; 
             margin-right: 5px; vertical-align: middle; position: relative;
         }
-        .checkbox.checked { background-color: #10b981; border-color: #10b981; }
+        .checkbox.checked { background-color: #06b6d4; border-color: #06b6d4; }
         .checkbox.checked:after { content: '✓'; color: white; font-size: 8px; position: absolute; top: -2px; left: 1px; }
 
         .signature-box {
@@ -106,11 +106,11 @@
     <table style="margin-bottom: 20px;">
         <tr>
             <td style="width: 50%;">
-                <img src="{{ 'file:///' . str_replace('\\', '/', base_path('frontend/src/assets/WNG-Logo.png')) }}" style="height: 50px; width: auto; margin-bottom: 5px;" alt="Logo"/>
+                <img src="{{ public_path('logo-outline.png') }}" style="height: 65px; width: auto; margin-bottom: 5px; display: block;" alt="Logo"/>
                 <div class="font-bold text-gray-900 tracking-wide uppercase" style="font-size: 14px;">Woodnork Green</div>
             </td>
             <td style="width: 50%; text-align: right;">
-                <h2 class="text-green-500 mb-2 uppercase tracking-wide text-2xl" style="margin: 0 0 10px 0;">ARCHIVAL REPORT</h2>
+                <h2 class="text-cyan-500 mb-2 uppercase tracking-wide text-2xl" style="margin: 0 0 10px 0;">ARCHIVAL REPORT</h2>
                 <div style="display: inline-block; border: 1px solid #d1d5db;">
                     <table>
                         <tr>
@@ -181,6 +181,28 @@
         </table>
     </div>
 
+    <!-- Design Assets (If any) -->
+    @if(isset($designAssets) && count($designAssets) > 0)
+    <div class="mb-4">
+        <div class="section-header">DESIGN ASSETS</div>
+        <div class="info-box">
+            @foreach($designAssets as $asset)
+                <div style="display: inline-block; width: 31%; margin-right: 2%; margin-bottom: 10px; vertical-align: top; border: 1px solid #e5e7eb; padding: 5px; background: white;">
+                    @if($asset->isImage())
+                        <img src="{{ storage_path('app/public/' . $asset->file_path) }}" style="width: 100%; height: 60px; object-fit: cover; margin-bottom: 5px;">
+                    @else
+                        <div style="height: 60px; background: #f3f4f6; text-align: center; line-height: 60px; color: #9ca3af; font-weight: bold; font-size: 16px;">
+                            {{ strtoupper(pathinfo($asset->original_name, PATHINFO_EXTENSION)) }}
+                        </div>
+                    @endif
+                    <div style="font-size: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;" class="font-bold">{{ $asset->original_name }}</div>
+                    <div style="font-size: 8px; color: #6b7280;">{{ $asset->category }} | {{ $asset->status }}</div>
+                </div>
+            @endforeach
+        </div>
+    </div>
+    @endif
+
     <!-- Setup & Team -->
     <div class="mb-4">
         <div class="section-header">ON-SITE SETUP & FINDINGS</div>
@@ -242,6 +264,72 @@
     </div>
     @endif
 
+    <!-- Materials Specification (If available) -->
+    @if(isset($materialsData) && $materialsData->elements->count() > 0)
+    <div class="mb-4">
+        <div class="section-header">MATERIALS SPECIFICATION</div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th width="30%">Item / Element</th>
+                    <th width="15%">Category</th>
+                    <th width="20%">Dimensions</th>
+                    <th width="35%">Notes / Specifications</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach($materialsData->elements as $element)
+                <tr>
+                    <td class="font-bold">{{ $element->name }}</td>
+                    <td class="uppercase">{{ $element->category }}</td>
+                    <td>{{ is_array($element->dimensions) ? implode(' x ', $element->dimensions) : $element->dimensions }}</td>
+                    <td>{{ $element->notes ?? '-' }}</td>
+                </tr>
+                @endforeach
+            </tbody>
+        </table>
+    </div>
+    @endif
+
+    <!-- Project Budget Summary (If available) -->
+    @if(isset($budgetData) && isset($budgetData->budget_summary))
+    <div class="mb-4">
+        <div class="section-header">PROJECT BUDGET SUMMARY</div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th style="text-align: right;">Total Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if(isset($budgetData->budget_summary['materials']))
+                <tr>
+                    <td>Materials Cost</td>
+                    <td style="text-align: right;">{{ number_format($budgetData->budget_summary['materials']['total'] ?? 0, 2) }}</td>
+                </tr>
+                @endif
+                @if(isset($budgetData->budget_summary['labour']))
+                <tr>
+                    <td>Labour & Skilled Manpower</td>
+                    <td style="text-align: right;">{{ number_format($budgetData->budget_summary['labour']['total'] ?? 0, 2) }}</td>
+                </tr>
+                @endif
+                @if(isset($budgetData->budget_summary['expenses']))
+                <tr>
+                    <td>Operational Expenses</td>
+                    <td style="text-align: right;">{{ number_format($budgetData->budget_summary['expenses']['total'] ?? 0, 2) }}</td>
+                </tr>
+                @endif
+                <tr>
+                    <td class="bg-gray-100 font-bold">TOTAL ESTIMATED BUDGET</td>
+                    <td class="bg-gray-100 font-bold" style="text-align: right;">{{ number_format($budgetData->budget_summary['grand_total'] ?? 0, 2) }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    @endif
+
     <!-- Performance & Quality Metrics (Combined Table) -->
     <div class="mb-4">
         <div class="section-header">PERFORMANCE & QUALITY METRICS</div>
@@ -296,7 +384,7 @@
                 <tr>
                     <td>{{ $report->handover_date ? \Carbon\Carbon::parse($report->handover_date)->format('d/m/Y') : 'N/A' }}</td>
                     <td class="font-bold">{{ $report->client_rating ?? 'N/A' }}</td>
-                    <td class="uppercase font-bold text-green-500">{{ $report->client_satisfaction ?? 'N/A' }}</td>
+                    <td class="uppercase font-bold text-cyan-500">{{ $report->client_satisfaction ?? 'N/A' }}</td>
                     <td>{{ $report->client_confidence ? 'Yes' : 'No' }}</td>
                 </tr>
                 <tr>

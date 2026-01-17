@@ -260,10 +260,34 @@ class ArchivalReportController extends Controller
                 return response()->json(['message' => 'Report not found'], 404);
             }
 
+            // Fetch related project data (Materials, Budget, Design Assets)
+            $enquiryId = $report->enquiryTask->project_enquiry_id;
+            
+            // 1. Materials Data
+            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
+                ->where('type', 'materials')
+                ->first();
+            $materialsData = $materialsTask ? \App\Models\TaskMaterialsData::with('elements')->where('enquiry_task_id', $materialsTask->id)->first() : null;
+
+            // 2. Budget Data
+            $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
+                ->where('type', 'budget')
+                ->first();
+            $budgetData = $budgetTask ? \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first() : null;
+
+            // 3. Design Assets
+            $designTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
+                ->where('type', 'design')
+                ->first();
+            $designAssets = $designTask ? \App\Models\DesignAsset::where('enquiry_task_id', $designTask->id)->get() : [];
+
             // Load view with data
-            // Since we don't have the view yet, we might error if we run this.
-            // But we will create the view next.
-            $pdf = Pdf::loadView('reports.archival', ['report' => $report]);
+            $pdf = Pdf::loadView('reports.archival', [
+                'report' => $report,
+                'materialsData' => $materialsData,
+                'budgetData' => $budgetData,
+                'designAssets' => $designAssets
+            ]);
             
             return $pdf->download('archival-report-' . $reportId . '.pdf');
         } catch (\Exception $e) {
