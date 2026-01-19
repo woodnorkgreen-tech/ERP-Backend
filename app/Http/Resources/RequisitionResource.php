@@ -11,43 +11,34 @@ class RequisitionResource extends JsonResource
         return [
             'id' => $this->id,
             'requisition_number' => $this->requisition_number,
-            'date' => $this->date->format('Y-m-d'),
+            'date' => $this->date,
             'requested_by_type' => $this->requested_by_type,
             'project_id' => $this->project_id,
-            'project' => $this->when($this->project, function () {
-                return [
-                    'id' => $this->project->id,
-                    'name' => $this->project->name ?? 'N/A',
-                ];
-            }),
             'employee_id' => $this->employee_id,
-            'employee' => $this->when($this->employee, function () {
-                return [
-                    'id' => $this->employee->id,
-                    'name' => $this->employee->name ?? 'N/A',
-                ];
-            }),
             'department_id' => $this->department_id,
-            'department' => $this->when($this->department, function () {
-                return [
-                    'id' => $this->department->id,
-                    'name' => $this->department->name ?? 'N/A',
-                ];
-            }),
             'urgency' => $this->urgency,
             'status' => $this->status,
-            'submitted_at' => $this->submitted_at?->format('Y-m-d H:i:s'),
-            'approved_at' => $this->approved_at?->format('Y-m-d H:i:s'),
+            'submitted_at' => $this->submitted_at,
+            'approved_at' => $this->approved_at,
             'rejection_reason' => $this->rejection_reason,
-            'approvedBy' => $this->when($this->approvedBy, function () {
-                return [
-                    'id' => $this->approvedBy->id,
-                    'first_name' => $this->approvedBy->first_name ?? '',
-                    'last_name' => $this->approvedBy->last_name ?? '',
-                ];
-            }),
-            'items' => $this->when($this->items, function () {
-                return $this->items->map(function ($item) {
+            
+            // Relationships
+            'project' => $this->when($this->project_id && $this->project, [
+                'id' => $this->project->id,
+                'project_id' => $this->project->project_id ?? null,
+                'name' => $this->project->enquiry->title ?? 'N/A',
+            ]),
+            'employee' => $this->when($this->employee_id && $this->employee, [
+                'id' => $this->employee->id,
+                'name' => $this->employee->name,
+            ]),
+            'department' => $this->when($this->department_id && $this->department, [
+                'id' => $this->department->id,
+                'name' => $this->department->name,
+            ]),
+            
+            'items' => $this->whenLoaded('items', function() {
+                return $this->items->map(function($item) {
                     return [
                         'id' => $item->id,
                         'material_id' => $item->material_id,
@@ -62,15 +53,31 @@ class RequisitionResource extends JsonResource
                     ];
                 });
             }),
-            'createdBy' => $this->when($this->createdBy, function () {
+            
+            // Created By - shown in details only
+            'createdBy' => $this->when($this->createdBy, function() {
+                $user = $this->createdBy;
                 return [
-                    'id' => $this->createdBy->id,
-                    'first_name' => $this->createdBy->first_name ?? '',
-                    'last_name' => $this->createdBy->last_name ?? '',
+                    'id' => $user->id,
+                    'name' => $user->employee 
+                        ? $user->employee->first_name . ' ' . $user->employee->last_name
+                        : $user->name,
                 ];
             }),
-            'created_at' => $this->created_at->format('Y-m-d H:i:s'),
-            'updated_at' => $this->updated_at->format('Y-m-d H:i:s'),
+            
+            // Approved By
+            'approvedBy' => $this->when($this->approved_by && $this->approvedBy, function() {
+                $user = $this->approvedBy;
+                return [
+                    'id' => $user->id,
+                    'name' => $user->employee 
+                        ? $user->employee->first_name . ' ' . $user->employee->last_name
+                        : $user->name,
+                ];
+            }),
+            
+            'created_at' => $this->created_at,
+            'updated_at' => $this->updated_at,
         ];
     }
 }

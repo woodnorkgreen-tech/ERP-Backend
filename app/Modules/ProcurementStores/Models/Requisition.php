@@ -55,14 +55,13 @@ class Requisition extends Model
 
     public function createdBy()
     {
-        return $this->belongsTo('App\Models\User', 'user_id');
+        return $this->belongsTo('App\Models\User', 'user_id')->with('employee');
     }
 
     public function approvedBy()
     {
-        return $this->belongsTo('App\Models\User', 'approved_by');
+        return $this->belongsTo('App\Models\User', 'approved_by')->with('employee');
     }
-
     public function submitForApproval()
     {
         $this->update([
@@ -93,18 +92,18 @@ class Requisition extends Model
     {
         $year = date('Y');
         $prefix = "PR-{$year}-";
-        
+
         $lastRequisition = self::where('requisition_number', 'like', "{$prefix}%")
             ->orderBy('requisition_number', 'desc')
             ->first();
-        
+
         if ($lastRequisition) {
             $lastNumber = (int) substr($lastRequisition->requisition_number, -4);
             $newNumber = $lastNumber + 1;
         } else {
             $newNumber = 1;
         }
-        
+
         return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
     }
 }
