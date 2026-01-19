@@ -597,19 +597,20 @@ class EnquiryWorkflowService
     private function validateTaskCompletion(EnquiryTask $task): void
     {
         // 1. Production Validation
-        if ($task->type === 'production') {
-            $prodData = \App\Models\TaskProductionData::where('task_id', $task->id)->first();
-            if ($prodData) {
-                $unmet = \App\Models\ProductionCompletionCriterion::where('production_data_id', $prodData->id)
-                    ->where('met', false)
-                    ->get();
+        // 1. Production Validation - validation removed as per simplified workflow
+        // if ($task->type === 'production') {
+        //     $prodData = \App\Models\TaskProductionData::where('task_id', $task->id)->first();
+        //     if ($prodData) {
+        //         $unmet = \App\Models\ProductionCompletionCriterion::where('production_data_id', $prodData->id)
+        //             ->where('met', false)
+        //             ->get();
                 
-                if ($unmet->isNotEmpty()) {
-                    $criteriaNames = $unmet->pluck('description')->join(', ');
-                    throw new \Exception("Cannot complete Production task. Mandatory criteria unmet: {$criteriaNames}");
-                }
-            }
-        }
+        //         if ($unmet->isNotEmpty()) {
+        //             $criteriaNames = $unmet->pluck('description')->join(', ');
+        //             throw new \Exception("Cannot complete Production task. Mandatory criteria unmet: {$criteriaNames}");
+        //         }
+        //     }
+        // }
 
         // 2. Materials Validation (Approvals)
         if ($task->type === 'materials') {
