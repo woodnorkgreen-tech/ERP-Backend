@@ -40,7 +40,7 @@ class Requisition extends Model
 
     public function project()
     {
-        return $this->belongsTo('App\Modules\Projects\Models\Project', 'project_id');
+        return $this->belongsTo('App\Models\ProjectEnquiry', 'project_id');
     }
 
     public function employee()
