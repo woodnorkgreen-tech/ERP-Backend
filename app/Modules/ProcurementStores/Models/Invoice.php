@@ -5,32 +5,35 @@ namespace App\Modules\ProcurementStores\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class PurchaseOrder extends Model
+class Invoice extends Model
 {
     use HasFactory;
 
     protected $connection = 'mysql';
 
     protected $fillable = [
-        'po_number',
-        'date',
+        'invoice_number',
+        'purchase_order_id',
         'supplier_id',
+        'invoice_date',
         'due_date',
-        'delivery_address',
-        'description',
-        'total_amount',
+        'amount',
         'status',
+        'payment_date',
+        'payment_method',
+        'notes',
         'user_id',
     ];
 
     protected $casts = [
-        'date' => 'date',
+        'invoice_date' => 'date',
         'due_date' => 'date',
+        'payment_date' => 'date',
     ];
 
-    public function items()
+    public function purchaseOrder()
     {
-        return $this->hasMany(PurchaseOrderItem::class);
+        return $this->belongsTo(PurchaseOrder::class);
     }
 
     public function supplier()
@@ -43,22 +46,17 @@ class PurchaseOrder extends Model
         return $this->belongsTo('App\Models\User', 'user_id');
     }
 
-    public function invoices()
-    {
-        return $this->hasMany(Invoice::class);
-    }
-
-    public static function generatePONumber()
+    public static function generateInvoiceNumber()
     {
         $year = date('Y');
-        $prefix = "PO-{$year}-";
+        $prefix = "INV-{$year}-";
         
-        $lastPO = self::where('po_number', 'like', "{$prefix}%")
-            ->orderBy('po_number', 'desc')
+        $lastInvoice = self::where('invoice_number', 'like', "{$prefix}%")
+            ->orderBy('invoice_number', 'desc')
             ->first();
         
-        if ($lastPO) {
-            $lastNumber = (int) substr($lastPO->po_number, -4);
+        if ($lastInvoice) {
+            $lastNumber = (int) substr($lastInvoice->invoice_number, -4);
             $newNumber = $lastNumber + 1;
         } else {
             $newNumber = 1;
@@ -67,6 +65,3 @@ class PurchaseOrder extends Model
         return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
     }
 }
-
-
-

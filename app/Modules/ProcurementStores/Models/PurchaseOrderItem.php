@@ -5,23 +5,29 @@ namespace App\Modules\ProcurementStores\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class RequisitionItem extends Model
+class PurchaseOrderItem extends Model
 {
     use HasFactory;
 
     protected $connection = 'mysql';
 
     protected $fillable = [
-        'requisition_id',
+        'purchase_order_id',
         'material_id',
         'quantity',
-        'purpose',
-        'reason',
+        'unit_price',
+        'total',
     ];
 
-    public function requisition()
+    protected $casts = [
+        'quantity' => 'integer',
+        'unit_price' => 'decimal:2',
+        'total' => 'decimal:2',
+    ];
+
+    public function purchaseOrder()
     {
-        return $this->belongsTo(Requisition::class);
+        return $this->belongsTo(PurchaseOrder::class);
     }
 
     /**

@@ -80,7 +80,8 @@ class RequisitionController extends Controller
             'department_id' => 'required_if:requested_by_type,office',
             'urgency' => 'required|in:normal,urgent',
             'items' => 'required|array|min:1',
-            'items.*.material_id' => 'required|exists:materials,id',
+            // FIXED: Changed from 'materials' to 'library_materials'
+            'items.*.material_id' => 'required|exists:library_materials,id',
             'items.*.quantity' => 'required|integer|min:1',
             'items.*.purpose' => 'required|string',
         ]);

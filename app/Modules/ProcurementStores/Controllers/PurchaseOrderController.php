@@ -71,7 +71,8 @@ class PurchaseOrderController extends Controller
             'due_date' => 'required|date',
             'delivery_address' => 'required|string',
             'items' => 'required|array|min:1',
-            'items.*.material_id' => 'required|exists:materials,id',
+            // FIXED: Changed from 'materials' to 'library_materials'
+            'items.*.material_id' => 'required|exists:library_materials,id',
             'items.*.quantity' => 'required|integer|min:1',
             'items.*.unit_price' => 'required|numeric|min:0',
         ]);
