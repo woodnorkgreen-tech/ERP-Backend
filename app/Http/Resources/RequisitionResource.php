@@ -23,11 +23,11 @@ class RequisitionResource extends JsonResource
             'rejection_reason' => $this->rejection_reason,
             
             // Relationships
-            'project' => $this->when($this->project_id && $this->project, [
-                'id' => $this->project->id,
-                'project_id' => $this->project->project_id ?? null,
-                'name' => $this->project->enquiry->title ?? 'N/A',
-            ]),
+           'project' => $this->when($this->project_id && $this->project, [
+    'id' => $this->project->id,
+    'project_id' => $this->project->project_id ?? null,
+    'name' => $this->project->enquiry?->title ?? 'N/A',
+]),
             'employee' => $this->when($this->employee_id && $this->employee, [
                 'id' => $this->employee->id,
                 'name' => $this->employee->name,
