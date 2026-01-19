@@ -68,7 +68,7 @@ class RequisitionController extends Controller
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }
 
-    public function store(Request $request)
+public function store(Request $request)
 {
     $input = $request->all();
     
@@ -95,7 +95,7 @@ class RequisitionController extends Controller
         $input['requisition_number'] = Requisition::generateRequisitionNumber();
         $input['user_id'] = auth()->id();
 
-        // Clean up unnecessary IDs based on requested_by_type
+        // **IMPORTANT: Clear unused fields based on requested_by_type**
         if ($input['requested_by_type'] === 'project') {
             $input['employee_id'] = null;
             $input['department_id'] = null;
@@ -113,28 +113,19 @@ class RequisitionController extends Controller
         $requisition = Requisition::create($input);
 
         foreach ($items as $item) {
-            $requisition->items()->create([
-                'material_id' => $item['material_id'],
-                'quantity' => $item['quantity'],
-                'purpose' => $item['purpose'],
-                'reason' => $item['reason'] ?? null,
-            ]);
+            $requisition->items()->create($item);
         }
 
         DB::commit();
 
-        return new RequisitionResource($requisition->load(['items.material', 'project.enquiry', 'employee', 'department', 'createdBy.employee']));
+        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
     } catch (\Exception $e) {
         DB::rollBack();
         return response(['error' => 'Failed to create requisition: ' . $e->getMessage()], 500);
     }
 }
-    public function show(Requisition $requisition)
-    {
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
-    }
 
-   public function update(Request $request, Requisition $requisition)
+public function update(Request $request, Requisition $requisition)
 {
     $input = $request->all();
     
@@ -152,7 +143,7 @@ class RequisitionController extends Controller
     try {
         DB::beginTransaction();
 
-        // Clean up IDs based on requested_by_type
+        // **IMPORTANT: Clear unused fields based on requested_by_type**
         if (isset($input['requested_by_type'])) {
             if ($input['requested_by_type'] === 'project') {
                 $input['employee_id'] = null;
@@ -173,12 +164,7 @@ class RequisitionController extends Controller
             $requisition->items()->delete();
             
             foreach ($items as $item) {
-                $requisition->items()->create([
-                    'material_id' => $item['material_id'],
-                    'quantity' => $item['quantity'],
-                    'purpose' => $item['purpose'],
-                    'reason' => $item['reason'] ?? null,
-                ]);
+                $requisition->items()->create($item);
             }
         }
 
@@ -186,12 +172,18 @@ class RequisitionController extends Controller
 
         DB::commit();
 
-        return new RequisitionResource($requisition->load(['items.material', 'project.enquiry', 'employee', 'department', 'createdBy.employee', 'approvedBy.employee']));
+        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
     } catch (\Exception $e) {
         DB::rollBack();
         return response(['error' => 'Failed to update requisition: ' . $e->getMessage()], 500);
     }
 }
+    public function show(Requisition $requisition)
+    {
+        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
+    }
+
+   
     public function destroy(Requisition $requisition)
     {
         $requisition->delete();

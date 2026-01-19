@@ -14,22 +14,22 @@ class RequisitionResource extends JsonResource
             'date' => $this->date?->format('Y-m-d'),
             'requested_by_type' => $this->requested_by_type,
             'project_id' => $this->project_id,
-            'project' => $this->when($this->project, function () {
+            'project' => $this->when($this->project_id && $this->project, function () {
                 return [
                     'id' => $this->project->id,
                     'project_id' => $this->project->project_id ?? null,
-                    'name' => $this->project->enquiry?->title ?? 'N/A',  // ← FIXED: null-safe operator
+                    'name' => $this->project->title ?? $this->project->name ?? 'N/A',
                 ];
             }),
             'employee_id' => $this->employee_id,
-            'employee' => $this->when($this->employee, function () {
+            'employee' => $this->when($this->employee_id && $this->employee, function () {
                 return [
                     'id' => $this->employee->id,
                     'name' => $this->employee->name ?? 'N/A',
                 ];
             }),
             'department_id' => $this->department_id,
-            'department' => $this->when($this->department, function () {
+            'department' => $this->when($this->department_id && $this->department, function () {
                 return [
                     'id' => $this->department->id,
                     'name' => $this->department->name ?? 'N/A',
@@ -40,15 +40,8 @@ class RequisitionResource extends JsonResource
             'submitted_at' => $this->submitted_at?->format('Y-m-d H:i:s'),
             'approved_at' => $this->approved_at?->format('Y-m-d H:i:s'),
             'rejection_reason' => $this->rejection_reason,
-            'approvedBy' => $this->when($this->approved_by && $this->approvedBy, function () {
-                $user = $this->approvedBy;
-                return [
-                    'id' => $user->id,
-                    'name' => $user->employee 
-                        ? $user->employee->first_name . ' ' . $user->employee->last_name
-                        : $user->name,
-                ];
-            }),
+            
+            // Items - always load with material details
             'items' => $this->whenLoaded('items', function () {
                 return $this->items->map(function ($item) {
                     return [
@@ -65,15 +58,34 @@ class RequisitionResource extends JsonResource
                     ];
                 });
             }),
-            'createdBy' => $this->when($this->createdBy, function () {
-                $user = $this->createdBy;
+            
+            // Created By - ONLY in details, not index
+            'createdBy' => $this->when(
+                request()->routeIs('*.show') && $this->createdBy,
+                function () {
+                    $user = $this->createdBy;
+                    // Users table has 'name' field, not first_name/last_name
+                    return [
+                        'id' => $user->id,
+                        'name' => $user->employee 
+                            ? ($user->employee->first_name . ' ' . $user->employee->last_name)
+                            : $user->name,
+                    ];
+                }
+            ),
+            
+            // Approved By
+            'approvedBy' => $this->when($this->approved_by && $this->approvedBy, function () {
+                $user = $this->approvedBy;
+                // Users table has 'name' field, not first_name/last_name
                 return [
                     'id' => $user->id,
                     'name' => $user->employee 
-                        ? $user->employee->first_name . ' ' . $user->employee->last_name
+                        ? ($user->employee->first_name . ' ' . $user->employee->last_name)
                         : $user->name,
                 ];
             }),
+            
             'created_at' => $this->created_at?->format('Y-m-d H:i:s'),
             'updated_at' => $this->updated_at?->format('Y-m-d H:i:s'),
         ];
