@@ -8,13 +8,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
-use Illuminate\Support\Facades\Mail;
 
 class PurchaseOrderController extends Controller
 {
     public function index(Request $request)
     {
-        $query = PurchaseOrder::with(['items.material', 'supplier', 'createdBy']);
+        $query = PurchaseOrder::with(['items.material', 'supplier', 'createdBy', 'approvedBy']);
 
         // Date filtering
         if ($request->has('date_filter')) {
@@ -48,7 +47,7 @@ class PurchaseOrderController extends Controller
     {
         $searchTerm = $request->input('searchTerm');
 
-        $purchaseOrders = PurchaseOrder::with(['items.material', 'supplier', 'createdBy'])
+        $purchaseOrders = PurchaseOrder::with(['items.material', 'supplier', 'createdBy', 'approvedBy'])
             ->where(function ($query) use ($searchTerm) {
                 $query->where('po_number', 'LIKE', '%' . $searchTerm . '%')
                     ->orWhereHas('supplier', function ($q) use ($searchTerm) {
@@ -71,7 +70,6 @@ class PurchaseOrderController extends Controller
             'due_date' => 'required|date',
             'delivery_address' => 'required|string',
             'items' => 'required|array|min:1',
-            // FIXED: Changed from 'materials' to 'library_materials'
             'items.*.material_id' => 'required|exists:library_materials,id',
             'items.*.quantity' => 'required|integer|min:1',
             'items.*.unit_price' => 'required|numeric|min:0',
@@ -86,6 +84,7 @@ class PurchaseOrderController extends Controller
 
             $input['po_number'] = PurchaseOrder::generatePONumber();
             $input['user_id'] = auth()->id();
+            $input['status'] = 'pending'; // Always start as pending
 
             // Calculate total
             $totalAmount = 0;
@@ -115,7 +114,7 @@ class PurchaseOrderController extends Controller
 
     public function show(PurchaseOrder $purchaseOrder)
     {
-        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy']));
+        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
     }
 
     public function update(Request $request, PurchaseOrder $purchaseOrder)
@@ -126,7 +125,6 @@ class PurchaseOrderController extends Controller
             'date' => 'date',
             'supplier_id' => 'exists:suppliers,id',
             'due_date' => 'date',
-            'status' => 'in:pending,approved,delivered,cancelled',
         ]);
 
         if ($validator->fails()) {
@@ -156,7 +154,7 @@ class PurchaseOrderController extends Controller
 
             DB::commit();
 
-            return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy']));
+            return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
         } catch (\Exception $e) {
             DB::rollBack();
             return response(['error' => 'Failed to update purchase order: ' . $e->getMessage()], 500);
@@ -165,9 +163,36 @@ class PurchaseOrderController extends Controller
 
     public function destroy(PurchaseOrder $purchaseOrder)
     {
+        // Only allow deletion if pending
+        if ($purchaseOrder->status !== 'pending') {
+            return response(['error' => 'Only pending purchase orders can be deleted'], 422);
+        }
+
         $purchaseOrder->delete();
         
         return response(['message' => 'Purchase order deleted successfully']);
+    }
+
+    public function submitForApproval(PurchaseOrder $purchaseOrder)
+    {
+        if ($purchaseOrder->status !== 'pending') {
+            return response(['error' => 'Only pending purchase orders can be submitted'], 422);
+        }
+
+        $purchaseOrder->submitForApproval();
+
+        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
+    }
+
+    public function approve(PurchaseOrder $purchaseOrder)
+    {
+        if ($purchaseOrder->status !== 'pending_approval') {
+            return response(['error' => 'Only pending purchase orders can be approved'], 422);
+        }
+
+        $purchaseOrder->approve(auth()->id());
+
+        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
     }
 
     public function sendEmail(PurchaseOrder $purchaseOrder)

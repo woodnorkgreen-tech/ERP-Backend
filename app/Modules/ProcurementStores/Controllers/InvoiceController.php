@@ -61,6 +61,32 @@ class InvoiceController extends Controller
         return InvoiceResource::collection($invoices)->preserveQuery();
     }
 
+    public function getApprovedPurchaseOrders()
+    {
+        // Get only approved POs that don't have invoices yet
+        $purchaseOrders = PurchaseOrder::with('supplier')
+            ->where('status', 'approved')
+            ->whereDoesntHave('invoices')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'data' => $purchaseOrders->map(function ($po) {
+                return [
+                    'id' => $po->id,
+                    'po_number' => $po->po_number,
+                    'supplier' => [
+                        'id' => $po->supplier->id,
+                        'supplier_name' => $po->supplier->supplier_name,
+                    ],
+                    'total_amount' => $po->total_amount,
+                    'date' => $po->date->format('Y-m-d'),
+                    'due_date' => $po->due_date->format('Y-m-d'),
+                ];
+            })
+        ]);
+    }
+
     public function store(Request $request)
     {
         $input = $request->all();
@@ -78,6 +104,16 @@ class InvoiceController extends Controller
 
         try {
             $purchaseOrder = PurchaseOrder::findOrFail($input['purchase_order_id']);
+            
+            // Check if PO is approved
+            if ($purchaseOrder->status !== 'approved') {
+                return response(['error' => 'Only approved purchase orders can have invoices'], 422);
+            }
+            
+            // Check if invoice already exists for this PO
+            if ($purchaseOrder->invoices()->exists()) {
+                return response(['error' => 'This purchase order already has an invoice'], 422);
+            }
             
             $input['invoice_number'] = Invoice::generateInvoiceNumber();
             $input['supplier_id'] = $purchaseOrder->supplier_id;

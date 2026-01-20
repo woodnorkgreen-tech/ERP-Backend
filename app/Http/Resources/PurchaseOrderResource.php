@@ -25,17 +25,35 @@ class PurchaseOrderResource extends JsonResource
             'description' => $this->description,
             'total_amount' => (float) $this->total_amount,
             'status' => $this->status,
+            'submitted_at' => $this->submitted_at?->format('Y-m-d H:i:s'),
+            'approved_at' => $this->approved_at?->format('Y-m-d H:i:s'),
+            
             'items' => PurchaseOrderItemResource::collection($this->whenLoaded('items')),
-            'createdBy' => $this->whenLoaded('createdBy', function () {
+            
+            // Created By
+            'createdBy' => $this->when($this->createdBy, function () {
+                $user = $this->createdBy;
                 return [
-                    'id' => $this->createdBy->id,
-                    'first_name' => $this->createdBy->first_name,
-                    'last_name' => $this->createdBy->last_name,
+                    'id' => $user->id,
+                    'name' => $user->employee 
+                        ? ($user->employee->first_name . ' ' . $user->employee->last_name)
+                        : $user->name,
                 ];
             }),
+            
+            // Approved By
+            'approvedBy' => $this->when($this->approved_by && $this->approvedBy, function () {
+                $user = $this->approvedBy;
+                return [
+                    'id' => $user->id,
+                    'name' => $user->employee 
+                        ? ($user->employee->first_name . ' ' . $user->employee->last_name)
+                        : $user->name,
+                ];
+            }),
+            
             'created_at' => $this->created_at->toISOString(),
             'updated_at' => $this->updated_at->toISOString(),
         ];
     }
 }
-

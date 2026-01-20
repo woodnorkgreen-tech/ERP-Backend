@@ -30,6 +30,8 @@ Route::resource('/requisitions', RequisitionController::class);
 
 // Purchase Orders
 Route::post('/search/purchase-orders', [PurchaseOrderController::class, 'search']);
+Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController::class, 'submitForApproval']);
+Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
 Route::resource('/purchase-orders', PurchaseOrderController::class);
 
@@ -37,4 +39,5 @@ Route::resource('/purchase-orders', PurchaseOrderController::class);
 Route::post('/search/invoices', [InvoiceController::class, 'search']);
 Route::post('/invoices/{invoice}/record-payment', [InvoiceController::class, 'recordPayment']);
 Route::get('/invoices-stats', [InvoiceController::class, 'stats']);
+Route::get('/approved-purchase-orders', [InvoiceController::class, 'getApprovedPurchaseOrders']);
 Route::resource('/invoices', InvoiceController::class);

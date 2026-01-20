@@ -21,11 +21,16 @@ class PurchaseOrder extends Model
         'total_amount',
         'status',
         'user_id',
+        'submitted_at',
+        'approved_at',
+        'approved_by',
     ];
 
     protected $casts = [
         'date' => 'date',
         'due_date' => 'date',
+        'submitted_at' => 'datetime',
+        'approved_at' => 'datetime',
     ];
 
     public function items()
@@ -40,12 +45,34 @@ class PurchaseOrder extends Model
 
     public function createdBy()
     {
-        return $this->belongsTo('App\Models\User', 'user_id');
+        return $this->belongsTo('App\Models\User', 'user_id')->with('employee');
+    }
+
+    public function approvedBy()
+    {
+        return $this->belongsTo('App\Models\User', 'approved_by')->with('employee');
     }
 
     public function invoices()
     {
         return $this->hasMany(Invoice::class);
+    }
+
+    public function submitForApproval()
+    {
+        $this->update([
+            'status' => 'pending_approval',
+            'submitted_at' => now()
+        ]);
+    }
+
+    public function approve($userId)
+    {
+        $this->update([
+            'status' => 'approved',
+            'approved_at' => now(),
+            'approved_by' => $userId
+        ]);
     }
 
     public static function generatePONumber()
@@ -67,6 +94,3 @@ class PurchaseOrder extends Model
         return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
     }
 }
-
-
-
