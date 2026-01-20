@@ -625,14 +625,19 @@ class EnquiryWorkflowService
 
         // 3. Procurement Validation (Items Received)
         if ($task->type === 'procurement') {
-            $pending = \App\Models\TaskProcurementData::where('enquiry_task_id', $task->id)
-                ->whereHas('procurementItems', function($q) {
-                    $q->where('status', '!=', 'received');
-                })->first();
+            $procurementData = \App\Models\TaskProcurementData::where('enquiry_task_id', $task->id)->first();
+            
+            if ($procurementData && is_array($procurementData->procurement_items)) {
+                $pending = collect($procurementData->procurement_items)->filter(function($item) {
+                    $needsPurchase = ($item['purchaseQuantity'] ?? 0) > 0;
+                    $status = $item['procurementStatus'] ?? $item['availabilityStatus'] ?? 'pending';
+                    return $needsPurchase && !in_array($status, ['received', 'cancelled']);
+                });
 
-            if ($pending) {
-                $count = $pending->procurementItems()->where('status', '!=', 'received')->count();
-                throw new \Exception("Cannot complete Procurement task. There are {$count} items still pending receipt.");
+                if ($pending->isNotEmpty()) {
+                    $count = $pending->count();
+                    throw new \Exception("Cannot complete Procurement task. There are {$count} items still pending receipt.");
+                }
             }
         }
 
