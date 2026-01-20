@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
@@ -14,6 +15,8 @@ return new class extends Migration
             $table->unsignedBigInteger('approved_by')->nullable();
             $table->foreign('approved_by')->references('id')->on('users')->onDelete('set null');
         });
+        // Change status field to VARCHAR
+        DB::statement("ALTER TABLE purchase_orders MODIFY COLUMN status VARCHAR(50) DEFAULT 'pending'");
     }
 
     public function down(): void
@@ -22,5 +25,6 @@ return new class extends Migration
             $table->dropForeign(['approved_by']);
             $table->dropColumn(['submitted_at', 'approved_at', 'approved_by']);
         });
+         DB::statement("ALTER TABLE purchase_orders MODIFY COLUMN status VARCHAR(50) DEFAULT 'pending'");
     }
 };
