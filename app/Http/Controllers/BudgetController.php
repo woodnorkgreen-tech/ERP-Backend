@@ -6,6 +6,7 @@ use App\Models\TaskBudgetData;
 use App\Services\BudgetService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 /**
  * Budget Controller
@@ -462,6 +463,40 @@ class BudgetController extends Controller
 
             return response()->json([
                 'message' => 'Failed to restore version',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+    /**
+     * Download budget as PDF
+     */
+    public function downloadPdf(int $taskId)
+    {
+        try {
+            $task = \App\Modules\Projects\Models\EnquiryTask::with('enquiry.client')->findOrFail($taskId);
+            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
+
+            if (!$budgetData) {
+                return response()->json(['message' => 'Budget data not found'], 404);
+            }
+
+            // Load view with data
+            $pdf = Pdf::loadView('reports.budget', [
+                'budgetData' => $budgetData,
+                'enquiry' => $task->enquiry
+            ]);
+
+            $fileName = 'budget-' . ($task->enquiry->job_number ?? $task->enquiry->enquiry_number ?? $taskId) . '.pdf';
+            
+            return $pdf->download($fileName);
+        } catch (\Exception $e) {
+            \Log::error('Failed to generate budget PDF', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate PDF',
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }

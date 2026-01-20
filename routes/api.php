@@ -365,6 +365,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/submit-approval', [App\Http\Controllers\BudgetController::class, 'submitForApproval']);
         Route::post('/import-materials', [App\Http\Controllers\BudgetController::class, 'importMaterials']);
         Route::get('/check-materials-update', [App\Http\Controllers\BudgetController::class, 'checkMaterialsUpdate']);
+        Route::get('/pdf', [App\Http\Controllers\BudgetController::class, 'downloadPdf']);
 
         // Budget versioning routes
         Route::post('/versions', [App\Http\Controllers\BudgetController::class, 'createBudgetVersion']);
