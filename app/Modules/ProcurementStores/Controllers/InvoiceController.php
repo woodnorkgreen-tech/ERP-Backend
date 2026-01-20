@@ -180,18 +180,18 @@ class InvoiceController extends Controller
         return new InvoiceResource($invoice->load(['purchaseOrder', 'supplier', 'createdBy']));
     }
 
-    public function stats()
-    {
-        $totalInvoices = Invoice::count();
-        $pendingAmount = Invoice::where('status', 'pending')->sum('amount');
-        $paidAmount = Invoice::where('status', 'paid')->sum('amount');
-        $overdueCount = Invoice::where('status', 'overdue')->count();
+   public function stats()
+{
+    $totalInvoices = Invoice::count();
+    $pendingAmount = Invoice::where('status', 'pending')->sum('amount');
+    $paidAmount = Invoice::where('status', 'paid')->sum('amount');
+    $overdueCount = Invoice::where('status', 'overdue')->count();
 
-        return response([
-            'total_invoices' => $totalInvoices,
-            'pending_amount' => $pendingAmount,
-            'paid_amount' => $paidAmount,
-            'overdue_count' => $overdueCount,
-        ]);
-    }
+    return response([
+        'total_invoices' => $totalInvoices,
+        'pending_amount' => 'Sh ' . number_format($pendingAmount, 2),
+        'paid_amount' => 'Sh ' . number_format($paidAmount, 2),
+        'overdue_count' => $overdueCount,
+    ]);
+}
 }
