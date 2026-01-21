@@ -250,9 +250,7 @@ class MaterialsController extends Controller
             if ($materialsChanged && $existingApprovalStatus) {
                 \Log::info('Materials content changed - resetting approval status', ['taskId' => $taskId]);
                 $projectInfo['approval_status'] = [
-                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
-                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
-                    'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
+                    'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
                     'all_approved' => false,
                     'last_approval_at' => null
                 ];
@@ -263,8 +261,6 @@ class MaterialsController extends Controller
             } else {
                 // Initialize approval status for new materials data
                 $projectInfo['approval_status'] = [
-                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'all_approved' => false,
                     'last_approval_at' => null
@@ -1096,8 +1092,17 @@ class MaterialsController extends Controller
      */
     public function approveMaterials(Request $request, int $taskId, string $department): JsonResponse
     {
+        $user = auth()->user();
+
+        // Authorization: Only Project Officers or Project Managers can approve materials
+        if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
+            return response()->json([
+                'message' => 'Unauthorized: Only Project Officers or Project Managers can approve materials.'
+            ], 403);
+        }
+
         $validator = Validator::make(['department' => $department], [
-            'department' => 'required|in:design,production,project_officer'
+            'department' => 'required|in:project_officer'
         ]);
 
         if ($validator->fails()) {
@@ -1119,8 +1124,6 @@ class MaterialsController extends Controller
             // Get current approval status from project_info
             $projectInfo = $materialsData->project_info ?? [];
             $approvalStatus = $projectInfo['approval_status'] ?? [
-                'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'all_approved' => false,
                 'last_approval_at' => null
@@ -1136,10 +1139,8 @@ class MaterialsController extends Controller
                 'comments' => $request->input('comments', '')
             ];
 
-            // Check if all departments approved
-            $allApproved = $approvalStatus['design']['approved'] &&
-                           $approvalStatus['production']['approved'] &&
-                           $approvalStatus['project_officer']['approved'];
+            // Since we simplified to only project_officer approval:
+            $allApproved = $approvalStatus['project_officer']['approved'];
 
             $approvalStatus['all_approved'] = $allApproved;
             if ($allApproved) {
@@ -1210,20 +1211,16 @@ class MaterialsController extends Controller
                 // Return default approval structure if no materials data exists
                 return response()->json([
                     'approval_status' => [
-                        'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                        'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                         'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                         'all_approved' => false,
                         'last_approval_at' => null
                     ],
-                    'pending' => ['design', 'production', 'project_officer']
+                    'pending' => ['project_officer']
                 ]);
             }
 
             $projectInfo = $materialsData->project_info ?? [];
             $approvalStatus = $projectInfo['approval_status'] ?? [
-                'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'all_approved' => false,
                 'last_approval_at' => null
@@ -1231,7 +1228,7 @@ class MaterialsController extends Controller
 
             // Calculate pending departments
             $pending = [];
-            foreach (['design', 'production', 'project_officer'] as $dept) {
+            foreach (['project_officer'] as $dept) {
                 if (!($approvalStatus[$dept]['approved'] ?? false)) {
                     $pending[] = $dept;
                 }
@@ -1548,8 +1545,6 @@ class MaterialsController extends Controller
                 
                 // Reset all approvals to draft
                 $projectInfo['approval_status'] = [
-                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'all_approved' => false,
                     'last_approval_at' => null,

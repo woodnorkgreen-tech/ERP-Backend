@@ -618,7 +618,7 @@ class EnquiryWorkflowService
             if ($materialsData) {
                 $status = $materialsData->project_info['approval_status'] ?? [];
                 if (!($status['all_approved'] ?? false)) {
-                    throw new \Exception("Cannot complete Materials task. All department approvals (Design, Production, Finance) are required.");
+                    throw new \Exception("Cannot complete Materials task. Project Approval is required.");
                 }
             }
         }

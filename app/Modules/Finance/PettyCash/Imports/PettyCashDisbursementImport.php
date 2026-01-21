@@ -5,12 +5,12 @@ namespace App\Modules\Finance\PettyCash\Imports;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use Maatwebsite\Excel\Concerns\WithValidation;
 use Maatwebsite\Excel\Concerns\WithChunkReading;
 
-class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithValidation, WithChunkReading
+class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithChunkReading
 {
     protected $service;
     protected $results = [
@@ -56,16 +56,24 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithV
         $mappedRow = [];
         $columnMapping = [
             'date' => 'date',
+            'datedisbursed' => 'date',
+            'disbursementdate' => 'date',
             'receiver' => 'receiver',
+            'payee' => 'receiver',
             'account' => 'account',
+            'ledger' => 'account',
             'amount' => 'amount',
             'description' => 'description',
+            'remarks' => 'description',
             'projectname' => 'project_name',
             'tax' => 'tax',
             'class' => 'classification',
             'classname' => 'classification',
+            'category' => 'classification',
             'jobno' => 'job_number',
-            'jobnumber' => 'job_number'
+            'jobnumber' => 'job_number',
+            'paymentmethod' => 'payment_method',
+            'transactioncode' => 'transaction_code'
         ];
         
         foreach ($normalizedRow as $key => $value) {
@@ -94,17 +102,22 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithV
                 return;
             }
 
-            // Validate row data
-            $validationErrors = $this->validateRowData($mappedRow);
+            // Normalize specific fields before validation to handle variations
+            $mappedRow = $this->normalizeMappedRow($mappedRow);
+
+            // Perform validation using rules defined below
+            $validator = Validator::make($mappedRow, $this->rules(), $this->customValidationMessages());
             
-            // Skip empty rows
-            if (isset($validationErrors['skip_empty_row'])) {
+            if ($validator->fails()) {
+                $this->addFailedRow($rowNumber, $validator->errors()->all());
                 return;
             }
-            
-            // Skip rows with too many validation errors
-            if (count($validationErrors) > 5) {
-                $this->addFailedRow($rowNumber, ['Too many validation errors - row skipped']);
+
+            // Additional custom validation
+            $customErrors = $this->validateRowData($mappedRow);
+            if (!empty($customErrors)) {
+                if (isset($customErrors['skip_empty_row'])) return;
+                $this->addFailedRow($rowNumber, $customErrors);
                 return;
             }
 
@@ -147,6 +160,69 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithV
         } catch (\Exception $e) {
             $this->addFailedRow($rowNumber, ['Unexpected error: ' . $e->getMessage()]);
         }
+    }
+
+    private function normalizeMappedRow(array $row): array
+    {
+        // Trim all string values
+        foreach ($row as $key => $value) {
+            if (is_string($value)) {
+                $row[$key] = trim($value);
+            }
+        }
+
+        // Normalize amount (remove commas and spaces)
+        if (isset($row['amount']) && !empty($row['amount'])) {
+            $amt = is_array($row['amount']) ? json_encode($row['amount']) : $row['amount'];
+            $row['amount'] = str_replace([',', ' ', '$'], '', $amt);
+        }
+
+        // Normalize classification
+        if (!empty($row['classification'] ?? null)) {
+            $val = strtolower($row['classification']);
+            $map = [
+                'admin' => 'admin',
+                'administrative' => 'admin',
+                'administration' => 'admin',
+                'agencies' => 'agencies',
+                'agency' => 'agencies',
+                'corporate' => 'agencies',
+                'operations' => 'operations',
+                'operation' => 'operations',
+                'operational' => 'operations',
+                'other' => 'other',
+                'other expenses' => 'other',
+                'miscellaneous' => 'other'
+            ];
+            
+            if (isset($map[$val])) {
+                $row['classification'] = $map[$val];
+            } else {
+                // Try partial match
+                foreach (['admin', 'agencies', 'operations', 'other'] as $valid) {
+                    if (strpos($val, $valid) !== false) {
+                        $row['classification'] = $valid;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Normalize tax
+        if (!empty($row['tax'] ?? null)) {
+            $val = strtolower(str_replace([' ', '_'], '', $row['tax']));
+            $map = [
+                'etr' => 'etr',
+                'yes' => 'etr',
+                'noetr' => 'no_etr',
+                'no' => 'no_etr'
+            ];
+            if (isset($map[$val])) {
+                $row['tax'] = $map[$val];
+            }
+        }
+
+        return $row;
     }
 
     private function parseDate($dateString): ?\DateTime
@@ -205,86 +281,20 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithV
 
     private function validateRowData($row): array
     {
-        $errors = [];
-
-        // Check if this is a completely empty row
+        // Final check to ensure we don't process empty rows
         $isEmptyRow = true;
         foreach ($row as $value) {
-            if (!empty(trim(is_array($value) ? json_encode($value) : ($value ?? '')))) {
+            if ($value !== null && $value !== '') {
                 $isEmptyRow = false;
                 break;
             }
         }
         
-        // Skip completely empty rows
         if ($isEmptyRow) {
             return ['skip_empty_row' => true];
         }
 
-        // Validate amount format (more lenient)
-        if (isset($row['amount']) && !empty(trim(is_array($row['amount']) ? json_encode($row['amount']) : $row['amount']))) {
-            $amountStr = trim(is_array($row['amount']) ? json_encode($row['amount']) : $row['amount']);
-            $amount = str_replace([',', ' ', '$'], '', $amountStr);
-            if (!is_numeric($amount) || (float)$amount < 0) { // Allow 0 amounts
-                $errors[] = 'Amount must be a positive number';
-            }
-        }
-
-        // Validate classification (case insensitive)
-        $validClassifications = ['admin', 'agencies', 'operations', 'other'];
-        if (!empty($row['classification'] ?? null)) {
-            $classification = strtolower(trim(is_array($row['classification']) ? json_encode($row['classification']) : $row['classification']));
-            // Normalize classification values
-            $classificationMap = [
-                'administrative' => 'admin',
-                'administration' => 'admin',
-                'agency' => 'agencies',
-                'corporate' => 'agencies',
-                'operation' => 'operations',
-                'operational' => 'operations',
-                'other expenses' => 'other',
-                'miscellaneous' => 'other'
-            ];
-            
-            if (isset($classificationMap[$classification])) {
-                $classification = $classificationMap[$classification];
-            } elseif (!in_array($classification, $validClassifications)) {
-                // Try to match partial strings
-                $matched = false;
-                foreach ($validClassifications as $valid) {
-                    if (strpos($classification, $valid) !== false) {
-                        $classification = $valid;
-                        $matched = true;
-                        break;
-                    }
-                }
-                
-                if (!$matched) {
-                    $errors[] = 'Invalid classification. Must be one of: admin, agencies, operations, other';
-                }
-            }
-        }
-
-        // Validate tax (case insensitive)
-        if (!empty($row['tax'] ?? null)) {
-            $tax = strtolower(str_replace([' ', '_'], '', trim(is_array($row['tax']) ? json_encode($row['tax']) : $row['tax'])));
-            // Normalize tax values
-            $taxMap = [
-                'noetr' => 'no_etr',
-                'no etr' => 'no_etr',
-                'etr' => 'etr',
-                'yes' => 'etr',
-                'no' => 'no_etr'
-            ];
-            
-            if (isset($taxMap[$tax])) {
-                $tax = $taxMap[$tax];
-            } elseif (!in_array($tax, ['etr', 'no_etr'])) {
-                $errors[] = 'Invalid tax value. Must be either ETR or NO ETR';
-            }
-        }
-
-        return $errors;
+        return [];
     }
 
     private function isDuplicate($row, $date): bool
@@ -427,8 +437,8 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithV
             'classification' => $classification,
             'job_number' => trim(is_array($row['job_number'] ?? '') ? json_encode($row['job_number'] ?? '') : ($row['job_number'] ?? '')),
             'tax' => $tax,
-            'payment_method' => 'cash', // Default payment method for imports
-            'transaction_code' => 'IMP-' . time() . '-' . rand(1000, 9999),
+            'payment_method' => $row['payment_method'] ?? 'cash',
+            'transaction_code' => $row['transaction_code'] ?? ('IMP-' . time() . '-' . rand(1000, 9999)),
             'status' => 'active',
             'created_by' => auth()->id() ?? 1, // Default to system user if not authenticated
             'created_at' => $date ? $date->format('Y-m-d 00:00:00') : now()->format('Y-m-d 00:00:00'),
@@ -502,30 +512,36 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithV
     public function rules(): array
     {
         return [
-            'date' => 'nullable', // Allow null dates and validate in code
-            'receiver' => 'nullable|string|max:255',
-            'account' => 'nullable|string|max:255',
-            'amount' => 'nullable|numeric|min:0', // Allow 0 amounts
-            'description' => 'nullable|string|max:2000', // Increased from 1000 to 2000
+            'date' => 'required',
+            'receiver' => 'required|string|max:255',
+            'account' => 'required|string|max:255',
+            'amount' => 'required|numeric|min:0',
+            'description' => 'required|string|max:2000',
             'project_name' => 'nullable|string|max:255',
-            'classification' => 'nullable|in:admin,agencies,operations,other',
+            'classification' => 'required|in:admin,agencies,operations,other',
             'job_number' => 'nullable|string|max:100',
-            'tax' => 'nullable|string'
+            'tax' => 'required|string'
         ];
     }
 
     public function customValidationMessages()
     {
         return [
-            'receiver.max' => 'Receiver must not exceed 255 characters',
+            'date.required' => 'DATE is required',
+            'receiver.required' => 'RECEIVER is required',
+            'receiver.max' => 'RECEIVER must not exceed 255 characters',
+            'account.required' => 'ACCOUNT is required',
             'account.max' => 'ACCOUNT must not exceed 255 characters',
+            'amount.required' => 'AMOUNT is required',
             'amount.numeric' => 'AMOUNT must be a number',
             'amount.min' => 'AMOUNT must be greater than or equal to 0',
+            'description.required' => 'DESCRIPTION is required',
             'description.max' => 'DESCRIPTION must not exceed 2000 characters',
             'project_name.max' => 'PROJECT NAME must not exceed 255 characters',
+            'classification.required' => 'CLASS is required',
             'classification.in' => 'CLASS must be one of: admin, agencies, operations, other',
-            'job_number.max' => 'JOB NO. must not exceed 100 characters'
-
+            'job_number.max' => 'JOB NO. must not exceed 100 characters',
+            'tax.required' => 'TAX is required'
         ];
     }
 
