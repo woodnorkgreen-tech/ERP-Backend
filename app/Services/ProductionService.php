@@ -8,6 +8,8 @@ use App\Models\ProductionIssue;
 use App\Models\ProductionCompletionCriterion;
 use App\Models\TaskMaterialsData;
 use App\Modules\Projects\Models\EnquiryTask;
+use App\Modules\Production\Models\WorkOrder;
+use App\Models\Project;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Models\TaskProcurementData;
@@ -609,5 +611,89 @@ class ProductionService
     private function formatCategoryName(string $category): string
     {
         return strtoupper(str_replace('-', ' ', $category));
+    }
+
+    /**
+     * Create work orders for existing projects that don't have one
+     */
+    public function createWorkOrdersForExistingProjects(): array {
+        try {
+            $results = [
+                'created' => 0,
+                'skipped' => 0,
+                'errors' => []
+            ];
+
+            // Get all enquiries that don't have work orders
+            $enquiriesWithoutWorkOrders = \App\Models\ProjectEnquiry::with('project')
+                ->whereDoesntHave('workOrders')
+                ->get();
+
+            foreach ($enquiriesWithoutWorkOrders as $enquiry) {
+                try {
+                    // Check if work order already exists for this enquiry
+                    $existingWorkOrder = WorkOrder::where('project_enquiry_id', $enquiry->id)->first();
+                    if ($existingWorkOrder) {
+                        $results['skipped']++;
+                        continue;
+                    }
+
+                    $workOrderNumber = $this->generateWorkOrderNumberForEnquiry($enquiry);
+
+                    WorkOrder::create([
+                        'work_order_number' => $workOrderNumber,
+                        'project_enquiry_id' => $enquiry->id,
+                        'title' => $enquiry->title,
+                        'specifications' => $enquiry->description,
+                        'quantity' => 1,
+                        'status' => 'pending',
+                        'priority' => $this->mapPriority($enquiry->priority ?? 'medium'),
+                        'due_date' => $enquiry->expected_delivery_date,
+                        'assigned_to' => $enquiry->project_officer_id,
+                        'created_by' => $enquiry->created_by,
+                    ]);
+
+                    $results['created']++;
+                    Log::info("Created work order {$workOrderNumber} for enquiry {$enquiry->id}");
+
+                } catch (\Exception $e) {
+                    $results['errors'][] = "Failed to create work order for enquiry {$enquiry->id}: " . $e->getMessage();
+                    Log::error("Failed to create work order for enquiry {$enquiry->id}: " . $e->getMessage());
+                }
+            }
+
+        } catch (\Exception $e) {
+            $results['errors'][] = "Failed to process enquiries: " . $e->getMessage();
+            Log::error("Failed to create work orders for existing enquiries: " . $e->getMessage());
+        }
+
+        return $results;
+    }
+
+    /**
+     * Generate a unique work order number for enquiries
+     */
+    private function generateWorkOrderNumberForEnquiry(\App\Models\ProjectEnquiry $enquiry): string
+    {
+        $year = date('Y');
+        $month = date('m');
+        $sequence = WorkOrder::whereYear('created_at', $year)->whereMonth('created_at', $month)->count() + 1;
+        
+        return sprintf('WO-%s%s-%03d', $year, $month, $sequence);
+    }
+
+    /**
+     * Map enquiry priority to work order priority
+     */
+    private function mapPriority(string $enquiryPriority): string
+    {
+        $map = [
+            'low' => 'low',
+            'medium' => 'medium',
+            'high' => 'high',
+            'urgent' => 'urgent',
+        ];
+
+        return $map[strtolower($enquiryPriority)] ?? 'medium';
     }
 }

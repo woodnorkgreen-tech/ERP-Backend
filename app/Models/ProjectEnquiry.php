@@ -101,6 +101,11 @@ class ProjectEnquiry extends Model
         return $this->hasMany(\App\Modules\Projects\Models\EnquiryTask::class, 'project_enquiry_id');
     }
 
+    public function workOrders(): HasMany
+    {
+        return $this->hasMany(\App\Modules\Production\Models\WorkOrder::class, 'project_enquiry_id');
+    }
+
 
     /**
      * Approve the quote for this enquiry

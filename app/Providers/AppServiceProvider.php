@@ -2,11 +2,14 @@
 
 namespace App\Providers;
 
+use App\Models\Project;
 use App\Models\ProjectEnquiry;
-use App\Observers\EnquiryObserver;
+use App\Modules\Production\Observers\ProjectEnquiryObserver;
+use App\Modules\Production\Observers\ProjectObserver;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -31,7 +34,10 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Register model observers
-        // ProjectEnquiry::observe(EnquiryObserver::class); // Observer not implemented yet
+        Log::info('Registering ProjectEnquiry observer');
+        ProjectEnquiry::observe(ProjectEnquiryObserver::class);
+        Log::info('Registering Project observer');
+        Project::observe(ProjectObserver::class);
 
         // Route model binding
         Route::bind('enquiry', function ($value) {
