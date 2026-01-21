@@ -53,8 +53,10 @@ class PettyCashService
             // Validate balance before creating disbursement
             $this->validateSufficientBalance($data['amount']);
 
-            // Add creator information
-            $data['created_by'] = Auth::id();
+            // Add creator information if not provided
+            if (!isset($data['created_by'])) {
+                $data['created_by'] = Auth::id();
+            }
             $data['status'] = 'active';
 
             // Create the disbursement (balance will be updated automatically via model events)
