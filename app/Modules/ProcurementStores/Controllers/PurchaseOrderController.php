@@ -18,7 +18,7 @@ class PurchaseOrderController extends Controller
         // Date filtering
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
-            
+
             if ($dateFilter === 'today') {
                 $query->whereDate('date', today());
             } elseif ($dateFilter === 'past_7_days') {
@@ -27,7 +27,7 @@ class PurchaseOrderController extends Controller
                 $query->whereDate('date', '>=', now()->subDays(30));
             } elseif ($dateFilter === 'this_month') {
                 $query->whereMonth('date', now()->month)
-                      ->whereYear('date', now()->year);
+                    ->whereYear('date', now()->year);
             } elseif ($dateFilter === 'custom' && $request->has('start_date') && $request->has('end_date')) {
                 $query->whereBetween('date', [$request->start_date, $request->end_date]);
             }
@@ -59,11 +59,101 @@ class PurchaseOrderController extends Controller
 
         return PurchaseOrderResource::collection($purchaseOrders)->preserveQuery();
     }
+    public function link(Requisition $requisition)
+    {
+        // Only approved requisitions can be linked
+        if ($requisition->status !== 'approved') {
+            return response(['error' => 'Only approved requisitions can be linked to purchase orders'], 403);
+        }
 
+        // Check if already linked
+        if ($requisition->purchaseOrder) {
+            return response(['error' => 'This requisition already has a purchase order'], 403);
+        }
+
+        // Return requisition with items
+        return response([
+            'requisition' => $requisition->load(['items.material', 'project', 'employee', 'department'])
+        ]);
+    }
+
+    // CREATE PO FROM REQUISITION
+    public function storeLinked(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'requisition_id' => 'required|exists:requisitions,id',
+            'supplier_id' => 'required|exists:suppliers,id',
+            'due_date' => 'required|date',
+            'delivery_address' => 'required|string',
+            'description' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response(['error' => $validator->errors()], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $requisition = Requisition::with('items')->findOrFail($request->requisition_id);
+
+            // Check if already linked
+            if ($requisition->purchaseOrder) {
+                return response(['error' => 'Purchase order already exists for this requisition'], 422);
+            }
+
+            // Check if approved
+            if ($requisition->status !== 'approved') {
+                return response(['error' => 'Only approved requisitions can be linked'], 422);
+            }
+
+            // Create Purchase Order
+            $purchaseOrder = PurchaseOrder::create([
+                'requisition_id' => $requisition->id,
+                'po_number' => PurchaseOrder::generatePONumber(),
+                'date' => now()->format('Y-m-d'),
+                'supplier_id' => $request->supplier_id,
+                'due_date' => $request->due_date,
+                'delivery_address' => $request->delivery_address,
+                'description' => $request->description,
+                'status' => 'pending',
+                'user_id' => auth()->id(),
+            ]);
+
+            // Copy items from requisition
+            $totalAmount = 0;
+            foreach ($requisition->items as $item) {
+                // Get material to get unit price
+                $material = $item->material;
+                $unitPrice = $material->unit_cost ?? 0;
+                $total = $item->quantity * $unitPrice;
+
+                $purchaseOrder->items()->create([
+                    'material_id' => $item->material_id,
+                    'quantity' => $item->quantity,
+                    'unit_price' => $unitPrice,
+                    'total' => $total,
+                ]);
+
+                $totalAmount += $total;
+            }
+
+            // Update total amount
+            $purchaseOrder->update(['total_amount' => $totalAmount]);
+
+            DB::commit();
+
+            return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'requisition']));
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response(['error' => 'Failed to create purchase order: ' . $e->getMessage()], 500);
+        }
+    }
     public function store(Request $request)
     {
+
         $input = $request->all();
-        
+
         $validator = Validator::make($input, [
             'date' => 'required|date',
             'supplier_id' => 'required|exists:suppliers,id',
@@ -108,7 +198,9 @@ class PurchaseOrderController extends Controller
             return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy']));
         } catch (\Exception $e) {
             DB::rollBack();
-            return response(['error' => 'Failed to create purchase order: ' . $e->getMessage()], 500);
+            return response([
+                'error' => 'Purchase Order must be created from an approved requisition'
+            ], 403);
         }
     }
 
@@ -120,7 +212,7 @@ class PurchaseOrderController extends Controller
     public function update(Request $request, PurchaseOrder $purchaseOrder)
     {
         $input = $request->all();
-        
+
         $validator = Validator::make($input, [
             'date' => 'date',
             'supplier_id' => 'exists:suppliers,id',
@@ -139,14 +231,14 @@ class PurchaseOrderController extends Controller
                 unset($input['items']);
 
                 $purchaseOrder->items()->delete();
-                
+
                 $totalAmount = 0;
                 foreach ($items as $item) {
                     $item['total'] = $item['quantity'] * $item['unit_price'];
                     $totalAmount += $item['total'];
                     $purchaseOrder->items()->create($item);
                 }
-                
+
                 $input['total_amount'] = $totalAmount;
             }
 
@@ -169,7 +261,7 @@ class PurchaseOrderController extends Controller
         }
 
         $purchaseOrder->delete();
-        
+
         return response(['message' => 'Purchase order deleted successfully']);
     }
 
@@ -198,7 +290,7 @@ class PurchaseOrderController extends Controller
     public function sendEmail(PurchaseOrder $purchaseOrder)
     {
         $supplier = $purchaseOrder->supplier;
-        
+
         if (!$supplier->email) {
             return response(['error' => 'Supplier does not have an email address'], 422);
         }
@@ -206,7 +298,7 @@ class PurchaseOrderController extends Controller
         try {
             // TODO: Implement email sending logic
             // Mail::to($supplier->email)->send(new PurchaseOrderMail($purchaseOrder));
-            
+
             return response(['message' => 'Purchase order sent to supplier email']);
         } catch (\Exception $e) {
             return response(['error' => 'Failed to send email: ' . $e->getMessage()], 500);

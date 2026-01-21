@@ -41,27 +41,29 @@ class Invoice extends Model
         return $this->belongsTo(Supplier::class);
     }
 
+    // In Invoice.php, update the createdBy method:
+
     public function createdBy()
     {
-        return $this->belongsTo('App\Models\User', 'user_id');
+        return $this->belongsTo('App\Models\User', 'user_id')->with('employee');
     }
 
     public static function generateInvoiceNumber()
     {
         $year = date('Y');
         $prefix = "INV-{$year}-";
-        
+
         $lastInvoice = self::where('invoice_number', 'like', "{$prefix}%")
             ->orderBy('invoice_number', 'desc')
             ->first();
-        
+
         if ($lastInvoice) {
             $lastNumber = (int) substr($lastInvoice->invoice_number, -4);
             $newNumber = $lastNumber + 1;
         } else {
             $newNumber = 1;
         }
-        
+
         return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
     }
 }

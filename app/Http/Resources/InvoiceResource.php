@@ -38,11 +38,10 @@ class InvoiceResource extends JsonResource
             'payment_date' => $this->payment_date ? $this->payment_date->format('Y-m-d') : null,
             'payment_method' => $this->payment_method,
             'notes' => $this->notes,
-            'createdBy' => $this->whenLoaded('createdBy', function () {
+           'createdBy' => $this->whenLoaded('createdBy', function() {
                 return [
                     'id' => $this->createdBy->id,
-                    'first_name' => $this->createdBy->first_name,
-                    'last_name' => $this->createdBy->last_name,
+                    'name' => $this->createdBy->name,
                 ];
             }),
             'created_at' => $this->created_at->toISOString(),

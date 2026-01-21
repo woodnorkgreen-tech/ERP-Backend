@@ -12,6 +12,7 @@ class PurchaseOrder extends Model
     protected $connection = 'mysql';
 
     protected $fillable = [
+        'requisition_id',
         'po_number',
         'date',
         'supplier_id',
@@ -32,6 +33,11 @@ class PurchaseOrder extends Model
         'submitted_at' => 'datetime',
         'approved_at' => 'datetime',
     ];
+
+     public function requisition()
+    {
+        return $this->belongsTo(Requisition::class);
+    }
 
     public function items()
     {
@@ -79,18 +85,18 @@ class PurchaseOrder extends Model
     {
         $year = date('Y');
         $prefix = "PO-{$year}-";
-        
+
         $lastPO = self::where('po_number', 'like', "{$prefix}%")
             ->orderBy('po_number', 'desc')
             ->first();
-        
+
         if ($lastPO) {
             $lastNumber = (int) substr($lastPO->po_number, -4);
             $newNumber = $lastNumber + 1;
         } else {
             $newNumber = 1;
         }
-        
+
         return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
     }
 }

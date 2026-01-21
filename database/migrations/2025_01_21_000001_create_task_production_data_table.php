@@ -19,13 +19,13 @@ return new class extends Migration
                 $table->timestamp('last_materials_import_date')->nullable();
                 $table->timestamps();
 
-                // Foreign key constraint
-                $table->foreign('task_id')
-                      ->references('id')
-                      ->on('enquiry_tasks')
-                      ->onDelete('cascade');
+                // // Foreign key constraint
+                // $table->foreign('task_id')
+                //       ->references('id')
+                //       ->on('enquiry_tasks')
+                //       ->onDelete('cascade');
 
-                // Unique constraint - one production data per task
+                // // Unique constraint - one production data per task
                 $table->unique('task_id', 'unique_task_production');
             });
         }

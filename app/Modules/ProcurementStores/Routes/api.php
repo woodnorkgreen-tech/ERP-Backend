@@ -34,6 +34,15 @@ Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController:
 Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
 Route::resource('/purchase-orders', PurchaseOrderController::class);
+Route::get(
+    '/purchase-orders/link/{requisition}',
+    [PurchaseOrderController::class, 'link']
+)->name('purchase-orders.link');
+
+Route::post(
+    '/purchase-orders/store-linked',
+    [PurchaseOrderController::class, 'storeLinked']
+)->name('purchase-orders.storeLinked');
 
 // Invoices (Billing)
 Route::post('/search/invoices', [InvoiceController::class, 'search']);
