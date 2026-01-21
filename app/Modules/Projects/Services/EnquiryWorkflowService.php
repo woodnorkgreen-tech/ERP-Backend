@@ -690,8 +690,8 @@ class EnquiryWorkflowService
 
             $summary = $budgetData->budget_summary ?? [];
             $total = (float)($summary['grandTotal'] ?? 0);
-            if ($total <= 0) {
-                throw new \Exception("Cannot complete Budget task. The total budget amount must be greater than zero. Please add items to your budget.");
+            if ($total < 0) {
+                throw new \Exception("Cannot complete Budget task. The total budget amount cannot be negative.");
             }
         }
 
