@@ -1,0 +1,22 @@
+
+   ReflectionException 
+
+  Class "App\Modules\ProcurementStores\Controllers\BillController" does not exist
+
+  at vendor\laravel\framework\src\Illuminate\Foundation\Console\RouteListCommand.php:235
+    231▕             if ($this->isFrameworkController($route)) {
+    232▕                 return false;
+    233▕             }
+    234▕ 
+  ➜ 235▕             $path = (new ReflectionClass($route->getControllerClass()))
+    236▕                 ->getFileName();
+    237▕         } else {
+    238▕             return false;
+    239▕         }
+
+  1   vendor\laravel\framework\src\Illuminate\Foundation\Console\RouteListCommand.php:235
+      ReflectionClass::__construct("App\Modules\ProcurementStores\Controllers\BillController")
+
+  2   vendor\laravel\framework\src\Illuminate\Foundation\Console\RouteListCommand.php:149
+      Illuminate\Foundation\Console\RouteListCommand::isVendorRoute(Object(Illuminate\Routing\Route))
+

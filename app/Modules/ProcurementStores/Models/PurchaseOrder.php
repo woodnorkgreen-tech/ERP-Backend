@@ -34,7 +34,7 @@ class PurchaseOrder extends Model
         'approved_at' => 'datetime',
     ];
 
-     public function requisition()
+    public function requisition()
     {
         return $this->belongsTo(Requisition::class);
     }
@@ -59,9 +59,10 @@ class PurchaseOrder extends Model
         return $this->belongsTo('App\Models\User', 'approved_by')->with('employee');
     }
 
-    public function invoices()
+    // CHANGED: invoices() -> bills() and Invoice::class -> Bill::class
+    public function bills()
     {
-        return $this->hasMany(Invoice::class);
+        return $this->hasMany(Bill::class);
     }
 
     public function submitForApproval()

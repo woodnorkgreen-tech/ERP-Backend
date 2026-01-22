@@ -7,6 +7,7 @@ use App\Http\Resources\PurchaseOrderResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Controllers\Controller;
 
 class PurchaseOrderController extends Controller

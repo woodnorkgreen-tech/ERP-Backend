@@ -6,6 +6,7 @@ use App\Modules\ProcurementStores\Controllers\SupplierController;
 use App\Modules\ProcurementStores\Controllers\RequisitionController;
 use App\Modules\ProcurementStores\Controllers\PurchaseOrderController;
 use App\Modules\ProcurementStores\Controllers\InvoiceController;
+use App\Modules\ProcurementStores\Controllers\BillController;
 
 
 Route::get('/test', [ProcurementStoresController::class, 'test']);
@@ -43,10 +44,13 @@ Route::post(
     '/purchase-orders/store-linked',
     [PurchaseOrderController::class, 'storeLinked']
 )->name('purchase-orders.storeLinked');
+// Bills - Specific routes FIRST (before resource)
+Route::get('/bills-stats', [BillController::class, 'stats']);
+Route::get('/pending-bills', [BillController::class, 'getPendingBills']);
+Route::get('/payment-methods', [BillController::class, 'getPaymentMethods']);
+Route::post('/payment-methods', [BillController::class, 'storePaymentMethod']);
+Route::post('/search/bills', [BillController::class, 'search']);
+Route::post('/bills/{bill}/record-payment', [BillController::class, 'recordPayment']);
 
-// Invoices (Billing)
-Route::post('/search/invoices', [InvoiceController::class, 'search']);
-Route::post('/invoices/{invoice}/record-payment', [InvoiceController::class, 'recordPayment']);
-Route::get('/invoices-stats', [InvoiceController::class, 'stats']);
-Route::get('/approved-purchase-orders', [InvoiceController::class, 'getApprovedPurchaseOrders']);
-Route::resource('/invoices', InvoiceController::class);
+// Bills - Resource route LAST
+Route::resource('/bills', BillController::class);
