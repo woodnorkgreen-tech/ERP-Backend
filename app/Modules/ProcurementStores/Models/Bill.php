@@ -40,11 +40,26 @@ class Bill extends Model
     }
 
     public static function generateBillNumber()
-    {
-        $lastBill = self::orderBy('id', 'desc')->first();
-        $number = $lastBill ? intval(substr($lastBill->bill_number, 4)) + 1 : 1;
-        return 'BILL' . str_pad($number, 6, '0', STR_PAD_LEFT);
+{
+    $year = date('Y');
+    $prefix = 'BILL-' . $year . '-';
+    
+    // Get the last bill for the current year
+    $lastBill = self::where('bill_number', 'like', $prefix . '%')
+                    ->orderBy('id', 'desc')
+                    ->first();
+    
+    if ($lastBill) {
+        // Extract the number part after the last dash
+        $lastNumber = intval(substr($lastBill->bill_number, strrpos($lastBill->bill_number, '-') + 1));
+        $number = $lastNumber + 1;
+    } else {
+        // First bill of the year
+        $number = 1;
     }
+    
+    return $prefix . str_pad($number, 4, '0', STR_PAD_LEFT);
+}
 
     public function updatePaymentStatus()
     {
