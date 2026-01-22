@@ -254,17 +254,18 @@ class PurchaseOrderController extends Controller
         }
     }
 
-    public function destroy(PurchaseOrder $purchaseOrder)
+   public function destroy(PurchaseOrder $purchaseOrder)
     {
         // Only allow deletion if pending
-        if ($purchaseOrder->status !== 'pending') {
-            return response(['error' => 'Only pending purchase orders can be deleted'], 422);
-        }
+        // if ($purchaseOrder->status !== 'pending') {
+        //     return response(['error' => 'Only pending purchase orders can be deleted'], 422);
+        // }
 
         $purchaseOrder->delete();
 
         return response(['message' => 'Purchase order deleted successfully']);
     }
+
 
     public function submitForApproval(PurchaseOrder $purchaseOrder)
     {

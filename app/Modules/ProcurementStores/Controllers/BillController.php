@@ -181,7 +181,15 @@ class BillController extends Controller
             'overdue_count' => $overdueCount,
         ]);
     }
-
+public function destroy(Bill $bill)
+    {
+        try {
+            $bill->delete();
+            return response(['message' => 'Bill deleted successfully']);
+        } catch (\Exception $e) {
+            return response(['error' => 'Failed to delete bill: ' . $e->getMessage()], 500);
+        }
+    }
     public function getPaymentMethods()
     {
         $methods = PaymentMethod::where('is_active', true)->orderBy('method_name')->get();
