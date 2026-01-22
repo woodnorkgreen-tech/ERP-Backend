@@ -312,6 +312,8 @@ class EnquiryController extends Controller
             'venue' => 'nullable|string|max:255',
             'site_survey_skipped' => 'nullable|boolean',
             'site_survey_skip_reason' => 'nullable|string|required_if:site_survey_skipped,true',
+            'selected_workflow_tasks' => 'nullable|array',
+            'workflow_preset_type' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -361,6 +363,8 @@ class EnquiryController extends Controller
                 'venue' => $request->venue,
                 'site_survey_skipped' => $request->site_survey_skipped ?? false,
                 'site_survey_skip_reason' => $request->site_survey_skip_reason,
+                'selected_workflow_tasks' => $request->selected_workflow_tasks,
+                'workflow_preset_type' => $request->workflow_preset_type,
                 'created_by' => Auth::id(),
             ]);
 
@@ -720,6 +724,8 @@ class EnquiryController extends Controller
             'venue' => 'nullable|string|max:255',
             'site_survey_skipped' => 'boolean',
             'site_survey_skip_reason' => 'nullable|string|required_if:site_survey_skipped,true',
+            'selected_workflow_tasks' => 'nullable|array',
+            'workflow_preset_type' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -759,7 +765,13 @@ class EnquiryController extends Controller
             'venue',
             'site_survey_skipped',
             'site_survey_skip_reason',
+            'selected_workflow_tasks',
+            'workflow_preset_type',
         ]));
+
+        // Sync workflow tasks (create any newly selected tasks)
+        $workflowService = new EnquiryWorkflowService($this->notificationService);
+        $workflowService->createWorkflowTasksForEnquiry($enquiry);
 
         return response()->json([
             'message' => 'Enquiry updated successfully',

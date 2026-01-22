@@ -40,6 +40,8 @@ class ProjectEnquiry extends Model
         'venue',
         'site_survey_skipped',
         'site_survey_skip_reason',
+        'selected_workflow_tasks',
+        'workflow_preset_type',
         'quote_approved',
         'quote_approved_at',
         'quote_approved_by',
@@ -67,6 +69,7 @@ class ProjectEnquiry extends Model
         'budget' => 'decimal:2',
         'assigned_users' => 'array',
         'project_scope' => 'array',
+        'selected_workflow_tasks' => 'array',
         'current_phase' => 'integer',
         'job_number' => 'string',
     ];
