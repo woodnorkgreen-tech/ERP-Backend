@@ -29,16 +29,15 @@ Route::post('/requisitions/{requisition}/approve', [RequisitionController::class
 Route::post('/requisitions/{requisition}/reject', [RequisitionController::class, 'reject']);
 Route::resource('/requisitions', RequisitionController::class);
 
-// Purchase Orders
+// Purchase Orders - ADD THIS LINE
+Route::get('/approved-purchase-orders', [PurchaseOrderController::class, 'getApprovedPurchaseOrders']);
 Route::post('/search/purchase-orders', [PurchaseOrderController::class, 'search']);
 Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController::class, 'submitForApproval']);
 Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
 Route::resource('/purchase-orders', PurchaseOrderController::class);
-Route::get(
-    '/purchase-orders/link/{requisition}',
-    [PurchaseOrderController::class, 'link']
-)->name('purchase-orders.link');
+Route::get('/purchase-orders/link/{requisition}', [PurchaseOrderController::class, 'link'])->name('purchase-orders.link');
+Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 'storeLinked'])->name('purchase-orders.storeLinked');
 
 Route::post(
     '/purchase-orders/store-linked',

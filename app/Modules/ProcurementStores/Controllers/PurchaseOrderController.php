@@ -287,7 +287,29 @@ class PurchaseOrderController extends Controller
 
         return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
     }
+public function getApprovedPurchaseOrders()
+{
+    $purchaseOrders = PurchaseOrder::with(['supplier'])
+        ->where('status', 'approved')
+        ->whereDoesntHave('bills') // Only POs without bills
+        ->orderBy('created_at', 'desc')
+        ->get();
 
+    return response()->json([
+        'data' => $purchaseOrders->map(function ($po) {
+            return [
+                'id' => $po->id,
+                'po_number' => $po->po_number,
+                'supplier' => [
+                    'id' => $po->supplier->id,
+                    'supplier_name' => $po->supplier->supplier_name,
+                ],
+                'total_amount' => $po->total_amount,
+                'due_date' => $po->due_date->format('Y-m-d'),
+            ];
+        })
+    ]);
+}
     public function sendEmail(PurchaseOrder $purchaseOrder)
     {
         $supplier = $purchaseOrder->supplier;
