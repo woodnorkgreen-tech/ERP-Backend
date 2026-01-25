@@ -84,6 +84,7 @@ class EmployeeController
             'department_id' => 'required|exists:departments,id',
             'position' => 'required|string|max:255',
             'hire_date' => 'required|date',
+            'salary' => 'nullable|numeric|min:0',
 
             'status' => ['required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
             'employment_type' => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],
@@ -145,6 +146,7 @@ class EmployeeController
             'department_id' => 'sometimes|required|exists:departments,id',
             'position' => 'sometimes|required|string|max:255',
             'hire_date' => 'sometimes|required|date',
+            'salary' => 'nullable|numeric|min:0',
 
             'status' => ['sometimes', 'required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
             'employment_type' => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],

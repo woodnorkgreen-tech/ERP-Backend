@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Modules\HR\Http\Controllers\EmployeeController;
 use App\Modules\HR\Http\Controllers\DepartmentController;
+use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\Admin\Http\Controllers\UserController;
 use App\Modules\Admin\Http\Controllers\RoleController;
 use App\Modules\Admin\Http\Controllers\PermissionController;
@@ -76,6 +77,14 @@ Route::prefix('hr')->group(function () {
     Route::put('departments/{department}', [DepartmentController::class, 'update']);
     Route::patch('departments/{department}', [DepartmentController::class, 'update']);
     Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
+
+    // Technical Labour Management
+    Route::get('technical-labour/template', [TechnicalLabourController::class, 'downloadTemplate']);
+    Route::post('technical-labour/import', [TechnicalLabourController::class, 'import']);
+    Route::get('technical-labour', [TechnicalLabourController::class, 'index']);
+    Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
+    Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
+    Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
 });
  
 Route::post('/register', [AuthController::class, 'register']);
