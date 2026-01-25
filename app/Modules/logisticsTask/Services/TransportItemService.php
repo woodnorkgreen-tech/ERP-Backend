@@ -24,6 +24,8 @@ class TransportItemService
                     'quantity' => $item->quantity,
                     'unit' => $item->unit,
                     'category' => $item->category,
+                    'main_category' => $item->main_category,
+                    'element_category' => $item->element_category,
                     'source' => $item->source,
                     'weight' => $item->weight,
                     'special_handling' => $item->special_handling,

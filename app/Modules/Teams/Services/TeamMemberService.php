@@ -41,6 +41,7 @@ class TeamMemberService
 
             $member = TeamsMember::create([
                 'teams_task_id' => $teamTaskId,
+                'technical_labour_id' => $data['technical_labour_id'] ?? null,
                 'member_name' => $data['member_name'],
                 'member_email' => $data['member_email'] ?? null,
                 'member_phone' => $data['member_phone'] ?? null,

@@ -153,11 +153,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{reportId}/attachments/{attachmentId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'deleteAttachment']);
     });
 
-        // Site survey management
-        Route::apiResource('site-surveys', SiteSurveyController::class); // Temporarily remove permissions for debugging
-        Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
-        Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
-        Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
 
         // Task management routes
         Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
@@ -249,6 +244,10 @@ Route::middleware('auth:sanctum')->group(function () {
             'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
             'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
         ]);
+
+        // Technical Labour management
+        Route::apiResource('technical-labour', App\Modules\HR\Http\Controllers\TechnicalLabourController::class);
+
         // Department management
         Route::get('departments', [DepartmentController::class, 'index'])
             ->middleware('permission:' . Permissions::DEPARTMENT_READ);
@@ -548,6 +547,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Projects Module Routes
     Route::prefix('projects')->group(function () {
+        // Site survey management
+        Route::apiResource('site-surveys', SiteSurveyController::class);
+        Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
+        Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
+        Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
+
         // Logistics Task Routes
         Route::prefix('tasks/{taskId}/logistics')->group(function () {
             Route::get('/', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'show']);

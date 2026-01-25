@@ -6,19 +6,152 @@ use App\Modules\ArchivalTask\Models\ArchivalReport;
 use App\Modules\ArchivalTask\Models\ArchivalSetupItem;
 use App\Modules\ArchivalTask\Models\ArchivalItemPlacement;
 use App\Modules\Projects\Models\EnquiryTask;
+use App\Models\SiteSurvey;
+use App\Models\HandoverSurvey;
+use App\Models\DesignAsset;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class ArchivalReportService
 {
-    /**
-     * Get archival report for a task
-     */
-    public function getReportByTask(int $taskId): ?ArchivalReport
+    public function getReportByTask(int $taskId): ?array
     {
-        return ArchivalReport::with(['setupItems', 'itemPlacements', 'creator'])
+        $report = ArchivalReport::with(['setupItems', 'itemPlacements', 'creator'])
             ->where('enquiry_task_id', $taskId)
             ->first();
+
+        if (!$report) {
+            return null;
+        }
+
+        $reportData = $report->toArray();
+        $reportData['attachment_urls'] = $report->attachment_urls;
+        $reportData['system_documents'] = $this->getSystemDocuments($taskId);
+
+        return $reportData;
+    }
+
+    /**
+     * Get system generated documents for the project
+     */
+    public function getSystemDocuments(int $taskId): array
+    {
+        try {
+            $task = EnquiryTask::findOrFail($taskId);
+            $enquiryId = $task->project_enquiry_id;
+
+            if (!$enquiryId) {
+                return [];
+            }
+
+            $documents = [];
+
+            // 1. Fetch Material List PDF
+            try {
+                $materialsTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                    ->where('type', 'materials')
+                    ->first();
+                if ($materialsTask) {
+                    $documents[] = [
+                        'name' => 'Material List',
+                        'type' => 'PDF',
+                        'category' => 'Materials',
+                        'url' => "/api/projects/tasks/{$materialsTask->id}/materials/pdf",
+                        'task_id' => $materialsTask->id
+                    ];
+                }
+            } catch (\Exception $e) {}
+
+            // 2. Fetch Budget PDF
+            try {
+                $budgetTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                    ->where('type', 'budget')
+                    ->first();
+                if ($budgetTask) {
+                    $documents[] = [
+                        'name' => 'Project Budget',
+                        'type' => 'PDF',
+                        'category' => 'Financials',
+                        'url' => "/api/projects/tasks/{$budgetTask->id}/budget/pdf",
+                        'task_id' => $budgetTask->id
+                    ];
+                }
+            } catch (\Exception $e) {}
+
+            // 3. Fetch Logistics Report PDF
+            try {
+                $logisticsTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                    ->where('type', 'logistics')
+                    ->first();
+                if ($logisticsTask) {
+                    $documents[] = [
+                        'name' => 'Logistics Manifest',
+                        'type' => 'PDF',
+                        'category' => 'Logistics',
+                        'url' => "/api/projects/tasks/{$logisticsTask->id}/logistics/pdf",
+                        'task_id' => $logisticsTask->id
+                    ];
+                }
+            } catch (\Exception $e) {}
+
+            // 4. Fetch Design Assets
+            try {
+                $designTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                    ->where('type', 'design')
+                    ->first();
+                if ($designTask) {
+                    $assets = DesignAsset::where('enquiry_task_id', $designTask->id)->get();
+                    foreach ($assets as $asset) {
+                        $documents[] = [
+                            'name' => "Design: {$asset->name}",
+                            'type' => strtoupper(pathinfo($asset->file_path, PATHINFO_EXTENSION)),
+                            'category' => 'Design',
+                            'url' => storage_url($asset->file_path),
+                            'asset_id' => $asset->id
+                        ];
+                    }
+                }
+            } catch (\Exception $e) {}
+
+            // 5. Fetch Site Survey PDF
+            try {
+                $survey = SiteSurvey::where('project_enquiry_id', $enquiryId)->first();
+                if ($survey) {
+                    $documents[] = [
+                        'name' => 'Site Survey Report',
+                        'type' => 'PDF',
+                        'category' => 'Field Work',
+                        'url' => "/api/projects/site-surveys/{$survey->id}/pdf",
+                        'survey_id' => $survey->id
+                    ];
+                }
+            } catch (\Exception $e) {}
+
+            // 6. Fetch Handover Survey
+            try {
+                $handover = HandoverSurvey::whereHas('task', function($q) use ($enquiryId) {
+                    $q->where('project_enquiry_id', $enquiryId);
+                })->first();
+                if ($handover) {
+                     $documents[] = [
+                        'name' => 'Handover Certificate',
+                        'type' => 'PDF',
+                        'category' => 'Handover',
+                        'url' => "/api/projects/tasks/{$handover->task_id}/handover/survey",
+                        'handover_id' => $handover->id
+                    ];
+                }
+            } catch (\Exception $e) {}
+
+            return $documents;
+        } catch (\Exception $e) {
+            Log::error('Failed to get system documents for archival report', [
+                'task_id' => $taskId ?? null,
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
     }
 
     /**

@@ -19,11 +19,76 @@ class LogisticsTaskService
     public function getLogisticsForTask(int $taskId): ?array
     {
         $logisticsTask = LogisticsTask::where('task_id', $taskId)
-            ->with(['transportItems', 'checklist.checklistItems', 'team.category', 'team.teamType'])
+            ->with(['transportItems', 'checklist.checklistItems', 'team.category', 'team.teamType', 'task.enquiry.projectOfficer'])
             ->first();
 
         if (!$logisticsTask) {
             return null; // Return null when no logistics data exists
+        }
+
+        // Fetch all teams for the project/enquiry
+        $enquiryId = $logisticsTask->task->project_enquiry_id;
+        $projectTeams = [];
+        
+        if ($enquiryId) {
+            $projectTeams = \App\Modules\Teams\Models\TeamsTask::whereHas('task', function($query) use ($enquiryId) {
+                $query->where('project_enquiry_id', $enquiryId);
+            })
+            ->with(['category', 'teamType', 'activeMembers'])
+            ->get()
+            ->map(function ($team) {
+                return [
+                    'id' => $team->id,
+                    'category_name' => $team->category->display_name ?? $team->category->name ?? 'N/A',
+                    'team_type_name' => $team->teamType->display_name ?? $team->teamType->name ?? 'N/A',
+                    'status' => $team->status,
+                    'members' => $team->activeMembers->map(function ($member) {
+                        return [
+                            'name' => $member->member_name,
+                            'phone' => $member->member_phone,
+                            'is_lead' => $member->is_lead,
+                        ];
+                    })->toArray(),
+                ];
+            })
+            ->toArray();
+        }
+
+        // Prepare logistics planning with defaults if empty
+        $planning = $logisticsTask->logistics_planning ?? [];
+        if (empty($planning)) {
+            $planning = [
+                'vehicle_type' => '',
+                'vehicle_identification' => '',
+                'driver_name' => '',
+                'driver_contact' => '',
+                'route' => [
+                    'origin' => 'Workshop',
+                    'destination' => $logisticsTask->task->enquiry->venue ?? 'TBC',
+                    'distance' => null,
+                ],
+                'timeline' => [
+                    'departure_time' => null,
+                    'arrival_time' => null,
+                    'setup_start_time' => null,
+                ]
+            ];
+        } else {
+            // Ensure nested objects exist
+            if (!isset($planning['route'])) {
+                $planning['route'] = [
+                    'origin' => 'Workshop',
+                    'destination' => $logisticsTask->task->enquiry->venue ?? 'TBC',
+                    'distance' => null,
+                ];
+            }
+            if (!isset($planning['timeline'])) {
+                $planning['timeline'] = [
+                    'departure_time' => null,
+                    'arrival_time' => null,
+                    'setup_start_time' => null,
+                ];
+            }
         }
 
         return [
@@ -37,7 +102,12 @@ class LogisticsTaskService
                 'required_members' => $logisticsTask->team->required_members,
                 'assigned_members_count' => $logisticsTask->team->assigned_members_count,
             ] : null,
-            'logistics_planning' => $logisticsTask->logistics_planning ?? [],
+            'project_teams' => $projectTeams,
+            'project_officer' => [
+                'name' => $logisticsTask->task->enquiry->projectOfficer->name ?? $logisticsTask->task->enquiry->project_officer_name ?? 'N/A',
+                'email' => $logisticsTask->task->enquiry->projectOfficer->email ?? null,
+            ],
+            'logistics_planning' => $planning,
             'team_confirmation' => [
                 'setup_teams_confirmed' => $logisticsTask->setup_teams_confirmed,
                 'notes' => $logisticsTask->team_confirmation_notes,

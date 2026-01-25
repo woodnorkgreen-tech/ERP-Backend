@@ -161,6 +161,7 @@
                     <td style="width: 60%;">
                         <div class="mb-2"><span class="font-bold">Project Title:</span> {{ $task->enquiry->title ?? 'N/A' }}</div>
                         <div class="mb-2"><span class="font-bold">Client:</span> {{ $client->full_name ?? $client->name ?? 'N/A' }}</div>
+                        <div class="mb-2"><span class="font-bold">Project Officer:</span> {{ $data['project_officer']['name'] ?? 'Unassigned' }}</div>
                     </td>
                     <td style="width: 40%;">
                          <div class="mb-2"><span class="font-bold">Destination:</span> {{ $data['logistics_planning']['route']['destination'] ?? 'TBC' }}</div>
@@ -176,7 +177,7 @@
         <div class="section-header">DISPATCH & ROUTE PLANNING</div>
         <table style="width: 100%;">
             <tr>
-                <td style="width: 32%; padding-right: 1%;">
+                <td style="width: 33%; padding-right: 1%;">
                     <div class="summary-card">
                          <div class="text-gray-600 uppercase font-small mb-2">TRANSPORT</div>
                          <div class="mb-1"><span class="font-bold">Vehicle:</span> {{ $data['logistics_planning']['vehicle_type'] ?? 'N/A' }}</div>
@@ -195,14 +196,54 @@
                 <td style="width: 33%;">
                     <div class="summary-card bg-gray-100">
                          <div class="text-gray-600 uppercase font-small mb-2">TIMELINE</div>
-                         <div class="mb-1"><span class="font-bold">Departure:</span> {{ isset($data['logistics_planning']['timeline']['departure_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['departure_time'])->format('H:i') : '--:--' }}</div>
-                         <div class="mb-1"><span class="font-bold">Arrival:</span> {{ isset($data['logistics_planning']['timeline']['arrival_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['arrival_time'])->format('H:i') : '--:--' }}</div>
-                         <div class="mb-1"><span class="font-bold">Setup:</span> {{ isset($data['logistics_planning']['timeline']['setup_start_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['setup_start_time'])->format('H:i') : '--:--' }}</div>
+                         <div class="mb-1"><span class="font-bold">Departure:</span> {{ !empty($data['logistics_planning']['timeline']['departure_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['departure_time'])->format('H:i') : '--:--' }}</div>
+                         <div class="mb-1"><span class="font-bold">Arrival:</span> {{ !empty($data['logistics_planning']['timeline']['arrival_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['arrival_time'])->format('H:i') : '--:--' }}</div>
+                         <div class="mb-1"><span class="font-bold">Setup:</span> {{ !empty($data['logistics_planning']['timeline']['setup_start_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['setup_start_time'])->format('H:i') : '--:--' }}</div>
                     </div>
                 </td>
             </tr>
         </table>
     </div>
+
+    <!-- Project Teams -->
+    @if(isset($data['project_teams']) && count($data['project_teams']) > 0)
+    <div class="mb-4">
+        <div class="section-header">PROJECT TEAMS</div>
+        <table style="width: 100%;">
+            @foreach(array_chunk($data['project_teams'], 2) as $teamRow)
+            <tr>
+                @foreach($teamRow as $team)
+                <td style="width: 49%; padding-right: 1%;">
+                    <div class="summary-card">
+                        <div class="text-blue-600 font-bold uppercase mb-2">{{ $team['category_name'] }} - {{ $team['team_type_name'] }}</div>
+                        @if(count($team['members']) > 0)
+                            <table style="width: 100%; border-top: 1px solid #e2e8f0; padding-top: 5px;">
+                                @foreach($team['members'] as $member)
+                                <tr>
+                                    <td style="padding: 2px 0;">
+                                        <span class="font-bold">{{ $member['name'] }}</span>
+                                        @if($member['is_lead'])
+                                            <span class="text-emerald-600" style="font-size: 8px;">(Lead)</span>
+                                        @endif
+                                    </td>
+                                    <td style="text-align: right; padding: 2px 0;" class="text-gray-600">{{ $member['phone'] ?? '-' }}</td>
+                                </tr>
+                                @endforeach
+                            </table>
+                        @else
+                            <div class="text-gray-500 italic" style="font-size: 8px;">No members assigned to this team.</div>
+                        @endif
+                    </div>
+                </td>
+                @endforeach
+                @if(count($teamRow) < 2)
+                <td style="width: 49%;"></td>
+                @endif
+            </tr>
+            @endforeach
+        </table>
+    </div>
+    @endif
 
     <!-- Cargo Manifest -->
     <div class="category-title">LOADING SHEET & CARGO MANIFEST</div>

@@ -10,6 +10,7 @@ class TeamsMember extends Model
 {
     protected $fillable = [
         'teams_task_id',
+        'technical_labour_id',
         'member_name',
         'member_email',
         'member_phone',
@@ -33,13 +34,19 @@ class TeamsMember extends Model
         'assigned_at' => 'datetime',
         'unassigned_at' => 'datetime',
         'assigned_by' => 'integer',
-        'unassigned_by' => 'integer'
+        'unassigned_by' => 'integer',
+        'technical_labour_id' => 'integer'
     ];
 
     // Relationships
     public function teamsTask(): BelongsTo
     {
         return $this->belongsTo(TeamsTask::class);
+    }
+
+    public function technicalLabour(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\HR\Models\TechnicalLabour::class);
     }
 
     public function assigner(): BelongsTo

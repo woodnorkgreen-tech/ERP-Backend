@@ -51,18 +51,18 @@ class SiteSurveyController extends Controller
             'project_enquiry_id' => 'required|numeric|exists:project_enquiries,id',
             'enquiry_task_id' => 'nullable|numeric|exists:enquiry_tasks,id',
             'project_id' => 'nullable|numeric',
-            'site_visit_date' => 'required|date',
+            'site_visit_date' => 'nullable|date',
             'status' => ['nullable', Rule::in(['pending', 'completed', 'approved', 'rejected'])],
             'project_manager' => 'nullable|string|max:255',
             'other_project_manager' => 'nullable|string|max:255',
-            'client_name' => 'required|string|max:255',
-            'location' => 'required|string|max:255',
+            'client_name' => 'nullable|string|max:255',
+            'location' => 'nullable|string|max:255',
             'attendees' => 'nullable|array',
             'attendees.*' => 'string',
             'client_contact_person' => 'nullable|string|max:255',
             'client_phone' => 'nullable|string|max:20',
             'client_email' => 'nullable|email|max:255',
-            'project_description' => 'required|string',
+            'project_description' => 'nullable|string',
             'objectives' => 'nullable|string',
             'current_condition' => 'nullable|string',
             'existing_branding' => 'nullable|string',
@@ -114,6 +114,19 @@ class SiteSurveyController extends Controller
             }
         }
 
+        // Apply defaults for drafts to satisfy DB constraints
+        $reqClient = $request->input('client_name');
+        $validated['client_name'] = !empty($reqClient) ? $reqClient : ($validated['client_name'] ?? 'Draft');
+
+        $reqLocation = $request->input('location');
+        $validated['location'] = !empty($reqLocation) ? $reqLocation : ($validated['location'] ?? 'Draft');
+
+        $reqDesc = $request->input('project_description');
+        $validated['project_description'] = !empty($reqDesc) ? $reqDesc : ($validated['project_description'] ?? 'Draft');
+
+        $reqDate = $request->input('site_visit_date');
+        $validated['site_visit_date'] = !empty($reqDate) ? $reqDate : ($validated['site_visit_date'] ?? now()->format('Y-m-d'));
+
         $siteSurvey = SiteSurvey::updateOrCreate(
             [
                 'project_enquiry_id' => $validated['project_enquiry_id'],
@@ -142,18 +155,18 @@ class SiteSurveyController extends Controller
             'project_enquiry_id' => 'sometimes|numeric|exists:project_enquiries,id',
             'enquiry_task_id' => 'nullable|numeric|exists:enquiry_tasks,id',
             'project_id' => 'nullable|numeric',
-            'site_visit_date' => 'sometimes|date',
+            'site_visit_date' => 'nullable|date',
             'status' => ['nullable', Rule::in(['pending', 'completed', 'approved', 'rejected'])],
             'project_manager' => 'nullable|string|max:255',
             'other_project_manager' => 'nullable|string|max:255',
-            'client_name' => 'sometimes|string|max:255',
-            'location' => 'sometimes|string|max:255',
+            'client_name' => 'nullable|string|max:255',
+            'location' => 'nullable|string|max:255',
             'attendees' => 'nullable|array',
             'attendees.*' => 'string',
             'client_contact_person' => 'nullable|string|max:255',
             'client_phone' => 'nullable|string|max:20',
             'client_email' => 'nullable|email|max:255',
-            'project_description' => 'sometimes|string',
+            'project_description' => 'nullable|string',
             'objectives' => 'nullable|string',
             'current_condition' => 'nullable|string',
             'existing_branding' => 'nullable|string',
@@ -203,6 +216,24 @@ class SiteSurveyController extends Controller
             } else {
                 \Log::warning("[DEBUG] SiteSurveyController::update no survey task found for enquiry ID: {$validated['project_enquiry_id']}");
             }
+        }
+
+        // Apply defaults for drafts to satisfy DB constraints - only if they are present in request as null or empty
+        if ($request->has('client_name')) {
+             $val = $request->input('client_name');
+             if (empty($val)) $validated['client_name'] = 'Draft';
+        }
+        if ($request->has('location')) {
+             $val = $request->input('location');
+             if (empty($val)) $validated['location'] = 'Draft';
+        }
+        if ($request->has('project_description')) {
+             $val = $request->input('project_description');
+             if (empty($val)) $validated['project_description'] = 'Draft';
+        }
+        if ($request->has('site_visit_date')) {
+             $val = $request->input('site_visit_date');
+             if (empty($val)) $validated['site_visit_date'] = now()->format('Y-m-d');
         }
 
         $siteSurvey->update($validated);
