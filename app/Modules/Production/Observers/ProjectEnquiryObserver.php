@@ -133,6 +133,31 @@ class ProjectEnquiryObserver
     }
 
     /**
+     * Determine the appropriate work order status based on enquiry state
+     */
+    private function determineWorkOrderStatusFromEnquiry(ProjectEnquiry $enquiry): string
+    {
+        $status = $enquiry->status;
+
+        if ($status === \App\Constants\EnquiryConstants::STATUS_COMPLETED) {
+            return 'completed';
+        }
+
+        // If enquiry is approved or formalized into a project
+        $activeStatuses = [
+            \App\Constants\EnquiryConstants::STATUS_QUOTE_APPROVED,
+            \App\Constants\EnquiryConstants::STATUS_PLANNING,
+            \App\Constants\EnquiryConstants::STATUS_IN_PROGRESS,
+        ];
+
+        if (in_array($status, $activeStatuses) || $enquiry->job_number) {
+            return 'in_progress';
+        }
+
+        return 'pending';
+    }
+
+    /**
      * Map enquiry priority to work order priority
      */
     private function mapPriority(string $enquiryPriority): string

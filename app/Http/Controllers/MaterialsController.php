@@ -293,6 +293,7 @@ class MaterialsController extends Controller
                     'template_id' => $elementData['templateId'] ?? null,
                     'element_type' => $elementData['elementType'],
                     'name' => $elementData['name'],
+                    'persistent_id' => $elementData['persistent_id'] ?? $elementData['persistentId'] ?? null,
                     'category' => $elementData['category'],
                     'dimensions' => $elementData['dimensions'] ?? [],
                     'is_included' => $elementData['isIncluded'] ?? true,
@@ -306,6 +307,7 @@ class MaterialsController extends Controller
                     $material = ElementMaterial::create([
                         'project_element_id' => $element->id,
                         'library_material_id' => $materialData['libraryMaterialId'] ?? null,
+                        'persistent_id' => $materialData['persistent_id'] ?? $materialData['persistentId'] ?? null,
                         'description' => $materialData['description'],
                         'unit_of_measurement' => $materialData['unitOfMeasurement'],
                         'quantity' => $materialData['quantity'],
@@ -336,9 +338,10 @@ class MaterialsController extends Controller
             // Check for additional materials and create budget additions automatically
             $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
 
-            // Update budget data with latest materials if budget exists
-            $this->syncMaterialsToBudget($taskId, $request->projectElements, $idMapping);
-
+            // Disable automatic background sync - users must trigger sync manually from the budget
+            // $this->syncMaterialsToBudget($taskId, $request->projectElements, $idMapping);
+            
+            /* 
             // Trigger Procurement Sync immediately using the ID Mapping
             // This ensures meaningful Procurement data is preserved even if Budget IDs changed
             $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($taskId);
@@ -352,6 +355,7 @@ class MaterialsController extends Controller
                     $this->procurementService->syncWithBudget($procurementTask->id, $idMapping);
                 }
             }
+            */
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData->fresh(['elements.materials'])),
@@ -713,6 +717,8 @@ class MaterialsController extends Controller
             $existingMaterials = $budgetData->materials_data ?? [];
             $budgetElementsById = []; // Key: IDString -> ElementData
             $budgetMaterialsById = []; // Key: IDString -> MaterialData
+            $budgetMaterialsByPersistentId = []; // Key: UUID -> MaterialData
+            $budgetElementsByPersistentId = []; // Key: UUID -> ElementData
             
             // Fallbacks for content matching (if IDs fail)
             $budgetElementsByKey = []; // Key: Name|Type -> ElementData
@@ -722,6 +728,9 @@ class MaterialsController extends Controller
                 if (isset($existingElem['id'])) {
                     $budgetElementsById[(string)$existingElem['id']] = $existingElem;
                 }
+                if (isset($existingElem['persistent_id'])) {
+                    $budgetElementsByPersistentId[(string)$existingElem['persistent_id']] = $existingElem;
+                }
                 
                 // Fallback Key for Element
                 $elemKey = strtolower(trim($existingElem['name'] ?? '')) . '|' . strtolower($existingElem['elementType'] ?? 'custom');
@@ -730,6 +739,9 @@ class MaterialsController extends Controller
                 foreach ($existingElem['materials'] ?? [] as $existingMat) {
                     if (isset($existingMat['id'])) {
                         $budgetMaterialsById[(string)$existingMat['id']] = $existingMat;
+                    }
+                    if (isset($existingMat['persistent_id'])) {
+                        $budgetMaterialsByPersistentId[(string)$existingMat['persistent_id']] = $existingMat;
                     }
                     
                     // Fallback Key for Material
@@ -748,6 +760,11 @@ class MaterialsController extends Controller
 
                 // Resolve matching budget element
                 $matchingBudgetElem = null;
+
+                // 0. Try Persistent ID Mapping
+                if (!empty($element->persistent_id)) {
+                    $matchingBudgetElem = $budgetElementsByPersistentId[(string)$element->persistent_id] ?? null;
+                }
 
                 // A. Try ID Mapping (New ID -> Old ID -> Budget Lookup)
                 $oldElementId = null;
@@ -782,6 +799,11 @@ class MaterialsController extends Controller
                     
                     // Resolve matching budget material
                     $matchingBudgetMat = null;
+
+                    // 0. Try Persistent ID Mapping (Highest Reliability)
+                    if (!empty($material->persistent_id)) {
+                        $matchingBudgetMat = $budgetMaterialsByPersistentId[(string)$material->persistent_id] ?? null;
+                    }
                     
                     // A. Try ID Mapping
                     $oldMaterialId = null;
@@ -805,17 +827,14 @@ class MaterialsController extends Controller
                     }
 
                     if ($matchingBudgetMat) {
-                         $oldPrice = (float)($matchingBudgetMat['unitPrice'] ?? 0);
-                         // Preserve price if it was set
-                         if ($oldPrice > 0) {
-                             $unitPrice = $oldPrice;
-                             $hasCustomPrice = true;
-                             \Log::info('Preserved price via ' . ($matchingBudgetMat['id'] === $oldMaterialId ? 'ID' : 'Content'), [
-                                 'material' => $material->description,
-                                 'price' => $unitPrice
-                             ]);
-                         }
+                         $unitPrice = (float)($matchingBudgetMat['unitPrice'] ?? 0);
+                         $hasCustomPrice = true;
                          $oldQty = (float)($matchingBudgetMat['quantity'] ?? 0);
+
+                         \Log::info('Preserved budget price during sync', [
+                             'material' => $material->description,
+                             'price' => $unitPrice
+                         ]);
                     }
 
                     // If no custom price found/preserved, use library/default
@@ -825,6 +844,7 @@ class MaterialsController extends Controller
 
                     $newMaterialData = [
                         'id' => (string) $material->id, // Use NEW ID to keep budget fresh
+                        'persistent_id' => $material->persistent_id,
                         'description' => $material->description,
                         'unitOfMeasurement' => $material->unit_of_measurement,
                         'quantity' => (float) $material->quantity,
@@ -850,6 +870,7 @@ class MaterialsController extends Controller
                         'id' => (string) $element->id, // Use NEW ID
                         'elementType' => $element->element_type,
                         'name' => $element->name,
+                        'persistent_id' => $element->persistent_id,
                         'category' => $element->category,
                         'materials' => $elementMaterials,
                         'isIncluded' => true,
@@ -1045,12 +1066,14 @@ class MaterialsController extends Controller
                         'templateId' => $element->template_id,
                         'elementType' => $element->element_type,
                         'name' => $element->name,
+                        'persistent_id' => $element->persistent_id,
                         'category' => $element->category,
                         'dimensions' => $element->dimensions ?? ['length' => '', 'width' => '', 'height' => ''],
                         'isIncluded' => (bool) $element->is_included,
                         'materials' => $element->materials->map(function ($material) {
                             return [
                                 'id' => (string) $material->id,
+                                'persistent_id' => $material->persistent_id,
                                 'libraryMaterialId' => $material->library_material_id,
                                 'description' => $material->description,
                                 'unitOfMeasurement' => $material->unit_of_measurement,

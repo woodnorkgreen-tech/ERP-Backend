@@ -133,7 +133,7 @@ class ProjectEnquiry extends Model
         ]);
 
         // Automatically convert to a formal Project/Mission
-        Project::firstOrCreate(
+        $project = Project::firstOrCreate(
             ['enquiry_id' => $this->id],
             [
                 'project_id' => $this->generateProjectId(),
@@ -144,6 +144,48 @@ class ProjectEnquiry extends Model
                 'assigned_users' => $this->assigned_users
             ]
         );
+
+        // Global Broadcast Signal (Refresh data first to ensure relations are loaded)
+        $this->refresh();
+        $this->load(['client', 'projectOfficer']);
+
+        // Notify system-wide that a new project is active (Wrapped in try-catch to prevent 500 on non-critical messaging)
+        try {
+            $activatedBy = User::find($userId)->name ?? 'System';
+            $notifPayload = [
+                'id' => $this->id,
+                'title' => $this->title,
+                'job_number' => $jobNumber,
+                'client_name' => $this->client?->full_name ?? $this->client?->name ?? 'Client TBC',
+                'venue' => $this->venue ?? 'Venue TBC',
+                'deadline' => $this->expected_delivery_date?->format('d M Y') ?? 'TBC',
+                'project_officer' => $this->projectOfficer?->name ?? 'Unassigned',
+                'activated_by' => $activatedBy
+            ];
+
+            // Global Broadcast Signal
+            event(new \App\Events\ProjectActivated($notifPayload));
+
+            // Record persistent notifications for all users
+            $allUserIds = User::pluck('id');
+            $notifData = [
+                'type' => 'project_activated',
+                'title' => 'New Mission Active',
+                'message' => "Project {$this->title} (#{$jobNumber}) is officially live!",
+                'data' => $notifPayload,
+                'notifiable_type' => self::class,
+                'notifiable_id' => $this->id,
+            ];
+
+            foreach ($allUserIds as $uId) {
+                \App\Models\Notification::create(array_merge($notifData, ['user_id' => $uId]));
+            }
+        } catch (\Exception $e) {
+            \Log::error('Failed to dispatch project activation notifications', [
+                'enquiry_id' => $this->id,
+                'error' => $e->getMessage()
+            ]);
+        }
 
         return true;
     }

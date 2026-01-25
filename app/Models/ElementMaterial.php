@@ -32,13 +32,27 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *     @OA\Property(property="notes", type="string", nullable=true, description="Material notes")
  * )
  */
+use Illuminate\Support\Str;
+
 class ElementMaterial extends Model
 {
     use HasFactory;
 
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function ($model) {
+            if (empty($model->persistent_id)) {
+                $model->persistent_id = (string) Str::uuid();
+            }
+        });
+    }
+
     protected $fillable = [
         'project_element_id',
         'library_material_id',
+        'persistent_id',
         'description',
         'unit_of_measurement',
         'quantity',
