@@ -356,6 +356,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Delete element
         Route::delete('/elements/{elementId}', [App\Http\Controllers\MaterialsController::class, 'deleteElement']);
+
+        // PDF Generation
+        Route::get('/pdf', [App\Http\Controllers\MaterialsController::class, 'downloadPdf']);
     });
 
     // Budget management routes

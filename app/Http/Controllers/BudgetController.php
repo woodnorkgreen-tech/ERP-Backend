@@ -166,9 +166,9 @@ class BudgetController extends Controller
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to import materials',
+                'message' => $e->getMessage(), // Pass through the actual error message
                 'error' => $e->getMessage()
-            ], 500);
+            ], 400); // Changed to 400 for client errors like approval needed
         }
     }
 

@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Validator;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 /**
  * @OA\Tag(
@@ -83,6 +84,46 @@ class MaterialsController extends Controller
             return response()->json([
                 'message' => 'Failed to retrieve materials data',
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Download materials data as PDF
+     */
+    public function downloadPdf(int $taskId)
+    {
+        try {
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)
+                ->with(['elements.materials', 'task.enquiry.client'])
+                ->first();
+
+            if (!$materialsData) {
+                return response()->json([
+                    'message' => 'Materials data not found'
+                ], 404);
+            }
+
+            $enquiry = $materialsData->task->enquiry;
+            
+            $pdf = Pdf::loadView('reports.materials', [
+                'materialsData' => $materialsData,
+                'enquiry' => $enquiry
+            ]);
+
+            $fileName = 'materials-specification-' . ($enquiry->job_number ?? $enquiry->enquiry_number ?? $taskId) . '.pdf';
+            
+            return $pdf->download($fileName);
+        } catch (\Exception $e) {
+            \Log::error('Failed to generate materials PDF', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
@@ -251,6 +292,7 @@ class MaterialsController extends Controller
                 \Log::info('Materials content changed - resetting approval status', ['taskId' => $taskId]);
                 $projectInfo['approval_status'] = [
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
+                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
                     'all_approved' => false,
                     'last_approval_at' => null
                 ];
@@ -258,14 +300,35 @@ class MaterialsController extends Controller
                 // Preserve existing approval status if materials haven't changed
                 \Log::info('Materials unchanged - preserving approval status', ['taskId' => $taskId]);
                 $projectInfo['approval_status'] = $existingApprovalStatus;
+                
+                // Ensure production key exists for legacy data migration
+                if (!isset($projectInfo['approval_status']['production'])) {
+                    $projectInfo['approval_status']['production'] = [
+                        'approved' => false, 
+                        'approved_by' => null, 
+                        'approved_by_name' => null, 
+                        'approved_at' => null, 
+                        'comments' => ''
+                    ];
+                    $projectInfo['approval_status']['all_approved'] = false; // Reset overall if structure changed
+                }
             } else {
                 // Initialize approval status for new materials data
                 $projectInfo['approval_status'] = [
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'all_approved' => false,
                     'last_approval_at' => null
                 ];
             }
+
+            // FORCE LOGIC: Calculate all_approved based on strict dual-approval requirement
+            // This ensures backend enforces the rule regardless of frontend state
+            $poApproved = $projectInfo['approval_status']['project_officer']['approved'] ?? false;
+            $prodApproved = $projectInfo['approval_status']['production']['approved'] ?? false;
+            
+            // STRICT GATE: Both must be true
+            $projectInfo['approval_status']['all_approved'] = ($poApproved && $prodApproved);
 
             $materialsData = TaskMaterialsData::updateOrCreate(
                 ['enquiry_task_id' => $taskId],
@@ -1116,16 +1179,26 @@ class MaterialsController extends Controller
     public function approveMaterials(Request $request, int $taskId, string $department): JsonResponse
     {
         $user = auth()->user();
+        $userRoles = $user->roles->pluck('name')->toArray();
+        $isSuperAdmin = in_array('Super Admin', $userRoles);
 
-        // Authorization: Only Project Officers or Project Managers can approve materials
-        if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
-            return response()->json([
-                'message' => 'Unauthorized: Only Project Officers or Project Managers can approve materials.'
-            ], 403);
+        // Department-specific authorization
+        if ($department === 'project_officer') {
+            if (!$isSuperAdmin && !$user->hasRole(['Project Officer', 'Project Manager', 'Admin'])) {
+                return response()->json([
+                    'message' => 'Unauthorized: Only Project Officers, Project Managers, or Admins can approve for Project Officer department.'
+                ], 403);
+            }
+        } elseif ($department === 'production') {
+            if (!$isSuperAdmin && !$user->hasRole(['Production', 'Production Manager', 'Admin'])) {
+                return response()->json([
+                    'message' => 'Unauthorized: Only Production staff or Admins can approve for Production department.'
+                ], 403);
+            }
         }
 
         $validator = Validator::make(['department' => $department], [
-            'department' => 'required|in:project_officer'
+            'department' => 'required|in:project_officer,production'  // Allow BOTH departments
         ]);
 
         if ($validator->fails()) {
@@ -1148,6 +1221,7 @@ class MaterialsController extends Controller
             $projectInfo = $materialsData->project_info ?? [];
             $approvalStatus = $projectInfo['approval_status'] ?? [
                 'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'all_approved' => false,
                 'last_approval_at' => null
             ];
@@ -1162,8 +1236,10 @@ class MaterialsController extends Controller
                 'comments' => $request->input('comments', '')
             ];
 
-            // Since we simplified to only project_officer approval:
-            $allApproved = $approvalStatus['project_officer']['approved'];
+            // STRICT GATE: BOTH departments must approve for all_approved to be true
+            $poApproved = $approvalStatus['project_officer']['approved'] ?? false;
+            $prodApproved = $approvalStatus['production']['approved'] ?? false;
+            $allApproved = ($poApproved && $prodApproved);  // BOTH must be true
 
             $approvalStatus['all_approved'] = $allApproved;
             if ($allApproved) {

@@ -65,6 +65,29 @@ class BudgetService
             throw new \Exception('Source materials data not found');
         }
 
+        // Check for approval (Strict Gate - BOTH approvals required)
+        $approvalStatus = $materialsData->project_info['approval_status'] ?? null;
+        if (empty($approvalStatus['all_approved'])) {
+            $missingApprovals = [];
+            if (empty($approvalStatus['project_officer']['approved'])) {
+                $missingApprovals[] = 'Project Officer';
+            }
+            if (empty($approvalStatus['production']['approved'])) {
+                $missingApprovals[] = 'Production';
+            }
+            
+            // Build strict error message emphasizing BOTH are required
+            if (count($missingApprovals) === 2) {
+                $errorMsg = "Cannot import materials to budget: BOTH Project Officer AND Production approvals are required. Currently missing both approvals.";
+            } elseif (!empty($missingApprovals)) {
+                $errorMsg = "Cannot import materials to budget: Missing approval from " . $missingApprovals[0] . ". BOTH Project Officer AND Production approvals are mandatory.";
+            } else {
+                $errorMsg = "Cannot import materials to budget: Materials must be approved by BOTH Project Officer AND Production departments.";
+            }
+            
+            throw new \Exception($errorMsg);
+        }
+
         $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
         
         // If already imported and not forced, we might want to merge or skip
