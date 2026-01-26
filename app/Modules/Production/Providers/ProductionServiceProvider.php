@@ -4,6 +4,12 @@ namespace App\Modules\Production\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
+use App\Modules\Production\Models\JobCard;
+use App\Modules\Production\Models\DailyTask;
+use App\Modules\Production\Models\WorkOrder;
+use App\Modules\Production\Observers\JobCardObserver;
+use App\Modules\Production\Observers\DailyTaskObserver;
+use App\Modules\Production\Observers\WorkOrderObserver;
 
 class ProductionServiceProvider extends ServiceProvider
 {
@@ -29,5 +35,10 @@ class ProductionServiceProvider extends ServiceProvider
                 ->prefix('api/production')
                 ->group(__DIR__.'/../Routes/api.php');
         });
+
+        // Register observers
+        JobCard::observe(JobCardObserver::class);
+        DailyTask::observe(DailyTaskObserver::class);
+        WorkOrder::observe(WorkOrderObserver::class);
     }
 }
