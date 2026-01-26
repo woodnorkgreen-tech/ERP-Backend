@@ -28,8 +28,7 @@ class JobCardController extends Controller
             $searchTerm = $request->search;
             $query->where(function($q) use ($searchTerm) {
                 $q->whereHas('worker', function($workerQuery) use ($searchTerm) {
-                    $workerQuery->where('first_name', 'LIKE', "%{$searchTerm}%")
-                        ->orWhere('last_name', 'LIKE', "%{$searchTerm}%");
+                    $workerQuery->where('full_name', 'LIKE', "%{$searchTerm}%");
                 })
                 ->orWhere('notes', 'LIKE', "%{$searchTerm}%")
                 ->orWhereHas('tasks', function($taskQuery) use ($searchTerm) {
@@ -71,7 +70,7 @@ class JobCardController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'worker_id' => 'required|integer|exists:employees,id',
+            'worker_id' => 'required|integer', // Simple integer for technical labour
             'date' => 'required|date',
             'clock_in_time' => 'nullable|date',
             'clock_out_time' => 'nullable|date|after:clock_in_time',
@@ -158,23 +157,13 @@ class JobCardController extends Controller
     public function update(Request $request, JobCard $jobCard): JsonResponse
     {
         $validated = $request->validate([
-            'worker_id' => 'nullable|integer|exists:employees,id',
-            'date' => 'nullable|date',
-            'clock_in_time' => 'nullable|date',
-            'clock_out_time' => 'nullable|date|after:clock_in_time',
+            'worker_id' => 'required|integer', // Simple integer for technical labour
+            'date' => 'required|date',
+            'clock_in_time' => 'nullable|date_format:H:i',
+            'clock_out_time' => 'nullable|date_format:H:i',
             'notes' => 'nullable|string',
             'tasks' => 'nullable|array',
-            'tasks.*.id' => 'nullable|integer|exists:daily_tasks,id',
-            'tasks.*.description' => 'required|string',
-            'tasks.*.work_order_id' => 'nullable|integer|exists:work_orders,id',
-            'tasks.*.start_time' => 'nullable|date',
-            'tasks.*.end_time' => 'nullable|date|after:tasks.*.start_time',
-            'tasks.*.hours_worked' => 'nullable|numeric|min:0',
-            'tasks.*.notes' => 'nullable|string',
-            'issues' => 'nullable|array',
-            'issues.*.description' => 'required|string',
-            'issues.*.resolution' => 'nullable|string',
-            'issues.*.status' => 'required|in:open,resolved',
+            'issues' => 'nullable|array'
         ]);
 
         DB::beginTransaction();
@@ -229,7 +218,7 @@ class JobCardController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Job card updated successfully',
-                'data' => $jobCard->load(['worker', 'tasks.workOrder', 'issues'])
+                'data' => $jobCard->load(['tasks.workOrder', 'issues'])
             ]);
 
         } catch (\Exception $e) {
@@ -400,41 +389,49 @@ class JobCardController extends Controller
 
     /**
      * Get technicians for dropdown.
+     * Only pulls from technical labour table.
      */
     public function technicians(Request $request): JsonResponse
     {
-        // Get production department
-        $productionDept = Department::where('name', 'like', '%production%')->first();
-        
-        $query = Employee::with(['department'])
-            ->where('status', 'active');
+        $search = $request->get('q', '');
 
-        // Filter by production department if found
-        if ($productionDept) {
-            $query->where('department_id', $productionDept->id);
-        }
+        // Get technical labour from HR module only
+        $technicalLabourQuery = \App\Modules\HR\Models\TechnicalLabour::active();
 
-        // Handle search parameter
-        if ($request->has('q') && $request->q) {
-            $search = $request->q;
-            $query->where(function ($q) use ($search) {
-                $q->where('first_name', 'like', "%{$search}%")
-                  ->orWhere('last_name', 'like', "%{$search}%")
-                  ->orWhere('employee_id', 'like', "%{$search}%");
+        // Handle search for technical labour
+        if ($search) {
+            $technicalLabourQuery->where(function ($q) use ($search) {
+                $q->where('full_name', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('specialization', 'like', "%{$search}%");
             });
         }
 
-        $employees = $query->orderBy('first_name')->get([
-            'id', 
-            'first_name', 
-            'last_name', 
-            'employee_id as employee_number',
-            'department_id'
-        ]);
+        $technicalLabours = $technicalLabourQuery->orderBy('full_name')->get([
+            'id',
+            'full_name',
+            'phone',
+            'email',
+            'specialization',
+            'day_rate'
+        ])->map(function ($tech) {
+            $nameParts = explode(' ', $tech->full_name);
+            return [
+                'id' => $tech->id, // Use simple integer ID (1, 2, 3...)
+                'first_name' => $nameParts[0] ?? '',
+                'last_name' => implode(' ', array_slice($nameParts, 1)),
+                'employee_number' => $tech->phone ?? 'TECH-' . $tech->id,
+                'source' => 'technical_labour',
+                'department' => 'Technical Resource Pool',
+                'specialization' => $tech->specialization,
+                'day_rate' => $tech->day_rate
+            ];
+        });
 
         return response()->json([
             'success' => true,
-            'data' => $employees
+            'data' => $technicalLabours
         ]);
     }
 

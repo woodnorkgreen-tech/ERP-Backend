@@ -5,6 +5,7 @@ namespace App\Modules\Production\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Models\JobCard;
 use App\Modules\HR\Models\Employee;
+use App\Modules\HR\Models\TechnicalLabour;
 use App\Modules\Production\Models\DailyTask;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -15,19 +16,52 @@ class ProductionReportsController extends Controller
     /**
      * Get production analytics for a date range.
      */
-    public function getAnalytics(Request $request): JsonResponse
+    public function analytics(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
+            'period' => 'nullable|string|in:week,month,quarter,year',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
         ]);
 
-        $startDate = $validated['start_date'];
-        $endDate = $validated['end_date'];
+        // Handle period parameter
+        if (isset($validated['period'])) {
+            $period = $validated['period'];
+            $now = now();
+            
+            switch ($period) {
+                case 'week':
+                    $startDate = $now->startOfWeek()->toDateString();
+                    $endDate = $now->endOfWeek()->toDateString();
+                    break;
+                case 'month':
+                    $startDate = $now->startOfMonth()->toDateString();
+                    $endDate = $now->endOfMonth()->toDateString();
+                    break;
+                case 'quarter':
+                    $startDate = $now->startOfQuarter()->toDateString();
+                    $endDate = $now->endOfQuarter()->toDateString();
+                    break;
+                case 'year':
+                    $startDate = $now->startOfYear()->toDateString();
+                    $endDate = $now->endOfYear()->toDateString();
+                    break;
+                default:
+                    $startDate = $now->startOfMonth()->toDateString();
+                    $endDate = $now->endOfMonth()->toDateString();
+            }
+        } else {
+            $startDate = $validated['start_date'] ?? now()->startOfMonth()->toDateString();
+            $endDate = $validated['end_date'] ?? now()->endOfMonth()->toDateString();
+        }
 
         try {
             // Total job cards in period
             $totalJobCards = JobCard::whereBetween('date', [$startDate, $endDate])
+                ->count();
+
+            // Completed job cards
+            $completedJobCards = JobCard::whereBetween('date', [$startDate, $endDate])
                 ->where('status', 'approved')
                 ->count();
 
@@ -55,16 +89,44 @@ class ProductionReportsController extends Controller
                 ? round(($employeesWithWork / $activeEmployees) * 100, 2) 
                 : 0;
 
+            // Calculate total labor cost (assuming $25/hr regular, $37.50/hr overtime)
+            $regularHours = $totalLaborHours - $totalOvertimeHours;
+            $totalLaborCost = ($regularHours * 25) + ($totalOvertimeHours * 37.5);
+
+            // Get top performers
+            $topPerformers = JobCard::whereBetween('date', [$startDate, $endDate])
+                ->where('status', 'approved')
+                ->with('worker')
+                ->get()
+                ->groupBy('worker_id')
+                ->map(function ($jobCards, $workerId) {
+                    $totalHours = $jobCards->sum('total_hours');
+                    $completedJobs = $jobCards->count();
+                    $efficiency = $totalHours > 0 ? min(100, round(($completedJobs / $totalHours) * 100, 1)) : 0;
+                    
+                    return [
+                        'technician_id' => (int) $workerId,
+                        'technician_name' => $jobCards->first()->worker->name ?? 'Unknown',
+                        'job_cards_completed' => $completedJobs,
+                        'total_hours' => round($totalHours, 1),
+                        'efficiency_rating' => $efficiency
+                    ];
+                })
+                ->sortByDesc('efficiency_rating')
+                ->take(10)
+                ->values();
+
             return response()->json([
                 'success' => true,
                 'data' => [
                     'total_job_cards' => $totalJobCards,
-                    'total_labor_hours' => $totalLaborHours,
-                    'total_overtime_hours' => $totalOvertimeHours,
-                    'average_daily_hours' => round($avgDailyHours, 2),
-                    'active_employees' => $activeEmployees,
-                    'employees_with_work' => $employeesWithWork,
-                    'utilization_rate' => $utilizationRate,
+                    'completed_job_cards' => $completedJobCards,
+                    'total_labor_hours' => round($totalLaborHours, 1),
+                    'total_overtime_hours' => round($totalOvertimeHours, 1),
+                    'total_labor_cost' => round($totalLaborCost, 2),
+                    'average_completion_time' => round($avgDailyHours, 1),
+                    'technician_utilization' => $utilizationRate,
+                    'top_performers' => $topPerformers,
                     'period' => [
                         'start_date' => $startDate,
                         'end_date' => $endDate
@@ -83,87 +145,93 @@ class ProductionReportsController extends Controller
     /**
      * Get employee time report for a date range.
      */
-    public function getTechnicianReport(Request $request): JsonResponse
+    public function technicianReport(Request $request, $technician_id): JsonResponse
     {
         $validated = $request->validate([
-            'technician_id' => 'required|exists:employees,id',
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
+            'period' => 'nullable|string|in:week,month,quarter,year',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
         ]);
 
-        $employee = Employee::findOrFail($validated['technician_id']);
-        $startDate = $validated['start_date'];
-        $endDate = $validated['end_date'];
+        // Handle period parameter
+        if (isset($validated['period'])) {
+            $period = $validated['period'];
+            $now = now();
+            
+            switch ($period) {
+                case 'week':
+                    $startDate = $now->startOfWeek()->toDateString();
+                    $endDate = $now->endOfWeek()->toDateString();
+                    break;
+                case 'month':
+                    $startDate = $now->startOfMonth()->toDateString();
+                    $endDate = $now->endOfMonth()->toDateString();
+                    break;
+                case 'quarter':
+                    $startDate = $now->startOfQuarter()->toDateString();
+                    $endDate = $now->endOfQuarter()->toDateString();
+                    break;
+                case 'year':
+                    $startDate = $now->startOfYear()->toDateString();
+                    $endDate = $now->endOfYear()->toDateString();
+                    break;
+                default:
+                    $startDate = $now->startOfMonth()->toDateString();
+                    $endDate = $now->endOfMonth()->toDateString();
+            }
+        } else {
+            $startDate = $validated['start_date'] ?? now()->startOfMonth()->toDateString();
+            $endDate = $validated['end_date'] ?? now()->endOfMonth()->toDateString();
+        }
 
         try {
-            // Get job cards for this employee in period
-            $jobCards = JobCard::where('worker_id', $employee->id)
+            // Try to find technical labour first, then fallback to employee
+            $technician = TechnicalLabour::find($technician_id);
+            
+            if (!$technician) {
+                $technician = Employee::findOrFail($technician_id);
+            }
+
+            // Get job cards for this technician in period
+            $jobCards = JobCard::where('worker_id', $technician_id)
                 ->whereBetween('date', [$startDate, $endDate])
                 ->where('status', 'approved')
-                ->with(['tasks.workOrder', 'issues'])
                 ->get();
 
             // Calculate totals
             $totalDays = $jobCards->count();
             $totalHours = $jobCards->sum('total_hours');
             $totalOvertime = $jobCards->sum('overtime_hours');
-            $totalTasks = $jobCards->sum(function ($jobCard) {
-                return $jobCard->tasks->count();
-            });
-            $totalIssues = $jobCards->sum(function ($jobCard) {
-                return $jobCard->issues->count();
-            });
+            $regularHours = $totalHours - $totalOvertime;
+            
+            // Calculate efficiency (jobs completed per hour)
+            $efficiency = $totalHours > 0 ? min(100, round(($totalDays / $totalHours) * 100, 1)) : 0;
 
-            // Average hours per day
-            $avgHoursPerDay = $totalDays > 0 ? $totalHours / $totalDays : 0;
+            // Calculate total cost - use day_rate from technical labour if available, otherwise default rates
+            $dayRate = $technician->day_rate ?? 25.00;
+            $totalCost = ($regularHours * $dayRate) + ($totalOvertime * $dayRate * 1.5);
 
-            // Group tasks by work order
-            $workOrderStats = [];
-            foreach ($jobCards as $jobCard) {
-                foreach ($jobCard->tasks as $task) {
-                    if ($task->workOrder) {
-                        $woId = $task->workOrder->id;
-                        if (!isset($workOrderStats[$woId])) {
-                            $workOrderStats[$woId] = [
-                                'work_order_number' => $task->workOrder->work_order_number,
-                                'title' => $task->workOrder->title,
-                                'client_name' => $task->workOrder->client_name ?? 'N/A',
-                                'total_hours' => 0,
-                                'task_count' => 0
-                            ];
-                        }
-                        $workOrderStats[$woId]['total_hours'] += $task->hours_worked;
-                        $workOrderStats[$woId]['task_count']++;
-                    }
-                }
+            // Determine technician name and ID based on model type
+            if ($technician instanceof TechnicalLabour) {
+                $technicianName = $technician->full_name;
+                $employeeId = 'TECH-' . $technician->id;
+            } else {
+                $technicianName = $technician->first_name . ' ' . $technician->last_name;
+                $employeeId = $technician->employee_id ?? 'EMP-' . $technician->id;
             }
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'employee' => [
-                        'id' => $employee->id,
-                        'name' => $employee->first_name . ' ' . $employee->last_name,
-                        'employee_number' => $employee->employee_id
-                    ],
-                    'summary' => [
-                        'total_days_worked' => $totalDays,
-                        'total_hours' => $totalHours,
-                        'total_overtime_hours' => $totalOvertime,
-                        'average_hours_per_day' => round($avgHoursPerDay, 2),
-                        'total_tasks' => $totalTasks,
-                        'total_issues' => $totalIssues
-                    ],
-                    'work_order_breakdown' => array_values($workOrderStats),
-                    'daily_breakdown' => $jobCards->map(function ($jobCard) {
-                        return [
-                            'date' => $jobCard->date,
-                            'total_hours' => $jobCard->total_hours,
-                            'overtime_hours' => $jobCard->overtime_hours,
-                            'task_count' => $jobCard->tasks->count(),
-                            'issue_count' => $jobCard->issues->count()
-                        ];
-                    })
+                    'technician_id' => $technician->id,
+                    'technician_name' => $technicianName,
+                    'employee_id' => $employeeId,
+                    'total_hours' => round($totalHours, 1),
+                    'regular_hours' => round($regularHours, 1),
+                    'overtime_hours' => round($totalOvertime, 1),
+                    'job_cards_completed' => $totalDays,
+                    'efficiency_rating' => round($efficiency, 1),
+                    'total_cost' => round($totalCost, 2)
                 ]
             ]);
 

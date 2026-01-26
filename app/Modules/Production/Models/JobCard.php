@@ -40,10 +40,67 @@ class JobCard extends Model
 
     /**
      * Get the worker/technician for this job card.
+     * Handles transition from employees to technical labour.
      */
-    public function worker(): BelongsTo
+    public function worker()
     {
-        return $this->belongsTo(Employee::class, 'worker_id');
+        return $this->belongsTo(\App\Modules\HR\Models\TechnicalLabour::class, 'worker_id')
+            ->withDefault(function ($worker, $jobCard) {
+                // If no technical labour found, try to find employee and create dummy data
+                if ($jobCard->worker_id && $jobCard->worker_id > 0) {
+                    $employee = \App\Modules\HR\Models\Employee::find($jobCard->worker_id);
+                    if ($employee) {
+                        $worker->id = $employee->id;
+                        $worker->full_name = $employee->first_name . ' ' . $employee->last_name;
+                        $worker->phone = $employee->phone ?? 'EMP-' . $employee->id;
+                        $worker->email = $employee->email ?? '';
+                        $worker->specialization = $employee->department->name ?? 'General';
+                        $worker->day_rate = 150.00;
+                        $worker->status = 'active';
+                    }
+                }
+            });
+    }
+
+    /**
+     * Get the worker data with proper handling for technical labour and legacy employees.
+     */
+    public function getWorkerDataAttribute()
+    {
+        // Try to find technical labour first
+        $techLabour = \App\Modules\HR\Models\TechnicalLabour::find($this->worker_id);
+        if ($techLabour) {
+            $nameParts = explode(' ', $techLabour->full_name);
+            return [
+                'id' => $techLabour->id,
+                'first_name' => $nameParts[0] ?? '',
+                'last_name' => implode(' ', array_slice($nameParts, 1)),
+                'employee_number' => $techLabour->phone ?? 'TECH-' . $techLabour->id,
+                'department' => 'Technical Resource Pool',
+                'source' => 'technical_labour',
+                'specialization' => $techLabour->specialization,
+                'day_rate' => $techLabour->day_rate
+            ];
+        }
+        
+        // Fallback to employee for legacy data
+        if ($this->worker_id && $this->worker_id > 0) {
+            $employee = \App\Modules\HR\Models\Employee::find($this->worker_id);
+            if ($employee) {
+                return [
+                    'id' => $employee->id,
+                    'first_name' => $employee->first_name,
+                    'last_name' => $employee->last_name,
+                    'employee_number' => $employee->employee_id ?? 'EMP-' . $employee->id,
+                    'department' => $employee->department->name ?? 'Unknown',
+                    'source' => 'employee',
+                    'specialization' => $employee->department->name ?? 'General',
+                    'day_rate' => 150.00
+                ];
+            }
+        }
+        
+        return null;
     }
 
     /**
