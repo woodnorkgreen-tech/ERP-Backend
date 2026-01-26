@@ -195,15 +195,11 @@ class PettyCashBalance extends Model
         return null;
     }
 
-    /**
-     * Validate balance before saving.
-     */
     public function save(array $options = [])
     {
-        if ($this->current_balance < 0) {
-            throw new Exception('Balance cannot be negative.');
-        }
-
+        // Allow negative balances for historical imports and data integrity
+        // Validation for sufficient funds is handled in the Service layer
+        
         return parent::save($options);
     }
 

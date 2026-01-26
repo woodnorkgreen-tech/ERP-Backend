@@ -40,15 +40,18 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
 
     private function processRow($row, $rowNumber)
     {
-        // Convert stdClass to array if needed
-        if (is_object($row)) {
+        // Ensure row is an array
+        if ($row instanceof Collection) {
+            $row = $row->all();
+        } elseif (is_object($row)) {
             $row = (array) $row;
         }
         
         // Normalize column names to lowercase for case-insensitive matching
         $normalizedRow = [];
         foreach ($row as $key => $value) {
-            $normalizedKey = strtolower(str_replace([' ', '_'], '', $key));
+            // Remove non-alphanumeric characters and lowercase
+            $normalizedKey = strtolower(preg_replace('/[^a-z0-9]/', '', (string)$key));
             $normalizedRow[$normalizedKey] = $value;
         }
         
@@ -66,8 +69,11 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'description' => 'description',
             'remarks' => 'description',
             'projectname' => 'project_name',
+            'project' => 'project_name',
             'tax' => 'tax',
+            'taxation' => 'tax',
             'class' => 'classification',
+            'classification' => 'classification',
             'classname' => 'classification',
             'category' => 'classification',
             'jobno' => 'job_number',
@@ -81,6 +87,25 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
                 $mappedRow[$columnMapping[$key]] = $value;
             } else {
                 $mappedRow[$key] = $value;
+            }
+        }
+        
+        // Fallback for numeric keys (if header row detection failed or column missing)
+        $fallbacks = [
+            0 => 'date',
+            1 => 'receiver',
+            2 => 'account',
+            3 => 'amount',
+            4 => 'description',
+            5 => 'classification',
+            6 => 'tax',
+            7 => 'project_name',
+            8 => 'job_number'
+        ];
+        
+        foreach ($fallbacks as $index => $targetKey) {
+            if (!isset($mappedRow[$targetKey]) && isset($row[$index])) {
+                $mappedRow[$targetKey] = $row[$index];
             }
         }
         
@@ -121,39 +146,45 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
                 return;
             }
 
-            // Parse and validate DATE
+            // Parse and validate DATE (Default to now if failing, to allow "bypass required")
             $date = $this->parseDate($mappedRow['date'] ?? null);
             if (!$date) {
-                $this->addFailedRow($rowNumber, ['Invalid date format. Could not parse date value']);
-                // Continue processing even with date errors
+                // Instead of failing, default to today so the import continues
+                $date = new \DateTime(); 
             }
 
-            // Check for duplicates (only if we have a valid date)
+            // Check for duplicates (using date_disbursed instead of created_at)
             if ($date && $this->isDuplicate($mappedRow, $date)) {
                 $this->addDuplicateRow($rowNumber, 'Duplicate transaction found');
                 return;
             }
 
-            // Check balance availability (only if amount is present)
-            $amount = 0;
-            if (isset($mappedRow['amount']) && !empty(trim(is_array($mappedRow['amount']) ? json_encode($mappedRow['amount']) : $mappedRow['amount']))) {
-                $amount = (float) str_replace([',', ' '], '', $mappedRow['amount']);
-            }
+            // Balance check is now handled inside createDisbursement service
+            // with a bypass flag for imports if needed.
+            // We'll remove the manual check here to avoid double-dipping and allow negative balance imports.
             
-            if ($amount > 0 && !$this->service->hasSufficientBalance($amount)) {
-                $this->addFailedRow($rowNumber, ['Insufficient petty cash balance']);
-                return;
+            // Calculate amount for the check below
+            $amount = 0;
+            if (isset($mappedRow['amount']) && !empty(trim(is_array($mappedRow['amount']) ? json_encode($mappedRow['amount']) : (string)$mappedRow['amount']))) {
+                $amount = (float) preg_replace('/[^0-9.-]/', '', (string)$mappedRow['amount']);
             }
 
             // Create disbursement (only if we have meaningful data)
             if ($amount > 0 || !empty($mappedRow['receiver'] ?? null)) {
                 $disbursementData = $this->prepareDisbursementData($mappedRow, $date);
-                $disbursement = $this->service->createDisbursement($disbursementData);
+                if (!$disbursementData['top_up_id']) {
+                    $this->addFailedRow($rowNumber, ['No top-up found with sufficient balance. Please ensure you have topped up the petty cash account.']);
+                    return;
+                }
                 
-                if ($disbursement) {
+                $result = $this->service->createDisbursement($disbursementData);
+                
+                if (isset($result['success']) && $result['success']) {
+                    $disbursement = $result['data'];
                     $this->addSuccessfulRow($rowNumber, $disbursement->id);
                 } else {
-                    $this->addFailedRow($rowNumber, ['Failed to create disbursement']);
+                    $errors = isset($result['errors']) ? (is_array($result['errors']) ? array_values($result['errors'])[0] : $result['errors']) : ['Failed to create disbursement'];
+                    $this->addFailedRow($rowNumber, (array)$errors);
                 }
             }
             
@@ -164,17 +195,16 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
 
     private function normalizeMappedRow(array $row): array
     {
-        // Trim all string values
-        foreach ($row as $key => $value) {
-            if (is_string($value)) {
-                $row[$key] = trim($value);
-            }
-        }
+        // Trim and cast basic fields
+        if (isset($row['receiver'])) $row['receiver'] = (string)$row['receiver'];
+        if (isset($row['account'])) $row['account'] = (string)$row['account'];
+        if (isset($row['description'])) $row['description'] = (string)$row['description'];
 
-        // Normalize amount (remove commas and spaces)
+        // Normalize amount (remove commas, spaces, and currency symbols)
         if (isset($row['amount']) && !empty($row['amount'])) {
-            $amt = is_array($row['amount']) ? json_encode($row['amount']) : $row['amount'];
-            $row['amount'] = str_replace([',', ' ', '$'], '', $amt);
+            $amt = is_array($row['amount']) ? json_encode($row['amount']) : (string)$row['amount'];
+            // Remove everything except digits, dots, and hyphens
+            $row['amount'] = preg_replace('/[^0-9.-]/', '', str_replace(',', '', $amt));
         }
 
         // Normalize classification
@@ -184,23 +214,35 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
                 'admin' => 'admin',
                 'administrative' => 'admin',
                 'administration' => 'admin',
+                'office' => 'admin',
+                'stationery' => 'admin',
                 'agencies' => 'agencies',
                 'agency' => 'agencies',
-                'corporate' => 'agencies',
+                'event planners' => 'event_planners',
+                'event_planners' => 'event_planners',
+                'event' => 'event_planners',
+                'events' => 'event_planners',
+                'corporates' => 'corporates',
+                'corporate' => 'corporates',
+                'crs' => 'crs',
                 'operations' => 'operations',
                 'operation' => 'operations',
                 'operational' => 'operations',
+                'transport' => 'operations',
+                'fuel' => 'operations',
+                'site' => 'operations',
                 'other' => 'other',
                 'other expenses' => 'other',
-                'miscellaneous' => 'other'
+                'miscellaneous' => 'other',
+                'misc' => 'other'
             ];
             
             if (isset($map[$val])) {
                 $row['classification'] = $map[$val];
             } else {
                 // Try partial match
-                foreach (['admin', 'agencies', 'operations', 'other'] as $valid) {
-                    if (strpos($val, $valid) !== false) {
+                foreach (['admin', 'agencies', 'operations', 'event_planners', 'corporates', 'crs', 'other'] as $valid) {
+                    if (strpos($val, str_replace('_', ' ', $valid)) !== false || strpos($val, $valid) !== false) {
                         $row['classification'] = $valid;
                         break;
                     }
@@ -246,10 +288,10 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
         $formats = [
             'm/d/Y',    // MM/DD/YYYY
             'd/m/Y',    // DD/MM/YYYY
-            'Y/m/d',    // YYYY/MM/DD
-            'm-d-Y',    // MM-DD-YYYY
-            'd-m-Y',    // DD-MM-YYYY
             'Y-m-d',    // YYYY-MM-DD
+            'Y/m/d',    // YYYY/MM/DD
+            'd-m-Y',    // DD-MM-YYYY
+            'm-d-Y',    // MM-DD-YYYY
             'M j, Y',   // Jan 1, 2025
             'F j, Y',   // January 1, 2025
             'j/m/Y',    // D/M/YYYY
@@ -259,6 +301,8 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'd.m.Y',    // DD.MM.YYYY
             'm.d.Y',    // MM.DD.YYYY
             'Y.m.d',    // YYYY.MM.DD
+            'd/m/y',    // DD/MM/YY (Excel often uses this)
+            'm/d/y',    // MM/DD/YY
         ];
 
         foreach ($formats as $format) {
@@ -328,9 +372,9 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
                 $classification = $classificationMap[$classification];
             } else {
                 // Try to match partial strings
-                $validClassifications = ['admin', 'agencies', 'operations', 'other'];
+                $validClassifications = ['admin', 'agencies', 'operations', 'event_planners', 'corporates', 'crs', 'other'];
                 foreach ($validClassifications as $valid) {
-                    if (strpos($classification, $valid) !== false) {
+                    if (strpos($classification, str_replace('_', ' ', $valid)) !== false || strpos($classification, $valid) !== false) {
                         $classification = $valid;
                         break;
                     }
@@ -341,11 +385,10 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
         $jobNumber = trim(is_array($row['job_number'] ?? '') ? json_encode($row['job_number'] ?? '') : ($row['job_number'] ?? ''));
 
         // Enhanced duplicate checking with additional fields for better accuracy
-        // Use a more flexible date comparison to handle timezone/time differences
         $query = PettyCashDisbursement::where('receiver', $receiver)
             ->where('account', $account)
             ->where('amount', $amount)
-            ->whereDate('created_at', $date->format('Y-m-d'));
+            ->whereDate('date_disbursed', $date->format('Y-m-d'));
 
         // Add additional fields to duplicate check if they exist
         if (!empty($description)) {
@@ -399,9 +442,9 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
                 $classification = $classificationMap[$classification];
             } else {
                 // Try to match partial strings
-                $validClassifications = ['admin', 'agencies', 'operations', 'other'];
+                $validClassifications = ['admin', 'agencies', 'operations', 'event_planners', 'corporates', 'crs', 'other'];
                 foreach ($validClassifications as $valid) {
-                    if (strpos($classification, $valid) !== false) {
+                    if (strpos($classification, str_replace('_', ' ', $valid)) !== false || strpos($classification, $valid) !== false) {
                         $classification = $valid;
                         break;
                     }
@@ -427,12 +470,25 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             }
         }
 
+        // Create defaults for missing values to bypass strict DB/Validation
+        $receiver = trim(is_array($row['receiver'] ?? '') ? json_encode($row['receiver'] ?? '') : ($row['receiver'] ?? ''));
+        if (empty($receiver)) $receiver = 'Unknown Payee';
+
+        $account = trim(is_array($row['account'] ?? '') ? json_encode($row['account'] ?? '') : ($row['account'] ?? ''));
+        if (empty($account)) $account = 'General Ledger';
+
+        $description = trim(is_array($row['description'] ?? '') ? json_encode($row['description'] ?? '') : ($row['description'] ?? ''));
+        if (empty($description)) $description = 'Imported transaction (' . now()->format('Y-m-d') . ')';
+
+        if (empty($classification)) $classification = 'other';
+        if (empty($tax)) $tax = 'no_etr';
+
         return [
             'top_up_id' => $topUpId,
-            'receiver' => trim(is_array($row['receiver'] ?? '') ? json_encode($row['receiver'] ?? '') : ($row['receiver'] ?? '')),
-            'account' => trim(is_array($row['account'] ?? '') ? json_encode($row['account'] ?? '') : ($row['account'] ?? '')),
-            'amount' => $amount,
-            'description' => trim(is_array($row['description'] ?? '') ? json_encode($row['description'] ?? '') : ($row['description'] ?? '')),
+            'receiver' => $receiver,
+            'account' => $account,
+            'amount' => $amount > 0 ? $amount : 0.00,
+            'description' => $description,
             'project_name' => trim(is_array($row['project_name'] ?? '') ? json_encode($row['project_name'] ?? '') : ($row['project_name'] ?? '')),
             'classification' => $classification,
             'job_number' => trim(is_array($row['job_number'] ?? '') ? json_encode($row['job_number'] ?? '') : ($row['job_number'] ?? '')),
@@ -441,6 +497,8 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'transaction_code' => $row['transaction_code'] ?? ('IMP-' . time() . '-' . rand(1000, 9999)),
             'status' => 'active',
             'created_by' => auth()->id() ?? 1, // Default to system user if not authenticated
+            'date_disbursed' => $date ? $date->format('Y-m-d') : now()->format('Y-m-d'),
+            'skip_balance_check' => true, // Bypass balance check for imports
             'created_at' => $date ? $date->format('Y-m-d 00:00:00') : now()->format('Y-m-d 00:00:00'),
             'updated_at' => now(),
         ];
@@ -484,9 +542,15 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
      */
     private function getSuitableTopUp(float $amount): ?int
     {
-        // Try to find a top-up with sufficient balance
-        $topUp = \App\Modules\Finance\PettyCash\Models\PettyCashTopUp::where('remaining_balance', '>=', $amount)
-            ->orderBy('created_at', 'desc')
+        // Try to find a top-up with sufficient raw funds available
+        // Note: We can't use the virtual 'remaining_balance' in a where clause
+        $topUp = \App\Modules\Finance\PettyCash\Models\PettyCashTopUp::withSum('activeDisbursements', 'amount')
+            ->get()
+            ->filter(function($tu) use ($amount) {
+                $remaining = $tu->amount - ($tu->active_disbursements_sum_amount ?? 0);
+                return $remaining >= $amount;
+            })
+            ->sortByDesc('created_at')
             ->first();
 
         // If no top-up with sufficient balance, use the most recent one
@@ -511,16 +575,17 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
 
     public function rules(): array
     {
+        // Relaxing rules to the absolute minimum to allow "messy" data imports
         return [
-            'date' => 'required',
-            'receiver' => 'required|string|max:255',
-            'account' => 'required|string|max:255',
-            'amount' => 'required|numeric|min:0',
-            'description' => 'required|string|max:2000',
-            'project_name' => 'nullable|string|max:255',
-            'classification' => 'required|in:admin,agencies,operations,other',
-            'job_number' => 'nullable|string|max:100',
-            'tax' => 'required|string'
+            'date' => 'nullable',
+            'receiver' => 'nullable',
+            'account' => 'nullable',
+            'amount' => 'nullable',
+            'description' => 'nullable',
+            'project_name' => 'nullable',
+            'classification' => 'nullable',
+            'job_number' => 'nullable',
+            'tax' => 'nullable'
         ];
     }
 
@@ -539,7 +604,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'description.max' => 'DESCRIPTION must not exceed 2000 characters',
             'project_name.max' => 'PROJECT NAME must not exceed 255 characters',
             'classification.required' => 'CLASS is required',
-            'classification.in' => 'CLASS must be one of: admin, agencies, operations, other',
+            'classification.in' => 'CLASS must be one of: admin, agencies, operations, event_planners, corporates, crs, other',
             'job_number.max' => 'JOB NO. must not exceed 100 characters',
             'tax.required' => 'TAX is required'
         ];

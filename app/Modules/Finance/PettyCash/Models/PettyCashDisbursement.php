@@ -39,6 +39,9 @@ class PettyCashDisbursement extends Model
         'voided_at',
         'tax',
         'date_disbursed',
+        'is_archived',
+        'archived_at',
+        'archived_by',
     ];
 
     /**
@@ -54,6 +57,8 @@ class PettyCashDisbursement extends Model
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
             'date_disbursed' => 'date',
+            'is_archived' => 'boolean',
+            'archived_at' => 'datetime',
         ];
     }
 
@@ -158,6 +163,22 @@ class PettyCashDisbursement extends Model
     public function scopeLatest($query)
     {
         return $query->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Scope to filter not archived transactions.
+     */
+    public function scopeNotArchived($query)
+    {
+        return $query->where('is_archived', false);
+    }
+
+    /**
+     * Scope to filter archived transactions.
+     */
+    public function scopeArchived($query)
+    {
+        return $query->where('is_archived', true);
     }
 
     /**

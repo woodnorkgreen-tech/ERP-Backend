@@ -781,7 +781,13 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('disbursements/{id}', [PettyCashController::class, 'show']);
             Route::put('disbursements/{id}', [PettyCashController::class, 'update']);
             Route::delete('disbursements/{id}', [PettyCashController::class, 'destroy']);
+            Route::post('disbursements/bulk-delete', [PettyCashController::class, 'bulkDestroy']);
             Route::post('disbursements/{id}/void', [PettyCashController::class, 'void']);
+            Route::post('transactions/{id}/archive', [PettyCashController::class, 'archive']);
+            Route::post('transactions/{id}/archive-group', [PettyCashController::class, 'archiveGroup']);
+            Route::post('transactions/bulk-archive', [PettyCashController::class, 'bulkArchive']);
+            Route::post('transactions/bulk-archive-groups', [PettyCashController::class, 'bulkArchiveGroups']);
+            Route::delete('clear-all', [PettyCashController::class, 'clearAll']);
 
             // Projects reference for job numbers
             Route::get('projects', [PettyCashController::class, 'getProjects']);
@@ -810,6 +816,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             // Excel upload route
             Route::post('upload-excel', [PettyCashController::class, 'uploadExcel'])
                 ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
+            Route::get('download-template', [PettyCashController::class, 'downloadTemplate']);
 
             // Statistics and validation routes
             Route::get('statistics', [PettyCashTopUpController::class, 'statistics']);

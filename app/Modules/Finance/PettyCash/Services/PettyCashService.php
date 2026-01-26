@@ -45,13 +45,26 @@ class PettyCashService
     /**
      * Create a new disbursement with balance validation.
      */
-    public function createDisbursement(array $data): PettyCashDisbursement
+    public function createDisbursement(array $data): array
     {
         DB::beginTransaction();
 
         try {
-            // Validate balance before creating disbursement
-            $this->validateSufficientBalance($data['amount']);
+            // Validate balance before creating disbursement (unless skipped)
+            if (!($data['skip_balance_check'] ?? false)) {
+                $balance = $this->repository->getCurrentBalance();
+                if (!$balance->hasSufficientBalance($data['amount'])) {
+                    return [
+                        'success' => false,
+                        'errors' => [
+                            'amount' => ["Insufficient balance. Current balance: KES " . number_format($balance->getCurrentBalance(), 2) . ", Required: KES " . number_format($data['amount'], 2)]
+                        ]
+                    ];
+                }
+            }
+
+            // Remove internal flag before saving
+            unset($data['skip_balance_check']);
 
             // Add creator information if not provided
             if (!isset($data['created_by'])) {
@@ -59,12 +72,37 @@ class PettyCashService
             }
             $data['status'] = 'active';
 
+            // Auto-assign top_up_id if not provided
+            if (empty($data['top_up_id'])) {
+                // Try to find a top-up that covers the whole amount first
+                $topUp = $this->repository->getTopUpsWithAvailableBalance()
+                    ->filter(function ($t) use ($data) {
+                        return $t->remaining_balance >= $data['amount'];
+                    })
+                    ->first();
+
+                // If none covers it fully, pick the most recent one with any balance (anchor)
+                if (!$topUp) {
+                    $topUp = $this->repository->getTopUpsWithAvailableBalance()->first();
+                }
+
+                if (!$topUp) {
+                    return [
+                        'success' => false,
+                        'errors' => [
+                            'amount' => ["No available petty cash funds found. Please add a top-up first."]
+                        ]
+                    ];
+                }
+                $data['top_up_id'] = $topUp->id;
+            }
+
             // Create the disbursement (balance will be updated automatically via model events)
             $disbursement = $this->repository->createDisbursement($data);
 
             DB::commit();
 
-            return $disbursement;
+            return ['success' => true, 'data' => $disbursement];
         } catch (Exception $e) {
             DB::rollBack();
             throw new Exception('Failed to create disbursement: ' . $e->getMessage());
@@ -79,9 +117,12 @@ class PettyCashService
         DB::beginTransaction();
 
         try {
+            $oldAmount = (float) $disbursement->amount;
+            $oldIsActive = (bool) $disbursement->is_active;
+
             // If amount is being changed and disbursement is active, validate balance
-            if (isset($data['amount']) && $data['amount'] != $disbursement->amount && $disbursement->is_active) {
-                $amountDifference = $data['amount'] - $disbursement->amount;
+            if (isset($data['amount']) && $data['amount'] != $oldAmount && $oldIsActive) {
+                $amountDifference = $data['amount'] - $oldAmount;
                 if ($amountDifference > 0) {
                     $this->validateSufficientBalance($amountDifference);
                 }
@@ -90,9 +131,9 @@ class PettyCashService
             // Update the disbursement
             $this->repository->updateDisbursement($disbursement, $data);
 
-            // If amount changed, manually update balance since model events won't handle the difference
-            if (isset($data['amount']) && $data['amount'] != $disbursement->getOriginal('amount') && $disbursement->is_active) {
-                $this->adjustBalanceForAmountChange($disbursement, $disbursement->getOriginal('amount'), $data['amount']);
+            // If amount changed and it's active, adjust the global balance
+            if (isset($data['amount']) && $data['amount'] != $oldAmount && $oldIsActive) {
+                $this->adjustBalanceForAmountChange($disbursement, $oldAmount, (float) $data['amount']);
             }
 
             DB::commit();
@@ -145,6 +186,77 @@ class PettyCashService
         } catch (Exception $e) {
             DB::rollBack();
             throw new Exception('Failed to delete disbursement: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Delete multiple disbursements at once.
+     */
+    public function bulkDeleteDisbursements(array $disbursementIds): array
+    {
+        DB::beginTransaction();
+
+        try {
+            $count = 0;
+            foreach ($disbursementIds as $id) {
+                $disbursement = PettyCashDisbursement::find($id);
+                if ($disbursement) {
+                    $disbursement->delete();
+                    $count++;
+                }
+            }
+
+            // Recalculate balance to ensure accuracy after bulk delete
+            $this->recalculateBalance();
+
+            DB::commit();
+
+            return [
+                'success' => true,
+                'count' => $count,
+                'message' => "Successfully deleted {$count} disbursements."
+            ];
+        } catch (Exception $e) {
+            DB::rollBack();
+            throw new Exception('Failed to bulk delete disbursements: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Clear all petty cash data (disbursements, top-ups, and reset balance).
+     * CAUTION: This is a destructive action and cannot be undone.
+     */
+    public function clearAllData(): array
+    {
+        DB::beginTransaction();
+
+        try {
+            // Delete all disbursements first
+            $disbursementsCount = PettyCashDisbursement::count();
+            PettyCashDisbursement::query()->delete();
+
+            // Delete all top-ups
+            $topUpsCount = PettyCashTopUp::count();
+            PettyCashTopUp::query()->delete();
+
+            // Reset balance
+            $balance = $this->repository->getCurrentBalance();
+            $balance->current_balance = 0.00;
+            $balance->last_transaction_id = null;
+            $balance->last_transaction_type = null;
+            $balance->save();
+
+            DB::commit();
+
+            return [
+                'success' => true,
+                'disbursements_deleted' => $disbursementsCount,
+                'top_ups_deleted' => $topUpsCount,
+                'message' => 'All petty cash data has been cleared and balance reset to zero.'
+            ];
+        } catch (Exception $e) {
+            DB::rollBack();
+            throw new Exception('Failed to clear petty cash data: ' . $e->getMessage());
         }
     }
 
@@ -300,49 +412,65 @@ class PettyCashService
     }
 
     /**
-     * Validate disbursement data before creation.
+     * Validate disbursement data before creation or update.
      */
-    public function validateDisbursementData(array $data): array
+    public function validateDisbursementData(array $data, bool $isUpdate = false, ?int $disbursementId = null): array
     {
         $errors = [];
 
-        // Validate required fields
-        $requiredFields = ['top_up_id', 'receiver', 'account', 'amount', 'description', 'classification', 'payment_method'];
+        // Validate required fields (top_up_id is now optional as service can auto-allocate)
+        $requiredFields = ['receiver', 'account', 'amount', 'description', 'classification', 'payment_method'];
         foreach ($requiredFields as $field) {
-            if (empty($data[$field])) {
-                $errors[$field] = "The {$field} field is required.";
+            // Only require fields if not updating, or if they are explicitly provided in the update
+            if (!$isUpdate && empty($data[$field])) {
+                $errors[$field] = ["The {$field} field is required."];
+            } elseif ($isUpdate && array_key_exists($field, $data) && empty($data[$field])) {
+                $errors[$field] = ["The {$field} field cannot be empty."];
             }
         }
 
         // Validate date_disbursed if provided
         if (!empty($data['date_disbursed']) && !strtotime($data['date_disbursed'])) {
-            $errors['date_disbursed'] = 'Invalid date format for date disbursed.';
+            $errors['date_disbursed'] = ['Invalid date format for date disbursed.'];
         }
 
-        // Validate amount
+        // Validate amount if provided
         if (isset($data['amount']) && $data['amount'] <= 0) {
-            $errors['amount'] = 'Amount must be greater than zero.';
+            $errors['amount'] = ['Amount must be greater than zero.'];
         }
 
         // Validate top-up exists and has sufficient balance
         if (!empty($data['top_up_id'])) {
             $topUp = $this->repository->findTopUp($data['top_up_id']);
             if (!$topUp) {
-                $errors['top_up_id'] = 'Selected top-up does not exist.';
-            } elseif (isset($data['amount']) && $topUp->remaining_balance < $data['amount']) {
-                $errors['amount'] = 'Amount exceeds available balance in selected top-up.';
+                $errors['top_up_id'] = ['Selected top-up does not exist.'];
+            } elseif (isset($data['amount'])) {
+                $availableBalance = $topUp->remaining_balance;
+                
+                // If updating, add back the current amount of this disbursement to available balance
+                if ($isUpdate && $disbursementId) {
+                    $disbursement = $this->repository->findDisbursement($disbursementId);
+                    if ($disbursement && $disbursement->top_up_id == $data['top_up_id'] && $disbursement->is_active) {
+                        $availableBalance += $disbursement->getRawOriginal('amount', 0);
+                    }
+                }
+                
+                if ($availableBalance < $data['amount'] && !$isUpdate) {
+                     // During creation, we are stricter IF they manually selected a top-up
+                     // However, we still check global balance in the service
+                }
             }
         }
 
         // Validate enums
-        $validClassifications = ['agencies', 'admin', 'operations', 'other'];
+        $validClassifications = ['agencies', 'admin', 'operations', 'event_planners', 'corporates', 'crs', 'other'];
         if (!empty($data['classification']) && !in_array($data['classification'], $validClassifications)) {
-            $errors['classification'] = 'Invalid classification selected.';
+            $errors['classification'] = ['Invalid classification selected.'];
         }
 
         $validPaymentMethods = ['cash', 'mpesa', 'bank_transfer', 'other'];
         if (!empty($data['payment_method']) && !in_array($data['payment_method'], $validPaymentMethods)) {
-            $errors['payment_method'] = 'Invalid payment method selected.';
+            $errors['payment_method'] = ['Invalid payment method selected.'];
         }
 
         return $errors;

@@ -29,6 +29,10 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::USER_ASSIGN_ROLE,
             Permissions::ROLE_READ, Permissions::DEPARTMENT_READ, Permissions::DEPARTMENT_UPDATE,
             Permissions::EMPLOYEE_READ, Permissions::PROJECT_READ, Permissions::FINANCE_VIEW,
+            Permissions::FINANCE_PETTY_CASH_VIEW, Permissions::FINANCE_PETTY_CASH_CREATE,
+            Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
+            Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
+            Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
             Permissions::HR_VIEW_EMPLOYEES, Permissions::ADMIN_ACCESS, Permissions::DASHBOARD_ADMIN
         ]);
 
@@ -59,7 +63,10 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::USER_READ, Permissions::USER_UPDATE, Permissions::DEPARTMENT_READ,
             Permissions::DEPARTMENT_ACCESS, Permissions::EMPLOYEE_READ, Permissions::PROJECT_READ,
             Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS, Permissions::TASK_READ,
-            Permissions::TASK_UPDATE, Permissions::TASK_ASSIGN, Permissions::DASHBOARD_VIEW
+            Permissions::TASK_UPDATE, Permissions::TASK_ASSIGN, Permissions::DASHBOARD_VIEW,
+            Permissions::FINANCE_PETTY_CASH_VIEW, Permissions::FINANCE_PETTY_CASH_CREATE,
+            Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
+            Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL
         ]);
 
         $employeeRole = Role::firstOrCreate(['name' => 'Employee'], ['description' => 'Basic employee access']);
@@ -73,7 +80,10 @@ class RoleAndPermissionSeeder extends Seeder
         $accountsRole->givePermissionTo([
             Permissions::FINANCE_VIEW, Permissions::FINANCE_BUDGET_READ,
             Permissions::PROJECT_READ, Permissions::USER_READ,
-            Permissions::DASHBOARD_FINANCE
+            Permissions::DASHBOARD_FINANCE,
+            Permissions::FINANCE_PETTY_CASH_VIEW, Permissions::FINANCE_PETTY_CASH_CREATE,
+            Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
+            Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP, Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL
         ]);
 
         $costingRole = Role::firstOrCreate(['name' => 'Costing'], ['description' => 'Cost analysis and budget management']);

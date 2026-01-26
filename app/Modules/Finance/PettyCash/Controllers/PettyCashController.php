@@ -100,7 +100,17 @@ class PettyCashController extends Controller
                 ], 422);
             }
 
-            $disbursement = $this->service->createDisbursement($request->all());
+            $result = $this->service->createDisbursement($request->all());
+
+            if (isset($result['success']) && !$result['success']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $result['errors'],
+                ], 422);
+            }
+
+            $disbursement = $result['data'];
 
             return response()->json([
                 'success' => true,
@@ -167,8 +177,8 @@ class PettyCashController extends Controller
                 ], 400);
             }
 
-            // Validate the request data
-            $validationErrors = $this->service->validateDisbursementData($request->all());
+            // Validate the request data (pass true for isUpdate and the ID to support partial updates and correct balance checks)
+            $validationErrors = $this->service->validateDisbursementData($request->all(), true, $id);
             if (!empty($validationErrors)) {
                 return response()->json([
                     'success' => false,
@@ -260,6 +270,47 @@ class PettyCashController extends Controller
     }
 
     /**
+     * Delete multiple disbursements.
+     */
+    public function bulkDestroy(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'ids' => 'required|array',
+                'ids.*' => 'exists:petty_cash_disbursements,id'
+            ]);
+
+            $result = $this->service->bulkDeleteDisbursements($request->ids);
+
+            return response()->json($result);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to perform bulk deletion',
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
+     * Clear all petty cash data.
+     */
+    public function clearAll(): JsonResponse
+    {
+        try {
+            $result = $this->service->clearAllData();
+
+            return response()->json($result);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to clear petty cash data',
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
      * Get hierarchical transaction view (top-ups with disbursements).
      */
     public function transactions(Request $request): JsonResponse
@@ -267,11 +318,12 @@ class PettyCashController extends Controller
         try {
             $filters = $request->only([
                 'payment_method', 'creator_id', 'start_date', 'end_date', 
-                'search', 'disbursement_status', 'classification'
+                'search', 'status', 'classification', 'show_archived'
             ]);
 
             $perPage = $request->get('per_page', 15);
-            $transactions = $this->repository->getHierarchicalTransactions($filters, $perPage);
+            $filters['page'] = $request->get('page', 1);
+            $transactions = $this->repository->getFlatTransactions($filters, $perPage);
 
             return response()->json([
                 'success' => true,
@@ -494,6 +546,185 @@ class PettyCashController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to process Excel file',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Download Excel template for disbursement upload.
+     */
+    public function downloadTemplate(): \Illuminate\Http\Response|\Symfony\Component\HttpFoundation\BinaryFileResponse
+    {
+        try {
+            $headers = [
+                'Date', 'Receiver', 'Account', 'Amount', 'Description', 
+                'Classification', 'Tax', 'Project Name', 'Job No.', 'Payment Method', 'Transaction Code'
+            ];
+            
+            $tempFile = tempnam(sys_get_temp_dir(), 'petty_cash_template');
+            $handle = fopen($tempFile, 'w');
+            
+            // Add BOM for Excel UTF-8 support
+            fprintf($handle, chr(0xEF).chr(0xBB).chr(0xBF));
+            
+            // Header row
+            fputcsv($handle, $headers);
+            
+            // Sample data row
+            fputcsv($handle, [
+                date('Y-m-d'), 
+                'John Doe', 
+                'Office Supplies', 
+                '1500.00', 
+                'Stationery for HR department', 
+                'Admin', 
+                'ETR', 
+                '', 
+                '', 
+                'Cash', 
+                ''
+            ]);
+            
+            // Another sample row for a project
+            fputcsv($handle, [
+                date('Y-m-d'), 
+                'Project Team A', 
+                'Transport', 
+                '5000.00', 
+                'Fuel for site visit', 
+                'Operations', 
+                'ETR', 
+                'Building Site X', 
+                'WNG-01-2026-001', 
+                'Cash', 
+                ''
+            ]);
+            
+            fclose($handle);
+            
+            return response()->download($tempFile, 'petty_cash_disbursements_template.csv', [
+                'Content-Type' => 'text/csv',
+            ])->deleteFileAfterSend(true);
+            
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate template',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Archive a transaction.
+     */
+    public function archive(Request $request, int $id): JsonResponse
+    {
+        try {
+            $type = $request->get('type', 'disbursement');
+            $userId = auth()->id();
+            
+            if ($type === 'disbursement') {
+                $disbursement = $this->repository->findDisbursement($id);
+                if (!$disbursement) {
+                    return response()->json(['success' => false, 'message' => 'Disbursement not found'], 404);
+                }
+                $this->repository->archiveDisbursement($disbursement, $userId);
+            } else {
+                $topUp = $this->repository->findTopUp($id);
+                if (!$topUp) {
+                    return response()->json(['success' => false, 'message' => 'Top-up not found'], 404);
+                }
+                $this->repository->archiveTopUp($topUp, $userId);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Transaction archived successfully'
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to archive transaction',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk archive transactions.
+     */
+    public function bulkArchive(Request $request): JsonResponse
+    {
+        try {
+            $ids = $request->get('ids', []);
+            if (empty($ids)) {
+                return response()->json(['success' => false, 'message' => 'No IDs provided'], 400);
+            }
+
+            $userId = auth()->id();
+            $count = $this->repository->bulkArchiveDisbursements($ids, $userId);
+
+            return response()->json([
+                'success' => true,
+                'message' => "{$count} transactions archived successfully",
+                'data' => ['count' => $count]
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to bulk archive transactions',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Archive a top-up and all its disbursements.
+     */
+    public function archiveGroup(Request $request, int $id): JsonResponse
+    {
+        try {
+            $userId = auth()->id();
+            $this->repository->archiveGroup($id, $userId);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Top-up and all related disbursements archived successfully'
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to archive group',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk archive multiple groups.
+     */
+    public function bulkArchiveGroups(Request $request): JsonResponse
+    {
+        try {
+            $ids = $request->get('ids', []);
+            if (empty($ids)) {
+                return response()->json(['success' => false, 'message' => 'No IDs provided'], 400);
+            }
+
+            $userId = auth()->id();
+            $count = $this->repository->bulkArchiveGroups($ids, $userId);
+
+            return response()->json([
+                'success' => true,
+                'message' => "{$count} groups archived successfully",
+                'data' => ['count' => $count]
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to bulk archive groups',
                 'error' => $e->getMessage(),
             ], 500);
         }

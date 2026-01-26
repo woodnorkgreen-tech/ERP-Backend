@@ -39,6 +39,10 @@ class PettyCashRepository
             });
         }
 
+        // Apply archiving filters
+        $showArchived = filter_var($filters['show_archived'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $query->where('is_archived', $showArchived);
+
         return $query->paginate($perPage);
     }
 
@@ -82,6 +86,10 @@ class PettyCashRepository
         if (!empty($filters['search'])) {
             $query->search($filters['search']);
         }
+
+        // Apply archiving filters
+        $showArchived = filter_var($filters['show_archived'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $query->where('is_archived', $showArchived);
 
         return $query->paginate($perPage);
     }
@@ -135,6 +143,10 @@ class PettyCashRepository
                   });
             });
         }
+
+        // Apply archiving filters
+        $showArchived = filter_var($filters['show_archived'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $query->where('is_archived', $showArchived);
 
         return $query->paginate($perPage);
     }
@@ -202,25 +214,15 @@ class PettyCashRepository
      */
     public function getTopUpsWithAvailableBalance(): Collection
     {
-        try {
-            // Simplified version - return all top-ups for now
-            // TODO: Implement proper available balance calculation
-            return PettyCashTopUp::with('creator')
-                ->latest()
-                ->get()
-                ->map(function ($topUp) {
-                    // Add mock available balance data
-                    $topUp->remaining_balance = [
-                        'raw' => $topUp->amount ?? 0,
-                        'formatted' => 'KES ' . number_format($topUp->amount ?? 0, 2)
-                    ];
-                    return $topUp;
-                });
-        } catch (\Exception $e) {
-            // Log the error and return empty collection
-            \Log::error('Error fetching available top-ups: ' . $e->getMessage());
-            return collect([]);
-        }
+        return PettyCashTopUp::with(['creator', 'disbursements' => function($q) {
+                $q->where('status', 'active');
+            }])
+            ->notArchived()
+            ->get()
+            ->filter(function ($topUp) {
+                return $topUp->remaining_balance > 0;
+            })
+            ->values();
     }
 
     /**
@@ -351,5 +353,195 @@ class PettyCashRepository
         $disbursements = $this->getDisbursements(array_merge($filters, ['search' => $search]), $perPage);
 
         return $disbursements;
+    }
+
+    /**
+     * Get unified flat transaction list (both top-ups and disbursements).
+     */
+    public function getFlatTransactions(array $filters = [], int $perPage = 15): LengthAwarePaginator
+    {
+        $page = $filters['page'] ?? 1;
+
+        // Build Top-ups subquery
+        $topUps = DB::table('petty_cash_top_ups')
+            ->select(
+                'id',
+                DB::raw("'top_up' as type"),
+                'amount',
+                'description',
+                DB::raw('NULL as receiver'),
+                DB::raw('NULL as account'),
+                DB::raw('NULL as project_name'),
+                'payment_method',
+                DB::raw('NULL as classification'),
+                DB::raw('NULL as job_number'),
+                DB::raw("'active' as status"),
+                'transaction_code',
+                'created_at',
+                'is_archived',
+                'id as parent_id', // Group by its own ID
+                DB::raw('1 as type_priority') // Top-up comes first in its group
+            );
+
+        // Build Disbursements subquery
+        $disbursements = DB::table('petty_cash_disbursements')
+            ->select(
+                'id',
+                DB::raw("'disbursement' as type"),
+                'amount',
+                'description',
+                'receiver',
+                'account',
+                'project_name',
+                'payment_method',
+                'classification',
+                'job_number',
+                'status',
+                'transaction_code',
+                'created_at',
+                'is_archived',
+                'top_up_id as parent_id', // Group by parent top-up ID
+                DB::raw('2 as type_priority') // Disbursements follow the top-up
+            );
+
+        // Apply shared filters
+        if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
+            $topUps->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
+            $disbursements->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
+        }
+
+        if (!empty($filters['payment_method'])) {
+            $topUps->where('payment_method', $filters['payment_method']);
+            $disbursements->where('payment_method', $filters['payment_method']);
+        }
+
+        if (!empty($filters['search'])) {
+            $search = '%' . $filters['search'] . '%';
+            $topUps->where(function($q) use ($search) {
+                $q->where('description', 'like', $search)
+                  ->orWhere('transaction_code', 'like', $search);
+            });
+            $disbursements->where(function($q) use ($search) {
+                $q->where('description', 'like', $search)
+                  ->orWhere('receiver', 'like', $search)
+                  ->orWhere('account', 'like', $search)
+                  ->orWhere('project_name', 'like', $search)
+                  ->orWhere('transaction_code', 'like', $search);
+            });
+        }
+
+        // Apply archiving filters
+        $showArchived = filter_var($filters['show_archived'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $topUps->where('is_archived', $showArchived);
+        $disbursements->where('is_archived', $showArchived);
+
+        // Apply disbursement-specific filters
+        if (!empty($filters['status'])) {
+            $disbursements->where('status', $filters['status']);
+            if ($filters['status'] !== 'active') {
+                $topUps->whereRaw('1 = 0');
+            }
+        }
+
+        if (!empty($filters['classification'])) {
+            $disbursements->where('classification', $filters['classification']);
+            $topUps->whereRaw('1 = 0');
+        }
+
+        // Combine using Union All
+        $query = $disbursements->unionAll($topUps);
+
+        // SORTING LOGIC: 
+        // 1. parent_id DESC: Keep groups (top-up + its disbursements) together, newest groups first.
+        // 2. type_priority ASC: Ensure the Top-up (priority 1) is above its related disbursements (priority 2).
+        // 3. created_at ASC: Sort disbursements chronologically within the group.
+        return $query->orderBy('parent_id', 'desc')
+                    ->orderBy('type_priority', 'asc')
+                    ->orderBy('created_at', 'asc')
+                    ->paginate($perPage, ['*'], 'page', $page);
+    }
+
+    /**
+     * Archive a specific disbursement.
+     */
+    public function archiveDisbursement(PettyCashDisbursement $disbursement, int $userId): bool
+    {
+        return $disbursement->update([
+            'is_archived' => true,
+            'archived_at' => now(),
+            'archived_by' => $userId
+        ]);
+    }
+
+    /**
+     * Bulk archive disbursements.
+     */
+    public function bulkArchiveDisbursements(array $ids, int $userId): int
+    {
+        return PettyCashDisbursement::whereIn('id', $ids)->update([
+            'is_archived' => true,
+            'archived_at' => now(),
+            'archived_by' => $userId
+        ]);
+    }
+
+    /**
+     * Archive a specific top-up.
+     */
+    public function archiveTopUp(PettyCashTopUp $topUp, int $userId): bool
+    {
+        return $topUp->update([
+            'is_archived' => true,
+            'archived_at' => now(),
+            'archived_by' => $userId
+        ]);
+    }
+
+    /**
+     * Archive a top-up and all its disbursements at once.
+     */
+    public function archiveGroup(int $topUpId, int $userId): bool
+    {
+        return DB::transaction(function () use ($topUpId, $userId) {
+            // Archive the Top-up
+            PettyCashTopUp::where('id', $topUpId)->update([
+                'is_archived' => true,
+                'archived_at' => now(),
+                'archived_by' => $userId
+            ]);
+
+            // Archive all related disbursements
+            PettyCashDisbursement::where('top_up_id', $topUpId)->update([
+                'is_archived' => true,
+                'archived_at' => now(),
+                'archived_by' => $userId
+            ]);
+
+            return true;
+        });
+    }
+
+    /**
+     * Bulk archive multiple groups at once.
+     */
+    public function bulkArchiveGroups(array $topUpIds, int $userId): int
+    {
+        return DB::transaction(function () use ($topUpIds, $userId) {
+            // Archive all Top-ups
+            PettyCashTopUp::whereIn('id', $topUpIds)->update([
+                'is_archived' => true,
+                'archived_at' => now(),
+                'archived_by' => $userId
+            ]);
+
+            // Archive all related disbursements
+            PettyCashDisbursement::whereIn('top_up_id', $topUpIds)->update([
+                'is_archived' => true,
+                'archived_at' => now(),
+                'archived_by' => $userId
+            ]);
+
+            return count($topUpIds);
+        });
     }
 }

@@ -28,6 +28,9 @@ class PettyCashTopUp extends Model
         'transaction_code',
         'description',
         'created_by',
+        'is_archived',
+        'archived_at',
+        'archived_by',
     ];
 
     /**
@@ -41,6 +44,8 @@ class PettyCashTopUp extends Model
             'amount' => 'decimal:2',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
+            'is_archived' => 'boolean',
+            'archived_at' => 'datetime',
         ];
     }
 
@@ -129,6 +134,22 @@ class PettyCashTopUp extends Model
     public function scopeLatest($query)
     {
         return $query->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Scope to filter not archived transactions.
+     */
+    public function scopeNotArchived($query)
+    {
+        return $query->where('is_archived', false);
+    }
+
+    /**
+     * Scope to filter archived transactions.
+     */
+    public function scopeArchived($query)
+    {
+        return $query->where('is_archived', true);
     }
 
     /**
