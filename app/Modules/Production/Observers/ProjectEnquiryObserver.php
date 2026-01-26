@@ -116,6 +116,7 @@ class ProjectEnquiryObserver
             'status' => 'pending',
             'priority' => $this->mapPriority($project->enquiry->priority ?? 'medium'),
             'due_date' => $project->end_date ?? $project->enquiry->expected_delivery_date,
+            'assigned_to' => $project->enquiry->project_officer_id,
             'created_by' => $project->enquiry->created_by ?? 1,
         ]);
     }

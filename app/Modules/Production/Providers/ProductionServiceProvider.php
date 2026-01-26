@@ -23,12 +23,11 @@ class ProductionServiceProvider extends ServiceProvider
         // Load migrations from module directory
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 
-        // Register routes with proper prefix
-        Route::group([
-            'middleware' => ['api', 'auth:sanctum'],
-            'prefix' => 'api/production',
-        ], function () {
-            $this->loadRoutesFrom(__DIR__.'/../Routes/api.php');
+        // Register routes using the new Laravel method
+        $this->app->booted(function () {
+            Route::middleware(['api', 'auth:sanctum'])
+                ->prefix('api/production')
+                ->group(__DIR__.'/../Routes/api.php');
         });
     }
 }

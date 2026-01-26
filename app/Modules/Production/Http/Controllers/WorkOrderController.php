@@ -57,13 +57,17 @@ class WorkOrderController extends Controller
             });
         }
 
-        $workOrders = $query->with(['projectEnquiry.projectOfficer', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy'])
+        $workOrders = $query->with(['projectEnquiry.projectOfficer', 'projectEnquiry.client', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy'])
             ->orderBy('created_at', 'desc')
             ->paginate(25);
 
-        // Append status_category to each work order for frontend tab display
+        // Append status_category and project_officer_name to each work order for frontend
         $workOrders->getCollection()->transform(function ($workOrder) {
             $workOrder->status_category = $workOrder->getStatusCategory();
+            
+            // Simple: Add project officer name directly
+            $workOrder->project_officer_name = $workOrder->projectEnquiry?->projectOfficer?->name;
+            
             return $workOrder;
         });
 
@@ -96,9 +100,10 @@ class WorkOrderController extends Controller
 
         $workOrder = WorkOrder::create($validated);
 
-        // Load relationships and append status_category for frontend tab display
-        $workOrder->load(['projectEnquiry.projectOfficer', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy']);
+        // Load relationships and append status_category and project_officer_name for frontend
+        $workOrder->load(['projectEnquiry.projectOfficer', 'projectEnquiry.client', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy']);
         $workOrder->status_category = $workOrder->getStatusCategory();
+        $workOrder->project_officer_name = $workOrder->projectEnquiry?->projectOfficer?->name;
 
         return response()->json([
             'success' => true,
@@ -112,11 +117,12 @@ class WorkOrderController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $workOrder = WorkOrder::with(['projectEnquiry.projectOfficer', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy'])
+        $workOrder = WorkOrder::with(['projectEnquiry.projectOfficer', 'projectEnquiry.client', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy'])
             ->findOrFail($id);
 
-        // Append status_category for frontend tab display
+        // Append status_category and project_officer_name for frontend
         $workOrder->status_category = $workOrder->getStatusCategory();
+        $workOrder->project_officer_name = $workOrder->projectEnquiry?->projectOfficer?->name;
 
         return response()->json([
             'success' => true,
@@ -145,9 +151,10 @@ class WorkOrderController extends Controller
 
         $workOrder->update($validated);
 
-        // Reload relationships and append status_category for frontend tab display
-        $workOrder->load(['projectEnquiry.projectOfficer', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy']);
+        // Reload relationships and append status_category and project_officer_name for frontend
+        $workOrder->load(['projectEnquiry.projectOfficer', 'projectEnquiry.client', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy']);
         $workOrder->status_category = $workOrder->getStatusCategory();
+        $workOrder->project_officer_name = $workOrder->projectEnquiry?->projectOfficer?->name;
 
         return response()->json([
             'success' => true,
@@ -176,13 +183,14 @@ class WorkOrderController extends Controller
     public function getByEnquiry($enquiry_id): JsonResponse
     {
         $workOrders = WorkOrder::where('project_enquiry_id', $enquiry_id)
-            ->with(['projectEnquiry.projectOfficer', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy'])
+            ->with(['projectEnquiry.projectOfficer', 'projectEnquiry.client', 'projectEnquiry', 'project', 'enquiryTask', 'assignedTo', 'createdBy'])
             ->orderBy('created_at', 'desc')
             ->get();
 
-        // Append status_category to each work order for frontend tab display
+        // Append status_category and project_officer_name to each work order for frontend
         $workOrders->transform(function ($workOrder) {
             $workOrder->status_category = $workOrder->getStatusCategory();
+            $workOrder->project_officer_name = $workOrder->projectEnquiry?->projectOfficer?->name;
             return $workOrder;
         });
 
