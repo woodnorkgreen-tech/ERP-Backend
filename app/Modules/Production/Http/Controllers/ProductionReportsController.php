@@ -89,9 +89,18 @@ class ProductionReportsController extends Controller
                 ? round(($employeesWithWork / $activeEmployees) * 100, 2) 
                 : 0;
 
-            // Calculate total labor cost (assuming $25/hr regular, $37.50/hr overtime)
-            $regularHours = $totalLaborHours - $totalOvertimeHours;
-            $totalLaborCost = ($regularHours * 25) + ($totalOvertimeHours * 37.5);
+            // Calculate total labor cost using daily rates from technical labour
+            $totalLaborCost = 0;
+            $jobCardsForCost = JobCard::whereBetween('date', [$startDate, $endDate])
+                ->where('status', 'approved')
+                ->get();
+                
+            foreach ($jobCardsForCost as $jobCard) {
+                if ($jobCard->worker) {
+                    $dayRate = $jobCard->worker->day_rate ?? 25.00;
+                    $totalLaborCost += $dayRate; // Each job card represents one day of work
+                }
+            }
 
             // Get top performers
             $topPerformers = JobCard::whereBetween('date', [$startDate, $endDate])
@@ -104,9 +113,19 @@ class ProductionReportsController extends Controller
                     $completedJobs = $jobCards->count();
                     $efficiency = $totalHours > 0 ? min(100, round(($completedJobs / $totalHours) * 100, 1)) : 0;
                     
+                    $firstJobCard = $jobCards->first();
+                    $workerName = 'Unknown';
+                    
+                    if ($firstJobCard->worker) {
+                        // Handle both technical labour (full_name) and legacy employees (first_name/last_name)
+                        $workerName = $firstJobCard->worker->full_name ?? 
+                                     ($firstJobCard->worker->first_name . ' ' . $firstJobCard->worker->last_name) ?? 
+                                     'Unknown';
+                    }
+                    
                     return [
                         'technician_id' => (int) $workerId,
-                        'technician_name' => $jobCards->first()->worker->name ?? 'Unknown',
+                        'technician_name' => $workerName,
                         'job_cards_completed' => $completedJobs,
                         'total_hours' => round($totalHours, 1),
                         'efficiency_rating' => $efficiency
@@ -207,9 +226,9 @@ class ProductionReportsController extends Controller
             // Calculate efficiency (jobs completed per hour)
             $efficiency = $totalHours > 0 ? min(100, round(($totalDays / $totalHours) * 100, 1)) : 0;
 
-            // Calculate total cost - use day_rate from technical labour if available, otherwise default rates
+            // Calculate total cost using fixed daily rate
             $dayRate = $technician->day_rate ?? 25.00;
-            $totalCost = ($regularHours * $dayRate) + ($totalOvertime * $dayRate * 1.5);
+            $totalCost = $totalDays * $dayRate;
 
             // Determine technician name and ID based on model type
             if ($technician instanceof TechnicalLabour) {
@@ -231,7 +250,8 @@ class ProductionReportsController extends Controller
                     'overtime_hours' => round($totalOvertime, 1),
                     'job_cards_completed' => $totalDays,
                     'efficiency_rating' => round($efficiency, 1),
-                    'total_cost' => round($totalCost, 2)
+                    'total_cost' => round($totalCost, 2),
+                    'day_rate' => round($dayRate, 2)
                 ]
             ]);
 
