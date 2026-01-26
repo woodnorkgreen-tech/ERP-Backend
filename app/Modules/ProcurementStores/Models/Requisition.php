@@ -33,6 +33,11 @@ class Requisition extends Model
         'approved_at' => 'datetime',
     ];
 
+    public function purchaseOrder()
+    {
+        return $this->hasOne(PurchaseOrder::class);
+    }
+
     public function items()
     {
         return $this->hasMany(RequisitionItem::class);

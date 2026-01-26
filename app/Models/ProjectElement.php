@@ -47,15 +47,29 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *     )
  * )
  */
+use Illuminate\Support\Str;
+
 class ProjectElement extends Model
 {
     use HasFactory;
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function ($model) {
+            if (empty($model->persistent_id)) {
+                $model->persistent_id = (string) Str::uuid();
+            }
+        });
+    }
 
     protected $fillable = [
         'task_materials_data_id',
         'template_id',
         'element_type',
         'name',
+        'persistent_id',
         'category',
         'dimensions',
         'is_included',

@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Validator;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 /**
  * @OA\Tag(
@@ -83,6 +84,46 @@ class MaterialsController extends Controller
             return response()->json([
                 'message' => 'Failed to retrieve materials data',
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Download materials data as PDF
+     */
+    public function downloadPdf(int $taskId)
+    {
+        try {
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)
+                ->with(['elements.materials', 'task.enquiry.client'])
+                ->first();
+
+            if (!$materialsData) {
+                return response()->json([
+                    'message' => 'Materials data not found'
+                ], 404);
+            }
+
+            $enquiry = $materialsData->task->enquiry;
+            
+            $pdf = Pdf::loadView('reports.materials', [
+                'materialsData' => $materialsData,
+                'enquiry' => $enquiry
+            ]);
+
+            $fileName = 'materials-specification-' . ($enquiry->job_number ?? $enquiry->enquiry_number ?? $taskId) . '.pdf';
+            
+            return $pdf->download($fileName);
+        } catch (\Exception $e) {
+            \Log::error('Failed to generate materials PDF', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
@@ -250,9 +291,8 @@ class MaterialsController extends Controller
             if ($materialsChanged && $existingApprovalStatus) {
                 \Log::info('Materials content changed - resetting approval status', ['taskId' => $taskId]);
                 $projectInfo['approval_status'] = [
-                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
+                    'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
                     'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
-                    'finance' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
                     'all_approved' => false,
                     'last_approval_at' => null
                 ];
@@ -260,16 +300,35 @@ class MaterialsController extends Controller
                 // Preserve existing approval status if materials haven't changed
                 \Log::info('Materials unchanged - preserving approval status', ['taskId' => $taskId]);
                 $projectInfo['approval_status'] = $existingApprovalStatus;
+                
+                // Ensure production key exists for legacy data migration
+                if (!isset($projectInfo['approval_status']['production'])) {
+                    $projectInfo['approval_status']['production'] = [
+                        'approved' => false, 
+                        'approved_by' => null, 
+                        'approved_by_name' => null, 
+                        'approved_at' => null, 
+                        'comments' => ''
+                    ];
+                    $projectInfo['approval_status']['all_approved'] = false; // Reset overall if structure changed
+                }
             } else {
                 // Initialize approval status for new materials data
                 $projectInfo['approval_status'] = [
-                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'all_approved' => false,
                     'last_approval_at' => null
                 ];
             }
+
+            // FORCE LOGIC: Calculate all_approved based on strict dual-approval requirement
+            // This ensures backend enforces the rule regardless of frontend state
+            $poApproved = $projectInfo['approval_status']['project_officer']['approved'] ?? false;
+            $prodApproved = $projectInfo['approval_status']['production']['approved'] ?? false;
+            
+            // STRICT GATE: Both must be true
+            $projectInfo['approval_status']['all_approved'] = ($poApproved && $prodApproved);
 
             $materialsData = TaskMaterialsData::updateOrCreate(
                 ['enquiry_task_id' => $taskId],
@@ -297,6 +356,7 @@ class MaterialsController extends Controller
                     'template_id' => $elementData['templateId'] ?? null,
                     'element_type' => $elementData['elementType'],
                     'name' => $elementData['name'],
+                    'persistent_id' => $elementData['persistent_id'] ?? $elementData['persistentId'] ?? null,
                     'category' => $elementData['category'],
                     'dimensions' => $elementData['dimensions'] ?? [],
                     'is_included' => $elementData['isIncluded'] ?? true,
@@ -310,6 +370,7 @@ class MaterialsController extends Controller
                     $material = ElementMaterial::create([
                         'project_element_id' => $element->id,
                         'library_material_id' => $materialData['libraryMaterialId'] ?? null,
+                        'persistent_id' => $materialData['persistent_id'] ?? $materialData['persistentId'] ?? null,
                         'description' => $materialData['description'],
                         'unit_of_measurement' => $materialData['unitOfMeasurement'],
                         'quantity' => $materialData['quantity'],
@@ -340,9 +401,10 @@ class MaterialsController extends Controller
             // Check for additional materials and create budget additions automatically
             $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
 
-            // Update budget data with latest materials if budget exists
-            $this->syncMaterialsToBudget($taskId, $request->projectElements, $idMapping);
-
+            // Disable automatic background sync - users must trigger sync manually from the budget
+            // $this->syncMaterialsToBudget($taskId, $request->projectElements, $idMapping);
+            
+            /* 
             // Trigger Procurement Sync immediately using the ID Mapping
             // This ensures meaningful Procurement data is preserved even if Budget IDs changed
             $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($taskId);
@@ -356,6 +418,7 @@ class MaterialsController extends Controller
                     $this->procurementService->syncWithBudget($procurementTask->id, $idMapping);
                 }
             }
+            */
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData->fresh(['elements.materials'])),
@@ -717,6 +780,8 @@ class MaterialsController extends Controller
             $existingMaterials = $budgetData->materials_data ?? [];
             $budgetElementsById = []; // Key: IDString -> ElementData
             $budgetMaterialsById = []; // Key: IDString -> MaterialData
+            $budgetMaterialsByPersistentId = []; // Key: UUID -> MaterialData
+            $budgetElementsByPersistentId = []; // Key: UUID -> ElementData
             
             // Fallbacks for content matching (if IDs fail)
             $budgetElementsByKey = []; // Key: Name|Type -> ElementData
@@ -726,6 +791,9 @@ class MaterialsController extends Controller
                 if (isset($existingElem['id'])) {
                     $budgetElementsById[(string)$existingElem['id']] = $existingElem;
                 }
+                if (isset($existingElem['persistent_id'])) {
+                    $budgetElementsByPersistentId[(string)$existingElem['persistent_id']] = $existingElem;
+                }
                 
                 // Fallback Key for Element
                 $elemKey = strtolower(trim($existingElem['name'] ?? '')) . '|' . strtolower($existingElem['elementType'] ?? 'custom');
@@ -734,6 +802,9 @@ class MaterialsController extends Controller
                 foreach ($existingElem['materials'] ?? [] as $existingMat) {
                     if (isset($existingMat['id'])) {
                         $budgetMaterialsById[(string)$existingMat['id']] = $existingMat;
+                    }
+                    if (isset($existingMat['persistent_id'])) {
+                        $budgetMaterialsByPersistentId[(string)$existingMat['persistent_id']] = $existingMat;
                     }
                     
                     // Fallback Key for Material
@@ -752,6 +823,11 @@ class MaterialsController extends Controller
 
                 // Resolve matching budget element
                 $matchingBudgetElem = null;
+
+                // 0. Try Persistent ID Mapping
+                if (!empty($element->persistent_id)) {
+                    $matchingBudgetElem = $budgetElementsByPersistentId[(string)$element->persistent_id] ?? null;
+                }
 
                 // A. Try ID Mapping (New ID -> Old ID -> Budget Lookup)
                 $oldElementId = null;
@@ -786,6 +862,11 @@ class MaterialsController extends Controller
                     
                     // Resolve matching budget material
                     $matchingBudgetMat = null;
+
+                    // 0. Try Persistent ID Mapping (Highest Reliability)
+                    if (!empty($material->persistent_id)) {
+                        $matchingBudgetMat = $budgetMaterialsByPersistentId[(string)$material->persistent_id] ?? null;
+                    }
                     
                     // A. Try ID Mapping
                     $oldMaterialId = null;
@@ -809,17 +890,14 @@ class MaterialsController extends Controller
                     }
 
                     if ($matchingBudgetMat) {
-                         $oldPrice = (float)($matchingBudgetMat['unitPrice'] ?? 0);
-                         // Preserve price if it was set
-                         if ($oldPrice > 0) {
-                             $unitPrice = $oldPrice;
-                             $hasCustomPrice = true;
-                             \Log::info('Preserved price via ' . ($matchingBudgetMat['id'] === $oldMaterialId ? 'ID' : 'Content'), [
-                                 'material' => $material->description,
-                                 'price' => $unitPrice
-                             ]);
-                         }
+                         $unitPrice = (float)($matchingBudgetMat['unitPrice'] ?? 0);
+                         $hasCustomPrice = true;
                          $oldQty = (float)($matchingBudgetMat['quantity'] ?? 0);
+
+                         \Log::info('Preserved budget price during sync', [
+                             'material' => $material->description,
+                             'price' => $unitPrice
+                         ]);
                     }
 
                     // If no custom price found/preserved, use library/default
@@ -829,6 +907,7 @@ class MaterialsController extends Controller
 
                     $newMaterialData = [
                         'id' => (string) $material->id, // Use NEW ID to keep budget fresh
+                        'persistent_id' => $material->persistent_id,
                         'description' => $material->description,
                         'unitOfMeasurement' => $material->unit_of_measurement,
                         'quantity' => (float) $material->quantity,
@@ -854,6 +933,7 @@ class MaterialsController extends Controller
                         'id' => (string) $element->id, // Use NEW ID
                         'elementType' => $element->element_type,
                         'name' => $element->name,
+                        'persistent_id' => $element->persistent_id,
                         'category' => $element->category,
                         'materials' => $elementMaterials,
                         'isIncluded' => true,
@@ -1049,12 +1129,14 @@ class MaterialsController extends Controller
                         'templateId' => $element->template_id,
                         'elementType' => $element->element_type,
                         'name' => $element->name,
+                        'persistent_id' => $element->persistent_id,
                         'category' => $element->category,
                         'dimensions' => $element->dimensions ?? ['length' => '', 'width' => '', 'height' => ''],
                         'isIncluded' => (bool) $element->is_included,
                         'materials' => $element->materials->map(function ($material) {
                             return [
                                 'id' => (string) $material->id,
+                                'persistent_id' => $material->persistent_id,
                                 'libraryMaterialId' => $material->library_material_id,
                                 'description' => $material->description,
                                 'unitOfMeasurement' => $material->unit_of_measurement,
@@ -1096,8 +1178,27 @@ class MaterialsController extends Controller
      */
     public function approveMaterials(Request $request, int $taskId, string $department): JsonResponse
     {
+        $user = auth()->user();
+        $userRoles = $user->roles->pluck('name')->toArray();
+        $isSuperAdmin = in_array('Super Admin', $userRoles);
+
+        // Department-specific authorization
+        if ($department === 'project_officer') {
+            if (!$isSuperAdmin && !$user->hasRole(['Project Officer', 'Project Manager', 'Admin'])) {
+                return response()->json([
+                    'message' => 'Unauthorized: Only Project Officers, Project Managers, or Admins can approve for Project Officer department.'
+                ], 403);
+            }
+        } elseif ($department === 'production') {
+            if (!$isSuperAdmin && !$user->hasRole(['Production', 'Production Manager', 'Admin'])) {
+                return response()->json([
+                    'message' => 'Unauthorized: Only Production staff or Admins can approve for Production department.'
+                ], 403);
+            }
+        }
+
         $validator = Validator::make(['department' => $department], [
-            'department' => 'required|in:design,production,project_officer'
+            'department' => 'required|in:project_officer,production'  // Allow BOTH departments
         ]);
 
         if ($validator->fails()) {
@@ -1119,9 +1220,8 @@ class MaterialsController extends Controller
             // Get current approval status from project_info
             $projectInfo = $materialsData->project_info ?? [];
             $approvalStatus = $projectInfo['approval_status'] ?? [
-                'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
+                'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'all_approved' => false,
                 'last_approval_at' => null
             ];
@@ -1136,10 +1236,10 @@ class MaterialsController extends Controller
                 'comments' => $request->input('comments', '')
             ];
 
-            // Check if all departments approved
-            $allApproved = $approvalStatus['design']['approved'] &&
-                           $approvalStatus['production']['approved'] &&
-                           $approvalStatus['project_officer']['approved'];
+            // STRICT GATE: BOTH departments must approve for all_approved to be true
+            $poApproved = $approvalStatus['project_officer']['approved'] ?? false;
+            $prodApproved = $approvalStatus['production']['approved'] ?? false;
+            $allApproved = ($poApproved && $prodApproved);  // BOTH must be true
 
             $approvalStatus['all_approved'] = $allApproved;
             if ($allApproved) {
@@ -1210,20 +1310,16 @@ class MaterialsController extends Controller
                 // Return default approval structure if no materials data exists
                 return response()->json([
                     'approval_status' => [
-                        'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                        'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                         'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                         'all_approved' => false,
                         'last_approval_at' => null
                     ],
-                    'pending' => ['design', 'production', 'project_officer']
+                    'pending' => ['project_officer']
                 ]);
             }
 
             $projectInfo = $materialsData->project_info ?? [];
             $approvalStatus = $projectInfo['approval_status'] ?? [
-                'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                 'all_approved' => false,
                 'last_approval_at' => null
@@ -1231,7 +1327,7 @@ class MaterialsController extends Controller
 
             // Calculate pending departments
             $pending = [];
-            foreach (['design', 'production', 'project_officer'] as $dept) {
+            foreach (['project_officer'] as $dept) {
                 if (!($approvalStatus[$dept]['approved'] ?? false)) {
                     $pending[] = $dept;
                 }
@@ -1548,8 +1644,6 @@ class MaterialsController extends Controller
                 
                 // Reset all approvals to draft
                 $projectInfo['approval_status'] = [
-                    'design' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
-                    'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'all_approved' => false,
                     'last_approval_at' => null,

@@ -87,6 +87,62 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Workflow Task Presets
+    |--------------------------------------------------------------------------
+    |
+    | Predefined task combinations for different project types.
+    | Users can select a preset which auto-selects appropriate tasks.
+    |
+    */
+
+    'task_presets' => [
+        'full_event' => [
+            'label' => 'Full Event (All Tasks)',
+            'description' => 'Complete event lifecycle from survey to reporting',
+            'tasks' => ['site-survey', 'design', 'materials', 'budget', 'quote', 'quote_approval', 'procurement', 'teams', 'production', 'logistics', 'setup', 'handover', 'setdown', 'report']
+        ],
+        'delivery_only' => [
+            'label' => 'Delivery Only',
+            'description' => 'Simple delivery projects without design/production',
+            'tasks' => ['materials', 'procurement', 'logistics', 'handover']
+        ],
+        'branding' => [
+            'label' => 'Branding/Merchandising',
+            'description' => 'Branding projects with design and production',
+            'tasks' => ['design', 'materials', 'budget', 'quote', 'quote_approval', 'production', 'handover']
+        ],
+        'design_only' => [
+            'label' => 'Design Only',
+            'description' => 'Concept and design delivery without execution',
+            'tasks' => ['site-survey', 'design', 'handover', 'report']
+        ],
+        'consultation' => [
+            'label' => 'Consultation/Advisory',
+            'description' => 'Advisory services without physical delivery',
+            'tasks' => ['site-survey', 'design', 'budget', 'quote', 'quote_approval', 'report']
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Task Dependencies
+    |--------------------------------------------------------------------------
+    |
+    | Define task dependencies for validation warnings
+    |
+    */
+
+    'task_dependencies' => [
+        'quote_approval' => ['quote'],
+        'procurement' => ['materials'],
+        'production' => ['materials', 'budget'],
+        'logistics' => ['procurement'],
+        'setup' => ['logistics'],
+        'setdown' => ['setup'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Task Escalation Settings
     |--------------------------------------------------------------------------
     |

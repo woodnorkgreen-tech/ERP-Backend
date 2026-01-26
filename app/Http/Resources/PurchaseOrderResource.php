@@ -25,6 +25,12 @@ class PurchaseOrderResource extends JsonResource
             'description' => $this->description,
             'total_amount' => (float) $this->total_amount,
             'status' => $this->status,
+             'requisition' => $this->when($this->requisition, function () {
+                return [
+                    'id' => $this->requisition->id,
+                    'requisition_number' => $this->requisition->requisition_number,
+                ];
+            }),
             'submitted_at' => $this->submitted_at?->format('Y-m-d H:i:s'),
             'approved_at' => $this->approved_at?->format('Y-m-d H:i:s'),
             

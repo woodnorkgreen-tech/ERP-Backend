@@ -37,6 +37,14 @@ class RequisitionResource extends JsonResource
         }),
         'urgency' => $this->urgency,
         'status' => $this->status,
+         // Add purchase order info
+            'purchaseOrder' => $this->when($this->purchaseOrder, function () {
+                return [
+                    'id' => $this->purchaseOrder->id,
+                    'po_number' => $this->purchaseOrder->po_number,
+                    'status' => $this->purchaseOrder->status,
+                ];
+            }),
         'submitted_at' => $this->submitted_at?->format('Y-m-d H:i:s'),
         'approved_at' => $this->approved_at?->format('Y-m-d H:i:s'),
         'rejection_reason' => $this->rejection_reason,

@@ -11,8 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('work_orders', function (Blueprint $table) {
-            $table->foreignId('project_id')->nullable()->after('project_enquiry_id')->constrained('projects')->onDelete('cascade');
+        Schema::table('transport_items', function (Blueprint $table) {
+            $table->string('main_category', 50)->nullable()->change();
         });
     }
 
@@ -21,9 +21,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('work_orders', function (Blueprint $table) {
-            $table->dropForeign(['project_id']);
-            $table->dropColumn('project_id');
+        Schema::table('transport_items', function (Blueprint $table) {
+            $table->enum('main_category', ['PRODUCTION', 'TOOLS_EQUIPMENTS', 'STORES', 'ELECTRICALS'])->nullable()->change();
         });
     }
 };

@@ -127,6 +127,12 @@ public function store(Request $request)
 
 public function update(Request $request, Requisition $requisition)
 {
+      if ($requisition->purchaseOrder) {
+            return response([
+                'error' => 'Cannot edit requisition after it has been linked to a purchase order'
+            ], 403);
+        }
+
     $input = $request->all();
     
     $validator = Validator::make($input, [
@@ -186,8 +192,14 @@ public function update(Request $request, Requisition $requisition)
    
     public function destroy(Requisition $requisition)
     {
+        // Block if linked to PO
+        if ($requisition->purchaseOrder) {
+            return response([
+                'error' => 'Cannot delete requisition after it has been linked to a purchase order'
+            ], 403);
+        }
+
         $requisition->delete();
-        
         return response(['message' => 'Requisition deleted successfully']);
     }
 

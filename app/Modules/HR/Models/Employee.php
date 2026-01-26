@@ -22,6 +22,7 @@ class Employee extends Model
         'hire_date',
 
         'status',
+        'salary',
         'employment_type',
         'manager_id',
         'address',

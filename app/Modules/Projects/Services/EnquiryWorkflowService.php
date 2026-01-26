@@ -21,26 +21,48 @@ class EnquiryWorkflowService
     /**
      * Create workflow tasks for a newly created enquiry (unassigned)
      */
+
     public function createWorkflowTasksForEnquiry(ProjectEnquiry $enquiry): void
     {
-        Log::info("Creating unassigned workflow tasks for enquiry ID: {$enquiry->id}");
-
-        // Check if tasks already exist for this enquiry to prevent duplication
-        $existingTasksCount = EnquiryTask::where('project_enquiry_id', $enquiry->id)->count();
-        if ($existingTasksCount > 0) {
-            Log::info("Tasks already exist for enquiry {$enquiry->id} ({$existingTasksCount} tasks found). Skipping task creation.");
-            return;
-        }
+        Log::info("Syncing workflow tasks for enquiry ID: {$enquiry->id}");
 
         try {
             $taskTemplates = config('enquiry_workflow.task_templates', []);
+            
+            // Get selected tasks or use all if none specified (backward compatibility)
+            $selectedTaskTypes = $enquiry->selected_workflow_tasks ?? 
+                                array_column($taskTemplates, 'type');
+            
+            // Ensure it's an array
+            if (!is_array($selectedTaskTypes)) {
+                $selectedTaskTypes = json_decode($selectedTaskTypes, true) ?? [];
+            }
 
-            foreach ($taskTemplates as $template) {
+            Log::info("Selected tasks for enquiry {$enquiry->id}: " . implode(', ', $selectedTaskTypes));
+
+            // Get existing tasks to prevent duplication and allow syncing
+            $existingTasks = EnquiryTask::where('project_enquiry_id', $enquiry->id)->get()->keyBy('type');
+            
+            foreach ($taskTemplates as $index => $template) {
+                $type = $template['type'];
+                $idealOrder = $index + 1; // Use canonical order from template config base-1
+
+                // If task exists, update its order to ensure sequence is correct (e.g. if we insert a task)
+                if ($existingTasks->has($type)) {
+                    $existingTasks[$type]->update(['order' => $idealOrder]);
+                    continue; 
+                }
+
+                // If not selected, skip creation
+                if (!in_array($type, $selectedTaskTypes)) {
+                    continue;
+                }
+                
                 $status = 'pending';
                 $notes = $template['notes'] ?? 'Complete this task';
 
                 // Handle skipped site survey
-                if ($template['type'] === 'site-survey' && $enquiry->site_survey_skipped) {
+                if ($type === 'site-survey' && $enquiry->site_survey_skipped) {
                     $status = 'completed';
                     $reason = $enquiry->site_survey_skip_reason ?? 'No reason provided';
                     $notes = "Site Survey skipped. Reason: {$reason}";
@@ -50,23 +72,37 @@ class EnquiryWorkflowService
                 EnquiryTask::create([
                     'project_enquiry_id' => $enquiry->id,
                     'title' => $template['title'],
-                    'type' => $template['type'],
+                    'type' => $type,
                     'status' => $status,
                     'priority' => EnquiryConstants::PRIORITY_MEDIUM,
-                    'notes' => $notes,
+                    'notes' => $notes, // Fixed syntax error here previously
                     'created_by' => $enquiry->created_by,
+                    'order' => $idealOrder, 
                 ]);
 
-                Log::info("Created unassigned {$template['type']} task for enquiry {$enquiry->id}");
+                Log::info("Created new {$type} task for enquiry {$enquiry->id}");
             }
 
-            Log::info("Successfully created unassigned workflow tasks for enquiry {$enquiry->id}");
+            // Cleanup: Remove tasks that are no longer selected (if they are safely removable)
+            foreach ($existingTasks as $type => $task) {
+                if (!in_array($type, $selectedTaskTypes)) {
+                    // Only delete if status is pending (safe to remove)
+                    if ($task->status === 'pending') {
+                         $task->delete();
+                         Log::info("Deleted removed task '{$type}' for enquiry {$enquiry->id}");
+                    }
+                }
+            }
+
+            Log::info("Workflow task sync completed for enquiry {$enquiry->id}");
 
         } catch (\Exception $e) {
-            Log::error("Failed to create workflow tasks for enquiry {$enquiry->id}: " . $e->getMessage());
+            Log::error("Failed to sync workflow tasks for enquiry {$enquiry->id}: " . $e->getMessage());
             throw $e;
         }
     }
+
+
 
 
 
@@ -618,7 +654,7 @@ class EnquiryWorkflowService
             if ($materialsData) {
                 $status = $materialsData->project_info['approval_status'] ?? [];
                 if (!($status['all_approved'] ?? false)) {
-                    throw new \Exception("Cannot complete Materials task. All department approvals (Design, Production, Finance) are required.");
+                    throw new \Exception("Cannot complete Materials task. Project Approval is required.");
                 }
             }
         }
@@ -690,8 +726,8 @@ class EnquiryWorkflowService
 
             $summary = $budgetData->budget_summary ?? [];
             $total = (float)($summary['grandTotal'] ?? 0);
-            if ($total <= 0) {
-                throw new \Exception("Cannot complete Budget task. The total budget amount must be greater than zero. Please add items to your budget.");
+            if ($total < 0) {
+                throw new \Exception("Cannot complete Budget task. The total budget amount cannot be negative.");
             }
         }
 

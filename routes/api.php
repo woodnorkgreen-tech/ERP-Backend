@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Modules\HR\Http\Controllers\EmployeeController;
 use App\Modules\HR\Http\Controllers\DepartmentController;
+use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\Admin\Http\Controllers\UserController;
 use App\Modules\Admin\Http\Controllers\RoleController;
 use App\Modules\Admin\Http\Controllers\PermissionController;
@@ -76,6 +77,14 @@ Route::prefix('hr')->group(function () {
     Route::put('departments/{department}', [DepartmentController::class, 'update']);
     Route::patch('departments/{department}', [DepartmentController::class, 'update']);
     Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
+
+    // Technical Labour Management
+    Route::get('technical-labour/template', [TechnicalLabourController::class, 'downloadTemplate']);
+    Route::post('technical-labour/import', [TechnicalLabourController::class, 'import']);
+    Route::get('technical-labour', [TechnicalLabourController::class, 'index']);
+    Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
+    Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
+    Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
 });
  
 Route::post('/register', [AuthController::class, 'register']);
@@ -153,11 +162,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{reportId}/attachments/{attachmentId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'deleteAttachment']);
     });
 
-        // Site survey management
-        Route::apiResource('site-surveys', SiteSurveyController::class); // Temporarily remove permissions for debugging
-        Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
-        Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
-        Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
 
         // Task management routes
         Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
@@ -249,6 +253,10 @@ Route::middleware('auth:sanctum')->group(function () {
             'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
             'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
         ]);
+
+        // Technical Labour management
+        Route::apiResource('technical-labour', App\Modules\HR\Http\Controllers\TechnicalLabourController::class);
+
         // Department management
         Route::get('departments', [DepartmentController::class, 'index'])
             ->middleware('permission:' . Permissions::DEPARTMENT_READ);
@@ -356,6 +364,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Delete element
         Route::delete('/elements/{elementId}', [App\Http\Controllers\MaterialsController::class, 'deleteElement']);
+
+        // PDF Generation
+        Route::get('/pdf', [App\Http\Controllers\MaterialsController::class, 'downloadPdf']);
     });
 
     // Budget management routes
@@ -365,11 +376,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/submit-approval', [App\Http\Controllers\BudgetController::class, 'submitForApproval']);
         Route::post('/import-materials', [App\Http\Controllers\BudgetController::class, 'importMaterials']);
         Route::get('/check-materials-update', [App\Http\Controllers\BudgetController::class, 'checkMaterialsUpdate']);
+        Route::get('/materials-preview', [App\Http\Controllers\BudgetController::class, 'getMaterialsPreview']);
         Route::get('/pdf', [App\Http\Controllers\BudgetController::class, 'downloadPdf']);
 
         // Budget versioning routes
         Route::post('/versions', [App\Http\Controllers\BudgetController::class, 'createBudgetVersion']);
         Route::get('/versions', [App\Http\Controllers\BudgetController::class, 'getBudgetVersions']);
+        Route::get('/versions/{versionId}', [App\Http\Controllers\BudgetController::class, 'getBudgetVersion']);
         Route::post('/versions/{versionId}/restore', [App\Http\Controllers\BudgetController::class, 'restoreBudgetVersion']);
 
         // Budget additions management
@@ -543,6 +556,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Projects Module Routes
     Route::prefix('projects')->group(function () {
+        // Site survey management
+        Route::apiResource('site-surveys', SiteSurveyController::class);
+        Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
+        Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
+        Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
+
         // Logistics Task Routes
         Route::prefix('tasks/{taskId}/logistics')->group(function () {
             Route::get('/', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'show']);

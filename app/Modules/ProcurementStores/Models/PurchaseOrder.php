@@ -12,6 +12,7 @@ class PurchaseOrder extends Model
     protected $connection = 'mysql';
 
     protected $fillable = [
+        'requisition_id',
         'po_number',
         'date',
         'supplier_id',
@@ -33,6 +34,11 @@ class PurchaseOrder extends Model
         'approved_at' => 'datetime',
     ];
 
+    public function requisition()
+    {
+        return $this->belongsTo(Requisition::class);
+    }
+
     public function items()
     {
         return $this->hasMany(PurchaseOrderItem::class);
@@ -53,9 +59,10 @@ class PurchaseOrder extends Model
         return $this->belongsTo('App\Models\User', 'approved_by')->with('employee');
     }
 
-    public function invoices()
+    // CHANGED: invoices() -> bills() and Invoice::class -> Bill::class
+    public function bills()
     {
-        return $this->hasMany(Invoice::class);
+        return $this->hasMany(Bill::class);
     }
 
     public function submitForApproval()
@@ -79,18 +86,18 @@ class PurchaseOrder extends Model
     {
         $year = date('Y');
         $prefix = "PO-{$year}-";
-        
+
         $lastPO = self::where('po_number', 'like', "{$prefix}%")
             ->orderBy('po_number', 'desc')
             ->first();
-        
+
         if ($lastPO) {
             $lastNumber = (int) substr($lastPO->po_number, -4);
             $newNumber = $lastNumber + 1;
         } else {
             $newNumber = 1;
         }
-        
+
         return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
     }
 }

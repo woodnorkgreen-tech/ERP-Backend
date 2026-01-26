@@ -27,7 +27,7 @@ class BudgetController extends Controller
     public function getBudgetData(int $taskId): JsonResponse
     {
         try {
-            $budgetData = $this->budgetService->getBudgetData($taskId);
+            $budgetData = TaskBudgetData::with('task')->where('enquiry_task_id', $taskId)->first();
 
             if (!$budgetData) {
                 return response()->json([
@@ -36,7 +36,8 @@ class BudgetController extends Controller
             }
 
             // Get materials task approval status
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $budgetData->task->project_enquiry_id ?? 0)
+            $projectEnquiryId = $budgetData->task->project_enquiry_id ?? 0;
+            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $projectEnquiryId)
                 ->where('type', 'materials')
                 ->first();
             
@@ -139,34 +140,35 @@ class BudgetController extends Controller
     public function importMaterials(int $taskId): JsonResponse
     {
         try {
-            $budgetData = $this->budgetService->importMaterials($taskId);
+            $result = $this->budgetService->importMaterials($taskId, (bool)request('force', false));
+            $budget = $result['budget'];
 
             // Transform the response to match frontend expectations
             $response = [
-                'projectInfo' => $budgetData->project_info,
-                'materials' => $budgetData->materials_data ?? [],
-                'labour' => $budgetData->labour_data ?? [],
-                'expenses' => $budgetData->expenses_data ?? [],
-                'logistics' => $budgetData->logistics_data ?? [],
-                'budgetSummary' => $budgetData->budget_summary,
-                'status' => $budgetData->status ?? 'draft',
+                'projectInfo' => $budget->project_info,
+                'materials' => $budget->materials_data ?? [],
+                'labour' => $budget->labour_data ?? [],
+                'expenses' => $budget->expenses_data ?? [],
+                'logistics' => $budget->logistics_data ?? [],
+                'budgetSummary' => $budget->budget_summary,
+                'status' => $budget->status ?? 'draft',
                 'materialsImportInfo' => [
-                    'importedAt' => $budgetData->materials_imported_at,
-                    'importedFromTask' => $budgetData->materials_imported_from_task,
-                    'manuallyModified' => $budgetData->materials_manually_modified ?? false,
-                    'importMetadata' => $budgetData->materials_import_metadata
+                    'importedAt' => $budget->materials_imported_at,
+                    'importedFromTask' => $budget->materials_imported_from_task,
+                    'manuallyModified' => $budget->materials_manually_modified ?? false,
+                    'importMetadata' => $budget->materials_import_metadata
                 ]
             ];
 
             return response()->json([
                 'data' => $response,
-                'message' => 'Materials imported successfully'
+                'message' => $result['message']
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to import materials',
+                'message' => $e->getMessage(), // Pass through the actual error message
                 'error' => $e->getMessage()
-            ], 500);
+            ], 400); // Changed to 400 for client errors like approval needed
         }
     }
 
@@ -182,6 +184,23 @@ class BudgetController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to check materials update',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getMaterialsPreview(int $taskId): JsonResponse
+    {
+        try {
+            $result = $this->budgetService->getMaterialsPreview($taskId);
+
+            return response()->json([
+                'data' => $result,
+                'message' => 'Materials preview retrieved'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve materials preview',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -292,6 +311,42 @@ class BudgetController extends Controller
 
             return response()->json([
                 'message' => 'Failed to create version',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get a specific version of a budget with its snapshot data
+     */
+    public function getBudgetVersion(int $taskId, int $versionId): JsonResponse
+    {
+        try {
+            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
+
+            if (!$budgetData) {
+                return response()->json(['message' => 'Budget data not found'], 404);
+            }
+
+            $version = \App\Models\BudgetVersion::where('task_budget_data_id', $budgetData->id)
+                ->with(['creator', 'materialVersion'])
+                ->find($versionId);
+
+            if (!$version) {
+                return response()->json(['message' => 'Version not found'], 404);
+            }
+
+            return response()->json(['data' => $version]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to get budget version', [
+                'taskId' => $taskId,
+                'versionId' => $versionId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to retrieve version data',
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
@@ -474,16 +529,39 @@ class BudgetController extends Controller
     {
         try {
             $task = \App\Modules\Projects\Models\EnquiryTask::with('enquiry.client')->findOrFail($taskId);
-            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-
+            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->with('budgetAdditions')->first();
+            
             if (!$budgetData) {
                 return response()->json(['message' => 'Budget data not found'], 404);
+            }
+
+            // CHECK FOR AUDIT REPORT TYPE
+            if (request('type') === 'audit') {
+                $baselineId = request('baseline_id');
+                $auditData = $this->budgetService->generateAuditReportData($taskId, $baselineId ? (int)$baselineId : null);
+                
+                $pdf = Pdf::loadView('reports.budget_audit', $auditData);
+                $fileName = 'budget-audit-' . ($task->enquiry->job_number ?? $taskId) . '.pdf';
+                return $pdf->download($fileName);
+            }
+
+            $comparisonData = null;
+            $comparisonVersion = null;
+            if (request()->has('comparison_version')) {
+                $version = \App\Models\BudgetVersion::find(request('comparison_version'));
+                if ($version && $version->task_budget_data_id === $budgetData->id) {
+                    $comparisonData = $version->data;
+                    $comparisonVersion = $version->version_number;
+                }
             }
 
             // Load view with data
             $pdf = Pdf::loadView('reports.budget', [
                 'budgetData' => $budgetData,
-                'enquiry' => $task->enquiry
+                'enquiry' => $task->enquiry,
+                'comparisonData' => $comparisonData,
+                'comparisonVersion' => $comparisonVersion,
+                'approvedAdditions' => $budgetData->budgetAdditions()->where('status', 'approved')->get()
             ]);
 
             $fileName = 'budget-' . ($task->enquiry->job_number ?? $task->enquiry->enquiry_number ?? $taskId) . '.pdf';
@@ -492,7 +570,8 @@ class BudgetController extends Controller
         } catch (\Exception $e) {
             \Log::error('Failed to generate budget PDF', [
                 'taskId' => $taskId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
