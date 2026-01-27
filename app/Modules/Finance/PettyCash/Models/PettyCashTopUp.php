@@ -24,6 +24,7 @@ class PettyCashTopUp extends Model
      */
     protected $fillable = [
         'amount',
+        'previous_balance',
         'payment_method',
         'transaction_code',
         'description',
@@ -42,6 +43,7 @@ class PettyCashTopUp extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'previous_balance' => 'decimal:2',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
             'is_archived' => 'boolean',

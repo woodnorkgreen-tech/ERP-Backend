@@ -27,6 +27,10 @@ class PettyCashService
         DB::beginTransaction();
 
         try {
+            // Get current balance before adding the top-up
+            $currentBalance = $this->repository->getCurrentBalance();
+            $data['previous_balance'] = $currentBalance->getCurrentBalance();
+            
             // Add creator information
             $data['created_by'] = Auth::id();
 
@@ -468,7 +472,7 @@ class PettyCashService
             $errors['classification'] = ['Invalid classification selected.'];
         }
 
-        $validPaymentMethods = ['cash', 'mpesa', 'bank_transfer', 'other'];
+        $validPaymentMethods = ['cash', 'mpesa', 'equity', 'stanbic', 'ncba', 'kcb', 'family', 'bank_transfer', 'other'];
         if (!empty($data['payment_method']) && !in_array($data['payment_method'], $validPaymentMethods)) {
             $errors['payment_method'] = ['Invalid payment method selected.'];
         }
@@ -497,7 +501,7 @@ class PettyCashService
         }
 
         // Validate payment method
-        $validPaymentMethods = ['cash', 'mpesa', 'bank_transfer', 'other'];
+        $validPaymentMethods = ['cash', 'mpesa', 'equity', 'stanbic', 'ncba', 'kcb', 'family', 'bank_transfer', 'other'];
         if (!empty($data['payment_method']) && !in_array($data['payment_method'], $validPaymentMethods)) {
             $errors['payment_method'] = 'Invalid payment method selected.';
         }
