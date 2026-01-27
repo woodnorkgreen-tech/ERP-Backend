@@ -275,14 +275,13 @@ class PettyCashController extends Controller
      */
     public function bulkDestroy(Request $request): JsonResponse
     {
+        $request->validate([
+            'ids' => 'required|array',
+            'ids.*' => 'exists:petty_cash_disbursements,id'
+        ]);
+
         try {
-            $request->validate([
-                'ids' => 'required|array',
-                'ids.*' => 'exists:petty_cash_disbursements,id'
-            ]);
-
             $result = $this->service->bulkDeleteDisbursements($request->ids);
-
             return response()->json($result);
         } catch (Exception $e) {
             return response()->json([
