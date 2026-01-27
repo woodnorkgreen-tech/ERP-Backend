@@ -25,6 +25,7 @@ class PettyCashTopUp extends Model
     protected $fillable = [
         'amount',
         'previous_balance',
+        'date_topped_up',
         'payment_method',
         'transaction_code',
         'description',
@@ -44,6 +45,7 @@ class PettyCashTopUp extends Model
         return [
             'amount' => 'decimal:2',
             'previous_balance' => 'decimal:2',
+            'date_topped_up' => 'date',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
             'is_archived' => 'boolean',
@@ -106,7 +108,7 @@ class PettyCashTopUp extends Model
      */
     public function scopeByDateRange($query, $startDate, $endDate)
     {
-        return $query->whereBetween('created_at', [$startDate, $endDate]);
+        return $query->whereBetween('date_topped_up', [$startDate, $endDate]);
     }
 
     /**

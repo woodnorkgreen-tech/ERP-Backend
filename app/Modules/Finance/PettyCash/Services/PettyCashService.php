@@ -511,6 +511,13 @@ class PettyCashService
             $errors['transaction_code'] = 'Transaction code is required for non-cash payments.';
         }
 
+        // Validate date
+        if (empty($data['date_topped_up'])) {
+            $errors['date_topped_up'] = 'Top-up date is required.';
+        } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $data['date_topped_up'])) {
+            $errors['date_topped_up'] = 'Invalid date format. Use YYYY-MM-DD.';
+        }
+
         return $errors;
     }
 

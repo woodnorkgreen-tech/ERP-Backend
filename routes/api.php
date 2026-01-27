@@ -24,6 +24,7 @@ use App\Http\Controllers\API\PublicHandoverController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
+use App\Modules\Finance\PettyCash\Controllers\PettyCashReportController;
 use App\Modules\Teams\Controllers\TeamsTaskController;
 use App\Modules\Teams\Controllers\TeamMemberController;
 use App\Constants\Permissions;
@@ -810,8 +811,14 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('transactions', [PettyCashController::class, 'transactions']);
             Route::get('recent', [PettyCashController::class, 'recent']);
             Route::get('search', [PettyCashController::class, 'search']);
-            Route::get('summary', [PettyCashController::class, 'summary']);
-            Route::get('analytics', [PettyCashController::class, 'analytics']);
+            
+            // Reporting & Analytics
+            Route::get('summary', [PettyCashReportController::class, 'summary']);
+            Route::get('analytics', [PettyCashReportController::class, 'analytics']);
+            Route::get('export', [PettyCashReportController::class, 'export']);
+            Route::get('report', [PettyCashReportController::class, 'report']);
+            Route::get('reports/summary', [PettyCashReportController::class, 'report']);
+            Route::get('reports/projects', [PettyCashReportController::class, 'projectReport']);
 
             // Excel upload route
             Route::post('upload-excel', [PettyCashController::class, 'uploadExcel'])
