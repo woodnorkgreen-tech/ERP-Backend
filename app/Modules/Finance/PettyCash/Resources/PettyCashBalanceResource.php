@@ -174,7 +174,7 @@ class PettyCashBalanceResource extends JsonResource
             return false;
         }
 
-        return $user->can('finance.petty_cash.create');
+        return $user->can('finance.petty_cash.create_disbursement');
     }
 
     /**

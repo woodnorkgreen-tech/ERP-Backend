@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel as ExcelFacade;
+use App\Modules\Finance\PettyCash\Resources\PettyCashBalanceResource;
 use Exception;
 
 class PettyCashController extends Controller
@@ -351,11 +352,11 @@ class PettyCashController extends Controller
     public function balance(): JsonResponse
     {
         try {
-            $balanceInfo = $this->service->getCurrentBalanceInfo();
+            $balance = $this->repository->getCurrentBalance();
 
             return response()->json([
                 'success' => true,
-                'data' => $balanceInfo,
+                'data' => (new PettyCashBalanceResource($balance))->resolve(),
             ]);
         } catch (Exception $e) {
             return response()->json([

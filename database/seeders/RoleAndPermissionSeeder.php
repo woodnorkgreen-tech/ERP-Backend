@@ -29,7 +29,10 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::USER_ASSIGN_ROLE,
             Permissions::ROLE_READ, Permissions::DEPARTMENT_READ, Permissions::DEPARTMENT_UPDATE,
             Permissions::EMPLOYEE_READ, Permissions::PROJECT_READ, Permissions::FINANCE_VIEW,
-            Permissions::FINANCE_PETTY_CASH_VIEW, Permissions::FINANCE_PETTY_CASH_CREATE,
+            Permissions::FINANCE_PETTY_CASH_VIEW,
+            Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE,
+            Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
+            Permissions::FINANCE_PETTY_CASH_CREATE,
             Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
             Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
             Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
@@ -64,7 +67,10 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::DEPARTMENT_ACCESS, Permissions::EMPLOYEE_READ, Permissions::PROJECT_READ,
             Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS, Permissions::TASK_READ,
             Permissions::TASK_UPDATE, Permissions::TASK_ASSIGN, Permissions::DASHBOARD_VIEW,
-            Permissions::FINANCE_PETTY_CASH_VIEW, Permissions::FINANCE_PETTY_CASH_CREATE,
+            Permissions::FINANCE_PETTY_CASH_VIEW,
+            Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE,
+            Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
+            Permissions::FINANCE_PETTY_CASH_CREATE,
             Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
             Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL
         ]);
@@ -81,9 +87,13 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::FINANCE_VIEW, Permissions::FINANCE_BUDGET_READ,
             Permissions::PROJECT_READ, Permissions::USER_READ,
             Permissions::DASHBOARD_FINANCE,
-            Permissions::FINANCE_PETTY_CASH_VIEW, Permissions::FINANCE_PETTY_CASH_CREATE,
+            Permissions::FINANCE_PETTY_CASH_VIEW,
+            Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE,
+            Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
+            Permissions::FINANCE_PETTY_CASH_CREATE,
             Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
-            Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP, Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL
+            Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
+            Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL
         ]);
 
         $costingRole = Role::firstOrCreate(['name' => 'Costing'], ['description' => 'Cost analysis and budget management']);

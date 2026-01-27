@@ -8,6 +8,7 @@ use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use App\Modules\Finance\PettyCash\Resources\PettyCashBalanceResource;
 use Exception;
 
 class PettyCashTopUpController extends Controller
@@ -120,11 +121,11 @@ class PettyCashTopUpController extends Controller
     public function balance(): JsonResponse
     {
         try {
-            $balanceInfo = $this->service->getCurrentBalanceInfo();
+            $balance = $this->repository->getCurrentBalance();
 
             return response()->json([
                 'success' => true,
-                'data' => $balanceInfo,
+                'data' => (new PettyCashBalanceResource($balance))->resolve(),
             ]);
         } catch (Exception $e) {
             return response()->json([
