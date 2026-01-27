@@ -231,6 +231,37 @@ class JobCardController extends Controller
     }
 
     /**
+     * Remove the specified job card from storage.
+     */
+    public function destroy(JobCard $jobCard): JsonResponse
+    {
+        try {
+            DB::beginTransaction();
+            
+            // Delete related tasks and issues first
+            $jobCard->tasks()->delete();
+            $jobCard->issues()->delete();
+            
+            // Delete the job card
+            $jobCard->delete();
+            
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Job card deleted successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete job card: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Update job card status.
      */
     public function updateStatus(Request $request, JobCard $jobCard): JsonResponse
