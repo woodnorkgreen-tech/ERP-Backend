@@ -146,14 +146,15 @@ class EnquiryController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-
         $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo');
 
-        // Apply filters
-        if ($request->has('search') && $request->search) {
+        // Apply search filter
+        if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('enquiry_number', 'like', "%{$search}%")
+                  ->orWhere('job_number', 'like', "%{$search}%")
                   ->orWhereHas('client', function ($clientQuery) use ($search) {
                       $clientQuery->where('full_name', 'like', "%{$search}%");
                   })
@@ -161,30 +162,54 @@ class EnquiryController extends Controller
             });
         }
 
-        if ($request->has('status') && $request->status) {
+        // Apply status filter (Direct match)
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        if ($request->has('client_id') && $request->client_id) {
+        if ($request->filled('client_id')) {
             $query->where('client_id', $request->client_id);
         }
 
-        if ($request->has('department_id') && $request->department_id) {
+        if ($request->filled('department_id')) {
             $query->where('department_id', $request->department_id);
         }
 
-        if ($request->has('view')) {
-            $view = $request->view;
-            $projectStatuses = ['quote_approved', 'planning', 'in_progress', 'completed', 'cancelled'];
+        // 1. Determine the core view filtering (Enquiries, Projects, Completed)
+        $completedStatuses = ['completed', 'cancelled'];
+        $activeProjectStatuses = ['quote_approved', 'planning', 'in_progress'];
+        
+        $view = $request->input('view', 'enquiries');
+        
+        if ($view === 'completed') {
+            $query->whereIn('status', $completedStatuses);
+        } else if ($view === 'projects') {
+            $query->whereIn('status', $activeProjectStatuses);
+        } else {
+            // Default Enquiries view: Statuses BEFORE quote_approved and not completed/cancelled
+            $query->whereNotIn('status', array_merge($activeProjectStatuses, $completedStatuses));
+        }
+
+        // 2. Apply "Sub-Tab" filtering (Status Groups)
+        if ($request->filled('sub_status') && $request->sub_status !== 'all') {
+            $subStatus = $request->sub_status;
             
-            if ($view === 'projects') {
-                $query->whereIn('status', $projectStatuses);
-            } else if ($view === 'enquiries') {
-                $query->whereNotIn('status', $projectStatuses);
+            if ($subStatus === 'new') {
+                $query->whereIn('status', ['enquiry_logged', 'client_registered']);
+            } elseif ($subStatus === 'in_progress_enquiry') {
+                $query->whereIn('status', ['site_survey_completed', 'design_completed', 'design_approved', 'materials_specified', 'budget_created', 'quote_prepared']);
+            } elseif ($subStatus === 'pre_prod') {
+                $query->whereIn('status', ['quote_approved', 'planning']);
+            } elseif ($subStatus === 'in_progress_active') {
+                $query->where('status', 'in_progress');
+            } elseif ($subStatus === 'completed') {
+                $query->where('status', 'completed');
+            } elseif ($subStatus === 'cancelled') {
+                $query->where('status', 'cancelled');
             }
         }
 
-        if ($request->has('assigned_to_me') && filter_var($request->assigned_to_me, FILTER_VALIDATE_BOOLEAN)) {
+        if ($request->boolean('assigned_to_me')) {
             $query->where('project_officer_id', Auth::id());
         }
 
@@ -194,20 +219,15 @@ class EnquiryController extends Controller
         $allowedSorts = ['created_at', 'expected_delivery_date', 'estimated_budget', 'title', 'priority', 'job_number'];
         
         // Special handling: When viewing projects (approved enquiries), default sort by job_number if not specified
-        $isProjectsView = $request->has('view') && $request->view === 'projects';
-        if ($isProjectsView && !$request->has('sort_by')) {
+        if ($view === 'projects' && !$request->has('sort_by')) {
             $sortBy = 'job_number';
         }
 
         if (in_array($sortBy, $allowedSorts)) {
             if ($sortBy === 'priority') {
-                // Custom sort for priority: Urgent (1) -> Low (4)
-                // ASC = Urgent First, DESC = Low First
                 $direction = strtolower($sortOrder) === 'asc' ? 'ASC' : 'DESC';
                 $query->orderByRaw("FIELD(priority, 'urgent', 'high', 'medium', 'low') $direction");
             } elseif ($sortBy === 'job_number') {
-                // Custom numerical sort for job_number (WNG-MM-YYYY-NNN format)
-                // Sort by Year DESC, Month DESC, Sequential Number DESC for latest first
                 $direction = strtolower($sortOrder) === 'desc' ? 'DESC' : 'ASC';
                 $query->orderByRaw("
                     CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, '-', 3), '-', -1) AS UNSIGNED) $direction,
@@ -221,7 +241,9 @@ class EnquiryController extends Controller
             $query->orderBy('created_at', 'desc');
         }
 
-        $enquiries = $query->paginate(EnquiryConstants::PAGINATION_PER_PAGE);
+        // Paginate results (Defaulting to 15)
+        $perPage = $request->get('per_page', EnquiryConstants::PAGINATION_PER_PAGE);
+        $enquiries = $query->paginate($perPage);
 
         return response()->json([
             'data' => $enquiries,

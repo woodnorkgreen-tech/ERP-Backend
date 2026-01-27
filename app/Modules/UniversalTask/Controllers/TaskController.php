@@ -681,7 +681,7 @@ class TaskController
             $history = $task->history()
                 ->with('user')
                 ->orderBy('created_at', 'desc')
-                ->paginate(50);
+                ->paginate(15);
 
             return response()->json([
                 'success' => true,

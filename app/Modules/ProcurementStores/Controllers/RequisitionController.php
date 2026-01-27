@@ -43,7 +43,7 @@ class RequisitionController extends Controller
             $query->where('urgency', $request->urgency);
         }
 
-        $requisitions = $query->orderBy('created_at', 'desc')->paginate(20);
+        $requisitions = $query->orderBy('created_at', 'desc')->paginate(15);
 
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }
@@ -63,7 +63,7 @@ class RequisitionController extends Controller
                     });
             })
             ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            ->paginate(15);
 
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }

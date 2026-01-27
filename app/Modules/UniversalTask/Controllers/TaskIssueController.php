@@ -67,7 +67,7 @@ class TaskIssueController
                 }
             }
 
-            $issues = $query->orderBy('reported_at', 'desc')->paginate(25);
+            $issues = $query->orderBy('reported_at', 'desc')->paginate(15);
 
             return response()->json([
                 'success' => true,
