@@ -372,6 +372,63 @@ class ArchivalReportService
             }
             
             $data['project_scope'] = $task->enquiry->project_scope ?? $task->enquiry->description;
+            
+            // --- From Materials Task ---
+            try {
+                $materialsTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
+                    ->where('type', 'materials')
+                    ->first();
+                    
+                if ($materialsTask) {
+                    $materialsData = \App\Models\TaskMaterialsData::with('elements.materials')
+                        ->where('enquiry_task_id', $materialsTask->id)
+                        ->first();
+                        
+                    if ($materialsData && $materialsData->elements) {
+                        $materialsList = [];
+                        foreach ($materialsData->elements as $element) {
+                            if (!$element->is_included) continue;
+                            
+                            foreach ($element->materials as $material) {
+                                if ($material->is_included) {
+                                    $materialsList[] = "- {$material->description}: {$material->quantity} {$material->unit}";
+                                }
+                            }
+                        }
+                        
+                        if (!empty($materialsList)) {
+                            $data['materials_used_in_production'] = implode("\n", $materialsList);
+                        }
+
+                        // --- Setup & Placements ---
+                        $data['setup_items'] = [];
+                        $data['item_placements'] = [];
+                        
+                        foreach ($materialsData->elements as $element) {
+                            if (!$element->is_included) continue;
+                            
+                            // 1. Setup Item Allocation
+                            $data['setup_items'][] = [
+                                'deliverable_item' => $element->name,
+                                'assigned_technician' => null,
+                                'site_section' => $element->dimensions ? implode(' x ', $element->dimensions) : null,
+                                'status' => 'pending',
+                                'notes' => $element->notes
+                            ];
+                            
+                            // 2. Item Placement Details
+                            $data['item_placements'][] = [
+                                'section_area' => $element->dimensions ? implode(' x ', $element->dimensions) : null,
+                                'items_installed' => $element->name,
+                                'placement_accuracy' => 'correct',
+                                'observation' => $element->notes
+                            ];
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::error('Archival Auto-populate: Materials fetch failed', ['error' => $e->getMessage()]);
+            }
         }
 
         return $data;
