@@ -16,6 +16,7 @@ class ArchivalSetupItem extends Model
         'assigned_technician',
         'site_section',
         'status',
+        'placement_accuracy',
         'notes',
     ];
 

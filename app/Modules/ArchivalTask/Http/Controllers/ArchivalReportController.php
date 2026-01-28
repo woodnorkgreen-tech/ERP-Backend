@@ -417,6 +417,7 @@ class ArchivalReportController extends Controller
             'setup_items.*.assigned_technician' => 'nullable|string|max:255',
             'setup_items.*.site_section' => 'nullable|string|max:255',
             'setup_items.*.status' => 'nullable|in:set,pending',
+            'setup_items.*.placement_accuracy' => 'nullable|string|max:50',
             'setup_items.*.notes' => 'nullable|string',
             
             'item_placements' => 'nullable|array',
