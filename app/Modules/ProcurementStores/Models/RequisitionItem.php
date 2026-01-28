@@ -15,10 +15,15 @@ class RequisitionItem extends Model
         'requisition_id',
         'material_id',
         'quantity',
+        'unit_price',
+        'total',
         'purpose',
         'reason',
     ];
-
+    protected $casts = [
+        'unit_price' => 'decimal:2',
+        'total' => 'decimal:2',
+    ];
     public function requisition()
     {
         return $this->belongsTo(Requisition::class);

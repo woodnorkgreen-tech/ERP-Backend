@@ -18,7 +18,7 @@ class RequisitionController extends Controller
         // Date filtering
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
-            
+
             if ($dateFilter === 'today') {
                 $query->whereDate('date', today());
             } elseif ($dateFilter === 'past_7_days') {
@@ -27,7 +27,7 @@ class RequisitionController extends Controller
                 $query->whereDate('date', '>=', now()->subDays(30));
             } elseif ($dateFilter === 'this_month') {
                 $query->whereMonth('date', now()->month)
-                      ->whereYear('date', now()->year);
+                    ->whereYear('date', now()->year);
             } elseif ($dateFilter === 'custom' && $request->has('start_date') && $request->has('end_date')) {
                 $query->whereBetween('date', [$request->start_date, $request->end_date]);
             }
@@ -50,107 +50,100 @@ class RequisitionController extends Controller
 
     public function search(Request $request)
     {
-        $searchTerm = $request->input('searchTerm');
+        $searchTerm = $request->input('searchTerm', '');
 
-        $requisitions = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy'])
-            ->where(function ($query) use ($searchTerm) {
-                $query->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhereHas('project', function ($q) use ($searchTerm) {
-                        $q->where('name', 'LIKE', '%' . $searchTerm . '%');
+        $query = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
+
+        // Only apply search if searchTerm is not empty
+        if (!empty($searchTerm)) {
+            $query->where(function ($q) use ($searchTerm) {
+                // Search in requisition_number
+                $q->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
+                    
+                    // FIXED: Search in related project using correct column names
+                    ->orWhereHas('project', function ($projectQuery) use ($searchTerm) {
+                        $projectQuery->where('project_name', 'LIKE', '%' . $searchTerm . '%')
+                                    ->orWhere('project_code', 'LIKE', '%' . $searchTerm . '%');
                     })
-                    ->orWhereHas('employee', function ($q) use ($searchTerm) {
-                        $q->where('name', 'LIKE', '%' . $searchTerm . '%');
+                    
+                    // FIXED: Search in related employee using correct column names
+                    ->orWhereHas('employee', function ($employeeQuery) use ($searchTerm) {
+                        $employeeQuery->where('first_name', 'LIKE', '%' . $searchTerm . '%')
+                                     ->orWhere('last_name', 'LIKE', '%' . $searchTerm . '%')
+                                     ->orWhere('employee_number', 'LIKE', '%' . $searchTerm . '%');
+                    })
+                    
+                    // FIXED: Search in department using correct column name
+                    ->orWhereHas('department', function ($deptQuery) use ($searchTerm) {
+                        $deptQuery->where('department_name', 'LIKE', '%' . $searchTerm . '%');
                     });
-            })
-            ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            });
+        }
+
+        // Apply filters if provided
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('urgency')) {
+            $query->where('urgency', $request->urgency);
+        }
+
+        if ($request->filled('project_id')) {
+            $query->where('project_id', $request->project_id);
+        }
+
+        if ($request->filled('department_id')) {
+            $query->where('department_id', $request->department_id);
+        }
+
+        if ($request->filled('employee_id')) {
+            $query->where('employee_id', $request->employee_id);
+        }
+
+        // Date filters
+        if ($request->filled('date_from')) {
+            $query->whereDate('date', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('date', '<=', $request->date_to);
+        }
+
+        $requisitions = $query->orderBy('created_at', 'desc')
+                             ->paginate($request->input('perPage', 20));
 
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }
 
-public function store(Request $request)
-{
-    $input = $request->all();
-    
-    $validator = Validator::make($input, [
-        'date' => 'required|date',
-        'requested_by_type' => 'required|in:project,office,employee',
-        'project_id' => 'required_if:requested_by_type,project',
-        'employee_id' => 'required_if:requested_by_type,employee',
-        'department_id' => 'required_if:requested_by_type,office',
-        'urgency' => 'required|in:normal,urgent',
-        'items' => 'required|array|min:1',
-        'items.*.material_id' => 'required|exists:library_materials,id',
-        'items.*.quantity' => 'required|integer|min:1',
-        'items.*.purpose' => 'required|string',
-    ]);
+    public function store(Request $request)
+    {
+        $input = $request->all();
 
-    if ($validator->fails()) {
-        return response(['error' => $validator->errors()], 422);
-    }
+        $validator = Validator::make($input, [
+            'date' => 'required|date',
+            'requested_by_type' => 'required|in:project,office,employee',
+            'project_id' => 'required_if:requested_by_type,project',
+            'employee_id' => 'required_if:requested_by_type,employee',
+            'department_id' => 'required_if:requested_by_type,office',
+            'urgency' => 'required|in:normal,urgent',
+            'items' => 'required|array|min:1',
+            'items.*.material_id' => 'required|exists:library_materials,id',
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.unit_price' => 'required|numeric|min:0',
+            'items.*.purpose' => 'required|string',
+        ]);
 
-    try {
-        DB::beginTransaction();
-
-        $input['requisition_number'] = Requisition::generateRequisitionNumber();
-        $input['user_id'] = auth()->id();
-
-        // **IMPORTANT: Clear unused fields based on requested_by_type**
-        if ($input['requested_by_type'] === 'project') {
-            $input['employee_id'] = null;
-            $input['department_id'] = null;
-        } elseif ($input['requested_by_type'] === 'employee') {
-            $input['project_id'] = null;
-            $input['department_id'] = null;
-        } elseif ($input['requested_by_type'] === 'office') {
-            $input['project_id'] = null;
-            $input['employee_id'] = null;
+        if ($validator->fails()) {
+            return response(['error' => $validator->errors()], 422);
         }
 
-        $items = $input['items'];
-        unset($input['items']);
+        try {
+            DB::beginTransaction();
 
-        $requisition = Requisition::create($input);
+            $input['requisition_number'] = Requisition::generateRequisitionNumber();
+            $input['user_id'] = auth()->id();
 
-        foreach ($items as $item) {
-            $requisition->items()->create($item);
-        }
-
-        DB::commit();
-
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
-    } catch (\Exception $e) {
-        DB::rollBack();
-        return response(['error' => 'Failed to create requisition: ' . $e->getMessage()], 500);
-    }
-}
-
-public function update(Request $request, Requisition $requisition)
-{
-      if ($requisition->purchaseOrder) {
-            return response([
-                'error' => 'Cannot edit requisition after it has been linked to a purchase order'
-            ], 403);
-        }
-
-    $input = $request->all();
-    
-    $validator = Validator::make($input, [
-        'date' => 'date',
-        'requested_by_type' => 'in:project,office,employee',
-        'urgency' => 'in:normal,urgent',
-        'status' => 'in:pending,approved,rejected,completed',
-    ]);
-
-    if ($validator->fails()) {
-        return response(['error' => $validator->errors()], 422);
-    }
-
-    try {
-        DB::beginTransaction();
-
-        // **IMPORTANT: Clear unused fields based on requested_by_type**
-        if (isset($input['requested_by_type'])) {
             if ($input['requested_by_type'] === 'project') {
                 $input['employee_id'] = null;
                 $input['department_id'] = null;
@@ -161,35 +154,102 @@ public function update(Request $request, Requisition $requisition)
                 $input['project_id'] = null;
                 $input['employee_id'] = null;
             }
-        }
 
-        if (isset($input['items'])) {
+            // Calculate total
+            $totalAmount = 0;
+            foreach ($input['items'] as $item) {
+                $totalAmount += $item['quantity'] * $item['unit_price'];
+            }
+            $input['total_amount'] = $totalAmount;
+
             $items = $input['items'];
             unset($input['items']);
 
-            $requisition->items()->delete();
-            
+            $requisition = Requisition::create($input);
+
             foreach ($items as $item) {
+                $item['total'] = $item['quantity'] * $item['unit_price'];
                 $requisition->items()->create($item);
             }
+
+            DB::commit();
+
+            return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response(['error' => 'Failed to create requisition: ' . $e->getMessage()], 500);
+        }
+    }
+
+    public function update(Request $request, Requisition $requisition)
+    {
+        if ($requisition->purchaseOrder) {
+            return response([
+                'error' => 'Cannot edit requisition after it has been linked to a purchase order'
+            ], 403);
         }
 
-        $requisition->update($input);
+        $input = $request->all();
 
-        DB::commit();
+        $validator = Validator::make($input, [
+            'date' => 'date',
+            'requested_by_type' => 'in:project,office,employee',
+            'urgency' => 'in:normal,urgent',
+            'status' => 'in:pending,approved,rejected,completed',
+        ]);
 
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
-    } catch (\Exception $e) {
-        DB::rollBack();
-        return response(['error' => 'Failed to update requisition: ' . $e->getMessage()], 500);
+        if ($validator->fails()) {
+            return response(['error' => $validator->errors()], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            if (isset($input['requested_by_type'])) {
+                if ($input['requested_by_type'] === 'project') {
+                    $input['employee_id'] = null;
+                    $input['department_id'] = null;
+                } elseif ($input['requested_by_type'] === 'employee') {
+                    $input['project_id'] = null;
+                    $input['department_id'] = null;
+                } elseif ($input['requested_by_type'] === 'office') {
+                    $input['project_id'] = null;
+                    $input['employee_id'] = null;
+                }
+            }
+
+            if (isset($input['items'])) {
+                $items = $input['items'];
+                unset($input['items']);
+
+                $requisition->items()->delete();
+
+                $totalAmount = 0;
+                foreach ($items as $item) {
+                    $item['total'] = $item['quantity'] * $item['unit_price'];
+                    $totalAmount += $item['total'];
+                    $requisition->items()->create($item);
+                }
+
+                $input['total_amount'] = $totalAmount;
+            }
+
+            $requisition->update($input);
+
+            DB::commit();
+
+            return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response(['error' => 'Failed to update requisition: ' . $e->getMessage()], 500);
+        }
     }
-}
+
     public function show(Requisition $requisition)
     {
         return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
     }
 
-   
     public function destroy(Requisition $requisition)
     {
         // Block if linked to PO

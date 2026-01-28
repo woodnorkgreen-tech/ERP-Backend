@@ -7,6 +7,7 @@ use App\Modules\ProcurementStores\Controllers\RequisitionController;
 use App\Modules\ProcurementStores\Controllers\PurchaseOrderController;
 use App\Modules\ProcurementStores\Controllers\InvoiceController;
 use App\Modules\ProcurementStores\Controllers\BillController;
+use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
 
 
 Route::get('/test', [ProcurementStoresController::class, 'test']);
@@ -50,6 +51,15 @@ Route::get('/payment-methods', [BillController::class, 'getPaymentMethods']);
 Route::post('/payment-methods', [BillController::class, 'storePaymentMethod']);
 Route::post('/search/bills', [BillController::class, 'search']);
 Route::post('/bills/{bill}/record-payment', [BillController::class, 'recordPayment']);
+Route::post('/multi-payment', [BillController::class, 'recordMultiBillPayment']);
 
 // Bills - Resource route LAST
 Route::resource('/bills', BillController::class);
+
+Route::get('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'index']);
+Route::get('/goods-receipt-notes/search', [GoodsReceiptNoteController::class, 'search']);
+Route::get('/goods-receipt-notes/available-purchase-orders', [GoodsReceiptNoteController::class, 'getAvailablePurchaseOrders']);
+Route::get('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'show']);
+Route::post('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'store']);
+Route::put('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'update']);
+Route::delete('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'destroy']);

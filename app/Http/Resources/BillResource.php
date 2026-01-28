@@ -43,7 +43,7 @@ class BillResource extends JsonResource
                             'id' => $payment->paymentMethod->id,
                             'method_name' => $payment->paymentMethod->method_name,
                         ] : null,
-                        'notes' => $payment->notes,
+                        'reference_number' => $payment->reference_number, // CHANGED from 'notes'
                         'created_by' => $payment->createdBy ? [
                             'id' => $payment->createdBy->id,
                             'name' => $payment->createdBy->name,

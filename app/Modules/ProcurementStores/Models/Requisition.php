@@ -20,17 +20,19 @@ class Requisition extends Model
         'department_id',
         'urgency',
         'status',
+        'total_amount',
         'submitted_at',
         'approved_at',
         'approved_by',
         'rejection_reason',
-        'user_id',
+        'user_id'
     ];
 
     protected $casts = [
-        'date' => 'date',
+         'date' => 'date',
         'submitted_at' => 'datetime',
         'approved_at' => 'datetime',
+        'total_amount' => 'decimal:2',
     ];
 
     public function purchaseOrder()

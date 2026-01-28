@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Models\User;
 
+
 class LibraryMaterial extends Model
 {
     use SoftDeletes;

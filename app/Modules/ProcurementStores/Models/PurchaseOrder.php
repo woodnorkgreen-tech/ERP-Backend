@@ -81,7 +81,10 @@ class PurchaseOrder extends Model
             'approved_by' => $userId
         ]);
     }
-
+public function goodsReceiptNote()
+{
+    return $this->hasOne(GoodsReceiptNote::class);
+}
     public static function generatePONumber()
     {
         $year = date('Y');

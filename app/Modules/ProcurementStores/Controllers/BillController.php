@@ -9,6 +9,7 @@ use App\Modules\ProcurementStores\Models\PaymentMethod;
 use App\Http\Resources\BillResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 
 class BillController extends Controller
@@ -85,9 +86,9 @@ class BillController extends Controller
                     ],
                     'bill_date' => $bill->bill_date->format('Y-m-d'),
                     'due_date' => $bill->due_date->format('Y-m-d'),
-                    'amount' => $bill->amount,
-                    'paid_amount' => $bill->paid_amount,
-                    'balance' => $bill->balance,
+                    'amount' => (float) $bill->amount,
+                    'paid_amount' => (float) $bill->paid_amount,
+                    'balance' => (float) $bill->balance,
                     'status' => $bill->status,
                 ];
             })
@@ -138,13 +139,17 @@ class BillController extends Controller
         return new BillResource($bill->load(['purchaseOrder', 'supplier', 'createdBy', 'payments.paymentMethod', 'payments.createdBy']));
     }
 
+    /**
+     * Record payment for a single bill
+     * CHANGED: notes -> reference_number (required)
+     */
     public function recordPayment(Request $request, Bill $bill)
     {
         $validator = Validator::make($request->all(), [
             'amount_paid' => 'required|numeric|min:0.01|max:' . $bill->balance,
             'payment_date' => 'required|date',
             'payment_method_id' => 'required|exists:payment_methods,id',
-            'notes' => 'nullable|string',
+            'reference_number' => 'required|string|max:255', // CHANGED from 'notes' => 'nullable|string'
         ]);
 
         if ($validator->fails()) {
@@ -152,17 +157,114 @@ class BillController extends Controller
         }
 
         try {
+            $paymentCode = 'PAY-' . str_pad((BillPayment::max('id') ?? 0) + 1, 6, '0', STR_PAD_LEFT);
+
             BillPayment::create([
                 'bill_id' => $bill->id,
+                'payment_code' => $paymentCode,
                 'amount_paid' => $request->amount_paid,
                 'payment_date' => $request->payment_date,
                 'payment_method_id' => $request->payment_method_id,
-                'notes' => $request->notes,
+                'reference_number' => $request->reference_number, // CHANGED from 'notes'
                 'user_id' => auth()->id(),
             ]);
 
-            return new BillResource($bill->fresh()->load(['purchaseOrder', 'supplier', 'createdBy', 'payments.paymentMethod']));
+            return new BillResource($bill->fresh()->load(['purchaseOrder', 'supplier', 'createdBy', 'payments.paymentMethod', 'payments.createdBy']));
         } catch (\Exception $e) {
+            return response(['error' => 'Failed to record payment: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * NEW METHOD: Record payment for multiple bills at once
+     * This fixes the NaN and 0.0 issues in payment summary
+     */
+    public function recordMultiBillPayment(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'bill_ids' => 'required|array|min:1',
+            'bill_ids.*' => 'exists:bills,id',
+            'amount_paid' => 'required|numeric|min:0.01',
+            'payment_date' => 'required|date',
+            'payment_method_id' => 'required|exists:payment_methods,id',
+            'reference_number' => 'required|string|max:255', // CHANGED from 'notes'
+        ]);
+
+        if ($validator->fails()) {
+            return response(['error' => $validator->errors()], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            // Get all bills with outstanding balance, ordered by due date
+            $bills = Bill::whereIn('id', $request->bill_ids)
+                        ->where('balance', '>', 0)
+                        ->orderBy('due_date', 'asc')
+                        ->get();
+
+            if ($bills->isEmpty()) {
+                DB::rollBack();
+                return response(['error' => 'No bills with outstanding balance found'], 422);
+            }
+
+            // Calculate total balance
+            $totalBalance = $bills->sum('balance');
+            
+            // Validate payment amount
+            if ($request->amount_paid > $totalBalance) {
+                DB::rollBack();
+                return response(['error' => 'Payment amount (' . number_format($request->amount_paid, 2) . ') exceeds total balance (' . number_format($totalBalance, 2) . ')'], 422);
+            }
+
+            // Generate a unique payment code for this multi-bill payment
+            $paymentCode = 'PAY-' . str_pad((BillPayment::max('id') ?? 0) + 1, 6, '0', STR_PAD_LEFT);
+            $remainingPayment = $request->amount_paid;
+            $billsUpdated = [];
+
+            // Distribute payment across bills
+            foreach ($bills as $bill) {
+                if ($remainingPayment <= 0) {
+                    break;
+                }
+
+                // Calculate how much to pay for this bill
+                $amountForThisBill = min($remainingPayment, $bill->balance);
+                
+                // Create payment record
+                BillPayment::create([
+                    'bill_id' => $bill->id,
+                    'payment_code' => $paymentCode,
+                    'amount_paid' => $amountForThisBill,
+                    'payment_date' => $request->payment_date,
+                    'payment_method_id' => $request->payment_method_id,
+                    'reference_number' => $request->reference_number, // CHANGED from 'notes'
+                    'user_id' => auth()->id(),
+                ]);
+
+                $billsUpdated[] = [
+                    'bill_id' => $bill->id,
+                    'bill_number' => $bill->bill_number,
+                    'amount_paid' => (float) $amountForThisBill,
+                    'previous_balance' => (float) $bill->balance,
+                    'new_balance' => (float) $bill->fresh()->balance,
+                ];
+
+                $remainingPayment -= $amountForThisBill;
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Payment recorded successfully for ' . count($billsUpdated) . ' bill(s)',
+                'payment_code' => $paymentCode,
+                'total_paid' => (float) $request->amount_paid,
+                'bills_updated' => $billsUpdated,
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
             return response(['error' => 'Failed to record payment: ' . $e->getMessage()], 500);
         }
     }
@@ -174,14 +276,15 @@ class BillController extends Controller
         $paidAmount = Bill::where('status', 'paid')->sum('amount');
         $overdueCount = Bill::where('status', 'overdue')->count();
 
-        return response([
+        return response()->json([
             'total_bills' => $totalBills,
-            'pending_amount' => $pendingAmount,
-            'paid_amount' => $paidAmount,
+            'pending_amount' => (float) $pendingAmount,
+            'paid_amount' => (float) $paidAmount,
             'overdue_count' => $overdueCount,
         ]);
     }
-public function destroy(Bill $bill)
+
+    public function destroy(Bill $bill)
     {
         try {
             $bill->delete();
@@ -190,6 +293,7 @@ public function destroy(Bill $bill)
             return response(['error' => 'Failed to delete bill: ' . $e->getMessage()], 500);
         }
     }
+
     public function getPaymentMethods()
     {
         $methods = PaymentMethod::where('is_active', true)->orderBy('method_name')->get();

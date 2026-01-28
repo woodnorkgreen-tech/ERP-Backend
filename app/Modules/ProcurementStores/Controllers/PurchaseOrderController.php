@@ -211,48 +211,53 @@ class PurchaseOrderController extends Controller
     }
 
     public function update(Request $request, PurchaseOrder $purchaseOrder)
-    {
-        $input = $request->all();
+{
+    $input = $request->all();
 
-        $validator = Validator::make($input, [
-            'date' => 'date',
-            'supplier_id' => 'exists:suppliers,id',
-            'due_date' => 'date',
-        ]);
+    $validator = Validator::make($input, [
+        'date' => 'date',
+        'supplier_id' => 'exists:suppliers,id',
+        'due_date' => 'date',
+    ]);
 
-        if ($validator->fails()) {
-            return response(['error' => $validator->errors()], 422);
+    if ($validator->fails()) {
+        return response(['error' => $validator->errors()], 422);
+    }
+
+    try {
+        DB::beginTransaction();
+
+        // Prevent item updates if PO is from a requisition
+        if ($purchaseOrder->requisition_id && isset($input['items'])) {
+            return response(['error' => 'Cannot modify items for purchase orders created from requisitions'], 422);
         }
 
-        try {
-            DB::beginTransaction();
+        if (isset($input['items'])) {
+            $items = $input['items'];
+            unset($input['items']);
 
-            if (isset($input['items'])) {
-                $items = $input['items'];
-                unset($input['items']);
+            $purchaseOrder->items()->delete();
 
-                $purchaseOrder->items()->delete();
-
-                $totalAmount = 0;
-                foreach ($items as $item) {
-                    $item['total'] = $item['quantity'] * $item['unit_price'];
-                    $totalAmount += $item['total'];
-                    $purchaseOrder->items()->create($item);
-                }
-
-                $input['total_amount'] = $totalAmount;
+            $totalAmount = 0;
+            foreach ($items as $item) {
+                $item['total'] = $item['quantity'] * $item['unit_price'];
+                $totalAmount += $item['total'];
+                $purchaseOrder->items()->create($item);
             }
 
-            $purchaseOrder->update($input);
-
-            DB::commit();
-
-            return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response(['error' => 'Failed to update purchase order: ' . $e->getMessage()], 500);
+            $input['total_amount'] = $totalAmount;
         }
+
+        $purchaseOrder->update($input);
+
+        DB::commit();
+
+        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response(['error' => 'Failed to update purchase order: ' . $e->getMessage()], 500);
     }
+}
 
    public function destroy(PurchaseOrder $purchaseOrder)
     {
