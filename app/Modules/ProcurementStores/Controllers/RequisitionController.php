@@ -250,57 +250,137 @@ class RequisitionController extends Controller
         return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
     }
 
-    public function destroy(Requisition $requisition)
+   
+
+   
+   
+
+   
+    
+  
+   
+    /**
+     * Check if user has approval/delete permissions
+     * Only Super Admin, Admin, and Accounts roles can approve/delete
+     */
+    private function canApproveOrDelete()
     {
-        // Block if linked to PO
-        if ($requisition->purchaseOrder) {
-            return response([
-                'error' => 'Cannot delete requisition after it has been linked to a purchase order'
+        $user = Auth::user();
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
+        
+        // Check if user has any of the allowed roles
+        return $user->roles->pluck('name')->intersect($allowedRoles)->isNotEmpty();
+    }
+
+    /**
+     * Submit requisition for approval
+     */
+    public function submitForApproval(Request $request, Requisition $requisition)
+    {
+        try {
+            $requisition->submitForApproval();
+            
+            return response()->json([
+                'message' => 'Requisition submitted for approval successfully',
+                'data' => $requisition->load(['items.material', 'createdBy', 'department', 'project'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to submit requisition',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Approve requisition - RESTRICTED to Super Admin, Admin, and Accounts
+     */
+    public function approve(Request $request, Requisition $requisition)
+    {
+        // Check authorization
+        if (!$this->canApproveOrDelete()) {
+            return response()->json([
+                'message' => 'Unauthorized. Only Super Admin, Admin, and Accounts can approve requisitions.'
             ], 403);
         }
 
-        $requisition->delete();
-        return response(['message' => 'Requisition deleted successfully']);
-    }
-
-    public function submitForApproval(Requisition $requisition)
-    {
-        if ($requisition->status !== 'draft') {
-            return response(['error' => 'Only draft requisitions can be submitted'], 422);
+        try {
+            $requisition->approve(Auth::id());
+            
+            return response()->json([
+                'message' => 'Requisition approved successfully',
+                'data' => $requisition->load(['items.material', 'createdBy', 'approvedBy', 'department', 'project'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to approve requisition',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $requisition->submitForApproval();
-
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
     }
 
-    public function approve(Requisition $requisition)
-    {
-        if ($requisition->status !== 'pending_approval') {
-            return response(['error' => 'Only pending requisitions can be approved'], 422);
-        }
-
-        $requisition->approve(auth()->id());
-
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
-    }
-
+    /**
+     * Reject requisition - RESTRICTED to Super Admin, Admin, and Accounts
+     */
     public function reject(Request $request, Requisition $requisition)
     {
-        $validator = Validator::make($request->all(), [
-            'reason' => 'required|string'
+        // Check authorization
+        if (!$this->canApproveOrDelete()) {
+            return response()->json([
+                'message' => 'Unauthorized. Only Super Admin, Admin, and Accounts can reject requisitions.'
+            ], 403);
+        }
+
+        $request->validate([
+            'reason' => 'required|string|max:500'
         ]);
 
-        if ($validator->fails()) {
-            return response(['error' => $validator->errors()], 422);
+        try {
+            $requisition->reject(Auth::id(), $request->reason);
+            
+            return response()->json([
+                'message' => 'Requisition rejected successfully',
+                'data' => $requisition->load(['items.material', 'createdBy', 'approvedBy', 'department', 'project'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to reject requisition',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        if ($requisition->status !== 'pending_approval') {
-            return response(['error' => 'Only pending requisitions can be rejected'], 422);
-        }
-
-        $requisition->reject(auth()->id(), $request->reason);
-
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
     }
+
+    /**
+     * Delete requisition - RESTRICTED to Super Admin, Admin, and Accounts
+     */
+    public function destroy(Requisition $requisition)
+    {
+        // Check authorization
+        if (!$this->canApproveOrDelete()) {
+            return response()->json([
+                'message' => 'Unauthorized. Only Super Admin, Admin, and Accounts can delete requisitions.'
+            ], 403);
+        }
+
+        try {
+            // Delete associated items first
+            $requisition->items()->delete();
+            
+            // Delete the requisition
+            $requisition->delete();
+            
+            return response()->json([
+                'message' => 'Requisition deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to delete requisition',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+   
+
+
 }

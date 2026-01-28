@@ -259,40 +259,11 @@ class PurchaseOrderController extends Controller
     }
 }
 
-   public function destroy(PurchaseOrder $purchaseOrder)
-    {
-        // Only allow deletion if pending
-        // if ($purchaseOrder->status !== 'pending') {
-        //     return response(['error' => 'Only pending purchase orders can be deleted'], 422);
-        // }
-
-        $purchaseOrder->delete();
-
-        return response(['message' => 'Purchase order deleted successfully']);
-    }
+   
 
 
-    public function submitForApproval(PurchaseOrder $purchaseOrder)
-    {
-        if ($purchaseOrder->status !== 'pending') {
-            return response(['error' => 'Only pending purchase orders can be submitted'], 422);
-        }
-
-        $purchaseOrder->submitForApproval();
-
-        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
-    }
-
-    public function approve(PurchaseOrder $purchaseOrder)
-    {
-        if ($purchaseOrder->status !== 'pending_approval') {
-            return response(['error' => 'Only pending purchase orders can be approved'], 422);
-        }
-
-        $purchaseOrder->approve(auth()->id());
-
-        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
-    }
+  
+   
 public function getApprovedPurchaseOrders()
 {
     $purchaseOrders = PurchaseOrder::with(['supplier'])
@@ -333,4 +304,97 @@ public function getApprovedPurchaseOrders()
             return response(['error' => 'Failed to send email: ' . $e->getMessage()], 500);
         }
     }
+     /**
+     * Check if user has approval/delete permissions
+     * Only Super Admin, Admin, and Accounts roles can approve/delete
+     */
+      /**
+     * Check if user has approval/delete permissions
+     * Only Super Admin, Admin, and Accounts roles can approve/delete
+     */
+    private function canApproveOrDelete()
+    {
+        $user = Auth::user();
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
+        
+        return $user->roles->pluck('name')->intersect($allowedRoles)->isNotEmpty();
+    }
+
+    /**
+     * Submit purchase order for approval
+     */
+    public function submitForApproval(Request $request, PurchaseOrder $purchaseOrder)
+    {
+        try {
+            $purchaseOrder->submitForApproval();
+            
+            return response()->json([
+                'message' => 'Purchase order submitted for approval successfully',
+                'data' => $purchaseOrder->load(['items.material', 'supplier', 'createdBy'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to submit purchase order',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Approve purchase order - RESTRICTED to Super Admin, Admin, and Accounts
+     */
+    public function approve(Request $request, PurchaseOrder $purchaseOrder)
+    {
+        // Check authorization
+        if (!$this->canApproveOrDelete()) {
+            return response()->json([
+                'message' => 'Unauthorized. Only Super Admin, Admin, and Accounts can approve purchase orders.'
+            ], 403);
+        }
+
+        try {
+            $purchaseOrder->approve(Auth::id());
+            
+            return response()->json([
+                'message' => 'Purchase order approved successfully',
+                'data' => $purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to approve purchase order',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete purchase order - RESTRICTED to Super Admin, Admin, and Accounts
+     */
+    public function destroy(PurchaseOrder $purchaseOrder)
+    {
+        // Check authorization
+        if (!$this->canApproveOrDelete()) {
+            return response()->json([
+                'message' => 'Unauthorized. Only Super Admin, Admin, and Accounts can delete purchase orders.'
+            ], 403);
+        }
+
+        try {
+            // Delete associated items first
+            $purchaseOrder->items()->delete();
+            
+            // Delete the purchase order
+            $purchaseOrder->delete();
+            
+            return response()->json([
+                'message' => 'Purchase order deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to delete purchase order',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }
