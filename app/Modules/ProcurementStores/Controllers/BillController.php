@@ -14,6 +14,30 @@ use App\Http\Controllers\Controller;
 
 class BillController extends Controller
 {
+    /**
+     * Check if user has delete permissions
+     * Only Super Admin, Admin, and Accounts roles can delete
+     */
+    private function canDelete()
+    {
+        $user = auth()->user();
+        
+        if (!$user || !$user->roles) {
+            return false;
+        }
+        
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
+        $userRoles = $user->roles->pluck('name')->toArray();
+        
+        foreach ($allowedRoles as $role) {
+            if (in_array($role, $userRoles)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
     public function index(Request $request)
     {
         $query = Bill::with(['purchaseOrder', 'supplier', 'createdBy', 'payments']);
@@ -79,6 +103,7 @@ class BillController extends Controller
                 return [
                     'id' => $bill->id,
                     'bill_number' => $bill->bill_number,
+                    'purchase_order_id' => $bill->purchase_order_id,
                     'po_number' => $bill->purchaseOrder->po_number,
                     'supplier' => [
                         'id' => $bill->supplier->id,
@@ -139,17 +164,13 @@ class BillController extends Controller
         return new BillResource($bill->load(['purchaseOrder', 'supplier', 'createdBy', 'payments.paymentMethod', 'payments.createdBy']));
     }
 
-    /**
-     * Record payment for a single bill
-     * CHANGED: notes -> reference_number (required)
-     */
     public function recordPayment(Request $request, Bill $bill)
     {
         $validator = Validator::make($request->all(), [
             'amount_paid' => 'required|numeric|min:0.01|max:' . $bill->balance,
             'payment_date' => 'required|date',
             'payment_method_id' => 'required|exists:payment_methods,id',
-            'reference_number' => 'required|string|max:255', // CHANGED from 'notes' => 'nullable|string'
+            'reference_number' => 'required|string|max:255',
         ]);
 
         if ($validator->fails()) {
@@ -165,7 +186,7 @@ class BillController extends Controller
                 'amount_paid' => $request->amount_paid,
                 'payment_date' => $request->payment_date,
                 'payment_method_id' => $request->payment_method_id,
-                'reference_number' => $request->reference_number, // CHANGED from 'notes'
+                'reference_number' => $request->reference_number,
                 'user_id' => auth()->id(),
             ]);
 
@@ -175,10 +196,6 @@ class BillController extends Controller
         }
     }
 
-    /**
-     * NEW METHOD: Record payment for multiple bills at once
-     * This fixes the NaN and 0.0 issues in payment summary
-     */
     public function recordMultiBillPayment(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -187,7 +204,7 @@ class BillController extends Controller
             'amount_paid' => 'required|numeric|min:0.01',
             'payment_date' => 'required|date',
             'payment_method_id' => 'required|exists:payment_methods,id',
-            'reference_number' => 'required|string|max:255', // CHANGED from 'notes'
+            'reference_number' => 'required|string|max:255',
         ]);
 
         if ($validator->fails()) {
@@ -197,7 +214,6 @@ class BillController extends Controller
         try {
             DB::beginTransaction();
 
-            // Get all bills with outstanding balance, ordered by due date
             $bills = Bill::whereIn('id', $request->bill_ids)
                         ->where('balance', '>', 0)
                         ->orderBy('due_date', 'asc')
@@ -208,37 +224,31 @@ class BillController extends Controller
                 return response(['error' => 'No bills with outstanding balance found'], 422);
             }
 
-            // Calculate total balance
             $totalBalance = $bills->sum('balance');
             
-            // Validate payment amount
             if ($request->amount_paid > $totalBalance) {
                 DB::rollBack();
                 return response(['error' => 'Payment amount (' . number_format($request->amount_paid, 2) . ') exceeds total balance (' . number_format($totalBalance, 2) . ')'], 422);
             }
 
-            // Generate a unique payment code for this multi-bill payment
             $paymentCode = 'PAY-' . str_pad((BillPayment::max('id') ?? 0) + 1, 6, '0', STR_PAD_LEFT);
             $remainingPayment = $request->amount_paid;
             $billsUpdated = [];
 
-            // Distribute payment across bills
             foreach ($bills as $bill) {
                 if ($remainingPayment <= 0) {
                     break;
                 }
 
-                // Calculate how much to pay for this bill
                 $amountForThisBill = min($remainingPayment, $bill->balance);
                 
-                // Create payment record
                 BillPayment::create([
                     'bill_id' => $bill->id,
                     'payment_code' => $paymentCode,
                     'amount_paid' => $amountForThisBill,
                     'payment_date' => $request->payment_date,
                     'payment_method_id' => $request->payment_method_id,
-                    'reference_number' => $request->reference_number, // CHANGED from 'notes'
+                    'reference_number' => $request->reference_number,
                     'user_id' => auth()->id(),
                 ]);
 
@@ -284,8 +294,18 @@ class BillController extends Controller
         ]);
     }
 
+    /**
+     * Delete bill - RESTRICTED to Super Admin, Admin, and Accounts
+     */
     public function destroy(Bill $bill)
     {
+        // Check authorization
+        if (!$this->canDelete()) {
+            return response([
+                'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can delete bills.'
+            ], 403);
+        }
+
         try {
             $bill->delete();
             return response(['message' => 'Bill deleted successfully']);

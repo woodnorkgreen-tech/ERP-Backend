@@ -11,6 +11,30 @@ use App\Http\Controllers\Controller;
 
 class RequisitionController extends Controller
 {
+    /**
+     * Check if user has approval/delete permissions
+     * Only Super Admin, Admin, and Accounts roles can approve/reject/delete
+     */
+    private function canApproveOrDelete()
+    {
+        $user = auth()->user();
+        
+        if (!$user || !$user->roles) {
+            return false;
+        }
+        
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
+        $userRoles = $user->roles->pluck('name')->toArray();
+        
+        foreach ($allowedRoles as $role) {
+            if (in_array($role, $userRoles)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
     public function index(Request $request)
     {
         $query = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
@@ -18,7 +42,7 @@ class RequisitionController extends Controller
         // Date filtering
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
-
+            
             if ($dateFilter === 'today') {
                 $query->whereDate('date', today());
             } elseif ($dateFilter === 'past_7_days') {
@@ -27,7 +51,7 @@ class RequisitionController extends Controller
                 $query->whereDate('date', '>=', now()->subDays(30));
             } elseif ($dateFilter === 'this_month') {
                 $query->whereMonth('date', now()->month)
-                    ->whereYear('date', now()->year);
+                      ->whereYear('date', now()->year);
             } elseif ($dateFilter === 'custom' && $request->has('start_date') && $request->has('end_date')) {
                 $query->whereBetween('date', [$request->start_date, $request->end_date]);
             }
@@ -50,68 +74,20 @@ class RequisitionController extends Controller
 
     public function search(Request $request)
     {
-        $searchTerm = $request->input('searchTerm', '');
+        $searchTerm = $request->input('searchTerm');
 
-        $query = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
-
-        // Only apply search if searchTerm is not empty
-        if (!empty($searchTerm)) {
-            $query->where(function ($q) use ($searchTerm) {
-                // Search in requisition_number
-                $q->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
-                    
-                    // FIXED: Search in related project using correct column names
-                    ->orWhereHas('project', function ($projectQuery) use ($searchTerm) {
-                        $projectQuery->where('project_name', 'LIKE', '%' . $searchTerm . '%')
-                                    ->orWhere('project_code', 'LIKE', '%' . $searchTerm . '%');
+        $requisitions = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy'])
+            ->where(function ($query) use ($searchTerm) {
+                $query->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
+                    ->orWhereHas('project', function ($q) use ($searchTerm) {
+                        $q->where('name', 'LIKE', '%' . $searchTerm . '%');
                     })
-                    
-                    // FIXED: Search in related employee using correct column names
-                    ->orWhereHas('employee', function ($employeeQuery) use ($searchTerm) {
-                        $employeeQuery->where('first_name', 'LIKE', '%' . $searchTerm . '%')
-                                     ->orWhere('last_name', 'LIKE', '%' . $searchTerm . '%')
-                                     ->orWhere('employee_number', 'LIKE', '%' . $searchTerm . '%');
-                    })
-                    
-                    // FIXED: Search in department using correct column name
-                    ->orWhereHas('department', function ($deptQuery) use ($searchTerm) {
-                        $deptQuery->where('department_name', 'LIKE', '%' . $searchTerm . '%');
+                    ->orWhereHas('employee', function ($q) use ($searchTerm) {
+                        $q->where('name', 'LIKE', '%' . $searchTerm . '%');
                     });
-            });
-        }
-
-        // Apply filters if provided
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->filled('urgency')) {
-            $query->where('urgency', $request->urgency);
-        }
-
-        if ($request->filled('project_id')) {
-            $query->where('project_id', $request->project_id);
-        }
-
-        if ($request->filled('department_id')) {
-            $query->where('department_id', $request->department_id);
-        }
-
-        if ($request->filled('employee_id')) {
-            $query->where('employee_id', $request->employee_id);
-        }
-
-        // Date filters
-        if ($request->filled('date_from')) {
-            $query->whereDate('date', '>=', $request->date_from);
-        }
-
-        if ($request->filled('date_to')) {
-            $query->whereDate('date', '<=', $request->date_to);
-        }
-
-        $requisitions = $query->orderBy('created_at', 'desc')
-                             ->paginate($request->input('perPage', 20));
+            })
+            ->orderBy('created_at', 'desc')
+            ->paginate(20);
 
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }
@@ -119,7 +95,7 @@ class RequisitionController extends Controller
     public function store(Request $request)
     {
         $input = $request->all();
-
+        
         $validator = Validator::make($input, [
             'date' => 'required|date',
             'requested_by_type' => 'required|in:project,office,employee',
@@ -190,7 +166,7 @@ class RequisitionController extends Controller
         }
 
         $input = $request->all();
-
+        
         $validator = Validator::make($input, [
             'date' => 'date',
             'requested_by_type' => 'in:project,office,employee',
@@ -223,7 +199,7 @@ class RequisitionController extends Controller
                 unset($input['items']);
 
                 $requisition->items()->delete();
-
+                
                 $totalAmount = 0;
                 foreach ($items as $item) {
                     $item['total'] = $item['quantity'] * $item['unit_price'];
@@ -250,137 +226,78 @@ class RequisitionController extends Controller
         return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
     }
 
-   
-
-   
-   
-
-   
-    
-  
-   
-    /**
-     * Check if user has approval/delete permissions
-     * Only Super Admin, Admin, and Accounts roles can approve/delete
-     */
-    private function canApproveOrDelete()
-    {
-        $user = Auth::user();
-        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
-        
-        // Check if user has any of the allowed roles
-        return $user->roles->pluck('name')->intersect($allowedRoles)->isNotEmpty();
-    }
-
-    /**
-     * Submit requisition for approval
-     */
-    public function submitForApproval(Request $request, Requisition $requisition)
-    {
-        try {
-            $requisition->submitForApproval();
-            
-            return response()->json([
-                'message' => 'Requisition submitted for approval successfully',
-                'data' => $requisition->load(['items.material', 'createdBy', 'department', 'project'])
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to submit requisition',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Approve requisition - RESTRICTED to Super Admin, Admin, and Accounts
-     */
-    public function approve(Request $request, Requisition $requisition)
-    {
-        // Check authorization
-        if (!$this->canApproveOrDelete()) {
-            return response()->json([
-                'message' => 'Unauthorized. Only Super Admin, Admin, and Accounts can approve requisitions.'
-            ], 403);
-        }
-
-        try {
-            $requisition->approve(Auth::id());
-            
-            return response()->json([
-                'message' => 'Requisition approved successfully',
-                'data' => $requisition->load(['items.material', 'createdBy', 'approvedBy', 'department', 'project'])
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to approve requisition',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Reject requisition - RESTRICTED to Super Admin, Admin, and Accounts
-     */
-    public function reject(Request $request, Requisition $requisition)
-    {
-        // Check authorization
-        if (!$this->canApproveOrDelete()) {
-            return response()->json([
-                'message' => 'Unauthorized. Only Super Admin, Admin, and Accounts can reject requisitions.'
-            ], 403);
-        }
-
-        $request->validate([
-            'reason' => 'required|string|max:500'
-        ]);
-
-        try {
-            $requisition->reject(Auth::id(), $request->reason);
-            
-            return response()->json([
-                'message' => 'Requisition rejected successfully',
-                'data' => $requisition->load(['items.material', 'createdBy', 'approvedBy', 'department', 'project'])
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to reject requisition',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Delete requisition - RESTRICTED to Super Admin, Admin, and Accounts
-     */
     public function destroy(Requisition $requisition)
     {
-        // Check authorization
+        // ROLE RESTRICTION ADDED HERE
         if (!$this->canApproveOrDelete()) {
-            return response()->json([
-                'message' => 'Unauthorized. Only Super Admin, Admin, and Accounts can delete requisitions.'
+            return response([
+                'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can delete requisitions.'
             ], 403);
         }
 
-        try {
-            // Delete associated items first
-            $requisition->items()->delete();
-            
-            // Delete the requisition
-            $requisition->delete();
-            
-            return response()->json([
-                'message' => 'Requisition deleted successfully'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to delete requisition',
-                'error' => $e->getMessage()
-            ], 500);
+        // Block if linked to PO
+        if ($requisition->purchaseOrder) {
+            return response([
+                'error' => 'Cannot delete requisition after it has been linked to a purchase order'
+            ], 403);
         }
+
+        $requisition->delete();
+        return response(['message' => 'Requisition deleted successfully']);
     }
 
-   
+    public function submitForApproval(Requisition $requisition)
+    {
+        if ($requisition->status !== 'draft') {
+            return response(['error' => 'Only draft requisitions can be submitted'], 422);
+        }
 
+        $requisition->submitForApproval();
 
+        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
+    }
+
+    public function approve(Requisition $requisition)
+    {
+        // ROLE RESTRICTION ADDED HERE
+        if (!$this->canApproveOrDelete()) {
+            return response([
+                'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can approve requisitions.'
+            ], 403);
+        }
+
+        if ($requisition->status !== 'pending_approval') {
+            return response(['error' => 'Only pending requisitions can be approved'], 422);
+        }
+
+        $requisition->approve(auth()->id());
+
+        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
+    }
+
+    public function reject(Request $request, Requisition $requisition)
+    {
+        // ROLE RESTRICTION ADDED HERE
+        if (!$this->canApproveOrDelete()) {
+            return response([
+                'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can reject requisitions.'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'reason' => 'required|string'
+        ]);
+
+        if ($validator->fails()) {
+            return response(['error' => $validator->errors()], 422);
+        }
+
+        if ($requisition->status !== 'pending_approval') {
+            return response(['error' => 'Only pending requisitions can be rejected'], 422);
+        }
+
+        $requisition->reject(auth()->id(), $request->reason);
+
+        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
+    }
 }
