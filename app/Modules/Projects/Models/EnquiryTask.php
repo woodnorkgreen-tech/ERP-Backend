@@ -129,9 +129,45 @@ class EnquiryTask extends Model
         return $this->hasOne(\App\Models\TaskQuoteData::class, 'enquiry_task_id');
     }
 
+    public function budgetData()
+    {
+        return $this->hasOne(\App\Models\TaskBudgetData::class, 'enquiry_task_id');
+    }
+
+    public function materialsData()
+    {
+        return $this->hasOne(\App\Models\TaskMaterialsData::class, 'enquiry_task_id');
+    }
+
+    public function procurementData()
+    {
+        return $this->hasOne(\App\Models\TaskProcurementData::class, 'enquiry_task_id');
+    }
+
+    public function productionData()
+    {
+        return $this->hasOne(\App\Models\TaskProductionData::class, 'enquiry_task_id');
+    }
+
     public function handoverSurvey()
     {
         return $this->hasOne(\App\Models\HandoverSurvey::class, 'task_id');
+    }
+
+    /**
+     * Unified accessor for task data based on type
+     */
+    public function getTaskDataAttribute()
+    {
+        return match($this->type) {
+            'quote', 'quote_approval' => $this->quoteData,
+            'budget' => $this->budgetData,
+            'materials' => $this->materialsData,
+            'procurement' => $this->procurementData,
+            'production' => $this->productionData,
+            'handover' => $this->handoverSurvey,
+            default => null,
+        };
     }
 
     // Scopes

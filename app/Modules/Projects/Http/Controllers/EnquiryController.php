@@ -489,7 +489,15 @@ class EnquiryController extends Controller
                 if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
                     $query->where('assigned_to', $user->id);
                 }
-                $query->with(['assignedUser', 'taskData']);
+                $query->with([
+                    'assignedUser',
+                    'quoteData',
+                    'budgetData',
+                    'materialsData',
+                    'procurementData',
+                    'productionData',
+                    'handoverSurvey'
+                ]);
             }
         ]);
 

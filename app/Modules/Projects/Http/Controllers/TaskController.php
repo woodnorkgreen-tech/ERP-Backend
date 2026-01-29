@@ -101,7 +101,7 @@ class TaskController extends Controller
         \Log::info("[DEBUG] getAllEnquiryTasks called, user: " . Auth::id());
 
         try {
-            $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedUser', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
+            $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedUser', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers', 'materialsData');
 
             $user = Auth::user();
             
@@ -207,7 +207,7 @@ class TaskController extends Controller
             // Enrich material tasks with approval status
             $tasks->each(function ($task) {
                 if ($task->type === 'materials') {
-                    $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
+                    $materialsData = $task->materialsData;
                     
                     if ($materialsData) {
                         $approvalStatus = $materialsData->project_info['approval_status'] ?? [];
@@ -282,7 +282,7 @@ class TaskController extends Controller
 
         try {
             $query = EnquiryTask::where('project_enquiry_id', $enquiryId)
-                ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers');
+                ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers', 'materialsData');
 
             $user = Auth::user();
             
@@ -322,7 +322,7 @@ class TaskController extends Controller
             // Enrich material tasks with approval status
             $tasks->each(function ($task) {
                 if ($task->type === 'materials') {
-                    $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
+                    $materialsData = $task->materialsData;
                     
                     if ($materialsData) {
                         $approvalStatus = $materialsData->project_info['approval_status'] ?? [];

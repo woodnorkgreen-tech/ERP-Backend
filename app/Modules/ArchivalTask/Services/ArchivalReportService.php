@@ -46,13 +46,17 @@ class ArchivalReportService
             }
 
             $documents = [];
+            
+            // Optimization: Fetch all valid tasks for this enquiry key types eager loaded
+            $allTasks = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                ->whereIn('type', ['materials', 'budget', 'logistics', 'design'])
+                ->get()
+                ->keyBy('type');
 
             // 1. Fetch Material List PDF
             try {
-                $materialsTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
-                    ->where('type', 'materials')
-                    ->first();
-                if ($materialsTask) {
+                if (isset($allTasks['materials'])) {
+                    $materialsTask = $allTasks['materials'];
                     $documents[] = [
                         'name' => 'Material List',
                         'type' => 'PDF',
@@ -65,10 +69,8 @@ class ArchivalReportService
 
             // 2. Fetch Budget PDF
             try {
-                $budgetTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
-                    ->where('type', 'budget')
-                    ->first();
-                if ($budgetTask) {
+               if (isset($allTasks['budget'])) {
+                    $budgetTask = $allTasks['budget'];
                     $documents[] = [
                         'name' => 'Project Budget',
                         'type' => 'PDF',
@@ -81,10 +83,8 @@ class ArchivalReportService
 
             // 3. Fetch Logistics Report PDF
             try {
-                $logisticsTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
-                    ->where('type', 'logistics')
-                    ->first();
-                if ($logisticsTask) {
+                if (isset($allTasks['logistics'])) {
+                    $logisticsTask = $allTasks['logistics'];
                     $documents[] = [
                         'name' => 'Logistics Manifest',
                         'type' => 'PDF',
@@ -97,10 +97,8 @@ class ArchivalReportService
 
             // 4. Fetch Design Assets
             try {
-                $designTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
-                    ->where('type', 'design')
-                    ->first();
-                if ($designTask) {
+                if (isset($allTasks['design'])) {
+                    $designTask = $allTasks['design'];
                     $assets = DesignAsset::where('enquiry_task_id', $designTask->id)->get();
                     foreach ($assets as $asset) {
                         $documents[] = [

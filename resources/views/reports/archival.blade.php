@@ -248,6 +248,7 @@
                     <th>Assigned Tech</th>
                     <th>Site Section</th>
                     <th>Status</th>
+                    <th>Accuracy</th>
                 </tr>
             </thead>
             <tbody>
@@ -257,6 +258,7 @@
                     <td>{{ $item['assigned_technician'] ?? '-' }}</td>
                     <td>{{ $item['site_section'] ?? '-' }}</td>
                     <td class="uppercase">{{ $item['status'] ?? '-' }}</td>
+                    <td class="uppercase">{{ $item['placement_accuracy'] ?? '-' }}</td>
                 </tr>
                 @endforeach
             </tbody>
