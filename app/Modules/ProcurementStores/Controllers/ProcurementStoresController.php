@@ -96,6 +96,7 @@ class ProcurementStoresController extends Controller
         return response()->json([
             'message' => 'Stock updated successfully',
             'data' => $log,
+            'batch_number' => $log->batch_number,
             'status' => 'success'
         ]);
     }
@@ -133,6 +134,7 @@ class ProcurementStoresController extends Controller
         return response()->json([
             'message' => 'Stock issued successfully',
             'data' => $log,
+            'batch_number' => $log->batch_number,
             'status' => 'success'
         ]);
     }
@@ -232,6 +234,110 @@ class ProcurementStoresController extends Controller
         return response()->json([
             'message' => 'Stock marked as defective and removed from inventory',
             'data' => $log,
+            'status' => 'success'
+        ]);
+    }
+
+    /**
+     * Process batch check-in (multiple materials with same batch number)
+     */
+    public function batchCheckIn(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $request->validate([
+            'items' => 'required|array|min:1',
+            'items.*.material_id' => 'required|exists:library_materials,id',
+            'items.*.quantity' => 'required|numeric|min:0.01',
+            'items.*.reference_no' => 'nullable|string',
+            'items.*.notes' => 'nullable|string',
+            'warehouse_code' => 'sometimes|string',
+        ]);
+
+        $service = new \App\Modules\ProcurementStores\Services\InventoryService();
+        $batchNumber = $service->generateBatchNumber();
+        $logs = [];
+
+        foreach ($request->items as $item) {
+            $meta = array_merge(
+                $item,
+                [
+                    'batch_number' => $batchNumber,
+                    'warehouse_code' => $request->warehouse_code ?? 'MAIN'
+                ]
+            );
+            
+            $logs[] = $service->adjustStock(
+                $item['material_id'],
+                $item['quantity'],
+                'check_in',
+                $meta
+            );
+        }
+
+        return response()->json([
+            'message' => 'Batch check-in processed successfully',
+            'batch_number' => $batchNumber,
+            'items_processed' => count($logs),
+            'data' => $logs,
+            'status' => 'success'
+        ]);
+    }
+
+    /**
+     * Process batch check-out (multiple materials with same batch number)
+     */
+    public function batchCheckOut(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $request->validate([
+            'items' => 'required|array|min:1',
+            'items.*.material_id' => 'required|exists:library_materials,id',
+            'items.*.quantity' => 'required|numeric|min:0.01',
+            'items.*.reference_no' => 'nullable|string',
+            'items.*.notes' => 'nullable|string',
+            'items.*.requestor' => 'nullable|string',
+            'project_id' => 'nullable|exists:projects,id',
+        ]);
+
+        $service = new \App\Modules\ProcurementStores\Services\InventoryService();
+        
+        // Validate stock availability for all items first
+        foreach ($request->items as $item) {
+            $stock = \App\Modules\ProcurementStores\Models\Stock::where('material_id', $item['material_id'])->first();
+            if (!$stock || ($stock->quantity_on_hand - $stock->quantity_reserved) < $item['quantity']) {
+                $material = \App\Modules\MaterialsLibrary\Models\LibraryMaterial::find($item['material_id']);
+                return response()->json([
+                    'message' => "Insufficient stock for material: {$material->material_name}",
+                    'status' => 'error'
+                ], 422);
+            }
+        }
+
+        // All items validated, process the batch
+        $batchNumber = $service->generateBatchNumber();
+        $logs = [];
+
+        foreach ($request->items as $item) {
+            $meta = array_merge(
+                $item,
+                [
+                    'batch_number' => $batchNumber,
+                    'project_id' => $request->project_id ?? null,
+                    'notes' => $item['notes'] ?? 'Batch check-out'
+                ]
+            );
+            
+            $logs[] = $service->adjustStock(
+                $item['material_id'],
+                -$item['quantity'], // Negative for check-out
+                'check_out',
+                $meta
+            );
+        }
+
+        return response()->json([
+            'message' => 'Batch check-out processed successfully',
+            'batch_number' => $batchNumber,
+            'items_processed' => count($logs),
+            'data' => $logs,
             'status' => 'success'
         ]);
     }

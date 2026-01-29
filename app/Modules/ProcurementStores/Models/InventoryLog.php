@@ -13,6 +13,7 @@ class InventoryLog extends Model
         'material_id',
         'user_id',
         'type',
+        'batch_number',
         'quantity',
         'balance_after',
         'project_id',

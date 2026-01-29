@@ -14,6 +14,8 @@ Route::get('/test', [ProcurementStoresController::class, 'test']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
 Route::post('/check-in', [ProcurementStoresController::class, 'checkIn']);
 Route::post('/check-out', [ProcurementStoresController::class, 'checkOut']);
+Route::post('/batch-check-in', [ProcurementStoresController::class, 'batchCheckIn']);
+Route::post('/batch-check-out', [ProcurementStoresController::class, 'batchCheckOut']);
 Route::post('/update-settings', [ProcurementStoresController::class, 'updateStockSettings']);
 Route::post('/returns', [ProcurementStoresController::class, 'returns']);
 Route::post('/defective', [ProcurementStoresController::class, 'markDefective']);

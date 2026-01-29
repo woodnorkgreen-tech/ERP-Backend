@@ -10,7 +10,38 @@ use Illuminate\Support\Facades\Auth;
 class InventoryService
 {
     /**
-     * Increase stock (Check-in, Returns)
+     * Generate unique batch number for inventory movements
+     * Format: ISS-YYYYMMDD-XXXX (e.g., ISS-20260129-0001)
+     */
+    public function generateBatchNumber(): string
+    {
+        $today = now()->format('Ymd');
+        $prefix = "ISS-{$today}-";
+        
+        // Get the last batch number for today
+        $lastBatch = InventoryLog::where('batch_number', 'like', "{$prefix}%")
+            ->orderBy('batch_number', 'desc')
+            ->first();
+        
+        if ($lastBatch) {
+            // Extract the sequence number and increment
+            $lastSequence = (int) substr($lastBatch->batch_number, -4);
+            $newSequence = $lastSequence + 1;
+        } else {
+            $newSequence = 1;
+        }
+        
+        return $prefix . str_pad($newSequence, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Adjust stock (Check-in, Check-out, Returns, etc.)
+     * 
+     * @param int $materialId The material being adjusted
+     * @param float $quantity Positive for additions, negative for deductions
+     * @param string $type Type of movement (check_in, check_out, return, etc.)
+     * @param array $meta Additional metadata including optional batch_number
+     * @return InventoryLog
      */
     public function adjustStock(int $materialId, float $quantity, string $type, array $meta = [])
     {
@@ -22,15 +53,18 @@ class InventoryService
             );
 
             // 2. Calculate new balance
-            // For check_in, quantity is positive. For adjustments, could be negative.
             $stock->quantity_on_hand += $quantity;
             $stock->save();
 
-            // 3. Log the movement
+            // 3. Generate or use provided batch number
+            $batchNumber = $meta['batch_number'] ?? $this->generateBatchNumber();
+
+            // 4. Log the movement with batch number
             return InventoryLog::create([
                 'material_id' => $materialId,
-                'user_id' => Auth::id() ?? 1, // Fallback to system user
+                'user_id' => Auth::id() ?? 1,
                 'type' => $type,
+                'batch_number' => $batchNumber,
                 'quantity' => $quantity,
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,
