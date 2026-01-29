@@ -9,8 +9,16 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('goods_receipt_note_items', function (Blueprint $table) {
-            // Drop the foreign key constraint
-            $table->dropForeign(['material_id']);
+            // Drop the foreign key constraint if it exists
+            try {
+                $table->dropForeign(['material_id']);
+            } catch (\Illuminate\Database\QueryException $e) {
+                // Constraint might not exist, continue
+                if (str_contains($e->getMessage(), '1091 Can\'t DROP FOREIGN KEY')) {
+                   return;
+                }
+                throw $e;
+            }
         });
     }
 
