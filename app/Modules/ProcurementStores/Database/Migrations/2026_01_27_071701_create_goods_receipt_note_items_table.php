@@ -11,17 +11,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('goods_receipt_note_items', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('goods_receipt_note_id')->constrained()->onDelete('cascade');
-            $table->foreignId('purchase_order_item_id')->constrained()->onDelete('cascade');
-            $table->foreignId('material_id')->constrained()->onDelete('cascade');
-            $table->integer('ordered_quantity');
-            $table->integer('received_quantity');
-            $table->enum('condition', ['good', 'fair', 'damaged', 'for_repair']);
-            $table->boolean('accepted')->default(false);
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('goods_receipt_note_items')) {
+            Schema::create('goods_receipt_note_items', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('goods_receipt_note_id')->constrained()->onDelete('cascade');
+                $table->foreignId('purchase_order_item_id')->constrained()->onDelete('cascade');
+                $table->foreignId('material_id')->constrained()->onDelete('cascade');
+                $table->integer('ordered_quantity');
+                $table->integer('received_quantity');
+                $table->enum('condition', ['good', 'fair', 'damaged', 'for_repair']);
+                $table->boolean('accepted')->default(false);
+                $table->timestamps();
+            });
+        }
     }
 
     /**
