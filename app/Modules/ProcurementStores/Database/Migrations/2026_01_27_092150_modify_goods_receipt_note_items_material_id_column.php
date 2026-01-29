@@ -14,7 +14,8 @@ return new class extends Migration
                 $table->dropForeign(['material_id']);
             } catch (\Illuminate\Database\QueryException $e) {
                 // Constraint might not exist, continue
-                if (str_contains($e->getMessage(), '1091 Can\'t DROP FOREIGN KEY')) {
+                // Check for MySQL error 1091 (Can't DROP X; check that it exists)
+                if ((isset($e->errorInfo[1]) && $e->errorInfo[1] == 1091) || str_contains($e->getMessage(), '1091 Can\'t DROP FOREIGN KEY')) {
                    return;
                 }
                 throw $e;
