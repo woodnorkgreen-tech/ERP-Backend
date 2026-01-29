@@ -74,20 +74,68 @@ class RequisitionController extends Controller
 
     public function search(Request $request)
     {
-        $searchTerm = $request->input('searchTerm');
+        $searchTerm = $request->input('searchTerm', '');
 
-        $requisitions = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy'])
-            ->where(function ($query) use ($searchTerm) {
-                $query->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhereHas('project', function ($q) use ($searchTerm) {
-                        $q->where('name', 'LIKE', '%' . $searchTerm . '%');
+        $query = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
+
+        // Only apply search if searchTerm is not empty
+        if (!empty($searchTerm)) {
+            $query->where(function ($q) use ($searchTerm) {
+                // Search in requisition_number
+                $q->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
+                    
+                    // FIXED: Search in related project using correct column names
+                    ->orWhereHas('project', function ($projectQuery) use ($searchTerm) {
+                        $projectQuery->where('project_name', 'LIKE', '%' . $searchTerm . '%')
+                                    ->orWhere('project_code', 'LIKE', '%' . $searchTerm . '%');
                     })
-                    ->orWhereHas('employee', function ($q) use ($searchTerm) {
-                        $q->where('name', 'LIKE', '%' . $searchTerm . '%');
+                    
+                    // FIXED: Search in related employee using correct column names
+                    ->orWhereHas('employee', function ($employeeQuery) use ($searchTerm) {
+                        $employeeQuery->where('first_name', 'LIKE', '%' . $searchTerm . '%')
+                                     ->orWhere('last_name', 'LIKE', '%' . $searchTerm . '%')
+                                     ->orWhere('employee_number', 'LIKE', '%' . $searchTerm . '%');
+                    })
+                    
+                    // FIXED: Search in department using correct column name
+                    ->orWhereHas('department', function ($deptQuery) use ($searchTerm) {
+                        $deptQuery->where('department_name', 'LIKE', '%' . $searchTerm . '%');
                     });
-            })
-            ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            });
+        }
+
+        // Apply filters if provided
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('urgency')) {
+            $query->where('urgency', $request->urgency);
+        }
+
+        if ($request->filled('project_id')) {
+            $query->where('project_id', $request->project_id);
+        }
+
+        if ($request->filled('department_id')) {
+            $query->where('department_id', $request->department_id);
+        }
+
+        if ($request->filled('employee_id')) {
+            $query->where('employee_id', $request->employee_id);
+        }
+
+        // Date filters
+        if ($request->filled('date_from')) {
+            $query->whereDate('date', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('date', '<=', $request->date_to);
+        }
+
+        $requisitions = $query->orderBy('created_at', 'desc')
+                             ->paginate($request->input('perPage', 20));
 
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }
