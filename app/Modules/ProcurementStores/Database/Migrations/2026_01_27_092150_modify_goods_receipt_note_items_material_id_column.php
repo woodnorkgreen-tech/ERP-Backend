@@ -8,19 +8,19 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('goods_receipt_note_items', function (Blueprint $table) {
-            // Drop the foreign key constraint if it exists
-            try {
+        try {
+            Schema::table('goods_receipt_note_items', function (Blueprint $table) {
+                // Drop the foreign key constraint
                 $table->dropForeign(['material_id']);
-            } catch (\Illuminate\Database\QueryException $e) {
-                // Constraint might not exist, continue
-                // Check for MySQL error 1091 (Can't DROP X; check that it exists)
-                if ((isset($e->errorInfo[1]) && $e->errorInfo[1] == 1091) || str_contains($e->getMessage(), '1091 Can\'t DROP FOREIGN KEY')) {
-                   return;
-                }
-                throw $e;
+            });
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Constraint might not exist, continue
+            // Check for MySQL error 1091 (Can't DROP X; check that it exists) or general error if message matches
+            if ((isset($e->errorInfo[1]) && $e->errorInfo[1] == 1091) || str_contains($e->getMessage(), '1091 Can\'t DROP FOREIGN KEY')) {
+               return;
             }
-        });
+            throw $e;
+        }
     }
 
     public function down(): void
