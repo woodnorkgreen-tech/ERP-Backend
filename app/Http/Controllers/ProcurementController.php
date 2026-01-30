@@ -105,6 +105,12 @@ class ProcurementController extends Controller
     public function saveProcurementData(Request $request, int $taskId): JsonResponse
     {
         try {
+            $user = $request->user();
+            $isAdmin = $user->hasRole(['Admin', 'Super Admin']);
+            $isStores = $user->hasRole(['Stores', 'Store Keeper']);
+            $isProcurement = $user->hasRole(['Procurement', 'Procurement Officer']);
+
+            // Validate the request data
             $data = $request->validate([
                 'projectInfo' => 'sometimes|array',
                 'budgetImported' => 'sometimes|boolean',
@@ -117,12 +123,49 @@ class ProcurementController extends Controller
                 'procurementItems.*.purchaseQuantity' => 'sometimes|numeric|min:0',
                 'procurementItems.*.purchaseOrderNumber' => 'sometimes|nullable|string',
                 'procurementItems.*.expectedDeliveryDate' => 'sometimes|nullable|date',
-                'procurementItems.*.availabilityStatus' => 'sometimes|string', // Kept for backward compatibility but less strict
+                'procurementItems.*.availabilityStatus' => 'sometimes|string',
                 'procurementItems.*.vendorName' => 'sometimes|nullable|string',
                 'procurementItems.*.procurementNotes' => 'sometimes|nullable|string',
                 'budgetSummary' => 'sometimes|array',
                 'lastImportDate' => 'sometimes|date'
             ]);
+
+            // Get existing data for comparison
+            $existingData = $this->procurementService->getProcurementData($taskId);
+            $existingItems = collect($existingData ? $existingData->procurement_items : [])->keyBy('budgetItemId');
+
+            if (!$isAdmin) {
+                foreach ($data['procurementItems'] as $item) {
+                    $budgetItemId = $item['budgetItemId'];
+                    $existingItem = $existingItems->get($budgetItemId);
+
+                    if (!$existingItem) continue; // New items or fresh import
+
+                    // Check Stores fields
+                    $storesFields = ['stockStatus', 'stockQuantity'];
+                    foreach ($storesFields as $field) {
+                        if (isset($item[$field]) && ($item[$field] != ($existingItem[$field] ?? null)) && !$isStores) {
+                            return response()->json([
+                                'message' => "Unauthorized: Only Stores users can modify {$field}",
+                                'field' => $field,
+                                'item' => $item['description']
+                            ], 403);
+                        }
+                    }
+
+                    // Check Procurement fields
+                    $procurementFields = ['procurementStatus', 'vendorName', 'purchaseQuantity', 'purchaseOrderNumber', 'expectedDeliveryDate'];
+                    foreach ($procurementFields as $field) {
+                        if (isset($item[$field]) && ($item[$field] != ($existingItem[$field] ?? null)) && !$isProcurement) {
+                            return response()->json([
+                                'message' => "Unauthorized: Only Procurement users can modify {$field}",
+                                'field' => $field,
+                                'item' => $item['description']
+                            ], 403);
+                        }
+                    }
+                }
+            }
 
             $procurementData = $this->procurementService->saveProcurementData($taskId, $data);
 

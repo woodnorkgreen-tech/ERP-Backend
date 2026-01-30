@@ -131,9 +131,9 @@ class TaskController extends Controller
                         $q->orWhereIn('type', ['budget', 'procurement']);
                      }
 
-                     // Specific requirement: Production see ALL Materials, Teams, Production tasks
+                     // Specific requirement: Production see ALL Materials, Teams, Production, Budget tasks
                      if ($user->hasRole('Production')) {
-                        $q->orWhereIn('type', ['materials', 'teams', 'production']);
+                        $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
                      }
                  });
             } else {
@@ -177,12 +177,27 @@ class TaskController extends Controller
                         });
                     }
 
-                    // Specific requirement: Production see unassigned Materials, Teams, Production tasks
+                    // Specific requirement: Production see unassigned Materials, Teams, Production, Budget tasks
                     if ($user->hasRole('Production')) {
                         $q->orWhere(function($sq) {
-                            $sq->whereNull('assigned_to')
-                               ->whereIn('type', ['materials', 'teams', 'production']);
+                            $sq->whereIn('type', ['materials', 'teams', 'production', 'budget']);
                         });
+                    }
+
+                    if ($user->hasRole('Designer')) {
+                        $q->orWhereIn('type', ['design', 'site-survey']);
+                    }
+
+                    if ($user->hasRole('Stores')) {
+                        $q->orWhereIn('type', ['materials', 'stores']);
+                    }
+
+                    if ($user->hasRole('Procurement')) {
+                        $q->orWhereIn('type', ['materials', 'procurement']);
+                    }
+
+                    if ($user->hasRole(['Costing', 'Accounts'])) {
+                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
                     }
                 });
             }
@@ -310,9 +325,18 @@ class TaskController extends Controller
                         $q->orWhereIn('type', ['budget', 'procurement']);
                      }
 
-                     // Specific requirement: Production see ALL Materials, Teams, Production tasks
+                     // Specific requirement: Production see ALL Materials, Teams, Production, Budget tasks
                      if ($user->hasRole('Production')) {
-                        $q->orWhereIn('type', ['materials', 'teams', 'production']);
+                        $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
+                     }
+                     if ($user->hasRole('Designer')) {
+                        $q->orWhereIn('type', ['design', 'site-survey']);
+                     }
+                     if ($user->hasRole(['Stores', 'Procurement'])) {
+                        $q->orWhereIn('type', ['materials', 'stores', 'procurement']);
+                     }
+                     if ($user->hasRole(['Costing', 'Accounts'])) {
+                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
                      }
                  });
             }
@@ -426,9 +450,9 @@ class TaskController extends Controller
                         $q->orWhereIn('type', ['budget', 'procurement']);
                      }
 
-                     // Specific requirement: Production see ALL Materials, Teams, Production tasks
+                     // Specific requirement: Production see ALL Materials, Teams, Production, Budget tasks
                      if ($user->hasRole('Production')) {
-                        $q->orWhereIn('type', ['materials', 'teams', 'production']);
+                        $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
                      }
                  });
             }
@@ -583,7 +607,7 @@ class TaskController extends Controller
                 $canClaimByRole = true;
             } elseif ($user->hasRole(['Stores', 'Procurement']) && in_array($task->type, ['budget', 'procurement'])) {
                 $canClaimByRole = true;
-            } elseif ($user->hasRole('Production') && in_array($task->type, ['materials', 'teams', 'production'])) {
+            } elseif ($user->hasRole('Production') && in_array($task->type, ['materials', 'teams', 'production', 'budget'])) {
                 $canClaimByRole = true;
             }
 

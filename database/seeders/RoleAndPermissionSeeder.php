@@ -144,7 +144,8 @@ class RoleAndPermissionSeeder extends Seeder
         $productionRole = Role::firstOrCreate(['name' => 'Production'], ['description' => 'Production and manufacturing operations']);
         $productionRole->givePermissionTo([
             Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW
+            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
+            Permissions::FINANCE_BUDGET_READ
         ]);
 
         $logisticsRole = Role::firstOrCreate(['name' => 'Logistics'], ['description' => 'Logistics and delivery coordination']);
