@@ -559,7 +559,7 @@ class PettyCashController extends Controller
         try {
             $headers = [
                 'Date', 'Receiver', 'Account', 'Amount', 'Description', 
-                'Classification', 'Tax', 'Project Name', 'Job No.', 'Payment Method', 'Transaction Code'
+                'Project Name', 'Tax', 'Classification', 'Job No.', 'Transaction Code'
             ];
             
             $tempFile = tempnam(sys_get_temp_dir(), 'petty_cash_template');
@@ -578,11 +578,10 @@ class PettyCashController extends Controller
                 'Office Supplies', 
                 '1500.00', 
                 'Stationery for HR department', 
-                'Admin', 
+                '', 
                 'ETR', 
+                'Admin', 
                 '', 
-                '', 
-                'Cash', 
                 ''
             ]);
             
@@ -593,11 +592,10 @@ class PettyCashController extends Controller
                 'Transport', 
                 '5000.00', 
                 'Fuel for site visit', 
-                'Operations', 
-                'ETR', 
                 'Building Site X', 
+                'ETR', 
+                'Operations', 
                 'WNG-01-2026-001', 
-                'Cash', 
                 ''
             ]);
             

@@ -97,10 +97,11 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             2 => 'account',
             3 => 'amount',
             4 => 'description',
-            5 => 'classification',
+            5 => 'project_name',
             6 => 'tax',
-            7 => 'project_name',
-            8 => 'job_number'
+            7 => 'classification',
+            8 => 'job_number',
+            9 => 'transaction_code'
         ];
         
         foreach ($fallbacks as $index => $targetKey) {
@@ -585,7 +586,8 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'project_name' => 'nullable',
             'classification' => 'nullable',
             'job_number' => 'nullable',
-            'tax' => 'nullable'
+            'tax' => 'nullable',
+            'transaction_code' => 'nullable'
         ];
     }
 
