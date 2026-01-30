@@ -426,6 +426,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [App\Http\Controllers\ProcurementController::class, 'getProcurementData']);
         Route::post('/', [App\Http\Controllers\ProcurementController::class, 'saveProcurementData']);
         Route::post('/import-budget', [App\Http\Controllers\ProcurementController::class, 'importBudgetData']);
+        Route::get('/pdf', [App\Http\Controllers\ProcurementController::class, 'downloadPdf']);
     });
 
     // Procurement utility routes

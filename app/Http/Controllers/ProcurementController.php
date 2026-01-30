@@ -106,9 +106,16 @@ class ProcurementController extends Controller
     {
         try {
             $user = $request->user();
-            $isAdmin = $user->hasRole(['Admin', 'Super Admin']);
+            $isSystemAdmin = $user->hasRole(['Admin', 'Super Admin']);
             $isStores = $user->hasRole(['Stores', 'Store Keeper']);
             $isProcurement = $user->hasRole(['Procurement', 'Procurement Officer']);
+
+            // Only designated roles can save procurement data
+            if (!$isSystemAdmin && !$isStores && !$isProcurement) {
+                return response()->json([
+                    'message' => 'Unauthorized: Only Stores, Procurement, or Admin users can save procurement data.'
+                ], 403);
+            }
 
             // Validate the request data
             $data = $request->validate([
@@ -134,39 +141,9 @@ class ProcurementController extends Controller
             $existingData = $this->procurementService->getProcurementData($taskId);
             $existingItems = collect($existingData ? $existingData->procurement_items : [])->keyBy('budgetItemId');
 
-            if (!$isAdmin) {
-                foreach ($data['procurementItems'] as $item) {
-                    $budgetItemId = $item['budgetItemId'];
-                    $existingItem = $existingItems->get($budgetItemId);
-
-                    if (!$existingItem) continue; // New items or fresh import
-
-                    // Check Stores fields
-                    $storesFields = ['stockStatus', 'stockQuantity'];
-                    foreach ($storesFields as $field) {
-                        if (isset($item[$field]) && ($item[$field] != ($existingItem[$field] ?? null)) && !$isStores) {
-                            return response()->json([
-                                'message' => "Unauthorized: Only Stores users can modify {$field}",
-                                'field' => $field,
-                                'item' => $item['description']
-                            ], 403);
-                        }
-                    }
-
-                    // Check Procurement fields
-                    $procurementFields = ['procurementStatus', 'vendorName', 'purchaseQuantity', 'purchaseOrderNumber', 'expectedDeliveryDate'];
-                    foreach ($procurementFields as $field) {
-                        if (isset($item[$field]) && ($item[$field] != ($existingItem[$field] ?? null)) && !$isProcurement) {
-                            return response()->json([
-                                'message' => "Unauthorized: Only Procurement users can modify {$field}",
-                                'field' => $field,
-                                'item' => $item['description']
-                            ], 403);
-                        }
-                    }
-                }
-            }
-
+            // Field-level checks removed as per user requirement to allow both roles to save procurement data.
+            // We still only allow authorized roles to hit the save logic at the top.
+            
             $procurementData = $this->procurementService->saveProcurementData($taskId, $data);
 
             // Transform to match frontend expectations (camelCase)
@@ -266,6 +243,57 @@ class ProcurementController extends Controller
      *     )
      * )
      */
+    /**
+     * Download procurement list as PDF
+     *
+     * @OA\Get(
+     *     path="/api/projects/tasks/{taskId}/procurement/pdf",
+     *     summary="Download procurement PDF",
+     *     tags={"Procurement"},
+     *     @OA\Parameter(
+     *         name="taskId",
+     *         in="path",
+     *         required=true,
+     *         description="Task ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(response=200, description="PDF generated and downloaded"),
+     *     @OA\Response(response=404, description="Procurement data not found")
+     * )
+     */
+    public function downloadPdf(int $taskId)
+    {
+        try {
+            $task = \App\Modules\Projects\Models\EnquiryTask::with('enquiry.client')->findOrFail($taskId);
+            $procurementData = TaskProcurementData::where('enquiry_task_id', $taskId)->first();
+            
+            if (!$procurementData) {
+                return response()->json(['message' => 'Procurement data not found'], 404);
+            }
+
+            // Load view with data
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.procurement', [
+                'procurementData' => $procurementData,
+                'enquiry' => $task->enquiry
+            ]);
+
+            $fileName = 'procurement-' . ($task->enquiry->job_number ?? $task->enquiry->enquiry_number ?? $taskId) . '.pdf';
+            
+            return $pdf->download($fileName);
+        } catch (\Exception $e) {
+            \Log::error('Failed to generate procurement PDF', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
     public function getVendorSuggestions(Request $request): JsonResponse
     {
         $description = $request->query('description', '');
