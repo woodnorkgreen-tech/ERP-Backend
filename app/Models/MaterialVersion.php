@@ -14,7 +14,10 @@ class MaterialVersion extends Model
     protected $fillable = [
         'task_materials_data_id',
         'version_number',
+        'is_base',
         'label',
+        'reason',
+        'change_log',
         'data',
         'created_by',
         'source_updated_at'
@@ -22,6 +25,8 @@ class MaterialVersion extends Model
 
     protected $casts = [
         'data' => 'array',
+        'change_log' => 'array',
+        'is_base' => 'boolean',
         'source_updated_at' => 'datetime'
     ];
 

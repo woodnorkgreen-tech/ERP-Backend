@@ -265,6 +265,7 @@ class MaterialsController extends Controller
             'projectElements.*.materials.*.unitOfMeasurement' => 'required|string',
             'projectElements.*.materials.*.quantity' => 'required|numeric|min:0',
             'availableElements' => 'sometimes|array',
+            'editReason' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -272,6 +273,20 @@ class MaterialsController extends Controller
                 'message' => 'Validation failed',
                 'errors' => $validator->errors()
             ], 422);
+        }
+
+        // Check if base version exists - if so, editReason is MANDATORY
+        $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+        if ($materialsData) {
+            $baseExists = $materialsData->versions()->where('is_base', true)->exists();
+            if ($baseExists && empty($request->editReason)) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => [
+                        'editReason' => ['A reason for modification is required because a base materials list has already been approved.']
+                    ]
+                ], 422);
+            }
         }
 
         try {
@@ -285,6 +300,7 @@ class MaterialsController extends Controller
             
             // Determine if materials content has actually changed
             $materialsChanged = $this->haveMaterialsChanged($existingMaterialsData, $request->projectElements);
+            $changeSummary = $materialsChanged ? $this->generateChangeSummary($existingMaterialsData, $request->projectElements) : [];
 
             // Reset approval status ONLY if materials have actually changed
             $projectInfo = $request->projectInfo;
@@ -397,6 +413,11 @@ class MaterialsController extends Controller
             }
 
             \DB::commit();
+
+            // Handle Versioning/Snapshots after successful save - ONLY if something actually changed
+            if ($materialsChanged) {
+                $this->handlePostSaveVersioning($taskId, $request->input('editReason'), $changeSummary);
+            }
 
             // Check for additional materials and create budget additions automatically
             $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
@@ -1277,6 +1298,9 @@ class MaterialsController extends Controller
                 $this->syncMaterialsToBudget($taskId, $projectElements); 
             }
 
+            // NEW: Handle Base Snapshot on First Approval
+            $this->handleBaseSnapshotOnApproval($taskId);
+
             return response()->json([
                 'message' => ucfirst($department) . ' approval recorded successfully',
                 'approval_status' => $approvalStatus
@@ -1353,84 +1377,83 @@ class MaterialsController extends Controller
     }
 
     /**
+     * Generate a structured list of changes between existing data and new elements
+     */
+    private function generateChangeSummary(?TaskMaterialsData $existingData, array $newProjectElements): array
+    {
+        if (!$existingData) return [['type' => 'addition', 'message' => 'Initial material list creation.']];
+
+        $existingData->load('elements.materials');
+        $existingElements = $existingData->elements;
+        $changes = [];
+
+        // Normalize existing for lookups
+        $existingMap = [];
+        foreach ($existingElements as $element) {
+            $key = $element->element_type . ' : ' . $element->name;
+            $existingMap[$key] = $element;
+        }
+
+        // Track new/updated
+        $newKeys = [];
+        foreach ($newProjectElements as $element) {
+            $key = $element['elementType'] . ' : ' . $element['name'];
+            $newKeys[] = $key;
+
+            if (!isset($existingMap[$key])) {
+                $count = count($element['materials'] ?? []);
+                $changes[] = ['type' => 'addition', 'message' => "Added Element: {$element['name']} ({$count} materials)"];
+            } else {
+                $oldElement = $existingMap[$key];
+                $oldMaterialsMap = [];
+                foreach ($oldElement->materials as $m) {
+                    $oldMaterialsMap[$m->description] = $m;
+                }
+
+                $newMaterials = $element['materials'] ?? [];
+                
+                foreach ($newMaterials as $m) {
+                    $desc = $m['description'];
+                    if (!isset($oldMaterialsMap[$desc])) {
+                        $changes[] = ['type' => 'addition', 'message' => "Element '{$element['name']}': Added material '{$desc}'"];
+                    } else {
+                        $oldM = $oldMaterialsMap[$desc];
+                        if ((float)$oldM->quantity !== (float)$m['quantity']) {
+                            $changes[] = [
+                                'type' => 'modification', 
+                                'message' => "Element '{$element['name']}': Changed '{$desc}' qty: {$oldM->quantity} -> {$m['quantity']}"
+                            ];
+                        }
+                    }
+                }
+
+                // Check for deletions
+                $currentMaterialNames = collect($newMaterials)->pluck('description')->toArray();
+                foreach (array_keys($oldMaterialsMap) as $oldMName) {
+                    if (!in_array($oldMName, $currentMaterialNames)) {
+                        $changes[] = ['type' => 'removal', 'message' => "Element '{$element['name']}': Removed material '{$oldMName}'"];
+                    }
+                }
+            }
+        }
+
+        // Check for deleted elements
+        foreach ($existingMap as $key => $element) {
+            if (!in_array($key, $newKeys)) {
+                $changes[] = ['type' => 'removal', 'message' => "Removed Element: {$element->name}"];
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
      * Check if materials content has actually changed
-     * Compares existing materials data with incoming project elements
-     * 
-     * @param TaskMaterialsData|null $existingData
-     * @param array $newProjectElements
-     * @return bool
      */
     private function haveMaterialsChanged(?TaskMaterialsData $existingData, array $newProjectElements): bool
     {
-        // If no existing data, this is a new entry (not a change)
-        if (!$existingData) {
-            return false;
-        }
-
-        // Load existing elements with materials
-        $existingData->load('elements.materials');
-        $existingElements = $existingData->elements;
-
-        // Quick check: different number of elements = changed
-        if ($existingElements->count() !== count($newProjectElements)) {
-            \Log::info('Materials changed: different element count', [
-                'existing' => $existingElements->count(),
-                'new' => count($newProjectElements)
-            ]);
-            return true;
-        }
-
-        // Create a normalized representation of existing materials for comparison
-        $existingNormalized = [];
-        foreach ($existingElements as $element) {
-            $elementKey = $element->element_type . '_' . $element->name;
-            $existingNormalized[$elementKey] = [
-                'element_type' => $element->element_type,
-                'name' => $element->name,
-                'category' => $element->category,
-                'materials' => $element->materials->map(function($material) {
-                    return [
-                        'description' => $material->description,
-                        'unit_of_measurement' => $material->unit_of_measurement,
-                        'quantity' => (float) $material->quantity,
-                        'is_additional' => (bool) $material->is_additional
-                    ];
-                })->sortBy('description')->values()->toArray()
-            ];
-        }
-
-        // Create a normalized representation of new materials
-        $newNormalized = [];
-        foreach ($newProjectElements as $element) {
-            $elementKey = $element['elementType'] . '_' . $element['name'];
-            $materials = $element['materials'] ?? [];
-            usort($materials, function($a, $b) {
-                return strcmp($a['description'] ?? '', $b['description'] ?? '');
-            });
-            
-            $newNormalized[$elementKey] = [
-                'element_type' => $element['elementType'],
-                'name' => $element['name'],
-                'category' => $element['category'],
-                'materials' => array_map(function($material) {
-                    return [
-                        'description' => $material['description'],
-                        'unit_of_measurement' => $material['unitOfMeasurement'],
-                        'quantity' => (float) $material['quantity'],
-                        'is_additional' => (bool) ($material['isAdditional'] ?? false)
-                    ];
-                }, $materials)
-            ];
-        }
-
-        // Compare normalized data
-        $changed = json_encode($existingNormalized) !== json_encode($newNormalized);
-        
-        if ($changed) {
-            \Log::info('Materials changed: content differs');
-        }
-        
-        return $changed;
+        $summary = $this->generateChangeSummary($existingData, $newProjectElements);
+        return !empty($summary) && $summary[0]['message'] !== "Initial material list creation.";
     }
 
     /**
@@ -1439,66 +1462,13 @@ class MaterialsController extends Controller
      */
     public function createMaterialVersion(Request $request, int $taskId): JsonResponse
     {
-        \Log::info("createMaterialVersion called for task ID: {$taskId}");
-        
         try {
-            // Get materials data with all related data
-            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)
-                ->with(['elements.materials'])
-                ->first();
-
-            if (!$materialsData) {
-                return response()->json(['message' => 'Materials data not found'], 404);
-            }
-
-            // Calculate next version number
-            $latestVersion = $materialsData->versions()->max('version_number') ?? 0;
-            $newVersionNumber = $latestVersion + 1;
-
-            // Build complete snapshot
-            $snapshot = [
-                'project_info' => $materialsData->project_info,
-                'elements' => $materialsData->elements->map(function ($element) {
-                    return [
-                        'id' => $element->id,
-                        'template_id' => $element->template_id,
-                        'element_type' => $element->element_type,
-                        'name' => $element->name,
-                        'category' => $element->category,
-                        'dimensions' => $element->dimensions,
-                        'is_included' => $element->is_included,
-                        'sort_order' => $element->sort_order,
-                        'notes' => $element->notes,
-                        'materials' => $element->materials->map(function ($material) {
-                            return [
-                                'id' => $material->id,
-                                'description' => $material->description,
-                                'unit_of_measurement' => $material->unit_of_measurement,
-                                'quantity' => $material->quantity,
-                                'is_included' => $material->is_included,
-                                'is_additional' => $material->is_additional ?? false,
-                                'notes' => $material->notes,
-                                'sort_order' => $material->sort_order,
-                            ];
-                        })->toArray()
-                    ];
-                })->toArray()
-            ];
-
-            // Create version with use statement at the top
-            $version = $materialsData->versions()->create([
-                'version_number' => $newVersionNumber,
-                'label' => $request->input('label', 'Version ' . $newVersionNumber . ' - ' . now()->format('M d, Y h:i A')),
-                'data' => $snapshot,
-                'created_by' => auth()->id() ?? 1, // Fallback for dev
-                'source_updated_at' => $materialsData->updated_at,
-            ]);
-
-            \Log::info('Material version created successfully', [
-                'version_id' => $version->id,
-                'version_number' => $newVersionNumber,
-                'task_id' => $taskId
-            ]);
+            $version = $this->internalCreateVersion(
+                $taskId, 
+                $request->input('label'), 
+                $request->input('reason'), 
+                $request->input('is_base', false)
+            );
 
             return response()->json([
                 'message' => 'Version created successfully',
@@ -1506,22 +1476,125 @@ class MaterialsController extends Controller
                     'id' => $version->id,
                     'version_number' => $version->version_number,
                     'label' => $version->label,
+                    'is_base' => $version->is_base,
                     'created_at' => $version->created_at,
                     'created_by_name' => $version->creator->name ?? 'Unknown'
                 ]
             ]);
-
         } catch (\Exception $e) {
-            \Log::error('Failed to create material version', [
-                'taskId' => $taskId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
             return response()->json([
-                'message' => 'Failed to create version',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'message' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * Internal helper to handle version creation
+     */
+    private function internalCreateVersion(int $taskId, ?string $label = null, ?string $reason = null, bool $isBase = false, $changeLog = null): \App\Models\MaterialVersion
+    {
+        $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)
+            ->with(['elements.materials'])
+            ->first();
+
+        if (!$materialsData) {
+            throw new \Exception('Materials data not found');
+        }
+
+        // Calculate next version number
+        $latestVersion = $materialsData->versions()->max('version_number') ?? 0;
+        $newVersionNumber = $latestVersion + 1;
+
+        // Build complete snapshot
+        $snapshot = [
+            'project_info' => $materialsData->project_info,
+            'elements' => $materialsData->elements->map(function ($element) {
+                return [
+                    'id' => $element->id,
+                    'template_id' => $element->template_id,
+                    'element_type' => $element->element_type,
+                    'name' => $element->name,
+                    'category' => $element->category,
+                    'dimensions' => $element->dimensions,
+                    'is_included' => $element->is_included,
+                    'sort_order' => $element->sort_order,
+                    'notes' => $element->notes,
+                    'materials' => $element->materials->map(function ($material) {
+                        return [
+                            'id' => $material->id,
+                            'description' => $material->description,
+                            'unit_of_measurement' => $material->unit_of_measurement,
+                            'quantity' => $material->quantity,
+                            'is_included' => $material->is_included,
+                            'is_additional' => $material->is_additional ?? false,
+                            'notes' => $material->notes,
+                            'sort_order' => $material->sort_order,
+                        ];
+                    })->toArray()
+                ];
+            })->toArray()
+        ];
+
+        // Create version
+        return $materialsData->versions()->create([
+            'version_number' => $newVersionNumber,
+            'is_base' => $isBase,
+            'label' => $label ?? ($isBase ? 'Base Materials' : 'Version ' . $newVersionNumber),
+            'reason' => $reason,
+            'change_log' => $changeLog,
+            'data' => $snapshot,
+            'created_by' => auth()->id() ?? 1,
+            'source_updated_at' => $materialsData->updated_at,
+        ]);
+    }
+
+    /**
+     * Automatically create a base snapshot if it's the first approval
+     */
+    private function handleBaseSnapshotOnApproval(int $taskId): void
+    {
+        $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+        if (!$materialsData) return;
+
+        // Check if an approval already exists (at least one)
+        $approvalStatus = $materialsData->project_info['approval_status'] ?? [];
+        $poApproved = $approvalStatus['project_officer']['approved'] ?? false;
+        $prodApproved = $approvalStatus['production']['approved'] ?? false;
+
+        // Check if base version already exists
+        $baseExists = $materialsData->versions()->where('is_base', true)->exists();
+
+        if (!$baseExists && ($poApproved || $prodApproved)) {
+            \Log::info("First approval received. Creating base materials snapshot.", ['taskId' => $taskId]);
+            $this->internalCreateVersion(
+                $taskId, 
+                'Base Materials (Snapshot on First Approval)', 
+                'Automatically created upon initial departmental approval.',
+                true
+            );
+        }
+    }
+
+    /**
+     * Handle versioning after a save operation
+     */
+    private function handlePostSaveVersioning(int $taskId, ?string $reason, $changeLog = null): void
+    {
+        $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+        if (!$materialsData) return;
+
+        // If a base version exists, any subsequent edit should create a new tracked version
+        $baseExists = $materialsData->versions()->where('is_base', true)->exists();
+
+        if ($baseExists) {
+            \Log::info("Edits made after base snapshot. Creating tracking version.", ['taskId' => $taskId]);
+            $this->internalCreateVersion(
+                $taskId, 
+                'Revision - ' . now()->format('M d, Y H:i'), 
+                $reason ?? 'Materials modified after initial approval snapshot.',
+                false,
+                $changeLog
+            );
         }
     }
 
@@ -1546,6 +1619,9 @@ class MaterialsController extends Controller
                         'id' => $version->id,
                         'version_number' => $version->version_number,
                         'label' => $version->label,
+                        'is_base' => (bool)$version->is_base,
+                        'reason' => $version->reason,
+                        'change_log' => $version->change_log,
                         'created_at' => $version->created_at,
                         'created_by_name' => $version->creator->name ?? 'Unknown',
                         'source_updated_at' => $version->source_updated_at,
@@ -1663,6 +1739,15 @@ class MaterialsController extends Controller
                 'version_number' => $version->version_number,
                 'had_conflicts' => $hasChanged
             ]);
+
+            // NEW: Create a tracking version for the restoation event itself
+            // This ensures the audit trail reflects the rollback in the versions table
+            $this->internalCreateVersion(
+                $taskId, 
+                'Revision - Restored from v' . $version->version_number, 
+                'System: Restored to state from Snapshot #' . $version->version_number . '. Approvals reset.',
+                false
+            );
 
             // Reload data to return fresh snapshot
             $materialsData->load('elements.materials');
