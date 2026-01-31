@@ -34,9 +34,23 @@ class GetEnquiriesHandler
 
             \Log::info('Initial enquiries count', ['count' => $enquiries->count()]);
 
+            // Only apply user-based filtering if user doesn't have global enquiry access
+            // Client Service, Admins, and users with enquiry.read permission should see all
             if ($user) {
-                $enquiries = $this->enquiryRepository->getByUser($user);
-                \Log::info('Enquiries after getByUser', ['count' => $enquiries->count()]);
+                $hasGlobalAccess = $user->hasRole(['Super Admin', 'Admin', 'Client Service']) 
+                    || $user->hasPermissionTo('enquiry.read');
+                
+                \Log::info('User access check', [
+                    'hasGlobalAccess' => $hasGlobalAccess,
+                    'roles' => $user->getRoleNames()->toArray()
+                ]);
+                
+                if (!$hasGlobalAccess) {
+                    $enquiries = $this->enquiryRepository->getByUser($user);
+                    \Log::info('Enquiries after getByUser filter', ['count' => $enquiries->count()]);
+                } else {
+                    \Log::info('User has global access, showing all enquiries');
+                }
             }
 
             // Apply filters

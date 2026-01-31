@@ -265,7 +265,9 @@ class ProcurementController extends Controller
     {
         try {
             $task = \App\Modules\Projects\Models\EnquiryTask::with('enquiry.client')->findOrFail($taskId);
-            $procurementData = TaskProcurementData::where('enquiry_task_id', $taskId)->first();
+            
+            // Use service to get data to ensure sync with budget
+            $procurementData = $this->procurementService->getProcurementData($taskId);
             
             if (!$procurementData) {
                 return response()->json(['message' => 'Procurement data not found'], 404);
