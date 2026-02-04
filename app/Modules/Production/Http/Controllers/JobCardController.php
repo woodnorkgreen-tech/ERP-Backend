@@ -72,21 +72,65 @@ class JobCardController extends Controller
         $validated = $request->validate([
             'worker_id' => 'required|integer', // Simple integer for technical labour
             'date' => 'required|date',
-            'clock_in_time' => 'nullable|date',
-            'clock_out_time' => 'nullable|date|after:clock_in_time',
+            'clock_in_time' => 'nullable|string',
+            'clock_out_time' => 'nullable|string',
             'notes' => 'nullable|string',
             'tasks' => 'nullable|array',
             'tasks.*.description' => 'required|string',
             'tasks.*.work_order_id' => 'nullable|integer|exists:work_orders,id',
-            'tasks.*.start_time' => 'nullable|date',
-            'tasks.*.end_time' => 'nullable|date|after:tasks.*.start_time',
+            'tasks.*.start_time' => 'nullable|string',
+            'tasks.*.end_time' => 'nullable|string',
             'tasks.*.hours_worked' => 'nullable|numeric|min:0',
             'tasks.*.notes' => 'nullable|string',
             'issues' => 'nullable|array',
             'issues.*.description' => 'required|string',
             'issues.*.resolution' => 'nullable|string',
-            'issues.*.status' => 'required|in:open,resolved',
+            'issues.*.status' => 'required|in:open,resolved,escalated,under_review',
         ]);
+
+        // Custom validation for overnight shifts
+        if (isset($validated['clock_in_time']) && isset($validated['clock_out_time'])) {
+            $clockIn = \Carbon\Carbon::createFromFormat('H:i', $validated['clock_in_time']);
+            $clockOut = \Carbon\Carbon::createFromFormat('H:i', $validated['clock_out_time']);
+            
+            // Calculate total hours worked (accounting for overnight)
+            $hoursWorked = $clockOut->diffInHours($clockIn);
+            if ($clockOut->lt($clockIn)) {
+                // Overnight shift - add 24 hours
+                $hoursWorked += 24;
+            }
+            
+            if ($hoursWorked > 24) {
+                throw new \Illuminate\Validation\ValidationException(
+                    validator()->make([], []),
+                    ['clock_out_time' => ['Total hours worked cannot exceed 24 hours.']]
+                );
+            }
+        }
+
+        // Custom validation for task times
+        if (isset($validated['tasks']) && is_array($validated['tasks'])) {
+            foreach ($validated['tasks'] as $index => $task) {
+                if (isset($task['start_time']) && isset($task['end_time'])) {
+                    $start = \Carbon\Carbon::createFromFormat('H:i', $task['start_time']);
+                    $end = \Carbon\Carbon::createFromFormat('H:i', $task['end_time']);
+                    
+                    // Calculate total hours worked (accounting for overnight)
+                    $hoursWorked = $end->diffInHours($start);
+                    if ($end->lt($start)) {
+                        // Overnight shift - add 24 hours
+                        $hoursWorked += 24;
+                    }
+                    
+                    if ($hoursWorked > 24) {
+                        throw new \Illuminate\Validation\ValidationException(
+                            validator()->make([], []),
+                            ["tasks.{$index}.end_time" => ['Task duration cannot exceed 24 hours.']]
+                        );
+                    }
+                }
+            }
+        }
 
         DB::beginTransaction();
         try {
@@ -159,8 +203,8 @@ class JobCardController extends Controller
         $validated = $request->validate([
             'worker_id' => 'required|integer', // Simple integer for technical labour
             'date' => 'required|date',
-            'clock_in_time' => 'nullable|date_format:H:i',
-            'clock_out_time' => 'nullable|date_format:H:i',
+            'clock_in_time' => 'nullable|string',
+            'clock_out_time' => 'nullable|string',
             'notes' => 'nullable|string',
             'tasks' => 'nullable|array',
             'issues' => 'nullable|array'
@@ -208,9 +252,15 @@ class JobCardController extends Controller
                 }
             }
 
-            // Recalculate hours if times are provided
+            // Recalculate hours only if clock times were explicitly provided and have changed
             if (isset($validated['clock_in_time']) || isset($validated['clock_out_time'])) {
-                $this->calculateHours($jobCard);
+                // Check if times have actually changed
+                $clockInChanged = isset($validated['clock_in_time']) && $jobCard->clock_in_time !== $validated['clock_in_time'];
+                $clockOutChanged = isset($validated['clock_out_time']) && $jobCard->clock_out_time !== $validated['clock_out_time'];
+                
+                if ($clockInChanged || $clockOutChanged) {
+                    $this->calculateHours($jobCard);
+                }
             }
 
             DB::commit();
@@ -517,9 +567,9 @@ class JobCardController extends Controller
             return;
         }
 
-        // Parse datetime strings (supports both ISO datetime and time-only formats)
-        $clockIn = \Carbon\Carbon::parse($jobCard->clock_in_time);
-        $clockOut = \Carbon\Carbon::parse($jobCard->clock_out_time);
+        // Parse time strings (supports both ISO datetime and time-only formats)
+        $clockIn = \Carbon\Carbon::createFromFormat('H:i', $jobCard->clock_in_time);
+        $clockOut = \Carbon\Carbon::createFromFormat('H:i', $jobCard->clock_out_time);
         
         // Handle overnight shifts - if clock out is before clock in, it's next day
         if ($clockOut->lt($clockIn)) {

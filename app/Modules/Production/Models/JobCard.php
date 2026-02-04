@@ -29,8 +29,8 @@ class JobCard extends Model
 
     protected $casts = [
         'date' => 'date',
-        'clock_in_time' => 'datetime',
-        'clock_out_time' => 'datetime',
+        'clock_in_time' => 'string',
+        'clock_out_time' => 'string',
         'total_hours' => 'decimal:2',
         'overtime_hours' => 'decimal:2',
         'approved_at' => 'datetime',
