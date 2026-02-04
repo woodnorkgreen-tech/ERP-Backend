@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel as ExcelFacade;
 use App\Modules\Finance\PettyCash\Resources\PettyCashBalanceResource;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Exception;
 
 class PettyCashController extends Controller
@@ -414,6 +415,72 @@ class PettyCashController extends Controller
                 'success' => false,
                 'message' => 'Failed to retrieve spending analytics',
                 'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get data for a petty cash voucher.
+     */
+    public function voucher(Request $request): JsonResponse
+    {
+        try {
+            $filters = $request->only([
+                'start_date', 'end_date', 'classification', 'project_name'
+            ]);
+
+            $data = $this->repository->getVoucherData($filters);
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+                'filters' => $filters,
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve voucher data',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function downloadVoucherPdf(Request $request)
+    {
+        try {
+            $filters = $request->only([
+                'start_date', 'end_date', 'classification', 'project_name'
+            ]);
+
+            $data = $this->repository->getVoucherData($filters);
+            
+            // Determine voucher title based on date range
+            $startDate = \Carbon\Carbon::parse($data['period']['start']);
+            $endDate = \Carbon\Carbon::parse($data['period']['end']);
+            $diffDays = $startDate->diffInDays($endDate);
+
+            if ($diffDays <= 1) {
+                $title = 'Daily Petty Cash Voucher';
+            } elseif ($diffDays <= 7) {
+                $title = 'Weekly Petty Cash Voucher';
+            } elseif ($diffDays <= 32) {
+                $title = 'Monthly Petty Cash Voucher';
+            } else {
+                $title = 'Periodical Petty Cash Voucher';
+            }
+
+            $pdf = Pdf::loadView('reports.finance.voucher', array_merge($data, ['title' => $title]));
+            $pdf->setPaper('A4', 'portrait');
+            
+            $filename = str_replace(' ', '-', strtolower($title)) . '-' . $startDate->format('Y-m-d') . '.pdf';
+            
+            return $pdf->download($filename);
+        } catch (Exception $e) {
+            \Log::error('Petty Cash Voucher PDF Generation Failed: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate PDF voucher',
+                'error' => $e->getMessage()
             ], 500);
         }
     }

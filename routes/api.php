@@ -98,6 +98,11 @@ Route::get('/user', function () {
 //location apis
 Route::get('/locations', 'App\Http\Controllers\LocationController@index');
 Route::resource('/location', 'App\Http\Controllers\LocationController');
+
+// System Refresh Routes
+Route::get('/system/version', [App\Http\Controllers\SystemController::class, 'getVersion']);
+Route::post('/system/refresh', [App\Http\Controllers\SystemController::class, 'triggerRefresh'])
+    ->middleware(['auth:sanctum']);
 Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
 Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
@@ -812,6 +817,8 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('transactions', [PettyCashController::class, 'transactions']);
             Route::get('recent', [PettyCashController::class, 'recent']);
             Route::get('search', [PettyCashController::class, 'search']);
+            Route::get('voucher', [PettyCashController::class, 'voucher']);
+            Route::get('voucher/pdf', [PettyCashController::class, 'downloadVoucherPdf']);
             
             // Reporting & Analytics
             Route::get('summary', [PettyCashReportController::class, 'summary']);
