@@ -21,6 +21,7 @@ use App\Http\Controllers\ProcurementController;
 use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\HandoverSurveyController;
 use App\Http\Controllers\API\PublicHandoverController;
+use App\Modules\Production\Http\Controllers\JobCardController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
@@ -50,6 +51,15 @@ Route::post('public/leads', [App\Modules\ClientService\Http\Controllers\PublicLe
 // Public routes for Client Handover
 Route::get('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'show']);
 Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'store']);
+
+// Public routes for Job Cards
+Route::prefix('public')->group(function () {
+    Route::post('job-cards/lookup', [JobCardController::class, 'publicLookupOrCreate']);
+    Route::post('job-cards', [JobCardController::class, 'publicStore']);
+    Route::get('job-cards/{token}', [JobCardController::class, 'publicShow']);
+    Route::post('job-cards/{token}', [JobCardController::class, 'publicUpdate']);
+    Route::get('technicians', [JobCardController::class, 'publicTechnicians']);
+});
 
 // Flash Quote PDF Generation
 Route::post('flash-quote/generate-pdf', [App\Http\Controllers\FlashQuoteController::class, 'generatePdf']);
