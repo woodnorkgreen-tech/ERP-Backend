@@ -230,13 +230,13 @@ class PettyCashRepository
      */
     public function getTransactionSummary(array $filters = []): array
     {
-        $topUpQuery = PettyCashTopUp::query();
-        $disbursementQuery = PettyCashDisbursement::active();
+        $topUpQuery = PettyCashTopUp::notArchived();
+        $disbursementQuery = PettyCashDisbursement::active()->notArchived();
 
-        // Apply date filters
+        // Apply date filters - Aligning to created_at for consistency if date_disbursed/date_topped_up differs
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $topUpQuery->byDateRange($filters['start_date'], $filters['end_date']);
-            $disbursementQuery->byDateRange($filters['start_date'], $filters['end_date']);
+            $topUpQuery->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
+            $disbursementQuery->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
         }
 
         // Apply other filters
@@ -248,19 +248,19 @@ class PettyCashRepository
             $disbursementQuery->byProject($filters['project_name']);
         }
 
-        $totalTopUps = $topUpQuery->sum('amount');
-        $totalDisbursements = $disbursementQuery->sum('amount');
+        $totalTopUps = (float) $topUpQuery->sum('amount');
+        $totalDisbursements = (float) $disbursementQuery->sum('amount');
         $topUpCount = $topUpQuery->count();
         $disbursementCount = $disbursementQuery->count();
 
         return [
-            'total_top_ups' => (float) $totalTopUps,
-            'total_disbursements' => (float) $totalDisbursements,
-            'net_balance' => (float) ($totalTopUps - $totalDisbursements),
+            'total_top_ups' => $totalTopUps,
+            'total_disbursements' => $totalDisbursements,
+            'net_balance' => $totalTopUps - $totalDisbursements,
             'top_up_count' => $topUpCount,
             'disbursement_count' => $disbursementCount,
-            'average_top_up' => $topUpCount > 0 ? (float) ($totalTopUps / $topUpCount) : 0,
-            'average_disbursement' => $disbursementCount > 0 ? (float) ($totalDisbursements / $disbursementCount) : 0,
+            'average_top_up' => $topUpCount > 0 ? $totalTopUps / $topUpCount : 0,
+            'average_disbursement' => $disbursementCount > 0 ? $totalDisbursements / $disbursementCount : 0,
         ];
     }
 
@@ -270,12 +270,13 @@ class PettyCashRepository
     public function getSpendingByClassification(array $filters = []): Collection
     {
         $query = PettyCashDisbursement::active()
+            ->notArchived()
             ->select('classification', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
             ->groupBy('classification');
 
-        // Apply date filters
+        // Apply date filters - Aligning to created_at
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $query->byDateRange($filters['start_date'], $filters['end_date']);
+            $query->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
         }
 
         return $query->get();
@@ -287,12 +288,13 @@ class PettyCashRepository
     public function getSpendingByPaymentMethod(array $filters = []): Collection
     {
         $query = PettyCashDisbursement::active()
+            ->notArchived()
             ->select('payment_method', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
             ->groupBy('payment_method');
 
-        // Apply date filters
+        // Apply date filters - Aligning to created_at
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $query->byDateRange($filters['start_date'], $filters['end_date']);
+            $query->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
         }
 
         return $query->get();
@@ -434,6 +436,12 @@ class PettyCashRepository
             });
         }
 
+        if (!empty($filters['project_name'])) {
+            $disbursements->where('project_name', 'like', '%' . $filters['project_name'] . '%');
+            // Top-ups don't have project names
+            $topUps->whereRaw('1 = 0');
+        }
+
         // Apply archiving filters
         $showArchived = filter_var($filters['show_archived'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $topUps->where('is_archived', $showArchived);
@@ -547,5 +555,66 @@ class PettyCashRepository
 
             return count($topUpIds);
         });
+    }
+    /**
+     * Get voucher data for a specific date range (non-paginated).
+     */
+    public function getVoucherData(array $filters = []): array
+    {
+        $startDate = $filters['start_date'] ?? now()->startOfDay()->toDateTimeString();
+        $endDate = $filters['end_date'] ?? now()->endOfDay()->toDateTimeString();
+
+        // 1. Calculate Opening Balance (Sum of all transactions before start_date)
+        // Opening Top-ups
+        $openingTopUps = PettyCashTopUp::notArchived()
+            ->where('created_at', '<', $startDate)
+            ->sum('amount');
+        
+        // Opening Disbursements (only active ones)
+        $openingDisbursements = PettyCashDisbursement::active()->notArchived()
+            ->where('created_at', '<', $startDate)
+            ->sum('amount');
+        
+        $openingBalance = (float)$openingTopUps - (float)$openingDisbursements;
+
+        // 2. Fetch Disbursements in range
+        $disbursementQuery = PettyCashDisbursement::with(['topUp', 'creator'])
+            ->active()
+            ->notArchived()
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->orderBy('created_at', 'asc');
+
+        if (!empty($filters['classification'])) {
+            $disbursementQuery->byClassification($filters['classification']);
+        }
+        if (!empty($filters['project_name'])) {
+            $disbursementQuery->byProject($filters['project_name']);
+        }
+
+        $disbursements = $disbursementQuery->get();
+
+        // 3. Fetch Top-ups in range
+        $topUps = PettyCashTopUp::with('creator')
+            ->notArchived()
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->orderBy('created_at', 'asc')
+            ->get();
+
+        $totalIn = (float)$topUps->sum('amount');
+        $totalOut = (float)$disbursements->sum('amount');
+
+        return [
+            'opening_balance' => $openingBalance,
+            'top_ups' => $topUps,
+            'disbursements' => $disbursements,
+            'total_in' => $totalIn,
+            'total_out' => $totalOut,
+            'closing_balance' => $openingBalance + $totalIn - $totalOut,
+            'filters' => $filters,
+            'period' => [
+                'start' => $startDate,
+                'end' => $endDate
+            ]
+        ];
     }
 }
