@@ -394,32 +394,6 @@ class PettyCashController extends Controller
     }
 
     /**
-     * Get spending analytics.
-     */
-    public function analytics(Request $request): JsonResponse
-    {
-        try {
-            $filters = $request->only([
-                'start_date', 'end_date', 'classification', 'project_name'
-            ]);
-
-            $analytics = $this->service->getSpendingAnalytics($filters);
-
-            return response()->json([
-                'success' => true,
-                'data' => $analytics,
-                'filters' => $filters,
-            ]);
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve spending analytics',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
      * Get data for a petty cash voucher.
      */
     public function voucher(Request $request): JsonResponse

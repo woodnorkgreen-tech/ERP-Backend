@@ -129,7 +129,8 @@
 <body>
     <div class="header clearfix">
         <div style="float: left;">
-            <div class="company-name">COMPANY LIMITED</div>
+            <img src="{{ public_path('logo-outline.png') }}" style="height: 65px; width: auto; margin-bottom: 5px; display: block;" alt="Woodnork Green Logo"/>
+            <div class="company-name">WOODNORK GREEN LTD</div>
             <div style="font-size: 14px; color: #555;">Petty Cash Record</div>
         </div>
         <div class="document-title">

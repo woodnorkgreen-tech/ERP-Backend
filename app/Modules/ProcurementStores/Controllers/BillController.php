@@ -11,9 +11,25 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class BillController extends Controller
 {
+    /**
+     * Download Bill as PDF
+     */
+    public function downloadPdf(Bill $bill)
+    {
+        $bill->load(['purchaseOrder', 'supplier', 'createdBy', 'payments.paymentMethod', 'payments.createdBy']);
+        
+        $pdf = Pdf::loadView('reports.procurement.bill', [
+            'bill' => $bill,
+        ]);
+
+        $filename = 'Bill-' . $bill->bill_number . '.pdf';
+        
+        return $pdf->download($filename);
+    }
     /**
      * Check if user has delete permissions
      * Only Super Admin, Admin, and Accounts roles can delete

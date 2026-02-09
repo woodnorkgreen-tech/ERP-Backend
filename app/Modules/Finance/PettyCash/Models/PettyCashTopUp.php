@@ -33,6 +33,7 @@ class PettyCashTopUp extends Model
         'is_archived',
         'archived_at',
         'archived_by',
+        'requisition_id',
     ];
 
     /**
@@ -59,6 +60,14 @@ class PettyCashTopUp extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Get the requisition this top-up was created for.
+     */
+    public function requisition(): BelongsTo
+    {
+        return $this->belongsTo(PettyCashRequisition::class, 'requisition_id');
     }
 
     /**
@@ -165,8 +174,57 @@ class PettyCashTopUp extends Model
 
         // Update balance when top-up is created
         static::created(function ($topUp) {
-            $balance = PettyCashBalance::current();
-            $balance->addTopUp($topUp->amount, $topUp->id);
+            if (!$topUp->is_archived) {
+                $topUp->updateBalance('add', (float) $topUp->amount);
+            }
         });
+
+        // Update balance when top-up is updated (amount or archived changes)
+        static::updating(function ($topUp) {
+            $oldAmount = (float) $topUp->getOriginal('amount');
+            $newAmount = (float) $topUp->amount;
+            
+            $oldArchived = (bool) $topUp->getOriginal('is_archived');
+            $newArchived = (bool) $topUp->is_archived;
+
+            $wasEffective = !$oldArchived;
+            $isEffective = !$newArchived;
+
+            if ($wasEffective && $isEffective) {
+                // Both were not archived, just adjust the difference
+                $difference = $newAmount - $oldAmount;
+                if ($difference !== 0.0) {
+                    $topUp->updateBalance('add', $difference);
+                }
+            } elseif ($wasEffective && !$isEffective) {
+                // Was not archived but now it is
+                // Subtract the old amount from balance
+                $topUp->updateBalance('subtract', $oldAmount);
+            } elseif (!$wasEffective && $isEffective) {
+                // Was archived but now it isn't
+                // Add the new amount to balance
+                $topUp->updateBalance('add', $newAmount);
+            }
+        });
+
+        // Update balance when top-up is deleted
+        static::deleted(function ($topUp) {
+            if (!$topUp->is_archived) {
+                $topUp->updateBalance('subtract', (float) $topUp->amount);
+            }
+        });
+    }
+
+    /**
+     * Update the petty cash balance.
+     */
+    private function updateBalance(string $operation, float $amount)
+    {
+        // current() automatically calls recalculateBalance()
+        $balance = PettyCashBalance::current();
+        
+        $balance->last_transaction_id = $this->id;
+        $balance->last_transaction_type = 'top_up';
+        $balance->save();
     }
 }

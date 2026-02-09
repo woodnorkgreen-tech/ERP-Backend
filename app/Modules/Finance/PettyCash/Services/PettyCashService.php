@@ -90,6 +90,12 @@ class PettyCashService
                     $topUp = $this->repository->getTopUpsWithAvailableBalance()->first();
                 }
 
+                // SIMPLIFIED SYNC: As a final fallback, just pick the latest active top-up 
+                // to allow spending against the global pool even if individual top-up tracking gets messy.
+                if (!$topUp) {
+                    $topUp = \App\Modules\Finance\PettyCash\Models\PettyCashTopUp::notArchived()->latest()->first();
+                }
+
                 if (!$topUp) {
                     return [
                         'success' => false,
@@ -104,12 +110,45 @@ class PettyCashService
             // Create the disbursement (balance will be updated automatically via model events)
             $disbursement = $this->repository->createDisbursement($data);
 
+            // If this disbursement is linked to a requisition, update the requisition status
+            if (!empty($data['requisition_id'])) {
+                $this->syncRequisitionStatus((int)$data['requisition_id'], 'disbursed');
+            }
+
             DB::commit();
 
             return ['success' => true, 'data' => $disbursement];
         } catch (Exception $e) {
             DB::rollBack();
             throw new Exception('Failed to create disbursement: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Synchronize requisition status based on disbursement state.
+     */
+    public function syncRequisitionStatus(int $requisitionId, string $forcedStatus = null): void
+    {
+        $requisition = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::find($requisitionId);
+        if (!$requisition) return;
+
+        if ($forcedStatus) {
+            $updateData = ['status' => $forcedStatus];
+            if ($forcedStatus === 'disbursed' && !$requisition->signing_token) {
+                $updateData['signing_token'] = \Illuminate\Support\Str::random(60);
+            }
+            $requisition->update($updateData);
+            return;
+        }
+
+        // Auto-detect status based on active disbursements
+        $hasActiveDisbursement = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::where('requisition_id', $requisitionId)
+            ->where('status', 'active')
+            ->exists();
+
+        if (!$hasActiveDisbursement && $requisition->status === 'disbursed') {
+            // Revert to approved if no active disbursements exist
+            $requisition->update(['status' => 'approved']);
         }
     }
 
@@ -132,13 +171,8 @@ class PettyCashService
                 }
             }
 
-            // Update the disbursement
+            // Update the disbursement (Model events will handle balance adjustment)
             $this->repository->updateDisbursement($disbursement, $data);
-
-            // If amount changed and it's active, adjust the global balance
-            if (isset($data['amount']) && $data['amount'] != $oldAmount && $oldIsActive) {
-                $this->adjustBalanceForAmountChange($disbursement, $oldAmount, (float) $data['amount']);
-            }
 
             DB::commit();
 
@@ -164,6 +198,11 @@ class PettyCashService
             // Void the disbursement (balance will be updated automatically via model events)
             $result = $this->repository->voidDisbursement($disbursement, Auth::id(), $reason);
 
+            // Sync requisition status if linked
+            if ($disbursement->requisition_id) {
+                $this->syncRequisitionStatus($disbursement->requisition_id);
+            }
+
             DB::commit();
 
             return $result;
@@ -182,7 +221,13 @@ class PettyCashService
 
         try {
             // Delete the disbursement (balance will be updated automatically via model events)
+            $requisitionId = $disbursement->requisition_id;
             $result = $disbursement->delete();
+
+            // Sync requisition status if linked
+            if ($requisitionId) {
+                $this->syncRequisitionStatus($requisitionId);
+            }
 
             DB::commit();
 
@@ -336,34 +381,6 @@ class PettyCashService
     }
 
     /**
-     * Get spending analytics by classification.
-     */
-    public function getSpendingAnalytics(array $filters = []): array
-    {
-        $byClassification = $this->repository->getSpendingByClassification($filters);
-        $byPaymentMethod = $this->repository->getSpendingByPaymentMethod($filters);
-        
-        return [
-            'by_classification' => $byClassification->map(function ($item) {
-                return [
-                    'classification' => $item->classification,
-                    'total_amount' => (float) $item->total_amount,
-                    'transaction_count' => $item->transaction_count,
-                    'percentage' => 0, // Will be calculated on frontend
-                ];
-            }),
-            'by_payment_method' => $byPaymentMethod->map(function ($item) {
-                return [
-                    'payment_method' => $item->payment_method,
-                    'total_amount' => (float) $item->total_amount,
-                    'transaction_count' => $item->transaction_count,
-                    'percentage' => 0, // Will be calculated on frontend
-                ];
-            }),
-        ];
-    }
-
-    /**
      * Get recent transactions for dashboard.
      */
     public function getRecentTransactions(int $limit = 10): array
@@ -397,22 +414,6 @@ class PettyCashService
             DB::rollBack();
             throw new Exception('Failed to recalculate balance: ' . $e->getMessage());
         }
-    }
-
-    /**
-     * Get balance history and trends.
-     */
-    public function getBalanceTrends(int $days = 30): array
-    {
-        // This would require a balance history table for full implementation
-        // For now, return current balance info
-        $currentBalance = $this->getCurrentBalanceInfo();
-        
-        return [
-            'current' => $currentBalance,
-            'trend' => 'stable', // Would be calculated from historical data
-            'days_analyzed' => $days,
-        ];
     }
 
     /**
@@ -521,18 +522,4 @@ class PettyCashService
         return $errors;
     }
 
-    /**
-     * Adjust balance when disbursement amount is changed.
-     */
-    private function adjustBalanceForAmountChange(PettyCashDisbursement $disbursement, float $oldAmount, float $newAmount): void
-    {
-        $balance = $this->repository->getCurrentBalance();
-        $difference = $newAmount - $oldAmount;
-        
-        // If new amount is higher, subtract the difference from balance
-        // If new amount is lower, add the difference back to balance
-        $balance->current_balance -= $difference;
-        $balance->updated_at = now();
-        $balance->save();
-    }
 }

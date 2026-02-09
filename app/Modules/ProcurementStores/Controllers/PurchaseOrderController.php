@@ -9,9 +9,25 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Controllers\Controller;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class PurchaseOrderController extends Controller
 {
+    /**
+     * Download Purchase Order as PDF
+     */
+    public function downloadPdf(PurchaseOrder $purchaseOrder)
+    {
+        $purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']);
+        
+        $pdf = Pdf::loadView('reports.procurement.purchase-order', [
+            'po' => $purchaseOrder,
+        ]);
+
+        $filename = 'LPO-' . $purchaseOrder->po_number . '.pdf';
+        
+        return $pdf->download($filename);
+    }
     /**
      * Check if user has approval/delete permissions
      * Only Super Admin, Admin, and Accounts roles can approve/delete

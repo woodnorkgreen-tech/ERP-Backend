@@ -50,12 +50,14 @@ class PettyCashBalance extends Model
      */
     public static function current(): self
     {
-        return static::firstOrCreate(['id' => 1], [
+        $balance = static::firstOrCreate(['id' => 1], [
             'current_balance' => 0.00,
             'last_transaction_id' => null,
             'last_transaction_type' => null,
             'updated_at' => now(),
         ]);
+
+        return $balance->recalculateBalance();
     }
 
     /**
@@ -155,7 +157,7 @@ class PettyCashBalance extends Model
         $totalTopUps = PettyCashTopUp::notArchived()->sum('amount');
         $totalDisbursements = PettyCashDisbursement::active()->notArchived()->sum('amount');
         
-        $this->current_balance = $totalTopUps - $totalDisbursements;
+        $this->current_balance = (float)$totalTopUps - (float)$totalDisbursements;
         $this->updated_at = now();
         $this->save();
 
