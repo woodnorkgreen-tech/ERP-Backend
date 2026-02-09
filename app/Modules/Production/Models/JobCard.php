@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Modules\HR\Models\Employee;
+use Illuminate\Support\Str;
 
 class JobCard extends Model
 {
@@ -15,6 +16,7 @@ class JobCard extends Model
     protected $table = 'job_cards';
 
     protected $fillable = [
+        'public_token',
         'worker_id',
         'date',
         'clock_in_time',
@@ -37,6 +39,15 @@ class JobCard extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    protected static function booted()
+    {
+        static::saving(function (JobCard $jobCard) {
+            if (empty($jobCard->public_token)) {
+                $jobCard->public_token = (string) Str::uuid();
+            }
+        });
+    }
 
     /**
      * Get the worker/technician for this job card.

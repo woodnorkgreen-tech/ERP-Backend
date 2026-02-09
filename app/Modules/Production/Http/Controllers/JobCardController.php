@@ -196,22 +196,103 @@ class JobCardController extends Controller
     }
 
     /**
-     * Update the specified job card.
+     * Public: Lookup or create a job card for a worker on a date.
      */
-    public function update(Request $request, JobCard $jobCard): JsonResponse
+    public function publicLookupOrCreate(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'worker_id' => 'required|integer', // Simple integer for technical labour
+            'worker_id' => 'required|integer',
+            'date' => 'nullable|date',
+        ]);
+
+        $date = $validated['date'] ?? now()->toDateString();
+
+        $jobCard = JobCard::firstOrCreate(
+            [
+                'worker_id' => $validated['worker_id'],
+                'date' => $date,
+            ],
+            [
+                'status' => 'pending_approval',
+                // Avoid insert failures if DB columns are NOT NULL without defaults
+                'clock_in_time' => '00:00',
+                'clock_out_time' => '00:00',
+            ]
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $jobCard->load(['worker', 'tasks.workOrder', 'issues', 'approver'])
+        ]);
+    }
+
+    /**
+     * Public: Show a job card by public token.
+     */
+    public function publicShow(string $token): JsonResponse
+    {
+        $jobCard = JobCard::where('public_token', $token)->first();
+
+        if (!$jobCard) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid job card link'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $jobCard->load(['worker', 'tasks.workOrder', 'issues'])
+        ]);
+    }
+
+    /**
+     * Public: Create a new job card (same as store).
+     */
+    public function publicStore(Request $request): JsonResponse
+    {
+        return $this->store($request);
+    }
+
+    /**
+     * Public: Update a job card by public token.
+     */
+    public function publicUpdate(Request $request, string $token): JsonResponse
+    {
+        $jobCard = JobCard::where('public_token', $token)->first();
+
+        if (!$jobCard) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid job card link'
+            ], 404);
+        }
+
+        $validated = $request->validate([
+            'worker_id' => 'required|integer',
             'date' => 'required|date',
             'clock_in_time' => 'nullable|string',
             'clock_out_time' => 'nullable|string',
             'notes' => 'nullable|string',
             'tasks' => 'nullable|array',
-            'issues' => 'nullable|array'
+            'tasks.*.id' => 'nullable|integer',
+            'tasks.*.description' => 'required|string',
+            'tasks.*.work_order_id' => 'nullable|integer|exists:work_orders,id',
+            'tasks.*.start_time' => 'nullable|string',
+            'tasks.*.end_time' => 'nullable|string',
+            'tasks.*.hours_worked' => 'nullable|numeric|min:0',
+            'tasks.*.notes' => 'nullable|string',
+            'issues' => 'nullable|array',
+            'issues.*.description' => 'required|string',
+            'issues.*.resolution' => 'nullable|string',
+            'issues.*.status' => 'required|in:open,resolved,escalated,under_review',
         ]);
 
         DB::beginTransaction();
         try {
+            $originalClockIn = $jobCard->clock_in_time;
+            $originalClockOut = $jobCard->clock_out_time;
+
             $jobCard->update($validated);
 
             // Handle tasks - update existing, create new, delete removed
@@ -255,8 +336,96 @@ class JobCardController extends Controller
             // Recalculate hours only if clock times were explicitly provided and have changed
             if (isset($validated['clock_in_time']) || isset($validated['clock_out_time'])) {
                 // Check if times have actually changed
-                $clockInChanged = isset($validated['clock_in_time']) && $jobCard->clock_in_time !== $validated['clock_in_time'];
-                $clockOutChanged = isset($validated['clock_out_time']) && $jobCard->clock_out_time !== $validated['clock_out_time'];
+                $clockInChanged = isset($validated['clock_in_time']) && $originalClockIn !== $validated['clock_in_time'];
+                $clockOutChanged = isset($validated['clock_out_time']) && $originalClockOut !== $validated['clock_out_time'];
+                
+                if ($clockInChanged || $clockOutChanged) {
+                    $this->calculateHours($jobCard);
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Job card updated successfully',
+                'data' => $jobCard->load(['tasks.workOrder', 'issues'])
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update job card: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update the specified job card.
+     */
+    public function update(Request $request, JobCard $jobCard): JsonResponse
+    {
+        $validated = $request->validate([
+            'worker_id' => 'required|integer', // Simple integer for technical labour
+            'date' => 'required|date',
+            'clock_in_time' => 'nullable|string',
+            'clock_out_time' => 'nullable|string',
+            'notes' => 'nullable|string',
+            'tasks' => 'nullable|array',
+            'issues' => 'nullable|array'
+        ]);
+
+        DB::beginTransaction();
+        try {
+            $originalClockIn = $jobCard->clock_in_time;
+            $originalClockOut = $jobCard->clock_out_time;
+
+            $jobCard->update($validated);
+
+            // Handle tasks - update existing, create new, delete removed
+            if (isset($validated['tasks'])) {
+                $incomingTaskIds = [];
+                
+                foreach ($validated['tasks'] as $taskData) {
+                    if (isset($taskData['id']) && $taskData['id']) {
+                        // Update existing task
+                        $existingTask = $jobCard->tasks()->find($taskData['id']);
+                        if ($existingTask) {
+                            $existingTask->update($taskData);
+                            $incomingTaskIds[] = $taskData['id'];
+                        }
+                    } else {
+                        // Create new task
+                        $taskData['job_card_id'] = $jobCard->id;
+                        $newTask = DailyTask::create($taskData);
+                        $incomingTaskIds[] = $newTask->id;
+                    }
+                }
+                
+                // Delete tasks that are no longer present
+                $jobCard->tasks()->whereNotIn('id', $incomingTaskIds)->delete();
+            }
+
+            // Handle issues - delete existing and create new ones
+            if (isset($validated['issues'])) {
+                // Delete existing issues
+                $jobCard->issues()->delete();
+                
+                // Create new issues if provided
+                if (is_array($validated['issues'])) {
+                    foreach ($validated['issues'] as $issueData) {
+                        $issueData['job_card_id'] = $jobCard->id;
+                        DailyIssue::create($issueData);
+                    }
+                }
+            }
+
+            // Recalculate hours only if clock times were explicitly provided and have changed
+            if (isset($validated['clock_in_time']) || isset($validated['clock_out_time'])) {
+                // Check if times have actually changed
+                $clockInChanged = isset($validated['clock_in_time']) && $originalClockIn !== $validated['clock_in_time'];
+                $clockOutChanged = isset($validated['clock_out_time']) && $originalClockOut !== $validated['clock_out_time'];
                 
                 if ($clockInChanged || $clockOutChanged) {
                     $this->calculateHours($jobCard);
@@ -514,6 +683,14 @@ class JobCardController extends Controller
             'success' => true,
             'data' => $technicalLabours
         ]);
+    }
+
+    /**
+     * Public: Get technicians for dropdown.
+     */
+    public function publicTechnicians(Request $request): JsonResponse
+    {
+        return $this->technicians($request);
     }
 
     /**

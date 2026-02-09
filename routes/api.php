@@ -21,6 +21,7 @@ use App\Http\Controllers\ProcurementController;
 use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\HandoverSurveyController;
 use App\Http\Controllers\API\PublicHandoverController;
+use App\Modules\Production\Http\Controllers\JobCardController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
@@ -51,9 +52,20 @@ Route::post('public/leads', [App\Modules\ClientService\Http\Controllers\PublicLe
 Route::get('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'show']);
 Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'store']);
 
+<<<<<<< HEAD
 // Public routes for Petty Cash Requisition Sign-off
 Route::get('public/pcr/{token}', [PettyCashRequisitionController::class, 'getByToken']);
 Route::post('public/pcr/{token}/sign', [PettyCashRequisitionController::class, 'publicSignOff']);
+=======
+// Public routes for Job Cards
+Route::prefix('public')->group(function () {
+    Route::post('job-cards/lookup', [JobCardController::class, 'publicLookupOrCreate']);
+    Route::post('job-cards', [JobCardController::class, 'publicStore']);
+    Route::get('job-cards/{token}', [JobCardController::class, 'publicShow']);
+    Route::post('job-cards/{token}', [JobCardController::class, 'publicUpdate']);
+    Route::get('technicians', [JobCardController::class, 'publicTechnicians']);
+});
+>>>>>>> 73b3a16da7fede94fe4b3c6d0ca080d0b44fe229
 
 // Flash Quote PDF Generation
 Route::post('flash-quote/generate-pdf', [App\Http\Controllers\FlashQuoteController::class, 'generatePdf']);
