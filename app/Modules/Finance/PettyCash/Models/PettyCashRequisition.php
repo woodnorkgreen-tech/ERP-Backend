@@ -37,6 +37,7 @@ class PettyCashRequisition extends Model
         'enquiry_id',
         'signing_token',
         'received_by',
+        'payee_id',
     ];
 
     protected $casts = [
