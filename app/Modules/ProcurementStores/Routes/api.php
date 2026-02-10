@@ -8,7 +8,7 @@ use App\Modules\ProcurementStores\Controllers\PurchaseOrderController;
 use App\Modules\ProcurementStores\Controllers\InvoiceController;
 use App\Modules\ProcurementStores\Controllers\BillController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
-
+use App\Modules\ProcurementStores\Controllers\POVerificationController;
 
 Route::get('/test', [ProcurementStoresController::class, 'test']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
@@ -32,20 +32,20 @@ Route::post('/requisitions/{requisition}/approve', [RequisitionController::class
 Route::post('/requisitions/{requisition}/reject', [RequisitionController::class, 'reject']);
 Route::resource('/requisitions', RequisitionController::class);
 
-// Purchase Orders - ADD THIS LINE
+// Purchase Orders
 Route::get('/approved-purchase-orders', [PurchaseOrderController::class, 'getApprovedPurchaseOrders']);
 Route::post('/search/purchase-orders', [PurchaseOrderController::class, 'search']);
 Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController::class, 'submitForApproval']);
 Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
+
+
+
+// Purchase Orders - Resource route (must come AFTER specific routes)
 Route::resource('/purchase-orders', PurchaseOrderController::class);
 Route::get('/purchase-orders/link/{requisition}', [PurchaseOrderController::class, 'link'])->name('purchase-orders.link');
 Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 'storeLinked'])->name('purchase-orders.storeLinked');
 
-Route::post(
-    '/purchase-orders/store-linked',
-    [PurchaseOrderController::class, 'storeLinked']
-)->name('purchase-orders.storeLinked');
 // Bills - Specific routes FIRST (before resource)
 Route::get('/bills-stats', [BillController::class, 'stats']);
 Route::get('/pending-bills', [BillController::class, 'getPendingBills']);
@@ -58,6 +58,7 @@ Route::post('/multi-payment', [BillController::class, 'recordMultiBillPayment'])
 // Bills - Resource route LAST
 Route::resource('/bills', BillController::class);
 
+// Goods Receipt Notes
 Route::get('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'index']);
 Route::get('/goods-receipt-notes/search', [GoodsReceiptNoteController::class, 'search']);
 Route::get('/goods-receipt-notes/available-purchase-orders', [GoodsReceiptNoteController::class, 'getAvailablePurchaseOrders']);
