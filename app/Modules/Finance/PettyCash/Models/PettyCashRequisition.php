@@ -117,8 +117,12 @@ class PettyCashRequisition extends Model
      */
     public static function generateRequisitionNumber(): string
     {
-        $last = self::orderBy('id', 'desc')->first();
-        $nextId = $last ? $last->id + 1 : 1;
-        return 'PCR-' . str_pad($nextId, 6, '0', STR_PAD_LEFT);
+        $maxNum = self::withTrashed()
+            ->where('requisition_number', 'LIKE', 'PCR-%')
+            ->selectRaw("MAX(CAST(SUBSTRING(requisition_number, 5) AS UNSIGNED)) as max_val")
+            ->value('max_val');
+            
+        $nextNum = $maxNum ? $maxNum + 1 : 1;
+        return 'PCR-' . str_pad($nextNum, 6, '0', STR_PAD_LEFT);
     }
 }

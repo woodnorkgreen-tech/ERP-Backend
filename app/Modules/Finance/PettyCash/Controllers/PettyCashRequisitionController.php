@@ -15,7 +15,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use App\Models\Project;
 use App\Models\ProjectEnquiry;
-use Illuminate\Support\Facades\Schema;
 use Exception;
 
 class PettyCashRequisitionController extends Controller
@@ -172,41 +171,20 @@ class PettyCashRequisitionController extends Controller
                 'status' => 'pending',
             ];
 
-            // Check which columns exist to handle partial migrations gracefully
-            $requisitionColumns = Schema::getColumnListing('petty_cash_requisitions');
-            $itemColumns = Schema::getColumnListing('petty_cash_requisition_items');
-            
-            // Build requisition data dynamically based on available columns
-            $requisitionData = array_merge($commonData, [
+            $requisition = PettyCashRequisition::create(array_merge($commonData, [
                 'requisition_number' => PettyCashRequisition::generateRequisitionNumber(),
+                'payee_id' => $request->payee_id ?? null,
+                'payee_name' => $request->payee_name ?? null,
                 'total_amount' => collect($request->items)->sum('amount'),
-            ]);
-            
-            // Add optional fields only if columns exist
-            if (in_array('payee_id', $requisitionColumns)) {
-                $requisitionData['payee_id'] = $request->payee_id ?? null;
-            }
-            if (in_array('payee_name', $requisitionColumns)) {
-                $requisitionData['payee_name'] = $request->payee_name ?? null;
-            }
-            
-            $requisition = PettyCashRequisition::create($requisitionData);
+            ]));
 
             foreach ($request->items as $item) {
-                $itemData = [
+                $requisition->items()->create([
                     'description' => $item['description'],
                     'amount' => $item['amount'],
-                ];
-                
-                // Add optional item fields only if columns exist
-                if (in_array('payee_id', $itemColumns)) {
-                    $itemData['payee_id'] = $item['payee_id'] ?? null;
-                }
-                if (in_array('payee_name', $itemColumns)) {
-                    $itemData['payee_name'] = $item['payee_name'] ?? null;
-                }
-                
-                $requisition->items()->create($itemData);
+                    'payee_id' => $item['payee_id'] ?? null,
+                    'payee_name' => $item['payee_name'] ?? null,
+                ]);
             }
 
             DB::commit();
