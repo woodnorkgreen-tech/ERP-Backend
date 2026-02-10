@@ -196,6 +196,17 @@ class PettyCashRequisitionController extends Controller
             ], 201);
         } catch (Exception $e) {
             DB::rollBack();
+            
+            // Log detailed error information for debugging
+            \Log::error('Petty Cash Requisition Creation Failed', [
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->all(),
+                'user_id' => Auth::id()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to submit requisition',
