@@ -184,28 +184,6 @@ class PettyCashTopUpController extends Controller
     }
 
     /**
-     * Get balance trends and history.
-     */
-    public function trends(Request $request): JsonResponse
-    {
-        try {
-            $days = $request->get('days', 30);
-            $trends = $this->service->getBalanceTrends($days);
-
-            return response()->json([
-                'success' => true,
-                'data' => $trends,
-            ]);
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve balance trends',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
      * Validate top-up data without creating.
      */
     public function validate(Request $request): JsonResponse
@@ -229,73 +207,6 @@ class PettyCashTopUpController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validation error',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
-     * Get top-up statistics.
-     */
-    public function statistics(Request $request): JsonResponse
-    {
-        try {
-            $filters = $request->only([
-                'start_date', 'end_date', 'payment_method', 'creator_id'
-            ]);
-
-            $summary = $this->service->getTransactionSummary($filters);
-
-            // Extract top-up specific statistics
-            $topUpStats = [
-                'total_amount' => $summary['total_top_ups'],
-                'count' => $summary['top_up_count'],
-                'average_amount' => $summary['average_top_up'],
-                'current_balance' => $summary['current_balance'],
-                'balance_status' => $summary['balance_status'],
-            ];
-
-            return response()->json([
-                'success' => true,
-                'data' => $topUpStats,
-                'filters' => $filters,
-            ]);
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve top-up statistics',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
-     * Get payment method breakdown for top-ups.
-     */
-    public function paymentMethods(Request $request): JsonResponse
-    {
-        try {
-            $filters = $request->only(['start_date', 'end_date']);
-
-            // Get top-ups grouped by payment method
-            $topUps = $this->repository->getTopUps($filters, 1000);
-            $paymentMethodBreakdown = $topUps->groupBy('payment_method')->map(function ($group) {
-                return [
-                    'count' => $group->count(),
-                    'total_amount' => $group->sum('amount'),
-                    'average_amount' => $group->avg('amount'),
-                ];
-            });
-
-            return response()->json([
-                'success' => true,
-                'data' => $paymentMethodBreakdown,
-                'filters' => $filters,
-            ]);
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve payment method breakdown',
                 'error' => $e->getMessage(),
             ], 500);
         }

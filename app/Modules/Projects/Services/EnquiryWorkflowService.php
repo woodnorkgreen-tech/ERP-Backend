@@ -132,11 +132,15 @@ class EnquiryWorkflowService
 
         // Handle enquiry status progression based on task completion
         if ($status === 'completed') {
-            $this->handleEnquiryStatusProgression($task);
+            // Only quote approval triggers automatic status progression
+            if ($task->type === 'quote_approval') {
+                $this->handleEnquiryStatusProgression($task);
+            }
             $this->handleTaskSpecificTransitions($task, $status);
         } elseif (in_array($oldStatus, ['completed', 'skipped']) && $status !== 'completed') {
             // Handle status reversion when task is reopened
-            $this->handleEnquiryStatusReversion($task);
+            // Manual reversion preferred for all tasks
+            // $this->handleEnquiryStatusReversion($task);
         } elseif ($status === 'in_progress') {
             $this->handleTaskSpecificTransitions($task, $status);
         }

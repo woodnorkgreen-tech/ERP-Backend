@@ -487,7 +487,27 @@ class EnquiryController extends Controller
                 $user = Auth::user();
                 // Check if user has privileged role
                 if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
-                    $query->where('assigned_to', $user->id);
+                    $query->where(function($q) use ($user) {
+                        $q->where('assigned_to', $user->id)
+                          ->orWhere('assigned_user_id', $user->id)
+                          ->orWhereHas('assignedUsers', function($subQ) use ($user) {
+                              $subQ->where('users.id', $user->id);
+                          });
+
+                        // Role-based visibility exceptions
+                        if ($user->hasRole('Designer')) {
+                            $q->orWhereIn('type', ['design', 'materials']);
+                        }
+                        if ($user->hasRole(['Costing', 'Accounts'])) {
+                            $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
+                        }
+                        if ($user->hasRole(['Stores', 'Procurement'])) {
+                            $q->orWhereIn('type', ['budget', 'procurement']);
+                        }
+                        if ($user->hasRole('Production')) {
+                            $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
+                        }
+                    });
                 }
                 $query->with([
                     'assignedUser',

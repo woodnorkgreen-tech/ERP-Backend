@@ -38,10 +38,7 @@ Route::post('/search/purchase-orders', [PurchaseOrderController::class, 'search'
 Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController::class, 'submitForApproval']);
 Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
-
-
-
-// Purchase Orders - Resource route (must come AFTER specific routes)
+Route::get('/purchase-orders/{purchaseOrder}/download', [PurchaseOrderController::class, 'downloadPdf']);
 Route::resource('/purchase-orders', PurchaseOrderController::class);
 Route::get('/purchase-orders/link/{requisition}', [PurchaseOrderController::class, 'link'])->name('purchase-orders.link');
 Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 'storeLinked'])->name('purchase-orders.storeLinked');
@@ -53,6 +50,7 @@ Route::get('/payment-methods', [BillController::class, 'getPaymentMethods']);
 Route::post('/payment-methods', [BillController::class, 'storePaymentMethod']);
 Route::post('/search/bills', [BillController::class, 'search']);
 Route::post('/bills/{bill}/record-payment', [BillController::class, 'recordPayment']);
+Route::get('/bills/{bill}/download', [BillController::class, 'downloadPdf']);
 Route::post('/multi-payment', [BillController::class, 'recordMultiBillPayment']);
 
 // Bills - Resource route LAST
@@ -62,6 +60,7 @@ Route::resource('/bills', BillController::class);
 Route::get('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'index']);
 Route::get('/goods-receipt-notes/search', [GoodsReceiptNoteController::class, 'search']);
 Route::get('/goods-receipt-notes/available-purchase-orders', [GoodsReceiptNoteController::class, 'getAvailablePurchaseOrders']);
+Route::get('/goods-receipt-notes/{id}/download', [GoodsReceiptNoteController::class, 'downloadPdf']);
 Route::get('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'show']);
 Route::post('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'store']);
 Route::put('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'update']);

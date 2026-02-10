@@ -24,8 +24,8 @@ class DailyTask extends Model
     ];
 
     protected $casts = [
-        'start_time' => 'datetime',
-        'end_time' => 'datetime',
+        'start_time' => 'string',
+        'end_time' => 'string',
         'hours_worked' => 'decimal:2',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',

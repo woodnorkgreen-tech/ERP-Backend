@@ -10,9 +10,29 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class GoodsReceiptNoteController extends Controller
 {
+    /**
+     * Download GRN as PDF
+     */
+    public function downloadPdf($id)
+    {
+        $grn = GoodsReceiptNote::with([
+            'items.purchaseOrderItem.material',
+            'purchaseOrder.supplier',
+            'receivedByUser'
+        ])->findOrFail($id);
+        
+        $pdf = Pdf::loadView('reports.procurement.grn', [
+            'grn' => $grn,
+        ]);
+
+        $filename = 'GRN-' . $grn->grn_number . '.pdf';
+        
+        return $pdf->download($filename);
+    }
     public function index(Request $request)
     {
         $query = GoodsReceiptNote::with([

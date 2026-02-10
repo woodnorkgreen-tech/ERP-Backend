@@ -21,10 +21,11 @@ use App\Http\Controllers\ProcurementController;
 use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\HandoverSurveyController;
 use App\Http\Controllers\API\PublicHandoverController;
+use App\Modules\Production\Http\Controllers\JobCardController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
-use App\Modules\Finance\PettyCash\Controllers\PettyCashReportController;
+use App\Modules\Finance\PettyCash\Controllers\PettyCashRequisitionController;
 use App\Modules\Teams\Controllers\TeamsTaskController;
 use App\Modules\Teams\Controllers\TeamMemberController;
 use App\Constants\Permissions;
@@ -50,6 +51,18 @@ Route::post('public/leads', [App\Modules\ClientService\Http\Controllers\PublicLe
 // Public routes for Client Handover
 Route::get('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'show']);
 Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'store']);
+
+// Public routes for Petty Cash Requisition Sign-off 
+Route::get('public/pcr/{token}', [PettyCashRequisitionController::class, 'getByToken']);
+Route::post('public/pcr/{token}/sign', [PettyCashRequisitionController::class, 'publicSignOff']);
+// Public routes for Job Cards
+Route::prefix('public')->group(function () {
+    Route::post('job-cards/lookup', [JobCardController::class, 'publicLookupOrCreate']);
+    Route::post('job-cards', [JobCardController::class, 'publicStore']);
+    Route::get('job-cards/{token}', [JobCardController::class, 'publicShow']);
+    Route::post('job-cards/{token}', [JobCardController::class, 'publicUpdate']);
+    Route::get('technicians', [JobCardController::class, 'publicTechnicians']);
+});
 
 // Flash Quote PDF Generation
 Route::post('flash-quote/generate-pdf', [App\Http\Controllers\FlashQuoteController::class, 'generatePdf']);
@@ -98,6 +111,11 @@ Route::get('/user', function () {
 //location apis
 Route::get('/locations', 'App\Http\Controllers\LocationController@index');
 Route::resource('/location', 'App\Http\Controllers\LocationController');
+
+// System Refresh Routes
+Route::get('/system/version', [App\Http\Controllers\SystemController::class, 'getVersion']);
+Route::post('/system/refresh', [App\Http\Controllers\SystemController::class, 'triggerRefresh'])
+    ->middleware(['auth:sanctum']);
 Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
 Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
@@ -426,6 +444,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [App\Http\Controllers\ProcurementController::class, 'getProcurementData']);
         Route::post('/', [App\Http\Controllers\ProcurementController::class, 'saveProcurementData']);
         Route::post('/import-budget', [App\Http\Controllers\ProcurementController::class, 'importBudgetData']);
+        Route::get('/pdf', [App\Http\Controllers\ProcurementController::class, 'downloadPdf']);
     });
 
     // Procurement utility routes
@@ -807,19 +826,13 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::post('balance/check', [PettyCashTopUpController::class, 'checkBalance']);
             Route::post('balance/recalculate', [PettyCashController::class, 'recalculateBalance']);
 
-            // Transaction and reporting routes
+            Route::get('summary', [PettyCashController::class, 'summary']);
             Route::get('transactions', [PettyCashController::class, 'transactions']);
             Route::get('recent', [PettyCashController::class, 'recent']);
             Route::get('search', [PettyCashController::class, 'search']);
+            Route::get('voucher', [PettyCashController::class, 'voucher']);
+            Route::get('voucher/pdf', [PettyCashController::class, 'downloadVoucherPdf']);
             
-            // Reporting & Analytics
-            Route::get('summary', [PettyCashReportController::class, 'summary']);
-            Route::get('analytics', [PettyCashReportController::class, 'analytics']);
-            Route::get('export', [PettyCashReportController::class, 'export']);
-            Route::get('report', [PettyCashReportController::class, 'report']);
-            Route::get('reports/summary', [PettyCashReportController::class, 'report']);
-            Route::get('reports/projects', [PettyCashReportController::class, 'projectReport']);
-
             // Excel upload route
             Route::post('upload-excel', [PettyCashController::class, 'uploadExcel'])
                 ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
@@ -829,6 +842,20 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('statistics', [PettyCashTopUpController::class, 'statistics']);
             Route::get('payment-methods', [PettyCashTopUpController::class, 'paymentMethods']);
             Route::post('validate/top-up', [PettyCashTopUpController::class, 'validate']);
+
+            // Requisition routes
+            Route::get('requisitions', [PettyCashRequisitionController::class, 'index']);
+            Route::post('requisitions', [PettyCashRequisitionController::class, 'store']);
+            Route::put('requisitions/{id}', [PettyCashRequisitionController::class, 'update']);
+            Route::delete('requisitions/{id}', [PettyCashRequisitionController::class, 'destroy']);
+            Route::get('requisitions/stats', [PettyCashRequisitionController::class, 'stats']);
+            Route::get('requisitions/form-data', [PettyCashRequisitionController::class, 'getFormData']);
+            Route::get('requisitions/{id}', [PettyCashRequisitionController::class, 'show']);
+            Route::post('requisitions/{id}/approve', [PettyCashRequisitionController::class, 'approve']);
+            Route::post('requisitions/{id}/disburse', [PettyCashRequisitionController::class, 'disburse']);
+            Route::post('requisitions/{id}/reject', [PettyCashRequisitionController::class, 'reject']);
+            Route::post('requisitions/{id}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmReceipt']);
+            Route::post('requisitions/{id}/items/{itemId}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmItemReceipt']);
         });
     });
 });

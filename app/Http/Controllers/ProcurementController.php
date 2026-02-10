@@ -105,6 +105,19 @@ class ProcurementController extends Controller
     public function saveProcurementData(Request $request, int $taskId): JsonResponse
     {
         try {
+            $user = $request->user();
+            $isSystemAdmin = $user->hasRole(['Admin', 'Super Admin']);
+            $isStores = $user->hasRole(['Stores', 'Store Keeper']);
+            $isProcurement = $user->hasRole(['Procurement', 'Procurement Officer']);
+
+            // Only designated roles can save procurement data
+            if (!$isSystemAdmin && !$isStores && !$isProcurement) {
+                return response()->json([
+                    'message' => 'Unauthorized: Only Stores, Procurement, or Admin users can save procurement data.'
+                ], 403);
+            }
+
+            // Validate the request data
             $data = $request->validate([
                 'projectInfo' => 'sometimes|array',
                 'budgetImported' => 'sometimes|boolean',
@@ -117,13 +130,20 @@ class ProcurementController extends Controller
                 'procurementItems.*.purchaseQuantity' => 'sometimes|numeric|min:0',
                 'procurementItems.*.purchaseOrderNumber' => 'sometimes|nullable|string',
                 'procurementItems.*.expectedDeliveryDate' => 'sometimes|nullable|date',
-                'procurementItems.*.availabilityStatus' => 'sometimes|string', // Kept for backward compatibility but less strict
+                'procurementItems.*.availabilityStatus' => 'sometimes|string',
                 'procurementItems.*.vendorName' => 'sometimes|nullable|string',
                 'procurementItems.*.procurementNotes' => 'sometimes|nullable|string',
                 'budgetSummary' => 'sometimes|array',
                 'lastImportDate' => 'sometimes|date'
             ]);
 
+            // Get existing data for comparison
+            $existingData = $this->procurementService->getProcurementData($taskId);
+            $existingItems = collect($existingData ? $existingData->procurement_items : [])->keyBy('budgetItemId');
+
+            // Field-level checks removed as per user requirement to allow both roles to save procurement data.
+            // We still only allow authorized roles to hit the save logic at the top.
+            
             $procurementData = $this->procurementService->saveProcurementData($taskId, $data);
 
             // Transform to match frontend expectations (camelCase)
@@ -223,6 +243,59 @@ class ProcurementController extends Controller
      *     )
      * )
      */
+    /**
+     * Download procurement list as PDF
+     *
+     * @OA\Get(
+     *     path="/api/projects/tasks/{taskId}/procurement/pdf",
+     *     summary="Download procurement PDF",
+     *     tags={"Procurement"},
+     *     @OA\Parameter(
+     *         name="taskId",
+     *         in="path",
+     *         required=true,
+     *         description="Task ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(response=200, description="PDF generated and downloaded"),
+     *     @OA\Response(response=404, description="Procurement data not found")
+     * )
+     */
+    public function downloadPdf(int $taskId)
+    {
+        try {
+            $task = \App\Modules\Projects\Models\EnquiryTask::with('enquiry.client')->findOrFail($taskId);
+            
+            // Use service to get data to ensure sync with budget
+            $procurementData = $this->procurementService->getProcurementData($taskId);
+            
+            if (!$procurementData) {
+                return response()->json(['message' => 'Procurement data not found'], 404);
+            }
+
+            // Load view with data
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.procurement', [
+                'procurementData' => $procurementData,
+                'enquiry' => $task->enquiry
+            ]);
+
+            $fileName = 'procurement-' . ($task->enquiry->job_number ?? $task->enquiry->enquiry_number ?? $taskId) . '.pdf';
+            
+            return $pdf->download($fileName);
+        } catch (\Exception $e) {
+            \Log::error('Failed to generate procurement PDF', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
     public function getVendorSuggestions(Request $request): JsonResponse
     {
         $description = $request->query('description', '');

@@ -51,7 +51,7 @@ class PettyCashRepository
      */
     public function getDisbursements(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy')
+        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition')
             ->latest();
 
         // Apply filters
@@ -102,7 +102,7 @@ class PettyCashRepository
         $query = PettyCashTopUp::with([
             'creator',
             'disbursements' => function ($q) use ($filters) {
-                $q->with('creator', 'voidedBy');
+                $q->with('creator', 'voidedBy', 'requisition');
                 
                 // Apply disbursement filters
                 if (!empty($filters['disbursement_status'])) {
@@ -230,13 +230,13 @@ class PettyCashRepository
      */
     public function getTransactionSummary(array $filters = []): array
     {
-        $topUpQuery = PettyCashTopUp::query();
-        $disbursementQuery = PettyCashDisbursement::active();
+        $topUpQuery = PettyCashTopUp::notArchived();
+        $disbursementQuery = PettyCashDisbursement::active()->notArchived();
 
-        // Apply date filters
+        // Apply date filters - Aligning to created_at for consistency if date_disbursed/date_topped_up differs
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $topUpQuery->byDateRange($filters['start_date'], $filters['end_date']);
-            $disbursementQuery->byDateRange($filters['start_date'], $filters['end_date']);
+            $topUpQuery->whereBetween('date_topped_up', [$filters['start_date'], $filters['end_date']]);
+            $disbursementQuery->whereBetween('date_disbursed', [$filters['start_date'], $filters['end_date']]);
         }
 
         // Apply other filters
@@ -248,19 +248,19 @@ class PettyCashRepository
             $disbursementQuery->byProject($filters['project_name']);
         }
 
-        $totalTopUps = $topUpQuery->sum('amount');
-        $totalDisbursements = $disbursementQuery->sum('amount');
+        $totalTopUps = (float) $topUpQuery->sum('amount');
+        $totalDisbursements = (float) $disbursementQuery->sum('amount');
         $topUpCount = $topUpQuery->count();
         $disbursementCount = $disbursementQuery->count();
 
         return [
-            'total_top_ups' => (float) $totalTopUps,
-            'total_disbursements' => (float) $totalDisbursements,
-            'net_balance' => (float) ($totalTopUps - $totalDisbursements),
+            'total_top_ups' => $totalTopUps,
+            'total_disbursements' => $totalDisbursements,
+            'net_balance' => $totalTopUps - $totalDisbursements,
             'top_up_count' => $topUpCount,
             'disbursement_count' => $disbursementCount,
-            'average_top_up' => $topUpCount > 0 ? (float) ($totalTopUps / $topUpCount) : 0,
-            'average_disbursement' => $disbursementCount > 0 ? (float) ($totalDisbursements / $disbursementCount) : 0,
+            'average_top_up' => $topUpCount > 0 ? $totalTopUps / $topUpCount : 0,
+            'average_disbursement' => $disbursementCount > 0 ? $totalDisbursements / $disbursementCount : 0,
         ];
     }
 
@@ -270,12 +270,13 @@ class PettyCashRepository
     public function getSpendingByClassification(array $filters = []): Collection
     {
         $query = PettyCashDisbursement::active()
+            ->notArchived()
             ->select('classification', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
             ->groupBy('classification');
 
-        // Apply date filters
+        // Apply date filters - Aligning to date_disbursed
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $query->byDateRange($filters['start_date'], $filters['end_date']);
+            $query->whereBetween('date_disbursed', [$filters['start_date'], $filters['end_date']]);
         }
 
         return $query->get();
@@ -287,12 +288,13 @@ class PettyCashRepository
     public function getSpendingByPaymentMethod(array $filters = []): Collection
     {
         $query = PettyCashDisbursement::active()
+            ->notArchived()
             ->select('payment_method', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
             ->groupBy('payment_method');
 
-        // Apply date filters
+        // Apply date filters - Aligning to date_disbursed
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $query->byDateRange($filters['start_date'], $filters['end_date']);
+            $query->whereBetween('date_disbursed', [$filters['start_date'], $filters['end_date']]);
         }
 
         return $query->get();
@@ -382,36 +384,47 @@ class PettyCashRepository
                 'created_at',
                 'is_archived',
                 'id as parent_id', // Group by its own ID
-                DB::raw('1 as type_priority') // Top-up comes first in its group
+                DB::raw('1 as type_priority'), // Top-up comes first in its group
+                // Union compatibility fields
+                DB::raw('NULL as requisition_status'),
+                DB::raw('NULL as received_at'),
+                DB::raw('NULL as signature'),
+                DB::raw('NULL as requisition_id')
             );
 
         // Build Disbursements subquery
         $disbursements = DB::table('petty_cash_disbursements')
+            ->leftJoin('petty_cash_requisitions', 'petty_cash_disbursements.requisition_id', '=', 'petty_cash_requisitions.id')
             ->select(
-                'id',
+                'petty_cash_disbursements.id',
                 DB::raw("'disbursement' as type"),
-                'amount',
+                'petty_cash_disbursements.amount',
                 DB::raw('NULL as previous_balance'),
                 DB::raw('NULL as date_topped_up'),
-                'description',
-                'receiver',
-                'account',
-                'project_name',
-                'payment_method',
-                'classification',
-                'job_number',
-                'status',
-                'transaction_code',
-                'created_at',
-                'is_archived',
-                'top_up_id as parent_id', // Group by parent top-up ID
-                DB::raw('2 as type_priority') // Disbursements follow the top-up
+                'petty_cash_disbursements.description',
+                'petty_cash_disbursements.receiver',
+                'petty_cash_disbursements.account',
+                'petty_cash_disbursements.project_name',
+                'petty_cash_disbursements.payment_method',
+                'petty_cash_disbursements.classification',
+                'petty_cash_disbursements.job_number',
+                'petty_cash_disbursements.status',
+                'petty_cash_disbursements.transaction_code',
+                'petty_cash_disbursements.created_at',
+                'petty_cash_disbursements.is_archived',
+                'petty_cash_disbursements.top_up_id as parent_id', // Group by parent top-up ID
+                DB::raw('2 as type_priority'), // Disbursements follow the top-up
+                // Requisition details
+                'petty_cash_requisitions.status as requisition_status',
+                'petty_cash_requisitions.received_at as received_at',
+                'petty_cash_requisitions.digital_signature as signature',
+                'petty_cash_disbursements.requisition_id'
             );
 
         // Apply shared filters
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $topUps->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
-            $disbursements->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
+            $topUps->whereBetween('date_topped_up', [$filters['start_date'], $filters['end_date']]);
+            $disbursements->whereBetween('date_disbursed', [$filters['start_date'], $filters['end_date']]);
         }
 
         if (!empty($filters['payment_method'])) {
@@ -432,6 +445,12 @@ class PettyCashRepository
                   ->orWhere('project_name', 'like', $search)
                   ->orWhere('transaction_code', 'like', $search);
             });
+        }
+
+        if (!empty($filters['project_name'])) {
+            $disbursements->where('project_name', 'like', '%' . $filters['project_name'] . '%');
+            // Top-ups don't have project names
+            $topUps->whereRaw('1 = 0');
         }
 
         // Apply archiving filters
@@ -455,13 +474,8 @@ class PettyCashRepository
         // Combine using Union All
         $query = $disbursements->unionAll($topUps);
 
-        // SORTING LOGIC: 
-        // 1. parent_id DESC: Keep groups (top-up + its disbursements) together, newest groups first.
-        // 2. type_priority ASC: Ensure the Top-up (priority 1) is above its related disbursements (priority 2).
-        // 3. created_at ASC: Sort disbursements chronologically within the group.
-        return $query->orderBy('parent_id', 'desc')
-                    ->orderBy('type_priority', 'asc')
-                    ->orderBy('created_at', 'asc')
+        // Sort by created_at DESC to show newest transactions first
+        return $query->orderBy('created_at', 'desc')
                     ->paginate($perPage, ['*'], 'page', $page);
     }
 
@@ -547,5 +561,64 @@ class PettyCashRepository
 
             return count($topUpIds);
         });
+    }
+    /**
+     * Get voucher data for a specific date range (non-paginated).
+     */
+    public function getVoucherData(array $filters = []): array
+    {
+        $startDate = $filters['start_date'] ?? now()->startOfDay()->toDateTimeString();
+        $endDate = $filters['end_date'] ?? now()->endOfDay()->toDateTimeString();
+
+        $openingTopUps = PettyCashTopUp::notArchived()
+            ->where('date_topped_up', '<', $startDate)
+            ->sum('amount');
+        
+        // Opening Disbursements (only active ones)
+        $openingDisbursements = PettyCashDisbursement::active()->notArchived()
+            ->where('date_disbursed', '<', $startDate)
+            ->sum('amount');
+        
+        $openingBalance = (float)$openingTopUps - (float)$openingDisbursements;
+
+        // 2. Fetch Disbursements in range
+        $disbursementQuery = PettyCashDisbursement::with(['topUp', 'creator'])
+            ->active()
+            ->notArchived()
+            ->whereBetween('date_disbursed', [$startDate, $endDate])
+            ->orderBy('date_disbursed', 'asc');
+
+        if (!empty($filters['classification'])) {
+            $disbursementQuery->byClassification($filters['classification']);
+        }
+        if (!empty($filters['project_name'])) {
+            $disbursementQuery->byProject($filters['project_name']);
+        }
+
+        $disbursements = $disbursementQuery->get();
+
+        // 3. Fetch Top-ups in range
+        $topUps = PettyCashTopUp::with('creator')
+            ->notArchived()
+            ->whereBetween('date_topped_up', [$startDate, $endDate])
+            ->orderBy('date_topped_up', 'asc')
+            ->get();
+
+        $totalIn = (float)$topUps->sum('amount');
+        $totalOut = (float)$disbursements->sum('amount');
+
+        return [
+            'opening_balance' => $openingBalance,
+            'top_ups' => $topUps,
+            'disbursements' => $disbursements,
+            'total_in' => $totalIn,
+            'total_out' => $totalOut,
+            'closing_balance' => $openingBalance + $totalIn - $totalOut,
+            'filters' => $filters,
+            'period' => [
+                'start' => $startDate,
+                'end' => $endDate
+            ]
+        ];
     }
 }
