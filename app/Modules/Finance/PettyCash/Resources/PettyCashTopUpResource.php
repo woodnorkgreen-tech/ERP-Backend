@@ -32,6 +32,10 @@ class PettyCashTopUpResource extends JsonResource
                 $this->transaction_code
             ),
             'description' => $this->description,
+            'date_topped_up' => [
+                'raw' => $this->date_topped_up?->format('Y-m-d'),
+                'formatted' => $this->date_topped_up?->format('M j, Y'),
+            ],
             'created_at' => [
                 'raw' => $this->created_at->toISOString(),
                 'formatted' => $this->created_at->format('M j, Y g:i A'),

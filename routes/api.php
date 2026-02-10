@@ -850,6 +850,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::delete('requisitions/{id}', [PettyCashRequisitionController::class, 'destroy']);
             Route::get('requisitions/stats', [PettyCashRequisitionController::class, 'stats']);
             Route::get('requisitions/form-data', [PettyCashRequisitionController::class, 'getFormData']);
+            Route::get('requisitions/project-team-members', [PettyCashRequisitionController::class, 'getProjectTeamMembers']);
             Route::get('requisitions/{id}', [PettyCashRequisitionController::class, 'show']);
             Route::post('requisitions/{id}/approve', [PettyCashRequisitionController::class, 'approve']);
             Route::post('requisitions/{id}/disburse', [PettyCashRequisitionController::class, 'disburse']);

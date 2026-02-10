@@ -43,6 +43,8 @@ class PettyCashDisbursement extends Model
         'archived_at',
         'archived_by',
         'requisition_id',
+        'transaction_cost',
+        'created_at',
     ];
 
     /**
@@ -60,6 +62,7 @@ class PettyCashDisbursement extends Model
             'date_disbursed' => 'date',
             'is_archived' => 'boolean',
             'archived_at' => 'datetime',
+            'transaction_cost' => 'decimal:2',
         ];
     }
 

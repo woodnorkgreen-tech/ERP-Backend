@@ -57,11 +57,12 @@ class PettyCashService
             // Validate balance before creating disbursement (unless skipped)
             if (!($data['skip_balance_check'] ?? false)) {
                 $balance = $this->repository->getCurrentBalance();
-                if (!$balance->hasSufficientBalance($data['amount'])) {
+                $totalToDeduct = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
+                if (!$balance->hasSufficientBalance($totalToDeduct)) {
                     return [
                         'success' => false,
                         'errors' => [
-                            'amount' => ["Insufficient balance. Current balance: KES " . number_format($balance->getCurrentBalance(), 2) . ", Required: KES " . number_format($data['amount'], 2)]
+                            'amount' => ["Insufficient balance. Current balance: KES " . number_format($balance->getCurrentBalance(), 2) . ", Required (Amount + Cost): KES " . number_format($totalToDeduct, 2)]
                         ]
                     ];
                 }
@@ -81,7 +82,8 @@ class PettyCashService
                 // Try to find a top-up that covers the whole amount first
                 $topUp = $this->repository->getTopUpsWithAvailableBalance()
                     ->filter(function ($t) use ($data) {
-                        return $t->remaining_balance >= $data['amount'];
+                        $required = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
+                        return $t->remaining_balance >= $required;
                     })
                     ->first();
 
@@ -451,16 +453,17 @@ class PettyCashService
                 $errors['top_up_id'] = ['Selected top-up does not exist.'];
             } elseif (isset($data['amount'])) {
                 $availableBalance = $topUp->remaining_balance;
+                $requestedTotal = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
                 
                 // If updating, add back the current amount of this disbursement to available balance
                 if ($isUpdate && $disbursementId) {
                     $disbursement = $this->repository->findDisbursement($disbursementId);
                     if ($disbursement && $disbursement->top_up_id == $data['top_up_id'] && $disbursement->is_active) {
-                        $availableBalance += $disbursement->getRawOriginal('amount', 0);
+                        $availableBalance += (float)$disbursement->getRawOriginal('amount', 0) + (float)$disbursement->getRawOriginal('transaction_cost', 0);
                     }
                 }
                 
-                if ($availableBalance < $data['amount'] && !$isUpdate) {
+                if ($availableBalance < $requestedTotal && !$isUpdate) {
                      // During creation, we are stricter IF they manually selected a top-up
                      // However, we still check global balance in the service
                 }

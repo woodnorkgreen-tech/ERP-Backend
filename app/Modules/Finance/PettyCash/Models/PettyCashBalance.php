@@ -155,7 +155,9 @@ class PettyCashBalance extends Model
     public function recalculateBalance(): self
     {
         $totalTopUps = PettyCashTopUp::notArchived()->sum('amount');
-        $totalDisbursements = PettyCashDisbursement::active()->notArchived()->sum('amount');
+        $totalDisbursements = PettyCashDisbursement::active()
+            ->notArchived()
+            ->sum(\Illuminate\Support\Facades\DB::raw('amount + COALESCE(transaction_cost, 0)'));
         
         $this->current_balance = (float)$totalTopUps - (float)$totalDisbursements;
         $this->updated_at = now();

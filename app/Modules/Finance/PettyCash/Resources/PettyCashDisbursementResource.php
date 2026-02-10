@@ -53,6 +53,10 @@ class PettyCashDisbursementResource extends JsonResource
                 'formatted' => $this->voided_at?->format('M j, Y g:i A'),
                 'human' => $this->voided_at?->diffForHumans(),
             ]),
+            'date_disbursed' => [
+                'raw' => $this->date_disbursed?->format('Y-m-d'),
+                'formatted' => $this->date_disbursed?->format('M j, Y'),
+            ],
             'created_at' => [
                 'raw' => $this->created_at->toISOString(),
                 'formatted' => $this->created_at->format('M j, Y g:i A'),

@@ -210,7 +210,7 @@ class PettyCashRequisitionController extends Controller
     public function show(int $id): JsonResponse
     {
         try {
-            $requisition = PettyCashRequisition::with(['requester', 'department', 'items', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
+            $requisition = PettyCashRequisition::with(['requester', 'department', 'items.payee', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
                 ->findOrFail($id);
 
             // Ensure signing token exists (lazy generation)
@@ -452,7 +452,8 @@ class PettyCashRequisitionController extends Controller
             $disbursementData = $request->only([
                 'amount', 'receiver', 'account', 'description', 
                 'classification', 'project_name', 'tax', 
-                'date_disbursed', 'job_number', 'payment_method'
+                'date_disbursed', 'job_number', 'payment_method',
+                'transaction_cost', 'transaction_code'
             ]);
             $disbursementData['requisition_id'] = $requisition->id;
             $disbursementData['status'] = 'active';
@@ -689,6 +690,65 @@ class PettyCashRequisitionController extends Controller
             'categories' => $categories,
             'projects' => $projects,
             'enquiries' => $enquiries
+        ]);
+    }
+
+    /**
+     * Get team members for a specific project or enquiry.
+     */
+    public function getProjectTeamMembers(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $projectId = $request->query('project_id');
+        $enquiryId = $request->query('enquiry_id');
+
+        if ($projectId) {
+            $project = \App\Models\Project::find($projectId);
+            if ($project) {
+                $enquiryId = $project->enquiry_id;
+            }
+        }
+    
+        if (!$projectId && !$enquiryId) {
+            return response()->json(['success' => false, 'members' => []]);
+        }
+
+    $query = \App\Modules\Teams\Models\TeamsMember::with(['technicalLabour.employee', 'teamsTask.category']);
+
+    if ($projectId && $enquiryId) {
+        $query->whereHas('teamsTask', function ($q) use ($projectId, $enquiryId) {
+            $q->where('project_id', $projectId)
+              ->orWhereHas('task', function ($tq) use ($enquiryId) {
+                  $tq->where('project_enquiry_id', $enquiryId);
+              });
+        });
+    } elseif ($projectId) {
+        $query->whereHas('teamsTask', function ($q) use ($projectId) {
+            $q->where('project_id', $projectId);
+        });
+    } else {
+        $query->whereHas('teamsTask.task', function ($q) use ($enquiryId) {
+            $q->where('project_enquiry_id', $enquiryId);
+        });
+    }
+
+    $members = $query->get()->map(function ($m) {
+        $employee = $m->technicalLabour?->employee;
+        $category = $m->teamsTask?->category?->name ?? 'Other';
+        return [
+            'id' => $m->id,
+            'name' => $employee ? "{$employee->first_name} {$employee->last_name}" : $m->member_name,
+            'payee_id' => $employee?->id,
+            'role' => $m->member_role,
+            'is_internal' => (bool)$employee,
+            'category' => $category
+        ];
+    })->unique(function ($item) {
+        return $item['name'] . $item['category'];
+    })->values();
+
+        return response()->json([
+            'success' => true,
+            'members' => $members
         ]);
     }
 

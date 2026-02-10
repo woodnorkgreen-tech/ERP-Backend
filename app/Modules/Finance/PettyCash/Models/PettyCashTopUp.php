@@ -34,6 +34,7 @@ class PettyCashTopUp extends Model
         'archived_at',
         'archived_by',
         'requisition_id',
+        'created_at',
     ];
 
     /**
@@ -92,7 +93,7 @@ class PettyCashTopUp extends Model
      */
     public function getRemainingBalanceAttribute(): float
     {
-        $totalDisbursed = $this->activeDisbursements()->sum('amount');
+        $totalDisbursed = $this->activeDisbursements()->sum(\Illuminate\Support\Facades\DB::raw('amount + COALESCE(transaction_cost, 0)'));
         return (float) ($this->amount - $totalDisbursed);
     }
 
@@ -134,7 +135,7 @@ class PettyCashTopUp extends Model
     public function scopeWithAvailableBalance($query)
     {
         return $query->whereHas('disbursements', function ($subQuery) {
-            $subQuery->selectRaw('SUM(amount) as total_disbursed')
+            $subQuery->selectRaw('SUM(amount + COALESCE(transaction_cost, 0)) as total_disbursed')
                      ->where('status', 'active')
                      ->groupBy('top_up_id')
                      ->havingRaw('total_disbursed < petty_cash_top_ups.amount');

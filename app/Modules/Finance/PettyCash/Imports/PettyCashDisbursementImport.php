@@ -61,6 +61,11 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'date' => 'date',
             'datedisbursed' => 'date',
             'disbursementdate' => 'date',
+            'transactiondate' => 'date',
+            'transdate' => 'date',
+            'tdate' => 'date',
+            'dateofpayment' => 'date',
+            'paymentdate' => 'date',
             'receiver' => 'receiver',
             'payee' => 'receiver',
             'account' => 'account',
@@ -147,11 +152,18 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
                 return;
             }
 
-            // Parse and validate DATE (Default to now if failing, to allow "bypass required")
-            $date = $this->parseDate($mappedRow['date'] ?? null);
+            // Parse and validate DATE
+            $rawValue = $mappedRow['date'] ?? null;
+            $date = $this->parseDate($rawValue);
+            
+            if (!$date && !empty($rawValue)) {
+                $this->addFailedRow($rowNumber, ["Invalid date format: '{$rawValue}'. Reference formats: DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD."]);
+                return;
+            }
+
             if (!$date) {
-                // Instead of failing, default to today so the import continues
-                $date = new \DateTime(); 
+                // If NO date provided at all, fallback to now
+                $date = new \DateTime();
             }
 
             // Check for duplicates (using date_disbursed instead of created_at)

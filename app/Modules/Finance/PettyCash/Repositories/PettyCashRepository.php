@@ -17,7 +17,8 @@ class PettyCashRepository
     public function getTopUps(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
         $query = PettyCashTopUp::with('creator', 'disbursements')
-            ->latest();
+            ->orderBy('date_topped_up', 'desc')
+            ->orderBy('created_at', 'desc');
 
         // Apply filters
         if (!empty($filters['payment_method'])) {
@@ -52,7 +53,8 @@ class PettyCashRepository
     public function getDisbursements(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
         $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition')
-            ->latest();
+            ->orderBy('date_disbursed', 'desc')
+            ->orderBy('created_at', 'desc');
 
         // Apply filters
         if (!empty($filters['status'])) {
@@ -249,7 +251,7 @@ class PettyCashRepository
         }
 
         $totalTopUps = (float) $topUpQuery->sum('amount');
-        $totalDisbursements = (float) $disbursementQuery->sum('amount');
+        $totalDisbursements = (float) $disbursementQuery->sum(DB::raw('amount + COALESCE(transaction_cost, 0)'));
         $topUpCount = $topUpQuery->count();
         $disbursementCount = $disbursementQuery->count();
 
@@ -271,7 +273,7 @@ class PettyCashRepository
     {
         $query = PettyCashDisbursement::active()
             ->notArchived()
-            ->select('classification', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
+            ->select('classification', DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
             ->groupBy('classification');
 
         // Apply date filters - Aligning to date_disbursed
@@ -289,7 +291,7 @@ class PettyCashRepository
     {
         $query = PettyCashDisbursement::active()
             ->notArchived()
-            ->select('payment_method', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
+            ->select('payment_method', DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
             ->groupBy('payment_method');
 
         // Apply date filters - Aligning to date_disbursed
@@ -371,7 +373,7 @@ class PettyCashRepository
                 DB::raw("'top_up' as type"),
                 'amount',
                 'previous_balance',
-                'date_topped_up',
+                'date_topped_up as transaction_date',
                 'description',
                 DB::raw('NULL as receiver'),
                 DB::raw('NULL as account'),
@@ -389,7 +391,8 @@ class PettyCashRepository
                 DB::raw('NULL as requisition_status'),
                 DB::raw('NULL as received_at'),
                 DB::raw('NULL as signature'),
-                DB::raw('NULL as requisition_id')
+                DB::raw('NULL as requisition_id'),
+                DB::raw('NULL as transaction_cost')
             );
 
         // Build Disbursements subquery
@@ -400,7 +403,7 @@ class PettyCashRepository
                 DB::raw("'disbursement' as type"),
                 'petty_cash_disbursements.amount',
                 DB::raw('NULL as previous_balance'),
-                DB::raw('NULL as date_topped_up'),
+                'petty_cash_disbursements.date_disbursed as transaction_date',
                 'petty_cash_disbursements.description',
                 'petty_cash_disbursements.receiver',
                 'petty_cash_disbursements.account',
@@ -418,7 +421,8 @@ class PettyCashRepository
                 'petty_cash_requisitions.status as requisition_status',
                 'petty_cash_requisitions.received_at as received_at',
                 'petty_cash_requisitions.digital_signature as signature',
-                'petty_cash_disbursements.requisition_id'
+                'petty_cash_disbursements.requisition_id',
+                'petty_cash_disbursements.transaction_cost'
             );
 
         // Apply shared filters
@@ -471,12 +475,19 @@ class PettyCashRepository
             $topUps->whereRaw('1 = 0');
         }
 
-        // Combine using Union All
-        $query = $disbursements->unionAll($topUps);
+        // Create temporary table from union
+        $query = DB::table(function ($q) use ($topUps, $disbursements) {
+            $q->from($topUps->unionAll($disbursements), 'transactions');
+        }, 'transactions');
 
-        // Sort by created_at DESC to show newest transactions first
-        return $query->orderBy('created_at', 'desc')
-                    ->paginate($perPage, ['*'], 'page', $page);
+        // Resulting Query
+        $results = $query
+            ->orderBy('transaction_date', 'desc')
+            ->orderBy('created_at', 'desc')
+            ->orderBy('type_priority', 'asc')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        return $results;
     }
 
     /**
@@ -577,7 +588,7 @@ class PettyCashRepository
         // Opening Disbursements (only active ones)
         $openingDisbursements = PettyCashDisbursement::active()->notArchived()
             ->where('date_disbursed', '<', $startDate)
-            ->sum('amount');
+            ->sum(DB::raw('amount + COALESCE(transaction_cost, 0)'));
         
         $openingBalance = (float)$openingTopUps - (float)$openingDisbursements;
 
@@ -605,7 +616,7 @@ class PettyCashRepository
             ->get();
 
         $totalIn = (float)$topUps->sum('amount');
-        $totalOut = (float)$disbursements->sum('amount');
+        $totalOut = (float)$disbursements->sum(function($d) { return (float)$d->amount + (float)($d->transaction_cost ?? 0); });
 
         return [
             'opening_balance' => $openingBalance,
