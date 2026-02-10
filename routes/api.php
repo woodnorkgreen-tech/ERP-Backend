@@ -55,6 +55,7 @@ Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverC
 // Public routes for Petty Cash Requisition Sign-off 
 Route::get('public/pcr/{token}', [PettyCashRequisitionController::class, 'getByToken']);
 Route::post('public/pcr/{token}/sign', [PettyCashRequisitionController::class, 'publicSignOff']);
+Route::post('public/pcr/{token}/item/{itemId}/sign', [PettyCashRequisitionController::class, 'publicItemSignOff']);
 // Public routes for Job Cards
 Route::prefix('public')->group(function () {
     Route::post('job-cards/lookup', [JobCardController::class, 'publicLookupOrCreate']);

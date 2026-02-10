@@ -771,7 +771,7 @@ class PettyCashRequisitionController extends Controller
         try {
             \Log::info('Public sign-off lookup', ['token' => $token]);
             
-            $requisition = PettyCashRequisition::with(['requester', 'department', 'disbursement', 'payee', 'project', 'enquiry'])
+            $requisition = PettyCashRequisition::with(['requester', 'department', 'disbursement', 'payee', 'project', 'enquiry', 'items.payee'])
                 ->where('signing_token', $token)
                 ->firstOrFail();
 
@@ -829,6 +829,72 @@ class PettyCashRequisitionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to confirm receipt',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Public sign-off for a specific item via token.
+     */
+    public function publicItemSignOff(Request $request, string $token, int $itemId): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'signature' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        try {
+            $requisition = PettyCashRequisition::where('signing_token', $token)->firstOrFail();
+
+            if ($requisition->status !== 'disbursed') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This requisition is not in a signable state'
+                ], 400);
+            }
+
+            $item = PettyCashRequisitionItem::where('requisition_id', $requisition->id)
+                ->findOrFail($itemId);
+
+            if ($item->received_at) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This item has already been signed for'
+                ], 400);
+            }
+
+            $item->update([
+                'digital_signature' => $request->signature,
+                'received_at' => now(),
+            ]);
+
+            // Check if all items in the requisition are now received
+            $allItemsReceived = PettyCashRequisitionItem::where('requisition_id', $requisition->id)
+                ->whereNull('received_at')
+                ->count() === 0;
+
+            if ($allItemsReceived) {
+                $requisition->update([
+                    'status' => 'received',
+                    'received_at' => now(),
+                    'received_by' => 'Bulk Recipients', // Fallback
+                    'signing_token' => null // Invalidate token after all items signed
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Item receipt confirmed. Thank you!',
+                'all_received' => $allItemsReceived
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to confirm item receipt',
                 'error' => $e->getMessage()
             ], 500);
         }
