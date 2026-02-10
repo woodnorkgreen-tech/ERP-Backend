@@ -769,6 +769,8 @@ class PettyCashRequisitionController extends Controller
     public function getByToken(string $token): JsonResponse
     {
         try {
+            \Log::info('Public sign-off lookup', ['token' => $token]);
+            
             $requisition = PettyCashRequisition::with(['requester', 'department', 'disbursement', 'payee', 'project', 'enquiry'])
                 ->where('signing_token', $token)
                 ->firstOrFail();
@@ -790,6 +792,8 @@ class PettyCashRequisitionController extends Controller
      */
     public function publicSignOff(Request $request, string $token): JsonResponse
     {
+        \Log::info('Public sign-off attempt', ['token' => $token, 'data' => $request->except('signature')]);
+        
         $validator = Validator::make($request->all(), [
             'signature' => 'required|string',
             'received_by' => 'required|string|max:255',
