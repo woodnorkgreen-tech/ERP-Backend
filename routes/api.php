@@ -789,49 +789,6 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
         });
     });
 
-    // Public diagnostic endpoint for checking requisition schema (no auth required)
-    Route::get('finance/petty-cash/requisitions/diagnostics/schema-check', function() {
-        try {
-            $results = [
-                'tables_exist' => [
-                    'petty_cash_requisitions' => Schema::hasTable('petty_cash_requisitions'),
-                    'petty_cash_requisition_items' => Schema::hasTable('petty_cash_requisition_items'),
-                ],
-                'requisitions_columns' => Schema::hasTable('petty_cash_requisitions') 
-                    ? Schema::getColumnListing('petty_cash_requisitions') 
-                    : [],
-                'items_columns' => Schema::hasTable('petty_cash_requisition_items')
-                    ? Schema::getColumnListing('petty_cash_requisition_items')
-                    : [],
-                'required_columns_check' => [
-                    'requisitions' => [
-                        'payee_id' => Schema::hasColumn('petty_cash_requisitions', 'payee_id'),
-                        'payee_name' => Schema::hasColumn('petty_cash_requisitions', 'payee_name'),
-                        'project_id' => Schema::hasColumn('petty_cash_requisitions', 'project_id'),
-                        'enquiry_id' => Schema::hasColumn('petty_cash_requisitions', 'enquiry_id'),
-                    ],
-                    'items' => [
-                        'payee_id' => Schema::hasColumn('petty_cash_requisition_items', 'payee_id'),
-                        'payee_name' => Schema::hasColumn('petty_cash_requisition_items', 'payee_name'),
-                    ]
-                ],
-                'test_data_check' => [
-                    'departments_count' => DB::table('departments')->count(),
-                    'users_count' => DB::table('users')->count(),
-                    'employees_count' => DB::table('employees')->count(),
-                ]
-            ];
-            
-            return response()->json($results);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ], 500);
-        }
-    });
-
-
 
 
     // Finance Module Routes
@@ -885,7 +842,6 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('statistics', [PettyCashTopUpController::class, 'statistics']);
             Route::get('payment-methods', [PettyCashTopUpController::class, 'paymentMethods']);
             Route::post('validate/top-up', [PettyCashTopUpController::class, 'validate']);
-
 
             // Requisition routes
             Route::get('requisitions', [PettyCashRequisitionController::class, 'index']);
