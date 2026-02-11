@@ -29,10 +29,13 @@ class Requisition extends Model
     ];
 
     protected $casts = [
-         'date' => 'date',
+        'date' => 'date',
         'submitted_at' => 'datetime',
         'approved_at' => 'datetime',
         'total_amount' => 'decimal:2',
+        'project_id' => 'integer',      // ADD THIS
+        'employee_id' => 'integer',     // ADD THIS
+        'department_id' => 'integer',   // ADD THIS
     ];
 
     public function purchaseOrder()
@@ -69,6 +72,7 @@ class Requisition extends Model
     {
         return $this->belongsTo('App\Models\User', 'approved_by')->with('employee');
     }
+    
     public function submitForApproval()
     {
         $this->update([
