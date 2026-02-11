@@ -161,6 +161,13 @@ class PettyCashController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can update transaction history.',
+            ], 403);
+        }
+
         try {
             $disbursement = $this->repository->findDisbursement($id);
 
@@ -210,6 +217,13 @@ class PettyCashController extends Controller
      */
     public function void(Request $request, int $id): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can void transaction history.',
+            ], 403);
+        }
+
         try {
             $disbursement = $this->repository->findDisbursement($id);
 
@@ -246,6 +260,13 @@ class PettyCashController extends Controller
      */
     public function destroy(int $id): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can delete transaction history.',
+            ], 403);
+        }
+
         try {
             $disbursement = $this->repository->findDisbursement($id);
 
@@ -276,6 +297,13 @@ class PettyCashController extends Controller
      */
     public function bulkDestroy(Request $request): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can delete transaction history.',
+            ], 403);
+        }
+
         $request->validate([
             'ids' => 'required|array',
             'ids.*' => 'exists:petty_cash_disbursements,id'
@@ -298,6 +326,13 @@ class PettyCashController extends Controller
      */
     public function clearAll(): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can clear transaction history.',
+            ], 403);
+        }
+
         try {
             $result = $this->service->clearAllData();
 
@@ -660,6 +695,13 @@ class PettyCashController extends Controller
      */
     public function archive(Request $request, int $id): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can archive transaction history.',
+            ], 403);
+        }
+
         try {
             $type = $request->get('type', 'disbursement');
             $userId = auth()->id();
@@ -696,6 +738,13 @@ class PettyCashController extends Controller
      */
     public function bulkArchive(Request $request): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can archive transaction history.',
+            ], 403);
+        }
+
         try {
             $ids = $request->get('ids', []);
             if (empty($ids)) {
@@ -724,6 +773,13 @@ class PettyCashController extends Controller
      */
     public function archiveGroup(Request $request, int $id): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can archive transaction history.',
+            ], 403);
+        }
+
         try {
             $userId = auth()->id();
             $this->repository->archiveGroup($id, $userId);
@@ -746,6 +802,13 @@ class PettyCashController extends Controller
      */
     public function bulkArchiveGroups(Request $request): JsonResponse
     {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can archive transaction history.',
+            ], 403);
+        }
+
         try {
             $ids = $request->get('ids', []);
             if (empty($ids)) {
