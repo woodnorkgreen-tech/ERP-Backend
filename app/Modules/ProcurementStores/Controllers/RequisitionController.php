@@ -37,7 +37,7 @@ class RequisitionController extends Controller
 
     public function index(Request $request)
     {
-        $query = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
+        $query = Requisition::with(['items.material',  'project.enquiry', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
 
         // Date filtering
         if ($request->has('date_filter')) {
@@ -76,7 +76,7 @@ class RequisitionController extends Controller
     {
         $searchTerm = $request->input('searchTerm', '');
 
-        $query = Requisition::with(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
+        $query = Requisition::with(['items.material','project.enquiry','project', 'employee', 'department', 'createdBy', 'approvedBy']);
 
         // Only apply search if searchTerm is not empty
         if (!empty($searchTerm)) {
