@@ -18,20 +18,20 @@ class RequisitionController extends Controller
     private function canApproveOrDelete()
     {
         $user = auth()->user();
-        
+
         if (!$user || !$user->roles) {
             return false;
         }
-        
+
         $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
         $userRoles = $user->roles->pluck('name')->toArray();
-        
+
         foreach ($allowedRoles as $role) {
             if (in_array($role, $userRoles)) {
                 return true;
             }
         }
-        
+
         return false;
     }
 
@@ -42,7 +42,7 @@ class RequisitionController extends Controller
         // Date filtering
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
-            
+
             if ($dateFilter === 'today') {
                 $query->whereDate('date', today());
             } elseif ($dateFilter === 'past_7_days') {
@@ -51,7 +51,7 @@ class RequisitionController extends Controller
                 $query->whereDate('date', '>=', now()->subDays(30));
             } elseif ($dateFilter === 'this_month') {
                 $query->whereMonth('date', now()->month)
-                      ->whereYear('date', now()->year);
+                    ->whereYear('date', now()->year);
             } elseif ($dateFilter === 'custom' && $request->has('start_date') && $request->has('end_date')) {
                 $query->whereBetween('date', [$request->start_date, $request->end_date]);
             }
@@ -76,27 +76,27 @@ class RequisitionController extends Controller
     {
         $searchTerm = $request->input('searchTerm', '');
 
-        $query = Requisition::with(['items.material','project.enquiry','project', 'employee', 'department', 'createdBy', 'approvedBy']);
+        $query = Requisition::with(['items.material', 'project.enquiry', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
 
         // Only apply search if searchTerm is not empty
         if (!empty($searchTerm)) {
             $query->where(function ($q) use ($searchTerm) {
                 // Search in requisition_number
                 $q->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
-                    
+
                     // FIXED: Search in related project using correct column names
                     ->orWhereHas('project', function ($projectQuery) use ($searchTerm) {
                         $projectQuery->where('project_name', 'LIKE', '%' . $searchTerm . '%')
-                                    ->orWhere('project_code', 'LIKE', '%' . $searchTerm . '%');
+                            ->orWhere('project_code', 'LIKE', '%' . $searchTerm . '%');
                     })
-                    
+
                     // FIXED: Search in related employee using correct column names
                     ->orWhereHas('employee', function ($employeeQuery) use ($searchTerm) {
                         $employeeQuery->where('first_name', 'LIKE', '%' . $searchTerm . '%')
-                                     ->orWhere('last_name', 'LIKE', '%' . $searchTerm . '%')
-                                     ->orWhere('employee_number', 'LIKE', '%' . $searchTerm . '%');
+                            ->orWhere('last_name', 'LIKE', '%' . $searchTerm . '%')
+                            ->orWhere('employee_number', 'LIKE', '%' . $searchTerm . '%');
                     })
-                    
+
                     // FIXED: Search in department using correct column name
                     ->orWhereHas('department', function ($deptQuery) use ($searchTerm) {
                         $deptQuery->where('department_name', 'LIKE', '%' . $searchTerm . '%');
@@ -135,7 +135,7 @@ class RequisitionController extends Controller
         }
 
         $requisitions = $query->orderBy('created_at', 'desc')
-                             ->paginate($request->input('perPage', 20));
+            ->paginate($request->input('perPage', 20));
 
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }
@@ -143,7 +143,7 @@ class RequisitionController extends Controller
     public function store(Request $request)
     {
         $input = $request->all();
-        
+
         $validator = Validator::make($input, [
             'date' => 'required|date',
             'requested_by_type' => 'required|in:project,office,employee',
@@ -214,7 +214,7 @@ class RequisitionController extends Controller
         }
 
         $input = $request->all();
-        
+
         $validator = Validator::make($input, [
             'date' => 'date',
             'requested_by_type' => 'in:project,office,employee',
@@ -247,7 +247,7 @@ class RequisitionController extends Controller
                 unset($input['items']);
 
                 $requisition->items()->delete();
-                
+
                 $totalAmount = 0;
                 foreach ($items as $item) {
                     $item['total'] = $item['quantity'] * $item['unit_price'];

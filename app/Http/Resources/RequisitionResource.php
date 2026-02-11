@@ -14,29 +14,29 @@ class RequisitionResource extends JsonResource
             'date' => $this->date?->format('Y-m-d'),
             'requested_by_type' => $this->requested_by_type,
             'project_id' => $this->project_id,
-            'project' => $this->whenLoaded('project', function () {
+           'project' => $this->whenLoaded('project', function () {
     return [
         'id' => $this->project->id,
         'project_id' => $this->project->project_id ?? null,
-        'name' => $this->project->title ?? $this->project->name ?? 'N/A',
+        'name' => $this->project->enquiry->title ?? $this->project->project_id ?? 'N/A',
     ];
 }),
             'employee_id' => $this->employee_id,
-           'employee' => $this->whenLoaded('employee', function () {
-    return [
-        'id' => $this->employee->id,
-        'name' => $this->employee->name ?? 'N/A',
-    ];
-}),
-  'department_id' => $this->department_id,
-'department' => $this->whenLoaded('department', function () {
-    return [
-        'id' => $this->department->id,
-        'name' => $this->department->name ?? 'N/A',
-    ];
-}),
-          
-            
+            'employee' => $this->whenLoaded('employee', function () {
+                return [
+                    'id' => $this->employee->id,
+                    'name' => $this->employee->name ?? 'N/A',
+                ];
+            }),
+            'department_id' => $this->department_id,
+            'department' => $this->whenLoaded('department', function () {
+                return [
+                    'id' => $this->department->id,
+                    'name' => $this->department->name ?? 'N/A',
+                ];
+            }),
+
+
             'urgency' => $this->urgency,
             'status' => $this->status,
             'total_amount' => (float) $this->total_amount,
