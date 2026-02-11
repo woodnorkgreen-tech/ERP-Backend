@@ -48,10 +48,10 @@ class Requisition extends Model
         return $this->hasMany(RequisitionItem::class);
     }
 
-    public function project()
-    {
-        return $this->belongsTo('App\Models\ProjectEnquiry', 'project_id');
-    }
+  public function project()
+{
+    return $this->belongsTo('App\Models\Project', 'project_id');
+}
 
     public function employee()
     {
