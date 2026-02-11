@@ -28,6 +28,7 @@ class PettyCashDisbursement extends Model
         'amount',
         'description',
         'project_name',
+        'venue',
         'classification',
         'job_number',
         'payment_method',

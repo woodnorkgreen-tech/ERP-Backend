@@ -199,6 +199,7 @@
                 <th>Receiver</th>
                 <th>Classification</th>
                 <th>Description</th>
+                <th>Project / Site</th>
                 <th class="text-right">Amount</th>
             </tr>
         </thead>
@@ -209,13 +210,25 @@
                 <td>{{ $disb['receiver'] }}</td>
                 <td>{{ ucfirst($disb['classification']) }}</td>
                 <td>{{ $disb['description'] }}</td>
+                <td>
+                    @if($disb['project_name'])
+                        {{ $disb['project_name'] }}
+                    @elseif($disb['job_number'])
+                        {{ $disb['job_number'] }}
+                    @else
+                        General
+                    @endif
+                    @if($disb['venue'])
+                        <br><small style="color: #666; font-size: 9px;">Site: {{ $disb['venue'] }}</small>
+                    @endif
+                </td>
                 <td class="text-right">KES {{ number_format($disb['amount'], 2) }}</td>
             </tr>
             @endforeach
         </tbody>
         <tfoot>
             <tr>
-                <td colspan="4" class="text-right label">Total Disbursements:</td>
+                <td colspan="5" class="text-right label">Total Disbursements:</td>
                 <td class="text-right value">KES {{ number_format($total_out, 2) }}</td>
             </tr>
         </tfoot>

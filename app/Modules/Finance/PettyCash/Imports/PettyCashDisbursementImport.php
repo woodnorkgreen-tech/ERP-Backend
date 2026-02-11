@@ -84,7 +84,12 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'jobno' => 'job_number',
             'jobnumber' => 'job_number',
             'paymentmethod' => 'payment_method',
-            'transactioncode' => 'transaction_code'
+            'transactioncode' => 'transaction_code',
+            'venue' => 'venue',
+            'site' => 'venue',
+            'location' => 'venue',
+            'siteoffice' => 'venue',
+            'factory' => 'venue'
         ];
         
         foreach ($normalizedRow as $key => $value) {
@@ -420,6 +425,10 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             $query->where('job_number', $jobNumber);
         }
 
+        if (!empty($row['venue'] ?? null)) {
+            $query->where('venue', trim($row['venue']));
+        }
+
         $exists = $query->exists();
         
         return $exists;
@@ -503,6 +512,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'amount' => $amount > 0 ? $amount : 0.00,
             'description' => $description,
             'project_name' => trim(is_array($row['project_name'] ?? '') ? json_encode($row['project_name'] ?? '') : ($row['project_name'] ?? '')),
+            'venue' => trim(is_array($row['venue'] ?? '') ? json_encode($row['venue'] ?? '') : ($row['venue'] ?? '')),
             'classification' => $classification,
             'job_number' => trim(is_array($row['job_number'] ?? '') ? json_encode($row['job_number'] ?? '') : ($row['job_number'] ?? '')),
             'tax' => $tax,
@@ -599,6 +609,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'classification' => 'nullable',
             'job_number' => 'nullable',
             'tax' => 'nullable',
+            'venue' => 'nullable',
             'transaction_code' => 'nullable'
         ];
     }

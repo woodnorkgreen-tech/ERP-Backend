@@ -142,6 +142,8 @@ class PettyCashRequisitionController extends Controller
             'payee_id' => 'nullable|exists:employees,id',
             'payee_name' => 'nullable|string',
             'project_id' => 'nullable|exists:projects,id',
+            'project_name' => 'nullable|string|max:255',
+            'venue' => 'nullable|string|max:255',
             'enquiry_id' => 'nullable|exists:project_enquiries,id',
             'items' => 'required|array|min:1',
             'items.*.description' => 'required|string',
@@ -167,6 +169,8 @@ class PettyCashRequisitionController extends Controller
                 'category' => $request->category,
                 'purpose' => $request->purpose,
                 'project_id' => $request->project_id,
+                'project_name' => $request->project_name,
+                'venue' => $request->venue,
                 'enquiry_id' => $request->enquiry_id,
                 'status' => 'pending',
             ];
@@ -256,6 +260,8 @@ class PettyCashRequisitionController extends Controller
             'category' => 'required|string',
             'purpose' => 'required|string',
             'project_id' => 'nullable|exists:projects,id',
+            'project_name' => 'nullable|string|max:255',
+            'venue' => 'nullable|string|max:255',
             'enquiry_id' => 'nullable|exists:project_enquiries,id',
             'payee_id' => 'nullable|exists:employees,id',
             'payee_name' => 'nullable|string',
@@ -290,6 +296,8 @@ class PettyCashRequisitionController extends Controller
                     'category' => $request->category,
                     'purpose' => $request->purpose,
                     'project_id' => $request->project_id,
+                    'project_name' => $request->project_name,
+                    'venue' => $request->venue,
                     'enquiry_id' => $request->enquiry_id,
                     // DO NOT update amount, items, or payee causing financial discrepancies
                 ]);
@@ -309,6 +317,8 @@ class PettyCashRequisitionController extends Controller
                 'category' => $request->category,
                 'purpose' => $request->purpose,
                 'project_id' => $request->project_id,
+                'project_name' => $request->project_name,
+                'venue' => $request->venue,
                 'enquiry_id' => $request->enquiry_id,
                 'payee_id' => $request->payee_id ?? null,
                 'payee_name' => $request->payee_name ?? null,
@@ -712,11 +722,17 @@ class PettyCashRequisitionController extends Controller
         $projectId = $request->query('project_id');
         $enquiryId = $request->query('enquiry_id');
 
+        $project = null;
+        $enquiry = null;
+
         if ($projectId) {
-            $project = \App\Models\Project::find($projectId);
+            $project = \App\Models\Project::with('enquiry')->find($projectId);
             if ($project) {
                 $enquiryId = $project->enquiry_id;
+                $enquiry = $project->enquiry;
             }
+        } elseif ($enquiryId) {
+            $enquiry = \App\Models\ProjectEnquiry::find($enquiryId);
         }
     
         if (!$projectId && !$enquiryId) {
@@ -759,8 +775,26 @@ class PettyCashRequisitionController extends Controller
 
         return response()->json([
             'success' => true,
-            'members' => $members
+            'members' => $members,
+            'project' => $project,
+            'enquiry' => $enquiry
         ]);
+    }
+
+    /**
+     * Download requisition voucher PDF.
+     */
+    public function downloadVoucher(int $id)
+    {
+        $requisition = PettyCashRequisition::with([
+            'requester', 'department', 'approver', 'payee',
+            'project.enquiry', 'enquiry', 'items.payee',
+            'disbursement'
+        ])->findOrFail($id);
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.finance.requisition-voucher', compact('requisition'));
+        
+        return $pdf->download("Voucher-{$requisition->requisition_number}.pdf");
     }
 
     /**
@@ -771,7 +805,7 @@ class PettyCashRequisitionController extends Controller
         try {
             \Log::info('Public sign-off lookup', ['token' => $token]);
             
-            $requisition = PettyCashRequisition::with(['requester', 'department', 'disbursement', 'payee', 'project', 'enquiry', 'items.payee'])
+            $requisition = PettyCashRequisition::with(['requester', 'department', 'disbursement', 'payee', 'project.enquiry', 'enquiry', 'items.payee'])
                 ->where('signing_token', $token)
                 ->firstOrFail();
 

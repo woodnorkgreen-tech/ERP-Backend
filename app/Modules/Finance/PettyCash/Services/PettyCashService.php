@@ -441,6 +441,11 @@ class PettyCashService
             $errors['date_disbursed'] = ['Invalid date format for date disbursed.'];
         }
 
+        // Validate venue length
+        if (!empty($data['venue']) && strlen($data['venue']) > 255) {
+            $errors['venue'] = ['Venue / Site Location must not exceed 255 characters.'];
+        }
+
         // Validate amount if provided
         if (isset($data['amount']) && $data['amount'] <= 0) {
             $errors['amount'] = ['Amount must be greater than zero.'];

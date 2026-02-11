@@ -378,6 +378,7 @@ class PettyCashRepository
                 DB::raw('NULL as receiver'),
                 DB::raw('NULL as account'),
                 DB::raw('NULL as project_name'),
+                DB::raw('NULL as venue'),
                 'payment_method',
                 DB::raw('NULL as classification'),
                 DB::raw('NULL as job_number'),
@@ -408,6 +409,7 @@ class PettyCashRepository
                 'petty_cash_disbursements.receiver',
                 'petty_cash_disbursements.account',
                 'petty_cash_disbursements.project_name',
+                'petty_cash_disbursements.venue',
                 'petty_cash_disbursements.payment_method',
                 'petty_cash_disbursements.classification',
                 'petty_cash_disbursements.job_number',
@@ -447,6 +449,7 @@ class PettyCashRepository
                   ->orWhere('receiver', 'like', $search)
                   ->orWhere('account', 'like', $search)
                   ->orWhere('project_name', 'like', $search)
+                  ->orWhere('venue', 'like', $search)
                   ->orWhere('transaction_code', 'like', $search);
             });
         }

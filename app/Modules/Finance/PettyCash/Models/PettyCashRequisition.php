@@ -34,6 +34,8 @@ class PettyCashRequisition extends Model
         'received_at',
         'payee_name',
         'project_id',
+        'project_name',
+        'venue',
         'enquiry_id',
         'signing_token',
         'received_by',

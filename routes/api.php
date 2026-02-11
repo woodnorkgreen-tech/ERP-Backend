@@ -858,6 +858,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::post('requisitions/{id}/reject', [PettyCashRequisitionController::class, 'reject']);
             Route::post('requisitions/{id}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmReceipt']);
             Route::post('requisitions/{id}/items/{itemId}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmItemReceipt']);
+            Route::get('requisitions/{id}/voucher', [PettyCashRequisitionController::class, 'downloadVoucher']);
         });
     });
 });
