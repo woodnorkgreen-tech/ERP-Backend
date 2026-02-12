@@ -132,6 +132,20 @@ class ProjectEnquiry extends Model
             'status' => EnquiryConstants::STATUS_QUOTE_APPROVED
         ]);
 
+        // Save immediately to persist in database
+        $this->save();
+
+        // Send Quote Approval Notification (HIGH PRIORITY - before project activation)
+        try {
+            $approvedByUser = User::find($userId);
+            if ($approvedByUser) {
+                $notificationService = app(\App\Modules\Projects\Services\NotificationService::class);
+                $notificationService->sendQuoteApproved($this, $approvedByUser, $jobNumber);
+            }
+        } catch (\Exception $e) {
+            \Log::error("Failed to send quote approval notification: " . $e->getMessage());
+        }
+
         // Automatically convert to a formal Project/Mission
         $project = Project::firstOrCreate(
             ['enquiry_id' => $this->id],

@@ -8,4 +8,5 @@ return [
     App\Modules\MaterialsLibrary\Providers\MaterialsLibraryServiceProvider::class,
     App\Modules\ProcurementStores\Providers\ProcurementStoresServiceProvider::class,
     App\Modules\Production\Providers\ProductionServiceProvider::class,
+    App\Modules\Logistics\Providers\LogisticsServiceProvider::class,
 ];

@@ -796,7 +796,29 @@ class EnquiryController extends Controller
             }
         }
 
-        $enquiry->update($request->only([
+        // Check if Project Officer changed and send notification
+    if ($request->has('project_officer_id') && $request->project_officer_id) {
+        $oldPO = $enquiry->getOriginal('project_officer_id');
+        $newPO = $request->project_officer_id;
+        
+        if ($oldPO !== $newPO) {
+            // PO has changed, send notification to new PO
+            $newProjectOfficer = \App\Models\User::find($newPO);
+            if ($newProjectOfficer) {
+                try {
+                    $this->notificationService->sendProjectOfficerAssigned(
+                        $enquiry->fresh(['client', 'creator']),
+                        $newProjectOfficer,
+                        Auth::user()
+                    );
+                } catch (\Exception $e) {
+                    \Log::error("Failed to send PO assignment notification: " . $e->getMessage());
+                }
+            }
+        }
+    }
+
+    $enquiry->update($request->only([
             'date_received',
             'expected_delivery_date',
             'client_id',

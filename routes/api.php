@@ -752,42 +752,6 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
 
 
 
-        // Notification management
-        Route::get('notifications', function () {
-            $user = auth()->user();
-            $notificationService = app(\App\Modules\Projects\Services\NotificationService::class);
-            $notifications = $notificationService->getUserNotifications($user->id);
-            return response()->json([
-                'data' => $notifications,
-                'message' => 'Notifications retrieved successfully'
-            ]);
-        });
-        Route::put('notifications/{notification}/read', function (\App\Models\Notification $notification) {
-            $user = auth()->user();
-            $notificationService = app(\App\Modules\Projects\Services\NotificationService::class);
-            $success = $notificationService->markAsRead($notification->id, $user->id);
-            return response()->json([
-                'success' => $success,
-                'message' => $success ? 'Notification marked as read' : 'Notification not found'
-            ]);
-        });
-        Route::put('notifications/mark-all-read', function () {
-            $user = auth()->user();
-            $notificationService = app(\App\Modules\Projects\Services\NotificationService::class);
-            $count = $notificationService->markAllAsRead($user->id);
-            return response()->json([
-                'count' => $count,
-                'message' => "{$count} notifications marked as read"
-            ]);
-        });
-        Route::delete('notifications/{notification}', function (\App\Models\Notification $notification) {
-            $user = auth()->user();
-            if ($notification->user_id !== $user->id) {
-                return response()->json(['message' => 'Unauthorized'], 403);
-            }
-            $notification->delete();
-            return response()->json(['message' => 'Notification deleted successfully']);
-        });
     });
 
 

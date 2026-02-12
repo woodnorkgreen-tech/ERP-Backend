@@ -138,6 +138,16 @@ class Permissions
     const PROCUREMENT_QUOTATIONS_MANAGE = 'procurement.quotations.manage';
 
     // ===========================================
+    // LOGISTICS MANAGEMENT PERMISSIONS
+    // ===========================================
+    const LOGISTICS_VIEW = 'logistics.view';
+    const LOGISTICS_DELIVERIES_MANAGE = 'logistics.deliveries.manage';
+    const LOGISTICS_DRIVERS_MANAGE = 'logistics.drivers.manage';
+    const LOGISTICS_FLEET_MANAGE = 'logistics.fleet.manage';
+    const LOGISTICS_ROUTES_MANAGE = 'logistics.routes.manage';
+    const LOGISTICS_TRACKING_VIEW = 'logistics.tracking.view';
+
+    // ===========================================
     // SYSTEM ADMIN PERMISSIONS
     // ===========================================
     const ADMIN_ACCESS = 'admin.access';
@@ -231,6 +241,10 @@ class Permissions
 
             // Dashboard Permissions
             self::DASHBOARD_VIEW, self::DASHBOARD_ADMIN, self::DASHBOARD_HR, self::DASHBOARD_FINANCE, self::DASHBOARD_PROJECTS,
+
+            // Logistics Permissions
+            self::LOGISTICS_VIEW, self::LOGISTICS_DELIVERIES_MANAGE, self::LOGISTICS_DRIVERS_MANAGE,
+            self::LOGISTICS_FLEET_MANAGE, self::LOGISTICS_ROUTES_MANAGE, self::LOGISTICS_TRACKING_VIEW,
         ];
     }
 
@@ -299,6 +313,10 @@ class Permissions
             ],
             'dashboard' => [
                 self::DASHBOARD_VIEW, self::DASHBOARD_ADMIN, self::DASHBOARD_HR, self::DASHBOARD_FINANCE, self::DASHBOARD_PROJECTS,
+            ],
+            'logistics' => [
+                self::LOGISTICS_VIEW, self::LOGISTICS_DELIVERIES_MANAGE, self::LOGISTICS_DRIVERS_MANAGE,
+                self::LOGISTICS_FLEET_MANAGE, self::LOGISTICS_ROUTES_MANAGE, self::LOGISTICS_TRACKING_VIEW,
             ],
         ];
     }
