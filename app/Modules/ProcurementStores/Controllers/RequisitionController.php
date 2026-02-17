@@ -8,6 +8,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Modules\ProcurementStores\Notifications\RequisitionSubmitted;
+use App\Modules\ProcurementStores\Notifications\RequisitionApproved;
+use App\Modules\ProcurementStores\Notifications\RequisitionRejected;
 
 class RequisitionController extends Controller
 {
@@ -39,7 +43,6 @@ class RequisitionController extends Controller
     {
         $query = Requisition::with(['items.material',  'project.enquiry', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
 
-        // Date filtering
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
 
@@ -57,12 +60,10 @@ class RequisitionController extends Controller
             }
         }
 
-        // Status filtering
         if ($request->has('status')) {
             $query->where('status', $request->status);
         }
 
-        // Urgency filtering
         if ($request->has('urgency')) {
             $query->where('urgency', $request->urgency);
         }
@@ -78,33 +79,24 @@ class RequisitionController extends Controller
 
         $query = Requisition::with(['items.material', 'project.enquiry', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
 
-        // Only apply search if searchTerm is not empty
         if (!empty($searchTerm)) {
             $query->where(function ($q) use ($searchTerm) {
-                // Search in requisition_number
                 $q->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
-
-                    // FIXED: Search in related project using correct column names
                     ->orWhereHas('project', function ($projectQuery) use ($searchTerm) {
                         $projectQuery->where('project_name', 'LIKE', '%' . $searchTerm . '%')
                             ->orWhere('project_code', 'LIKE', '%' . $searchTerm . '%');
                     })
-
-                    // FIXED: Search in related employee using correct column names
                     ->orWhereHas('employee', function ($employeeQuery) use ($searchTerm) {
                         $employeeQuery->where('first_name', 'LIKE', '%' . $searchTerm . '%')
                             ->orWhere('last_name', 'LIKE', '%' . $searchTerm . '%')
                             ->orWhere('employee_number', 'LIKE', '%' . $searchTerm . '%');
                     })
-
-                    // FIXED: Search in department using correct column name
                     ->orWhereHas('department', function ($deptQuery) use ($searchTerm) {
                         $deptQuery->where('department_name', 'LIKE', '%' . $searchTerm . '%');
                     });
             });
         }
 
-        // Apply filters if provided
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
@@ -125,7 +117,6 @@ class RequisitionController extends Controller
             $query->where('employee_id', $request->employee_id);
         }
 
-        // Date filters
         if ($request->filled('date_from')) {
             $query->whereDate('date', '>=', $request->date_from);
         }
@@ -179,7 +170,6 @@ class RequisitionController extends Controller
                 $input['employee_id'] = null;
             }
 
-            // Calculate total
             $totalAmount = 0;
             foreach ($input['items'] as $item) {
                 $totalAmount += $item['quantity'] * $item['unit_price'];
@@ -276,14 +266,12 @@ class RequisitionController extends Controller
 
     public function destroy(Requisition $requisition)
     {
-        // ROLE RESTRICTION ADDED HERE
         if (!$this->canApproveOrDelete()) {
             return response([
                 'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can delete requisitions.'
             ], 403);
         }
 
-        // Block if linked to PO
         if ($requisition->purchaseOrder) {
             return response([
                 'error' => 'Cannot delete requisition after it has been linked to a purchase order'
@@ -302,12 +290,16 @@ class RequisitionController extends Controller
 
         $requisition->submitForApproval();
 
+        // Notify Finance + Admin users that a requisition needs approval
+        User::whereHas('roles', fn($q) => $q->whereIn('name', ['Super Admin', 'Admin', 'Accounts']))
+            ->get()
+            ->each(fn($user) => $user->notify(new RequisitionSubmitted($requisition)));
+
         return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
     }
 
     public function approve(Requisition $requisition)
     {
-        // ROLE RESTRICTION ADDED HERE
         if (!$this->canApproveOrDelete()) {
             return response([
                 'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can approve requisitions.'
@@ -320,12 +312,14 @@ class RequisitionController extends Controller
 
         $requisition->approve(auth()->id());
 
+        // Notify the person who created the requisition
+        $requisition->createdBy?->notify(new RequisitionApproved($requisition));
+
         return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
     }
 
     public function reject(Request $request, Requisition $requisition)
     {
-        // ROLE RESTRICTION ADDED HERE
         if (!$this->canApproveOrDelete()) {
             return response([
                 'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can reject requisitions.'
@@ -345,6 +339,9 @@ class RequisitionController extends Controller
         }
 
         $requisition->reject(auth()->id(), $request->reason);
+
+        // Notify the person who created the requisition
+        $requisition->createdBy?->notify(new RequisitionRejected($requisition));
 
         return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
     }
