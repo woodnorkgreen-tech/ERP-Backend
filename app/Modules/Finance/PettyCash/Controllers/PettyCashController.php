@@ -53,6 +53,88 @@ class PettyCashController extends Controller
     }
 
     /**
+     * Get summary of project budgets vs actual petty cash spend
+     */
+    public function getProjectBudgetsSummary(Request $request): JsonResponse
+    {
+        try {
+            $filters = $request->only(['start_date', 'end_date']);
+            $perPage = $request->get('per_page', 15);
+            
+            $result = $this->repository->getProjectBudgetsSummary($filters, (int)$perPage);
+            $summary = $result['paginator'];
+            $stats = $result['stats'];
+
+            return response()->json([
+                'success' => true,
+                'data' => $summary->items(),
+                'stats' => $stats,
+                'meta' => [
+                    'current_page' => $summary->currentPage(),
+                    'last_page' => $summary->lastPage(),
+                    'per_page' => $summary->perPage(),
+                    'total' => $summary->total(),
+                ]
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve project budgets summary',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get budget items/categories for a specific project
+     */
+    public function getProjectBudgetItems(string $jobNumber): JsonResponse
+    {
+        try {
+            $enquiry = \App\Models\ProjectEnquiry::where('job_number', $jobNumber)
+                ->with(['enquiryTasks' => function($q) {
+                    $q->where('type', 'budget')
+                      ->with('budgetData');
+                }])
+                ->first();
+
+            if (!$enquiry) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project not found'
+                ], 404);
+            }
+
+            $budgetTask = $enquiry->enquiryTasks->filter(function($t) {
+                return $t->type === 'budget';
+            })->first();
+
+            $budgetData = $budgetTask ? $budgetTask->budgetData : null;
+            $items = [];
+
+            if ($budgetData) {
+                // Return categories that have budget allocated
+                $summary = $budgetData->budget_summary ?? [];
+                if (($summary['materialsTotal'] ?? 0) > 0) $items[] = ['id' => 'materials', 'name' => 'Materials'];
+                if (($summary['labourTotal'] ?? 0) > 0) $items[] = ['id' => 'labour', 'name' => 'Labour'];
+                if (($summary['logisticsTotal'] ?? 0) > 0) $items[] = ['id' => 'logistics', 'name' => 'Logistics'];
+                if (($summary['expensesTotal'] ?? 0) > 0) $items[] = ['id' => 'expenses', 'name' => 'Expenses'];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $items
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve project budget items',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Display a listing of disbursements.
      */
     public function index(Request $request): JsonResponse

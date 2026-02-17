@@ -47,6 +47,37 @@ class PettyCashService
     }
 
     /**
+     * Update an existing top-up.
+     */
+    public function updateTopUp(PettyCashTopUp $topUp, array $data): PettyCashTopUp
+    {
+        DB::beginTransaction();
+
+        try {
+            $oldAmount = (float) $topUp->amount;
+            $newAmount = isset($data['amount']) ? (float) $data['amount'] : $oldAmount;
+
+            // Update the top-up
+            $this->repository->updateTopUp($topUp, $data);
+
+            // If amount changed, we might need a global balance recalculation 
+            // to ensure all subsequent transaction previous_balance fields are correct.
+            // Model events usually handle the current balance record, but historical sync 
+            // is better served by a full recalculation if amount changes.
+            if ($oldAmount !== $newAmount) {
+                $this->recalculateBalance();
+            }
+
+            DB::commit();
+
+            return $topUp->fresh();
+        } catch (Exception $e) {
+            DB::rollBack();
+            throw new Exception('Failed to update top-up: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Create a new disbursement with balance validation.
      */
     public function createDisbursement(array $data): array
@@ -484,6 +515,12 @@ class PettyCashService
         $validPaymentMethods = ['cash', 'mpesa', 'equity', 'stanbic', 'ncba', 'kcb', 'family', 'bank_transfer', 'other'];
         if (!empty($data['payment_method']) && !in_array($data['payment_method'], $validPaymentMethods)) {
             $errors['payment_method'] = ['Invalid payment method selected.'];
+        }
+
+        // Validate budget category if provided
+        $validBudgetCategories = ['materials', 'labour', 'logistics', 'expenses'];
+        if (!empty($data['budget_category']) && !in_array($data['budget_category'], $validBudgetCategories)) {
+            $errors['budget_category'] = ['Invalid budget category selected.'];
         }
 
         return $errors;

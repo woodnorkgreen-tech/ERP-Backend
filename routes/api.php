@@ -776,10 +776,13 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
 
             // Projects reference for job numbers
             Route::get('projects', [PettyCashController::class, 'getProjects']);
+            Route::get('budgets/summary', [PettyCashController::class, 'getProjectBudgetsSummary']);
+            Route::get('projects/{jobNumber}/budget-items', [PettyCashController::class, 'getProjectBudgetItems']);
 
             // Top-up management routes
             Route::get('top-ups', [PettyCashTopUpController::class, 'index']);
             Route::post('top-ups', [PettyCashTopUpController::class, 'store']);
+            Route::put('top-ups/{id}', [PettyCashTopUpController::class, 'update']);
             Route::get('top-ups/available', [PettyCashTopUpController::class, 'available'])
                 ->withoutMiddleware(['auth:sanctum']);
             Route::get('top-ups/{id}', [PettyCashTopUpController::class, 'show']);
@@ -816,6 +819,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('requisitions/stats', [PettyCashRequisitionController::class, 'stats']);
             Route::get('requisitions/form-data', [PettyCashRequisitionController::class, 'getFormData']);
             Route::get('requisitions/project-team-members', [PettyCashRequisitionController::class, 'getProjectTeamMembers']);
+            Route::get('requisitions/search-payees', [PettyCashRequisitionController::class, 'searchPayees']);
             Route::get('requisitions/{id}', [PettyCashRequisitionController::class, 'show']);
             Route::post('requisitions/{id}/approve', [PettyCashRequisitionController::class, 'approve']);
             Route::post('requisitions/{id}/disburse', [PettyCashRequisitionController::class, 'disburse']);

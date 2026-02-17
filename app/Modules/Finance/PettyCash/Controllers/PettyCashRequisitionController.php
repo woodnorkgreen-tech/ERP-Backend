@@ -696,8 +696,9 @@ class PettyCashRequisitionController extends Controller
 
         $categories = [
             'Office Supplies',
-            'Travel & Subsistence',
-            'Entertainment & Meals',
+            'Transport',
+            'Meals',
+            'Transport and Meals',
             'Repair & Maintenance',
             'Fuel & Lubricants',
             'Communication & Airtime',
@@ -795,6 +796,65 @@ class PettyCashRequisitionController extends Controller
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.finance.requisition-voucher', compact('requisition'));
         
         return $pdf->download("Voucher-{$requisition->requisition_number}.pdf");
+    }
+
+    /**
+     * Search for payees (Employees + Technical Labour).
+     */
+    public function searchPayees(Request $request): JsonResponse
+    {
+        $query = $request->get('query', '');
+        
+        if (strlen($query) < 2) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        // Search Employees
+        $employees = Employee::where('status', 'active')
+            ->where(function($q) use ($query) {
+                $q->where('first_name', 'like', "%{$query}%")
+                  ->orWhere('last_name', 'like', "%{$query}%")
+                  ->orWhere('email', 'like', "%{$query}%");
+            })
+            ->select('id', 'first_name', 'last_name', 'position')
+            ->limit(10)
+            ->get()
+            ->map(function($e) {
+                return [
+                    'id' => $e->id,
+                    'name' => "{$e->first_name} {$e->last_name}",
+                    'detail' => $e->position ?: 'Employee',
+                    'type' => 'employee'
+                ];
+            });
+
+        // Search Technical Labour
+        $techLabour = \App\Modules\HR\Models\TechnicalLabour::where('status', 'active')
+            ->where(function($q) use ($query) {
+                $q->where('full_name', 'like', "%{$query}%")
+                  ->orWhere('phone', 'like', "%{$query}%")
+                  ->orWhere('specialization', 'like', "%{$query}%");
+            })
+            ->select('id', 'full_name', 'specialization', 'phone')
+            ->limit(10)
+            ->get()
+            ->map(function($t) {
+                return [
+                    'id' => $t->id, // We'll need to handle ID collision in frontend if any
+                    'name' => $t->full_name,
+                    'detail' => $t->specialization ? "{$t->specialization} (Tech Labour)" : "Technical Labour",
+                    'type' => 'technical_labour',
+                    'phone' => $t->phone
+                ];
+            });
+
+        // Merge and limit
+        $results = $employees->concat($techLabour)->take(15);
+
+        return response()->json([
+            'success' => true,
+            'data' => $results->values()
+        ]);
     }
 
     /**
