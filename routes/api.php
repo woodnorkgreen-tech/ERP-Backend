@@ -105,6 +105,23 @@ Route::prefix('hr')->group(function () {
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
+// Notifications
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/notifications', function () {
+        $user = auth()->user();
+        return response(['data' => $user->unreadNotifications]);
+    });
+    Route::post('/notifications/{id}/read', function ($id) {
+        $user = auth()->user();
+        $user->notifications()->find($id)?->markAsRead();
+        return response(['success' => true]);
+    });
+    Route::post('/notifications/read-all', function () {
+        $user = auth()->user();
+        $user->unreadNotifications->markAsRead();
+        return response(['success' => true]);
+    });
+});
 Route::get('/user', function () {
     $user = auth()->user();
     return response()->json($user->load('roles'));
@@ -622,15 +639,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/quality-checkpoints', [App\Http\Controllers\ProductionController::class, 'deleteQualityCheckpoints']);
         });
 
-        // Notification Routes
-        Route::prefix('projects')->group(function () {
-            Route::get('/notifications', [App\Http\Controllers\NotificationController::class, 'index']);
-        });
-        Route::prefix('notifications')->group(function () {
-            Route::put('/{id}/read', [App\Http\Controllers\NotificationController::class, 'markAsRead']);
-            Route::put('/mark-all-read', [App\Http\Controllers\NotificationController::class, 'markAllAsRead']);
-            Route::delete('/{id}', [App\Http\Controllers\NotificationController::class, 'destroy']);
-        });
+        
 
         // Drivers endpoint for logistics
         Route::get('/drivers', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getDrivers']);
