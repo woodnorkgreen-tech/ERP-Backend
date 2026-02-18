@@ -147,6 +147,8 @@ class WorkOrderController extends Controller
             'started_at' => 'sometimes|nullable|date_format:Y-m-d H:i:s',
             'completed_at' => 'sometimes|nullable|date_format:Y-m-d H:i:s',
             'assigned_to' => 'sometimes|nullable|exists:users,id',
+            'workflow_completed_steps' => 'sometimes|array',
+            'workflow_completed_steps.*' => 'string'
         ]);
 
         $workOrder->update($validated);
