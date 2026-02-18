@@ -180,6 +180,14 @@ class PettyCashRepository
     }
 
     /**
+     * Update a top-up.
+     */
+    public function updateTopUp(PettyCashTopUp $topUp, array $data): bool
+    {
+        return $topUp->update($data);
+    }
+
+    /**
      * Create a new disbursement.
      */
     public function createDisbursement(array $data): PettyCashDisbursement
@@ -632,6 +640,109 @@ class PettyCashRepository
             'period' => [
                 'start' => $startDate,
                 'end' => $endDate
+            ]
+        ];
+    }
+
+    /**
+     * Get summary of project budgets vs actual petty cash spend with pagination and overall stats.
+     */
+    public function getProjectBudgetsSummary(array $filters = [], int $perPage = 15): array
+    {
+        // 1. Get approved project enquiries with their budget tasks (PAGINATED)
+        $query = \App\Models\ProjectEnquiry::where("quote_approved", true)
+            ->whereNotNull("job_number")
+            ->with(["enquiryTasks" => function($q) {
+                $q->where("type", "budget")
+                  ->with("budgetData");
+            }])
+            ->orderBy('created_at', 'desc');
+
+        $paginator = $query->paginate($perPage);
+
+        // 2. Aggregate actual spent from petty cash disbursements by job_number and category
+        $actualSpentRaw = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::active()
+            ->notArchived()
+            ->whereNotNull("job_number")
+            ->select("job_number", "budget_category", \Illuminate\Support\Facades\DB::raw("SUM(amount + COALESCE(transaction_cost, 0)) as total_spent"))
+            ->groupBy("job_number", "budget_category")
+            ->get();
+
+        $actualSpent = [];
+        $totalActualSpentOverall = 0;
+        foreach ($actualSpentRaw as $row) {
+            if (!isset($actualSpent[$row->job_number])) {
+                $actualSpent[$row->job_number] = [
+                    'total' => 0,
+                    'categories' => ['materials' => 0, 'labour' => 0, 'logistics' => 0, 'expenses' => 0]
+                ];
+            }
+            $actualSpent[$row->job_number]['total'] += (float) $row->total_spent;
+            $totalActualSpentOverall += (float) $row->total_spent;
+            $cat = $row->budget_category ?: 'expenses';
+            if (isset($actualSpent[$row->job_number]['categories'][$cat])) {
+                $actualSpent[$row->job_number]['categories'][$cat] += (float) $row->total_spent;
+            } else {
+                $actualSpent[$row->job_number]['categories']['expenses'] += (float) $row->total_spent;
+            }
+        }
+
+        // 3. Calculate Overall Budget Total (for stats)
+        // This is done across all enquiries, not just the current page
+        $totalBudgetOverall = 0;
+        $allApprovedEnquiries = \App\Models\ProjectEnquiry::where("quote_approved", true)
+            ->whereNotNull("job_number")
+            ->with(["enquiryTasks" => function($q) {
+                $q->where("type", "budget")
+                  ->with("budgetData");
+            }])
+            ->get();
+
+        foreach ($allApprovedEnquiries as $enquiry) {
+            $budgetTask = $enquiry->enquiryTasks->filter(fn($t) => $t->type === "budget")->first();
+            if ($budgetTask && $budgetTask->budgetData) {
+                $totalBudgetOverall += (float) ($budgetTask->budgetData->budget_summary['grandTotal'] ?? 0);
+            }
+        }
+
+        // 4. Transform data using the paginator's collection
+        $paginator->getCollection()->transform(function ($enquiry) use ($actualSpent) {
+            $budgetTask = $enquiry->enquiryTasks->filter(function($t) {
+                return $t->type === "budget";
+            })->first();
+            
+            $budgetData = $budgetTask ? $budgetTask->budgetData : null;
+            $summary = $budgetData ? ($budgetData->budget_summary ?? []) : [];
+            
+            $projectSpent = $actualSpent[$enquiry->job_number] ?? [
+                'total' => 0,
+                'categories' => ['materials' => 0, 'labour' => 0, 'logistics' => 0, 'expenses' => 0]
+            ];
+            
+            return [
+                "id" => $enquiry->id,
+                "job_number" => $enquiry->job_number,
+                "project_id" => $enquiry->project_id,
+                "title" => $enquiry->title,
+                "budget_summary" => $summary,
+                "actual_spent" => (float) $projectSpent['total'],
+                "actual_spent_breakdown" => $projectSpent['categories'],
+                "totals" => [
+                    "materials" => (float) ($summary["materialsTotal"] ?? 0),
+                    "labour" => (float) ($summary["labourTotal"] ?? 0),
+                    "logistics" => (float) ($summary["logisticsTotal"] ?? 0),
+                    "expenses" => (float) ($summary["expensesTotal"] ?? 0),
+                    "grand_total" => (float) ($summary["grandTotal"] ?? 0),
+                ]
+            ];
+        });
+
+        return [
+            'paginator' => $paginator,
+            'stats' => [
+                'total_budget' => $totalBudgetOverall,
+                'total_spent' => $totalActualSpentOverall,
+                'avg_utilization' => $totalBudgetOverall > 0 ? round(($totalActualSpentOverall / $totalBudgetOverall) * 100) : 0
             ]
         ];
     }

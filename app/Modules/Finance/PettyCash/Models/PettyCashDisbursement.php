@@ -45,6 +45,7 @@ class PettyCashDisbursement extends Model
         'archived_by',
         'requisition_id',
         'transaction_cost',
+        'budget_category',
         'created_at',
     ];
 

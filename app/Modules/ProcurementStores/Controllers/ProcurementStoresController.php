@@ -370,4 +370,30 @@ class ProcurementStoresController extends Controller
             'status' => 'success'
         ]);
     }
+
+    /**
+     * Delete an inventory log and revert the stock adjustment.
+     */
+    public function destroyLog($id): JsonResponse
+    {
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($id) {
+            $log = \App\Modules\ProcurementStores\Models\InventoryLog::findOrFail($id);
+            $stock = \App\Modules\ProcurementStores\Models\Stock::where('material_id', $log->material_id)->first();
+
+            if ($stock) {
+                // Revert the adjustment: 
+                // If it was a check-in (positive quantity), we subtract it.
+                // If it was a check-out (negative quantity), we add it back.
+                $stock->quantity_on_hand -= $log->quantity;
+                $stock->save();
+            }
+
+            $log->delete();
+
+            return response()->json([
+                'message' => 'Inventory log deleted and stock reverted successfully',
+                'status' => 'success'
+            ]);
+        });
+    }
 }

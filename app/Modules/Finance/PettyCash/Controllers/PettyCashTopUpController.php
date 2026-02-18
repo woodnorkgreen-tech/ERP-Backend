@@ -88,6 +88,47 @@ class PettyCashTopUpController extends Controller
     }
 
     /**
+     * Update the specified top-up.
+     */
+    public function update(Request $request, int $id): JsonResponse
+    {
+        try {
+            $topUp = $this->repository->findTopUp($id);
+
+            if (!$topUp) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Top-up not found',
+                ], 404);
+            }
+
+            // Validate the request data
+            $validationErrors = $this->service->validateTopUpData($request->all());
+            if (!empty($validationErrors)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validationErrors,
+                ], 422);
+            }
+
+            $updatedTopUp = $this->service->updateTopUp($topUp, $request->all());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Top-up updated successfully',
+                'data' => $updatedTopUp->load('creator'),
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update top-up',
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
      * Display the specified top-up.
      */
     public function show(int $id): JsonResponse
