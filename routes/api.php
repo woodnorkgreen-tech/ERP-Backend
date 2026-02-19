@@ -796,6 +796,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
                 ->withoutMiddleware(['auth:sanctum']);
             Route::get('top-ups/{id}', [PettyCashTopUpController::class, 'show']);
             Route::get('top-ups/{id}/available-balance', [PettyCashTopUpController::class, 'availableBalance']);
+            Route::delete('top-ups/{id}', [PettyCashTopUpController::class, 'destroy']);
 
             // Balance and transaction routes
             Route::get('balance', [PettyCashController::class, 'balance']);

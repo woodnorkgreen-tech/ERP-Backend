@@ -288,4 +288,42 @@ class PettyCashTopUpController extends Controller
             ], 400);
         }
     }
+
+    /**
+     * Remove the specified top-up from storage.
+     */
+    public function destroy(int $id): JsonResponse
+    {
+        try {
+            $topUp = $this->repository->findTopUp($id);
+
+            if (!$topUp) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Top-up not found',
+                ], 404);
+            }
+
+            // Check if there are active disbursements linked to this top-up
+            if ($topUp->activeDisbursements()->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot delete top-up because it has active disbursements linked to it.',
+                ], 400);
+            }
+
+            $topUp->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Top-up deleted successfully',
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete top-up',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }

@@ -99,6 +99,7 @@ class Permissions
     const FINANCE_PETTY_CASH_UPDATE = 'finance.petty_cash.edit_disbursement';
     const FINANCE_PETTY_CASH_VOID = 'finance.petty_cash.void_disbursement';
     const FINANCE_PETTY_CASH_DELETE = 'finance.petty_cash.delete_disbursement';
+    const FINANCE_PETTY_CASH_DELETE_TOP_UP = 'finance.petty_cash.delete_top_up';
     const FINANCE_PETTY_CASH_CREATE_TOP_UP = 'finance.petty_cash.create_top_up';
     const FINANCE_PETTY_CASH_UPLOAD_EXCEL = 'finance.petty_cash.upload_excel';
     const FINANCE_PETTY_CASH_ADMIN = 'finance.petty_cash.admin';
@@ -216,7 +217,12 @@ class Permissions
             self::FINANCE_PETTY_CASH_VIEW_REPORTS,
             self::FINANCE_PETTY_CASH_CREATE,
             self::FINANCE_PETTY_CASH_UPDATE,
-            self::FINANCE_PETTY_CASH_VOID, self::FINANCE_PETTY_CASH_DELETE, self::FINANCE_PETTY_CASH_CREATE_TOP_UP, self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, self::FINANCE_PETTY_CASH_ADMIN,
+            self::FINANCE_PETTY_CASH_VOID, 
+            self::FINANCE_PETTY_CASH_DELETE, 
+            self::FINANCE_PETTY_CASH_DELETE_TOP_UP,
+            self::FINANCE_PETTY_CASH_CREATE_TOP_UP, 
+            self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
+            self::FINANCE_PETTY_CASH_ADMIN,
 
             // HR Permissions
             self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
@@ -288,7 +294,12 @@ class Permissions
                 self::FINANCE_PETTY_CASH_VIEW_REPORTS,
                 self::FINANCE_PETTY_CASH_CREATE,
                 self::FINANCE_PETTY_CASH_UPDATE,
-                self::FINANCE_PETTY_CASH_VOID, self::FINANCE_PETTY_CASH_DELETE, self::FINANCE_PETTY_CASH_CREATE_TOP_UP, self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, self::FINANCE_PETTY_CASH_ADMIN,
+                self::FINANCE_PETTY_CASH_VOID, 
+                self::FINANCE_PETTY_CASH_DELETE, 
+                self::FINANCE_PETTY_CASH_DELETE_TOP_UP,
+                self::FINANCE_PETTY_CASH_CREATE_TOP_UP, 
+                self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
+                self::FINANCE_PETTY_CASH_ADMIN,
             ],
             'hr' => [
                 self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
