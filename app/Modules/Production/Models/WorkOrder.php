@@ -5,6 +5,7 @@ namespace App\Modules\Production\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Constants\EnquiryConstants;
 
 class WorkOrder extends Model
@@ -26,6 +27,7 @@ class WorkOrder extends Model
         'due_date',
         'started_at',
         'completed_at',
+        'workflow_completed_steps',
         'assigned_to',
         'created_by',
     ];
@@ -34,6 +36,7 @@ class WorkOrder extends Model
         'due_date' => 'date',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
+        'workflow_completed_steps' => 'array',
     ];
 
     /**
@@ -65,6 +68,21 @@ class WorkOrder extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(\App\Models\User::class, 'created_by');
+    }
+
+    public function scrapLogs(): HasMany
+    {
+        return $this->hasMany(WorkOrderScrapLog::class, 'work_order_id');
+    }
+
+    public function tasks(): HasMany
+    {
+        return $this->hasMany(WorkOrderTask::class, 'work_order_id');
+    }
+
+    public function midQcChecks(): HasMany
+    {
+        return $this->hasMany(WorkOrderMidQcCheck::class, 'work_order_id');
     }
 
     // Scopes

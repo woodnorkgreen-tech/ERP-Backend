@@ -4,13 +4,40 @@ use Illuminate\Support\Facades\Route;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
 use App\Modules\Production\Http\Controllers\JobCardController;
 use App\Modules\Production\Http\Controllers\ProductionReportsController;
+use App\Modules\Production\Http\Controllers\WorkOrderScrapLogController;
+use App\Modules\Production\Http\Controllers\WorkOrderTaskController;
+use App\Modules\Production\Http\Controllers\ProductionAssigneeController;
+use App\Modules\Production\Http\Controllers\WorkOrderMidQcController;
+use App\Modules\Production\Http\Controllers\WorkOrderTaskEvidenceController;
+use App\Modules\Production\Http\Controllers\WorkOrderFinalQcController;
+use App\Modules\Production\Http\Controllers\WorkOrderReworkController;
+use App\Modules\Production\Http\Controllers\WorkOrderReworkEvidenceController;
 
 Route::middleware('auth:sanctum')->group(function () {
     // Work Orders
     Route::apiResource('work-orders', WorkOrderController::class);
     Route::get('work-orders/enquiry/{enquiry_id}', [WorkOrderController::class, 'getByEnquiry']);
     Route::post('work-orders/create-for-existing-projects', [WorkOrderController::class, 'createForExistingProjects']);
-    Route::get('work-orders/search', [WorkOrderController::class, 'search']);
+    Route::get('work-orders/{work_order}/scrap-logs', [WorkOrderScrapLogController::class, 'index']);
+    Route::post('work-orders/{work_order}/scrap-logs', [WorkOrderScrapLogController::class, 'store']);
+    Route::delete('work-orders/{work_order}/scrap-logs/{scrap_log}', [WorkOrderScrapLogController::class, 'destroy']);
+    Route::get('work-orders/{work_order}/tasks', [WorkOrderTaskController::class, 'index']);
+    Route::post('work-orders/{work_order}/tasks', [WorkOrderTaskController::class, 'store']);
+    Route::put('work-orders/{work_order}/tasks/{task}', [WorkOrderTaskController::class, 'update']);
+    Route::delete('work-orders/{work_order}/tasks/{task}', [WorkOrderTaskController::class, 'destroy']);
+    Route::get('work-orders/{work_order}/tasks/{task}/evidence', [WorkOrderTaskEvidenceController::class, 'index']);
+    Route::post('work-orders/{work_order}/tasks/{task}/evidence', [WorkOrderTaskEvidenceController::class, 'store']);
+    Route::delete('work-orders/{work_order}/tasks/{task}/evidence/{evidence}', [WorkOrderTaskEvidenceController::class, 'destroy']);
+    Route::get('work-orders/{work_order}/mid-qc', [WorkOrderMidQcController::class, 'index']);
+    Route::post('work-orders/{work_order}/mid-qc', [WorkOrderMidQcController::class, 'store']);
+    Route::get('work-orders/{work_order}/final-qc', [WorkOrderFinalQcController::class, 'index']);
+    Route::post('work-orders/{work_order}/final-qc', [WorkOrderFinalQcController::class, 'store']);
+    Route::get('work-orders/{work_order}/reworks', [WorkOrderReworkController::class, 'index']);
+    Route::post('work-orders/{work_order}/reworks', [WorkOrderReworkController::class, 'store']);
+    Route::put('work-orders/{work_order}/reworks/{rework}', [WorkOrderReworkController::class, 'update']);
+    Route::get('work-orders/{work_order}/reworks/{rework}/evidence', [WorkOrderReworkEvidenceController::class, 'index']);
+    Route::post('work-orders/{work_order}/reworks/{rework}/evidence', [WorkOrderReworkEvidenceController::class, 'store']);
+    Route::delete('work-orders/{work_order}/reworks/{rework}/evidence/{evidence}', [WorkOrderReworkEvidenceController::class, 'destroy']);
 
     // Job Cards
     Route::apiResource('job-cards', JobCardController::class);
@@ -31,4 +58,5 @@ Route::middleware('auth:sanctum')->group(function () {
     // Reference Data
     Route::get('technicians', [JobCardController::class, 'technicians']);
     Route::get('work-centers', [JobCardController::class, 'workCenters']);
+    Route::get('assignees', [ProductionAssigneeController::class, 'index']);
 });

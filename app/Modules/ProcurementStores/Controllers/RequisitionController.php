@@ -4,14 +4,11 @@ namespace App\Modules\ProcurementStores\Controllers;
 
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Resources\RequisitionResource;
+use App\Services\RequisitionNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
-use App\Models\User;
-use App\Modules\ProcurementStores\Notifications\RequisitionSubmitted;
-use App\Modules\ProcurementStores\Notifications\RequisitionApproved;
-use App\Modules\ProcurementStores\Notifications\RequisitionRejected;
 
 class RequisitionController extends Controller
 {
@@ -39,10 +36,35 @@ class RequisitionController extends Controller
         return false;
     }
 
+    /**
+     * Get the "requested by" label for notifications
+     */
+    private function getRequestedByLabel(Requisition $requisition, string $type): string
+    {
+        return match($type) {
+            'project'  => $requisition->project?->project_name ?? 'Project',
+            'employee' => trim(
+                ($requisition->employee?->first_name ?? '') . ' ' .
+                ($requisition->employee?->last_name ?? '')
+            ),
+            'office'   => $requisition->department?->name ?? 'Department',
+            default    => 'Unknown',
+        };
+    }
+
     public function index(Request $request)
     {
-        $query = Requisition::with(['items.material',  'project.enquiry', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
+        $query = Requisition::with([
+            'items.material',
+            'project.enquiry',
+            'project',
+            'employee',
+            'department',
+            'createdBy',
+            'approvedBy'
+        ]);
 
+        // Date filtering
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
 
@@ -55,7 +77,11 @@ class RequisitionController extends Controller
             } elseif ($dateFilter === 'this_month') {
                 $query->whereMonth('date', now()->month)
                     ->whereYear('date', now()->year);
-            } elseif ($dateFilter === 'custom' && $request->has('start_date') && $request->has('end_date')) {
+            } elseif (
+                $dateFilter === 'custom' &&
+                $request->has('start_date') &&
+                $request->has('end_date')
+            ) {
                 $query->whereBetween('date', [$request->start_date, $request->end_date]);
             }
         }
@@ -77,7 +103,15 @@ class RequisitionController extends Controller
     {
         $searchTerm = $request->input('searchTerm', '');
 
-        $query = Requisition::with(['items.material', 'project.enquiry', 'project', 'employee', 'department', 'createdBy', 'approvedBy']);
+        $query = Requisition::with([
+            'items.material',
+            'project.enquiry',
+            'project',
+            'employee',
+            'department',
+            'createdBy',
+            'approvedBy'
+        ]);
 
         if (!empty($searchTerm)) {
             $query->where(function ($q) use ($searchTerm) {
@@ -136,17 +170,17 @@ class RequisitionController extends Controller
         $input = $request->all();
 
         $validator = Validator::make($input, [
-            'date' => 'required|date',
-            'requested_by_type' => 'required|in:project,office,employee',
-            'project_id' => 'required_if:requested_by_type,project',
-            'employee_id' => 'required_if:requested_by_type,employee',
-            'department_id' => 'required_if:requested_by_type,office',
-            'urgency' => 'required|in:normal,urgent',
-            'items' => 'required|array|min:1',
-            'items.*.material_id' => 'required|exists:library_materials,id',
-            'items.*.quantity' => 'required|integer|min:1',
-            'items.*.unit_price' => 'required|numeric|min:0',
-            'items.*.purpose' => 'required|string',
+            'date'                     => 'required|date',
+            'requested_by_type'        => 'required|in:project,office,employee',
+            'project_id'               => 'required_if:requested_by_type,project',
+            'employee_id'              => 'required_if:requested_by_type,employee',
+            'department_id'            => 'required_if:requested_by_type,office',
+            'urgency'                  => 'required|in:normal,urgent',
+            'items'                    => 'required|array|min:1',
+            'items.*.material_id'      => 'required|exists:library_materials,id',
+            'items.*.quantity'         => 'required|integer|min:1',
+            'items.*.unit_price'       => 'required|numeric|min:0',
+            'items.*.purpose'          => 'required|string',
         ]);
 
         if ($validator->fails()) {
@@ -160,16 +194,17 @@ class RequisitionController extends Controller
             $input['user_id'] = auth()->id();
 
             if ($input['requested_by_type'] === 'project') {
-                $input['employee_id'] = null;
+                $input['employee_id']   = null;
                 $input['department_id'] = null;
             } elseif ($input['requested_by_type'] === 'employee') {
-                $input['project_id'] = null;
+                $input['project_id']    = null;
                 $input['department_id'] = null;
             } elseif ($input['requested_by_type'] === 'office') {
-                $input['project_id'] = null;
+                $input['project_id']  = null;
                 $input['employee_id'] = null;
             }
 
+            // Calculate total
             $totalAmount = 0;
             foreach ($input['items'] as $item) {
                 $totalAmount += $item['quantity'] * $item['unit_price'];
@@ -188,11 +223,37 @@ class RequisitionController extends Controller
 
             DB::commit();
 
-            return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
+            // Send push notification to approvers
+            try {
+                $requestedBy = $this->getRequestedByLabel(
+                    $requisition->load(['project', 'employee', 'department']),
+                    $input['requested_by_type']
+                );
+
+                RequisitionNotificationService::notifyApprovers(
+                    $requisition->requisition_number,
+                    $requestedBy,
+                    $input['urgency'] ?? 'normal'
+                );
+            } catch (\Exception $e) {
+                \Log::error('Requisition notification failed: ' . $e->getMessage());
+            }
+
+            return new RequisitionResource(
+                $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy'])
+            );
+
         } catch (\Exception $e) {
             DB::rollBack();
             return response(['error' => 'Failed to create requisition: ' . $e->getMessage()], 500);
         }
+    }
+
+    public function show(Requisition $requisition)
+    {
+        return new RequisitionResource(
+            $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy'])
+        );
     }
 
     public function update(Request $request, Requisition $requisition)
@@ -206,10 +267,10 @@ class RequisitionController extends Controller
         $input = $request->all();
 
         $validator = Validator::make($input, [
-            'date' => 'date',
-            'requested_by_type' => 'in:project,office,employee',
-            'urgency' => 'in:normal,urgent',
-            'status' => 'in:pending,approved,rejected,completed',
+            'date'               => 'date',
+            'requested_by_type'  => 'in:project,office,employee',
+            'urgency'            => 'in:normal,urgent',
+            'status'             => 'in:pending,approved,rejected,completed',
         ]);
 
         if ($validator->fails()) {
@@ -221,13 +282,13 @@ class RequisitionController extends Controller
 
             if (isset($input['requested_by_type'])) {
                 if ($input['requested_by_type'] === 'project') {
-                    $input['employee_id'] = null;
+                    $input['employee_id']   = null;
                     $input['department_id'] = null;
                 } elseif ($input['requested_by_type'] === 'employee') {
-                    $input['project_id'] = null;
+                    $input['project_id']    = null;
                     $input['department_id'] = null;
                 } elseif ($input['requested_by_type'] === 'office') {
-                    $input['project_id'] = null;
+                    $input['project_id']  = null;
                     $input['employee_id'] = null;
                 }
             }
@@ -241,7 +302,7 @@ class RequisitionController extends Controller
                 $totalAmount = 0;
                 foreach ($items as $item) {
                     $item['total'] = $item['quantity'] * $item['unit_price'];
-                    $totalAmount += $item['total'];
+                    $totalAmount  += $item['total'];
                     $requisition->items()->create($item);
                 }
 
@@ -252,16 +313,14 @@ class RequisitionController extends Controller
 
             DB::commit();
 
-            return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
+            return new RequisitionResource(
+                $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            );
+
         } catch (\Exception $e) {
             DB::rollBack();
             return response(['error' => 'Failed to update requisition: ' . $e->getMessage()], 500);
         }
-    }
-
-    public function show(Requisition $requisition)
-    {
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy']));
     }
 
     public function destroy(Requisition $requisition)
@@ -290,12 +349,9 @@ class RequisitionController extends Controller
 
         $requisition->submitForApproval();
 
-        // Notify Finance + Admin users that a requisition needs approval
-        User::whereHas('roles', fn($q) => $q->whereIn('name', ['Super Admin', 'Admin', 'Accounts']))
-            ->get()
-            ->each(fn($user) => $user->notify(new RequisitionSubmitted($requisition)));
-
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
+        return new RequisitionResource(
+            $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+        );
     }
 
     public function approve(Requisition $requisition)
@@ -312,10 +368,9 @@ class RequisitionController extends Controller
 
         $requisition->approve(auth()->id());
 
-        // Notify the person who created the requisition
-        $requisition->createdBy?->notify(new RequisitionApproved($requisition));
-
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
+        return new RequisitionResource(
+            $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+        );
     }
 
     public function reject(Request $request, Requisition $requisition)
@@ -340,9 +395,8 @@ class RequisitionController extends Controller
 
         $requisition->reject(auth()->id(), $request->reason);
 
-        // Notify the person who created the requisition
-        $requisition->createdBy?->notify(new RequisitionRejected($requisition));
-
-        return new RequisitionResource($requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy']));
+        return new RequisitionResource(
+            $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+        );
     }
 }
