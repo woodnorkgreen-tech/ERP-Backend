@@ -5,6 +5,7 @@ namespace App\Modules\Production\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class WorkOrderRework extends Model
 {
@@ -37,5 +38,10 @@ class WorkOrderRework extends Model
     public function workOrder(): BelongsTo
     {
         return $this->belongsTo(WorkOrder::class, 'work_order_id');
+    }
+
+    public function ncrs(): HasMany
+    {
+        return $this->hasMany(ProductionNcr::class, 'work_order_rework_id');
     }
 }

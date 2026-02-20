@@ -12,6 +12,7 @@ use App\Modules\Production\Http\Controllers\WorkOrderTaskEvidenceController;
 use App\Modules\Production\Http\Controllers\WorkOrderFinalQcController;
 use App\Modules\Production\Http\Controllers\WorkOrderReworkController;
 use App\Modules\Production\Http\Controllers\WorkOrderReworkEvidenceController;
+use App\Modules\Production\Http\Controllers\ProductionNcrController;
 
 Route::middleware('auth:sanctum')->group(function () {
     // Work Orders
@@ -38,6 +39,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('work-orders/{work_order}/reworks/{rework}/evidence', [WorkOrderReworkEvidenceController::class, 'index']);
     Route::post('work-orders/{work_order}/reworks/{rework}/evidence', [WorkOrderReworkEvidenceController::class, 'store']);
     Route::delete('work-orders/{work_order}/reworks/{rework}/evidence/{evidence}', [WorkOrderReworkEvidenceController::class, 'destroy']);
+    Route::get('ncrs/reference-data', [ProductionNcrController::class, 'referenceData']);
+    Route::get('ncrs', [ProductionNcrController::class, 'index']);
+    Route::post('ncrs', [ProductionNcrController::class, 'store']);
+    Route::get('ncrs/{ncr}', [ProductionNcrController::class, 'show']);
+    Route::put('ncrs/{ncr}', [ProductionNcrController::class, 'update']);
+    Route::post('ncrs/{ncr}/assign', [ProductionNcrController::class, 'assign']);
+    Route::post('ncrs/{ncr}/request-reinspection', [ProductionNcrController::class, 'requestReinspection']);
+    Route::post('ncrs/{ncr}/close', [ProductionNcrController::class, 'close']);
+    Route::post('ncrs/{ncr}/upload-image', [ProductionNcrController::class, 'uploadImage']);
 
     // Job Cards
     Route::apiResource('job-cards', JobCardController::class);

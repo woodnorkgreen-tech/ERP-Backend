@@ -6,11 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Modules\Production\Models\WorkOrder;
 use App\Modules\Production\Models\WorkOrderFinalQcCheck;
 use App\Modules\Production\Models\WorkOrderRework;
+use App\Modules\Production\Services\ProductionNcrService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class WorkOrderFinalQcController extends Controller
 {
+    public function __construct(private readonly ProductionNcrService $ncrService)
+    {
+    }
+
     public function index(WorkOrder $workOrder): JsonResponse
     {
         $checks = WorkOrderFinalQcCheck::where('work_order_id', $workOrder->id)
@@ -62,7 +67,7 @@ class WorkOrderFinalQcController extends Controller
             $saved[] = $record;
 
             if ($check['status'] === 'failed') {
-                WorkOrderRework::updateOrCreate(
+                $rework = WorkOrderRework::updateOrCreate(
                     [
                         'work_order_id' => $workOrder->id,
                         'source_type' => 'final_qc',
@@ -77,6 +82,17 @@ class WorkOrderFinalQcController extends Controller
                         'created_by' => auth()->id()
                     ]
                 );
+
+                $this->ncrService->upsertFromQcFailure([
+                    'work_order_id' => $workOrder->id,
+                    'work_order_rework_id' => $rework->id,
+                    'source_type' => 'final_qc',
+                    'source_ref' => $check['category'] . ':' . $check['title'],
+                    'qc_stage' => 'final_qc',
+                    'workstation' => null,
+                    'description' => $check['category'] . ': ' . $check['title'] . '. ' . ($check['failure_reason'] ?? ''),
+                    'detected_by' => auth()->id(),
+                ]);
             }
         }
 

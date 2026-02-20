@@ -563,11 +563,19 @@ class JobCardController extends Controller
      */
     public function submitForApproval(JobCard $jobCard): JsonResponse
     {
-        if ($jobCard->status !== 'draft') {
+        if ($jobCard->status === 'approved') {
             return response()->json([
                 'success' => false,
-                'message' => 'Only draft job cards can be submitted for approval'
+                'message' => 'Approved job cards cannot be re-submitted for approval'
             ], 422);
+        }
+
+        if ($jobCard->status === 'pending_approval') {
+            return response()->json([
+                'success' => true,
+                'message' => 'Job card is already pending approval',
+                'data' => $jobCard
+            ]);
         }
 
         $jobCard->update(['status' => 'pending_approval']);

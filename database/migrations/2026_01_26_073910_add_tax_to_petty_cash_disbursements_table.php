@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasColumn('petty_cash_disbursements', 'tax')) {
+            return;
+        }
+
         Schema::table('petty_cash_disbursements', function (Blueprint $table) {
             $table->string('tax')->nullable()->after('job_number');
         });
@@ -21,6 +25,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (! Schema::hasColumn('petty_cash_disbursements', 'tax')) {
+            return;
+        }
+
         Schema::table('petty_cash_disbursements', function (Blueprint $table) {
             $table->dropColumn('tax');
         });

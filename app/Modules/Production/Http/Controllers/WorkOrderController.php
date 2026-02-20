@@ -4,6 +4,8 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Models\WorkOrder;
+use App\Modules\Production\Models\WorkOrderTask;
+use App\Modules\Production\Models\WorkOrderFinalQcCheck;
 use App\Services\ProductionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -151,6 +153,20 @@ class WorkOrderController extends Controller
             'workflow_completed_steps.*' => 'string'
         ]);
 
+        if (array_key_exists('workflow_completed_steps', $validated)) {
+            $validationError = $this->validateWorkflowProgression(
+                $workOrder,
+                $validated['workflow_completed_steps'] ?? []
+            );
+
+            if ($validationError) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $validationError
+                ], 422);
+            }
+        }
+
         $workOrder->update($validated);
 
         // Reload relationships and append status_category and project_officer_name for frontend
@@ -223,5 +239,103 @@ class WorkOrderController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function validateWorkflowProgression(WorkOrder $workOrder, array $nextSteps): ?string
+    {
+        $orderedSteps = ['intake', 'design_assets', 'materials', 'fabrication', 'qc', 'packaging', 'close'];
+        $nextFiltered = array_values(array_intersect($orderedSteps, array_unique($nextSteps)));
+        $currentFiltered = array_values(array_intersect($orderedSteps, array_unique($workOrder->workflow_completed_steps ?? [])));
+
+        // No step can be uncompleted once marked complete.
+        foreach ($currentFiltered as $step) {
+            if (!in_array($step, $nextFiltered, true)) {
+                return 'Completed steps cannot be removed.';
+            }
+        }
+
+        // Must be sequential with no skipping.
+        for ($i = 0; $i < count($nextFiltered); $i++) {
+            if ($nextFiltered[$i] !== $orderedSteps[$i]) {
+                return 'Workflow must be completed in sequence from Intake to Close.';
+            }
+        }
+
+        // Validate any newly added step gates.
+        $newSteps = array_values(array_diff($nextFiltered, $currentFiltered));
+        foreach ($newSteps as $step) {
+            $gateError = $this->validateStepGate($workOrder, $step);
+            if ($gateError) {
+                return $gateError;
+            }
+        }
+
+        return null;
+    }
+
+    private function validateStepGate(WorkOrder $workOrder, string $step): ?string
+    {
+        if ($step === 'intake') {
+            $taskCount = WorkOrderTask::where('work_order_id', $workOrder->id)->count();
+            if ($taskCount === 0) {
+                return 'Cannot complete Intake. Add at least one workstation task.';
+            }
+            return null;
+        }
+
+        if ($step === 'fabrication') {
+            $tasks = WorkOrderTask::where('work_order_id', $workOrder->id)
+                ->where('included', true)
+                ->get(['status', 'safety_checks']);
+
+            if ($tasks->isEmpty()) {
+                return 'Cannot complete Fabrication. No included tasks found.';
+            }
+
+            $incomplete = $tasks->contains(fn ($task) => $task->status !== 'completed');
+            if ($incomplete) {
+                return 'Cannot complete Fabrication. All included tasks must be completed.';
+            }
+
+            $missingSafety = $tasks->contains(function ($task) {
+                $checks = $task->safety_checks ?? [];
+                return !($checks['ppe'] ?? false) || !($checks['machine'] ?? false);
+            });
+            if ($missingSafety) {
+                return 'Cannot complete Fabrication. Safety checks (PPE and machine) are required for all tasks.';
+            }
+            return null;
+        }
+
+        if ($step === 'qc') {
+            $checks = WorkOrderFinalQcCheck::where('work_order_id', $workOrder->id)->get(['status']);
+            if ($checks->isEmpty()) {
+                return 'Cannot complete QC. Final QC checklist has not been filled.';
+            }
+            $hasPending = $checks->contains(fn ($check) => $check->status === 'pending');
+            if ($hasPending) {
+                return 'Cannot complete QC. Resolve all final QC checkpoints.';
+            }
+            return null;
+        }
+
+        if ($step === 'packaging') {
+            $qcDone = in_array('qc', $workOrder->workflow_completed_steps ?? [], true);
+            if (!$qcDone) {
+                return 'Cannot complete Packaging before QC is complete.';
+            }
+            return null;
+        }
+
+        if ($step === 'close') {
+            $packagingDone = in_array('packaging', $workOrder->workflow_completed_steps ?? [], true);
+            if (!$packagingDone) {
+                return 'Cannot complete Close before Packaging is complete.';
+            }
+            return null;
+        }
+
+        // design_assets, materials: sequence-enforced; additional gate can be added later.
+        return null;
     }
 }

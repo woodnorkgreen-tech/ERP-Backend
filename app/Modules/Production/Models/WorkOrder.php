@@ -85,6 +85,11 @@ class WorkOrder extends Model
         return $this->hasMany(WorkOrderMidQcCheck::class, 'work_order_id');
     }
 
+    public function ncrs(): HasMany
+    {
+        return $this->hasMany(ProductionNcr::class, 'work_order_id');
+    }
+
     // Scopes
     public function scopeInProgress($query)
     {
