@@ -102,6 +102,9 @@ class BudgetService
                 foreach ($elem['materials'] ?? [] as $mat) {
                     if (($mat['unitPrice'] ?? 0) > 0) {
                         $pricedMap[$mat['description']] = $mat['unitPrice'];
+                        if (!empty($mat['library_material_id'])) {
+                            $pricedMap[$mat['description'].'_libId'] = $mat['library_material_id'];
+                        }
                     }
                 }
             }
@@ -112,6 +115,11 @@ class BudgetService
                         $newMat['unitPrice'] = $pricedMap[$newMat['description']];
                         $newMat['totalPrice'] = $newMat['quantity'] * $newMat['unitPrice'];
                         $newMat['_priceStatus'] = 'preserved';
+                        
+                        // Ensure library ID is preserved if it existed in old map (though it should come from newMaterials)
+                        if (empty($newMat['library_material_id']) && isset($pricedMap[$newMat['description'].'_libId'])) {
+                            $newMat['library_material_id'] = $pricedMap[$newMat['description'].'_libId'];
+                        }
                     }
                 }
             }
@@ -284,6 +292,7 @@ class BudgetService
                     'baselineQty' => $Qb,
                     'currentQty' => $Qc,
                     'unit' => $inMat['unitOfMeasurement'],
+                    'library_material_id' => $inMat['library_material_id'] ?? null,
                     'variance' => $variance,
                     'volumeVariance' => $ivolVar,
                     'priceVariance' => $ipriceVar,
@@ -306,6 +315,7 @@ class BudgetService
                     'baselineQty' => $rem['mat']['quantity'],
                     'currentQty' => 0,
                     'unit' => $rem['mat']['unitOfMeasurement'],
+                    'library_material_id' => $rem['mat']['library_material_id'] ?? null,
                     'variance' => $var,
                     'volumeVariance' => $var,
                     'priceVariance' => 0,
@@ -381,6 +391,7 @@ class BudgetService
                 $budgetMaterials[] = [
                     'id' => uniqid('mat_'),
                     'persistent_id' => $material->persistent_id,
+                    'library_material_id' => $material->library_material_id,
                     'description' => $material->description,
                     'unitOfMeasurement' => $material->unit_of_measurement,
                     'quantity' => $material->quantity,

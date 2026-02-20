@@ -105,23 +105,8 @@ Route::prefix('hr')->group(function () {
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
-// Notifications
-Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/notifications', function () {
-        $user = auth()->user();
-        return response(['data' => $user->unreadNotifications]);
-    });
-    Route::post('/notifications/{id}/read', function ($id) {
-        $user = auth()->user();
-        $user->notifications()->find($id)?->markAsRead();
-        return response(['success' => true]);
-    });
-    Route::post('/notifications/read-all', function () {
-        $user = auth()->user();
-        $user->unreadNotifications->markAsRead();
-        return response(['success' => true]);
-    });
-});
+
+
 Route::get('/user', function () {
     $user = auth()->user();
     return response()->json($user->load('roles'));
@@ -141,7 +126,7 @@ Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store
 Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
 Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
 Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
-//to be removed later
+
 // Protected Project & Task Routes
 Route::middleware('auth:sanctum')->group(function () {
     // Action Logs
@@ -244,7 +229,29 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::get('/app-departments', [DepartmentController::class, 'index']);
 
 // Protected routes (require authentication)
+// Protected routes (require authentication)
 Route::middleware('auth:sanctum')->group(function () {
+
+    // Notifications & OneSignal
+    Route::get('/notifications', function () {
+        $user = auth()->user();
+        return response(['data' => $user->unreadNotifications]);
+    });
+    Route::post('/notifications/{id}/read', function ($id) {
+        $user = auth()->user();
+        $user->notifications()->find($id)?->markAsRead();
+        return response(['success' => true]);
+    });
+    Route::post('/notifications/read-all', function () {
+        $user = auth()->user();
+        $user->unreadNotifications->markAsRead();
+        return response(['success' => true]);
+    });
+    Route::post('/user/onesignal-token', function (Request $request) {
+        $user = auth()->user();
+        $user->update(['onesignal_player_id' => $request->player_id]);
+        return response(['success' => true]);
+    });
 
     Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
     Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
@@ -592,6 +599,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Get materials by enquiry ID (for budget import)
     Route::get('projects/enquiries/{enquiryId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsByEnquiry']);
 
+    // Get project by enquiry ID
+    Route::get('projects/enquiries/{enquiryId}/project', [App\Modules\Projects\Http\Controllers\EnquiryController::class, 'getByProjectEnquiryId']);
+
     // Projects Module Routes
     Route::prefix('projects')->group(function () {
         // Site survey management
@@ -796,6 +806,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
                 ->withoutMiddleware(['auth:sanctum']);
             Route::get('top-ups/{id}', [PettyCashTopUpController::class, 'show']);
             Route::get('top-ups/{id}/available-balance', [PettyCashTopUpController::class, 'availableBalance']);
+            Route::delete('top-ups/{id}', [PettyCashTopUpController::class, 'destroy']);
 
             // Balance and transaction routes
             Route::get('balance', [PettyCashController::class, 'balance']);

@@ -157,7 +157,8 @@ class ProcurementService
 
                     // Reference data for traceability
                     'budgetElementId' => $element['id'] ?? '',
-                    'budgetItemId' => $material['id'] ?? ''
+                    'budgetItemId' => $material['id'] ?? '',
+                    'libraryMaterialId' => $material['library_material_id'] ?? null
                 ];
             }
         }
@@ -178,6 +179,7 @@ class ProcurementService
 
         return [
             'projectId' => $enquiry ? 'ENQ-' . $enquiry->id : 'ENQ-' . $task->project_enquiry_id,
+            'job_number' => $enquiry->job_number ?? null,
             'enquiryTitle' => $enquiry ? $enquiry->title : 'Untitled Project',
             'clientName' => $enquiry ? ($enquiry->client?->full_name ?? $enquiry->contact_person ?? 'Unknown Client') : 'Unknown Client',
             'eventVenue' => $enquiry ? $enquiry->venue : 'TBC',

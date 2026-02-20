@@ -452,6 +452,23 @@ class EnquiryController extends Controller
     }
 
     /**
+     * Get project by enquiry ID
+     */
+    public function getByProjectEnquiryId($enquiryId)
+    {
+        $project = \App\Models\Project::where('enquiry_id', $enquiryId)->first();
+
+        if (!$project) {
+            return response()->json(['message' => 'Project not found'], 404);
+        }
+
+        return response()->json([
+            'data' => $project,
+            'message' => 'Project retrieved successfully'
+        ]);
+    }
+
+    /**
      * @OA\Get(
      *     path="/api/projects/enquiries/{enquiry}/complete-details",
      *     summary="Get complete enquiry details with aggregated task data",

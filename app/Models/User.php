@@ -31,6 +31,7 @@ class User extends Authenticatable
         'department_id',
         'is_active',
         'last_login_at',
+        'onesignal_player_id',
     ];
 
     /**
@@ -147,4 +148,8 @@ class User extends Authenticatable
 
         return $permissions;
     }
+   public function routeNotificationForOneSignal(): string
+{
+    return $this->onesignal_player_id;
+}
 }

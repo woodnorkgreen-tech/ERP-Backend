@@ -25,7 +25,8 @@ class Requisition extends Model
         'approved_at',
         'approved_by',
         'rejection_reason',
-        'user_id'
+        'user_id',
+        'job_number'
     ];
 
     protected $casts = [
@@ -52,6 +53,15 @@ class Requisition extends Model
 {
     return $this->belongsTo('App\Models\Project', 'project_id');
 }
+
+    /**
+     * Direct link to the enquiry (used when requested_by_type = 'project').
+     * We store the enquiry ID in project_id, so this resolves the full enquiry details.
+     */
+    public function projectEnquiry()
+    {
+        return $this->belongsTo('App\Models\ProjectEnquiry', 'project_id');
+    }
 
     public function employee()
     {
