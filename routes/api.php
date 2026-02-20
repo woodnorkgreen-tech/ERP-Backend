@@ -599,6 +599,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Get materials by enquiry ID (for budget import)
     Route::get('projects/enquiries/{enquiryId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsByEnquiry']);
 
+    // Get project by enquiry ID
+    Route::get('projects/enquiries/{enquiryId}/project', [App\Modules\Projects\Http\Controllers\EnquiryController::class, 'getByProjectEnquiryId']);
+
     // Projects Module Routes
     Route::prefix('projects')->group(function () {
         // Site survey management

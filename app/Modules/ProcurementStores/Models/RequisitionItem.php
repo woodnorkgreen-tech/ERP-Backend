@@ -14,6 +14,7 @@ class RequisitionItem extends Model
     protected $fillable = [
         'requisition_id',
         'material_id',
+        'custom_description',
         'quantity',
         'unit_price',
         'total',

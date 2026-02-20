@@ -14,15 +14,29 @@ class RequisitionResource extends JsonResource
             'date' => $this->date?->format('Y-m-d'),
             'requested_by_type' => $this->requested_by_type,
             'project_id' => $this->project_id,
-           'project' => $this->whenLoaded('project', function () {
-    return [
-        'id' => $this->project->id,
-        'project_id' => $this->project->project_id ?? null,
-        'name' => $this->project->enquiry->title ?? $this->project->project_id ?? 'N/A',
-    ];
-}),
+            'job_number' => $this->job_number,
+            'project' => $this->whenLoaded('project', function () {
+                if (!$this->project) return null;
+                return [
+                    'id' => $this->project->id,
+                    'project_id' => $this->project->project_id ?? null,
+                    'name' => $this->project->enquiry->title ?? $this->project->project_id ?? 'N/A',
+                ];
+            }),
+            // Enquiry-based project details (when requested_by_type = 'project' and no Project record exists)
+            'project_enquiry' => $this->whenLoaded('projectEnquiry', function () {
+                if (!$this->projectEnquiry) return null;
+                $enquiry = $this->projectEnquiry;
+                return [
+                    'id'          => $enquiry->id,
+                    'job_number'  => $enquiry->job_number ?? $enquiry->enquiry_number,
+                    'title'       => $enquiry->title,
+                    'venue'       => $enquiry->venue,
+                ];
+            }),
             'employee_id' => $this->employee_id,
             'employee' => $this->whenLoaded('employee', function () {
+                if (!$this->employee) return null;
                 return [
                     'id' => $this->employee->id,
                     'name' => $this->employee->name ?? 'N/A',
@@ -30,6 +44,7 @@ class RequisitionResource extends JsonResource
             }),
             'department_id' => $this->department_id,
             'department' => $this->whenLoaded('department', function () {
+                if (!$this->department) return null;
                 return [
                     'id' => $this->department->id,
                     'name' => $this->department->name ?? 'N/A',
@@ -57,6 +72,8 @@ class RequisitionResource extends JsonResource
                     return [
                         'id' => $item->id,
                         'material_id' => $item->material_id,
+                        'custom_description' => $item->custom_description,
+                        'material_name' => $item->material ? $item->material->material_name : $item->custom_description,
                         'material' => $item->material ? [
                             'id' => $item->material->id,
                             'material_code' => $item->material->material_code,

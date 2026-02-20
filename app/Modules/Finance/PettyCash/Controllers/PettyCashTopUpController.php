@@ -305,10 +305,16 @@ class PettyCashTopUpController extends Controller
             }
 
             // Check if there are active disbursements linked to this top-up
-            if ($topUp->activeDisbursements()->exists()) {
+            $activeDisbursements = $topUp->activeDisbursements()->get();
+            if ($activeDisbursements->isNotEmpty()) {
+                $details = $activeDisbursements->map(function($d) {
+                    $formattedAmount = number_format((float)$d->amount, 2);
+                    return "#{$d->id}: {$d->receiver} (KES {$formattedAmount})";
+                })->implode(', ');
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot delete top-up because it has active disbursements linked to it.',
+                    'message' => "Cannot delete top-up because it has active disbursements linked to it: {$details}. Please void or delete these disbursements first.",
                 ], 400);
             }
 
