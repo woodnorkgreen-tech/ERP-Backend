@@ -72,12 +72,16 @@ class MaterialsController extends Controller
             if (!$materialsData) {
                 return response()->json([
                     'data' => $this->getDefaultMaterialsStructure($taskId),
+                    'designGate' => $this->checkDesignApprovalGate($taskId),
                     'message' => 'Materials data retrieved successfully'
                 ]);
             }
 
+            $gate = $this->checkDesignApprovalGate($taskId);
+
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData),
+                'designGate' => $gate,
                 'message' => 'Materials data retrieved successfully'
             ]);
         } catch (\Exception $e) {
@@ -1230,6 +1234,15 @@ class MaterialsController extends Controller
         }
 
         try {
+            // Check Design Gate before proceeding
+            $gate = $this->checkDesignApprovalGate($taskId);
+            if ($gate['is_gated']) {
+                return response()->json([
+                    'message' => 'Unauthorized: ' . $gate['message'],
+                    'designGate' => $gate
+                ], 403);
+            }
+
             $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
 
             if (!$materialsData) {
@@ -1995,6 +2008,51 @@ class MaterialsController extends Controller
                 'success' => false,
                 'message' => 'Failed to process file: ' . ($e->getMessage() ?: 'Unknown error'),
             ], 422);
+        }
+    }
+
+    /**
+     * Check if materials approval is gated by design requirements
+     */
+    private function checkDesignApprovalGate(int $taskId): array
+    {
+        try {
+            $currentTask = \App\Modules\Projects\Models\EnquiryTask::find($taskId);
+            if (!$currentTask) {
+                return ['is_gated' => false, 'message' => 'Task not found'];
+            }
+
+            // Find design task for the same enquiry
+            $designTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $currentTask->project_enquiry_id)
+                ->where('type', 'design')
+                ->first();
+
+            // If no design task exists, there is no gate
+            if (!$designTask) {
+                return ['is_gated' => false, 'message' => 'No design task required for this project preset.'];
+            }
+
+            // Check for approved assets in the design task
+            $hasApprovedAssets = \App\Models\DesignAsset::where('enquiry_task_id', $designTask->id)
+                ->where('status', 'approved')
+                ->exists();
+
+            if (!$hasApprovedAssets) {
+                return [
+                    'is_gated' => true,
+                    'message' => 'Materials approval is locked until the Design Task has approved assets. Please ensure at least one design file is approved by the client or manager.',
+                    'design_task_id' => $designTask->id
+                ];
+            }
+
+            return [
+                'is_gated' => false,
+                'message' => 'Design requirements met.',
+                'design_task_id' => $designTask->id
+            ];
+        } catch (\Exception $e) {
+            \Log::error('Design gate check failed', ['error' => $e->getMessage()]);
+            return ['is_gated' => false, 'message' => 'Gate check errored. Contact admin.'];
         }
     }
 }

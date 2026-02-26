@@ -14,6 +14,8 @@ use App\Models\TaskAssignmentHistory;
 use App\Constants\Permissions;
 use App\Modules\UniversalTask\Services\TaskService as UniversalTaskService;
 use App\Modules\UniversalTask\Models\Task as UniversalTask;
+use App\Http\Controllers\MaterialsController;
+use App\Models\DesignAsset;
 
 /**
  * @OA\Schema(
@@ -108,7 +110,6 @@ class TaskController extends Controller
             // Strict Access Control
             // If NOT Project Officer, Project Manager, or Super Admin, only show assigned tasks.
             if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
-                 \Log::info('[TASK LIST] Restricting tasks for standard user', ['user_id' => $user->id]);
                  $query->where(function($q) use ($user) {
                      $q->where('assigned_to', $user->id)
                        ->orWhere('assigned_user_id', $user->id)
@@ -136,9 +137,7 @@ class TaskController extends Controller
                         $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
                      }
                  });
-            } else {
-                 \Log::info('[TASK LIST] Full access granted to privileged user', ['user_id' => $user->id, 'role' => $user->roles->pluck('name')]);
-            }
+            } 
 
             // Apply filters if provided
             if ($request->has('status') && $request->status) {
@@ -236,11 +235,41 @@ class TaskController extends Controller
                             }
                         }
                         
+                        // Get counts
+                        $elementCount = $materialsData->elements()->count();
+                        $materialCount = \App\Models\ElementMaterial::whereIn(
+                            'project_element_id', 
+                            $materialsData->elements()->pluck('id')
+                        )->count();
+
+                        // Check Design Gate
+                        $isGated = false;
+                        $gateMessage = '';
+                        
+                        $designTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
+                            ->where('type', 'design')
+                            ->first();
+
+                        if ($designTask) {
+                            $hasApprovedAssets = DesignAsset::where('enquiry_task_id', $designTask->id)
+                                ->where('status', 'approved')
+                                ->exists();
+                            
+                            if (!$hasApprovedAssets) {
+                                $isGated = true;
+                                $gateMessage = 'Materials approval is locked until the Design Task has approved assets.';
+                            }
+                        }
+                        
                         $task->material_approval = [
                             'needs_approval' => !($approvalStatus['all_approved'] ?? false),
                             'approved_count' => $totalApprovals,
                             'total_count' => 3,
                             'all_approved' => $approvalStatus['all_approved'] ?? false,
+                            'element_count' => $elementCount,
+                            'material_count' => $materialCount,
+                            'is_gated' => $isGated,
+                            'gate_message' => $gateMessage,
                             'departments' => [
                                 'design' => $approvalStatus['design']['approved'] ?? false,
                                 'production' => $approvalStatus['production']['approved'] ?? false,
@@ -360,11 +389,41 @@ class TaskController extends Controller
                             }
                         }
                         
+                        // Get counts
+                        $elementCount = $materialsData->elements()->count();
+                        $materialCount = \App\Models\ElementMaterial::whereIn(
+                            'project_element_id', 
+                            $materialsData->elements()->pluck('id')
+                        )->count();
+
+                        // Check Design Gate
+                        $isGated = false;
+                        $gateMessage = '';
+                        
+                        $designTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
+                            ->where('type', 'design')
+                            ->first();
+
+                        if ($designTask) {
+                            $hasApprovedAssets = DesignAsset::where('enquiry_task_id', $designTask->id)
+                                ->where('status', 'approved')
+                                ->exists();
+                            
+                            if (!$hasApprovedAssets) {
+                                $isGated = true;
+                                $gateMessage = 'Materials approval is locked until the Design Task has approved assets.';
+                            }
+                        }
+                        
                         $task->material_approval = [
                             'needs_approval' => !($approvalStatus['all_approved'] ?? false),
                             'approved_count' => $totalApprovals,
                             'total_count' => 3,
                             'all_approved' => $approvalStatus['all_approved'] ?? false,
+                            'element_count' => $elementCount,
+                            'material_count' => $materialCount,
+                            'is_gated' => $isGated,
+                            'gate_message' => $gateMessage,
                             'departments' => [
                                 'design' => $approvalStatus['design']['approved'] ?? false,
                                 'production' => $approvalStatus['production']['approved'] ?? false,
