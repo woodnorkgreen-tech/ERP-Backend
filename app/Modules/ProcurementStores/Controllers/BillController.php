@@ -177,7 +177,15 @@ class BillController extends Controller
 
     public function show(Bill $bill)
     {
-        return new BillResource($bill->load(['purchaseOrder', 'supplier', 'createdBy', 'payments.paymentMethod', 'payments.createdBy']));
+        return new BillResource($bill->load([
+        'purchaseOrder.requisition.project',
+        'purchaseOrder.requisition.department',
+        'purchaseOrder.requisition.projectEnquiry',
+        'supplier',
+        'createdBy',
+        'payments.paymentMethod',
+        'payments.createdBy'
+    ]));
     }
 
     public function recordPayment(Request $request, Bill $bill)

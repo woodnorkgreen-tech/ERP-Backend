@@ -14,6 +14,7 @@ class PurchaseOrderItem extends Model
     protected $fillable = [
         'purchase_order_id',
         'material_id',
+        'custom_description',
         'quantity',
         'unit_price',
         'total',

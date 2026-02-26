@@ -169,7 +169,7 @@
             @foreach($po->items as $index => $item)
             <tr>
                 <td>{{ $index + 1 }}</td>
-                <td>{{ $item->material->material_name }}</td>
+                <td>{{ $item->material?->material_name ?? $item->custom_description ?? '—' }}</td>
                 <td class="text-right">{{ $item->quantity }}</td>
                 <td class="text-right">{{ number_format($item->unit_price, 2) }}</td>
                 <td class="text-right">{{ number_format($item->total, 2) }}</td>

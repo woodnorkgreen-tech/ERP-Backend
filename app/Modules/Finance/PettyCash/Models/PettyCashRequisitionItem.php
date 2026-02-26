@@ -19,6 +19,7 @@ class PettyCashRequisitionItem extends Model
         'amount',
         'payee_id',
         'payee_name',
+        'payee_phone',
         'digital_signature',
         'received_at',
     ];

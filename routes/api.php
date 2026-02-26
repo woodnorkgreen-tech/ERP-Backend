@@ -767,10 +767,35 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
     Route::put('/{asset}', [DesignAssetController::class, 'update']);
     Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
 });
-
-
-
-
+        // Notifications
+        Route::get('notifications', function () {
+            $user = auth()->user();
+            return response()->json([
+                'success' => true,
+                'data' => $user->appNotifications()->orderBy('created_at', 'desc')->get()
+            ]);
+        });
+        Route::put('notifications/{id}/read', function ($id) {
+            $user = auth()->user();
+            $notification = $user->appNotifications()->find($id);
+            if ($notification) {
+                $notification->markAsRead();
+            }
+            return response()->json(['success' => true]);
+        });
+        Route::put('notifications/mark-all-read', function () {
+            $user = auth()->user();
+            $user->appNotifications()->where('is_read', false)->update([
+                'is_read' => true,
+                'read_at' => now()
+            ]);
+            return response()->json(['success' => true]);
+        });
+        Route::delete('notifications/{id}', function ($id) {
+            $user = auth()->user();
+            $user->appNotifications()->where('id', $id)->delete();
+            return response()->json(['success' => true]);
+        });
     });
 
 

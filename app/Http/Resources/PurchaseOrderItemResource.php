@@ -15,21 +15,25 @@ class PurchaseOrderItemResource extends JsonResource
     public function toArray($request)
     {
         return [
-            'id' => $this->id,
-            'purchase_order_id' => $this->purchase_order_id,
-            'material_id' => $this->material_id,
-            'material' => $this->whenLoaded('material', function () {
+            'id'               => $this->id,
+            'purchase_order_id'=> $this->purchase_order_id,
+            'material_id'      => $this->material_id,
+            'custom_description' => $this->custom_description,
+            // Resolved display name: library name OR custom description
+            'item_name'        => $this->material?->material_name ?? $this->custom_description ?? '—',
+            'material'         => $this->whenLoaded('material', function () {
+                if (!$this->material) return null;
                 return [
-                    'id' => $this->material->id,
+                    'id'            => $this->material->id,
                     'material_code' => $this->material->material_code,
                     'material_name' => $this->material->material_name,
                 ];
             }),
-            'quantity' => $this->quantity,
-            'unit_price' => (float) $this->unit_price,
-            'total' => (float) $this->total,
-            'created_at' => $this->created_at->toISOString(),
-            'updated_at' => $this->updated_at->toISOString(),
+            'quantity'    => $this->quantity,
+            'unit_price'  => (float) $this->unit_price,
+            'total'       => (float) $this->total,
+            'created_at'  => $this->created_at->toISOString(),
+            'updated_at'  => $this->updated_at->toISOString(),
         ];
     }
 }

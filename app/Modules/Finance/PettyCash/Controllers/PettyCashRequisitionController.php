@@ -26,7 +26,7 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $user = Auth::user();
-            $query = PettyCashRequisition::with(['requester', 'department', 'approver', 'payee', 'project.enquiry', 'enquiry'])
+            $query = PettyCashRequisition::with(['requester.employee', 'department', 'approver', 'payee', 'project.enquiry', 'enquiry'])
                 ->withCount('items');
 
             // If not admin/finance, only show their own
@@ -68,6 +68,10 @@ class PettyCashRequisitionController extends Controller
                 ]
             ]);
         } catch (Exception $e) {
+            \Log::error("Failed to retrieve requisitions: " . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'user_id' => Auth::id()
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve requisitions',
@@ -141,15 +145,18 @@ class PettyCashRequisitionController extends Controller
             'purpose' => 'required|string',
             'payee_id' => 'nullable|exists:employees,id',
             'payee_name' => 'nullable|string',
+            'payee_phone' => 'nullable|string|max:255',
             'project_id' => 'nullable|exists:projects,id',
             'project_name' => 'nullable|string|max:255',
             'venue' => 'nullable|string|max:255',
             'enquiry_id' => 'nullable|exists:project_enquiries,id',
+            'bill_id' => 'nullable|exists:bills,id',
             'items' => 'required|array|min:1',
             'items.*.description' => 'required|string',
             'items.*.amount' => 'required|numeric|min:0.01',
             'items.*.payee_id' => 'nullable|exists:employees,id',
             'items.*.payee_name' => 'nullable|string',
+            'items.*.payee_phone' => 'nullable|string|max:255',
         ]);
 
         if ($validator->fails()) {
@@ -172,6 +179,7 @@ class PettyCashRequisitionController extends Controller
                 'project_name' => $request->project_name,
                 'venue' => $request->venue,
                 'enquiry_id' => $request->enquiry_id,
+                'bill_id' => $request->bill_id,
                 'status' => 'pending',
             ];
 
@@ -179,6 +187,7 @@ class PettyCashRequisitionController extends Controller
                 'requisition_number' => PettyCashRequisition::generateRequisitionNumber(),
                 'payee_id' => $request->payee_id ?? null,
                 'payee_name' => $request->payee_name ?? null,
+                'payee_phone' => $request->payee_phone ?? null,
                 'total_amount' => collect($request->items)->sum('amount'),
             ]));
 
@@ -188,6 +197,7 @@ class PettyCashRequisitionController extends Controller
                     'amount' => $item['amount'],
                     'payee_id' => $item['payee_id'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
+                    'payee_phone' => $item['payee_phone'] ?? null,
                 ]);
             }
 
@@ -225,7 +235,7 @@ class PettyCashRequisitionController extends Controller
     public function show(int $id): JsonResponse
     {
         try {
-            $requisition = PettyCashRequisition::with(['requester', 'department', 'items.payee', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
+            $requisition = PettyCashRequisition::with(['requester.employee', 'department', 'items.payee', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
                 ->findOrFail($id);
 
             // Ensure signing token exists (lazy generation)
@@ -263,8 +273,10 @@ class PettyCashRequisitionController extends Controller
             'project_name' => 'nullable|string|max:255',
             'venue' => 'nullable|string|max:255',
             'enquiry_id' => 'nullable|exists:project_enquiries,id',
+            'bill_id' => 'nullable|exists:bills,id',
             'payee_id' => 'nullable|exists:employees,id',
             'payee_name' => 'nullable|string',
+            'payee_phone' => 'nullable|string|max:255',
         ];
 
         // If not disbursed, allow updating items/amount
@@ -274,6 +286,7 @@ class PettyCashRequisitionController extends Controller
             $rules['items.*.amount'] = 'required|numeric|min:0.01';
             $rules['items.*.payee_id'] = 'nullable|exists:employees,id';
             $rules['items.*.payee_name'] = 'nullable|string';
+            $rules['items.*.payee_phone'] = 'nullable|string|max:255';
         }
 
         $validator = Validator::make($request->all(), $rules);
@@ -299,6 +312,7 @@ class PettyCashRequisitionController extends Controller
                     'project_name' => $request->project_name,
                     'venue' => $request->venue,
                     'enquiry_id' => $request->enquiry_id,
+                    'bill_id' => $request->bill_id,
                     // DO NOT update amount, items, or payee causing financial discrepancies
                 ]);
 
@@ -320,8 +334,10 @@ class PettyCashRequisitionController extends Controller
                 'project_name' => $request->project_name,
                 'venue' => $request->venue,
                 'enquiry_id' => $request->enquiry_id,
+                'bill_id' => $request->bill_id,
                 'payee_id' => $request->payee_id ?? null,
                 'payee_name' => $request->payee_name ?? null,
+                'payee_phone' => $request->payee_phone ?? null,
                 'total_amount' => collect($request->items)->sum('amount'),
             ];
 
@@ -344,6 +360,7 @@ class PettyCashRequisitionController extends Controller
                     'amount' => $item['amount'],
                     'payee_id' => $item['payee_id'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
+                    'payee_phone' => $item['payee_phone'] ?? null,
                     'requisition_id' => $requisition->id
                 ]);
             }
@@ -665,7 +682,7 @@ class PettyCashRequisitionController extends Controller
     public function getFormData(): JsonResponse
     {
         $departments = Department::select('id', 'name')->get();
-        $employees = Employee::select('id', 'first_name', 'last_name')->where('status', 'active')->orderBy('first_name')->get();
+        $employees = Employee::select('id', 'first_name', 'last_name', 'phone')->where('status', 'active')->orderBy('first_name')->get();
         
         // Fetch Projects and Enquiries
         $projects = Project::with('enquiry')
@@ -695,6 +712,7 @@ class PettyCashRequisitionController extends Controller
             });
 
         $categories = [
+            'Projects',
             'Office Supplies',
             'Transport',
             'Meals',
@@ -740,7 +758,7 @@ class PettyCashRequisitionController extends Controller
             return response()->json(['success' => false, 'members' => []]);
         }
 
-    $query = \App\Modules\Teams\Models\TeamsMember::with(['technicalLabour.employee', 'teamsTask.category']);
+    $query = \App\Modules\Teams\Models\TeamsMember::with(['technicalLabour', 'teamsTask.category']);
 
     if ($projectId && $enquiryId) {
         $query->whereHas('teamsTask', function ($q) use ($projectId, $enquiryId) {
@@ -760,19 +778,40 @@ class PettyCashRequisitionController extends Controller
     }
 
     $members = $query->get()->map(function ($m) {
-        $employee = $m->technicalLabour?->employee;
+        // Try to find corresponding employee if not directly linked
+        $employee = null;
+        if ($m->member_email) {
+            $employee = \App\Modules\HR\Models\Employee::where('email', $m->member_email)->first();
+        }
+        
+        if (!$employee && $m->member_name) {
+            // Try robust name match as fallback
+            $employee = \App\Modules\HR\Models\Employee::where(\DB::raw("CONCAT(first_name, ' ', last_name)"), 'LIKE', '%' . $m->member_name . '%')
+                ->orWhere(\DB::raw("CONCAT(last_name, ' ', first_name)"), 'LIKE', '%' . $m->member_name . '%')
+                ->first();
+        }
+
         $category = $m->teamsTask?->category?->name ?? 'Other';
+        
+        // Final fallback chain for phone: Member Record -> Employee Profile -> Tech Labour Profile
+        $phone = $m->member_phone ?: ($employee?->phone ?: ($m->technicalLabour?->phone ?: ''));
+
         return [
             'id' => $m->id,
-            'name' => $employee ? "{$employee->first_name} {$employee->last_name}" : $m->member_name,
+            'name' => trim($m->member_name),
             'payee_id' => $employee?->id,
+            'payee_phone' => $phone,
             'role' => $m->member_role,
             'is_internal' => (bool)$employee,
             'category' => $category
         ];
-    })->unique(function ($item) {
-        return $item['name'] . $item['category'];
-    })->values();
+    })
+    ->sortByDesc(fn($item) => (bool)$item['payee_phone']) // Put records with phones at the top
+    ->unique(function ($item) {
+        // Robust unique key: normalized name + normalized category
+        return strtolower(trim($item['name'])) . '|' . strtolower(trim($item['category']));
+    })
+    ->values();
 
         return response()->json([
             'success' => true,
@@ -816,7 +855,7 @@ class PettyCashRequisitionController extends Controller
                   ->orWhere('last_name', 'like', "%{$query}%")
                   ->orWhere('email', 'like', "%{$query}%");
             })
-            ->select('id', 'first_name', 'last_name', 'position')
+            ->select('id', 'first_name', 'last_name', 'position', 'phone')
             ->limit(10)
             ->get()
             ->map(function($e) {
@@ -824,7 +863,9 @@ class PettyCashRequisitionController extends Controller
                     'id' => $e->id,
                     'name' => "{$e->first_name} {$e->last_name}",
                     'detail' => $e->position ?: 'Employee',
-                    'type' => 'employee'
+                    'type' => 'employee',
+                    'phone' => $e->phone,
+                    'payee_phone' => $e->phone
                 ];
             });
 
@@ -844,7 +885,8 @@ class PettyCashRequisitionController extends Controller
                     'name' => $t->full_name,
                     'detail' => $t->specialization ? "{$t->specialization} (Tech Labour)" : "Technical Labour",
                     'type' => 'technical_labour',
-                    'phone' => $t->phone
+                    'phone' => $t->phone,
+                    'payee_phone' => $t->phone
                 ];
             });
 
@@ -865,7 +907,7 @@ class PettyCashRequisitionController extends Controller
         try {
             \Log::info('Public sign-off lookup', ['token' => $token]);
             
-            $requisition = PettyCashRequisition::with(['requester', 'department', 'disbursement', 'payee', 'project.enquiry', 'enquiry', 'items.payee'])
+            $requisition = PettyCashRequisition::with(['requester.employee', 'department', 'disbursement', 'payee', 'project.enquiry', 'enquiry', 'items.payee'])
                 ->where('signing_token', $token)
                 ->firstOrFail();
 

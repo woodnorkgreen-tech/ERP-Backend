@@ -146,6 +146,12 @@ class PettyCashService
             // If this disbursement is linked to a requisition, update the requisition status
             if (!empty($data['requisition_id'])) {
                 $this->syncRequisitionStatus((int)$data['requisition_id'], 'disbursed');
+                
+                // PHASE 2: Handle Bill Link
+                $requisition = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::find($data['requisition_id']);
+                if ($requisition && $requisition->bill_id) {
+                    $this->createBillPaymentFromDisbursement($requisition, $disbursement);
+                }
             }
 
             DB::commit();
@@ -567,4 +573,29 @@ class PettyCashService
         return $errors;
     }
 
+
+    /**
+     * Create a BillPayment record from a Petty Cash disbursement.
+     */
+    private function createBillPaymentFromDisbursement($requisition, $disbursement): void
+    {
+        try {
+            $paymentMethodId = \App\Modules\ProcurementStores\Models\PaymentMethod::where('name', 'Petty Cash')
+                ->orWhere('name', 'like', '%Cash%')
+                ->value('id') ?? 1; // Fallback to 1
+
+            \App\Modules\ProcurementStores\Models\BillPayment::create([
+                'bill_id' => $requisition->bill_id,
+                'amount_paid' => $disbursement->amount,
+                'payment_date' => $disbursement->date_disbursed ?? now(),
+                'payment_method_id' => $paymentMethodId,
+                'reference_number' => "Paid via Petty Cash Req #{$requisition->requisition_number} (Disb #{$disbursement->id})",
+                'user_id' => $disbursement->created_by ?? Auth::id(),
+            ]);
+            
+            \Log::info("Automated BillPayment created for Bill #{$requisition->bill_id} from Requisition #{$requisition->id}");
+        } catch (Exception $e) {
+            \Log::error("Failed to auto-create BillPayment for Requisition #{$requisition->id}: " . $e->getMessage());
+        }
+    }
 }

@@ -40,6 +40,8 @@ class PettyCashRequisition extends Model
         'signing_token',
         'received_by',
         'payee_id',
+        'payee_phone',
+        'bill_id',
     ];
 
     protected $casts = [
@@ -112,6 +114,14 @@ class PettyCashRequisition extends Model
     public function enquiry(): BelongsTo
     {
         return $this->belongsTo(\App\Models\ProjectEnquiry::class, 'enquiry_id');
+    }
+
+    /**
+     * Get the associated bill.
+     */
+    public function bill(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\ProcurementStores\Models\Bill::class, 'bill_id');
     }
 
     /**

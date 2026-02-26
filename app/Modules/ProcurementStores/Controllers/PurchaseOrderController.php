@@ -165,16 +165,18 @@ class PurchaseOrderController extends Controller
             // Copy items from requisition
             $totalAmount = 0;
             foreach ($requisition->items as $item) {
-                // Get material to get unit price
-                $material = $item->material;
-                $unitPrice = $material->unit_cost ?? 0;
+                // Use the unit_price already stored on the requisition item
+                // (populated during creation). Fall back to material unit_cost only
+                // if no price was set — handles both library AND custom items safely.
+                $unitPrice = (float) ($item->unit_price ?: ($item->material?->unit_cost ?? 0));
                 $total = $item->quantity * $unitPrice;
 
                 $purchaseOrder->items()->create([
-                    'material_id' => $item->material_id,
-                    'quantity' => $item->quantity,
-                    'unit_price' => $unitPrice,
-                    'total' => $total,
+                    'material_id'        => $item->material_id,
+                    'custom_description' => $item->custom_description,
+                    'quantity'           => $item->quantity,
+                    'unit_price'         => $unitPrice,
+                    'total'              => $total,
                 ]);
 
                 $totalAmount += $total;

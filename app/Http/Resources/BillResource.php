@@ -13,9 +13,28 @@ class BillResource extends JsonResource
             'bill_number' => $this->bill_number,
             'purchase_order_id' => $this->purchase_order_id,
             'purchase_order' => $this->whenLoaded('purchaseOrder', function () {
+                $requisition = $this->purchaseOrder->requisition;
                 return [
                     'id' => $this->purchaseOrder->id,
                     'po_number' => $this->purchaseOrder->po_number,
+                    'delivery_address' => $this->purchaseOrder->delivery_address,
+                    'requisition' => $requisition ? [
+                        'id' => $requisition->id,
+                        'department_id' => $requisition->department_id,
+                        'project_id' => $requisition->project_id,
+                        'job_number' => $requisition->job_number,
+                        'requested_by_type' => $requisition->requested_by_type,
+                        'department_name' => $requisition->department?->name,
+                        'project' => $requisition->project ? [
+                            'id' => $requisition->project->id,
+                            'name' => $requisition->project->enquiry?->title,
+                        ] : null,
+                        'enquiry' => $requisition->projectEnquiry ? [
+                            'id' => $requisition->projectEnquiry->id,
+                            'title' => $requisition->projectEnquiry->title,
+                            'venue' => $requisition->projectEnquiry->venue,
+                        ] : null,
+                    ] : null,
                 ];
             }),
             'supplier_id' => $this->supplier_id,

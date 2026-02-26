@@ -369,10 +369,19 @@
                     <span class="info-value">
                         @if($requisition->payee)
                             {{ $requisition->payee->first_name }} {{ $requisition->payee->last_name }}
+                            @if($requisition->payee->phone || $requisition->payee_phone)
+                                <span style="font-size: 8px; color: #3b82f6; display: block;">Tel: {{ $requisition->payee->phone ?? $requisition->payee_phone }}</span>
+                            @endif
                         @elseif($requisition->payee_name)
                             {{ $requisition->payee_name }}
+                            @if($requisition->payee_phone)
+                                <span style="font-size: 8px; color: #3b82f6; display: block;">Tel: {{ $requisition->payee_phone }}</span>
+                            @endif
                         @else
                             {{ $requisition->requester->name }}
+                            @if($requisition->requester->employee && $requisition->requester->employee->phone)
+                                <span style="font-size: 8px; color: #3b82f6; display: block;">Tel: {{ $requisition->requester->employee->phone }}</span>
+                            @endif
                         @endif
                     </span>
                 </div>
@@ -438,6 +447,11 @@
                                     @endif
                                 </div>
                                 <div class="item-desc">{{ $item->description }}</div>
+                                @if($item->payee_phone || ($item->payee && $item->payee->phone) || ($requisition->requester->employee && $requisition->requester->employee->phone))
+                                    <div style="font-size: 8px; color: #3b82f6; font-weight: bold; margin-top: 2px;">
+                                        Tel: {{ $item->payee_phone ?? ($item->payee ? $item->payee->phone : ($requisition->requester->employee ? $requisition->requester->employee->phone : '')) }}
+                                    </div>
+                                @endif
                             </td>
                             <td class="item-amount-box">
                                 <div class="item-amount">KES {{ number_format($item->amount, 2) }}</div>

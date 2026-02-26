@@ -148,8 +148,16 @@ class User extends Authenticatable
 
         return $permissions;
     }
-   public function routeNotificationForOneSignal(): string
-{
-    return $this->onesignal_player_id;
-}
+    public function routeNotificationForOneSignal(): string
+    {
+        return $this->onesignal_player_id;
+    }
+
+    /**
+     * Get the notifications for the user using the custom Notification model.
+     */
+    public function appNotifications(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Notification::class);
+    }
 }
