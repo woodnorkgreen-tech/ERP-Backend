@@ -13,6 +13,7 @@ use App\Modules\Production\Http\Controllers\WorkOrderFinalQcController;
 use App\Modules\Production\Http\Controllers\WorkOrderReworkController;
 use App\Modules\Production\Http\Controllers\WorkOrderReworkEvidenceController;
 use App\Modules\Production\Http\Controllers\ProductionNcrController;
+use App\Modules\Production\Http\Controllers\WorkOrderHandoverController;
 
 Route::middleware('auth:sanctum')->group(function () {
     // Work Orders
@@ -39,6 +40,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('work-orders/{work_order}/reworks/{rework}/evidence', [WorkOrderReworkEvidenceController::class, 'index']);
     Route::post('work-orders/{work_order}/reworks/{rework}/evidence', [WorkOrderReworkEvidenceController::class, 'store']);
     Route::delete('work-orders/{work_order}/reworks/{rework}/evidence/{evidence}', [WorkOrderReworkEvidenceController::class, 'destroy']);
+    
+    // Handovers
+    Route::get('work-orders/{work_order}/handovers', [WorkOrderHandoverController::class, 'index']);
+    Route::post('work-orders/{work_order}/handovers', [WorkOrderHandoverController::class, 'store']);
+    Route::put('work-orders/{work_order}/handovers/{handover}', [WorkOrderHandoverController::class, 'update']);
+    Route::delete('work-orders/{work_order}/handovers/{handover}', [WorkOrderHandoverController::class, 'destroy']);
+    Route::get('work-orders/{work_order}/handovers/{handover}/pdf', [WorkOrderHandoverController::class, 'pdf']);
     Route::get('ncrs/reference-data', [ProductionNcrController::class, 'referenceData']);
     Route::get('ncrs', [ProductionNcrController::class, 'index']);
     Route::post('ncrs', [ProductionNcrController::class, 'store']);
