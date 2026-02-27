@@ -97,29 +97,62 @@ return [
 
     'task_presets' => [
         'full_event' => [
-            'label' => 'Full Event (All Tasks)',
+            'label' => 'Full Event Production',
             'description' => 'Complete event lifecycle from survey to reporting',
             'tasks' => ['site-survey', 'design', 'materials', 'budget', 'quote', 'quote_approval', 'procurement', 'teams', 'production', 'logistics', 'setup', 'handover', 'setdown', 'report']
         ],
-        'delivery_only' => [
-            'label' => 'Delivery Only',
-            'description' => 'Simple delivery projects without design/production',
-            'tasks' => ['materials', 'procurement', 'logistics', 'handover']
+        'proposal' => [
+            'label' => 'Proposal Development',
+            'description' => 'Survey, design, and initial budgeting without execution',
+            'tasks' => ['site-survey', 'design', 'materials', 'budget', 'quote']
         ],
         'branding' => [
-            'label' => 'Branding/Merchandising',
-            'description' => 'Branding projects with design and production',
-            'tasks' => ['design', 'materials', 'budget', 'quote', 'quote_approval', 'production', 'handover']
+            'label' => 'Branding & Merchandising',
+            'description' => 'Branding projects with design, production and delivery',
+            'tasks' => ['design', 'materials', 'budget', 'quote', 'quote_approval', 'procurement', 'production', 'logistics', 'handover', 'report']
+        ],
+        'fabrication' => [
+            'label' => 'Fabrication Project',
+            'description' => 'Custom manufacturing and installation builds',
+            'tasks' => ['site-survey', 'design', 'materials', 'budget', 'quote', 'quote_approval', 'procurement', 'production', 'logistics', 'handover', 'report']
+        ],
+        'installation' => [
+            'label' => 'Installation & Setup',
+            'description' => 'Deployment of ready-made assets with setup',
+            'tasks' => ['site-survey', 'materials', 'budget', 'quote', 'quote_approval', 'procurement', 'teams', 'logistics', 'setup', 'handover', 'report']
+        ],
+        'delivery_only' => [
+            'label' => 'Simple Delivery',
+            'description' => 'Procurement and delivery without production/setup',
+            'tasks' => ['materials', 'budget', 'quote', 'quote_approval', 'procurement', 'logistics', 'handover']
         ],
         'design_only' => [
-            'label' => 'Design Only',
-            'description' => 'Concept and design delivery without execution',
-            'tasks' => ['site-survey', 'design', 'handover', 'report']
+            'label' => 'Design & Consultation',
+            'description' => 'Service delivery focused on creative and advisory',
+            'tasks' => ['site-survey', 'design', 'budget', 'quote', 'quote_approval', 'handover', 'report']
         ],
-        'consultation' => [
-            'label' => 'Consultation/Advisory',
-            'description' => 'Advisory services without physical delivery',
-            'tasks' => ['site-survey', 'design', 'budget', 'quote', 'quote_approval', 'report']
+        'internal_prod' => [
+            'label' => 'Internal Production',
+            'description' => 'In-house manufacturing for departmental use',
+            'tasks' => ['design', 'materials', 'procurement', 'teams', 'production', 'handover', 'report']
+        ],
+        'internal_job' => [
+            'label' => 'Internal Maintenance Job',
+            'description' => 'Company facility repairs and office maintenance',
+            'tasks' => ['site-survey', 'materials', 'budget', 'quote', 'quote_approval', 'procurement', 'teams', 'setup', 'handover', 'report'],
+            'title_overrides' => [
+                'quote_approval' => 'Maintenance Approval',
+                'setup' => 'Repair Works'
+            ]
+        ],
+        'sponsorship' => [
+            'label' => 'Corporate Sponsorship',
+            'description' => 'Marketing-led brand exposure at external events',
+            'tasks' => ['design', 'materials', 'budget', 'quote', 'quote_approval', 'production', 'logistics', 'setup', 'handover', 'report'],
+            'title_overrides' => [
+                'quote_approval' => 'Sponsorship Approval',
+                'setup' => 'Event Activation'
+            ]
         ],
     ],
 

@@ -100,7 +100,6 @@ class TaskController extends Controller
      */
     public function getAllEnquiryTasks(Request $request): JsonResponse
     {
-        \Log::info("[DEBUG] getAllEnquiryTasks called, user: " . Auth::id());
 
         try {
             $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedUser', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers', 'materialsData');
@@ -137,8 +136,7 @@ class TaskController extends Controller
                         $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
                      }
                  });
-            } 
-
+            }
             // Apply filters if provided
             if ($request->has('status') && $request->status) {
                 $query->where('status', $request->status);
@@ -322,7 +320,6 @@ class TaskController extends Controller
      */
     public function getEnquiryTasks(int $enquiryId): JsonResponse
     {
-        \Log::info("[DEBUG] getEnquiryTasks called for enquiryId: {$enquiryId}, user: " . Auth::id());
 
         try {
             $query = EnquiryTask::where('project_enquiry_id', $enquiryId)

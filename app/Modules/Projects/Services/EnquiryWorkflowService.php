@@ -43,6 +43,12 @@ class EnquiryWorkflowService
             // Get existing tasks to prevent duplication and allow syncing
             $existingTasks = EnquiryTask::where('project_enquiry_id', $enquiry->id)->get()->keyBy('type');
             
+            $presets = config('enquiry_workflow.task_presets', []);
+            $selectedPreset = $enquiry->workflow_preset_type;
+            $titleOverrides = ($selectedPreset && isset($presets[$selectedPreset]['title_overrides'])) 
+                ? $presets[$selectedPreset]['title_overrides'] 
+                : [];
+
             foreach ($taskTemplates as $index => $template) {
                 $type = $template['type'];
                 $idealOrder = $index + 1; // Use canonical order from template config base-1
@@ -69,9 +75,11 @@ class EnquiryWorkflowService
                     Log::info("Auto-completing site survey task for enquiry {$enquiry->id} (Skipped by user)");
                 }
 
+                $title = $titleOverrides[$type] ?? $template['title'];
+
                 EnquiryTask::create([
                     'project_enquiry_id' => $enquiry->id,
-                    'title' => $template['title'],
+                    'title' => $title,
                     'type' => $type,
                     'status' => $status,
                     'priority' => EnquiryConstants::PRIORITY_MEDIUM,
