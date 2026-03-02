@@ -432,21 +432,26 @@
                             <td class="item-index">{{ $idx + 1 }}.</td>
                             <td class="item-detail">
                                 <div class="item-payee">
-                                    @if($item->payee)
-                                        {{ $item->payee->first_name }} {{ $item->payee->last_name }}
-                                    @elseif($item->payee_name)
-                                        {{ $item->payee_name }}
+                                    @if($item->payee_name)
+                                    {{ $item->payee_name }}
+                                @elseif($item->payee)
+                                    {{ $item->payee->first_name }} {{ $item->payee->last_name }}
+                                @else
+                                    @if($requisition->payee)
+                                        {{ $requisition->payee->first_name }} {{ $requisition->payee->last_name }}
+                                    @elseif($requisition->payee_name)
+                                        {{ $requisition->payee_name }}
                                     @else
-                                        @if($requisition->payee)
-                                            {{ $requisition->payee->first_name }} {{ $requisition->payee->last_name }}
-                                        @elseif($requisition->payee_name)
-                                            {{ $requisition->payee_name }}
-                                        @else
-                                            {{ $requisition->requester->name }}
-                                        @endif
+                                        {{ $requisition->requester->name }}
                                     @endif
+                                @endif
                                 </div>
-                                <div class="item-desc">{{ $item->description }}</div>
+                                <div class="item-desc">
+                                    @if($item->remarks)
+                                        <span style="color: #3b82f6; font-weight: 900;">[TASK: {{ $item->remarks }}]</span> &mdash;
+                                    @endif
+                                    {{ $item->description }}
+                                </div>
                                 @if($item->payee_phone || ($item->payee && $item->payee->phone) || ($requisition->requester->employee && $requisition->requester->employee->phone))
                                     <div style="font-size: 8px; color: #3b82f6; font-weight: bold; margin-top: 2px;">
                                         Tel: {{ $item->payee_phone ?? ($item->payee ? $item->payee->phone : ($requisition->requester->employee ? $requisition->requester->employee->phone : '')) }}

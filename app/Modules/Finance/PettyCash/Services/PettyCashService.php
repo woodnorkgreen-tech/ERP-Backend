@@ -37,6 +37,12 @@ class PettyCashService
             // Create the top-up (balance will be updated automatically via model events)
             $topUp = $this->repository->createTopUp($data);
 
+            // Log activity
+            $this->logActivity('created', 'top_up', $topUp->id, "Top-up of KES " . number_format($topUp->amount, 2) . " created", [
+                'amount' => $topUp->amount,
+                'payment_method' => $topUp->payment_method
+            ]);
+
             DB::commit();
 
             return $topUp;
@@ -67,6 +73,13 @@ class PettyCashService
             if ($oldAmount !== $newAmount) {
                 $this->recalculateBalance();
             }
+
+            // Log activity
+            $this->logActivity('updated', 'top_up', $topUp->id, "Top-up updated", [
+                'old_amount' => $oldAmount,
+                'new_amount' => $newAmount,
+                'data' => $data
+            ]);
 
             DB::commit();
 
@@ -154,6 +167,13 @@ class PettyCashService
                 }
             }
 
+            // Log activity
+            $this->logActivity('created', 'disbursement', $disbursement->id, "Disbursement of KES " . number_format($disbursement->amount, 2) . " to " . $disbursement->receiver, [
+                'amount' => $disbursement->amount,
+                'receiver' => $disbursement->receiver,
+                'top_up_id' => $disbursement->top_up_id
+            ]);
+
             DB::commit();
 
             return ['success' => true, 'data' => $disbursement];
@@ -213,6 +233,13 @@ class PettyCashService
             // Update the disbursement (Model events will handle balance adjustment)
             $this->repository->updateDisbursement($disbursement, $data);
 
+            // Log activity
+            $this->logActivity('updated', 'disbursement', $disbursement->id, "Disbursement updated", [
+                'old_amount' => $oldAmount,
+                'new_amount' => $data['amount'] ?? $oldAmount,
+                'data' => $data
+            ]);
+
             DB::commit();
 
             return $disbursement->fresh();
@@ -242,6 +269,9 @@ class PettyCashService
                 $this->syncRequisitionStatus($disbursement->requisition_id);
             }
 
+            // Log activity
+            $this->logActivity('voided', 'disbursement', $disbursement->id, "Disbursement voided. Reason: " . $reason);
+
             DB::commit();
 
             return $result;
@@ -267,6 +297,9 @@ class PettyCashService
             if ($requisitionId) {
                 $this->syncRequisitionStatus($requisitionId);
             }
+
+            // Log activity
+            $this->logActivity('deleted', 'disbursement', $disbursement->id, "Disbursement deleted. Recovered KES " . number_format($disbursement->amount, 2));
 
             DB::commit();
 
@@ -296,6 +329,9 @@ class PettyCashService
 
             // Recalculate balance to ensure accuracy after bulk delete
             $this->recalculateBalance();
+
+            // Log activity
+            $this->logActivity('deleted', 'disbursement', null, "Bulk deleted {$count} disbursements", ['ids' => $disbursementIds]);
 
             DB::commit();
 
@@ -333,6 +369,9 @@ class PettyCashService
             $balance->last_transaction_id = null;
             $balance->last_transaction_type = null;
             $balance->save();
+
+            // Log activity
+            $this->logActivity('cleared', null, null, "All petty cash data cleared. Deleted {$topUpsCount} top-ups and {$disbursementsCount} disbursements.");
 
             DB::commit();
 
@@ -441,6 +480,13 @@ class PettyCashService
             $balance->recalculateBalance();
             $newBalance = $balance->getCurrentBalance();
             
+            // Log activity
+            $this->logActivity('recalculated', null, null, "Balance recalculated. Old: KES " . number_format($oldBalance, 2) . ", New: KES " . number_format($newBalance, 2), [
+                'old_balance' => $oldBalance,
+                'new_balance' => $newBalance,
+                'difference' => $newBalance - $oldBalance
+            ]);
+
             DB::commit();
 
             return [
@@ -573,6 +619,65 @@ class PettyCashService
         return $errors;
     }
 
+    /**
+     * Archive a disbursement.
+     */
+    public function archiveDisbursement(\App\Modules\Finance\PettyCash\Models\PettyCashDisbursement $disbursement): bool
+    {
+        $result = $this->repository->archiveDisbursement($disbursement, Auth::id());
+        if ($result) {
+            $this->logActivity('archived', 'disbursement', $disbursement->id, "Disbursement archived");
+        }
+        return $result;
+    }
+
+    /**
+     * Bulk archive disbursements.
+     */
+    public function bulkArchiveDisbursements(array $ids): int
+    {
+        $count = $this->repository->bulkArchiveDisbursements($ids, Auth::id());
+        if ($count > 0) {
+            $this->logActivity('archived', 'disbursement', null, "Bulk archived {$count} disbursements", ['ids' => $ids]);
+        }
+        return $count;
+    }
+
+    /**
+     * Archive a top-up.
+     */
+    public function archiveTopUp(\App\Modules\Finance\PettyCash\Models\PettyCashTopUp $topUp): bool
+    {
+        $result = $this->repository->archiveTopUp($topUp, Auth::id());
+        if ($result) {
+            $this->logActivity('archived', 'top_up', $topUp->id, "Top-up archived");
+        }
+        return $result;
+    }
+
+    /**
+     * Archive a top-up and all its disbursements.
+     */
+    public function archiveGroup(int $topUpId): bool
+    {
+        $result = $this->repository->archiveGroup($topUpId, Auth::id());
+        if ($result) {
+            $this->logActivity('archived', 'group', $topUpId, "Top-up and related disbursements archived");
+        }
+        return $result;
+    }
+
+    /**
+     * Bulk archive multiple groups.
+     */
+    public function bulkArchiveGroups(array $topUpIds): int
+    {
+        $count = $this->repository->bulkArchiveGroups($topUpIds, Auth::id());
+        if ($count > 0) {
+            $this->logActivity('archived', 'group', null, "Bulk archived {$count} groups", ['top_up_ids' => $topUpIds]);
+        }
+        return $count;
+    }
 
     /**
      * Create a BillPayment record from a Petty Cash disbursement.
@@ -594,8 +699,28 @@ class PettyCashService
             ]);
             
             \Log::info("Automated BillPayment created for Bill #{$requisition->bill_id} from Requisition #{$requisition->id}");
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             \Log::error("Failed to auto-create BillPayment for Requisition #{$requisition->id}: " . $e->getMessage());
+        }
+    }
+
+
+    /**
+     * Log activity to petty_cash_activity_logs.
+     */
+    public function logActivity(string $action, ?string $type = null, ?int $id = null, ?string $description = null, ?array $changes = null): void
+    {
+        try {
+            \App\Modules\Finance\PettyCash\Models\PettyCashActivityLog::create([
+                'user_id' => \Illuminate\Support\Facades\Auth::id(),
+                'action' => $action,
+                'transaction_type' => $type,
+                'transaction_id' => $id,
+                'description' => $description,
+                'changes' => $changes,
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("Failed to log petty cash activity: " . $e->getMessage());
         }
     }
 }

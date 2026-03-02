@@ -17,7 +17,7 @@ class StoreTeamsTaskRequest extends FormRequest
             'category_id' => 'required|exists:team_categories,id',
             'team_type_id' => 'required|exists:team_types,id',
             'required_members' => 'required|integer|min:1|max:50',
-            'start_date' => 'nullable|date|after_or_equal:today',
+            'start_date' => 'nullable|date',
             'end_date' => 'nullable|date|after:start_date',
             'estimated_hours' => 'nullable|numeric|min:0.1',
             'notes' => 'nullable|string|max:1000',
@@ -36,7 +36,6 @@ class StoreTeamsTaskRequest extends FormRequest
             'required_members.min' => 'At least 1 member is required',
             'required_members.max' => 'Maximum 50 members allowed',
             'end_date.after' => 'End date must be after start date',
-            'start_date.after_or_equal' => 'Start date cannot be in the past'
         ];
     }
 

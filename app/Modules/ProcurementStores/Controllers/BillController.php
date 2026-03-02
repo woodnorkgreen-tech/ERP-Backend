@@ -178,6 +178,7 @@ class BillController extends Controller
     public function show(Bill $bill)
     {
         return new BillResource($bill->load([
+        'purchaseOrder.items.material',
         'purchaseOrder.requisition.project',
         'purchaseOrder.requisition.department',
         'purchaseOrder.requisition.projectEnquiry',

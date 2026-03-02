@@ -629,12 +629,22 @@ class PettyCashRepository
         $totalIn = (float)$topUps->sum('amount');
         $totalOut = (float)$disbursements->sum(function($d) { return (float)$d->amount + (float)($d->transaction_cost ?? 0); });
 
+        // 4. Group by classification for advanced reporting
+        $classificationBreakdown = $disbursements->groupBy('classification')
+            ->map(function ($items) {
+                return [
+                    'count' => $items->count(),
+                    'total' => $items->sum(function($i) { return (float)$i->amount + (float)($i->transaction_cost ?? 0); })
+                ];
+            });
+
         return [
             'opening_balance' => $openingBalance,
             'top_ups' => $topUps,
             'disbursements' => $disbursements,
             'total_in' => $totalIn,
             'total_out' => $totalOut,
+            'classification_breakdown' => $classificationBreakdown,
             'closing_balance' => $openingBalance + $totalIn - $totalOut,
             'filters' => $filters,
             'period' => [

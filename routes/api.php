@@ -816,6 +816,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::post('transactions/{id}/archive-group', [PettyCashController::class, 'archiveGroup']);
             Route::post('transactions/bulk-archive', [PettyCashController::class, 'bulkArchive']);
             Route::post('transactions/bulk-archive-groups', [PettyCashController::class, 'bulkArchiveGroups']);
+            Route::get('activity-logs', [PettyCashController::class, 'getActivityLogs']);
             Route::delete('clear-all', [PettyCashController::class, 'clearAll']);
 
             // Projects reference for job numbers
@@ -854,7 +855,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             // Statistics and validation routes
             Route::get('statistics', [PettyCashTopUpController::class, 'statistics']);
             Route::get('payment-methods', [PettyCashTopUpController::class, 'paymentMethods']);
-            Route::post('validate/top-up', [PettyCashTopUpController::class, 'validate']);
+            Route::post('validate/top-up', [PettyCashTopUpController::class, 'validateTopUp']);
 
             // Requisition routes
             Route::get('requisitions', [PettyCashRequisitionController::class, 'index']);

@@ -16,6 +16,7 @@ class PettyCashRequisitionItem extends Model
     protected $fillable = [
         'requisition_id',
         'description',
+        'remarks',
         'amount',
         'payee_id',
         'payee_name',

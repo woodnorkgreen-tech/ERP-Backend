@@ -227,7 +227,7 @@ class PettyCashTopUpController extends Controller
     /**
      * Validate top-up data without creating.
      */
-    public function validate(Request $request): JsonResponse
+    public function validateTopUp(Request $request): JsonResponse
     {
         try {
             $validationErrors = $this->service->validateTopUpData($request->all());

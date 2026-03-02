@@ -682,24 +682,40 @@ class PettyCashController extends Controller
             }
 
             $file = $request->file('file');
+            
+            \Illuminate\Support\Facades\DB::beginTransaction();
 
-            // Process the Excel file
-            $import = new PettyCashDisbursementImport($this->service);
-            ExcelFacade::import($import, $file);
+            try {
+                // Process the Excel file
+                $import = new PettyCashDisbursementImport($this->service);
+                ExcelFacade::import($import, $file);
 
-            $results = $import->getResults();
+                $results = $import->getResults();
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Excel file processed successfully',
-                'data' => [
+                // Log activity
+                $this->service->logActivity('import', 'disbursement', null, "Excel import processed: " . $results['successful_imports'] . " successful, " . count($results['failed_rows']) . " failed", [
                     'total_rows' => $results['total_rows'],
-                    'processed_rows' => $results['processed_rows'],
                     'successful_imports' => $results['successful_imports'],
-                    'failed_rows' => $results['failed_rows'],
-                    'duplicates' => $results['duplicates'],
-                ],
-            ]);
+                    'failed_rows' => count($results['failed_rows'])
+                ]);
+
+                \Illuminate\Support\Facades\DB::commit();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Excel file processed successfully',
+                    'data' => [
+                        'total_rows' => $results['total_rows'],
+                        'processed_rows' => $results['processed_rows'],
+                        'successful_imports' => $results['successful_imports'],
+                        'failed_rows' => $results['failed_rows'],
+                        'duplicates' => $results['duplicates'],
+                    ],
+                ]);
+            } catch (Exception $e) {
+                \Illuminate\Support\Facades\DB::rollBack();
+                throw $e;
+            }
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
@@ -793,13 +809,13 @@ class PettyCashController extends Controller
                 if (!$disbursement) {
                     return response()->json(['success' => false, 'message' => 'Disbursement not found'], 404);
                 }
-                $this->repository->archiveDisbursement($disbursement, $userId);
+                $this->service->archiveDisbursement($disbursement);
             } else {
                 $topUp = $this->repository->findTopUp($id);
                 if (!$topUp) {
                     return response()->json(['success' => false, 'message' => 'Top-up not found'], 404);
                 }
-                $this->repository->archiveTopUp($topUp, $userId);
+                $this->service->archiveTopUp($topUp);
             }
 
             return response()->json([
@@ -833,8 +849,7 @@ class PettyCashController extends Controller
                 return response()->json(['success' => false, 'message' => 'No IDs provided'], 400);
             }
 
-            $userId = auth()->id();
-            $count = $this->repository->bulkArchiveDisbursements($ids, $userId);
+            $count = $this->service->bulkArchiveDisbursements($ids);
 
             return response()->json([
                 'success' => true,
@@ -863,8 +878,7 @@ class PettyCashController extends Controller
         }
 
         try {
-            $userId = auth()->id();
-            $this->repository->archiveGroup($id, $userId);
+            $this->service->archiveGroup($id);
 
             return response()->json([
                 'success' => true,
@@ -897,8 +911,7 @@ class PettyCashController extends Controller
                 return response()->json(['success' => false, 'message' => 'No IDs provided'], 400);
             }
 
-            $userId = auth()->id();
-            $count = $this->repository->bulkArchiveGroups($ids, $userId);
+            $count = $this->service->bulkArchiveGroups($ids);
 
             return response()->json([
                 'success' => true,
@@ -909,6 +922,55 @@ class PettyCashController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to bulk archive groups',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get activity logs for petty cash.
+     */
+    public function getActivityLogs(Request $request): JsonResponse
+    {
+        if (!Auth::user()->hasRole('Super Admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admins can view activity logs.',
+            ], 403);
+        }
+
+        try {
+            $query = \App\Modules\Finance\PettyCash\Models\PettyCashActivityLog::with('user')
+                ->latest();
+
+            if ($request->filled('action')) {
+                $query->where('action', $request->action);
+            }
+
+            if ($request->filled('transaction_type')) {
+                $query->where('transaction_type', $request->transaction_type);
+            }
+
+            if ($request->filled('user_id')) {
+                $query->where('user_id', $request->user_id);
+            }
+
+            $logs = $query->paginate($request->get('limit', 15));
+
+            return response()->json([
+                'success' => true,
+                'data' => $logs->items(),
+                'meta' => [
+                    'current_page' => $logs->currentPage(),
+                    'last_page' => $logs->lastPage(),
+                    'per_page' => $logs->perPage(),
+                    'total' => $logs->total(),
+                ],
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch activity logs',
                 'error' => $e->getMessage(),
             ], 500);
         }

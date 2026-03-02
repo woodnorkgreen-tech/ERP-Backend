@@ -26,7 +26,7 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $user = Auth::user();
-            $query = PettyCashRequisition::with(['requester.employee', 'department', 'approver', 'payee', 'project.enquiry', 'enquiry'])
+            $query = PettyCashRequisition::with(['requester.employee', 'department', 'approver', 'payee', 'project.enquiry', 'enquiry', 'items.payee'])
                 ->withCount('items');
 
             // If not admin/finance, only show their own
@@ -153,6 +153,7 @@ class PettyCashRequisitionController extends Controller
             'bill_id' => 'nullable|exists:bills,id',
             'items' => 'required|array|min:1',
             'items.*.description' => 'required|string',
+            'items.*.remarks' => 'nullable|string',
             'items.*.amount' => 'required|numeric|min:0.01',
             'items.*.payee_id' => 'nullable|exists:employees,id',
             'items.*.payee_name' => 'nullable|string',
@@ -194,6 +195,7 @@ class PettyCashRequisitionController extends Controller
             foreach ($request->items as $item) {
                 $requisition->items()->create([
                     'description' => $item['description'],
+                    'remarks' => $item['remarks'] ?? null,
                     'amount' => $item['amount'],
                     'payee_id' => $item['payee_id'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
@@ -206,7 +208,7 @@ class PettyCashRequisitionController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Requisition submitted successfully',
-                'data' => $requisition->load('items')
+                'data' => $requisition->load('items.payee')
             ], 201);
         } catch (Exception $e) {
             DB::rollBack();
@@ -283,6 +285,7 @@ class PettyCashRequisitionController extends Controller
         if ($requisition->status !== 'disbursed') {
             $rules['items'] = 'required|array|min:1';
             $rules['items.*.description'] = 'required|string';
+            $rules['items.*.remarks'] = 'nullable|string';
             $rules['items.*.amount'] = 'required|numeric|min:0.01';
             $rules['items.*.payee_id'] = 'nullable|exists:employees,id';
             $rules['items.*.payee_name'] = 'nullable|string';
@@ -357,6 +360,7 @@ class PettyCashRequisitionController extends Controller
             foreach ($request->items as $item) {
                 $requisition->items()->create([
                     'description' => $item['description'],
+                    'remarks' => $item['remarks'] ?? null,
                     'amount' => $item['amount'],
                     'payee_id' => $item['payee_id'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
@@ -372,7 +376,7 @@ class PettyCashRequisitionController extends Controller
                 'message' => $requisition->wasChanged('status') && $requisition->status === 'pending' 
                     ? 'Requisition updated and reverted to Pending status' 
                     : 'Requisition updated successfully',
-                'data' => $requisition->load('items')
+                'data' => $requisition->load('items.payee')
             ]);
 
         } catch (Exception $e) {
@@ -409,11 +413,10 @@ class PettyCashRequisitionController extends Controller
                  
                  $service = app(PettyCashService::class);
                  $disbursement = $requisition->disbursement;
-                 
                  if ($disbursement && !$disbursement->deleted_at) {
                      // Attempt to void the disbursement first to restore balance
                      // We need a reason. We'll use "Requisition Deleted".
-                     $service->voidDisbursement($disbursement->id, 'Requisition Deleted by User');
+                     $service->voidDisbursement($disbursement, 'Requisition Deleted by User');
                  }
             }
 
@@ -785,10 +788,13 @@ class PettyCashRequisitionController extends Controller
         }
         
         if (!$employee && $m->member_name) {
-            // Try robust name match as fallback
-            $employee = \App\Modules\HR\Models\Employee::where(\DB::raw("CONCAT(first_name, ' ', last_name)"), 'LIKE', '%' . $m->member_name . '%')
-                ->orWhere(\DB::raw("CONCAT(last_name, ' ', first_name)"), 'LIKE', '%' . $m->member_name . '%')
-                ->first();
+            // ONLY match if the name is reasonably long and unique
+            // Avoid matching short names like "true" or "cosmas" if they might be ambiguous
+            if (strlen($m->member_name) > 3) {
+                 $employee = \App\Modules\HR\Models\Employee::where(DB::raw("CONCAT(first_name, ' ', last_name)"), $m->member_name)
+                    ->orWhere(DB::raw("CONCAT(last_name, ' ', first_name)"), $m->member_name)
+                    ->first();
+            }
         }
 
         $category = $m->teamsTask?->category?->name ?? 'Other';

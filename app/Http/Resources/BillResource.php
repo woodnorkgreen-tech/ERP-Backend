@@ -35,6 +35,16 @@ class BillResource extends JsonResource
                             'venue' => $requisition->projectEnquiry->venue,
                         ] : null,
                     ] : null,
+                    'items' => $this->purchaseOrder->items ? $this->purchaseOrder->items->map(function ($item) {
+                        return [
+                            'id' => $item->id,
+                            'material_id' => $item->material_id,
+                            'material_name' => $item->material ? $item->material->item_name : $item->custom_description,
+                            'quantity' => $item->quantity,
+                            'unit_price' => (float) $item->unit_price,
+                            'total' => (float) $item->total,
+                        ];
+                    }) : [],
                 ];
             }),
             'supplier_id' => $this->supplier_id,
