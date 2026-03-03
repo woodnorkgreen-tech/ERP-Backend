@@ -378,8 +378,8 @@
                                 <span style="font-size: 8px; color: #3b82f6; display: block;">Tel: {{ $requisition->payee_phone }}</span>
                             @endif
                         @else
-                            {{ $requisition->requester->name }}
-                            @if($requisition->requester->employee && $requisition->requester->employee->phone)
+                            {{ $requisition->requester->name ?? 'Public Submission' }}
+                            @if($requisition->requester && $requisition->requester->employee && $requisition->requester->employee->phone)
                                 <span style="font-size: 8px; color: #3b82f6; display: block;">Tel: {{ $requisition->requester->employee->phone }}</span>
                             @endif
                         @endif
@@ -442,7 +442,7 @@
                                     @elseif($requisition->payee_name)
                                         {{ $requisition->payee_name }}
                                     @else
-                                        {{ $requisition->requester->name }}
+                                        {{ $requisition->requester->name ?? 'Public Guest' }}
                                     @endif
                                 @endif
                                 </div>
@@ -452,9 +452,9 @@
                                     @endif
                                     {{ $item->description }}
                                 </div>
-                                @if($item->payee_phone || ($item->payee && $item->payee->phone) || ($requisition->requester->employee && $requisition->requester->employee->phone))
+                                @if($item->payee_phone || ($item->payee && $item->payee->phone) || ($requisition->requester && $requisition->requester->employee && $requisition->requester->employee->phone))
                                     <div style="font-size: 8px; color: #3b82f6; font-weight: bold; margin-top: 2px;">
-                                        Tel: {{ $item->payee_phone ?? ($item->payee ? $item->payee->phone : ($requisition->requester->employee ? $requisition->requester->employee->phone : '')) }}
+                                        Tel: {{ $item->payee_phone ?? ($item->payee ? $item->payee->phone : ($requisition->requester && $requisition->requester->employee ? $requisition->requester->employee->phone : '')) }}
                                     </div>
                                 @endif
                             </td>
@@ -534,7 +534,7 @@
                 <div class="signature-footer">
                     <div style="font-size: 9px; color: #94a3b8; margin-bottom: 10px; text-transform: uppercase;">Acknowledged by:</div>
                     <img src="{{ $requisition->digital_signature }}" class="signature-img" />
-                    <div class="sig-user-name">{{ $requisition->received_by ?? $requisition->requester->name }}</div>
+                    <div class="sig-user-name">{{ $requisition->received_by ?? ($requisition->requester->name ?? 'Public Guest') }}</div>
                     <div class="sig-verify-text">Verified Digital Signature</div>
                     @if($requisition->received_at)
                         <div style="font-size: 8px; color: #94a3b8; margin-top: 5px;">

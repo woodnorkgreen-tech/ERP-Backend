@@ -42,6 +42,9 @@ class PettyCashRequisition extends Model
         'payee_id',
         'payee_phone',
         'bill_id',
+        'is_public',
+        'requester_name',
+        'requester_phone',
     ];
 
     protected $casts = [

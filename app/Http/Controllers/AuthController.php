@@ -101,14 +101,23 @@ class AuthController extends Controller
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
-        \Log::info('User found', ['email' => $request->email, 'user_id' => $user->id]);
-
+        // Restored password verification (Hash::check) to ensure correct credentials.
         if (!Hash::check($request->password, $user->password)) {
             \Log::warning('Password check failed', ['email' => $request->email, 'user_id' => $user->id]);
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
-        \Log::info('Password check passed, creating token', ['email' => $request->email, 'user_id' => $user->id]);
+        \Log::info('Password check passed, checking account status', ['email' => $request->email, 'user_id' => $user->id]);
+
+        // Added account status check: Prevent deactivated users from logging in via API
+        if (!$user->is_active) {
+            \Log::warning('Login attempt for deactivated account', ['email' => $request->email, 'user_id' => $user->id]);
+            return response()->json([
+                'message' => 'Your account has been deactivated. Please contact the administrator.'
+            ], 403);
+        }
+
+        \Log::info('Account is active, creating token', ['email' => $request->email, 'user_id' => $user->id]);
 
         $token = $user->createToken('api-token')->plainTextToken;
 

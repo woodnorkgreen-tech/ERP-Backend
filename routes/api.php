@@ -9,6 +9,7 @@ use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\Admin\Http\Controllers\UserController;
 use App\Modules\Admin\Http\Controllers\RoleController;
 use App\Modules\Admin\Http\Controllers\PermissionController;
+use App\Modules\Admin\Http\Controllers\AdminDashboardController;
 use App\Modules\ClientService\Http\Controllers\ClientController;
 use App\Modules\ClientService\Http\Controllers\EnquiryController as ClientServiceEnquiryController;
 use App\Modules\Projects\Http\Controllers\EnquiryController;
@@ -56,13 +57,17 @@ Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverC
 Route::get('public/pcr/{token}', [PettyCashRequisitionController::class, 'getByToken']);
 Route::post('public/pcr/{token}/sign', [PettyCashRequisitionController::class, 'publicSignOff']);
 Route::post('public/pcr/{token}/item/{itemId}/sign', [PettyCashRequisitionController::class, 'publicItemSignOff']);
-// Public routes for Job Cards
 Route::prefix('public')->group(function () {
     Route::post('job-cards/lookup', [JobCardController::class, 'publicLookupOrCreate']);
     Route::post('job-cards', [JobCardController::class, 'publicStore']);
     Route::get('job-cards/{token}', [JobCardController::class, 'publicShow']);
     Route::post('job-cards/{token}', [JobCardController::class, 'publicUpdate']);
     Route::get('technicians', [JobCardController::class, 'publicTechnicians']);
+    
+    // Public Petty Cash Requisition routes
+    Route::get('petty-cash/form-data', [PettyCashRequisitionController::class, 'getPublicFormData']);
+    Route::post('petty-cash/requisitions', [PettyCashRequisitionController::class, 'publicStore']);
+    Route::get('petty-cash/payees/search', [PettyCashRequisitionController::class, 'publicSearchPayees']);
 });
 
 // Flash Quote PDF Generation
@@ -104,13 +109,13 @@ Route::prefix('hr')->group(function () {
  
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
-Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
+Route::post('/logout', [AuthController::class, 'logout'])->middleware(['auth:sanctum', 'active']);
 
 
 Route::get('/user', function () {
     $user = auth()->user();
     return response()->json($user->load('roles'));
-})->middleware('auth:sanctum');
+})->middleware(['auth:sanctum', 'active']);
 //location apis
 Route::get('/locations', 'App\Http\Controllers\LocationController@index');
 Route::resource('/location', 'App\Http\Controllers\LocationController');
@@ -118,7 +123,7 @@ Route::resource('/location', 'App\Http\Controllers\LocationController');
 // System Refresh Routes
 Route::get('/system/version', [App\Http\Controllers\SystemController::class, 'getVersion']);
 Route::post('/system/refresh', [App\Http\Controllers\SystemController::class, 'triggerRefresh'])
-    ->middleware(['auth:sanctum']);
+    ->middleware(['auth:sanctum', 'active']);
 Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
 Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
@@ -127,8 +132,8 @@ Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@
 Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
 Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 
-// Protected Project & Task Routes
-Route::middleware('auth:sanctum')->group(function () {
+// Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
+Route::middleware(['auth:sanctum', 'active'])->group(function () {
     // Action Logs
     Route::get('/logs/{type}/{id}', [App\Http\Controllers\ActionLogController::class, 'index']);
 
@@ -230,7 +235,7 @@ Route::get('/app-departments', [DepartmentController::class, 'index']);
 
 // Protected routes (require authentication)
 // Protected routes (require authentication)
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Notifications & OneSignal
     Route::get('/notifications', function () {
@@ -321,6 +326,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // User management
         Route::get('users/available-employees', [UserController::class, 'availableEmployees'])
             ->middleware('permission:' . Permissions::USER_READ . ',' . Permissions::TASK_ASSIGN);
+        Route::get('dashboard/stats', [AdminDashboardController::class, 'index']);
         Route::apiResource('users', UserController::class)->parameters([
             'users' => 'user'
         ])->middleware([

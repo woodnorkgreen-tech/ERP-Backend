@@ -15,6 +15,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use App\Models\Project;
 use App\Models\ProjectEnquiry;
+use App\Models\User;
+use App\Modules\HR\Models\TechnicalLabour;
 use Exception;
 
 class PettyCashRequisitionController extends Controller
@@ -719,7 +721,6 @@ class PettyCashRequisitionController extends Controller
             'Office Supplies',
             'Transport',
             'Meals',
-            'Transport and Meals',
             'Repair & Maintenance',
             'Fuel & Lubricants',
             'Communication & Airtime',
@@ -1040,5 +1041,187 @@ class PettyCashRequisitionController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+    /**
+     * Get data for the public requisition form.
+     */
+    public function getPublicFormData(): JsonResponse
+    {
+        $departments = Department::select('id', 'name')->get();
+        
+        // Fetch Projects and Enquiries (Only active ones for public)
+        $projects = Project::with('enquiry')
+            ->whereIn('status', ['Planning', 'active'])
+            ->get()
+            ->map(function($p) {
+                $title = $p->enquiry->title ?? 'No Title';
+                $jobNumber = $p->project_id;
+                return [
+                    'id' => $p->id,
+                    'label' => "{$jobNumber} - {$title}",
+                    'type' => 'project'
+                ];
+            });
+
+        $enquiries = ProjectEnquiry::select('id', 'title', 'enquiry_number')
+            ->whereNotIn('status', ['lost', 'completed', 'quote_approved'])
+            ->get()
+            ->map(function($e) {
+                $label = $e->enquiry_number ? "Enquiry #{$e->enquiry_number}: {$e->title}" : "Enquiry: {$e->title}";
+                return [
+                    'id' => $e->id,
+                    'label' => $label,
+                    'type' => 'enquiry'
+                ];
+            });
+
+        $categories = [
+            'Projects',
+            'Office Supplies',
+            'Transport',
+            'Meals',
+            'Repair & Maintenance',
+            'Fuel & Lubricants',
+            'Communication & Airtime',
+            'Miscellaneous'
+        ];
+
+        return response()->json([
+            'success' => true,
+            'departments' => $departments,
+            'categories' => $categories,
+            'projects' => $projects,
+            'enquiries' => $enquiries
+        ]);
+    }
+
+    /**
+     * Store a public requisition.
+     */
+    public function publicStore(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'department_id' => 'required|exists:departments,id',
+            'category' => 'required|string',
+            'purpose' => 'required|string',
+            'project_id' => 'nullable|exists:projects,id',
+            'project_name' => 'nullable|string|max:255',
+            'venue' => 'nullable|string|max:255',
+            'enquiry_id' => 'nullable|exists:project_enquiries,id',
+            'items' => 'required|array|min:1',
+            'items.*.description' => 'required|string',
+            'items.*.remarks' => 'nullable|string',
+            'items.*.amount' => 'required|numeric|min:0.01',
+            'items.*.payee_name' => 'nullable|string',
+            'items.*.payee_phone' => 'nullable|string|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $requisition = PettyCashRequisition::create([
+                'requisition_number' => PettyCashRequisition::generateRequisitionNumber(),
+                'user_id' => null,
+                'is_public' => true,
+                'department_id' => $request->department_id,
+                'category' => $request->category,
+                'purpose' => $request->purpose,
+                'project_id' => $request->project_id,
+                'project_name' => $request->project_name,
+                'venue' => $request->venue,
+                'enquiry_id' => $request->enquiry_id,
+                'status' => 'pending',
+                'total_amount' => collect($request->items)->sum('amount'),
+            ]);
+
+            foreach ($request->items as $item) {
+                $requisition->items()->create([
+                    'description' => $item['description'],
+                    'remarks' => $item['remarks'] ?? null,
+                    'amount' => $item['amount'],
+                    'payee_name' => $item['payee_name'] ?? null,
+                    'payee_phone' => $item['payee_phone'] ?? null,
+                ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Public requisition submitted successfully',
+                'data' => $requisition->load('items')
+            ], 201);
+        } catch (Exception $e) {
+            DB::rollBack();
+            \Log::error('Public Petty Cash Requisition Failed', [
+                'error' => $e->getMessage(),
+                'request' => $request->all()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to submit requisition',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    /**
+     * Search for payees publicly (Limited data exposure).
+     */
+    public function publicSearchPayees(Request $request): JsonResponse
+    {
+        $query = $request->get('query', '');
+        
+        if (strlen($query) < 2) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        // Search Employees (System Users)
+        $employees = User::where('is_active', true)
+            ->where('name', 'like', "%{$query}%")
+            ->with(['department', 'employee'])
+            ->limit(10)
+            ->get()
+            ->map(function($u) {
+                return [
+                    'id' => null, 
+                    'name' => $u->name,
+                    'detail' => $u->department->name ?? 'System User',
+                    'type' => 'employee',
+                    'payee_phone' => $u->employee->phone ?? '' 
+                ];
+            });
+
+        // Search Technical Labour
+        $techLabour = TechnicalLabour::where('status', 'active')
+            ->where(function($q) use ($query) {
+                $q->where('full_name', 'like', "%{$query}%")
+                  ->orWhere('specialization', 'like', "%{$query}%");
+            })
+            ->select('id', 'full_name', 'specialization', 'phone')
+            ->limit(10)
+            ->get()
+            ->map(function($t) {
+                return [
+                    'id' => null, 
+                    'name' => $t->full_name,
+                    'detail' => $t->specialization ? "{$t->specialization}" : "Technical Labour",
+                    'type' => 'technical_labour',
+                    'payee_phone' => $t->phone 
+                ];
+            });
+
+        $results = $employees->concat($techLabour)->take(15);
+
+        return response()->json([
+            'success' => true,
+            'data' => $results
+        ]);
     }
 }

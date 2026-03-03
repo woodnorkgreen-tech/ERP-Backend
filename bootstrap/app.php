@@ -17,10 +17,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'department.access' => \App\Http\Middleware\CheckDepartmentAccess::class,
             'permission' => \App\Http\Middleware\CheckPermission::class,
             'project.access' => \App\Http\Middleware\CheckProjectAccess::class,
+            'active' => \App\Http\Middleware\CheckUserActive::class, // Registering 'active' middleware for status checks
         ]);
 
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+            \App\Http\Middleware\CheckUserActive::class, // Prepend check to all API routes
         ]);
 
         // Exclude API routes from CSRF verification for mobile app
