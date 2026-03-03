@@ -1224,4 +1224,13 @@ class PettyCashRequisitionController extends Controller
             'data' => $results
         ]);
     }
+
+    /**
+     * Get team members for a specific project or enquiry (Public).
+     */
+    public function getPublicProjectTeamMembers(\Illuminate\Http\Request $request): JsonResponse
+    {
+        // Reuse the existing internal logic but wrap it for public safety if needed
+        return $this->getProjectTeamMembers($request);
+    }
 }

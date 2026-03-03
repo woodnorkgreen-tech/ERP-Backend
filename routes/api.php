@@ -68,6 +68,7 @@ Route::prefix('public')->group(function () {
     Route::get('petty-cash/form-data', [PettyCashRequisitionController::class, 'getPublicFormData']);
     Route::post('petty-cash/requisitions', [PettyCashRequisitionController::class, 'publicStore']);
     Route::get('petty-cash/payees/search', [PettyCashRequisitionController::class, 'publicSearchPayees']);
+    Route::get('petty-cash/requisitions/project-team-members', [PettyCashRequisitionController::class, 'getPublicProjectTeamMembers']);
 });
 
 // Flash Quote PDF Generation
