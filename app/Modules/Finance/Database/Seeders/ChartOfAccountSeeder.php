@@ -13,28 +13,140 @@ class ChartOfAccountSeeder extends Seeder
      */
     public function run(): void
     {
-        $jsonPath = base_path('../frontend/src/data/accounts.json');
+        $accounts = [
+            ['code' => 'AP-001', 'name' => 'Accounts Payable (A/P)', 'category' => 'liability'],
+            ['code' => 'AR-001', 'name' => 'Accounts Receivable (A/R)', 'category' => 'asset'],
+            ['code' => 'AR-002', 'name' => 'Accounts Receivable (A/R) - EUR', 'category' => 'asset'],
+            ['code' => 'STD-001', 'name' => 'Short Term Debtors', 'category' => 'asset'],
+            ['code' => 'CASH-001', 'name' => 'Cash Account', 'category' => 'asset'],
+            ['code' => 'EQB-001', 'name' => 'Equity Bank', 'category' => 'asset'],
+            ['code' => 'FMB-001', 'name' => 'Family Bank', 'category' => 'asset'],
+            ['code' => 'FK-001', 'name' => 'Faulu Kenya', 'category' => 'asset'],
+            ['code' => 'KCB-001', 'name' => 'KCB Bank', 'category' => 'asset'],
+            ['code' => 'NCBA-001', 'name' => 'NCBA', 'category' => 'asset'],
+            ['code' => 'NIC-001', 'name' => 'NIC Dollar Account', 'category' => 'asset'],
+            ['code' => 'PETTY-001', 'name' => 'Petty cash', 'category' => 'asset'],
+            ['code' => 'SBM-001', 'name' => 'SBM', 'category' => 'asset'],
+            ['code' => 'STB-001', 'name' => 'Stanbic Bank', 'category' => 'asset'],
+            ['code' => 'COS-001', 'name' => 'Change in inventory - COS', 'category' => 'expense'],
+            ['code' => 'COS-002', 'name' => 'Cost of Sales', 'category' => 'expense'],
+            ['code' => 'COS-003', 'name' => 'Cost of Sales:Branding', 'category' => 'expense'],
+            ['code' => 'COS-004', 'name' => 'Cost of Sales:Courier - Projects', 'category' => 'expense'],
+            ['code' => 'COS-005', 'name' => 'Cost of Sales:Fabrication', 'category' => 'expense'],
+            ['code' => 'COS-006', 'name' => 'Cost of Sales:Field Facilitation', 'category' => 'expense'],
+            ['code' => 'COS-007', 'name' => 'Cost of Sales:Jomat hardware', 'category' => 'expense'],
+            ['code' => 'COS-008', 'name' => 'Cost of Sales:Materials', 'category' => 'expense'],
+            ['code' => 'COS-009', 'name' => 'Cost of Sales:Motor bike and motor vehicle fuel', 'category' => 'expense'],
+            ['code' => 'COS-010', 'name' => 'Cost of Sales:Paints & Hardware', 'category' => 'expense'],
+            ['code' => 'COS-011', 'name' => 'Cost of Sales:Parking Fees', 'category' => 'expense'],
+            ['code' => 'COS-012', 'name' => 'Cost of Sales:Plotting & Cutting', 'category' => 'expense'],
+            ['code' => 'COS-013', 'name' => 'Cost of Sales:Printing', 'category' => 'expense'],
+            ['code' => 'COS-014', 'name' => 'Cost of Sales:Team Meals', 'category' => 'expense'],
+            ['code' => 'COS-015', 'name' => 'Cost of Sales:Teams accomodation', 'category' => 'expense'],
+            ['code' => 'COS-016', 'name' => 'Cost of Sales:Transport & Delivery', 'category' => 'expense'],
+            ['code' => 'COS-017', 'name' => 'Discounts given - COS', 'category' => 'expense'],
+            ['code' => 'INV-001', 'name' => 'Inventory Shrinkage', 'category' => 'expense'],
+            ['code' => 'COS-018', 'name' => 'Other - COS', 'category' => 'expense'],
+            ['code' => 'COS-019', 'name' => 'Overhead - COS', 'category' => 'expense'],
+            ['code' => 'EXP-001', 'name' => 'Pasting Expenses', 'category' => 'expense'],
+            ['code' => 'COS-020', 'name' => 'Subcontractors - COS', 'category' => 'expense'],
+            ['code' => 'DIV-001', 'name' => 'Dividend disbursed', 'category' => 'equity'],
+            ['code' => 'EQE-001', 'name' => 'Equity in earnings of subsidiaries', 'category' => 'equity'],
+            ['code' => 'OBE-001', 'name' => 'Opening Balance Equity', 'category' => 'equity'],
+            ['code' => 'OCI-001', 'name' => 'Other comprehensive income', 'category' => 'equity'],
+            ['code' => 'RE-001', 'name' => 'Retained Earnings', 'category' => 'equity'],
+            ['code' => 'SC-001', 'name' => 'Share capital', 'category' => 'equity'],
+            ['code' => 'ADM-001', 'name' => 'Administration expenses', 'category' => 'expense'],
+            ['code' => 'ADM-002', 'name' => 'Administration expenses:Courier & Postage', 'category' => 'expense'],
+            ['code' => 'ADM-003', 'name' => 'Administration expenses:Depreciation Expense', 'category' => 'expense'],
+            ['code' => 'AMO-001', 'name' => 'Amortisation expense', 'category' => 'expense'],
+            ['code' => 'ATM-001', 'name' => 'Atm charges', 'category' => 'expense'],
+            ['code' => 'BD-001', 'name' => 'Bad Debts', 'category' => 'expense'],
+            ['code' => 'DEL-001', 'name' => 'Delivery/Trolley expenses', 'category' => 'expense'],
+            ['code' => 'EXD-001', 'name' => 'EXCISE DUTY', 'category' => 'expense'],
+            ['code' => 'FIN-001', 'name' => 'Finance cost', 'category' => 'expense'],
+            ['code' => 'FIN-002', 'name' => 'Finance cost:Bad debts', 'category' => 'expense'],
+            ['code' => 'FIN-003', 'name' => 'Finance cost:Bank charges', 'category' => 'expense'],
+            ['code' => 'FIN-004', 'name' => 'Finance cost:Interest expense', 'category' => 'expense'],
+            ['code' => 'FIN-005', 'name' => 'Finance cost:Mpesa charges', 'category' => 'expense'],
+            ['code' => 'ITX-001', 'name' => 'Income tax expense', 'category' => 'expense'],
+            ['code' => 'INS-001', 'name' => 'Insurance - Disability', 'category' => 'expense'],
+            ['code' => 'INS-002', 'name' => 'Insurance - General', 'category' => 'expense'],
+            ['code' => 'INS-003', 'name' => 'Insurance - Liability', 'category' => 'expense'],
+            ['code' => 'LPF-001', 'name' => 'Legal and professional fees', 'category' => 'expense'],
+            ['code' => 'LDO-001', 'name' => 'Loss on discontinued operations, net of tax', 'category' => 'expense'],
+            ['code' => 'MC-001', 'name' => 'Management compensation', 'category' => 'expense'],
+            ['code' => 'MAE-001', 'name' => 'Meals and entertainment', 'category' => 'expense'],
+            ['code' => 'MED-001', 'name' => 'Medical expenses', 'category' => 'expense'],
+            ['code' => 'MBMV-001', 'name' => 'Motor bike and motor vehicle car wash', 'category' => 'expense'],
+            ['code' => 'MBMV-002', 'name' => 'Motor bike and motor vehicles Repair', 'category' => 'expense'],
+            ['code' => 'OPE-001', 'name' => 'Operating Expenses', 'category' => 'expense'],
+            ['code' => 'OPE-002', 'name' => 'Operating Expenses:Advertising/Promotional', 'category' => 'expense'],
+            ['code' => 'OPE-003', 'name' => 'Operating Expenses:Audit & Accountancy Fees', 'category' => 'expense'],
+            ['code' => 'OPE-004', 'name' => 'Operating Expenses:Commissions and fees', 'category' => 'expense'],
+            ['code' => 'OPE-005', 'name' => 'Operating Expenses:Consultancy Fees', 'category' => 'expense'],
+            ['code' => 'OPE-006', 'name' => 'Operating Expenses:Consumables', 'category' => 'expense'],
+            ['code' => 'OPE-007', 'name' => 'Operating Expenses:Corporate social Responsibility', 'category' => 'expense'],
+            ['code' => 'OPE-008', 'name' => 'Operating Expenses:Director Expenses', 'category' => 'expense'],
+            ['code' => 'OPE-009', 'name' => 'Operating Expenses:Director Expenses:Courier - Director\'s Errands', 'category' => 'expense'],
+            ['code' => 'OPE-010', 'name' => 'Operating Expenses:Dues and subacriptions', 'category' => 'expense'],
+            ['code' => 'OPE-011', 'name' => 'Operating Expenses:Dues and subscriptions', 'category' => 'expense'],
+            ['code' => 'OPE-012', 'name' => 'Operating Expenses:Electricity & Water', 'category' => 'expense'],
+            ['code' => 'OPE-013', 'name' => 'Operating Expenses:Equipment Rental', 'category' => 'expense'],
+            ['code' => 'OPE-014', 'name' => 'Operating Expenses:Garbage Collections', 'category' => 'expense'],
+            ['code' => 'OPE-015', 'name' => 'Operating Expenses:Generator fuel, Repair and Maintenance', 'category' => 'expense'],
+            ['code' => 'OPE-016', 'name' => 'Operating Expenses:Insurance premium', 'category' => 'expense'],
+            ['code' => 'OPE-017', 'name' => 'Operating Expenses:Licenses and permits', 'category' => 'expense'],
+            ['code' => 'OPE-018', 'name' => 'Operating Expenses:Office Casual/Stipend', 'category' => 'expense'],
+            ['code' => 'OPE-019', 'name' => 'Operating Expenses:Office expenses', 'category' => 'expense'],
+            ['code' => 'OPE-020', 'name' => 'Operating Expenses:Packaging and Delivery', 'category' => 'expense'],
+            ['code' => 'OPE-021', 'name' => 'Operating Expenses:Professional Fees', 'category' => 'expense'],
+            ['code' => 'OPE-022', 'name' => 'Operating Expenses:Rent & lease Payments', 'category' => 'expense'],
+            ['code' => 'OPE-023', 'name' => 'Operating Expenses:Repairs and Maintenance', 'category' => 'expense'],
+            ['code' => 'OPE-024', 'name' => 'Operating Expenses:Samples', 'category' => 'expense'],
+            ['code' => 'OPE-025', 'name' => 'Operating Expenses:Security And Fees', 'category' => 'expense'],
+            ['code' => 'OPE-026', 'name' => 'Operating Expenses:Set Up Casuals', 'category' => 'expense'],
+            ['code' => 'OPE-027', 'name' => 'Operating Expenses:Shipping & Delivery Expense', 'category' => 'expense'],
+            ['code' => 'OPE-028', 'name' => 'Operating Expenses:Site Visist', 'category' => 'expense'],
+            ['code' => 'OPE-029', 'name' => 'Operating Expenses:Staff Welfare', 'category' => 'expense'],
+            ['code' => 'OPE-030', 'name' => 'Operating Expenses:Stationery & Printing', 'category' => 'expense'],
+            ['code' => 'OPE-031', 'name' => 'Operating Expenses:Telephone & Internet', 'category' => 'expense'],
+            ['code' => 'OPE-032', 'name' => 'Operating Expenses:Transport & Delivery', 'category' => 'expense'],
+            ['code' => 'OGAE-001', 'name' => 'Other general and administrative expenses', 'category' => 'expense'],
+            ['code' => 'OSE-001', 'name' => 'Other selling expenses', 'category' => 'expense'],
+            ['code' => 'OTEA-001', 'name' => 'Other Types of Expenses-Advertising Expenses', 'category' => 'expense'],
+            ['code' => 'OTE-001', 'name' => 'Overtime expense', 'category' => 'expense'],
+            ['code' => 'PE-001', 'name' => 'Payroll Expenses', 'category' => 'expense'],
+            ['code' => 'PE-002', 'name' => 'Personnel Expenses', 'category' => 'expense'],
+            ['code' => 'PE-003', 'name' => 'Personnel Expenses:Housing levy', 'category' => 'expense'],
+            ['code' => 'PE-004', 'name' => 'Personnel Expenses:Nita Levy', 'category' => 'expense'],
+            ['code' => 'PE-005', 'name' => 'Personnel Expenses:NSSF Expense', 'category' => 'expense'],
+            ['code' => 'PE-006', 'name' => 'Personnel Expenses:Salaries', 'category' => 'expense'],
+            ['code' => 'PE-007', 'name' => 'Personnel Expenses:Wages-Direct Labour', 'category' => 'expense'],
+            ['code' => 'PS-001', 'name' => 'Printing Supplies', 'category' => 'expense'],
+            ['code' => 'RI-001', 'name' => 'Return Inwards', 'category' => 'revenue'],
+            ['code' => 'RE-002', 'name' => 'Rider\'s Expense', 'category' => 'expense'],
+            ['code' => 'SUP-001', 'name' => 'Supplies', 'category' => 'expense'],
+            ['code' => 'TSE-001', 'name' => 'Travel expenses - selling expenses', 'category' => 'expense'],
+            ['code' => 'UCBPE-001', 'name' => 'Unapplied Cash Bill Payment Expense', 'category' => 'expense'],
+            ['code' => 'UE-001', 'name' => 'Uncategorised Expense', 'category' => 'expense'],
+            ['code' => 'UTIL-001', 'name' => 'Utilities', 'category' => 'expense'],
+            ['code' => 'VP-001', 'name' => 'Vat Penalty', 'category' => 'expense'],
+            ['code' => 'WE-001', 'name' => 'Wage expenses', 'category' => 'expense'],
+            ['code' => 'WNGA-001', 'name' => 'WNG Give aways', 'category' => 'expense'],
+        ];
 
-        if (!File::exists($jsonPath)) {
-            $this->command->error("Source file not found at: {$jsonPath}");
-            return;
+        foreach ($accounts as $account) {
+            ChartOfAccount::updateOrCreate(
+                ['code' => $account['code']],
+                [
+                    'name' => $account['name'],
+                    'category' => $account['category'],
+                    'is_active' => true,
+                ]
+            );
         }
 
-        $json = File::get($jsonPath);
-        $data = json_decode($json, true);
-
-        if (isset($data['accounts'])) {
-            foreach ($data['accounts'] as $account) {
-                ChartOfAccount::updateOrCreate(
-                    ['code' => $account['code']],
-                    [
-                        'name' => $account['name'],
-                        'category' => $account['category'],
-                        'is_active' => true,
-                    ]
-                );
-            }
-            $this->command->info('Chart of accounts seeded successfully.');
-        }
+        $this->command->info('Chart of accounts seeded successfully from embedded data.');
     }
 }
