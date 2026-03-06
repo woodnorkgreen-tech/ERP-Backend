@@ -256,8 +256,8 @@ class ClientController
             $query->where('company_name', 'like', "%{$request->company}%");
         }
 
-        // Order by latest
-        $query->latest();
+        // Order by name alphabetical
+        $query->orderBy('full_name', 'asc');
 
         // Check if pagination is requested
         if ($request->has('paginate') && $request->paginate == 'true') {

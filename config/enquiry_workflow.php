@@ -139,7 +139,7 @@ return [
         'internal_job' => [
             'label' => 'Internal Maintenance Job',
             'description' => 'Company facility repairs and office maintenance',
-            'tasks' => ['site-survey', 'materials', 'budget', 'quote', 'quote_approval', 'procurement', 'teams', 'setup', 'handover', 'report'],
+            'tasks' => ['site-survey', 'materials', 'budget', 'quote_approval', 'procurement', 'teams', 'setup', 'handover', 'report'],
             'title_overrides' => [
                 'quote_approval' => 'Maintenance Approval',
                 'setup' => 'Repair Works'
@@ -148,7 +148,7 @@ return [
         'sponsorship' => [
             'label' => 'Corporate Sponsorship',
             'description' => 'Marketing-led brand exposure at external events',
-            'tasks' => ['design', 'materials', 'budget', 'quote', 'quote_approval', 'production', 'logistics', 'setup', 'handover', 'report'],
+            'tasks' => ['design', 'materials', 'budget', 'quote_approval', 'production', 'logistics', 'setup', 'handover', 'report'],
             'title_overrides' => [
                 'quote_approval' => 'Sponsorship Approval',
                 'setup' => 'Event Activation'
@@ -166,7 +166,7 @@ return [
     */
 
     'task_dependencies' => [
-        'quote_approval' => ['quote'],
+        'quote_approval' => [], // Standardized flexibility
         'procurement' => ['materials'],
         'production' => ['materials', 'budget'],
         'logistics' => ['procurement'],

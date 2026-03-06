@@ -180,7 +180,9 @@ class EnquiryController extends Controller
         $activeProjectStatuses = ['quote_approved', 'planning', 'in_progress'];
         
         $view = $request->input('view', 'enquiries');
-        
+        $isNonProfit = $request->boolean('is_non_profit');
+
+        // Apply View Filter (Phase)
         if ($view === 'completed') {
             $query->whereIn('status', $completedStatuses);
         } else if ($view === 'projects') {
@@ -190,20 +192,29 @@ class EnquiryController extends Controller
             $query->whereNotIn('status', array_merge($activeProjectStatuses, $completedStatuses));
         }
 
+        // Apply Global Non-Profit Filter
+        if ($isNonProfit) {
+            $query->whereIn('workflow_preset_type', ['internal_job', 'sponsorship']);
+        } else {
+            $query->whereNotIn('workflow_preset_type', ['internal_job', 'sponsorship']);
+        }
+
         // 2. Apply "Sub-Tab" filtering (Status Groups)
         if ($request->filled('sub_status') && $request->sub_status !== 'all') {
             $subStatus = $request->sub_status;
             
-            if ($subStatus === 'new') {
-                $query->whereIn('status', ['enquiry_logged', 'client_registered']);
+            if ($subStatus === 'new' || $subStatus === 'pipeline') {
+                $query->whereNotIn('status', array_merge($activeProjectStatuses, $completedStatuses));
+            } elseif ($subStatus === 'in_progress_active' || $subStatus === 'active') {
+                $query->whereIn('status', $activeProjectStatuses);
+            } elseif ($subStatus === 'completed' || $subStatus === 'finished') {
+                $query->whereIn('status', $completedStatuses);
+            } elseif ($subStatus === 'internal_job' || $subStatus === 'sponsorship') {
+                $query->where('workflow_preset_type', $subStatus);
             } elseif ($subStatus === 'in_progress_enquiry') {
                 $query->whereIn('status', ['site_survey_completed', 'design_completed', 'design_approved', 'materials_specified', 'budget_created', 'quote_prepared']);
             } elseif ($subStatus === 'pre_prod') {
                 $query->whereIn('status', ['quote_approved', 'planning']);
-            } elseif ($subStatus === 'in_progress_active') {
-                $query->where('status', 'in_progress');
-            } elseif ($subStatus === 'completed') {
-                $query->where('status', 'completed');
             } elseif ($subStatus === 'cancelled') {
                 $query->where('status', 'cancelled');
             }

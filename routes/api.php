@@ -830,6 +830,7 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('projects', [PettyCashController::class, 'getProjects']);
             Route::get('budgets/summary', [PettyCashController::class, 'getProjectBudgetsSummary']);
             Route::get('projects/{jobNumber}/budget-items', [PettyCashController::class, 'getProjectBudgetItems']);
+            Route::get('accounts', [PettyCashController::class, 'accounts']);
 
             // Top-up management routes
             Route::get('top-ups', [PettyCashTopUpController::class, 'index']);

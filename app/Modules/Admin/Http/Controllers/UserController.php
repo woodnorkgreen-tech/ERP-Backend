@@ -127,7 +127,9 @@ class UserController
 
         // Apply pagination if requested
         $perPage = $request->get('per_page', 15);
-        $users = $query->with(['employee', 'department', 'roles'])->paginate($perPage);
+        $users = $query->with(['employee', 'department', 'roles'])
+            ->orderBy('name', 'asc')
+            ->paginate($perPage);
 
         \Log::info('UserController::index returning users', [
             'count' => $users->count(),
@@ -450,7 +452,9 @@ class UserController
         // Apply active filter
         $query->where('is_active', true);
 
-        $users = $query->with(['employee', 'department', 'roles'])->get();
+        $users = $query->with(['employee', 'department', 'roles'])
+            ->orderBy('name', 'asc')
+            ->get();
 
         // Format for frontend
         $formattedUsers = $users->map(function ($user) {

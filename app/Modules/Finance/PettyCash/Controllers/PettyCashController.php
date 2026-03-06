@@ -135,6 +135,29 @@ class PettyCashController extends Controller
     }
 
     /**
+     * Get all active Chart of Accounts
+     */
+    public function accounts(): JsonResponse
+    {
+        try {
+            $accounts = \App\Modules\Finance\Models\ChartOfAccount::where('is_active', true)
+                ->orderBy('name', 'asc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $accounts
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve Chart of Accounts',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Display a listing of disbursements.
      */
     public function index(Request $request): JsonResponse

@@ -241,8 +241,15 @@ class ProjectEnquiry extends Model
         $year = $now->year;
         $month = str_pad($now->month, 2, '0', STR_PAD_LEFT);
 
-        // Use format: WNG-MM-YYYY-NNN (e.g., WNG-01-2026-001)
-        $prefix = EnquiryConstants::PROJECT_PREFIX . "-{$month}-{$year}-";
+        $prefixCode = EnquiryConstants::PROJECT_PREFIX;
+        if ($this->workflow_preset_type === 'internal_job') {
+            $prefixCode = EnquiryConstants::INTERNAL_PREFIX;
+        } elseif ($this->workflow_preset_type === 'sponsorship') {
+            $prefixCode = EnquiryConstants::SPONSORSHIP_PREFIX;
+        }
+
+        // Use format: PRX-MM-YYYY-NNN (e.g., WNG-01-2026-001)
+        $prefix = $prefixCode . "-{$month}-{$year}-";
 
         // Get the last project number for this month
         $lastProject = Project::where('project_id', 'like', $prefix . '%')
@@ -270,8 +277,15 @@ class ProjectEnquiry extends Model
         $year = $now->year;
         $month = str_pad($now->month, 2, '0', STR_PAD_LEFT);
 
-        // Use format: WNG-MM-YYYY-NNN (e.g., WNG-01-2026-001)
-        $prefix = EnquiryConstants::PROJECT_PREFIX . "-{$month}-{$year}-";
+        $prefixCode = EnquiryConstants::PROJECT_PREFIX;
+        if ($this->workflow_preset_type === 'internal_job') {
+            $prefixCode = EnquiryConstants::INTERNAL_PREFIX;
+        } elseif ($this->workflow_preset_type === 'sponsorship') {
+            $prefixCode = EnquiryConstants::SPONSORSHIP_PREFIX;
+        }
+
+        // Use format: PRX-MM-YYYY-NNN (e.g., WNG-01-2026-001)
+        $prefix = $prefixCode . "-{$month}-{$year}-";
 
         // Get the last job number for this prefix (monthly reset)
         $lastEnquiry = self::where('job_number', 'like', $prefix . '%')

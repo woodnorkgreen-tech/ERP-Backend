@@ -44,6 +44,10 @@ class EnquiryConstants
     // Project ID prefix
     const PROJECT_PREFIX = 'WNG';
 
+    // Non-profit prefixes
+    const INTERNAL_PREFIX = 'INT';
+    const SPONSORSHIP_PREFIX = 'SPN';
+
     // Pagination default
     const PAGINATION_PER_PAGE = 15;
 
