@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('goods_receipt_note_id')->constrained()->onDelete('cascade');
             $table->foreignId('purchase_order_item_id')->constrained()->onDelete('cascade');
-            $table->foreignId('material_id')->constrained()->onDelete('cascade');
+            // $table->foreignId('material_id')->constrained()->onDelete('cascade');   TODO: consult Ann
             $table->integer('ordered_quantity');
             $table->integer('received_quantity');
             $table->enum('condition', ['good', 'fair', 'damaged', 'for_repair']);

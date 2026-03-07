@@ -41,7 +41,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // Seed Universal Task System data
-        $this->call(UniversalTaskSeeder::class);
+        // $this->call(UniversalTaskSeeder::class); TODO: FRANSIS
 
     }
 }
