@@ -101,6 +101,7 @@ class PettyCashDisbursementResource extends JsonResource
             'can_edit' => $this->canEdit($user),
             'can_void' => $this->canVoid($user),
             'can_view_details' => $this->canViewDetails($user),
+            'budget_category' => $this->budget_category,
         ];
     }
 
