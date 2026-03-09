@@ -347,7 +347,7 @@ class ProcurementStoresController extends Controller
      */
     public function inventoryLogs(\Illuminate\Http\Request $request): JsonResponse
     {
-        $query = \App\Modules\ProcurementStores\Models\InventoryLog::with(['material', 'user']);
+        $query = \App\Modules\ProcurementStores\Models\InventoryLog::with(['material', 'user', 'project.enquiry']);
 
         if ($request->filled('type')) {
             $query->where('type', $request->type);

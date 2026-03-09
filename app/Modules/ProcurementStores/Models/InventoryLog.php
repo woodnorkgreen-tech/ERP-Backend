@@ -36,4 +36,9 @@ class InventoryLog extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Project::class, 'project_id');
+    }
 }
