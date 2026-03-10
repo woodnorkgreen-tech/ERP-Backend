@@ -222,13 +222,17 @@ class PettyCashService
             $oldAmount = (float) $disbursement->amount;
             $oldIsActive = (bool) $disbursement->is_active;
 
-            // If amount is being changed and disbursement is active, validate balance
+            /**
+             * BALANCE BYPASS: Allow amount changes regardless of active balance for updates
+             * to support reconciliation of past records.
+             * 
             if (isset($data['amount']) && $data['amount'] != $oldAmount && $oldIsActive) {
                 $amountDifference = $data['amount'] - $oldAmount;
                 if ($amountDifference > 0) {
                     $this->validateSufficientBalance($amountDifference);
                 }
             }
+            */
 
             // Update the disbursement (Model events will handle balance adjustment)
             $this->repository->updateDisbursement($disbursement, $data);

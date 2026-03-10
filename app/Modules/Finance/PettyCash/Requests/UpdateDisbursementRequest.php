@@ -147,7 +147,10 @@ class UpdateDisbursementRequest extends FormRequest
             $paymentMethod = $this->input('payment_method');
             $transactionCode = $this->input('transaction_code');
 
-            // Check if top-up has sufficient balance (considering current disbursement amount)
+            /** 
+             * BALANCE BYPASS: Allow editing transactions regardless of top-up balance
+             * for reconciliation and data integrity purposes.
+             * 
             if ($topUpId && $amount && $disbursement) {
                 $topUp = PettyCashTopUp::find($topUpId);
                 if ($topUp) {
@@ -169,8 +172,11 @@ class UpdateDisbursementRequest extends FormRequest
                     }
                 }
             }
+            */
 
-            // Check overall balance for amount changes
+            /**
+             * BALANCE BYPASS: Allow editing transactions regardless of global balance
+             * 
             if ($amount && $disbursement) {
                 $balance = PettyCashBalance::current();
                 $amountDifference = $amount - $disbursement->amount;
@@ -182,6 +188,7 @@ class UpdateDisbursementRequest extends FormRequest
                     );
                 }
             }
+            */
 
             // Validate transaction code for specific payment methods
             $currentPaymentMethod = $paymentMethod ?: ($disbursement ? $disbursement->payment_method : null);

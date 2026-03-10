@@ -85,6 +85,8 @@ class WorkstationSeeder extends Seeder
             );
         }
 
-        $this->command->info('✅ Workstations seeded successfully!');
+        if ($this->command) {
+            $this->command->info('✅ Workstations seeded successfully!');
+        }
     }
 }
