@@ -20,7 +20,7 @@ class ActionLogController extends Controller
             'budget' => \App\Models\TaskBudgetData::class,
             'materials' => \App\Models\TaskMaterialsData::class,
             'procurement' => \App\Models\TaskProcurementData::class,
-            'production' => \App\Models\TaskProductionData::class,
+            'production' => \App\Modules\Production\Models\WorkOrder::class,
             'project' => \App\Models\Project::class,
             'enquiry_task' => \App\Modules\Projects\Models\EnquiryTask::class,
         ];

@@ -6,7 +6,6 @@ use App\Modules\logisticsTask\Models\LogisticsTask;
 use App\Modules\logisticsTask\Models\TransportItem;
 use App\Modules\logisticsTask\Models\LogisticsChecklist;
 use App\Modules\Projects\Models\EnquiryTask;
-use App\Models\TaskProductionData;
 use App\Models\TaskMaterialsData;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;

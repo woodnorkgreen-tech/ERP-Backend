@@ -14,6 +14,10 @@ use App\Constants\EnquiryConstants;
 use App\Modules\Projects\Services\NotificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Modules\Projects\Services\FinanceService;
+use App\Modules\Projects\Actions\ApproveQuoteAction;
+use App\Modules\Projects\Actions\ReleaseFinanceGateAction;
+use App\Services\Governance\ProjectGovernanceService;
 
 /**
  * @OA\Schema(
@@ -36,10 +40,17 @@ use Illuminate\Support\Facades\Log;
 class EnquiryController extends Controller
 {
     protected $notificationService;
+    protected $financeService;
+    protected $governanceService;
 
-    public function __construct(NotificationService $notificationService)
-    {
+    public function __construct(
+        NotificationService $notificationService, 
+        FinanceService $financeService,
+        ProjectGovernanceService $governanceService
+    ) {
         $this->notificationService = $notificationService;
+        $this->financeService = $financeService;
+        $this->governanceService = $governanceService;
     }
 
     /**
@@ -260,6 +271,13 @@ class EnquiryController extends Controller
         $perPage = $request->get('per_page', EnquiryConstants::PAGINATION_PER_PAGE);
         $enquiries = $query->paginate($perPage);
 
+        // Enrich with payment progress for receivables/projects view
+        $enquiries->getCollection()->transform(function ($enquiry) {
+            $progress = $this->financeService->getPaymentProgress($enquiry);
+            $enquiry->payment_progress_percentage = $progress['percentage'];
+            return $enquiry;
+        });
+
         return response()->json([
             'data' => $enquiries,
             'message' => 'Enquiries retrieved successfully'
@@ -408,7 +426,7 @@ class EnquiryController extends Controller
             Log::info('Enquiry record created', ['id' => $enquiry->id]);
 
             // Create workflow tasks for the enquiry
-            $workflowService = new EnquiryWorkflowService($this->notificationService);
+            $workflowService = new EnquiryWorkflowService($this->notificationService, $this->governanceService);
             $workflowService->createWorkflowTasksForEnquiry($enquiry);
 
             DB::commit();
@@ -808,6 +826,7 @@ class EnquiryController extends Controller
             'site_survey_skip_reason' => 'nullable|string|required_if:site_survey_skipped,true',
             'selected_workflow_tasks' => 'nullable|array',
             'workflow_preset_type' => 'nullable|string',
+            'client_approved_quote' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -871,10 +890,11 @@ class EnquiryController extends Controller
             'site_survey_skip_reason',
             'selected_workflow_tasks',
             'workflow_preset_type',
+            'client_approved_quote',
         ]));
 
         // Sync workflow tasks (create any newly selected tasks)
-        $workflowService = new EnquiryWorkflowService($this->notificationService);
+        $workflowService = new EnquiryWorkflowService($this->notificationService, $this->governanceService);
         $workflowService->createWorkflowTasksForEnquiry($enquiry);
 
         return response()->json([
@@ -941,24 +961,17 @@ class EnquiryController extends Controller
      *     @OA\Response(response=401, description="Unauthorized")
      * )
      */
-    public function approveQuote(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    public function approveQuote(Request $request, ProjectEnquiry $enquiry, ApproveQuoteAction $action): JsonResponse
     {
         try {
-            // Call the model's approveQuote method which handles job number generation and project creation
-            $result = $enquiry->approveQuote(Auth::id());
+            $action->execute($enquiry, Auth::id());
 
-            if ($result) {
-                return response()->json([
-                    'message' => 'Quote approved successfully. Job number generated and project created.',
-                    'data' => $enquiry->fresh(['client', 'department'])
-                ]);
-            } else {
-                return response()->json([
-                    'message' => 'Failed to approve quote'
-                ], 500);
-            }
+            return response()->json([
+                'message' => 'Quote approved successfully. Job number generated and subsequent actions triggered.',
+                'data' => $enquiry->fresh(['client', 'department'])
+            ]);
         } catch (\Exception $e) {
-            \Log::error('Error approving quote', [
+            Log::error('Error approving quote', [
                 'enquiry_id' => $enquiry->id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
@@ -981,5 +994,91 @@ class EnquiryController extends Controller
         ]);
     }
 
+    /**
+     * Log a new payment against an enquiry
+     */
+    public function logPayment(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    {
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:0',
+            'payment_date' => 'nullable|date',
+            'payment_method' => 'nullable|string',
+            'transaction_reference' => 'nullable|string',
+            'notes' => 'nullable|string',
+        ]);
 
+        try {
+            $payment = $this->financeService->logPayment($enquiry, $validated);
+
+            return response()->json([
+                'message' => 'Payment logged successfully',
+                'data' => $payment->load('recorder'),
+                'progress' => $this->financeService->getPaymentProgress($enquiry)
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Failed to log payment: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Get finance progress and payment history
+     */
+    public function getFinanceProgress(ProjectEnquiry $enquiry): JsonResponse
+    {
+        try {
+            $progress = $this->financeService->getPaymentProgress($enquiry);
+            $payments = $enquiry->payments()->with('recorder')->orderBy('payment_date', 'desc')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'progress' => $progress,
+                    'payments' => $payments
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Failed to fetch finance progress: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Manually release a project for production
+     */
+    public function releaseProject(Request $request, ProjectEnquiry $enquiry, ReleaseFinanceGateAction $action): JsonResponse
+    {
+        $validated = $request->validate([
+            'notes' => 'nullable|string',
+        ]);
+
+        try {
+            $action->execute($enquiry, Auth::id(), $validated['notes'] ?? null);
+
+            return response()->json([
+                'message' => 'Project released for production successfully',
+                'data' => $enquiry->fresh(['client', 'projectOfficer'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Failed to release project: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Get governance audit logs for an enquiry
+     */
+    public function getGovernanceTrace(ProjectEnquiry $enquiry): JsonResponse
+    {
+        try {
+            $logs = \App\Models\GovernanceAuditLog::with('user')
+                ->where('project_enquiry_id', $enquiry->id)
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $logs
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Failed to fetch governance logs: ' . $e->getMessage()], 500);
+        }
+    }
 }

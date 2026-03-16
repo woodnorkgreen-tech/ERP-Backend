@@ -22,4 +22,9 @@ class WorkOrderTaskAssignee extends Model
     {
         return $this->belongsTo(WorkOrderTask::class, 'work_order_task_id');
     }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class, 'assignee_id');
+    }
 }

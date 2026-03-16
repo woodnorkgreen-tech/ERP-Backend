@@ -12,11 +12,11 @@ use Illuminate\Http\JsonResponse;
 
 class WorkOrderController extends Controller
 {
-    protected ProductionService $productionService;
+    protected \App\Modules\Production\Services\ProductionTaskAlignmentService $alignmentService;
 
-    public function __construct(ProductionService $productionService)
+    public function __construct(\App\Modules\Production\Services\ProductionTaskAlignmentService $alignmentService)
     {
-        $this->productionService = $productionService;
+        $this->alignmentService = $alignmentService;
     }
     /**
      * Get all work orders with filters
@@ -224,7 +224,7 @@ class WorkOrderController extends Controller
     public function createForExistingProjects(): JsonResponse
     {
         try {
-            $results = $this->productionService->createWorkOrdersForExistingProjects();
+            $results = $this->alignmentService->createWorkOrdersForExistingProjects();
 
             return response()->json([
                 'success' => true,

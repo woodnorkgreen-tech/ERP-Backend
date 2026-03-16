@@ -20,11 +20,11 @@ class CreateWorkOrdersForProjects extends Command
     /**
      * Execute the console command.
      */
-    public function handle(ProductionService $productionService): int
+    public function handle(\App\Modules\Production\Services\ProductionTaskAlignmentService $alignmentService): int
     {
-        $this->info('Creating work orders for existing projects...');
+        $this->info('Creating work orders for existing projects using Alignment Engine...');
 
-        $results = $productionService->createWorkOrdersForExistingProjects();
+        $results = $alignmentService->createWorkOrdersForExistingProjects();
 
         $this->info("✅ Results:");
         $this->info("   - Created: {$results['created']} work orders");

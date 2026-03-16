@@ -80,9 +80,29 @@ class WorkOrder extends Model
         return $this->hasMany(WorkOrderTask::class, 'work_order_id');
     }
 
+    public function dailyTasks(): HasMany
+    {
+        return $this->hasMany(DailyTask::class, 'work_order_id');
+    }
+
     public function midQcChecks(): HasMany
     {
         return $this->hasMany(WorkOrderMidQcCheck::class, 'work_order_id');
+    }
+
+    public function finalQcChecks(): HasMany
+    {
+        return $this->hasMany(WorkOrderFinalQcCheck::class, 'work_order_id');
+    }
+
+    public function reworks(): HasMany
+    {
+        return $this->hasMany(WorkOrderRework::class, 'work_order_id');
+    }
+
+    public function handovers(): HasMany
+    {
+        return $this->hasMany(WorkOrderHandover::class, 'work_order_id');
     }
 
     public function ncrs(): HasMany

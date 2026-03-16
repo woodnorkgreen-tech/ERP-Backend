@@ -13,9 +13,11 @@ use App\Modules\HR\Models\Employee;
 
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+use App\Traits\Governed;
+
 class PettyCashRequisition extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, SoftDeletes, Governed;
 
     protected $table = 'petty_cash_requisitions';
 

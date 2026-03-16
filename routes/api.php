@@ -16,6 +16,8 @@ use App\Modules\Projects\Http\Controllers\EnquiryController;
 use App\Modules\Projects\Http\Controllers\DashboardController;
 use App\Modules\Projects\Http\Controllers\TaskController;
 use App\Modules\Projects\Http\Controllers\PhaseDepartmentalTaskController;
+use App\Modules\Projects\Models\EnquiryTask;
+use App\Models\TaskMaterialsData;
 use App\Http\Controllers\SiteSurveyController;
 use App\Http\Controllers\DesignAssetController;
 use App\Http\Controllers\ProcurementController;
@@ -194,7 +196,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Task management routes
         Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
         Route::get('tasks/{taskId}', [TaskController::class, 'show']);
-        Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus']);
+        Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus'])->middleware(\App\Http\Middleware\EnsureFinancialClearance::class);
         Route::put('tasks/{taskId}/assign', [TaskController::class, 'assignTask']);
         Route::put('tasks/{taskId}', [TaskController::class, 'update']);
         Route::get('enquiries/{enquiryId}/tasks', [TaskController::class, 'getEnquiryTasks']);
@@ -482,13 +484,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     // Procurement utility routes
     Route::get('projects/procurement/vendor-suggestions', [App\Http\Controllers\ProcurementController::class, 'getVendorSuggestions']);
 
-    // Production management routes
-    Route::prefix('projects/tasks/{taskId}/production')->group(function () {
-        Route::get('/', [App\Http\Controllers\ProductionController::class, 'getProductionData']);
-        Route::put('/', [App\Http\Controllers\ProductionController::class, 'saveProductionData']);
-        Route::post('/import-materials', [App\Http\Controllers\ProductionController::class, 'importMaterialsData']);
-        Route::post('/generate-checkpoints', [App\Http\Controllers\ProductionController::class, 'generateQualityCheckpoints']);
-    });
 
     // Handover management routes
     Route::prefix('projects/tasks/{taskId}/handover')->group(function () {
@@ -498,62 +493,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/survey/generate-token', [HandoverSurveyController::class, 'generateToken']);
     });
 
-    // Logistics management routes
-    Route::prefix('projects/tasks/{taskId}/logistics')->group(function () {
-        Route::get('/', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'show']);
-        Route::post('/planning', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'savePlanning']);
-        Route::post('/team-confirmation', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTeamConfirmation']);
-        Route::put('/assign-team', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'assignTeam']);
-        
-        // Transport items
-        Route::get('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getTransportItems']);
-        Route::post('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'addTransportItem']);
-        Route::put('/transport-items/{itemId}', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTransportItem']);
-        Route::delete('/transport-items/{itemId}', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'deleteTransportItem']);
-        Route::post('/transport-items/import', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'importProductionElements']);
-        
-        // Checklist
-        Route::get('/checklist', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklist']);
-        Route::post('/checklist', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateChecklist']);
-        Route::post('/checklist/generate', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateChecklist']);
-    });
-
-    // Logistics utility routes
-    Route::get('logistics/drivers', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getDrivers']);
-
-    // Setup Task management routes
-    Route::prefix('projects/tasks/{taskId}/setup')->group(function () {
-        Route::get('/', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'show']);
-        Route::post('/documentation', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'saveDocumentation']);
-        
-        // Photos
-        Route::post('/photos', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'uploadPhoto']);
-        Route::delete('/photos/{photoId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deletePhoto']);
-        
-        // Issues
-        Route::post('/issues', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'addIssue']);
-        Route::put('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'updateIssue']);
-        Route::delete('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deleteIssue']);
-    });
-
-    // Setdown Task management routes
-    Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
-        Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
-        Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);
-        
-        // Photos
-        Route::post('/photos', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'uploadPhoto']);
-        Route::delete('/photos/{photoId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deletePhoto']);
-        
-        // Issues
-        Route::post('/issues', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'addIssue']);
-        Route::put('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateIssue']);
-        Route::delete('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deleteIssue']);
-        
-        // Checklist
-        Route::get('/checklist', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'getChecklist']);
-        Route::patch('/checklist/items/{itemId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateChecklistItem']);
-    });
+    // Logistics, Setup, and Setdown routes consolidated under 'projects' prefix below.
 
     // Teams management routes
     Route::prefix('projects/tasks/{taskId}/teams')->group(function () {
@@ -646,7 +586,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('/{reportId}/status', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'changeStatus']);
             Route::get('/{reportId}/analyze', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'analyze']);
         });
-
+ 
         // Production Task Routes
         Route::prefix('tasks/{taskId}/production')->group(function () {
             Route::get('/', [App\Http\Controllers\ProductionController::class, 'getProductionData']);
@@ -716,6 +656,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
+        Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
+        Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
+        Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
+        Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
 
         // Available project officers for enquiry assignment
         Route::get('available-project-officers', function () {

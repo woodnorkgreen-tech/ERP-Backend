@@ -17,6 +17,12 @@ class EventServiceProvider extends ServiceProvider
         EnquiryCreated::class => [
             SendEnquiryNotification::class,
         ],
+        \App\Events\QuoteApproved::class => [
+            \App\Listeners\EvaluateFinancialRequirements::class,
+        ],
+        \App\Events\FinanceReleased::class => [
+            \App\Listeners\ActivateProjectAfterFinance::class,
+        ],
     ];
 
     /**

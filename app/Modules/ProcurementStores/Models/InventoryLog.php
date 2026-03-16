@@ -7,8 +7,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use App\Models\User;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
+use App\Traits\Governed;
+
 class InventoryLog extends Model
 {
+    use Governed;
+
+    public function getGovernanceGate(): string
+    {
+        return 'financial';
+    }
     protected $fillable = [
         'material_id',
         'user_id',

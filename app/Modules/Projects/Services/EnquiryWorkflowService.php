@@ -8,14 +8,19 @@ use App\Models\User;
 use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Support\Facades\Log;
 use App\Constants\EnquiryConstants;
+use App\Services\Governance\ProjectGovernanceService;
 
 class EnquiryWorkflowService
 {
     private NotificationService $notificationService;
+    private ProjectGovernanceService $governanceService;
 
-    public function __construct(NotificationService $notificationService)
-    {
+    public function __construct(
+        NotificationService $notificationService,
+        ProjectGovernanceService $governanceService
+    ) {
         $this->notificationService = $notificationService;
+        $this->governanceService = $governanceService;
     }
 
     /**
@@ -122,8 +127,16 @@ class EnquiryWorkflowService
         $task = EnquiryTask::findOrFail($taskId);
 
         $oldStatus = $task->status;
-        
-        // Hard Gate Validation for Completion
+
+        // 1. Universal Governance Check (Expenditure/Financial/Technical Gates)
+        if (in_array($status, ['in_progress', 'completed'])) {
+            $gateResult = $this->governanceService->evaluateTask($task);
+            if (!$gateResult->isAuthorized()) {
+                throw new \Exception($gateResult->getMessage());
+            }
+        }
+
+        // 2. Specific Hard Gate Validation for Completion (Legacy Checks)
         if ($status === 'completed') {
             $this->validateTaskCompletion($task);
         }
@@ -644,23 +657,10 @@ class EnquiryWorkflowService
      */
     private function validateTaskCompletion(EnquiryTask $task): void
     {
-        // 1. Production Validation
-        // 1. Production Validation - validation removed as per simplified workflow
-        // if ($task->type === 'production') {
-        //     $prodData = \App\Models\TaskProductionData::where('task_id', $task->id)->first();
-        //     if ($prodData) {
-        //         $unmet = \App\Models\ProductionCompletionCriterion::where('production_data_id', $prodData->id)
-        //             ->where('met', false)
-        //             ->get();
-                
-        //         if ($unmet->isNotEmpty()) {
-        //             $criteriaNames = $unmet->pluck('description')->join(', ');
-        //             throw new \Exception("Cannot complete Production task. Mandatory criteria unmet: {$criteriaNames}");
-        //         }
-        //     }
-        // }
-
-        // 2. Materials Validation (Approvals)
+        // Note: Operational gates (Production, Procurement, Logistics) are now 
+        // handled via policies in the ProjectGovernanceService.
+        
+        // 1. Materials Validation (Approvals)
         if ($task->type === 'materials') {
             $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
             if ($materialsData) {
@@ -671,65 +671,7 @@ class EnquiryWorkflowService
             }
         }
 
-        // 3. Procurement Validation (Items Received)
-        if ($task->type === 'procurement') {
-            $procurementData = \App\Models\TaskProcurementData::where('enquiry_task_id', $task->id)->first();
-            
-            if ($procurementData && is_array($procurementData->procurement_items)) {
-                $pending = collect($procurementData->procurement_items)->filter(function($item) {
-                    $needsPurchase = ($item['purchaseQuantity'] ?? 0) > 0;
-                    $status = $item['procurementStatus'] ?? $item['availabilityStatus'] ?? 'pending';
-                    return $needsPurchase && !in_array($status, ['received', 'cancelled']);
-                });
-
-                if ($pending->isNotEmpty()) {
-                    $count = $pending->count();
-                    throw new \Exception("Cannot complete Procurement task. There are {$count} items still pending receipt.");
-                }
-            }
-        }
-
-        // 4. Site Survey Validation (Evidence Captured)
-        if ($task->type === 'site-survey') {
-            $survey = \App\Models\SiteSurvey::where('enquiry_task_id', $task->id)->first();
-            if (!$survey) {
-                throw new \Exception("Cannot complete Site Survey. No survey record has been created for this task.");
-            }
-            
-            $photos = $survey->survey_photos ?? [];
-            if (empty($photos)) {
-                throw new \Exception("Cannot complete Site Survey. At least one survey photo/image is required as evidence.");
-            }
-        }
-
-        // 5. Design Validation (Assets Uploaded)
-        if ($task->type === 'design') {
-            $attachments = \App\Models\DesignAsset::where('enquiry_task_id', $task->id)->count();
-            if ($attachments === 0) {
-                throw new \Exception("Cannot complete Design task. At least one design asset or conceptual layout must be attached.");
-            }
-        }
-
-        // 6. Setup/Setdown Validation (Issues Resolved)
-        if (in_array($task->type, ['setup', 'setdown'])) {
-            $isSetup = $task->type === 'setup';
-            $metaModel = $isSetup ? \App\Modules\setupTask\Models\SetupTask::class : \App\Modules\setdownTask\Models\SetdownTask::class;
-            $issueModel = $isSetup ? \App\Modules\setupTask\Models\SetupTaskIssue::class : \App\Modules\setdownTask\Models\SetdownTaskIssue::class;
-            $fk = $isSetup ? 'setup_task_id' : 'setdown_task_id';
-
-            $metaRecord = $metaModel::where('task_id', $task->id)->first();
-            if ($metaRecord) {
-                $unresolved = $issueModel::where($fk, $metaRecord->id)
-                    ->where('status', '!=', 'resolved')
-                    ->count();
-                
-                if ($unresolved > 0) {
-                    throw new \Exception("Cannot complete {$task->type}. All reported {$task->type} issues ({$unresolved}) must be resolved first.");
-                }
-            }
-        }
-
-        // 7. Budget Validation
+        // 2. Budget Validation
         if ($task->type === 'budget') {
             $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $task->id)->first();
             if (!$budgetData) {
@@ -743,7 +685,7 @@ class EnquiryWorkflowService
             }
         }
 
-        // 8. Quote Validation
+        // 3. Quote Validation
         if ($task->type === 'quote') {
             $quoteData = \App\Models\TaskQuoteData::where('enquiry_task_id', $task->id)->first();
             if (!$quoteData) {
@@ -754,7 +696,7 @@ class EnquiryWorkflowService
             }
         }
 
-        // 9. Quote Approval Validation
+        // 4. Quote Approval Validation
         if ($task->type === 'quote_approval') {
             $approval = \DB::table('quote_approvals')->where('task_id', $task->id)->first();
             if (!$approval || $approval->approval_status === 'pending') {
@@ -803,4 +745,6 @@ class EnquiryWorkflowService
 
         Log::info("Auto-initialized Handover Survey for Enquiry {$task->project_enquiry_id} via task {$task->type}");
     }
+
+
 }

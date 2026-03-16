@@ -46,13 +46,12 @@ class ProjectEnquiry extends Model
         'quote_approved_at',
         'quote_approved_by',
         'created_by',
-        // Project fields
-        'project_id',
         'start_date',
         'end_date',
         'budget',
         'current_phase',
         'assigned_users',
+        'client_approved_quote',
     ];
 
     protected $casts = [
@@ -72,6 +71,7 @@ class ProjectEnquiry extends Model
         'selected_workflow_tasks' => 'array',
         'current_phase' => 'integer',
         'job_number' => 'string',
+        'client_approved_quote' => 'decimal:2',
     ];
 
     public function client(): BelongsTo
@@ -109,100 +109,11 @@ class ProjectEnquiry extends Model
         return $this->hasMany(\App\Modules\Production\Models\WorkOrder::class, 'project_enquiry_id');
     }
 
-
-    /**
-     * Approve the quote for this enquiry
-     */
-    public function approveQuote(int $userId): bool
+    public function payments(): HasMany
     {
-        // Temporarily remove permission check for testing
-        // $user = User::find($userId);
-        // if (!$user || !$user->hasPermissionTo(Permissions::FINANCE_QUOTE_APPROVE)) {
-        //     throw new \Exception('Unauthorized: Only users with finance approval permission can approve quotes');
-        // }
-
-        // Generate job number when quote is approved
-        $jobNumber = $this->generateJobNumber();
-
-        $this->update([
-            'quote_approved' => true,
-            'quote_approved_at' => now(),
-            'quote_approved_by' => $userId,
-            'job_number' => $jobNumber,
-            'status' => EnquiryConstants::STATUS_QUOTE_APPROVED
-        ]);
-
-        // Save immediately to persist in database
-        $this->save();
-
-        // Send Quote Approval Notification (HIGH PRIORITY - before project activation)
-        try {
-            $approvedByUser = User::find($userId);
-            if ($approvedByUser) {
-                $notificationService = app(\App\Modules\Projects\Services\NotificationService::class);
-                $notificationService->sendQuoteApproved($this, $approvedByUser, $jobNumber);
-            }
-        } catch (\Exception $e) {
-            \Log::error("Failed to send quote approval notification: " . $e->getMessage());
-        }
-
-        // Automatically convert to a formal Project/Mission
-        $project = Project::firstOrCreate(
-            ['enquiry_id' => $this->id],
-            [
-                'project_id' => $this->generateProjectId(),
-                'start_date' => $this->start_date ?? now(),
-                'end_date' => $this->end_date ?? $this->expected_delivery_date,
-                'budget' => $this->budget ?? $this->estimated_budget,
-                'status' => 'planning',
-                'assigned_users' => $this->assigned_users
-            ]
-        );
-
-        // Global Broadcast Signal (Refresh data first to ensure relations are loaded)
-        $this->refresh();
-        $this->load(['client', 'projectOfficer']);
-
-        // Notify system-wide that a new project is active (Wrapped in try-catch to prevent 500 on non-critical messaging)
-        try {
-            $activatedBy = User::find($userId)->name ?? 'System';
-            $notifPayload = [
-                'id' => $this->id,
-                'title' => $this->title,
-                'job_number' => $jobNumber,
-                'client_name' => $this->client?->full_name ?? $this->client?->name ?? 'Client TBC',
-                'venue' => $this->venue ?? 'Venue TBC',
-                'deadline' => $this->expected_delivery_date?->format('d M Y') ?? 'TBC',
-                'project_officer' => $this->projectOfficer?->name ?? 'Unassigned',
-                'activated_by' => $activatedBy
-            ];
-
-            // Global Broadcast Signal
-            event(new \App\Events\ProjectActivated($notifPayload));
-
-            // Record persistent notifications for all users
-            $allUserIds = User::pluck('id');
-            $notifData = [
-                'type' => 'project_activated',
-                'title' => 'New Mission Active',
-                'message' => "Project {$this->title} (#{$jobNumber}) is officially live!",
-                'data' => $notifPayload,
-                'notifiable_type' => self::class,
-                'notifiable_id' => $this->id,
-            ];
-
-            foreach ($allUserIds as $uId) {
-                \App\Models\Notification::create(array_merge($notifData, ['user_id' => $uId]));
-            }
-        } catch (\Exception $e) {
-            \Log::error('Failed to dispatch project activation notifications', [
-                'enquiry_id' => $this->id,
-                'error' => $e->getMessage()
-            ]);
-        }
-
-        return true;
+        return $this->hasMany(EnquiryPayment::class, 'project_enquiry_id');
     }
+
 
     // Scopes
     public function scopeByDepartment($query, $departmentId)

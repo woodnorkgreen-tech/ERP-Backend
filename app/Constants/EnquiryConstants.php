@@ -17,6 +17,7 @@ class EnquiryConstants
     const STATUS_BUDGET_CREATED = 'budget_created';
     const STATUS_QUOTE_PREPARED = 'quote_prepared';
     const STATUS_QUOTE_APPROVED = 'quote_approved';
+    const STATUS_AWAITING_DEPOSIT = 'awaiting_deposit';
     const STATUS_PLANNING = 'planning';
     const STATUS_IN_PROGRESS = 'in_progress';
     const STATUS_COMPLETED = 'completed';
@@ -66,6 +67,7 @@ class EnquiryConstants
             self::STATUS_BUDGET_CREATED,
             self::STATUS_QUOTE_PREPARED,
             self::STATUS_QUOTE_APPROVED,
+            self::STATUS_AWAITING_DEPOSIT,
             self::STATUS_PLANNING,
             self::STATUS_IN_PROGRESS,
             self::STATUS_COMPLETED,
@@ -103,6 +105,7 @@ class EnquiryConstants
             self::STATUS_BUDGET_CREATED,
             self::STATUS_QUOTE_PREPARED,
             self::STATUS_QUOTE_APPROVED,
+            self::STATUS_AWAITING_DEPOSIT,
             self::STATUS_PLANNING,
             self::STATUS_IN_PROGRESS,
         ];

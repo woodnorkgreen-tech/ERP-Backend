@@ -144,10 +144,6 @@ class EnquiryTask extends Model
         return $this->hasOne(\App\Models\TaskProcurementData::class, 'enquiry_task_id');
     }
 
-    public function productionData()
-    {
-        return $this->hasOne(\App\Models\TaskProductionData::class, 'enquiry_task_id');
-    }
 
     public function handoverSurvey()
     {
@@ -164,7 +160,7 @@ class EnquiryTask extends Model
             'budget' => $this->budgetData,
             'materials' => $this->materialsData,
             'procurement' => $this->procurementData,
-            'production' => $this->productionData,
+            'production' => $this->enquiry->workOrders()->where('enquiry_task_id', $this->id)->first(),
             'handover' => $this->handoverSurvey,
             default => null,
         };
