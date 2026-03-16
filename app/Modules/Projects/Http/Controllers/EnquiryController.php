@@ -190,7 +190,11 @@ class EnquiryController extends Controller
         $completedOnlyStatuses = ['completed'];
         $cancelledStatuses = ['cancelled'];
         $closedStatuses = array_merge($completedOnlyStatuses, $cancelledStatuses);
+        // awaiting_deposit is intentionally NOT here — it belongs in the enquiry pipeline view.
+        // Projects only become "active" once Finance releases them (planning/in_progress).
         $activeProjectStatuses = ['quote_approved', 'planning', 'in_progress'];
+        // All statuses relevant to the Finance Billing & Deposits page
+        $receivableStatuses = ['quote_approved', 'awaiting_deposit', 'planning', 'in_progress', 'completed'];
         
         $view = $request->input('view', 'enquiries');
         $isNonProfit = $request->boolean('is_non_profit');
@@ -201,9 +205,14 @@ class EnquiryController extends Controller
         } else if ($view === 'canceled' || $view === 'cancelled') {
             $query->whereIn('status', $cancelledStatuses);
         } else if ($view === 'projects') {
+            // Active projects only — after Finance Gate has released them
             $query->whereIn('status', $activeProjectStatuses);
+        } else if ($view === 'receivables') {
+            // Finance Billing & Deposits: needs awaiting_deposit + active + completed
+            $query->whereIn('status', $receivableStatuses);
         } else {
-            // Default Enquiries view: Statuses BEFORE quote_approved and not completed/cancelled
+            // Default Enquiries pipeline: everything not yet a project, not closed
+            // awaiting_deposit is included here — quote is approved but Finance Gate hasn't released yet
             $query->whereNotIn('status', array_merge($activeProjectStatuses, $closedStatuses));
         }
 
@@ -211,7 +220,12 @@ class EnquiryController extends Controller
         if ($isNonProfit) {
             $query->whereIn('workflow_preset_type', ['internal_job', 'sponsorship']);
         } else {
-            $query->whereNotIn('workflow_preset_type', ['internal_job', 'sponsorship']);
+            // Use a grouped where to treat NULL workflow_preset_type as a regular (non-internal) project.
+            // Plain whereNotIn() silently drops NULL rows in MySQL because NULL NOT IN (...) = UNKNOWN.
+            $query->where(function ($q) {
+                $q->whereNotIn('workflow_preset_type', ['internal_job', 'sponsorship'])
+                  ->orWhereNull('workflow_preset_type');
+            });
         }
 
         // 2. Apply "Sub-Tab" filtering (Status Groups)
@@ -219,7 +233,7 @@ class EnquiryController extends Controller
             $subStatus = $request->sub_status;
             
             if ($subStatus === 'new' || $subStatus === 'pipeline') {
-                $query->whereNotIn('status', array_merge($activeProjectStatuses, $completedStatuses));
+                $query->whereNotIn('status', array_merge($activeProjectStatuses, $closedStatuses));
             } elseif ($subStatus === 'in_progress_active' || $subStatus === 'active') {
                 $query->whereIn('status', $activeProjectStatuses);
             } elseif ($subStatus === 'completed' || $subStatus === 'finished') {
