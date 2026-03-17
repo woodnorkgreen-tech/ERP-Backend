@@ -148,13 +148,33 @@ class ProcurementStoresController extends Controller
             'material_id' => 'required|exists:library_materials,id',
             'min_stock_level' => 'nullable|numeric|min:0',
             'location_bin' => 'nullable|string|max:50',
-            'warehouse_code' => 'nullable|string|max:20'
+            'warehouse_code' => 'nullable|string|max:20',
+            'quantity_on_hand' => 'nullable|numeric|min:0'
         ]);
 
         $stock = \App\Modules\ProcurementStores\Models\Stock::firstOrCreate(
             ['material_id' => $request->material_id],
             ['quantity_on_hand' => 0, 'quantity_reserved' => 0]
         );
+
+        // Process direct quantity adjustment
+        if ($request->has('quantity_on_hand')) {
+            $newQuantity = (float)$request->quantity_on_hand;
+            $currentQuantity = (float)$stock->quantity_on_hand;
+            
+            if ($newQuantity !== $currentQuantity) {
+                $difference = $newQuantity - $currentQuantity;
+                $service = new \App\Modules\ProcurementStores\Services\InventoryService();
+                $service->adjustStock(
+                    $request->material_id, 
+                    $difference, 
+                    'adjustment', 
+                    ['notes' => 'Manual balance adjustment via inventory catalog']
+                );
+                // Refresh stock instance after adjustment
+                $stock->refresh();
+            }
+        }
 
         if ($request->has('min_stock_level')) {
             $stock->min_stock_level = $request->min_stock_level;
