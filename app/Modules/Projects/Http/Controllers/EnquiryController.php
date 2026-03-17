@@ -204,6 +204,8 @@ class EnquiryController extends Controller
             $query->whereIn('status', $completedOnlyStatuses);
         } else if ($view === 'canceled' || $view === 'cancelled') {
             $query->whereIn('status', $cancelledStatuses);
+        } else if ($view === 'awaiting_deposit') {
+            $query->where('status', 'awaiting_deposit');
         } else if ($view === 'projects') {
             // Active projects only — after Finance Gate has released them
             $query->whereIn('status', $activeProjectStatuses);
@@ -211,9 +213,8 @@ class EnquiryController extends Controller
             // Finance Billing & Deposits: needs awaiting_deposit + active + completed
             $query->whereIn('status', $receivableStatuses);
         } else {
-            // Default Enquiries pipeline: everything not yet a project, not closed
-            // awaiting_deposit is included here — quote is approved but Finance Gate hasn't released yet
-            $query->whereNotIn('status', array_merge($activeProjectStatuses, $closedStatuses));
+            // Default Enquiries pipeline: everything not yet a project, not closed, NOT awaiting deposit
+            $query->whereNotIn('status', array_merge($activeProjectStatuses, $closedStatuses, ['awaiting_deposit']));
         }
 
         // Apply Global Non-Profit Filter
