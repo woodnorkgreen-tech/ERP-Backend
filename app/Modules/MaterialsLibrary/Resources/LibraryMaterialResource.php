@@ -29,6 +29,7 @@ class LibraryMaterialResource extends JsonResource
             'attributes' => ($this->attributes && isset($this->attributes['attributes'])) ? $this->attributes['attributes'] : [],
             'is_active' => $this->is_active,
             'notes' => $this->notes,
+            'quantity_on_hand' => $this->stock ? (float) $this->stock->quantity_on_hand : 0,
             'created_by' => $this->created_by,
             'updated_by' => $this->updated_by,
             'created_at' => $this->created_at,
