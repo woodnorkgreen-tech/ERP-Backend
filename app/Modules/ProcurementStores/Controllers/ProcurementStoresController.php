@@ -40,7 +40,7 @@ class ProcurementStoresController extends Controller
             $query->where('category', 'like', "%{$request->category}%");
         }
 
-        $materials = $query->get()->map(function ($material) {
+        $materials = $query->latest()->get()->map(function ($material) {
                 return [
                     'id' => $material->id,
                     'workstation_id' => $material->workstation_id,
@@ -56,6 +56,7 @@ class ProcurementStoresController extends Controller
                     'attributes' => $material->attributes ?? [],
                     'is_active' => $material->is_active,
                     'notes' => $material->notes,
+                    'material_type' => $material->material_type ?? 'consumable',
                     // Default to 0 if no stock record exists yet
                     'quantity_on_hand' => (float)($material->stock ? $material->stock->quantity_on_hand : 0),
                     'quantity_reserved' => (float)($material->stock ? $material->stock->quantity_reserved : 0),
@@ -81,8 +82,9 @@ class ProcurementStoresController extends Controller
             'quantity' => 'required|numeric|min:0.01',
             'warehouse_code' => 'sometimes|string',
             'location' => 'nullable|string',
-            'reference_no' => 'nullable|string',
-            'notes' => 'nullable|string'
+            'notes' => 'nullable|string',
+            'usage_type' => 'nullable|string|in:consumable,reusable',
+            'type' => 'nullable|string'
         ]);
 
         $service = new \App\Modules\ProcurementStores\Services\InventoryService();
@@ -313,6 +315,7 @@ class ProcurementStoresController extends Controller
             'items.*.quantity' => 'required|numeric|min:0.01',
             'items.*.reference_no' => 'nullable|string',
             'items.*.notes' => 'nullable|string',
+            'items.*.usage_type' => 'nullable|string|in:consumable,reusable',
             'items.*.requestor' => 'nullable|string',
             'project_id' => 'nullable|exists:projects,id',
         ]);
@@ -463,11 +466,61 @@ class ProcurementStoresController extends Controller
             }
 
             $log->delete();
-
-            return response()->json([
-                'message' => 'Inventory log deleted and stock reverted successfully',
-                'status' => 'success'
-            ]);
-        });
-    }
-}
+ 
+             return response()->json([
+                 'message' => 'Inventory log deleted and stock reverted successfully',
+                 'status' => 'success'
+             ]);
+         });
+     }
+ 
+     /**
+      * Get outstanding reusable items by project
+      */
+     public function outstandingReusables(): JsonResponse
+     {
+         $logs = \App\Modules\ProcurementStores\Models\InventoryLog::with(['material', 'project.enquiry'])
+             ->where('usage_type', 'reusable')
+             ->whereIn('type', ['check_out', 'return'])
+             ->get();
+ 
+         $outstanding = $logs->groupBy('project_id')
+             ->map(function ($projectLogs, $projectId) {
+                 if (!$projectId) return null;
+                 
+                 $project = $projectLogs->first()->project;
+                 if (!$project) return null;
+ 
+                 $materials = $projectLogs->groupBy('material_id')->map(function ($materialLogs, $materialId) {
+                     $material = $materialLogs->first()->material;
+                     if (!$material) return null;
+ 
+                     $issued = abs($materialLogs->where('type', 'check_out')->sum('quantity'));
+                     $returned = (float) $materialLogs->where('type', 'return')->sum('quantity');
+                     $balance = $issued - $returned;
+                     
+                     return $balance > 0 ? [
+                         'material_id' => $materialId,
+                         'material_name' => $material->material_name,
+                         'material_code' => $material->material_code,
+                         'unit' => $material->unit_of_measure,
+                         'issued' => $issued,
+                         'returned' => $returned,
+                         'balance' => $balance
+                     ] : null;
+                 })->filter()->values();
+ 
+                 return $materials->count() > 0 ? [
+                     'project_id' => $projectId,
+                     'project_code' => $project->project_id ?? 'N/A',
+                     'project_title' => $project->enquiry?->title ?? 'N/A',
+                     'items' => $materials
+                 ] : null;
+             })->filter()->values();
+ 
+         return response()->json([
+             'data' => $outstanding,
+             'status' => 'success'
+         ]);
+     }
+ }

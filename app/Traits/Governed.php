@@ -58,9 +58,16 @@ trait Governed
             return ProjectEnquiry::find($this->enquiry_id);
         }
 
-        // Case 2: Model has project_id (linked to an enquiry)
+        // Case 2: Model has project relationship (e.g. InventoryLog)
+        if (method_exists($this, 'project')) {
+            $project = $this->project;
+            if ($project && $project instanceof \App\Models\Project) {
+                return $project->enquiry;
+            }
+        }
+
+        // Case 3: Model has project_id (linked to an enquiry for legacy models)
         if (isset($this->project_id) && $this->project_id) {
-            // Some models use project_id to point to the enquiry table
             return ProjectEnquiry::find($this->project_id);
         }
 

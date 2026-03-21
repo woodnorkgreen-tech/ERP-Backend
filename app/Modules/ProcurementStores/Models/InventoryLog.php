@@ -27,7 +27,8 @@ class InventoryLog extends Model
         'project_id',
         'supplier_id',
         'reference_no',
-        'notes'
+        'notes',
+        'usage_type'
     ];
 
     protected $casts = [

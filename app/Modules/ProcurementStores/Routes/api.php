@@ -21,6 +21,7 @@ Route::post('/returns', [ProcurementStoresController::class, 'returns']);
 Route::post('/defective', [ProcurementStoresController::class, 'markDefective']);
 Route::get('/inventory-logs', [ProcurementStoresController::class, 'inventoryLogs']);
 Route::get('/inventory-logs/pdf', [ProcurementStoresController::class, 'inventoryLogsPdf']);
+Route::get('/outstanding-reusables', [ProcurementStoresController::class, 'outstandingReusables']);
 Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'destroyLog']);
 
 // Suppliers

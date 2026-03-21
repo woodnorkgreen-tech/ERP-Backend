@@ -25,6 +25,7 @@ class LibraryMaterial extends Model
         'material_name',
         'category',
         'subcategory',
+        'material_type',
         'unit_of_measure',
         'unit_cost',
         'attributes',
