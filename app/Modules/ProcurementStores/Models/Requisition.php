@@ -5,11 +5,11 @@ namespace App\Modules\ProcurementStores\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-use App\Traits\Governed;
+
 
 class Requisition extends Model
 {
-    use HasFactory, Governed;
+    use HasFactory;
 
     protected $connection = 'mysql';
 
