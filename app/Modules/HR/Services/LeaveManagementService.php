@@ -19,10 +19,12 @@ class LeaveManagementService
             [
                 'name' => 'Annual Leave',
                 'code' => 'ANNUAL',
-                'days_per_year' => 20,
+                'days_per_year' => 21,
+                'monthly_accrual_rate' => 1.75,
+                'allow_advance' => true,
                 'color' => 'emerald',
                 'icon' => 'mdi-palm-tree',
-                'description' => 'Standard annual leave entitlement.',
+                'description' => 'Kenya statutory minimum annual leave: 21 working days, earned at 1.75 days per completed month.',
                 'is_active' => true,
                 'requires_attachment' => false,
             ],
@@ -30,9 +32,11 @@ class LeaveManagementService
                 'name' => 'Maternity Leave',
                 'code' => 'MATERNITY',
                 'days_per_year' => 90,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'amber',
                 'icon' => 'mdi-baby-carriage',
-                'description' => 'Leave for maternity and post-delivery recovery.',
+                'description' => 'Kenya statutory maternity leave: 3 months with full pay.',
                 'is_active' => true,
                 'requires_attachment' => true,
             ],
@@ -40,29 +44,59 @@ class LeaveManagementService
                 'name' => 'Paternity Leave',
                 'code' => 'PATERNITY',
                 'days_per_year' => 14,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'green',
                 'icon' => 'mdi-human-male-child',
-                'description' => 'Leave for fathers after childbirth.',
+                'description' => 'Kenya statutory paternity leave: 2 weeks with full pay.',
                 'is_active' => true,
                 'requires_attachment' => true,
             ],
             [
                 'name' => 'Sick Leave',
                 'code' => 'SICK',
-                'days_per_year' => 10,
+                'days_per_year' => 14,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'blue',
                 'icon' => 'mdi-medical-bag',
-                'description' => 'Leave for illness or medical recovery.',
+                'description' => 'Kenya statutory sick leave baseline: 7 days full pay and 7 days half pay after two months of service.',
                 'is_active' => true,
                 'requires_attachment' => true,
             ],
             [
+                'name' => 'Special Leave',
+                'code' => 'SPECIAL',
+                'days_per_year' => 7,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
+                'color' => 'purple',
+                'icon' => 'mdi-heart-outline',
+                'description' => 'Leave for special circumstances such as compassionate leave, family emergencies, or other personal matters. Requires explanation of the reason.',
+                'is_active' => true,
+                'requires_attachment' => true,
+            ],
+            [
+                'name' => 'Compensatory Leave',
+                'code' => 'COMPENSATORY',
+                'days_per_year' => 0,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
+                'color' => 'orange',
+                'icon' => 'mdi-clock-outline',
+                'description' => 'Time off in lieu of overtime worked or work performed on holidays/weekends. Requires explanation of the work being compensated.',
+                'is_active' => true,
+                'requires_attachment' => false,
+            ],
+            [
                 'name' => 'Unpaid Leave',
                 'code' => 'UNPAID',
-                'days_per_year' => 30,
+                'days_per_year' => 0,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'slate',
                 'icon' => 'mdi-cash-remove',
-                'description' => 'Approved leave taken without pay.',
+                'description' => 'Policy-controlled unpaid leave. No statutory monthly accrual.',
                 'is_active' => true,
                 'requires_attachment' => false,
             ],
@@ -100,7 +134,7 @@ class LeaveManagementService
 
     public function canManage(User $user): bool
     {
-        return $user->hasRole(['Super Admin', 'Admin', 'HR', 'Manager'])
+        return $user->hasRole(['Super Admin', 'Admin', 'HR', 'Manager', 'Lead'])
             || $user->can('leave.request.approve')
             || $user->can('leave.type.update');
     }
@@ -193,11 +227,20 @@ class LeaveManagementService
     {
         return LeaveType::query()
             ->where('is_active', true)
+            ->where('code', '!=', 'UNPAID')
             ->orderBy('name')
             ->get()
             ->map(function (LeaveType $leaveType) use ($employee, $year) {
                 $usedDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_APPROVED]);
                 $pendingDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_PENDING]);
+                $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year);
+                $accruedRemaining = max($metrics['earned_days'] - ($usedDays + $pendingDays), 0);
+                $requestableDays = $leaveType->allow_advance
+                    ? max($metrics['year_entitlement_days'] - ($usedDays + $pendingDays), 0)
+                    : $accruedRemaining;
+                $advanceAvailableDays = $leaveType->allow_advance
+                    ? max($requestableDays - $accruedRemaining, 0)
+                    : 0;
 
                 return [
                     'leave_type_id' => $leaveType->id,
@@ -205,10 +248,14 @@ class LeaveManagementService
                     'code' => $leaveType->code,
                     'color' => $leaveType->color,
                     'icon' => $leaveType->icon,
-                    'allocated_days' => $leaveType->days_per_year,
+                    'allocated_days' => $metrics['year_entitlement_days'],
+                    'earned_days' => $metrics['earned_days'],
                     'used_days' => $usedDays,
                     'pending_days' => $pendingDays,
-                    'available_days' => max($leaveType->days_per_year - $usedDays, 0),
+                    'available_days' => $accruedRemaining,
+                    'requestable_days' => $requestableDays,
+                    'advance_available_days' => $advanceAvailableDays,
+                    'allow_advance' => (bool) $leaveType->allow_advance,
                 ];
             })
             ->values();
@@ -240,11 +287,26 @@ class LeaveManagementService
         ];
     }
 
-    public function ensureBalanceAvailable(Employee $employee, LeaveType $leaveType, float $daysRequested, int $year, ?int $ignoreRequestId = null): void
+    public function ensureBalanceAvailable(
+        Employee $employee,
+        LeaveType $leaveType,
+        float $daysRequested,
+        int $year,
+        ?int $ignoreRequestId = null,
+        string|Carbon|null $asOfDate = null
+    ): void
     {
         $approved = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_APPROVED], $ignoreRequestId);
         $pending = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_PENDING], $ignoreRequestId);
-        $remaining = $leaveType->days_per_year - ($approved + $pending);
+
+        if ($leaveType->code === 'UNPAID') {
+            return;
+        }
+
+        $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year, $asOfDate);
+        $remaining = $leaveType->allow_advance
+            ? $metrics['year_entitlement_days'] - ($approved + $pending)
+            : $metrics['earned_days'] - ($approved + $pending);
 
         if ($daysRequested > $remaining) {
             throw new \InvalidArgumentException(sprintf(
@@ -255,6 +317,65 @@ class LeaveManagementService
                 $year
             ));
         }
+    }
+
+    protected function getLeaveEntitlementMetrics(
+        Employee $employee,
+        LeaveType $leaveType,
+        int $year,
+        string|Carbon|null $asOfDate = null
+    ): array
+    {
+        if (!$leaveType->monthly_accrual_rate) {
+            return [
+                'year_entitlement_days' => (float) $leaveType->days_per_year,
+                'earned_days' => (float) $leaveType->days_per_year,
+            ];
+        }
+
+        $yearStart = Carbon::create($year, 1, 1)->startOfDay();
+        $yearEnd = Carbon::create($year, 12, 31)->endOfDay();
+        $hireDate = $employee->hire_date
+            ? ($employee->hire_date instanceof Carbon
+                ? $employee->hire_date->copy()->startOfDay()
+                : Carbon::parse($employee->hire_date)->startOfDay())
+            : $yearStart->copy();
+
+        if ($hireDate->gt($yearEnd)) {
+            return [
+                'year_entitlement_days' => 0.0,
+                'earned_days' => 0.0,
+            ];
+        }
+
+        $accrualStart = $hireDate->greaterThan($yearStart) ? $hireDate : $yearStart;
+        $effectiveAsOf = $asOfDate instanceof Carbon
+            ? $asOfDate->copy()->endOfDay()
+            : ($asOfDate ? Carbon::parse($asOfDate)->endOfDay() : now()->endOfDay());
+
+        $eligibleMonthsInYear = $this->countInclusiveMonths($accrualStart, $yearEnd);
+        $earnedMonths = $effectiveAsOf->lt($accrualStart)
+            ? 0
+            : min($eligibleMonthsInYear, $this->countInclusiveMonths($accrualStart, $effectiveAsOf));
+
+        $yearEntitlement = min((float) $leaveType->days_per_year, $eligibleMonthsInYear * (float) $leaveType->monthly_accrual_rate);
+        $earnedDays = min($yearEntitlement, $earnedMonths * (float) $leaveType->monthly_accrual_rate);
+
+        return [
+            'year_entitlement_days' => round($yearEntitlement, 2),
+            'earned_days' => round($earnedDays, 2),
+        ];
+    }
+
+    protected function countInclusiveMonths(Carbon $startDate, Carbon $endDate): int
+    {
+        if ($endDate->lt($startDate)) {
+            return 0;
+        }
+
+        return (($endDate->year - $startDate->year) * 12)
+            + ($endDate->month - $startDate->month)
+            + 1;
     }
 
     public function getContactEmployees(User $user): Collection

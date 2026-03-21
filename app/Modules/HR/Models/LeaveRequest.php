@@ -28,6 +28,7 @@ class LeaveRequest extends Model
         'session',
         'status',
         'reason',
+        'explanation',
         'handover_notes',
         'attachment_path',
         'review_notes',

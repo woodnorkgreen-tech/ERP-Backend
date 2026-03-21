@@ -17,7 +17,7 @@ class MaterialController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = LibraryMaterial::with('workstation');
+        $query = LibraryMaterial::with(['workstation', 'stock']);
 
         if ($request->boolean('with_trashed')) {
             $query->withTrashed();
@@ -44,7 +44,7 @@ class MaterialController extends Controller
     public function byWorkstation($workstationId, Request $request): JsonResponse
     {
         try {
-            $query = LibraryMaterial::with('workstation')
+            $query = LibraryMaterial::with(['workstation', 'stock'])
                 ->where('workstation_id', $workstationId);
 
             if ($request->boolean('with_trashed')) {
@@ -86,6 +86,15 @@ class MaterialController extends Controller
         }
 
         $material = LibraryMaterial::create($data);
+        
+        if (isset($data['quantity'])) {
+            $material->stock()->create([
+                'quantity_on_hand' => $data['quantity'],
+                'warehouse_code' => 'MAIN', // Default warehouse or could be configurable
+            ]);
+        }
+
+        $material->load('stock'); // Reload with stock
 
         return response()->json([
             'message' => 'Material created successfully',
@@ -98,7 +107,7 @@ class MaterialController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $material = LibraryMaterial::with('workstation')->findOrFail($id);
+        $material = LibraryMaterial::with(['workstation', 'stock'])->findOrFail($id);
         return response()->json([
             'data' => new LibraryMaterialResource($material)
         ]);
@@ -121,6 +130,15 @@ class MaterialController extends Controller
         }
 
         $material->update($data);
+
+        if (isset($data['quantity'])) {
+            $material->stock()->updateOrCreate(
+                ['material_id' => $material->id],
+                ['quantity_on_hand' => $data['quantity']]
+            );
+        }
+
+        $material->load('stock');
 
         return response()->json([
             'message' => 'Material updated successfully',
@@ -146,7 +164,7 @@ class MaterialController extends Controller
      */
     public function trashed(Request $request): JsonResponse
     {
-        $query = LibraryMaterial::onlyTrashed()->with('workstation');
+        $query = LibraryMaterial::onlyTrashed()->with(['workstation', 'stock']);
 
         if ($request->has('search')) {
             $query->search((string) $request->search);

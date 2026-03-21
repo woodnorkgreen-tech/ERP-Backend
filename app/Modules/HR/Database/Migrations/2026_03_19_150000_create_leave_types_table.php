@@ -14,6 +14,8 @@ return new class extends Migration
             $table->string('name');
             $table->string('code')->unique();
             $table->unsignedSmallInteger('days_per_year')->default(0);
+            $table->decimal('monthly_accrual_rate', 4, 2)->nullable();
+            $table->boolean('allow_advance')->default(false);
             $table->string('color', 32)->default('slate');
             $table->string('icon', 64)->nullable();
             $table->text('description')->nullable();
@@ -28,10 +30,12 @@ return new class extends Migration
             [
                 'name' => 'Annual Leave',
                 'code' => 'ANNUAL',
-                'days_per_year' => 20,
+                'days_per_year' => 21,
+                'monthly_accrual_rate' => 1.75,
+                'allow_advance' => true,
                 'color' => 'emerald',
                 'icon' => 'mdi-palm-tree',
-                'description' => 'Standard annual leave entitlement.',
+                'description' => 'Kenya statutory minimum annual leave: 21 working days, earned at 1.75 days per completed month.',
                 'is_active' => true,
                 'requires_attachment' => false,
                 'created_at' => now(),
@@ -40,10 +44,12 @@ return new class extends Migration
             [
                 'name' => 'Sick Leave',
                 'code' => 'SICK',
-                'days_per_year' => 10,
+                'days_per_year' => 14,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'blue',
                 'icon' => 'mdi-medical-bag',
-                'description' => 'Leave for illness or medical recovery.',
+                'description' => 'Kenya statutory sick leave baseline: 7 days full pay and 7 days half pay after two months of service.',
                 'is_active' => true,
                 'requires_attachment' => true,
                 'created_at' => now(),
@@ -53,9 +59,11 @@ return new class extends Migration
                 'name' => 'Maternity Leave',
                 'code' => 'MATERNITY',
                 'days_per_year' => 90,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'amber',
                 'icon' => 'mdi-baby-carriage',
-                'description' => 'Leave for maternity and post-delivery recovery.',
+                'description' => 'Kenya statutory maternity leave: 3 months with full pay.',
                 'is_active' => true,
                 'requires_attachment' => true,
                 'created_at' => now(),
@@ -65,9 +73,11 @@ return new class extends Migration
                 'name' => 'Paternity Leave',
                 'code' => 'PATERNITY',
                 'days_per_year' => 14,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'green',
                 'icon' => 'mdi-human-male-child',
-                'description' => 'Leave for fathers after childbirth.',
+                'description' => 'Kenya statutory paternity leave: 2 weeks with full pay.',
                 'is_active' => true,
                 'requires_attachment' => true,
                 'created_at' => now(),
@@ -76,10 +86,12 @@ return new class extends Migration
             [
                 'name' => 'Unpaid Leave',
                 'code' => 'UNPAID',
-                'days_per_year' => 30,
+                'days_per_year' => 0,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'slate',
                 'icon' => 'mdi-cash-remove',
-                'description' => 'Approved leave taken without pay.',
+                'description' => 'Policy-controlled unpaid leave. No statutory monthly accrual.',
                 'is_active' => true,
                 'requires_attachment' => false,
                 'created_at' => now(),

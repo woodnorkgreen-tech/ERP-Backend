@@ -99,6 +99,7 @@ class LeaveRequestController extends Controller
             'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'session' => ['required', Rule::in(['full_day', 'first_half', 'second_half'])],
             'reason' => ['required', 'string'],
+            'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
             'attachment_path' => ['nullable', 'string', 'max:255'],
         ]);
@@ -115,7 +116,14 @@ class LeaveRequestController extends Controller
             $validated['end_date'],
             $validated['session']
         );
-        $this->leaveService->ensureBalanceAvailable($employee, $leaveType, $daysRequested, (int) date('Y', strtotime($validated['start_date'])));
+        $this->leaveService->ensureBalanceAvailable(
+            $employee,
+            $leaveType,
+            $daysRequested,
+            (int) date('Y', strtotime($validated['start_date'])),
+            null,
+            $validated['start_date']
+        );
 
         $leaveRequest = LeaveRequest::create([
             'employee_id' => $employee->id,
@@ -128,6 +136,7 @@ class LeaveRequestController extends Controller
             'session' => $validated['session'],
             'status' => LeaveRequest::STATUS_PENDING,
             'reason' => $validated['reason'],
+            'explanation' => $validated['explanation'] ?? null,
             'handover_notes' => $validated['handover_notes'] ?? null,
             'attachment_path' => $validated['attachment_path'] ?? null,
         ]);
@@ -142,9 +151,10 @@ class LeaveRequestController extends Controller
     public function update(Request $request, LeaveRequest $leaveRequest): JsonResponse
     {
         $user = $request->user();
+        $canManage = $this->leaveService->canManage($user);
         $this->authorizeAccessToRequest($user, $leaveRequest, allowManage: true);
 
-        if ($leaveRequest->status !== LeaveRequest::STATUS_PENDING && !$this->leaveService->canManage($user)) {
+        if ($leaveRequest->status !== LeaveRequest::STATUS_PENDING && !$canManage) {
             return response()->json([
                 'success' => false,
                 'message' => 'Only pending requests can be edited.',
@@ -158,8 +168,10 @@ class LeaveRequestController extends Controller
             'end_date' => ['sometimes', 'required', 'date', 'after_or_equal:start_date'],
             'session' => ['sometimes', 'required', Rule::in(['full_day', 'first_half', 'second_half'])],
             'reason' => ['sometimes', 'required', 'string'],
+            'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
             'attachment_path' => ['nullable', 'string', 'max:255'],
+            'review_notes' => ['nullable', 'string'],
             'status' => ['sometimes', Rule::in([
                 LeaveRequest::STATUS_PENDING,
                 LeaveRequest::STATUS_APPROVED,
@@ -167,6 +179,27 @@ class LeaveRequestController extends Controller
                 LeaveRequest::STATUS_CANCELLED,
             ])],
         ]);
+
+        if (array_key_exists('status', $validated) && !$canManage) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only managers can change request status directly.',
+            ], 403);
+        }
+
+        if (
+            array_key_exists('status', $validated)
+            && in_array($validated['status'], [LeaveRequest::STATUS_REJECTED, LeaveRequest::STATUS_CANCELLED], true)
+            && blank($validated['review_notes'] ?? null)
+        ) {
+            return response()->json([
+                'success' => false,
+                'message' => 'A reason is required when rejecting or cancelling a leave request.',
+                'errors' => [
+                    'review_notes' => ['A reason is required when rejecting or cancelling a leave request.'],
+                ],
+            ], 422);
+        }
 
         $startDate = $validated['start_date'] ?? $leaveRequest->start_date?->toDateString();
         $endDate = $validated['end_date'] ?? $leaveRequest->end_date?->toDateString();
@@ -185,10 +218,21 @@ class LeaveRequestController extends Controller
             $leaveType,
             $daysRequested,
             (int) date('Y', strtotime($startDate)),
-            $leaveRequest->id
+            $leaveRequest->id,
+            $startDate
         );
 
-        $leaveRequest->update(array_merge($validated, [
+        $statusAttributes = [];
+        if (array_key_exists('status', $validated)) {
+            $statusAttributes = $this->statusTransitionAttributes(
+                $leaveRequest,
+                $validated['status'],
+                $user->id,
+                $validated['review_notes'] ?? $leaveRequest->review_notes
+            );
+        }
+
+        $leaveRequest->update(array_merge($validated, $statusAttributes, [
             'days_requested' => $daysRequested,
             'start_date' => $startDate,
             'end_date' => $endDate,
@@ -224,6 +268,16 @@ class LeaveRequestController extends Controller
             ], 422);
         }
 
+        if (blank($request->input('review_notes'))) {
+            return response()->json([
+                'success' => false,
+                'message' => 'A reason is required when cancelling a leave request.',
+                'errors' => [
+                    'review_notes' => ['A reason is required when cancelling a leave request.'],
+                ],
+            ], 422);
+        }
+
         $leaveRequest->update([
             'status' => LeaveRequest::STATUS_CANCELLED,
             'cancelled_at' => now(),
@@ -254,6 +308,16 @@ class LeaveRequestController extends Controller
             'review_notes' => ['nullable', 'string'],
         ]);
 
+        if ($status === LeaveRequest::STATUS_REJECTED && blank($validated['review_notes'] ?? null)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'A reason is required when rejecting a leave request.',
+                'errors' => [
+                    'review_notes' => ['A reason is required when rejecting a leave request.'],
+                ],
+            ], 422);
+        }
+
         $leaveRequest->update([
             'status' => $status,
             'approved_by' => $request->user()->id,
@@ -266,6 +330,47 @@ class LeaveRequestController extends Controller
             'message' => $message,
             'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'contactEmployee.department']),
         ]);
+    }
+
+    protected function statusTransitionAttributes(
+        LeaveRequest $leaveRequest,
+        string $status,
+        int $actorId,
+        ?string $reviewNotes = null
+    ): array {
+        return match ($status) {
+            LeaveRequest::STATUS_PENDING => [
+                'status' => LeaveRequest::STATUS_PENDING,
+                'approved_by' => null,
+                'approved_at' => null,
+                'cancelled_at' => null,
+                'review_notes' => $reviewNotes,
+            ],
+            LeaveRequest::STATUS_APPROVED => [
+                'status' => LeaveRequest::STATUS_APPROVED,
+                'approved_by' => $actorId,
+                'approved_at' => $leaveRequest->status === LeaveRequest::STATUS_APPROVED && $leaveRequest->approved_at
+                    ? $leaveRequest->approved_at
+                    : now(),
+                'cancelled_at' => null,
+                'review_notes' => $reviewNotes,
+            ],
+            LeaveRequest::STATUS_REJECTED => [
+                'status' => LeaveRequest::STATUS_REJECTED,
+                'approved_by' => $actorId,
+                'approved_at' => null,
+                'cancelled_at' => null,
+                'review_notes' => $reviewNotes,
+            ],
+            LeaveRequest::STATUS_CANCELLED => [
+                'status' => LeaveRequest::STATUS_CANCELLED,
+                'cancelled_at' => $leaveRequest->status === LeaveRequest::STATUS_CANCELLED && $leaveRequest->cancelled_at
+                    ? $leaveRequest->cancelled_at
+                    : now(),
+                'review_notes' => $reviewNotes,
+            ],
+            default => [],
+        };
     }
 
     protected function resolveTargetEmployee($user, ?int $employeeId): Employee

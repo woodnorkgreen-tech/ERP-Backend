@@ -392,6 +392,60 @@ class ProcurementStoresController extends Controller
     }
 
     /**
+     * Export movement logs to PDF with filtering
+     */
+    public function inventoryLogsPdf(\Illuminate\Http\Request $request)
+    {
+        $query = \App\Modules\ProcurementStores\Models\InventoryLog::with(['material', 'user', 'project.enquiry']);
+
+        // Apply filters (same as inventoryLogs)
+        if ($request->filled('type')) {
+            $query->where('type', $request->type);
+        }
+
+        if ($request->filled('material_id')) {
+            $query->where('material_id', $request->material_id);
+        }
+
+        if ($request->filled('project_id')) {
+            $query->where('project_id', $request->project_id);
+        }
+
+        // Apply Search (Matches frontend filteredLogs logic)
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('batch_number', 'like', "%{$search}%")
+                  ->orWhereHas('material', function($mq) use ($search) {
+                      $mq->where('material_name', 'like', "%{$search}%")
+                         ->orWhere('material_code', 'like', "%{$search}%");
+                  })
+                  ->orWhereHas('project', function($pq) use ($search) {
+                      $pq->where('project_id', 'like', "%{$search}%");
+                  });
+            });
+        }
+
+        // Apply Date Filters
+        if ($request->filled('start_date')) {
+            $query->whereDate('created_at', '>=', $request->start_date);
+        }
+        if ($request->filled('end_date')) {
+            $query->whereDate('created_at', '<=', $request->end_date);
+        }
+
+        $logs = $query->orderBy('created_at', 'desc')->get();
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.inventory-logs', [
+            'logs' => $logs,
+            'filters' => $request->all()
+        ]);
+
+        $fileName = 'inventory-movement-report-' . now()->format('Y-m-d') . '.pdf';
+        return $pdf->download($fileName);
+    }
+
+    /**
      * Delete an inventory log and revert the stock adjustment.
      */
     public function destroyLog($id): JsonResponse

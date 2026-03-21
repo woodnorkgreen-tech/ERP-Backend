@@ -32,6 +32,7 @@ class StoreMaterialRequest extends FormRequest
             'attributes' => 'nullable|array',
             'is_active' => 'boolean',
             'notes' => 'nullable|string',
+            'quantity' => 'nullable|numeric|min:0',
         ];
     }
 }

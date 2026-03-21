@@ -14,6 +14,8 @@ class LeaveType extends Model
         'name',
         'code',
         'days_per_year',
+        'monthly_accrual_rate',
+        'allow_advance',
         'color',
         'icon',
         'description',
@@ -24,6 +26,8 @@ class LeaveType extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'requires_attachment' => 'boolean',
+        'monthly_accrual_rate' => 'decimal:2',
+        'allow_advance' => 'boolean',
     ];
 
     public function requests(): HasMany
