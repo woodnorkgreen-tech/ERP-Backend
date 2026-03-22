@@ -102,10 +102,22 @@ class PettyCashRequisitionController extends Controller
                     'amount' => (clone $query)->where('status', 'pending')->sum('total_amount'),
                 ],
                 'approved' => [
-                    'count' => (clone $query)->where('status', 'approved')->count(),
-                    'amount' => (clone $query)->where('status', 'approved')->sum('total_amount'),
-                ],
-                'monthly' => [
+                'count' => (clone $query)->where('status', 'approved')->count(),
+                'amount' => (clone $query)->where('status', 'approved')->sum('total_amount'),
+            ],
+            'disbursed' => [
+                'count' => (clone $query)->where('status', 'disbursed')->count(),
+                'amount' => (clone $query)->where('status', 'disbursed')->sum('total_amount'),
+            ],
+            'received' => [
+                'count' => (clone $query)->where('status', 'received')->count(),
+                'amount' => (clone $query)->where('status', 'received')->sum('total_amount'),
+            ],
+            'rejected' => [
+                'count' => (clone $query)->where('status', 'rejected')->count(),
+                'amount' => (clone $query)->where('status', 'rejected')->sum('total_amount'),
+            ],
+            'monthly' => [
                     'count' => (clone $query)->whereMonth('created_at', now()->month)
                                            ->whereYear('created_at', now()->year)
                                            ->count(),
@@ -691,8 +703,7 @@ class PettyCashRequisitionController extends Controller
         
         // Fetch Projects and Enquiries
         $projects = Project::with('enquiry')
-            ->where('status', 'Planning')
-            ->orWhere('status', 'active')
+            ->whereIn('status', ['Planning', 'active', 'planning', 'Active', 'In Progress', 'in_progress'])
             ->get()
             ->map(function($p) {
                 $title = $p->enquiry->title ?? 'No Title';
@@ -705,6 +716,7 @@ class PettyCashRequisitionController extends Controller
             });
 
         $enquiries = ProjectEnquiry::select('id', 'title', 'enquiry_number')
+            ->whereDoesntHave('project') // Exclude those already converted to projects
             ->whereNotIn('status', ['lost', 'completed', 'quote_approved'])
             ->get()
             ->map(function($e) {
@@ -1051,7 +1063,7 @@ class PettyCashRequisitionController extends Controller
         
         // Fetch Projects and Enquiries (Only active ones for public)
         $projects = Project::with('enquiry')
-            ->whereIn('status', ['Planning', 'active'])
+            ->whereIn('status', ['Planning', 'active', 'planning', 'Active', 'In Progress', 'in_progress'])
             ->get()
             ->map(function($p) {
                 $title = $p->enquiry->title ?? 'No Title';
@@ -1064,6 +1076,7 @@ class PettyCashRequisitionController extends Controller
             });
 
         $enquiries = ProjectEnquiry::select('id', 'title', 'enquiry_number')
+            ->whereDoesntHave('project') // Exclude those already converted to projects
             ->whereNotIn('status', ['lost', 'completed', 'quote_approved'])
             ->get()
             ->map(function($e) {

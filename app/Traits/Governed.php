@@ -66,9 +66,10 @@ trait Governed
             }
         }
 
-        // Case 3: Model has project_id (linked to an enquiry for legacy models)
+        // Case 3: Model has project_id (linked to a Project model)
         if (isset($this->project_id) && $this->project_id) {
-            return ProjectEnquiry::find($this->project_id);
+            $project = \App\Models\Project::find($this->project_id);
+            return $project ? $project->enquiry : null;
         }
 
         // Case 3: Requisition relationship (for PurchaseOrders)

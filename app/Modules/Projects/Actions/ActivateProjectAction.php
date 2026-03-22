@@ -22,7 +22,7 @@ class ActivateProjectAction
         // 1. Mark status as planning (it's now officially a project)
         $enquiry->update(['status' => EnquiryConstants::STATUS_PLANNING]);
 
-        // 2. Automatically convert to a formal Project/Mission
+        // 2. Automatically convert to a formal Project
         $project = Project::firstOrCreate(
             ['enquiry_id' => $enquiry->id],
             [
@@ -59,7 +59,7 @@ class ActivateProjectAction
             $allUserIds = User::pluck('id');
             $notifData = [
                 'type' => 'project_activated',
-                'title' => 'New Mission Active',
+                'title' => 'New Project Active',
                 'message' => "Project {$enquiry->title} (#{$enquiry->job_number}) is officially live!",
                 'data' => $notifPayload,
                 'notifiable_type' => ProjectEnquiry::class,

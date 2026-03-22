@@ -792,7 +792,7 @@ class ProjectsDashboardService
                 'type' => 'operational',
                 'priority' => 'medium',
                 'title' => 'Execution Velocity',
-                'message' => "{$staleInProgress} active missions haven't reported progress in 48 hours. Check-in with production leads.",
+                'message' => "{$staleInProgress} active projects haven't reported progress in 48 hours. Check-in with production leads.",
                 'icon' => 'mdi-lightning-bolt-outline',
                 'action_label' => 'Track Progress',
                 'action_url' => '/projects/dashboard'
@@ -838,9 +838,9 @@ class ProjectsDashboardService
                     'type' => 'progression',
                     'priority' => 'medium',
                     'title' => 'Path to Next Stage: ' . $p->enquiry_number,
-                    'message' => "Mission is currently held in '{$p->status}'. Complete '{$criticalTask->title}' to trigger automatic progression to the next operational phase.",
+                    'message' => "Project is currently held in '{$p->status}'. Complete '{$criticalTask->title}' to trigger automatic progression to the next operational phase.",
                     'icon' => 'mdi-arrow-right-bold-circle-outline',
-                    'action_label' => 'View Mission',
+                    'action_label' => 'View Project',
                     'action_url' => "/projects/enquiries/{$p->id}"
                 ];
             }
