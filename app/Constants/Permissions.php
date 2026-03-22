@@ -46,6 +46,15 @@ class Permissions
     const EMPLOYEE_READ = 'employee.read';
     const EMPLOYEE_UPDATE = 'employee.update';
     const EMPLOYEE_DELETE = 'employee.delete';
+    const LEAVE_TYPE_CREATE = 'leave.type.create';
+    const LEAVE_TYPE_READ = 'leave.type.read';
+    const LEAVE_TYPE_UPDATE = 'leave.type.update';
+    const LEAVE_TYPE_DELETE = 'leave.type.delete';
+    const LEAVE_REQUEST_CREATE = 'leave.request.create';
+    const LEAVE_REQUEST_READ = 'leave.request.read';
+    const LEAVE_REQUEST_UPDATE = 'leave.request.update';
+    const LEAVE_REQUEST_APPROVE = 'leave.request.approve';
+    const LEAVE_REQUEST_DELETE = 'leave.request.delete';
 
     // ===========================================
     // PROJECT MANAGEMENT PERMISSIONS
@@ -196,6 +205,9 @@ class Permissions
 
             // Employee Management
             self::EMPLOYEE_CREATE, self::EMPLOYEE_READ, self::EMPLOYEE_UPDATE, self::EMPLOYEE_DELETE,
+            self::LEAVE_TYPE_CREATE, self::LEAVE_TYPE_READ, self::LEAVE_TYPE_UPDATE, self::LEAVE_TYPE_DELETE,
+            self::LEAVE_REQUEST_CREATE, self::LEAVE_REQUEST_READ, self::LEAVE_REQUEST_UPDATE,
+            self::LEAVE_REQUEST_APPROVE, self::LEAVE_REQUEST_DELETE,
 
             // Project Management
             self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
@@ -273,6 +285,9 @@ class Permissions
             ],
             'employee_management' => [
                 self::EMPLOYEE_CREATE, self::EMPLOYEE_READ, self::EMPLOYEE_UPDATE, self::EMPLOYEE_DELETE,
+                self::LEAVE_TYPE_CREATE, self::LEAVE_TYPE_READ, self::LEAVE_TYPE_UPDATE, self::LEAVE_TYPE_DELETE,
+                self::LEAVE_REQUEST_CREATE, self::LEAVE_REQUEST_READ, self::LEAVE_REQUEST_UPDATE,
+                self::LEAVE_REQUEST_APPROVE, self::LEAVE_REQUEST_DELETE,
             ],
             'project_management' => [
                 self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
