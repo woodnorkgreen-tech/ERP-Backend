@@ -16,11 +16,8 @@ class RequisitionNotificationService
         $approvers = User::whereHas('roles', function ($query) {
             $query->whereIn('name', [
                 'Super Admin',
-                'Admin',
                 'Finance',
                 'Accounts',
-                'Procurement',
-                'Manager',
             ]);
         })
         ->whereNotNull('onesignal_player_id')

@@ -13,7 +13,7 @@ use App\Modules\HR\Http\Controllers\EmployeeDocumentController;
 use App\Modules\HR\Http\Controllers\AnnouncementController;
 use App\Constants\Permissions;
 
-// Unprotected HR Routes
+// Unprotected HR Routes 
 Route::prefix('hr')->group(function () {
     // Employee management
     Route::apiResource('employees', EmployeeController::class);

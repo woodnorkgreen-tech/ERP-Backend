@@ -26,19 +26,19 @@ class CreateWorkOrdersForProjects extends Command
 
         $results = $alignmentService->createWorkOrdersForExistingProjects();
 
-        $this->info(" Results:");
+        $this->info("✅ Results:");
         $this->info("   - Created: {$results['created']} work orders");
         $this->info("   - Skipped: {$results['skipped']} projects (already had work orders)");
 
         if (!empty($results['errors'])) {
-            $this->error(" Errors:");
+            $this->error("❌ Errors:");
             foreach ($results['errors'] as $error) {
                 $this->error("   - $error");
             }
             return 1;
         }
 
-        $this->info(' Work order creation process completed successfully!');
+        $this->info('🎉 Work order creation process completed successfully!');
         return 0;
     }
 }

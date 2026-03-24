@@ -3,7 +3,9 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
-
+use App\Modules\HR\Http\Controllers\EmployeeController;
+use App\Modules\HR\Http\Controllers\DepartmentController;
+use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\Admin\Http\Controllers\UserController;
 use App\Modules\Admin\Http\Controllers\RoleController;
 use App\Modules\Admin\Http\Controllers\PermissionController;
@@ -87,7 +89,26 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
+Route::prefix('hr')->group(function () {
+    // Employee management
+    Route::apiResource('employees', EmployeeController::class);
+    
+    // Department management
+    Route::get('departments', [DepartmentController::class, 'index']);
+    Route::post('departments', [DepartmentController::class, 'store']);
+    Route::get('departments/{department}', [DepartmentController::class, 'show']);
+    Route::put('departments/{department}', [DepartmentController::class, 'update']);
+    Route::patch('departments/{department}', [DepartmentController::class, 'update']);
+    Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
 
+    // Technical Labour Management
+    Route::get('technical-labour/template', [TechnicalLabourController::class, 'downloadTemplate']);
+    Route::post('technical-labour/import', [TechnicalLabourController::class, 'import']);
+    Route::get('technical-labour', [TechnicalLabourController::class, 'index']);
+    Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
+    Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
+    Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
+});
  
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
@@ -108,6 +129,11 @@ Route::post('/system/refresh', [App\Http\Controllers\SystemController::class, 't
     ->middleware(['auth:sanctum', 'active']);
 Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
+Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
+Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
+Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
+Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
+Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
@@ -208,7 +234,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 });
 
 //mobile app
-Route::get('/app-departments', [\App\Modules\HR\Http\Controllers\DepartmentController::class, 'index']);
+Route::get('/app-departments', [DepartmentController::class, 'index']);
 
 // Protected routes (require authentication)
 // Protected routes (require authentication)
@@ -235,6 +261,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         return response(['success' => true]);
     });
 
+    Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
+    Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
+    Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
+    Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
+    Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 
     // Event Calendar Routes
     // Get all events
@@ -264,7 +295,34 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         ]);
     });
 
+    // HR Module Routes
+    Route::prefix('hr')->group(function () {
+        // Employee management
+        Route::apiResource('employees', EmployeeController::class)->middleware([
+            'index' => 'permission:' . Permissions::EMPLOYEE_READ,
+            'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
+            'show' => 'permission:' . Permissions::EMPLOYEE_READ,
+            'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
+            'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
+        ]);
 
+        // Technical Labour management
+        Route::apiResource('technical-labour', App\Modules\HR\Http\Controllers\TechnicalLabourController::class);
+
+        // Department management
+        Route::get('departments', [DepartmentController::class, 'index'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
+        Route::post('departments', [DepartmentController::class, 'store'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_CREATE);
+        Route::get('departments/{department}', [DepartmentController::class, 'show'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
+        Route::put('departments/{department}', [DepartmentController::class, 'update'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
+        Route::patch('departments/{department}', [DepartmentController::class, 'update'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
+        Route::delete('departments/{department}', [DepartmentController::class, 'destroy'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_DELETE);
+    });
 
     // Admin Module Routes
     Route::prefix('admin')->group(function () {
