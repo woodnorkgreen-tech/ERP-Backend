@@ -131,12 +131,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('employees/{employeeId}/documents', [EmployeeDocumentController::class, 'store']);
         Route::get('employees/{employeeId}/documents/{documentId}/download', [EmployeeDocumentController::class, 'download']);
         Route::delete('employees/{employeeId}/documents/{documentId}', [EmployeeDocumentController::class, 'destroy']);
-
-        // Announcements
-        Route::get('announcements', [AnnouncementController::class, 'index']);
-        Route::post('announcements', [AnnouncementController::class, 'store']);
-        Route::post('announcements/read', [AnnouncementController::class, 'markAsRead']);
-        Route::get('announcements/unread-count', [AnnouncementController::class, 'unreadCount']);
-        Route::delete('announcements/{id}', [AnnouncementController::class, 'destroy']);
     });
+
+    // Announcements at root api/ level for Android app
+    Route::get('announcements', [AnnouncementController::class, 'index']);
+    Route::post('announcements', [AnnouncementController::class, 'store']);
+    Route::post('announcements/read', [AnnouncementController::class, 'markAsRead']);
+    Route::get('announcements/unread-count', [AnnouncementController::class, 'unreadCount']);
+    Route::delete('announcements/{id}', [AnnouncementController::class, 'destroy']);
 });
