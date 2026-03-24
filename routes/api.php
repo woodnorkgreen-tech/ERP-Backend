@@ -129,11 +129,6 @@ Route::post('/system/refresh', [App\Http\Controllers\SystemController::class, 't
     ->middleware(['auth:sanctum', 'active']);
 Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
-Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
-Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
-Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
-Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
-Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
@@ -261,11 +256,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         return response(['success' => true]);
     });
 
-    Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
-    Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
-    Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
-    Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
-    Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
 
     // Event Calendar Routes
     // Get all events

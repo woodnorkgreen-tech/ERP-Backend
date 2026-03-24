@@ -12,6 +12,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Trust all proxies — required for ngrok / reverse proxy setups
+        $middleware->prepend(\App\Http\Middleware\TrustProxies::class);
+
         $middleware->alias([
             'verified' => \App\Http\Middleware\EnsureEmailIsVerified::class,
             'department.access' => \App\Http\Middleware\CheckDepartmentAccess::class,

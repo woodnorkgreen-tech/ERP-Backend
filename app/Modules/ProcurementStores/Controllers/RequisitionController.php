@@ -24,7 +24,7 @@ class RequisitionController extends Controller
             return false;
         }
 
-        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts', 'Procurement Stores'];
         $userRoles = $user->roles->pluck('name')->toArray();
 
         foreach ($allowedRoles as $role) {

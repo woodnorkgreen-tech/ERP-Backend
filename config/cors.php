@@ -23,6 +23,7 @@ return [
     'https://www.woodnorkgreen.co.ke',
     'https://woodnorkgreen.co.ke',  // Without www
     'http://127.0.0.1:5173', // Alternative localhost format
+    //'https://abc123.ngrok-free.app',
 ],
 'allowed_origins_patterns' => [],
 'allowed_headers' => ['*'],

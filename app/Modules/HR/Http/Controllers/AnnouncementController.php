@@ -1,8 +1,9 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Modules\HR\Http\Controllers;
 
-use App\Models\Announcement;
+use App\Http\Controllers\Controller;
+use App\Modules\HR\Models\Announcement;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Department;
 use Illuminate\Http\Request;
