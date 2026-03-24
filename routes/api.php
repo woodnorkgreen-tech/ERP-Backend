@@ -3,9 +3,6 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
-use App\Modules\HR\Http\Controllers\EmployeeController;
-use App\Modules\HR\Http\Controllers\DepartmentController;
-use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\Admin\Http\Controllers\UserController;
 use App\Modules\Admin\Http\Controllers\RoleController;
 use App\Modules\Admin\Http\Controllers\PermissionController;
@@ -89,27 +86,7 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
-Route::prefix('hr')->group(function () {
-    // Employee management
-    Route::apiResource('employees', EmployeeController::class);
-    
-    // Department management
-    Route::get('departments', [DepartmentController::class, 'index']);
-    Route::post('departments', [DepartmentController::class, 'store']);
-    Route::get('departments/{department}', [DepartmentController::class, 'show']);
-    Route::put('departments/{department}', [DepartmentController::class, 'update']);
-    Route::patch('departments/{department}', [DepartmentController::class, 'update']);
-    Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
 
-    // Technical Labour Management
-    Route::get('technical-labour/template', [TechnicalLabourController::class, 'downloadTemplate']);
-    Route::post('technical-labour/import', [TechnicalLabourController::class, 'import']);
-    Route::get('technical-labour', [TechnicalLabourController::class, 'index']);
-    Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
-    Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
-    Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
-});
- 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware(['auth:sanctum', 'active']);
@@ -129,18 +106,41 @@ Route::post('/system/refresh', [App\Http\Controllers\SystemController::class, 't
     ->middleware(['auth:sanctum', 'active']);
 Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
-Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
-Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
-Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
-Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
-Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
-
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     // Action Logs
     Route::get('/logs/{type}/{id}', [App\Http\Controllers\ActionLogController::class, 'index']);
 
- Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
+    // Event Calendar Routes
+    // Get all events
+    Route::get('/events', 'App\Http\Controllers\EventController@index');
+    
+    // Get single event
+    Route::get('/events/{id}', 'App\Http\Controllers\EventController@show');
+    
+    // Save new event
+    Route::post('/events/save', 'App\Http\Controllers\EventController@save');
+    
+    // Update event
+    Route::post('/events/update', 'App\Http\Controllers\EventController@update');
+    
+    // Delete event
+    Route::post('/events/delete', 'App\Http\Controllers\EventController@delete');
+    
+    // Get events by date range
+    Route::post('/events/range', 'App\Http\Controllers\EventController@getByDateRange');
+
+    // User permissions and navigation
+    Route::get('/user/permissions', function () {
+        return response()->json([
+            'permissions' => auth()->user()->getNavigationPermissions(),
+            'user_permissions' => auth()->user()->getAllPermissions()->pluck('name')->toArray(),
+            'roles' => auth()->user()->roles->pluck('name'),
+            'departments' => auth()->user()->getAccessibleDepartments()
+        ]);
+    });
+
+    Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
         Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
         Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);
         
@@ -193,52 +193,44 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     });
 
 
-        // Task management routes
-        Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
-        Route::get('tasks/{taskId}', [TaskController::class, 'show']);
-        Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus'])->middleware(\App\Http\Middleware\EnsureFinancialClearance::class);
-        Route::put('tasks/{taskId}/assign', [TaskController::class, 'assignTask']);
-        Route::put('tasks/{taskId}', [TaskController::class, 'update']);
-        Route::get('enquiries/{enquiryId}/tasks', [TaskController::class, 'getEnquiryTasks']);
-        Route::get('all-enquiry-tasks', [TaskController::class, 'getAllEnquiryTasks']);
+    // Task management routes
+    Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
+    Route::get('tasks/{taskId}', [TaskController::class, 'show']);
+    Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus'])->middleware(\App\Http\Middleware\EnsureFinancialClearance::class);
+    Route::put('tasks/{taskId}/assign', [TaskController::class, 'assignTask']);
+    Route::put('tasks/{taskId}', [TaskController::class, 'update']);
+    Route::get('enquiries/{enquiryId}/tasks', [TaskController::class, 'getEnquiryTasks']);
+    Route::get('all-enquiry-tasks', [TaskController::class, 'getAllEnquiryTasks']);
 
-        // Enquiry task assignment routes
-        Route::post('enquiry-tasks/{task}/assign', [TaskController::class, 'assignEnquiryTask']);
-        Route::put('enquiry-tasks/{task}/reassign', [TaskController::class, 'reassignEnquiryTask']);
-        Route::put('enquiry-tasks/{taskId}/release', [TaskController::class, 'releaseEnquiryTask']);
-        Route::get('enquiry-tasks/{taskId}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
-        Route::put('enquiry-tasks/{taskId}', [TaskController::class, 'updateEnquiryTask']);
+    // Enquiry task assignment routes
+    Route::post('enquiry-tasks/{task}/assign', [TaskController::class, 'assignEnquiryTask']);
+    Route::put('enquiry-tasks/{task}/reassign', [TaskController::class, 'reassignEnquiryTask']);
+    Route::put('enquiry-tasks/{taskId}/release', [TaskController::class, 'releaseEnquiryTask']);
+    Route::get('enquiry-tasks/{taskId}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
+    Route::put('enquiry-tasks/{taskId}', [TaskController::class, 'updateEnquiryTask']);
 
-        // Project management
-        Route::get('projects', function () {
-            $query = \App\Models\Project::with('enquiry.client');
+    // Project management
+    Route::get('projects', function () {
+        $query = \App\Models\Project::with('enquiry.client');
 
-            if (request()->has('enquiry_id')) {
-                $query->where('enquiry_id', request()->enquiry_id);
-            }
+        if (request()->has('enquiry_id')) {
+            $query->where('enquiry_id', request()->enquiry_id);
+        }
 
-            return response()->json([
-                'data' => $query->get(),
-                'message' => 'Projects retrieved successfully'
-            ]);
-        }); // No permission for debugging
+        return response()->json([
+            'data' => $query->get(),
+            'message' => 'Projects retrieved successfully'
+        ]);
+    }); // No permission for debugging
 
-        // Enquiry management
-        Route::get('enquiries', [EnquiryController::class, 'index']);
-        Route::get('enquiries/{enquiry}', [EnquiryController::class, 'show']);
-        Route::post('enquiries', [EnquiryController::class, 'store']);
-        Route::put('enquiries/{enquiry}', [EnquiryController::class, 'update']);
-        Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
-        Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
-        Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
-});
-
-//mobile app
-Route::get('/app-departments', [DepartmentController::class, 'index']);
-
-// Protected routes (require authentication)
-// Protected routes (require authentication)
-Route::middleware(['auth:sanctum', 'active'])->group(function () {
+    // Enquiry management
+    Route::get('enquiries', [EnquiryController::class, 'index']);
+    Route::get('enquiries/{enquiry}', [EnquiryController::class, 'show']);
+    Route::post('enquiries', [EnquiryController::class, 'store']);
+    Route::put('enquiries/{enquiry}', [EnquiryController::class, 'update']);
+    Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
+    Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
+    Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
 
     // Notifications & OneSignal
     Route::get('/notifications', function () {
@@ -259,69 +251,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         $user = auth()->user();
         $user->update(['onesignal_player_id' => $request->player_id]);
         return response(['success' => true]);
-    });
-
-    Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
-    Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
-    Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
-    Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
-    Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
-
-    // Event Calendar Routes
-    // Get all events
-    Route::get('/events', 'App\Http\Controllers\EventController@index');
-    
-    // Get single event
-    Route::get('/events/{id}', 'App\Http\Controllers\EventController@show');
-    
-    // Save new event
-    Route::post('/events/save', 'App\Http\Controllers\EventController@save');
-    
-    // Update event
-    Route::post('/events/update', 'App\Http\Controllers\EventController@update');
-    
-    // Delete event
-    Route::post('/events/delete', 'App\Http\Controllers\EventController@delete');
-    
-    // Get events by date range
-    Route::post('/events/range', 'App\Http\Controllers\EventController@getByDateRange');
-    // User permissions and navigation
-    Route::get('/user/permissions', function () {
-        return response()->json([
-            'permissions' => auth()->user()->getNavigationPermissions(),
-            'user_permissions' => auth()->user()->getAllPermissions()->pluck('name')->toArray(),
-            'roles' => auth()->user()->roles->pluck('name'),
-            'departments' => auth()->user()->getAccessibleDepartments()
-        ]);
-    });
-
-    // HR Module Routes
-    Route::prefix('hr')->group(function () {
-        // Employee management
-        Route::apiResource('employees', EmployeeController::class)->middleware([
-            'index' => 'permission:' . Permissions::EMPLOYEE_READ,
-            'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
-            'show' => 'permission:' . Permissions::EMPLOYEE_READ,
-            'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
-            'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
-        ]);
-
-        // Technical Labour management
-        Route::apiResource('technical-labour', App\Modules\HR\Http\Controllers\TechnicalLabourController::class);
-
-        // Department management
-        Route::get('departments', [DepartmentController::class, 'index'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
-        Route::post('departments', [DepartmentController::class, 'store'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_CREATE);
-        Route::get('departments/{department}', [DepartmentController::class, 'show'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
-        Route::put('departments/{department}', [DepartmentController::class, 'update'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
-        Route::patch('departments/{department}', [DepartmentController::class, 'update'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
-        Route::delete('departments/{department}', [DepartmentController::class, 'destroy'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_DELETE);
     });
 
     // Admin Module Routes
