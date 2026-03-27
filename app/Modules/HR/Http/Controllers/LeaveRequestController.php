@@ -181,8 +181,8 @@ class LeaveRequestController extends Controller
             'attachment_path' => $attachmentPath,
         ]);
 
-        // Send notification to managers
-        $this->notifyManagers($leaveRequest);
+        // Return the response immediately; notify managers after the request finishes.
+        $this->notifyManagersAfterResponse($leaveRequest->id);
 
         return response()->json([
             'success' => true,
@@ -375,8 +375,8 @@ class LeaveRequestController extends Controller
             'review_notes' => $validated['review_notes'] ?? null,
         ]);
 
-        // Send notification to employee
-        $this->notifyEmployee($leaveRequest, $status);
+        // Avoid blocking the review response on notification delivery.
+        $this->notifyEmployeeAfterResponse($leaveRequest->id, $status);
 
         return response()->json([
             'success' => true,
@@ -455,8 +455,32 @@ class LeaveRequestController extends Controller
         }
     }
 
-    protected function notifyManagers(LeaveRequest $leaveRequest): void
+    protected function notifyManagersAfterResponse(int $leaveRequestId): void
     {
+        dispatch(static function () use ($leaveRequestId): void {
+            try {
+                $leaveRequest = LeaveRequest::query()
+                    ->with(['employee', 'leaveType'])
+                    ->find($leaveRequestId);
+
+                if (!$leaveRequest) {
+                    return;
+                }
+
+                self::sendManagerNotifications($leaveRequest);
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to send leave request manager notifications.', [
+                    'leave_request_id' => $leaveRequestId,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        })->afterResponse();
+    }
+
+    protected static function sendManagerNotifications(LeaveRequest $leaveRequest): void
+    {
+        $leaveRequest->loadMissing(['employee', 'leaveType']);
+
         $managers = User::query()
             ->whereHas('roles', function (Builder $query) {
                 $query->whereIn('name', ['Super Admin', 'Admin', 'HR', 'Manager', 'Lead']);
@@ -469,8 +493,33 @@ class LeaveRequestController extends Controller
         }
     }
 
-    protected function notifyEmployee(LeaveRequest $leaveRequest, string $status): void
+    protected function notifyEmployeeAfterResponse(int $leaveRequestId, string $status): void
     {
+        dispatch(static function () use ($leaveRequestId, $status): void {
+            try {
+                $leaveRequest = LeaveRequest::query()
+                    ->with(['employee.user', 'leaveType', 'approver'])
+                    ->find($leaveRequestId);
+
+                if (!$leaveRequest) {
+                    return;
+                }
+
+                self::sendEmployeeNotification($leaveRequest, $status);
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to send leave request employee notification.', [
+                    'leave_request_id' => $leaveRequestId,
+                    'status' => $status,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        })->afterResponse();
+    }
+
+    protected static function sendEmployeeNotification(LeaveRequest $leaveRequest, string $status): void
+    {
+        $leaveRequest->loadMissing(['employee.user', 'leaveType', 'approver']);
+
         $employee = $leaveRequest->employee;
         $user = $employee->user;
 
