@@ -24,7 +24,31 @@ class RequisitionController extends Controller
             return false;
         }
 
-        $allowedRoles = ['Super Admin', 'Admin', 'Accounts', 'Procurement Stores'];
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
+        $userRoles = $user->roles->pluck('name')->toArray();
+
+        foreach ($allowedRoles as $role) {
+            if (in_array($role, $userRoles)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if user has permission to view all requisitions
+     * Super Admin, Admin, Accounts, Procurement, and Stores can see all
+     */
+    private function canSeeAll()
+    {
+        $user = auth()->user();
+
+        if (!$user || !$user->roles) {
+            return false;
+        }
+
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts', 'Procurement', 'Stores'];
         $userRoles = $user->roles->pluck('name')->toArray();
 
         foreach ($allowedRoles as $role) {
@@ -95,8 +119,8 @@ class RequisitionController extends Controller
             $query->where('urgency', $request->urgency);
         }
 
-        // Filter by user if they are not an approver
-        if (!$this->canApproveOrDelete()) {
+        // Filter by user if they don't have permission to see all
+        if (!$this->canSeeAll()) {
             $query->where('user_id', auth()->id());
         }
 
@@ -166,8 +190,8 @@ class RequisitionController extends Controller
             $query->whereDate('date', '<=', $request->date_to);
         }
 
-        // Filter by user if they are not an approver
-        if (!$this->canApproveOrDelete()) {
+        // Filter by user if they don't have permission to see all
+        if (!$this->canSeeAll()) {
             $query->where('user_id', auth()->id());
         }
 

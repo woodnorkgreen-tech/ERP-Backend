@@ -118,6 +118,9 @@ class AuthController extends Controller
         }
 
         \Log::info('Account is active, creating token', ['email' => $request->email, 'user_id' => $user->id]);
+        
+        // Update last login timestamp
+        $user->update(['last_login_at' => now()]);
 
         $token = $user->createToken('api-token')->plainTextToken;
 

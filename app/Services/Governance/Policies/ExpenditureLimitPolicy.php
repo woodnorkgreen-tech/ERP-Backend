@@ -12,8 +12,23 @@ class ExpenditureLimitPolicy extends BasePolicy
     protected function runPolicy(ProjectEnquiry $enquiry, array $context = []): GateResult
     {
         $budget = (float) $enquiry->budget;
+
+        // Try to fetch budget from TaskBudgetData (the actual source of truth for Project budgets)
+        $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiry->id)
+            ->where('type', 'budget')
+            ->first();
+
+        if ($budgetTask) {
+            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->latest()->first();
+                
+            if ($budgetData && isset($budgetData->budget_summary['grandTotal'])) {
+                $budget = (float) $budgetData->budget_summary['grandTotal'];
+            } elseif ($budgetData && isset($budgetData->budget_summary['grand_total'])) {
+                $budget = (float) $budgetData->budget_summary['grand_total'];
+            }
+        }
         
-        // If budget is zero, and it's not a special case, we block.
+        // If budget is still zero, and it's not a special case, we block.
         if ($budget <= 0) {
             return GateResult::blocked("Expenditure Gate: The project budget is set to 0.00. Please finalize the budget before committing funds.");
         }
