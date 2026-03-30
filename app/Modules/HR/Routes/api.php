@@ -6,6 +6,7 @@ use App\Modules\HR\Http\Controllers\DepartmentController;
 use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\HR\Http\Controllers\PayrollEngineController;
 use App\Modules\HR\Http\Controllers\LeaveDashboardController;
+use App\Modules\HR\Http\Controllers\LeaveHandoverController;
 use App\Modules\HR\Http\Controllers\LeaveRequestController;
 use App\Modules\HR\Http\Controllers\LeaveTypeController;
 use App\Modules\HR\Http\Controllers\HRActionController;
@@ -107,19 +108,39 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
             // Leave types
             Route::get('types', [LeaveTypeController::class, 'index']);
-            Route::post('types', [LeaveTypeController::class, 'store']);
-            Route::put('types/{leaveType}', [LeaveTypeController::class, 'update']);
-            Route::delete('types/{leaveType}', [LeaveTypeController::class, 'destroy']);
+            Route::post('types', [LeaveTypeController::class, 'store'])
+                ->middleware('permission:' . Permissions::LEAVE_TYPE_CREATE);
+            Route::put('types/{leaveType}', [LeaveTypeController::class, 'update'])
+                ->middleware('permission:' . Permissions::LEAVE_TYPE_UPDATE);
+            Route::patch('types/{leaveType}', [LeaveTypeController::class, 'update'])
+                ->middleware('permission:' . Permissions::LEAVE_TYPE_UPDATE);
+            Route::delete('types/{leaveType}', [LeaveTypeController::class, 'destroy'])
+                ->middleware('permission:' . Permissions::LEAVE_TYPE_DELETE);
 
             // Leave requests
             Route::get('requests', [LeaveRequestController::class, 'index']);
             Route::post('requests', [LeaveRequestController::class, 'store']);
             Route::get('requests/{leaveRequest}', [LeaveRequestController::class, 'show']);
             Route::put('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
-            Route::post('requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve']);
-            Route::post('requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject']);
+            Route::patch('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
+            Route::post('requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])
+                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
+            Route::post('requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])
+                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
             Route::post('requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel']);
-            Route::post('requests/{leaveRequest}/recall', [LeaveRequestController::class, 'recall']);
+            Route::post('requests/{leaveRequest}/recall', [LeaveRequestController::class, 'recall'])
+                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
+            Route::get('statistics', [LeaveRequestController::class, 'statistics']);
+            Route::post('adjust-balance', [LeaveRequestController::class, 'adjustBalance'])
+                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
+
+            // Leave handovers
+            Route::get('handovers', [LeaveHandoverController::class, 'index']);
+            Route::get('handovers/leave-request/{leaveRequestId}', [LeaveHandoverController::class, 'show']);
+            Route::post('handovers', [LeaveHandoverController::class, 'store']);
+            Route::put('handovers/{handover}', [LeaveHandoverController::class, 'update']);
+            Route::patch('handovers/{handover}', [LeaveHandoverController::class, 'update']);
+            Route::delete('handovers/{handover}', [LeaveHandoverController::class, 'destroy']);
         });
 
         // Employee Actions (HR directives: promotions, transfers, warnings, etc.)

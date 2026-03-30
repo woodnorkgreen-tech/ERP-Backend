@@ -16,9 +16,9 @@ return new class extends Migration
             $table->id();
             $table->foreignId('work_order_id')->constrained('work_orders')->cascadeOnDelete();
             $table->enum('source_type', ['mid_qc', 'final_qc', 'manual']);
-            $table->string('source_ref', 160)->nullable();
+            $table->string('source_ref', 100)->nullable();
             $table->string('qc_stage', 50)->nullable();
-            $table->string('title', 190);
+            $table->string('title', 100);
             $table->text('reason')->nullable();
             $table->enum('status', ['open', 'in_progress', 'closed'])->default('open');
             $table->string('assigned_workstation', 120)->nullable();
