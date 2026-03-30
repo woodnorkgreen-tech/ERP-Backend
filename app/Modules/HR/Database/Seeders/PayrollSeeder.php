@@ -1,12 +1,12 @@
 <?php
-
-namespace Database\Seeders;
-
+ 
+namespace App\Modules\HR\Database\Seeders;
+ 
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use App\Modules\HR\Models\PayrollVariable;
 use App\Modules\HR\Models\PayrollTaxBand;
-
+ 
 class PayrollSeeder extends Seeder
 {
     /**
@@ -24,11 +24,11 @@ class PayrollSeeder extends Seeder
             ['name' => 'HOUSING_LEVY_RATE', 'type' => 'percentage', 'value' => 0.015, 'description' => 'Affordable Housing Levy Rate (1.5%)'],
             ['name' => 'PERSONAL_RELIEF', 'type' => 'fixed_amount', 'value' => 2400.00, 'description' => 'Monthly Personal Tax Relief'],
         ];
-
+ 
         foreach ($variables as $var) {
             PayrollVariable::updateOrCreate(['name' => $var['name']], $var);
         }
-
+ 
         // 2. Initial PAYE Tax Bands (Kenya 2024)
         $bands = [
             ['name' => 'Band 1', 'min_amount' => 0, 'max_amount' => 24000, 'rate' => 0.10, 'sort_order' => 1],
@@ -37,7 +37,7 @@ class PayrollSeeder extends Seeder
             ['name' => 'Band 4', 'min_amount' => 500000, 'max_amount' => 800000, 'rate' => 0.325, 'sort_order' => 4],
             ['name' => 'Band 5', 'min_amount' => 800000, 'max_amount' => null, 'rate' => 0.35, 'sort_order' => 5],
         ];
-
+ 
         foreach ($bands as $band) {
             PayrollTaxBand::updateOrCreate(['name' => $band['name']], $band);
         }
