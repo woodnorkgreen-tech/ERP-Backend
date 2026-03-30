@@ -9,9 +9,17 @@ return new class extends Migration
 {
     public function up(): void
     {
+<<<<<<< HEAD
         Schema::table('leave_types', function (Blueprint $table) {
             $table->decimal('monthly_accrual_rate', 4, 2)->nullable()->after('days_per_year');
         });
+=======
+        if (!Schema::hasColumn('leave_types', 'monthly_accrual_rate')) {
+            Schema::table('leave_types', function (Blueprint $table) {
+                $table->decimal('monthly_accrual_rate', 4, 2)->nullable()->after('days_per_year');
+            });
+        }
+>>>>>>> hr
 
         DB::table('leave_types')->where('code', 'ANNUAL')->update([
             'days_per_year' => 21,
@@ -53,21 +61,41 @@ return new class extends Migration
     {
         DB::table('leave_types')->where('code', 'ANNUAL')->update([
             'days_per_year' => 20,
+<<<<<<< HEAD
+=======
+            'monthly_accrual_rate' => null,
+>>>>>>> hr
             'updated_at' => now(),
         ]);
 
         DB::table('leave_types')->where('code', 'SICK')->update([
             'days_per_year' => 10,
+<<<<<<< HEAD
+=======
+            'monthly_accrual_rate' => null,
+>>>>>>> hr
             'updated_at' => now(),
         ]);
 
         DB::table('leave_types')->where('code', 'UNPAID')->update([
             'days_per_year' => 30,
+<<<<<<< HEAD
             'updated_at' => now(),
         ]);
 
         Schema::table('leave_types', function (Blueprint $table) {
             $table->dropColumn('monthly_accrual_rate');
         });
+=======
+            'monthly_accrual_rate' => null,
+            'updated_at' => now(),
+        ]);
+
+        if (Schema::hasColumn('leave_types', 'monthly_accrual_rate')) {
+            Schema::table('leave_types', function (Blueprint $table) {
+                $table->dropColumn('monthly_accrual_rate');
+            });
+        }
+>>>>>>> hr
     }
 };

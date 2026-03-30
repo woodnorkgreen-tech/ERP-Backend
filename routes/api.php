@@ -3,7 +3,10 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
+<<<<<<< HEAD
 use App\Modules\HR\Http\Controllers\DepartmentController;
+=======
+>>>>>>> hr
 use App\Modules\Admin\Http\Controllers\UserController;
 use App\Modules\Admin\Http\Controllers\RoleController;
 use App\Modules\Admin\Http\Controllers\PermissionController;
@@ -87,7 +90,11 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
+<<<<<<< HEAD
  
+=======
+
+>>>>>>> hr
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware(['auth:sanctum', 'active']);
@@ -107,18 +114,41 @@ Route::post('/system/refresh', [App\Http\Controllers\SystemController::class, 't
     ->middleware(['auth:sanctum', 'active']);
 Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
-Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
-Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
-Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
-Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
-Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
-
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     // Action Logs
     Route::get('/logs/{type}/{id}', [App\Http\Controllers\ActionLogController::class, 'index']);
 
- Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
+    // Event Calendar Routes
+    // Get all events
+    Route::get('/events', 'App\Http\Controllers\EventController@index');
+    
+    // Get single event
+    Route::get('/events/{id}', 'App\Http\Controllers\EventController@show');
+    
+    // Save new event
+    Route::post('/events/save', 'App\Http\Controllers\EventController@save');
+    
+    // Update event
+    Route::post('/events/update', 'App\Http\Controllers\EventController@update');
+    
+    // Delete event
+    Route::post('/events/delete', 'App\Http\Controllers\EventController@delete');
+    
+    // Get events by date range
+    Route::post('/events/range', 'App\Http\Controllers\EventController@getByDateRange');
+
+    // User permissions and navigation
+    Route::get('/user/permissions', function () {
+        return response()->json([
+            'permissions' => auth()->user()->getNavigationPermissions(),
+            'user_permissions' => auth()->user()->getAllPermissions()->pluck('name')->toArray(),
+            'roles' => auth()->user()->roles->pluck('name'),
+            'departments' => auth()->user()->getAccessibleDepartments()
+        ]);
+    });
+
+    Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
         Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
         Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);
         
@@ -171,52 +201,44 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     });
 
 
-        // Task management routes
-        Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
-        Route::get('tasks/{taskId}', [TaskController::class, 'show']);
-        Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus'])->middleware(\App\Http\Middleware\EnsureFinancialClearance::class);
-        Route::put('tasks/{taskId}/assign', [TaskController::class, 'assignTask']);
-        Route::put('tasks/{taskId}', [TaskController::class, 'update']);
-        Route::get('enquiries/{enquiryId}/tasks', [TaskController::class, 'getEnquiryTasks']);
-        Route::get('all-enquiry-tasks', [TaskController::class, 'getAllEnquiryTasks']);
+    // Task management routes
+    Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
+    Route::get('tasks/{taskId}', [TaskController::class, 'show']);
+    Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus'])->middleware(\App\Http\Middleware\EnsureFinancialClearance::class);
+    Route::put('tasks/{taskId}/assign', [TaskController::class, 'assignTask']);
+    Route::put('tasks/{taskId}', [TaskController::class, 'update']);
+    Route::get('enquiries/{enquiryId}/tasks', [TaskController::class, 'getEnquiryTasks']);
+    Route::get('all-enquiry-tasks', [TaskController::class, 'getAllEnquiryTasks']);
 
-        // Enquiry task assignment routes
-        Route::post('enquiry-tasks/{task}/assign', [TaskController::class, 'assignEnquiryTask']);
-        Route::put('enquiry-tasks/{task}/reassign', [TaskController::class, 'reassignEnquiryTask']);
-        Route::put('enquiry-tasks/{taskId}/release', [TaskController::class, 'releaseEnquiryTask']);
-        Route::get('enquiry-tasks/{taskId}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
-        Route::put('enquiry-tasks/{taskId}', [TaskController::class, 'updateEnquiryTask']);
+    // Enquiry task assignment routes
+    Route::post('enquiry-tasks/{task}/assign', [TaskController::class, 'assignEnquiryTask']);
+    Route::put('enquiry-tasks/{task}/reassign', [TaskController::class, 'reassignEnquiryTask']);
+    Route::put('enquiry-tasks/{taskId}/release', [TaskController::class, 'releaseEnquiryTask']);
+    Route::get('enquiry-tasks/{taskId}/assignment-history', [TaskController::class, 'getTaskAssignmentHistory']);
+    Route::put('enquiry-tasks/{taskId}', [TaskController::class, 'updateEnquiryTask']);
 
-        // Project management
-        Route::get('projects', function () {
-            $query = \App\Models\Project::with('enquiry.client');
+    // Project management
+    Route::get('projects', function () {
+        $query = \App\Models\Project::with('enquiry.client');
 
-            if (request()->has('enquiry_id')) {
-                $query->where('enquiry_id', request()->enquiry_id);
-            }
+        if (request()->has('enquiry_id')) {
+            $query->where('enquiry_id', request()->enquiry_id);
+        }
 
-            return response()->json([
-                'data' => $query->get(),
-                'message' => 'Projects retrieved successfully'
-            ]);
-        }); // No permission for debugging
+        return response()->json([
+            'data' => $query->get(),
+            'message' => 'Projects retrieved successfully'
+        ]);
+    }); // No permission for debugging
 
-        // Enquiry management
-        Route::get('enquiries', [EnquiryController::class, 'index']);
-        Route::get('enquiries/{enquiry}', [EnquiryController::class, 'show']);
-        Route::post('enquiries', [EnquiryController::class, 'store']);
-        Route::put('enquiries/{enquiry}', [EnquiryController::class, 'update']);
-        Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
-        Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
-        Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
-});
-
-//mobile app
-Route::get('/app-departments', [DepartmentController::class, 'index']);
-
-// Protected routes (require authentication)
-// Protected routes (require authentication)
-Route::middleware(['auth:sanctum', 'active'])->group(function () {
+    // Enquiry management
+    Route::get('enquiries', [EnquiryController::class, 'index']);
+    Route::get('enquiries/{enquiry}', [EnquiryController::class, 'show']);
+    Route::post('enquiries', [EnquiryController::class, 'store']);
+    Route::put('enquiries/{enquiry}', [EnquiryController::class, 'update']);
+    Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
+    Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
+    Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
 
     // Notifications & OneSignal
     Route::get('/notifications', function () {
@@ -239,6 +261,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         return response(['success' => true]);
     });
 
+<<<<<<< HEAD
     Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
     Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
     Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
@@ -273,6 +296,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         ]);
     });
 
+=======
+>>>>>>> hr
     // Admin Module Routes
     Route::prefix('admin')->group(function () {
         // User management

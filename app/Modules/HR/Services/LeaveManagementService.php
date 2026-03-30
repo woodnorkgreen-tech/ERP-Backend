@@ -234,9 +234,18 @@ class LeaveManagementService
                 $usedDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_APPROVED]);
                 $pendingDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_PENDING]);
                 $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year);
+<<<<<<< HEAD
                 $accruedRemaining = max($metrics['earned_days'] - ($usedDays + $pendingDays), 0);
                 $requestableDays = $leaveType->allow_advance
                     ? max($metrics['year_entitlement_days'] - ($usedDays + $pendingDays), 0)
+=======
+                $carryForwardDays = $this->calculateCarryForwardDays($employee, $leaveType, $year);
+                
+                $totalAvailable = $metrics['earned_days'] + $carryForwardDays;
+                $accruedRemaining = max($totalAvailable - ($usedDays + $pendingDays), 0);
+                $requestableDays = $leaveType->allow_advance
+                    ? max($metrics['year_entitlement_days'] + $carryForwardDays - ($usedDays + $pendingDays), 0)
+>>>>>>> hr
                     : $accruedRemaining;
                 $advanceAvailableDays = $leaveType->allow_advance
                     ? max($requestableDays - $accruedRemaining, 0)
@@ -250,6 +259,10 @@ class LeaveManagementService
                     'icon' => $leaveType->icon,
                     'allocated_days' => $metrics['year_entitlement_days'],
                     'earned_days' => $metrics['earned_days'],
+<<<<<<< HEAD
+=======
+                    'carry_forward_days' => $carryForwardDays,
+>>>>>>> hr
                     'used_days' => $usedDays,
                     'pending_days' => $pendingDays,
                     'available_days' => $accruedRemaining,
@@ -463,4 +476,86 @@ class LeaveManagementService
 
         return (float) $query->sum('days_requested');
     }
+<<<<<<< HEAD
+=======
+
+    public function calculateCarryForwardDays(Employee $employee, LeaveType $leaveType, int $year): float
+    {
+        // Only calculate carry-forward for leave types with monthly accrual
+        if (!$leaveType->monthly_accrual_rate) {
+            return 0;
+        }
+
+        $previousYear = $year - 1;
+        
+        // Get metrics for the previous year
+        $previousYearMetrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $previousYear);
+        $previousYearUsed = $this->sumRequestedDays($employee->id, $leaveType->id, $previousYear, [LeaveRequest::STATUS_APPROVED, LeaveRequest::STATUS_RECALLED]);
+        
+        $unusedPreviousYear = $previousYearMetrics['earned_days'] - $previousYearUsed;
+        
+        // Maximum carry-forward allowed (typically cannot carry more than annual entitlement)
+        $maxCarryForward = min((float) $leaveType->days_per_year, $previousYearMetrics['earned_days']);
+        
+        // Only carry forward up to the max allowed, and only if there are unused days
+        return min(max($unusedPreviousYear, 0), $maxCarryForward);
+    }
+
+    public function restoreLeaveBalance(LeaveRequest $leaveRequest, ?float $daysToRestore = null): void
+    {
+        $employee = $leaveRequest->employee;
+        $leaveType = $leaveRequest->leaveType;
+        $year = $leaveRequest->start_date->year;
+
+        // Use provided days or default to full request days
+        $daysToRestore = (float) ($daysToRestore ?? $leaveRequest->days_requested);
+
+        // Get current leave summary for this leave type
+        $summary = $this->getLeaveSummaryForEmployee($employee, $year);
+        $leaveBalance = $summary->firstWhere('leave_type_id', $leaveType->id);
+
+        if (!$leaveBalance) {
+            return;
+        }
+
+        // Calculate the new values
+        $currentUsedDays = (float) $leaveBalance['used_days'];
+        $currentAvailableDays = (float) $leaveBalance['available_days'];
+
+        // Restore the specified days back to the balance
+        $newUsedDays = max(0, $currentUsedDays - $daysToRestore);
+        $newAvailableDays = $currentAvailableDays + $daysToRestore;
+
+        // Log the restoration for audit purposes
+        \Log::info('Leave balance restored', [
+            'employee_id' => $employee->id,
+            'leave_type_id' => $leaveType->id,
+            'year' => $year,
+            'days_restored' => $daysToRestore,
+            'previous_used_days' => $currentUsedDays,
+            'new_used_days' => $newUsedDays,
+            'previous_available_days' => $currentAvailableDays,
+            'new_available_days' => $newAvailableDays,
+        ]);
+    }
+
+    /**
+     * Get leave balance for a specific employee and leave type
+     */
+    public function getLeaveBalance(int $employeeId, int $leaveTypeId, int $year): array
+    {
+        $employee = Employee::findOrFail($employeeId);
+        $leaveType = LeaveType::findOrFail($leaveTypeId);
+
+        $summary = $this->getLeaveSummaryForEmployee($employee, $year);
+        $balance = $summary->firstWhere('leave_type_id', $leaveTypeId);
+
+        return $balance ? $balance->toArray() : [
+            'leave_type_id' => $leaveTypeId,
+            'used_days' => 0,
+            'available_days' => 0,
+            'pending_days' => 0,
+        ];
+    }
+>>>>>>> hr
 }

@@ -15,6 +15,10 @@ class LeaveRequest extends Model
     public const STATUS_APPROVED = 'approved';
     public const STATUS_REJECTED = 'rejected';
     public const STATUS_CANCELLED = 'cancelled';
+<<<<<<< HEAD
+=======
+    public const STATUS_RECALLED = 'recalled';
+>>>>>>> hr
 
     protected $fillable = [
         'employee_id',
@@ -25,6 +29,10 @@ class LeaveRequest extends Model
         'start_date',
         'end_date',
         'days_requested',
+<<<<<<< HEAD
+=======
+        'carry_forward_days',
+>>>>>>> hr
         'session',
         'status',
         'reason',
@@ -34,14 +42,27 @@ class LeaveRequest extends Model
         'review_notes',
         'approved_at',
         'cancelled_at',
+<<<<<<< HEAD
+=======
+        'recalled_at',
+        'recalled_by',
+        'recall_reason',
+>>>>>>> hr
     ];
 
     protected $casts = [
         'start_date' => 'date',
         'end_date' => 'date',
         'days_requested' => 'decimal:1',
+<<<<<<< HEAD
         'approved_at' => 'datetime',
         'cancelled_at' => 'datetime',
+=======
+        'carry_forward_days' => 'decimal:1',
+        'approved_at' => 'datetime',
+        'cancelled_at' => 'datetime',
+        'recalled_at' => 'datetime',
+>>>>>>> hr
     ];
 
     protected $appends = [
@@ -73,6 +94,14 @@ class LeaveRequest extends Model
         return $this->belongsTo(User::class, 'approved_by');
     }
 
+<<<<<<< HEAD
+=======
+    public function recalledBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'recalled_by');
+    }
+
+>>>>>>> hr
     public function getDateRangeLabelAttribute(): string
     {
         if (!$this->start_date || !$this->end_date) {

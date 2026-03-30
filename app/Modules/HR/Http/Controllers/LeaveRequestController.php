@@ -3,6 +3,7 @@
 namespace App\Modules\HR\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+<<<<<<< HEAD
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Models\LeaveType;
@@ -10,6 +11,23 @@ use App\Modules\HR\Services\LeaveManagementService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+=======
+use App\Models\User;
+use App\Modules\HR\Models\Employee;
+use App\Modules\HR\Models\LeaveRequest;
+use App\Modules\HR\Models\LeaveType;
+use App\Modules\HR\Notifications\LeaveRequestApprovedNotification;
+use App\Modules\HR\Notifications\LeaveRequestRejectedNotification;
+use App\Modules\HR\Notifications\LeaveRequestSubmittedNotification;
+use App\Modules\HR\Services\LeaveManagementService;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+>>>>>>> hr
 use Illuminate\Validation\Rule;
 
 class LeaveRequestController extends Controller
@@ -91,6 +109,12 @@ class LeaveRequestController extends Controller
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
+<<<<<<< HEAD
+=======
+        $leaveTypeId = $request->input('leave_type_id');
+        $leaveType = LeaveType::find($leaveTypeId);
+        
+>>>>>>> hr
         $validated = $request->validate([
             'employee_id' => ['nullable', 'integer', 'exists:employees,id'],
             'contact_employee_id' => ['nullable', 'integer', 'different:employee_id', 'exists:employees,id'],
@@ -101,21 +125,43 @@ class LeaveRequestController extends Controller
             'reason' => ['required', 'string'],
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
+<<<<<<< HEAD
             'attachment_path' => ['nullable', 'string', 'max:255'],
+=======
+            'attachment' => $leaveType && $leaveType->requires_attachment 
+                ? ['required', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048']
+                : ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
+>>>>>>> hr
         ]);
 
         $employee = $this->resolveTargetEmployee($user, $validated['employee_id'] ?? null);
         $leaveType = LeaveType::query()->whereKey($validated['leave_type_id'])->firstOrFail();
         $this->ensureContactEmployeeIsDifferent($employee->id, $validated['contact_employee_id'] ?? null);
 
+<<<<<<< HEAD
         $this->leaveService->validateDateRange($validated['start_date'], $validated['end_date']);
         $this->leaveService->ensureNoOverlap($employee, $validated['start_date'], $validated['end_date']);
+=======
+        try {
+            $this->leaveService->validateDateRange($validated['start_date'], $validated['end_date']);
+            $this->leaveService->ensureNoOverlap($employee, $validated['start_date'], $validated['end_date']);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'errors' => [
+                    'date_range' => [$e->getMessage()],
+                ],
+            ], 422);
+        }
+>>>>>>> hr
 
         $daysRequested = $this->leaveService->calculateBusinessDays(
             $validated['start_date'],
             $validated['end_date'],
             $validated['session']
         );
+<<<<<<< HEAD
         $this->leaveService->ensureBalanceAvailable(
             $employee,
             $leaveType,
@@ -124,6 +170,33 @@ class LeaveRequestController extends Controller
             null,
             $validated['start_date']
         );
+=======
+        
+        try {
+            $this->leaveService->ensureBalanceAvailable(
+                $employee,
+                $leaveType,
+                $daysRequested,
+                (int) date('Y', strtotime($validated['start_date'])),
+                null,
+                $validated['start_date']
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'errors' => [
+                    'balance' => [$e->getMessage()],
+                ],
+            ], 422);
+        }
+
+        // Handle file upload
+        $attachmentPath = null;
+        if ($request->hasFile('attachment')) {
+            $attachmentPath = $request->file('attachment')->store('leave-attachments', 'public');
+        }
+>>>>>>> hr
 
         $leaveRequest = LeaveRequest::create([
             'employee_id' => $employee->id,
@@ -138,9 +211,18 @@ class LeaveRequestController extends Controller
             'reason' => $validated['reason'],
             'explanation' => $validated['explanation'] ?? null,
             'handover_notes' => $validated['handover_notes'] ?? null,
+<<<<<<< HEAD
             'attachment_path' => $validated['attachment_path'] ?? null,
         ]);
 
+=======
+            'attachment_path' => $attachmentPath,
+        ]);
+
+        // Return the response immediately; notify managers after the request finishes.
+        $this->notifyManagersAfterResponse($leaveRequest->id);
+
+>>>>>>> hr
         return response()->json([
             'success' => true,
             'message' => 'Leave request submitted successfully.',
@@ -170,7 +252,11 @@ class LeaveRequestController extends Controller
             'reason' => ['sometimes', 'required', 'string'],
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
+<<<<<<< HEAD
             'attachment_path' => ['nullable', 'string', 'max:255'],
+=======
+            'attachment' => ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
+>>>>>>> hr
             'review_notes' => ['nullable', 'string'],
             'status' => ['sometimes', Rule::in([
                 LeaveRequest::STATUS_PENDING,
@@ -232,12 +318,27 @@ class LeaveRequestController extends Controller
             );
         }
 
+<<<<<<< HEAD
         $leaveRequest->update(array_merge($validated, $statusAttributes, [
+=======
+        // Handle file upload
+        $updateData = array_merge($validated, $statusAttributes, [
+>>>>>>> hr
             'days_requested' => $daysRequested,
             'start_date' => $startDate,
             'end_date' => $endDate,
             'session' => $session,
+<<<<<<< HEAD
         ]));
+=======
+        ]);
+
+        if ($request->hasFile('attachment')) {
+            $updateData['attachment_path'] = $request->file('attachment')->store('leave-attachments', 'public');
+        }
+
+        $leaveRequest->update($updateData);
+>>>>>>> hr
 
         return response()->json([
             'success' => true,
@@ -325,6 +426,12 @@ class LeaveRequestController extends Controller
             'review_notes' => $validated['review_notes'] ?? null,
         ]);
 
+<<<<<<< HEAD
+=======
+        // Avoid blocking the review response on notification delivery.
+        $this->notifyEmployeeAfterResponse($leaveRequest->id, $status);
+
+>>>>>>> hr
         return response()->json([
             'success' => true,
             'message' => $message,
@@ -401,4 +508,265 @@ class LeaveRequestController extends Controller
             abort(422, 'Contact during leave must be a different employee.');
         }
     }
+<<<<<<< HEAD
+=======
+
+    protected function notifyManagersAfterResponse(int $leaveRequestId): void
+    {
+        dispatch(static function () use ($leaveRequestId): void {
+            try {
+                $leaveRequest = LeaveRequest::query()
+                    ->with(['employee', 'leaveType'])
+                    ->find($leaveRequestId);
+
+                if (!$leaveRequest) {
+                    return;
+                }
+
+                self::sendManagerNotifications($leaveRequest);
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to send leave request manager notifications.', [
+                    'leave_request_id' => $leaveRequestId,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        })->afterResponse();
+    }
+
+    protected static function sendManagerNotifications(LeaveRequest $leaveRequest): void
+    {
+        $leaveRequest->loadMissing(['employee', 'leaveType']);
+
+        $managers = User::query()
+            ->whereHas('roles', function (Builder $query) {
+                $query->whereIn('name', ['Super Admin', 'Admin', 'HR', 'Manager', 'Lead']);
+            })
+            ->whereNotNull('email')
+            ->get();
+
+        foreach ($managers as $manager) {
+            $manager->notify(new LeaveRequestSubmittedNotification($leaveRequest));
+        }
+    }
+
+    protected function notifyEmployeeAfterResponse(int $leaveRequestId, string $status): void
+    {
+        dispatch(static function () use ($leaveRequestId, $status): void {
+            try {
+                $leaveRequest = LeaveRequest::query()
+                    ->with(['employee.user', 'leaveType', 'approver'])
+                    ->find($leaveRequestId);
+
+                if (!$leaveRequest) {
+                    return;
+                }
+
+                self::sendEmployeeNotification($leaveRequest, $status);
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to send leave request employee notification.', [
+                    'leave_request_id' => $leaveRequestId,
+                    'status' => $status,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        })->afterResponse();
+    }
+
+    protected static function sendEmployeeNotification(LeaveRequest $leaveRequest, string $status): void
+    {
+        $leaveRequest->loadMissing(['employee.user', 'leaveType', 'approver']);
+
+        $employee = $leaveRequest->employee;
+        $user = $employee->user;
+
+        if (!$user || !$user->email) {
+            return;
+        }
+
+        if ($status === LeaveRequest::STATUS_APPROVED) {
+            $user->notify(new LeaveRequestApprovedNotification($leaveRequest));
+        } elseif ($status === LeaveRequest::STATUS_REJECTED) {
+            $user->notify(new LeaveRequestRejectedNotification($leaveRequest));
+        }
+    }
+
+    public function statistics(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $year = $request->integer('year', now()->year);
+
+        $query = LeaveRequest::query()
+            ->whereYear('start_date', $year);
+
+        if (!$this->leaveService->canManage($user)) {
+            $employee = $this->leaveService->resolveEmployeeForUser($user);
+            if ($employee) {
+                $query->where('employee_id', $employee->id);
+            }
+        }
+
+        $totalRequests = $query->count();
+        $approvedRequests = $query->where('status', LeaveRequest::STATUS_APPROVED)->count();
+        $pendingRequests = $query->where('status', LeaveRequest::STATUS_PENDING)->count();
+        $rejectedRequests = $query->where('status', LeaveRequest::STATUS_REJECTED)->count();
+        $cancelledRequests = $query->where('status', LeaveRequest::STATUS_CANCELLED)->count();
+
+        $totalDays = $query->sum('days_requested');
+        $approvedDays = $query->where('status', LeaveRequest::STATUS_APPROVED)->sum('days_requested');
+
+        $byLeaveType = LeaveRequest::query()
+            ->whereYear('start_date', $year)
+            ->selectRaw('leave_type_id, COUNT(*) as count, SUM(days_requested) as total_days')
+            ->groupBy('leave_type_id')
+            ->with('leaveType:id,name,code,color')
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'leave_type_id' => $item->leave_type_id,
+                    'name' => $item->leaveType->name,
+                    'code' => $item->leaveType->code,
+                    'color' => $item->leaveType->color,
+                    'count' => $item->count,
+                    'total_days' => $item->total_days,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'year' => $year,
+                'total_requests' => $totalRequests,
+                'approved_requests' => $approvedRequests,
+                'pending_requests' => $pendingRequests,
+                'rejected_requests' => $rejectedRequests,
+                'cancelled_requests' => $cancelledRequests,
+                'total_days' => $totalDays,
+                'approved_days' => $approvedDays,
+                'by_leave_type' => $byLeaveType,
+            ],
+        ]);
+    }
+
+    public function adjustBalance(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$this->leaveService->canManage($user)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only managers can adjust leave balances.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'employee_id' => ['required', 'integer', 'exists:employees,id'],
+            'leave_type_id' => ['required', 'integer', 'exists:leave_types,id'],
+            'adjustment_days' => ['required', 'numeric', 'min:-365', 'max:365'],
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+
+        $employee = Employee::findOrFail($validated['employee_id']);
+        $leaveType = LeaveType::findOrFail($validated['leave_type_id']);
+        $year = now()->year;
+
+        // Create a special leave request for adjustment
+        $adjustment = LeaveRequest::create([
+            'employee_id' => $employee->id,
+            'leave_type_id' => $leaveType->id,
+            'created_by' => $user->id,
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->toDateString(),
+            'days_requested' => abs($validated['adjustment_days']),
+            'session' => 'full_day',
+            'status' => LeaveRequest::STATUS_APPROVED,
+            'reason' => 'Balance adjustment: ' . $validated['reason'],
+            'approved_by' => $user->id,
+            'approved_at' => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Leave balance adjusted successfully.',
+            'data' => $adjustment->load(['employee.department', 'leaveType']),
+        ]);
+    }
+
+    public function recall(Request $request, LeaveRequest $leaveRequest): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$this->leaveService->canManage($user)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only managers can recall employees from leave.',
+            ], 403);
+        }
+
+        // Validate that the leave request is approved
+        if ($leaveRequest->status !== LeaveRequest::STATUS_APPROVED) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only approved leave requests can be recalled.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'recall_reason' => ['required', 'string', 'max:500'],
+            'days_to_recall' => ['nullable', 'numeric', 'min:1', 'max:' . $leaveRequest->days_requested],
+        ]);
+
+        $daysToRecall = $validated['days_to_recall'] ?? $leaveRequest->days_requested;
+        $remainingDays = $leaveRequest->days_requested - $daysToRecall;
+
+        try {
+            DB::beginTransaction();
+
+            // Update the leave request status
+            $leaveRequest->update([
+                'status' => LeaveRequest::STATUS_RECALLED,
+                'recalled_by' => $user->id,
+                'recall_reason' => $validated['recall_reason'],
+                'recalled_at' => now(),
+            ]);
+
+            // Restore the days to employee's leave balance
+            $this->leaveService->restoreLeaveBalance($leaveRequest, $daysToRecall);
+
+            // Log the recall action for audit purposes
+            \Log::info('Leave recall audit', [
+                'action' => 'leave_recalled',
+                'leave_request_id' => $leaveRequest->id,
+                'employee_id' => $leaveRequest->employee_id,
+                'leave_type_id' => $leaveRequest->leave_type_id,
+                'original_days' => $leaveRequest->days_requested,
+                'days_recalled' => $daysToRecall,
+                'remaining_days' => $remainingDays,
+                'recalled_by' => $user->id,
+                'recall_reason' => $validated['recall_reason'],
+                'recalled_at' => now()->toDateTimeString(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Employee recalled from leave successfully.',
+                'data' => [
+                    'leave_request' => $leaveRequest->load(['employee.department', 'leaveType', 'recalledBy']),
+                    'recall_summary' => [
+                        'original_days' => $leaveRequest->days_requested,
+                        'days_recalled' => $daysToRecall,
+                        'remaining_days' => $remainingDays,
+                    ],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to recall employee from leave: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+>>>>>>> hr
 }

@@ -1,0 +1,93 @@
+<?php
+
+namespace App\Modules\HR\Traits;
+
+use App\Modules\HR\Models\Department;
+use App\Modules\HR\Models\Employee;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Collection;
+
+trait HasHRRelations
+{
+    /**
+     * Get the department that the user belongs to.
+     */
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
+    }
+
+    /**
+     * Get the employee record associated with this user.
+     */
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class);
+    }
+
+    /**
+     * Scope to filter users by department.
+     */
+    public function scopeInDepartment($query, $departmentId)
+    {
+        return $query->where('department_id', $departmentId);
+    }
+
+    /**
+     * Get user's accessible departments based on role.
+     */
+    public function getAccessibleDepartments(): Collection
+    {
+        if ($this->hasRole('Super Admin')) {
+            return Department::all();
+        }
+
+        if ($this->hasRole('Admin')) {
+            // Admin doesn't access departments directly, but can see all for admin purposes
+            return collect();
+        }
+
+        // Regular users can only access their own department
+        if ($this->department) {
+            return collect([$this->department]);
+        }
+
+        return collect();
+    }
+
+    /**
+     * Check if user can access a specific department.
+     */
+    public function canAccessDepartment($departmentId): bool
+    {
+        if ($this->hasRole(['Super Admin', 'Admin'])) {
+            return true;
+        }
+
+        return (int)$this->department_id === (int)$departmentId;
+    }
+
+    /**
+     * Get user's navigation permissions and accessible modules.
+     */
+    public function getNavigationPermissions(): array
+    {
+        $permissions = [
+            'can_access_admin' => $this->hasRole(['Super Admin', 'Admin']),
+            'can_access_hr' => $this->hasRole(['Super Admin', 'Manager', 'Employee']),
+            'can_access_creatives' => $this->hasRole(['Super Admin', 'Designer']) ||
+                                     ($this->department && strtolower($this->department->name) === 'creatives'),
+            'can_manage_users' => $this->can('user.create') || $this->can('user.update'),
+            'can_manage_employees' => $this->can('employee.read'),
+            'can_manage_departments' => $this->can('department.read'),
+            'can_view_reports' => $this->can('admin.access'),
+            'accessible_departments' => $this->getAccessibleDepartments()->pluck('id')->toArray(),
+            'user_department' => $this->department ? [
+                'id' => $this->department->id,
+                'name' => $this->department->name
+            ] : null
+        ];
+
+        return $permissions;
+    }
+}

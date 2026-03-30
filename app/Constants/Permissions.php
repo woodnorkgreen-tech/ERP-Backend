@@ -120,6 +120,20 @@ class Permissions
     const HR_MANAGE_PAYROLL = 'hr.manage_payroll';
     const HR_CREATE_POSITION = 'hr.create_position';
     const HR_MANAGE_ATTENDANCE = 'hr.manage_attendance';
+    const LEAVE_TYPE_CREATE = 'leave.type.create';
+    const LEAVE_TYPE_READ = 'leave.type.read';
+    const LEAVE_TYPE_UPDATE = 'leave.type.update';
+    const LEAVE_TYPE_DELETE = 'leave.type.delete';
+    const LEAVE_REQUEST_CREATE = 'leave.request.create';
+    const LEAVE_REQUEST_READ = 'leave.request.read';
+    const LEAVE_REQUEST_UPDATE = 'leave.request.update';
+    const LEAVE_REQUEST_DELETE = 'leave.request.delete';
+    const LEAVE_REQUEST_APPROVE = 'leave.request.approve';
+    const LEAVE_REQUEST_REJECT = 'leave.request.reject';
+    const LEAVE_REQUEST_RECALL = 'leave.request.recall';
+    const LEAVE_BALANCE_VIEW = 'leave.balance.view';
+    const LEAVE_POLICY_MANAGE = 'leave.policy.manage';
+    const LEAVE_CALENDAR_VIEW = 'leave.calendar.view';
 
     // ===========================================
     // CREATIVES/DESIGN PERMISSIONS
@@ -238,6 +252,10 @@ class Permissions
 
             // HR Permissions
             self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
+            self::LEAVE_TYPE_CREATE, self::LEAVE_TYPE_READ, self::LEAVE_TYPE_UPDATE, self::LEAVE_TYPE_DELETE,
+            self::LEAVE_REQUEST_CREATE, self::LEAVE_REQUEST_READ, self::LEAVE_REQUEST_UPDATE, self::LEAVE_REQUEST_DELETE,
+            self::LEAVE_REQUEST_APPROVE, self::LEAVE_REQUEST_REJECT, self::LEAVE_REQUEST_RECALL,
+            self::LEAVE_BALANCE_VIEW, self::LEAVE_POLICY_MANAGE, self::LEAVE_CALENDAR_VIEW,
 
             // Creatives Permissions
             self::CREATIVES_VIEW, self::CREATIVES_DESIGN_CREATE, self::CREATIVES_DESIGN_UPDATE,
@@ -318,6 +336,10 @@ class Permissions
             ],
             'hr' => [
                 self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
+                self::LEAVE_TYPE_CREATE, self::LEAVE_TYPE_READ, self::LEAVE_TYPE_UPDATE, self::LEAVE_TYPE_DELETE,
+                self::LEAVE_REQUEST_CREATE, self::LEAVE_REQUEST_READ, self::LEAVE_REQUEST_UPDATE, self::LEAVE_REQUEST_DELETE,
+                self::LEAVE_REQUEST_APPROVE, self::LEAVE_REQUEST_REJECT, self::LEAVE_REQUEST_RECALL,
+                self::LEAVE_BALANCE_VIEW, self::LEAVE_POLICY_MANAGE, self::LEAVE_CALENDAR_VIEW,
             ],
             'creatives' => [
                 self::CREATIVES_VIEW, self::CREATIVES_DESIGN_CREATE, self::CREATIVES_DESIGN_UPDATE,
