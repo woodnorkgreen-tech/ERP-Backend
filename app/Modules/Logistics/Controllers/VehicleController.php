@@ -1,0 +1,117 @@
+<?php
+
+namespace App\Modules\Logistics\Controllers;
+
+use App\Http\Controllers\Controller;
+use App\Modules\Logistics\Models\Vehicle;
+use App\Http\Resources\VehicleResource;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+
+class VehicleController extends Controller
+{
+    /**
+     * List all vehicles.
+     * Supports filtering by status, type, gps_status via query params.
+     * e.g. GET /fleet/vehicles?status=active&vehicle_type=truck&gps_status=active
+     */
+    public function index(Request $request): AnonymousResourceCollection
+    {
+        $vehicles = Vehicle::with('assignedDriver.employee')
+            ->when($request->status, fn($q) => $q->where('status', $request->status))
+            ->when($request->vehicle_type, fn($q) => $q->where('vehicle_type', $request->vehicle_type))
+            ->when($request->gps_status, fn($q) => $q->where('gps_status', $request->gps_status))
+            ->latest()
+            ->paginate(20);
+
+        return VehicleResource::collection($vehicles);
+    }
+
+    /**
+     * Add a new vehicle.
+     */
+    public function store(Request $request): VehicleResource
+    {
+        $validated = $request->validate([
+            'plate_number'       => 'required|string|max:20|unique:vehicles,plate_number',
+            'vehicle_type'       => 'required|in:truck,van,pickup,motorcycle,trailer,other',
+            'capacity_kg'        => 'required|numeric|min:0',
+            'fuel_type'          => 'required|in:diesel,petrol,electric,hybrid',
+            'insurance_expiry'   => 'required|date|after:today',
+            'odometer_km'        => 'sometimes|numeric|min:0',
+            'gps_status'         => 'sometimes|in:active,inactive',
+            'status'             => 'sometimes|in:active,inactive,maintenance,booked',
+            'assigned_driver_id' => 'sometimes|nullable|exists:drivers,id',
+        ]);
+
+        $vehicle = Vehicle::create($validated);
+        $vehicle->load('assignedDriver.employee');
+
+        return new VehicleResource($vehicle);
+    }
+
+    /**
+     * View a single vehicle.
+     */
+    public function show(Vehicle $vehicle): VehicleResource
+    {
+        $vehicle->load('assignedDriver.employee');
+
+        return new VehicleResource($vehicle);
+    }
+
+    /**
+     * Update vehicle details.
+     */
+    public function update(Request $request, Vehicle $vehicle): VehicleResource
+    {
+        $validated = $request->validate([
+            'plate_number'       => 'sometimes|string|max:20|unique:vehicles,plate_number,' . $vehicle->id,
+            'vehicle_type'       => 'sometimes|in:truck,van,pickup,motorcycle,trailer,other',
+            'capacity_kg'        => 'sometimes|numeric|min:0',
+            'fuel_type'          => 'sometimes|in:diesel,petrol,electric,hybrid',
+            'insurance_expiry'   => 'sometimes|date',
+            'odometer_km'        => 'sometimes|numeric|min:0',
+            'gps_status'         => 'sometimes|in:active,inactive',
+            'status'             => 'sometimes|in:active,inactive,maintenance,booked',
+            'assigned_driver_id' => 'sometimes|nullable|exists:drivers,id',
+        ]);
+
+        $vehicle->update($validated);
+        $vehicle->load('assignedDriver.employee');
+
+        return new VehicleResource($vehicle);
+    }
+
+    /**
+     * Update GPS coordinates only.
+     * Separate endpoint so the GPS tracker can ping without touching other fields.
+     * PATCH /fleet/vehicles/{vehicle}/gps
+     */
+    public function updateGps(Request $request, Vehicle $vehicle): VehicleResource
+    {
+        $validated = $request->validate([
+            'gps_lat'    => 'required|numeric|between:-90,90',
+            'gps_lng'    => 'required|numeric|between:-180,180',
+            'gps_status' => 'sometimes|in:active,inactive',
+        ]);
+
+        $vehicle->update([
+            ...$validated,
+            'gps_last_updated' => now(),
+        ]);
+
+        return new VehicleResource($vehicle);
+    }
+
+    /**
+     * Soft-delete a vehicle.
+     */
+    public function destroy(Vehicle $vehicle): JsonResponse
+    {
+        $vehicle->delete();
+
+        return response()->json(['message' => 'Vehicle removed successfully.']);
+    }
+}
