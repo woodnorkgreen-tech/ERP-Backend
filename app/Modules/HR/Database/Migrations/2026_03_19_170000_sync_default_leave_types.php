@@ -2,21 +2,15 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
-<<<<<<< HEAD
-=======
 use Illuminate\Support\Facades\Schema;
->>>>>>> hr
 
 return new class extends Migration
 {
     public function up(): void
     {
         $timestamp = now();
-<<<<<<< HEAD
-=======
         $hasMonthlyAccrualRate = Schema::hasColumn('leave_types', 'monthly_accrual_rate');
         $hasAllowAdvance = Schema::hasColumn('leave_types', 'allow_advance');
->>>>>>> hr
 
         $defaults = [
             [
@@ -82,8 +76,6 @@ return new class extends Migration
         ];
 
         foreach ($defaults as $leaveType) {
-<<<<<<< HEAD
-=======
             if (!$hasMonthlyAccrualRate) {
                 unset($leaveType['monthly_accrual_rate']);
             }
@@ -92,7 +84,6 @@ return new class extends Migration
                 unset($leaveType['allow_advance']);
             }
 
->>>>>>> hr
             DB::table('leave_types')->updateOrInsert(
                 ['code' => $leaveType['code']],
                 array_merge($leaveType, ['updated_at' => $timestamp, 'created_at' => $timestamp])
@@ -110,80 +101,13 @@ return new class extends Migration
     public function down(): void
     {
         $timestamp = now();
-<<<<<<< HEAD
-=======
         $hasMonthlyAccrualRate = Schema::hasColumn('leave_types', 'monthly_accrual_rate');
         $hasAllowAdvance = Schema::hasColumn('leave_types', 'allow_advance');
->>>>>>> hr
 
         DB::table('leave_types')
             ->whereIn('code', ['MATERNITY', 'PATERNITY', 'UNPAID'])
             ->delete();
 
-<<<<<<< HEAD
-        DB::table('leave_types')
-            ->where('code', 'ANNUAL')
-            ->update([
-                'name' => 'Annual Leave',
-                'days_per_year' => 20,
-                'monthly_accrual_rate' => null,
-                'allow_advance' => false,
-                'color' => 'emerald',
-                'icon' => 'mdi-palm-tree',
-                'description' => 'Standard annual leave entitlement.',
-                'is_active' => true,
-                'requires_attachment' => false,
-                'updated_at' => $timestamp,
-            ]);
-
-        DB::table('leave_types')
-            ->where('code', 'SICK')
-            ->update([
-                'name' => 'Sick Leave',
-                'days_per_year' => 10,
-                'monthly_accrual_rate' => null,
-                'allow_advance' => false,
-                'color' => 'blue',
-                'icon' => 'mdi-medical-bag',
-                'description' => 'Leave for illness or medical recovery.',
-                'is_active' => true,
-                'requires_attachment' => true,
-                'updated_at' => $timestamp,
-            ]);
-
-        DB::table('leave_types')->updateOrInsert(
-            ['code' => 'PARENTAL'],
-            [
-                'name' => 'Parental Leave',
-                'days_per_year' => 15,
-                'monthly_accrual_rate' => null,
-                'allow_advance' => false,
-                'color' => 'amber',
-                'icon' => 'mdi-baby-face-outline',
-                'description' => 'Parental care and bonding leave.',
-                'is_active' => true,
-                'requires_attachment' => false,
-                'created_at' => $timestamp,
-                'updated_at' => $timestamp,
-            ]
-        );
-
-        DB::table('leave_types')->updateOrInsert(
-            ['code' => 'COMPOFF'],
-            [
-                'name' => 'Comp Off',
-                'days_per_year' => 3,
-                'monthly_accrual_rate' => null,
-                'allow_advance' => false,
-                'color' => 'green',
-                'icon' => 'mdi-calendar-check-outline',
-                'description' => 'Time off in lieu of overtime or off-day work.',
-                'is_active' => true,
-                'requires_attachment' => false,
-                'created_at' => $timestamp,
-                'updated_at' => $timestamp,
-            ]
-=======
         $annualUpdate = [
             'name' => 'Annual Leave',
             'days_per_year' => 20,
@@ -278,7 +202,6 @@ return new class extends Migration
         DB::table('leave_types')->updateOrInsert(
             ['code' => 'COMPOFF'],
             $compOffPayload
->>>>>>> hr
         );
     }
 };

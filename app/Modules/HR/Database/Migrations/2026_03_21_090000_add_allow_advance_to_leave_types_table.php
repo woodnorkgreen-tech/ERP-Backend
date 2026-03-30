@@ -9,17 +9,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-<<<<<<< HEAD
-        Schema::table('leave_types', function (Blueprint $table) {
-            $table->boolean('allow_advance')->default(false)->after('monthly_accrual_rate');
-        });
-=======
         if (!Schema::hasColumn('leave_types', 'allow_advance')) {
             Schema::table('leave_types', function (Blueprint $table) {
                 $table->boolean('allow_advance')->default(false)->after('monthly_accrual_rate');
             });
         }
->>>>>>> hr
 
         DB::table('leave_types')->where('code', 'ANNUAL')->update([
             'allow_advance' => true,
@@ -29,16 +23,10 @@ return new class extends Migration
 
     public function down(): void
     {
-<<<<<<< HEAD
-        Schema::table('leave_types', function (Blueprint $table) {
-            $table->dropColumn('allow_advance');
-        });
-=======
         if (Schema::hasColumn('leave_types', 'allow_advance')) {
             Schema::table('leave_types', function (Blueprint $table) {
                 $table->dropColumn('allow_advance');
             });
         }
->>>>>>> hr
     }
 };
