@@ -234,18 +234,12 @@ class LeaveManagementService
                 $usedDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_APPROVED]);
                 $pendingDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_PENDING]);
                 $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year);
-<<<<<<< HEAD
-                $accruedRemaining = max($metrics['earned_days'] - ($usedDays + $pendingDays), 0);
-                $requestableDays = $leaveType->allow_advance
-                    ? max($metrics['year_entitlement_days'] - ($usedDays + $pendingDays), 0)
-=======
                 $carryForwardDays = $this->calculateCarryForwardDays($employee, $leaveType, $year);
                 
                 $totalAvailable = $metrics['earned_days'] + $carryForwardDays;
                 $accruedRemaining = max($totalAvailable - ($usedDays + $pendingDays), 0);
                 $requestableDays = $leaveType->allow_advance
                     ? max($metrics['year_entitlement_days'] + $carryForwardDays - ($usedDays + $pendingDays), 0)
->>>>>>> hr
                     : $accruedRemaining;
                 $advanceAvailableDays = $leaveType->allow_advance
                     ? max($requestableDays - $accruedRemaining, 0)
@@ -259,10 +253,7 @@ class LeaveManagementService
                     'icon' => $leaveType->icon,
                     'allocated_days' => $metrics['year_entitlement_days'],
                     'earned_days' => $metrics['earned_days'],
-<<<<<<< HEAD
-=======
                     'carry_forward_days' => $carryForwardDays,
->>>>>>> hr
                     'used_days' => $usedDays,
                     'pending_days' => $pendingDays,
                     'available_days' => $accruedRemaining,
@@ -476,8 +467,6 @@ class LeaveManagementService
 
         return (float) $query->sum('days_requested');
     }
-<<<<<<< HEAD
-=======
 
     public function calculateCarryForwardDays(Employee $employee, LeaveType $leaveType, int $year): float
     {
@@ -557,5 +546,4 @@ class LeaveManagementService
             'pending_days' => 0,
         ];
     }
->>>>>>> hr
 }

@@ -3,15 +3,6 @@
 namespace App\Modules\HR\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-<<<<<<< HEAD
-use App\Modules\HR\Models\Employee;
-use App\Modules\HR\Models\LeaveRequest;
-use App\Modules\HR\Models\LeaveType;
-use App\Modules\HR\Services\LeaveManagementService;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-=======
 use App\Models\User;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\LeaveRequest;
@@ -27,7 +18,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
->>>>>>> hr
 use Illuminate\Validation\Rule;
 
 class LeaveRequestController extends Controller
@@ -109,12 +99,9 @@ class LeaveRequestController extends Controller
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
-<<<<<<< HEAD
-=======
         $leaveTypeId = $request->input('leave_type_id');
         $leaveType = LeaveType::find($leaveTypeId);
         
->>>>>>> hr
         $validated = $request->validate([
             'employee_id' => ['nullable', 'integer', 'exists:employees,id'],
             'contact_employee_id' => ['nullable', 'integer', 'different:employee_id', 'exists:employees,id'],
@@ -125,23 +112,15 @@ class LeaveRequestController extends Controller
             'reason' => ['required', 'string'],
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
-<<<<<<< HEAD
-            'attachment_path' => ['nullable', 'string', 'max:255'],
-=======
             'attachment' => $leaveType && $leaveType->requires_attachment 
                 ? ['required', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048']
                 : ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
->>>>>>> hr
         ]);
 
         $employee = $this->resolveTargetEmployee($user, $validated['employee_id'] ?? null);
         $leaveType = LeaveType::query()->whereKey($validated['leave_type_id'])->firstOrFail();
         $this->ensureContactEmployeeIsDifferent($employee->id, $validated['contact_employee_id'] ?? null);
 
-<<<<<<< HEAD
-        $this->leaveService->validateDateRange($validated['start_date'], $validated['end_date']);
-        $this->leaveService->ensureNoOverlap($employee, $validated['start_date'], $validated['end_date']);
-=======
         try {
             $this->leaveService->validateDateRange($validated['start_date'], $validated['end_date']);
             $this->leaveService->ensureNoOverlap($employee, $validated['start_date'], $validated['end_date']);
@@ -154,23 +133,12 @@ class LeaveRequestController extends Controller
                 ],
             ], 422);
         }
->>>>>>> hr
 
         $daysRequested = $this->leaveService->calculateBusinessDays(
             $validated['start_date'],
             $validated['end_date'],
             $validated['session']
         );
-<<<<<<< HEAD
-        $this->leaveService->ensureBalanceAvailable(
-            $employee,
-            $leaveType,
-            $daysRequested,
-            (int) date('Y', strtotime($validated['start_date'])),
-            null,
-            $validated['start_date']
-        );
-=======
         
         try {
             $this->leaveService->ensureBalanceAvailable(
@@ -196,7 +164,6 @@ class LeaveRequestController extends Controller
         if ($request->hasFile('attachment')) {
             $attachmentPath = $request->file('attachment')->store('leave-attachments', 'public');
         }
->>>>>>> hr
 
         $leaveRequest = LeaveRequest::create([
             'employee_id' => $employee->id,
@@ -211,18 +178,12 @@ class LeaveRequestController extends Controller
             'reason' => $validated['reason'],
             'explanation' => $validated['explanation'] ?? null,
             'handover_notes' => $validated['handover_notes'] ?? null,
-<<<<<<< HEAD
-            'attachment_path' => $validated['attachment_path'] ?? null,
-        ]);
-
-=======
             'attachment_path' => $attachmentPath,
         ]);
 
         // Return the response immediately; notify managers after the request finishes.
         $this->notifyManagersAfterResponse($leaveRequest->id);
 
->>>>>>> hr
         return response()->json([
             'success' => true,
             'message' => 'Leave request submitted successfully.',
@@ -252,11 +213,7 @@ class LeaveRequestController extends Controller
             'reason' => ['sometimes', 'required', 'string'],
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
-<<<<<<< HEAD
-            'attachment_path' => ['nullable', 'string', 'max:255'],
-=======
             'attachment' => ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
->>>>>>> hr
             'review_notes' => ['nullable', 'string'],
             'status' => ['sometimes', Rule::in([
                 LeaveRequest::STATUS_PENDING,
@@ -318,19 +275,12 @@ class LeaveRequestController extends Controller
             );
         }
 
-<<<<<<< HEAD
-        $leaveRequest->update(array_merge($validated, $statusAttributes, [
-=======
         // Handle file upload
         $updateData = array_merge($validated, $statusAttributes, [
->>>>>>> hr
             'days_requested' => $daysRequested,
             'start_date' => $startDate,
             'end_date' => $endDate,
             'session' => $session,
-<<<<<<< HEAD
-        ]));
-=======
         ]);
 
         if ($request->hasFile('attachment')) {
@@ -338,7 +288,6 @@ class LeaveRequestController extends Controller
         }
 
         $leaveRequest->update($updateData);
->>>>>>> hr
 
         return response()->json([
             'success' => true,
@@ -426,12 +375,9 @@ class LeaveRequestController extends Controller
             'review_notes' => $validated['review_notes'] ?? null,
         ]);
 
-<<<<<<< HEAD
-=======
         // Avoid blocking the review response on notification delivery.
         $this->notifyEmployeeAfterResponse($leaveRequest->id, $status);
 
->>>>>>> hr
         return response()->json([
             'success' => true,
             'message' => $message,
@@ -508,8 +454,6 @@ class LeaveRequestController extends Controller
             abort(422, 'Contact during leave must be a different employee.');
         }
     }
-<<<<<<< HEAD
-=======
 
     protected function notifyManagersAfterResponse(int $leaveRequestId): void
     {
@@ -768,5 +712,4 @@ class LeaveRequestController extends Controller
             ], 500);
         }
     }
->>>>>>> hr
 }

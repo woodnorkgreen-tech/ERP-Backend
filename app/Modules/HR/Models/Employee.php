@@ -167,9 +167,6 @@ class Employee extends Model
         // Check if employee is in user's department
         return $this->department_id === $user->department_id;
     }
-<<<<<<< HEAD
-}
-=======
 
     /**
      * Get the HR actions performed for this employee.
@@ -179,4 +176,3 @@ class Employee extends Model
         return $this->hasMany(HRAction::class);
     }
 }
->>>>>>> hr
