@@ -71,6 +71,7 @@ class InventoryService
                 'supplier_id' => $meta['supplier_id'] ?? null,
                 'reference_no' => $meta['reference_no'] ?? null,
                 'notes' => $meta['notes'] ?? null,
+                'logged_at' => $meta['logged_at'] ?? now(),
             ]);
         });
     }

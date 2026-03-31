@@ -13,6 +13,29 @@ use App\Http\Controllers\Controller;
 class RequisitionController extends Controller
 {
     /**
+     * Check if user can view all requisitions
+     */
+    private function canViewAll()
+    {
+        $user = auth()->user();
+
+        if (!$user || !$user->roles) {
+            return false;
+        }
+
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts', 'Stores', 'Procurement', 'Manager'];
+        $userRoles = $user->roles->pluck('name')->toArray();
+
+        foreach ($allowedRoles as $role) {
+            if (in_array($role, $userRoles)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Check if user has approval/delete permissions
      * Only Super Admin, Admin, and Accounts roles can approve/reject/delete
      */
@@ -95,8 +118,8 @@ class RequisitionController extends Controller
             $query->where('urgency', $request->urgency);
         }
 
-        // Filter by user if they are not an approver
-        if (!$this->canApproveOrDelete()) {
+        // Filter by user if they are not an authorized viewer
+        if (!$this->canViewAll()) {
             $query->where('user_id', auth()->id());
         }
 
@@ -166,8 +189,8 @@ class RequisitionController extends Controller
             $query->whereDate('date', '<=', $request->date_to);
         }
 
-        // Filter by user if they are not an approver
-        if (!$this->canApproveOrDelete()) {
+        // Filter by user if they are not an authorized viewer
+        if (!$this->canViewAll()) {
             $query->where('user_id', auth()->id());
         }
 
