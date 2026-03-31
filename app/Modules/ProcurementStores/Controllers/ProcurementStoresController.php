@@ -82,9 +82,11 @@ class ProcurementStoresController extends Controller
             'quantity' => 'required|numeric|min:0.01',
             'warehouse_code' => 'sometimes|string',
             'location' => 'nullable|string',
+            'reference_no' => 'nullable|string',
             'notes' => 'nullable|string',
             'usage_type' => 'nullable|string|in:consumable,reusable',
-            'type' => 'nullable|string'
+            'type' => 'nullable|string',
+            'logged_at' => 'nullable|date'
         ]);
 
         $service = new \App\Modules\ProcurementStores\Services\InventoryService();
@@ -112,7 +114,8 @@ class ProcurementStoresController extends Controller
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
             'project_id' => 'nullable|exists:projects,id',
-            'notes' => 'nullable|string'
+            'notes' => 'nullable|string',
+            'logged_at' => 'nullable|date'
         ]);
 
         $service = new \App\Modules\ProcurementStores\Services\InventoryService();
@@ -272,6 +275,7 @@ class ProcurementStoresController extends Controller
             'items.*.reference_no' => 'nullable|string',
             'items.*.notes' => 'nullable|string',
             'warehouse_code' => 'sometimes|string',
+            'logged_at' => 'nullable|date'
         ]);
 
         $service = new \App\Modules\ProcurementStores\Services\InventoryService();
@@ -283,7 +287,8 @@ class ProcurementStoresController extends Controller
                 $item,
                 [
                     'batch_number' => $batchNumber,
-                    'warehouse_code' => $request->warehouse_code ?? 'MAIN'
+                    'warehouse_code' => $request->warehouse_code ?? 'MAIN',
+                    'logged_at' => $request->logged_at ?? now()
                 ]
             );
             
@@ -318,6 +323,7 @@ class ProcurementStoresController extends Controller
             'items.*.usage_type' => 'nullable|string|in:consumable,reusable',
             'items.*.requestor' => 'nullable|string',
             'project_id' => 'nullable|exists:projects,id',
+            'logged_at' => 'nullable|date'
         ]);
 
         $service = new \App\Modules\ProcurementStores\Services\InventoryService();
@@ -344,7 +350,8 @@ class ProcurementStoresController extends Controller
                 [
                     'batch_number' => $batchNumber,
                     'project_id' => $request->project_id ?? null,
-                    'notes' => $item['notes'] ?? 'Batch check-out'
+                    'notes' => $item['notes'] ?? 'Batch check-out',
+                    'logged_at' => $request->logged_at ?? now()
                 ]
             );
             
@@ -384,7 +391,16 @@ class ProcurementStoresController extends Controller
             $query->where('project_id', $request->project_id);
         }
 
-        $logs = $query->orderBy('created_at', 'desc')
+        if ($request->filled('start_date')) {
+            $query->whereDate('logged_at', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('logged_at', '<=', $request->end_date);
+        }
+
+        $logs = $query->orderBy('logged_at', 'desc')
+            ->orderBy('created_at', 'desc')
             ->limit(200)
             ->get();
 
@@ -429,15 +445,17 @@ class ProcurementStoresController extends Controller
             });
         }
 
-        // Apply Date Filters
+        // Apply Date Filters (Using logged_at for business logic)
         if ($request->filled('start_date')) {
-            $query->whereDate('created_at', '>=', $request->start_date);
+            $query->whereDate('logged_at', '>=', $request->start_date);
         }
         if ($request->filled('end_date')) {
-            $query->whereDate('created_at', '<=', $request->end_date);
+            $query->whereDate('logged_at', '<=', $request->end_date);
         }
 
-        $logs = $query->orderBy('created_at', 'desc')->get();
+        $logs = $query->orderBy('logged_at', 'desc')
+            ->orderBy('created_at', 'desc')
+            ->get();
 
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.inventory-logs', [
             'logs' => $logs,

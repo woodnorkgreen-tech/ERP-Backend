@@ -13,6 +13,29 @@ use App\Http\Controllers\Controller;
 class RequisitionController extends Controller
 {
     /**
+     * Check if user can view all requisitions
+     */
+    private function canViewAll()
+    {
+        $user = auth()->user();
+
+        if (!$user || !$user->roles) {
+            return false;
+        }
+
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts', 'Stores', 'Procurement', 'Manager'];
+        $userRoles = $user->roles->pluck('name')->toArray();
+
+        foreach ($allowedRoles as $role) {
+            if (in_array($role, $userRoles)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Check if user has approval/delete permissions
      * Only Super Admin, Admin, and Accounts roles can approve/reject/delete
      */
@@ -48,7 +71,7 @@ class RequisitionController extends Controller
             return false;
         }
 
-        $allowedRoles = ['Super Admin', 'Admin', 'Accounts', 'Procurement', 'Stores'];
+        $allowedRoles = ['Super Admin', 'Admin', 'Accounts', 'Procurement', 'Stores', 'Manager'];
         $userRoles = $user->roles->pluck('name')->toArray();
 
         foreach ($allowedRoles as $role) {

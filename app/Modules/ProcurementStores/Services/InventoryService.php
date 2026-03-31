@@ -72,6 +72,7 @@ class InventoryService
                 'reference_no' => $meta['reference_no'] ?? null,
                 'notes' => $meta['notes'] ?? null,
                 'usage_type' => $meta['usage_type'] ?? 'consumable',
+                'logged_at' => $meta['logged_at'] ?? now(),
             ]);
         });
     }
