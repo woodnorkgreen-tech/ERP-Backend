@@ -31,6 +31,9 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
     })
+    ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule) {
+        $schedule->command('hr:process-actions')->daily();
+    })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Handle unauthenticated requests for API
         $exceptions->renderable(function (\Illuminate\Auth\AuthenticationException $e, \Illuminate\Http\Request $request) {

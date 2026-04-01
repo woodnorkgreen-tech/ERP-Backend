@@ -161,6 +161,38 @@ class Employee extends Model
     }
 
     /**
+     * Get the documents for the employee.
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(EmployeeDocument::class);
+    }
+
+    /**
+     * Get the leave requests for the employee.
+     */
+    public function leaveRequests(): HasMany
+    {
+        return $this->hasMany(LeaveRequest::class);
+    }
+
+    /**
+     * Get the payslips for the employee.
+     */
+    public function payslips(): HasMany
+    {
+        return $this->hasMany(Payslip::class);
+    }
+
+    /**
+     * Get the payroll ledgers for the employee.
+     */
+    public function payrollLedgers(): HasMany
+    {
+        return $this->hasMany(PayrollLedger::class);
+    }
+
+    /**
      * Get the HR actions performed for this employee.
      */
     public function actions(): HasMany
