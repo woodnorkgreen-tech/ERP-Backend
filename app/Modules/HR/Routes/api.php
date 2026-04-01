@@ -144,6 +144,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
         // Employee Actions (HR directives: promotions, transfers, warnings, etc.)
         Route::get('employees/{employee}/actions', [HRActionController::class, 'index']);
+        Route::get('action-types', [HRActionController::class, 'actionTypes']);
         Route::post('actions', [HRActionController::class, 'store']);
 
         // Employee Documents

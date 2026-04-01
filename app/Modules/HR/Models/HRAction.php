@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class HRAction extends Model
 {
@@ -15,11 +16,13 @@ class HRAction extends Model
 
     protected $fillable = [
         'employee_id',
-        'action_type',
+        'action_type_id',
+        'action_type', // Keep for backward compatibility/legacy records
         'previous_data',
         'new_data',
         'effective_date',
         'reason',
+        'status',
         'recorded_by'
     ];
 
@@ -43,5 +46,21 @@ class HRAction extends Model
     public function recorder(): BelongsTo
     {
         return $this->belongsTo(User::class, 'recorded_by');
+    }
+
+    /**
+     * Get the action type.
+     */
+    public function type(): BelongsTo
+    {
+        return $this->belongsTo(HRActionType::class, 'action_type_id');
+    }
+
+    /**
+     * Get the attachments for this action.
+     */
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(HRActionAttachment::class, 'hr_action_id');
     }
 }

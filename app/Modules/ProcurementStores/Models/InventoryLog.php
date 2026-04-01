@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use App\Models\User;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
-
 class InventoryLog extends Model
 {
 
@@ -25,6 +24,7 @@ class InventoryLog extends Model
         'project_id',
         'supplier_id',
         'reference_no',
+        'recipient_name',
         'notes',
         'usage_type',
         'logged_at'
