@@ -7,11 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use App\Models\User;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
-use App\Traits\Governed;
-
 class InventoryLog extends Model
 {
-    use Governed;
 
     public function getGovernanceGate(): string
     {
@@ -27,6 +24,7 @@ class InventoryLog extends Model
         'project_id',
         'supplier_id',
         'reference_no',
+        'recipient_name',
         'notes',
         'usage_type'
     ];
