@@ -176,13 +176,6 @@ class Employee extends Model
         return $this->hasMany(EmployeeDocument::class);
     }
 
-    /**
-     * Get the leave requests for the employee.
-     */
-    public function leaveRequests(): HasMany
-    {
-        return $this->hasMany(LeaveRequest::class);
-    }
 
     /**
      * Get the payslips for the employee.

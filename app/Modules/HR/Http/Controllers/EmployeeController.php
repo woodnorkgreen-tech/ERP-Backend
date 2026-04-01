@@ -19,8 +19,7 @@ class EmployeeController
         $query = Employee::with(['department', 'manager']);
 
         // Apply department access control first
-        // Temporarily disabled for debugging
-        // $query->accessibleByUser();
+        $query->accessibleByUser();
 
         // Apply filters
         if ($request->has('department_id') && $request->department_id) {
