@@ -15,6 +15,9 @@ use App\Constants\Permissions;
 
 // Unprotected HR Routes 
 Route::prefix('hr')->group(function () {
+    // Specifically define profile before the resource to avoid it being interpreted as an ID
+    Route::get('employees/profile', [EmployeeController::class, 'profile'])->middleware(['auth:sanctum', 'active']);
+    
     // Employee management
     Route::apiResource('employees', EmployeeController::class);
     
@@ -38,6 +41,10 @@ Route::prefix('hr')->group(function () {
 // Protected HR Routes
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('hr')->group(function () {
+        // Specifically define profile before the resource to avoid it being interpreted as an ID
+        // This MUST come before apiResource('employees')
+        Route::get('employees/profile', [EmployeeController::class, 'profile']);
+
         // Employee management
         Route::apiResource('employees', EmployeeController::class)->middleware([
             'index' => 'permission:' . Permissions::EMPLOYEE_READ,

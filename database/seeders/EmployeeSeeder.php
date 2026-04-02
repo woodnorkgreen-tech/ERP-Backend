@@ -43,7 +43,15 @@ class EmployeeSeeder extends Seeder
                 'address' => 'Nairobi, Kenya',
                 'emergency_contact' => ['name' => 'Jane Manager', 'phone' => '+254700001002'],
                 'performance_rating' => 4.5,
-                'last_review_date' => '2025-12-01'
+                'last_review_date' => '2025-12-01',
+                'id_number' => '12345678',
+                'kra_pin' => 'A001234567Z',
+                'nssf_id' => 'NSSF001',
+                'nhif_id' => 'NHIF001',
+                'bank_name' => 'KCB Bank',
+                'bank_branch' => 'Nairobi Central',
+                'account_number' => '1100223344',
+                'is_on_probation' => false
             ],
             [
                 'employee_id' => 'EMP002',

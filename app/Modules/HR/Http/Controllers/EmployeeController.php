@@ -84,6 +84,18 @@ class EmployeeController
             'position' => 'required|string|max:255',
             'hire_date' => 'required|date',
             'salary' => 'nullable|numeric|min:0',
+            'id_number' => 'nullable|string|max:20',
+            'kra_pin' => 'nullable|string|max:20',
+            'nssf_id' => 'nullable|string|max:20',
+            'nhif_id' => 'nullable|string|max:20',
+            'bank_name' => 'nullable|string|max:255',
+            'bank_branch' => 'nullable|string|max:255',
+            'bank_code' => 'nullable|string|max:20',
+            'account_number' => 'nullable|string|max:50',
+            'payment_method' => ['nullable', Rule::in(['bank', 'mobile_money', 'cheque', 'cash'])],
+            'probation_end_date' => 'nullable|date',
+            'is_on_probation' => 'nullable|boolean',
+            'contract_end_date' => 'nullable|date',
 
             'status' => ['required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
             'employment_type' => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],
@@ -146,6 +158,18 @@ class EmployeeController
             'position' => 'sometimes|required|string|max:255',
             'hire_date' => 'sometimes|required|date',
             'salary' => 'nullable|numeric|min:0',
+            'id_number' => 'nullable|string|max:20',
+            'kra_pin' => 'nullable|string|max:20',
+            'nssf_id' => 'nullable|string|max:20',
+            'nhif_id' => 'nullable|string|max:20',
+            'bank_name' => 'nullable|string|max:255',
+            'bank_branch' => 'nullable|string|max:255',
+            'bank_code' => 'nullable|string|max:20',
+            'account_number' => 'nullable|string|max:50',
+            'payment_method' => ['nullable', Rule::in(['bank', 'mobile_money', 'cheque', 'cash'])],
+            'probation_end_date' => 'nullable|date',
+            'is_on_probation' => 'nullable|boolean',
+            'contract_end_date' => 'nullable|date',
 
             'status' => ['sometimes', 'required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
             'employment_type' => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],
@@ -196,6 +220,32 @@ class EmployeeController
 
         return response()->json([
             'message' => 'Employee deleted successfully'
+        ]);
+    }
+
+    /**
+     * Display the authenticated user's employee profile.
+     */
+    public function profile(Request $request): JsonResponse
+    {
+        $user = auth()->user();
+        
+        if (!$user || !$user->employee_id) {
+            return response()->json([
+                'message' => 'No employee profile associated with this user account'
+            ], 404);
+        }
+
+        $employee = Employee::with(['department', 'manager'])->find($user->employee_id);
+
+        if (!$employee) {
+            return response()->json([
+                'message' => 'Employee profile not found'
+            ], 404);
+        }
+
+        return response()->json([
+            'data' => $employee
         ]);
     }
 }

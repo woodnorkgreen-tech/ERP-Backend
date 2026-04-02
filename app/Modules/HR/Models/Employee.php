@@ -15,14 +15,26 @@ class Employee extends Model
         'employee_id',
         'first_name',
         'last_name',
+        'id_number',
+        'kra_pin',
+        'nssf_id',
+        'nhif_id',
         'email',
         'phone',
         'department_id',
         'position',
         'hire_date',
+        'probation_end_date',
+        'is_on_probation',
+        'contract_end_date',
 
         'status',
         'salary',
+        'bank_name',
+        'bank_branch',
+        'bank_code',
+        'account_number',
+        'payment_method',
         'employment_type',
         'manager_id',
         'address',
@@ -34,11 +46,13 @@ class Employee extends Model
 
     protected $casts = [
         'hire_date' => 'date',
-
-
+        'probation_end_date' => 'date',
+        'is_on_probation' => 'boolean',
+        'contract_end_date' => 'date',
         'emergency_contact' => 'array',
         'performance_rating' => 'decimal:1',
-        'last_review_date' => 'date'
+        'last_review_date' => 'date',
+        'salary' => 'float'
     ];
 
     protected $appends = [
