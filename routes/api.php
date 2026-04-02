@@ -25,7 +25,7 @@ use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\HandoverSurveyController;
 use App\Http\Controllers\API\PublicHandoverController;
 use App\Modules\Production\Http\Controllers\JobCardController;
-
+use App\Modules\Logistics\Controllers\DriverDeliveryController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashRequisitionController;
@@ -577,6 +577,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('/checklist/generate', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateChecklist']);
             Route::get('/checklist/stats', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklistStats']);
         });
+
+
+
 
         // Archival Task Routes (Project Memorial Report)
         Route::prefix('tasks/{taskId}/archival')->group(function () {

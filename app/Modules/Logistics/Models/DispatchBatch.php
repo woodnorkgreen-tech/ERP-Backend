@@ -1,7 +1,5 @@
 <?php
 
-
-
 namespace App\Modules\Logistics\Models;
 
 use App\Modules\HR\Models\Employee;
@@ -23,10 +21,10 @@ class DispatchBatch extends Model
     ];
 
     protected $casts = [
-        'dispatch_date'  => 'date',
-        'confirmed_at'   => 'datetime',
-        'started_at'     => 'datetime',
-        'completed_at'   => 'datetime',
+        'dispatch_date' => 'date',
+        'confirmed_at'  => 'datetime',
+        'started_at'    => 'datetime',
+        'completed_at'  => 'datetime',
     ];
 
     public function driver(): BelongsTo

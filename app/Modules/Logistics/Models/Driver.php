@@ -26,4 +26,10 @@ class Driver extends Model
     {
         return $this->belongsTo(Employee::class);
     }
+    // In App\Modules\Logistics\Models\Driver
+public function user(): HasOne
+{
+    // If your drivers table has a user_id column (for login)
+    return $this->hasOne(\App\Models\User::class, 'employee_id', 'employee_id');
+}
 }
