@@ -113,18 +113,22 @@ class PayrollEngineController extends Controller
         return response()->json(['message' => 'Ledger entry removed']);
     }
 
-    public function exportLedgerTemplate()
+    public function exportLedgerTemplate(Request $request)
     {
+        $month = $request->query('month', date('Y-m'));
+        $employeeIds = $request->query('employee_ids', []);
+
         $headers = [
             'Content-Type' => 'text/csv',
-            'Content-Disposition' => 'attachment; filename="Ledger_Import_Template.csv"',
+            'Content-Disposition' => 'attachment; filename="Ledger_Import_Template_' . $month . '.csv"',
         ];
 
-        $callback = function() {
+        $callback = function() use ($month, $employeeIds) {
             $file = fopen('php://output', 'w');
             // Provide the headers
             fputcsv($file, [
                 'Employee_ID', 
+                'Employee_Name',
                 'Month(YYYY-MM)', 
                 'Type(addition/deduction)', 
                 'Amount_Type(fixed/percentage_of_basic)', 
@@ -134,17 +138,35 @@ class PayrollEngineController extends Controller
                 'Recurring(yes/no)'
             ]);
             
-            // Provide a sample row
-            fputcsv($file, [
-                'EMP001', 
-                date('Y-m'), 
-                'addition', 
-                'fixed', 
-                '5000', 
-                'Performance Bonus', 
-                'Q1 Performance', 
-                'no'
-            ]);
+            if (!empty($employeeIds) && is_array($employeeIds)) {
+                $employees = Employee::whereIn('id', $employeeIds)->get();
+                foreach ($employees as $emp) {
+                    fputcsv($file, [
+                        $emp->employee_id, 
+                        $emp->first_name . ' ' . $emp->last_name,
+                        $month, 
+                        'addition', 
+                        'fixed', 
+                        '', 
+                        '', 
+                        '', 
+                        'no'
+                    ]);
+                }
+            } else {
+                // Provide a sample row
+                fputcsv($file, [
+                    'EMP001', 
+                    'John Doe',
+                    $month, 
+                    'addition', 
+                    'fixed', 
+                    '5000', 
+                    'Performance Bonus', 
+                    'Q1 Performance', 
+                    'no'
+                ]);
+            }
             
             fclose($file);
         };
@@ -171,20 +193,53 @@ class PayrollEngineController extends Controller
         \DB::beginTransaction();
         try {
             while (($row = fgetcsv($handle, 1000, ',')) !== false) {
-                // If the row is empty or not matching header length, skip
-                if (count($row) < 8 || empty(trim($row[0]))) {
-                    continue;
+                // Determine format
+                $isLegacy = count($row) === 8;
+                $isModern = count($row) >= 9;
+
+                if (!$isLegacy && !$isModern) {
+                    continue; // invalid row
+                }
+                
+                $empIdRaw = trim($row[0]);
+                if (empty($empIdRaw) || strtolower($empIdRaw) === 'employee_id') {
+                    continue; // Skip header or empty row
+                }
+                
+                $monthIdx = $isLegacy ? 1 : 2;
+                $typeIdx = $isLegacy ? 2 : 3;
+                $amountTypeIdx = $isLegacy ? 3 : 4;
+                $amountIdx = $isLegacy ? 4 : 5;
+                $nameIdx = $isLegacy ? 5 : 6;
+                $descriptionIdx = $isLegacy ? 6 : 7;
+                $recurringIdx = $isLegacy ? 7 : 8;
+
+                $amount = trim($row[$amountIdx] ?? '');
+                $name = trim($row[$nameIdx] ?? '');
+                
+                // --- TRAP 1: Blank rows from pre-filled template ---
+                if ($amount === '' || $name === '') {
+                    continue; // Skip silently without recording a formal error
                 }
 
                 $results['total']++;
-                $empIdRaw = trim($row[0]);
-                $month = trim($row[1]);
-                $type = strtolower(trim($row[2]));
-                $amountType = strtolower(trim($row[3]));
-                $amount = trim($row[4]);
-                $name = trim($row[5]);
-                $description = trim($row[6]);
-                $recurring = strtolower(trim($row[7])) === 'yes' || strtolower(trim($row[7])) === 'true' || trim($row[7]) === '1' ? true : false;
+                $month = trim($row[$monthIdx] ?? '');
+                
+                // --- TRAP 4: Fuzzy matching percentage ---
+                $rawAmountType = strtolower(trim($row[$amountTypeIdx] ?? ''));
+                if (str_contains($rawAmountType, '%') || str_contains($rawAmountType, 'percent') || str_contains($rawAmountType, 'percentage')) {
+                    $amountType = 'percentage_of_basic';
+                } elseif (str_contains($rawAmountType, 'fix')) {
+                    $amountType = 'fixed';
+                } else {
+                    $amountType = $rawAmountType; 
+                }
+                
+                $type = strtolower(trim($row[$typeIdx] ?? ''));
+                $description = trim($row[$descriptionIdx] ?? '');
+                
+                $rawRecurring = strtolower(trim($row[$recurringIdx] ?? ''));
+                $recurring = in_array($rawRecurring, ['yes', 'true', '1']) ? true : false;
 
                 $employee = Employee::where('employee_id', $empIdRaw)->first();
 
@@ -205,7 +260,7 @@ class PayrollEngineController extends Controller
                 }
 
                 if (!in_array($amountType, ['fixed', 'percentage_of_basic'])) {
-                    $results['errors'][] = ['row' => $results['total'], 'message' => "Invalid amount_type {$amountType} for {$empIdRaw}"];
+                    $results['errors'][] = ['row' => $results['total'], 'message' => "Invalid amount_type {$rawAmountType} for {$empIdRaw}"];
                     continue;
                 }
 
@@ -214,21 +269,21 @@ class PayrollEngineController extends Controller
                     continue;
                 }
 
-                if (empty($name)) {
-                    $results['errors'][] = ['row' => $results['total'], 'message' => "Name is required for {$empIdRaw}"];
-                    continue;
-                }
-
-                PayrollLedger::create([
-                    'employee_id' => $employee->id,
-                    'ledger_month' => $month,
-                    'type' => $type,
-                    'amount_type' => $amountType,
-                    'amount_value' => (float)$amount,
-                    'name' => $name,
-                    'description' => $description,
-                    'is_recurring' => $recurring
-                ]);
+                // --- TRAP 2: Double submissions ---
+                PayrollLedger::updateOrCreate(
+                    [
+                        'employee_id' => $employee->id,
+                        'ledger_month' => $month,
+                        'name' => $name
+                    ],
+                    [
+                        'type' => $type,
+                        'amount_type' => $amountType,
+                        'amount_value' => (float)$amount,
+                        'description' => $description,
+                        'is_recurring' => $recurring
+                    ]
+                );
 
                 $results['processed']++;
             }
@@ -279,7 +334,9 @@ class PayrollEngineController extends Controller
     {
         $validated = $request->validate([
             'payroll_month' => 'required|string|regex:/^\d{4}-\d{2}$/',
-            'department_id' => 'nullable|exists:departments,id'
+            'department_id' => 'nullable|exists:departments,id',
+            'employee_ids'  => 'nullable|array',
+            'employee_ids.*' => 'exists:employees,id'
         ]);
 
         $month = $validated['payroll_month'];
@@ -287,6 +344,11 @@ class PayrollEngineController extends Controller
         
         if (!empty($validated['department_id'])) {
             $query->where('department_id', $validated['department_id']);
+        }
+
+        // Only process the explicitly selected employees if provided
+        if (!empty($validated['employee_ids'])) {
+            $query->whereIn('id', $validated['employee_ids']);
         }
 
         $employees = $query->get();
