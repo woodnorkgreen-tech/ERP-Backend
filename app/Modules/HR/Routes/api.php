@@ -79,8 +79,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::put('variables/{id}/toggle', [PayrollEngineController::class, 'toggleVariable']);
 
             // Ledgers
+            Route::get('ledgers/template', [PayrollEngineController::class, 'exportLedgerTemplate']);
+            Route::post('ledgers/import', [PayrollEngineController::class, 'importLedgers']);
             Route::get('ledgers', [PayrollEngineController::class, 'getLedgers']);
             Route::post('ledgers', [PayrollEngineController::class, 'storeLedger']);
+            Route::put('ledgers/{id}', [PayrollEngineController::class, 'updateLedger']);
             Route::delete('ledgers/{id}', [PayrollEngineController::class, 'destroyLedger']);
 
             // Tax Bands
