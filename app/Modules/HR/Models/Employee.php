@@ -15,14 +15,26 @@ class Employee extends Model
         'employee_id',
         'first_name',
         'last_name',
+        'id_number',
+        'kra_pin',
+        'nssf_id',
+        'nhif_id',
         'email',
         'phone',
         'department_id',
         'position',
         'hire_date',
+        'probation_end_date',
+        'is_on_probation',
+        'contract_end_date',
 
         'status',
         'salary',
+        'bank_name',
+        'bank_branch',
+        'bank_code',
+        'account_number',
+        'payment_method',
         'employment_type',
         'manager_id',
         'address',
@@ -34,11 +46,13 @@ class Employee extends Model
 
     protected $casts = [
         'hire_date' => 'date',
-
-
+        'probation_end_date' => 'date',
+        'is_on_probation' => 'boolean',
+        'contract_end_date' => 'date',
         'emergency_contact' => 'array',
         'performance_rating' => 'decimal:1',
-        'last_review_date' => 'date'
+        'last_review_date' => 'date',
+        'salary' => 'float'
     ];
 
     protected $appends = [
@@ -76,6 +90,14 @@ class Employee extends Model
     public function subordinates(): HasMany
     {
         return $this->hasMany(Employee::class, 'manager_id');
+    }
+
+    /**
+     * Get leave requests recorded for this employee.
+     */
+    public function leaveRequests(): HasMany
+    {
+        return $this->hasMany(LeaveRequest::class);
     }
 
     /**
@@ -158,6 +180,31 @@ class Employee extends Model
 
         // Check if employee is in user's department
         return $this->department_id === $user->department_id;
+    }
+
+    /**
+     * Get the documents for the employee.
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(EmployeeDocument::class);
+    }
+
+
+    /**
+     * Get the payslips for the employee.
+     */
+    public function payslips(): HasMany
+    {
+        return $this->hasMany(Payslip::class);
+    }
+
+    /**
+     * Get the payroll ledgers for the employee.
+     */
+    public function payrollLedgers(): HasMany
+    {
+        return $this->hasMany(PayrollLedger::class);
     }
 
     /**

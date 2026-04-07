@@ -29,6 +29,9 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::USER_ASSIGN_ROLE,
             Permissions::ROLE_READ, Permissions::DEPARTMENT_READ, Permissions::DEPARTMENT_UPDATE,
             Permissions::EMPLOYEE_READ, Permissions::PROJECT_READ, Permissions::FINANCE_VIEW,
+            Permissions::LEAVE_TYPE_CREATE, Permissions::LEAVE_TYPE_READ, Permissions::LEAVE_TYPE_UPDATE,
+            Permissions::LEAVE_TYPE_DELETE, Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ,
+            Permissions::LEAVE_REQUEST_UPDATE, Permissions::LEAVE_REQUEST_APPROVE, Permissions::LEAVE_REQUEST_DELETE,
             Permissions::FINANCE_PETTY_CASH_VIEW,
             Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE,
             Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -43,7 +46,10 @@ class RoleAndPermissionSeeder extends Seeder
         $hrRole->givePermissionTo([
             Permissions::EMPLOYEE_CREATE, Permissions::EMPLOYEE_READ, Permissions::EMPLOYEE_UPDATE,
             Permissions::EMPLOYEE_DELETE, Permissions::USER_READ, Permissions::USER_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::HR_VIEW_EMPLOYEES, Permissions::DASHBOARD_HR
+            Permissions::DEPARTMENT_READ, Permissions::HR_VIEW_EMPLOYEES, Permissions::DASHBOARD_HR,
+            Permissions::LEAVE_TYPE_CREATE, Permissions::LEAVE_TYPE_READ, Permissions::LEAVE_TYPE_UPDATE,
+            Permissions::LEAVE_TYPE_DELETE, Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ,
+            Permissions::LEAVE_REQUEST_UPDATE, Permissions::LEAVE_REQUEST_APPROVE, Permissions::LEAVE_REQUEST_DELETE
         ]);
 
         $clientServiceRole = Role::firstOrCreate(['name' => 'Client Service'], ['description' => 'Client acquisition and enquiry management']);
@@ -67,6 +73,7 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::DEPARTMENT_ACCESS, Permissions::EMPLOYEE_READ, Permissions::PROJECT_READ,
             Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS, Permissions::TASK_READ,
             Permissions::TASK_UPDATE, Permissions::TASK_ASSIGN, Permissions::DASHBOARD_VIEW,
+            Permissions::LEAVE_REQUEST_READ, Permissions::LEAVE_REQUEST_APPROVE,
             Permissions::FINANCE_PETTY_CASH_VIEW,
             Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE,
             Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -78,7 +85,8 @@ class RoleAndPermissionSeeder extends Seeder
         $employeeRole = Role::firstOrCreate(['name' => 'Employee'], ['description' => 'Basic employee access']);
         $employeeRole->givePermissionTo([
             Permissions::USER_READ, Permissions::PROJECT_READ, Permissions::TASK_READ,
-            Permissions::TASK_UPDATE, Permissions::DASHBOARD_VIEW
+            Permissions::TASK_UPDATE, Permissions::DASHBOARD_VIEW,
+            Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ, Permissions::LEAVE_REQUEST_UPDATE
         ]);
 
         // Finance Roles

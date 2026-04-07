@@ -85,12 +85,164 @@ class PayrollEngineController extends Controller
         return response()->json($ledger, 201);
     }
 
+    public function updateLedger(Request $request, $id)
+    {
+        $ledger = PayrollLedger::findOrFail($id);
+
+        $validated = $request->validate([
+            'employee_id' => 'required|exists:employees,id',
+            'ledger_month' => 'required|string|regex:/^\d{4}-\d{2}$/',
+            'type' => 'required|in:addition,deduction',
+            'amount_type' => 'required|in:fixed,percentage_of_basic',
+            'amount_value' => 'required|numeric|min:0',
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'is_recurring' => 'boolean'
+        ]);
+
+        $ledger->update($validated);
+        $ledger->load('employee');
+
+        return response()->json($ledger);
+    }
+
     public function destroyLedger($id)
     {
         $ledger = PayrollLedger::findOrFail($id);
         $ledger->delete();
         return response()->json(['message' => 'Ledger entry removed']);
     }
+
+    public function exportLedgerTemplate()
+    {
+        $headers = [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => 'attachment; filename="Ledger_Import_Template.csv"',
+        ];
+
+        $callback = function() {
+            $file = fopen('php://output', 'w');
+            // Provide the headers
+            fputcsv($file, [
+                'Employee_ID', 
+                'Month(YYYY-MM)', 
+                'Type(addition/deduction)', 
+                'Amount_Type(fixed/percentage_of_basic)', 
+                'Amount', 
+                'Name', 
+                'Description', 
+                'Recurring(yes/no)'
+            ]);
+            
+            // Provide a sample row
+            fputcsv($file, [
+                'EMP001', 
+                date('Y-m'), 
+                'addition', 
+                'fixed', 
+                '5000', 
+                'Performance Bonus', 
+                'Q1 Performance', 
+                'no'
+            ]);
+            
+            fclose($file);
+        };
+
+        return response()->stream($callback, 200, $headers);
+    }
+
+    public function importLedgers(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:csv,txt|max:2048'
+        ]);
+
+        $file = $request->file('file');
+        $handle = fopen($file->getRealPath(), 'r');
+        $header = fgetcsv($handle, 1000, ',');
+
+        $results = [
+            'total' => 0,
+            'processed' => 0,
+            'errors' => []
+        ];
+
+        \DB::beginTransaction();
+        try {
+            while (($row = fgetcsv($handle, 1000, ',')) !== false) {
+                // If the row is empty or not matching header length, skip
+                if (count($row) < 8 || empty(trim($row[0]))) {
+                    continue;
+                }
+
+                $results['total']++;
+                $empIdRaw = trim($row[0]);
+                $month = trim($row[1]);
+                $type = strtolower(trim($row[2]));
+                $amountType = strtolower(trim($row[3]));
+                $amount = trim($row[4]);
+                $name = trim($row[5]);
+                $description = trim($row[6]);
+                $recurring = strtolower(trim($row[7])) === 'yes' || strtolower(trim($row[7])) === 'true' || trim($row[7]) === '1' ? true : false;
+
+                $employee = Employee::where('employee_id', $empIdRaw)->first();
+
+                if (!$employee) {
+                    $results['errors'][] = ['row' => $results['total'], 'message' => "Employee ID {$empIdRaw} not found"];
+                    continue;
+                }
+
+                // Basic validation
+                if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+                    $results['errors'][] = ['row' => $results['total'], 'message' => "Invalid month format {$month} for {$empIdRaw}"];
+                    continue;
+                }
+
+                if (!in_array($type, ['addition', 'deduction'])) {
+                    $results['errors'][] = ['row' => $results['total'], 'message' => "Invalid type {$type} for {$empIdRaw}"];
+                    continue;
+                }
+
+                if (!in_array($amountType, ['fixed', 'percentage_of_basic'])) {
+                    $results['errors'][] = ['row' => $results['total'], 'message' => "Invalid amount_type {$amountType} for {$empIdRaw}"];
+                    continue;
+                }
+
+                if (!is_numeric($amount) || $amount < 0) {
+                    $results['errors'][] = ['row' => $results['total'], 'message' => "Invalid amount {$amount} for {$empIdRaw}"];
+                    continue;
+                }
+
+                if (empty($name)) {
+                    $results['errors'][] = ['row' => $results['total'], 'message' => "Name is required for {$empIdRaw}"];
+                    continue;
+                }
+
+                PayrollLedger::create([
+                    'employee_id' => $employee->id,
+                    'ledger_month' => $month,
+                    'type' => $type,
+                    'amount_type' => $amountType,
+                    'amount_value' => (float)$amount,
+                    'name' => $name,
+                    'description' => $description,
+                    'is_recurring' => $recurring
+                ]);
+
+                $results['processed']++;
+            }
+            \DB::commit();
+        } catch (\Exception $e) {
+            \DB::rollBack();
+            return response()->json(['message' => 'Failed to process import file: ' . $e->getMessage()], 422);
+        } finally {
+            fclose($handle);
+        }
+
+        return response()->json($results);
+    }
+
 
     // --- PAYSLIPS ---
     public function getPayslips(Request $request)

@@ -117,8 +117,8 @@
                 <th style="width: 10%;">Activity</th>
                 <th style="width: 30%;">Material Item</th>
                 <th style="width: 10%; text-align: center;">Qty</th>
-                <th style="width: 18%;">Timestamp</th>
-                <th style="width: 20%; text-align: right;">Project / Entity</th>
+                <th style="width: 18%;">Trans. Date</th>
+                <th style="width: 20%; text-align: right;">Audit / Context</th>
             </tr>
         </thead>
         <tbody>
@@ -141,11 +141,11 @@
                     {{ $log->quantity > 0 ? '+' : '' }}{{ $log->quantity }}
                     <span style="font-size: 7px; color: #6b7280; margin-left: 2px;">{{ $log->material->unit_of_measure ?? '' }}</span>
                 </td>
-                <td class="text-gray-600">{{ $log->created_at->format('d M Y, H:i') }}</td>
+                <td class="text-gray-600">{{ ($log->logged_at ?: $log->created_at)->format('d M Y, H:i') }}</td>
                 <td class="text-right">
                     <div class="font-bold uppercase">{{ $log->project->project_id ?? 'STORES' }}</div>
-                    <div class="text-gray-600" style="font-size: 7px;">{{ $log->project->enquiry->title ?? '' }}</div>
-                    <div class="text-gray-500" style="font-size: 6px;">{{ $log->user->name ?? 'SYSTEM' }}</div>
+                    <div class="text-gray-600" style="font-size: 7px;">Entered: {{ $log->created_at->format('d/m/Y H:i') }}</div>
+                    <div class="text-gray-500" style="font-size: 6px;">By: {{ $log->user->name ?? 'SYSTEM' }}</div>
                 </td>
             </tr>
             @empty

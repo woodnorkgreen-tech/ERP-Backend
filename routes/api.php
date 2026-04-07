@@ -86,7 +86,6 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
-
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware(['auth:sanctum', 'active']);

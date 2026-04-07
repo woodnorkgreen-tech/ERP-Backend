@@ -1,5 +1,4 @@
 <?php
-
 use Illuminate\Support\Facades\Route;
 use App\Modules\HR\Http\Controllers\EmployeeController;
 use App\Modules\HR\Http\Controllers\DepartmentController;
@@ -18,6 +17,9 @@ use App\Constants\Permissions;
 
 // Unprotected HR Routes 
 Route::prefix('hr')->group(function () {
+    // Specifically define profile before the resource to avoid it being interpreted as an ID
+    Route::get('employees/profile', [EmployeeController::class, 'profile'])->middleware(['auth:sanctum', 'active']);
+    
     // Employee management
     Route::apiResource('employees', EmployeeController::class);
     
@@ -48,6 +50,10 @@ Route::prefix('hr')->group(function () {
 // Protected HR Routes
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('hr')->group(function () {
+        // Specifically define profile before the resource to avoid it being interpreted as an ID
+        // This MUST come before apiResource('employees')
+        Route::get('employees/profile', [EmployeeController::class, 'profile']);
+
         // Employee management
         Route::apiResource('employees', EmployeeController::class)->middleware([
             'index' => 'permission:' . Permissions::EMPLOYEE_READ,
@@ -82,8 +88,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::put('variables/{id}/toggle', [PayrollEngineController::class, 'toggleVariable']);
 
             // Ledgers
+            Route::get('ledgers/template', [PayrollEngineController::class, 'exportLedgerTemplate']);
+            Route::post('ledgers/import', [PayrollEngineController::class, 'importLedgers']);
             Route::get('ledgers', [PayrollEngineController::class, 'getLedgers']);
             Route::post('ledgers', [PayrollEngineController::class, 'storeLedger']);
+            Route::put('ledgers/{id}', [PayrollEngineController::class, 'updateLedger']);
             Route::delete('ledgers/{id}', [PayrollEngineController::class, 'destroyLedger']);
 
             // Tax Bands
@@ -154,6 +163,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
         // Employee Actions (HR directives: promotions, transfers, warnings, etc.)
         Route::get('employees/{employee}/actions', [HRActionController::class, 'index']);
+        Route::get('action-types', [HRActionController::class, 'actionTypes']);
         Route::post('actions', [HRActionController::class, 'store']);
 
         // Employee Documents
