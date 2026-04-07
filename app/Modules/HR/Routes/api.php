@@ -12,6 +12,8 @@ use App\Modules\HR\Http\Controllers\LeaveTypeController;
 use App\Modules\HR\Http\Controllers\HRActionController;
 use App\Modules\HR\Http\Controllers\EmployeeDocumentController;
 use App\Modules\HR\Http\Controllers\AnnouncementController;
+use App\Modules\HR\Http\Controllers\IncidentController;
+use App\Modules\HR\Http\Controllers\RecruitmentController;
 use App\Constants\Permissions;
 
 // Unprotected HR Routes 
@@ -34,6 +36,13 @@ Route::prefix('hr')->group(function () {
     Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
     Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
     Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
+
+    // Public Recruitment
+    Route::prefix('recruitment')->group(function () {
+        Route::get('jobs', [RecruitmentController::class, 'publicJobs']);
+        Route::get('jobs/{id}', [RecruitmentController::class, 'publicJobDetails']);
+        Route::post('apply', [RecruitmentController::class, 'apply']);
+    });
 });
 
 // Protected HR Routes
@@ -152,6 +161,41 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('employees/{employeeId}/documents', [EmployeeDocumentController::class, 'store']);
         Route::get('employees/{employeeId}/documents/{documentId}/download', [EmployeeDocumentController::class, 'download']);
         Route::delete('employees/{employeeId}/documents/{documentId}', [EmployeeDocumentController::class, 'destroy']);
+
+        // Incident management
+        Route::get('incidents', [IncidentController::class, 'index']);
+        Route::post('incidents', [IncidentController::class, 'store']);
+        Route::post('incidents/report', [IncidentController::class, 'store']);
+        Route::get('incidents/statistics', [IncidentController::class, 'statistics']);
+        Route::get('incidents/my', [IncidentController::class, 'myIncidents']);
+        Route::get('incidents/pending-reviews', [IncidentController::class, 'pendingReviews']);
+        Route::get('incidents/context', [IncidentController::class, 'userContext']);
+        Route::get('incidents/{id}', [IncidentController::class, 'show']);
+        Route::put('incidents/{id}', [IncidentController::class, 'update']);
+        Route::patch('incidents/{id}', [IncidentController::class, 'update']);
+        Route::delete('incidents/{id}', [IncidentController::class, 'destroy']);
+        Route::post('incidents/{id}/review', [IncidentController::class, 'review']);
+        Route::post('incidents/{id}/approve', [IncidentController::class, 'approve']);
+        Route::post('incidents/{id}/comments', [IncidentController::class, 'addComment']);
+        Route::get('incidents/{id}/pdf', [IncidentController::class, 'downloadPdf']);
+        Route::post('incidents/{id}/attachments', [IncidentController::class, 'uploadAttachments']);
+        Route::get('incidents/{id}/attachments/{filename}/view', [IncidentController::class, 'viewAttachment']);
+        Route::get('incidents/{id}/attachments/{filename}', [IncidentController::class, 'downloadAttachment']);
+
+        // Internal Recruitment (ATS)
+        Route::prefix('recruitment/admin')->group(function () {
+            // Jobs management
+            Route::get('jobs', [RecruitmentController::class, 'adminJobs']);
+            Route::post('jobs', [RecruitmentController::class, 'storeJob']);
+            Route::put('jobs/{id}', [RecruitmentController::class, 'updateJob']);
+            Route::delete('jobs/{id}', [RecruitmentController::class, 'destroyJob']);
+
+            // Candidates management
+            Route::get('candidates', [RecruitmentController::class, 'adminCandidates']);
+            Route::get('candidates/{id}', [RecruitmentController::class, 'candidateDetails']);
+            Route::put('candidates/{id}/status', [RecruitmentController::class, 'updateCandidateStatus']);
+            Route::get('candidates/{id}/documents/{documentId}/download', [RecruitmentController::class, 'downloadDocument']);
+        });
     });
 
     // Announcements at root api/ level for Android app
