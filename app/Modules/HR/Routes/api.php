@@ -170,4 +170,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::post('announcements/read', [AnnouncementController::class, 'markAsRead']);
     Route::get('announcements/unread-count', [AnnouncementController::class, 'unreadCount']);
     Route::delete('announcements/{id}', [AnnouncementController::class, 'destroy']);
+
+    // Departments at root api/ level for Android app
+    Route::get('app-departments', [DepartmentController::class, 'index']);
 });
