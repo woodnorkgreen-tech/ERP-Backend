@@ -13,6 +13,7 @@ use App\Modules\HR\Http\Controllers\EmployeeDocumentController;
 use App\Modules\HR\Http\Controllers\AnnouncementController;
 use App\Modules\HR\Http\Controllers\IncidentController;
 use App\Modules\HR\Http\Controllers\RecruitmentController;
+use App\Modules\HR\Http\Controllers\InterviewController;
 use App\Constants\Permissions;
 
 // Unprotected HR Routes 
@@ -199,12 +200,42 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('jobs', [RecruitmentController::class, 'storeJob']);
             Route::put('jobs/{id}', [RecruitmentController::class, 'updateJob']);
             Route::delete('jobs/{id}', [RecruitmentController::class, 'destroyJob']);
+            Route::post('jobs/{id}/notify-shortlisted', [InterviewController::class, 'notifyShortlisted'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_NOTIFY);
+
+            // Shortlisting
+            Route::get('jobs/{id}/shortlist-criteria', [RecruitmentController::class, 'getShortlistCriteria']);
+            Route::put('jobs/{id}/shortlist-criteria', [RecruitmentController::class, 'saveShortlistCriteria']);
+            Route::post('jobs/{id}/shortlist-preview', [RecruitmentController::class, 'previewShortlist']);
+            Route::post('jobs/{id}/run-shortlist', [RecruitmentController::class, 'runShortlist']);
 
             // Candidates management
             Route::get('candidates', [RecruitmentController::class, 'adminCandidates']);
             Route::get('candidates/{id}', [RecruitmentController::class, 'candidateDetails']);
             Route::put('candidates/{id}/status', [RecruitmentController::class, 'updateCandidateStatus']);
             Route::get('candidates/{id}/documents/{documentId}/download', [RecruitmentController::class, 'downloadDocument']);
+            Route::patch('candidates/{id}/background-check', [RecruitmentController::class, 'updateBackgroundCheck'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_BACKGROUND_CHECK_UPDATE);
+            Route::post('candidates/{id}/background-check/start', [RecruitmentController::class, 'startBackgroundCheck'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_BACKGROUND_CHECK_UPDATE);
+            Route::post('candidates/{id}/background-check/complete', [RecruitmentController::class, 'completeBackgroundCheck'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_BACKGROUND_CHECK_COMPLETE);
+            Route::get('candidates/{id}/interviews', [InterviewController::class, 'candidateInterviews']);
+            Route::post('candidates/{id}/interviews', [InterviewController::class, 'store'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_CREATE);
+
+            // Interviews management
+            Route::get('interviews', [InterviewController::class, 'index']);
+            Route::post('interviews/bulk', [InterviewController::class, 'bulkStore'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_CREATE);
+            Route::put('interviews/{id}', [InterviewController::class, 'update'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_UPDATE);
+            Route::patch('interviews/{id}/complete', [InterviewController::class, 'complete'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_UPDATE);
+            Route::delete('interviews/{id}', [InterviewController::class, 'destroy'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_DELETE);
+            Route::post('interviews/{id}/notify', [InterviewController::class, 'notifyCandidate'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_NOTIFY);
         });
     });
 

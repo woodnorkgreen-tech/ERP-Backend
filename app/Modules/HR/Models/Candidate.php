@@ -19,6 +19,9 @@ class Candidate extends Model
         'software_proficiency' => 'array',
         'certifications' => 'array',
         'questionnaire_responses' => 'array',
+        'shortlist_breakdown' => 'array',
+        'background_check_documents' => 'array',
+        'background_check_completed_at' => 'datetime',
     ];
 
     public function jobPosting()

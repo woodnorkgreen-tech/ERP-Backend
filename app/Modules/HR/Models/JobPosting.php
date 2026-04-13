@@ -13,6 +13,10 @@ class JobPosting extends Model
     
     protected $guarded = ['id'];
 
+    protected $casts = [
+        'shortlisting_criteria' => 'array',
+    ];
+
     public function candidates()
     {
         return $this->hasMany(Candidate::class, 'job_posting_id');
