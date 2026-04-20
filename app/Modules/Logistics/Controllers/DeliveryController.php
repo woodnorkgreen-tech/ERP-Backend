@@ -52,6 +52,39 @@ class DeliveryController extends Controller
         return response()->json(['data' => $delivery]);
     }
 
+    public function cancel(Request $request, Delivery $delivery): JsonResponse
+    {
+        if ($delivery->status !== 'pending') {
+            return response()->json(['message' => 'Only pending deliveries can be cancelled.'], 422);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'required|string|max:255',
+            'note'   => 'nullable|string|max:1000',
+        ]);
+
+        DB::transaction(function () use ($validated, $delivery) {
+            // Free the vehicle back to active
+            if ($delivery->vehicle_id) {
+                Vehicle::where('id', $delivery->vehicle_id)->update(['status' => 'active']);
+            }
+
+            // Void all pending/en_route stops
+            $delivery->stops()->whereIn('status', ['pending', 'en_route'])->update(['status' => 'failed']);
+
+            $delivery->update([
+                'status'       => 'cancelled',
+                'completed_at' => now(),
+                'notes'        => trim(($delivery->notes ? $delivery->notes . "\n" : '')
+                                  . 'Cancelled: ' . $validated['reason']
+                                  . ($validated['note'] ? ' — ' . $validated['note'] : '')),
+            ]);
+        });
+
+        $delivery->load($this->with);
+        return response()->json(['data' => $delivery]);
+    }
+
     public function updateStop(Request $request, Delivery $delivery, DeliveryStop $stop): JsonResponse
     {
         $validated = $request->validate([
