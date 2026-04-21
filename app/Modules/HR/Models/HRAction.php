@@ -23,13 +23,16 @@ class HRAction extends Model
         'effective_date',
         'reason',
         'status',
-        'recorded_by'
+        'recorded_by',
+        'approved_by',
+        'executed_at'
     ];
 
     protected $casts = [
         'previous_data' => 'array',
         'new_data' => 'array',
-        'effective_date' => 'date'
+        'effective_date' => 'date',
+        'executed_at' => 'datetime'
     ];
 
     /**
@@ -54,6 +57,14 @@ class HRAction extends Model
     public function type(): BelongsTo
     {
         return $this->belongsTo(HRActionType::class, 'action_type_id');
+    }
+
+    /**
+     * Get the user who approved the action.
+     */
+    public function approver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by');
     }
 
     /**

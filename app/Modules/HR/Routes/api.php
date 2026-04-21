@@ -156,6 +156,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('employees/{employee}/actions', [HRActionController::class, 'index']);
         Route::get('action-types', [HRActionController::class, 'actionTypes']);
         Route::post('actions', [HRActionController::class, 'store']);
+        Route::post('actions/{id}/approve', [HRActionController::class, 'approveAction']);
+        Route::post('profile/update-request', [HRActionController::class, 'requestProfileUpdate']);
 
         // Employee Documents
         Route::get('employees/{employeeId}/documents', [EmployeeDocumentController::class, 'index']);
