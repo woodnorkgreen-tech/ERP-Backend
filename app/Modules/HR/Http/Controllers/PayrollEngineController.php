@@ -278,22 +278,27 @@ class PayrollEngineController extends Controller
     public function batchGenerate(Request $request)
     {
         $validated = $request->validate([
-            'payroll_month' => 'required|string|regex:/^\d{4}-\d{2}$/',
-            'department_id' => 'nullable|exists:departments,id'
+            'payroll_month'  => 'required|string|regex:/^\d{4}-\d{2}$/',
+            'department_id'  => 'nullable|exists:departments,id',
+            'employee_ids'   => 'nullable|array',
+            'employee_ids.*' => 'integer|exists:employees,id',
         ]);
 
         $month = $validated['payroll_month'];
         $query = Employee::where('status', 'active');
-        
-        if (!empty($validated['department_id'])) {
+
+        // Specific employee selection takes priority over department filter
+        if (!empty($validated['employee_ids'])) {
+            $query->whereIn('id', $validated['employee_ids']);
+        } elseif (!empty($validated['department_id'])) {
             $query->where('department_id', $validated['department_id']);
         }
 
         $employees = $query->get();
         $results = [
-            'total' => $employees->count(),
+            'total'     => $employees->count(),
             'processed' => 0,
-            'errors' => []
+            'errors'    => []
         ];
 
         foreach ($employees as $employee) {
@@ -303,7 +308,7 @@ class PayrollEngineController extends Controller
             } catch (\Exception $e) {
                 $results['errors'][] = [
                     'employee' => $employee->full_name,
-                    'message' => $e->getMessage()
+                    'message'  => $e->getMessage()
                 ];
             }
         }
