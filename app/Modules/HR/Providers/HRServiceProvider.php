@@ -20,8 +20,9 @@ class HRServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom(__DIR__ . '/../Database/Migrations');
 
-        // Register Eloquent observer for real-time status sync
+        // Register Eloquent observers
         LeaveRequest::observe(LeaveRequestObserver::class);
+        \App\Modules\HR\Models\Employee::observe(\App\Modules\HR\Observers\EmployeeObserver::class);
 
         // Register Artisan command
         if ($this->app->runningInConsole()) {

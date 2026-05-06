@@ -32,7 +32,11 @@ class AppServiceProvider extends ServiceProvider
 
         // Disable foreign key checks during migrations in local environment
         if (app()->environment('local') && app()->runningInConsole()) {
-            DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+            try {
+                DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+            } catch (\Exception $e) {
+                // Silently fail if DB is not reachable during boot
+            }
         }
 
         ResetPassword::createUrlUsing(function (object $notifiable, string $token) {
@@ -40,9 +44,7 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Register model observers
-        Log::info('Registering ProjectEnquiry observer');
         ProjectEnquiry::observe(ProjectEnquiryObserver::class);
-        Log::info('Registering Project observer');
         Project::observe(ProjectObserver::class);
 
         // Route model binding

@@ -4,6 +4,7 @@ use App\Modules\HR\Http\Controllers\EmployeeController;
 use App\Modules\HR\Http\Controllers\DepartmentController;
 use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\HR\Http\Controllers\PayrollEngineController;
+use App\Modules\HR\Http\Controllers\PayrollRunController;
 use App\Modules\HR\Http\Controllers\LeaveDashboardController;
 use App\Modules\HR\Http\Controllers\LeaveHandoverController;
 use App\Modules\HR\Http\Controllers\LeaveRequestController;
@@ -14,33 +15,12 @@ use App\Modules\HR\Http\Controllers\AnnouncementController;
 use App\Modules\HR\Http\Controllers\IncidentController;
 use App\Modules\HR\Http\Controllers\RecruitmentController;
 use App\Modules\HR\Http\Controllers\InterviewController;
+use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
 use App\Constants\Permissions;
 
-// Unprotected HR Routes 
+// Unprotected HR Routes (public recruitment only)
 Route::prefix('hr')->group(function () {
-    // Specifically define profile before the resource to avoid it being interpreted as an ID
-    Route::get('employees/profile', [EmployeeController::class, 'profile'])->middleware(['auth:sanctum', 'active']);
-    
-    // Employee management
-    Route::apiResource('employees', EmployeeController::class);
-    
-    // Department management
-    Route::get('departments', [DepartmentController::class, 'index']);
-    Route::post('departments', [DepartmentController::class, 'store']);
-    Route::get('departments/{department}', [DepartmentController::class, 'show']);
-    Route::put('departments/{department}', [DepartmentController::class, 'update']);
-    Route::patch('departments/{department}', [DepartmentController::class, 'update']);
-    Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
-
-    // Technical Labour Management
-    Route::get('technical-labour/template', [TechnicalLabourController::class, 'downloadTemplate']);
-    Route::post('technical-labour/import', [TechnicalLabourController::class, 'import']);
-    Route::get('technical-labour', [TechnicalLabourController::class, 'index']);
-    Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
-    Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
-    Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
-
-    // Public Recruitment
+    // Public Recruitment — no auth required for job listings and applications
     Route::prefix('recruitment')->group(function () {
         Route::get('jobs', [RecruitmentController::class, 'publicJobs']);
         Route::get('jobs/{id}', [RecruitmentController::class, 'publicJobDetails']);
@@ -107,18 +87,36 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::delete('payslips/{id}', [PayrollEngineController::class, 'destroyPayslip']);
             Route::delete('payslips', [PayrollEngineController::class, 'clearPayslips']);
 
-            // Batch Processing
-            Route::post('batch', [PayrollEngineController::class, 'batchGenerate']);
+            // Batch Processing (LEGACY REMOVED - Use Runs)
+            // Route::post('batch', [PayrollEngineController::class, 'batchGenerate']);
 
             // Exports
             Route::get('export/bank', [PayrollEngineController::class, 'exportBankRemittance']);
             Route::get('export/mpesa', [PayrollEngineController::class, 'exportMpesaRemittance']);
             Route::get('export/p9', [PayrollEngineController::class, 'exportP9']);
 
-            // Compliance & Payment 
-            Route::get('compliance-summary', [PayrollEngineController::class, 'getComplianceSummary']);
-            Route::post('mark-paid', [PayrollEngineController::class, 'markAsPaid']);
+            // Compliance & Payment (LEGACY REMOVED - Use Runs)
+            // Route::get('compliance-summary', [PayrollEngineController::class, 'getComplianceSummary']);
+            // Route::post('mark-paid', [PayrollEngineController::class, 'markAsPaid']);
+
+            // Payroll Runs (lifecycle management)
+            Route::get('runs', [PayrollRunController::class, 'index']);
+            Route::post('runs', [PayrollRunController::class, 'store']);
+            Route::get('runs/{payrollRun}', [PayrollRunController::class, 'show']);
+            Route::post('runs/{payrollRun}/process', [PayrollRunController::class, 'process']);
+            Route::post('runs/{payrollRun}/lock', [PayrollRunController::class, 'lock']);
+            Route::post('runs/{payrollRun}/mark-paid', [PayrollRunController::class, 'markPaid']);
+            Route::post('runs/{payrollRun}/rollback', [PayrollRunController::class, 'rollback']);
+            Route::delete('runs/{payrollRun}', [PayrollRunController::class, 'destroy']);
+            Route::get('runs/{payrollRun}/compliance-summary', [PayrollRunController::class, 'complianceSummary']);
         });
+
+        // Salary Advances
+        Route::get('advances', [SalaryAdvanceController::class, 'index']);
+        Route::post('advances/{id}/approve', [SalaryAdvanceController::class, 'approve']);
+        Route::post('advances/{id}/reject', [SalaryAdvanceController::class, 'reject']);
+        Route::get('my-advances', [SalaryAdvanceController::class, 'myRequests']);
+        Route::post('my-advances', [SalaryAdvanceController::class, 'store']);
 
         // Leave management
         Route::prefix('leave')->group(function () {
@@ -166,6 +164,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('employees/{employee}/actions', [HRActionController::class, 'index']);
         Route::get('action-types', [HRActionController::class, 'actionTypes']);
         Route::post('actions', [HRActionController::class, 'store']);
+
+        // Employee Salary History
+        Route::get('employees/{employee}/salary-history', [PayrollRunController::class, 'salaryHistory']);
+        Route::post('employees/{employee}/salary-history', [PayrollRunController::class, 'storeSalaryHistory']);
 
         // Employee Documents
         Route::get('employees/{employeeId}/documents', [EmployeeDocumentController::class, 'index']);

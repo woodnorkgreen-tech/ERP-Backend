@@ -9,6 +9,7 @@ class Payslip extends Model
 {
     protected $fillable = [
         'employee_id',
+        'payroll_run_id',
         'payroll_month',
         'basic_salary',
         'gross_pay',
@@ -29,8 +30,19 @@ class Payslip extends Model
         'net_pay' => 'decimal:2'
     ];
 
+    /**
+     * Get the employee that the payslip belongs to.
+     */
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    /**
+     * Get the payroll run that generated this payslip.
+     */
+    public function payrollRun(): BelongsTo
+    {
+        return $this->belongsTo(PayrollRun::class);
     }
 }
