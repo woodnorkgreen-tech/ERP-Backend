@@ -13,6 +13,8 @@ use App\Modules\HR\Http\Controllers\HRActionController;
 use App\Modules\HR\Http\Controllers\EmployeeDocumentController;
 use App\Modules\HR\Http\Controllers\AnnouncementController;
 use App\Modules\HR\Http\Controllers\IncidentController;
+use App\Modules\HR\Http\Controllers\GrievanceController;
+use App\Modules\HR\Http\Controllers\DisciplineController;
 use App\Modules\HR\Http\Controllers\RecruitmentController;
 use App\Modules\HR\Http\Controllers\InterviewController;
 use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
@@ -29,7 +31,7 @@ Route::prefix('hr')->group(function () {
 });
 
 // Protected HR Routes
-Route::middleware(['auth:sanctum', 'active'])->group(function () {
+Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('hr')->group(function () {
         // Specifically define profile before the resource to avoid it being interpreted as an ID
         // This MUST come before apiResource('employees')
@@ -122,6 +124,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::prefix('leave')->group(function () {
             // Dashboard
             Route::get('dashboard', [LeaveDashboardController::class, 'show']);
+            Route::get('projects', [LeaveDashboardController::class, 'projects']);
 
             // Leave types
             Route::get('types', [LeaveTypeController::class, 'index']);
@@ -194,6 +197,33 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('incidents/{id}/attachments', [IncidentController::class, 'uploadAttachments']);
         Route::get('incidents/{id}/attachments/{filename}/view', [IncidentController::class, 'viewAttachment']);
         Route::get('incidents/{id}/attachments/{filename}', [IncidentController::class, 'downloadAttachment']);
+
+        // Grievance management
+        Route::get('grievance', [GrievanceController::class, 'index']);
+        Route::post('grievance', [GrievanceController::class, 'store']);
+        Route::get('grievance/statistics', [GrievanceController::class, 'statistics']);
+        Route::get('grievance/{id}', [GrievanceController::class, 'show']);
+        Route::put('grievance/{id}', [GrievanceController::class, 'update']);
+        Route::patch('grievance/{id}', [GrievanceController::class, 'update']);
+        Route::post('grievance/{id}/resolve', [GrievanceController::class, 'resolve']);
+        Route::post('grievance/{id}/escalate', [GrievanceController::class, 'escalate']);
+        Route::post('grievance/{id}/comments', [GrievanceController::class, 'addComment']);
+        Route::post('grievance/{id}/attachments', [GrievanceController::class, 'uploadAttachments']);
+
+        // Discipline management
+        Route::get('discipline', [DisciplineController::class, 'index']);
+        Route::post('discipline', [DisciplineController::class, 'store']);
+        Route::get('discipline/statistics', [DisciplineController::class, 'statistics']);
+        Route::get('discipline/{id}', [DisciplineController::class, 'show']);
+        Route::post('discipline/{id}/show-cause', [DisciplineController::class, 'issueShowCause']);
+        Route::post('discipline/{id}/show-cause-response', [DisciplineController::class, 'submitShowCauseResponse']);
+        Route::post('discipline/{id}/schedule-hearing', [DisciplineController::class, 'scheduleHearing']);
+        Route::post('discipline/{id}/hearing-minutes', [DisciplineController::class, 'submitHearingMinutes']);
+        Route::post('discipline/{id}/issue-warning', [DisciplineController::class, 'issueWarning']);
+        Route::post('discipline/{id}/appeal', [DisciplineController::class, 'submitAppeal']);
+        Route::post('discipline/{id}/finalize', [DisciplineController::class, 'finalizeCase']);
+        Route::post('discipline/{id}/comments', [DisciplineController::class, 'addComment']);
+        Route::post('discipline/{id}/attachments', [DisciplineController::class, 'uploadAttachments']);
 
         // Internal Recruitment (ATS)
         Route::prefix('recruitment/admin')->group(function () {

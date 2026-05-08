@@ -26,4 +26,12 @@ class LeaveDashboardController extends Controller
             'data' => $dashboard,
         ]);
     }
+
+    public function projects(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->leaveService->getHandoverProjects(),
+        ]);
+    }
 }
