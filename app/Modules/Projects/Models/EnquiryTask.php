@@ -9,9 +9,11 @@ use App\Modules\HR\Models\Department;
 
 class EnquiryTask extends Model
 {
+    use \App\Modules\Projects\Traits\AuthorizedVisibility;
     use HasFactory, \App\Traits\LogsActions;
 
     protected $table = 'enquiry_tasks';
+
 
     protected $fillable = [
         'project_enquiry_id',
@@ -31,11 +33,13 @@ class EnquiryTask extends Model
         'task_order',
         'created_by',
         'type',
-        // Backward compatibility fields
+        // LEGACY FIELDS - Use assignedUsers() relationship instead
         'assigned_at',
         'assigned_by',
         'assigned_to',
     ];
+
+    protected $appends = ['task_data', 'is_authorized'];
 
     protected $casts = [
         'due_date' => 'date',
@@ -232,5 +236,16 @@ class EnquiryTask extends Model
             return Department::where('name', $departmentName)->first();
         }
         return null;
+    }
+
+    /**
+     * Accessor to check if the current authenticated user is authorized to interact with this task.
+     */
+    public function getIsAuthorizedAttribute(): bool
+    {
+        $user = auth()->user();
+        if (!$user) return false;
+        
+        return $this->isUserAuthorized($user);
     }
 }

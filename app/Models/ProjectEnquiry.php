@@ -148,35 +148,7 @@ class ProjectEnquiry extends Model
      */
     public function generateProjectId(): string
     {
-        $now = now();
-        $year = $now->year;
-        $month = str_pad($now->month, 2, '0', STR_PAD_LEFT);
-
-        $prefixCode = EnquiryConstants::PROJECT_PREFIX;
-        if ($this->workflow_preset_type === 'internal_job') {
-            $prefixCode = EnquiryConstants::INTERNAL_PREFIX;
-        } elseif ($this->workflow_preset_type === 'sponsorship') {
-            $prefixCode = EnquiryConstants::SPONSORSHIP_PREFIX;
-        }
-
-        // Use format: PRX-MM-YYYY-NNN (e.g., WNG-01-2026-001)
-        $prefix = $prefixCode . "-{$month}-{$year}-";
-
-        // Get the last project number for this month
-        $lastProject = Project::where('project_id', 'like', $prefix . '%')
-                              ->orderByRaw('CAST(SUBSTRING(project_id, LENGTH(?) + 1) AS UNSIGNED) DESC', [$prefix])
-                              ->first();
-
-        $nextNumber = 1;
-        if ($lastProject) {
-            // Extract the number part after the prefix
-            $prefixLen = strlen($prefix);
-            $numberPart = substr($lastProject->project_id, $prefixLen);
-            $nextNumber = intval($numberPart) + 1;
-        }
-        $formattedNumber = str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
-
-        return $prefix . $formattedNumber;
+        return app(\App\Modules\Projects\Services\SequencingService::class)->generateProjectId($this->workflow_preset_type);
     }
 
     /**
@@ -184,34 +156,7 @@ class ProjectEnquiry extends Model
      */
     public function generateJobNumber(): string
     {
-        $now = now();
-        $year = $now->year;
-        $month = str_pad($now->month, 2, '0', STR_PAD_LEFT);
-
-        $prefixCode = EnquiryConstants::PROJECT_PREFIX;
-        if ($this->workflow_preset_type === 'internal_job') {
-            $prefixCode = EnquiryConstants::INTERNAL_PREFIX;
-        } elseif ($this->workflow_preset_type === 'sponsorship') {
-            $prefixCode = EnquiryConstants::SPONSORSHIP_PREFIX;
-        }
-
-        // Use format: PRX-MM-YYYY-NNN (e.g., WNG-01-2026-001)
-        $prefix = $prefixCode . "-{$month}-{$year}-";
-
-        // Get the last job number for this prefix (monthly reset)
-        $lastEnquiry = self::where('job_number', 'like', $prefix . '%')
-                          ->orderByRaw('CAST(SUBSTRING(job_number, LENGTH(?) + 1) AS UNSIGNED) DESC', [$prefix])
-                          ->first();
-
-        $nextNumber = 1;
-        if ($lastEnquiry) {
-            // Extract the number part after the prefix
-            $numberPart = substr($lastEnquiry->job_number, strlen($prefix));
-            $nextNumber = intval($numberPart) + 1;
-        }
-        $formattedNumber = str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
-
-        return $prefix . $formattedNumber;
+        return app(\App\Modules\Projects\Services\SequencingService::class)->generateJobNumber($this->workflow_preset_type);
     }
 
     /**

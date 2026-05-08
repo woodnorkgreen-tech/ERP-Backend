@@ -36,15 +36,19 @@ class EvaluateFinancialRequirements
             Log::error("Failed to send quote approval notification in listener: " . $e->getMessage());
         }
 
-        // 2. Evaluate Financial Gate based on job type
-        $isExternal = !in_array($enquiry->workflow_preset_type, ['internal_job', 'sponsorship']);
+        // 2. Evaluate Financial Gate based on job number prefix (WNG = External/Project)
+        $isExternal = str_starts_with($enquiry->job_number ?? '', EnquiryConstants::PROJECT_PREFIX);
+
+        Log::info("Evaluating financial gate for enquiry {$enquiry->id}. Job Number: {$enquiry->job_number}, isExternal: " . ($isExternal ? 'Yes' : 'No'));
 
         if ($isExternal) {
-            // EXTERNAL: Halt progress, put in Awaiting Deposit queue
+            // EXTERNAL: Halt progress, put in Awaiting Deposit queue (Confirmed Pending Funds)
             $enquiry->update(['status' => EnquiryConstants::STATUS_AWAITING_DEPOSIT]);
+            Log::info("Enquiry {$enquiry->id} moved to Awaiting Deposit (Financial Gate Active)");
         } else {
             // INTERNAL: Skip financial gate entirely, activate project
             $this->activateProjectAction->execute($enquiry, $user);
+            Log::info("Enquiry {$enquiry->id} skipped financial gate (Internal Job)");
         }
     }
 }

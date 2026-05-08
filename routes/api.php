@@ -282,12 +282,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     });
 
     // Project Officers endpoint (accessible by Client Service for enquiry assignment)
-    Route::get('project-officers', [UserController::class, 'getProjectOfficers'])
-        ->middleware('permission:' . Permissions::ENQUIRY_UPDATE);
+    Route::get('project-officers', [UserController::class, 'getProjectOfficers']);
 
     // Users endpoint for task assignment (accessible by Project Managers)
-    Route::get('users', [UserController::class, 'index'])
-        ->middleware('permission:' . Permissions::USER_READ . ',' . Permissions::TASK_ASSIGN);
+    Route::get('users', [UserController::class, 'index']);
 
     // ClientService Module Routes
     Route::prefix('clientservice')->group(function () {
@@ -295,8 +293,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('handovers', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'index']);
         Route::get('handovers/{id}', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'show']);
         // Client management
-        Route::get('clients', [ClientController::class, 'index'])
-            ->middleware('permission:' . Permissions::CLIENT_READ);
+        Route::get('clients', [ClientController::class, 'index']);
         Route::get('clients/{client}', [ClientController::class, 'show'])
             ->middleware('permission:' . Permissions::CLIENT_READ);
         Route::post('clients', [ClientController::class, 'store'])

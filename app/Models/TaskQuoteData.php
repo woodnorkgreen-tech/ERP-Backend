@@ -11,6 +11,15 @@ class TaskQuoteData extends Model
 {
     use HasFactory, \App\Traits\LogsActions;
 
+    protected static function booted()
+    {
+        static::saved(function ($model) {
+            if ($model->enquiryTask) {
+                app(\App\Modules\Projects\Services\EnquiryWorkflowService::class)->tryAutoCompleteTask($model->enquiryTask);
+            }
+        });
+    }
+
     protected $fillable = [
         'enquiry_task_id',
         'project_info',

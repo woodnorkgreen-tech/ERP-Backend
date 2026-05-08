@@ -15,74 +15,87 @@ return [
         [
             'title' => 'Site Survey',
             'type' => 'site-survey',
+            'phase' => 'Concept & Survey',
             'notes' => 'Conduct site survey for the enquiry'
         ],
         [
             'title' => 'Design & Concept Development',
             'type' => 'design',
+            'phase' => 'Concept & Survey',
             'notes' => 'Create design concepts and mockups'
         ],
         [
             'title' => 'Material & Cost Listing',
             'type' => 'materials',
+            'phase' => 'Financials & Approval',
             'notes' => 'Specify and source materials for the project'
         ],
         [
             'title' => 'Budget Creation',
             'type' => 'budget',
+            'phase' => 'Financials & Approval',
             'notes' => 'Create budget for the project'
         ],
         [
             'title' => 'Quote Preparation',
             'type' => 'quote',
+            'phase' => 'Financials & Approval',
             'notes' => 'Prepare final quote for the project'
         ],
         [
             'title' => 'Quote Approval',
             'type' => 'quote_approval',
+            'phase' => 'Financials & Approval',
             'notes' => 'Approve the prepared quote'
         ],
         [
             'title' => 'Procurement & Inventory Management',
             'type' => 'procurement',
+            'phase' => 'Fabrication & Inventory',
             'notes' => 'Manage procurement and inventory'
         ],
         [
             'title' => 'Teams',
             'type' => 'teams',
+            'phase' => 'Field Operations',
             'notes' => 'Manage project teams'
         ],
         [
             'title' => 'Production',
             'type' => 'production',
+            'phase' => 'Fabrication & Inventory',
             'notes' => 'Handle production activities'
         ],
         [
             'title' => 'Logistics',
             'type' => 'logistics',
+            'phase' => 'Field Operations',
             'notes' => 'Manage logistics and transportation'
         ],
         [
             'title' => 'Event Setup & Execution',
             'type' => 'setup',
+            'phase' => 'Field Operations',
             'notes' => 'Set up event and execute'
         ],
         [
             'title' => 'Client Handover',
             'type' => 'handover',
+            'phase' => 'Project Closure',
             'notes' => 'Hand over to client'
         ],
         [
             'title' => 'Set Down & Return',
             'type' => 'setdown',
+            'phase' => 'Field Operations',
             'notes' => 'Set down and return equipment'
         ],
         [
             'title' => 'Archival & Reporting',
             'type' => 'report',
+            'phase' => 'Project Closure',
             'notes' => 'Archive and generate reports'
         ],
-
     ],
 
     /*

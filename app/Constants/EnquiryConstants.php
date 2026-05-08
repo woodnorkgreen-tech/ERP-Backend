@@ -29,14 +29,33 @@ class EnquiryConstants
     const PRIORITY_HIGH = 'high';
     const PRIORITY_URGENT = 'urgent';
 
-    // Roles that can access projects enquiries
-    const PROJECT_ACCESS_ROLES = [
-        'Super Admin',
-        'Project Manager',
-        'Project Officer',
-        'Manager',
-        'Employee',
-        'Client Service'
+    // Roles with full administrative access to projects
+    const ROLES_ADMIN = ['Super Admin', 'Project Manager', 'Project Officer', 'HR'];
+
+    // All roles that participate in the project workflow
+    const ROLES_WORKFLOW = [
+        'Super Admin', 'Admin', 'Project Manager', 'Project Officer', 'HR',
+        'Designer', 'Procurement', 'Production', 'Logistics', 'Stores', 'Accounts', 'Client Service', 'Costing'
+    ];
+
+    // Mapping of roles to the task types they are authorized to view/manage
+    const TASK_VISIBILITY_MAPPING = [
+        'Designer' => ['design', 'site-survey', 'materials'],
+        'Costing' => ['materials', 'budget', 'quote', 'quote_approval'],
+        'Accounts' => ['materials', 'budget', 'quote', 'quote_approval'],
+        'Stores' => ['materials', 'stores'],
+        'Procurement' => ['materials', 'procurement', 'budget'],
+        'Production' => ['materials', 'teams', 'production', 'budget'],
+    ];
+
+    // Mapping of enquiry statuses to the tasks required to achieve them
+    const ENQUIRY_STATUS_REQUISITES = [
+        self::STATUS_QUOTE_APPROVED => ['quote_approval'],
+        self::STATUS_QUOTE_PREPARED => ['quote'],
+        self::STATUS_BUDGET_CREATED => ['budget'],
+        self::STATUS_MATERIALS_SPECIFIED => ['materials'],
+        self::STATUS_DESIGN_COMPLETED => ['design'],
+        self::STATUS_SITE_SURVEY_COMPLETED => ['site-survey'],
     ];
 
     // Enquiry number prefix
