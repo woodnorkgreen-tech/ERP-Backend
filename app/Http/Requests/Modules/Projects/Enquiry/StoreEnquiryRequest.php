@@ -15,7 +15,7 @@ class StoreEnquiryRequest extends FormRequest
     {
         return [
             'date_received'           => 'required|date',
-            'expected_delivery_date'  => 'nullable|date|after_or_equal:date_received',
+            'expected_delivery_date'  => 'required|date|after_or_equal:date_received',
             'client_id'               => 'required|exists:clients,id',
             'title'                   => 'required|string|max:255',
             'description'             => 'nullable|string',

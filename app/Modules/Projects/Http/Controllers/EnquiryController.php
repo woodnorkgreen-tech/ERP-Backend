@@ -636,7 +636,7 @@ class EnquiryController extends Controller
 
         $validator = Validator::make($request->all(), [
             'date_received' => 'sometimes|required|date',
-            'expected_delivery_date' => 'nullable|date|after_or_equal:date_received',
+            'expected_delivery_date' => 'sometimes|required|date|after_or_equal:date_received',
             'client_id' => 'sometimes|required|integer|exists:clients,id',
             'title' => 'sometimes|required|string|max:255',
             'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias

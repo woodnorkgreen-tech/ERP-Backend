@@ -266,6 +266,15 @@ class SiteSurveyController extends Controller
     }
 
     /**
+     * Download PDF by Task ID
+     */
+    public function downloadTaskPdf(int $taskId)
+    {
+        $siteSurvey = SiteSurvey::where('enquiry_task_id', $taskId)->firstOrFail();
+        return $this->generatePDF($siteSurvey);
+    }
+
+    /**
      * Upload a photo for the survey
      */
     public function uploadPhoto(Request $request, int $taskId): JsonResponse

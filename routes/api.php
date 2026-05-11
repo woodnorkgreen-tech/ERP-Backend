@@ -483,6 +483,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::apiResource('site-surveys', SiteSurveyController::class);
         Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
         Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
+        Route::get('tasks/{taskId}/survey/pdf', [SiteSurveyController::class, 'downloadTaskPdf']);
         Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
 
         // Logistics Task Routes

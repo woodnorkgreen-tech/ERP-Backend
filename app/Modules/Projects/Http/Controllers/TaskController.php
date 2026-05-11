@@ -395,7 +395,7 @@ class TaskController extends Controller
         } catch (\Exception $e) {
             \Log::error("[DEBUG] updateTaskStatus failed for task {$taskId}: " . $e->getMessage());
             return response()->json([
-                'message' => 'Failed to update task status',
+                'message' => $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -587,7 +587,7 @@ class TaskController extends Controller
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to update task',
+                'message' => $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -911,7 +911,7 @@ class TaskController extends Controller
         } catch (\Throwable $e) {
         \Log::error("[DEBUG] updateEnquiryTask failed for task {$taskId}: " . $e->getMessage());
         return response()->json([
-            'message' => 'Failed to update task',
+            'message' => $e->getMessage(),
             'error' => $e->getMessage()
         ], 500);
     }

@@ -9,6 +9,7 @@ use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Support\Facades\Log;
 use App\Constants\EnquiryConstants;
 use App\Services\Governance\ProjectGovernanceService;
+use App\Modules\Projects\Actions\SyncEnquiryStatusAction;
 
 class EnquiryWorkflowService
 {
