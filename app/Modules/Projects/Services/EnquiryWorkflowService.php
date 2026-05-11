@@ -9,6 +9,7 @@ use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Support\Facades\Log;
 use App\Constants\EnquiryConstants;
 use App\Services\Governance\ProjectGovernanceService;
+use App\Modules\Projects\Actions\SyncEnquiryStatusAction;
 
 class EnquiryWorkflowService
 {
@@ -27,7 +28,7 @@ class EnquiryWorkflowService
      * Create workflow tasks for a newly created enquiry (unassigned)
      */
 
-    public function createWorkflowTasksForEnquiry(ProjectEnquiry $enquiry): void
+    public function initializeWorkflow(ProjectEnquiry $enquiry): void
     {
         Log::info("Syncing workflow tasks for enquiry ID: {$enquiry->id}");
 
@@ -60,7 +61,7 @@ class EnquiryWorkflowService
 
                 // If task exists, update its order to ensure sequence is correct (e.g. if we insert a task)
                 if ($existingTasks->has($type)) {
-                    $existingTasks[$type]->update(['order' => $idealOrder]);
+                    $existingTasks[$type]->update(['task_order' => $idealOrder]);
                     continue; 
                 }
 
@@ -90,7 +91,7 @@ class EnquiryWorkflowService
                     'priority' => EnquiryConstants::PRIORITY_MEDIUM,
                     'notes' => $notes, // Fixed syntax error here previously
                     'created_by' => $enquiry->created_by,
-                    'order' => $idealOrder, 
+                    'task_order' => $idealOrder, 
                 ]);
 
                 Log::info("Created new {$type} task for enquiry {$enquiry->id}");
@@ -112,6 +113,36 @@ class EnquiryWorkflowService
         } catch (\Exception $e) {
             Log::error("Failed to sync workflow tasks for enquiry {$enquiry->id}: " . $e->getMessage());
             throw $e;
+        }
+    }
+
+    /**
+     * Attempt to automatically complete a task if it meets the criteria.
+     * This is called by model hooks (e.g., when a budget is saved).
+     */
+    public function tryAutoCompleteTask(EnquiryTask $task): bool
+    {
+        Log::info("Attempting auto-completion for task {$task->id} (Type: {$task->type})");
+
+        if ($task->status === 'completed') {
+            return true;
+        }
+
+        try {
+            // Validate if task is ready for completion
+            $this->validateTaskCompletion($task);
+
+            // If we reach here, validation passed
+            $this->updateTaskStatus($task->id, 'completed');
+            
+            Log::info("Task {$task->id} auto-completed successfully.");
+            return true;
+
+        } catch (\Exception $e) {
+            // If validation fails, we just don't auto-complete.
+            // This is "soft" failure, so we just log it and return false.
+            Log::info("Auto-completion skipped for task {$task->id}: " . $e->getMessage());
+            return false;
         }
     }
 
@@ -500,92 +531,15 @@ class EnquiryWorkflowService
         $enquiry = $task->enquiry;
 
         // Define task type to status mapping
-        $statusMapping = [
-            'site-survey' => EnquiryConstants::STATUS_SITE_SURVEY_COMPLETED,
-            'design' => EnquiryConstants::STATUS_DESIGN_COMPLETED,
-            'materials' => EnquiryConstants::STATUS_MATERIALS_SPECIFIED,
-            'budget' => EnquiryConstants::STATUS_BUDGET_CREATED,
-            'quote' => EnquiryConstants::STATUS_QUOTE_PREPARED,
-            'quote_approval' => EnquiryConstants::STATUS_QUOTE_APPROVED,
-        ];
+        $statusMapping = EnquiryConstants::ENQUIRY_STATUS_REQUISITES;
 
-        // Check if this task type maps to a status update
-        if (!isset($statusMapping[$task->type])) {
-            Log::info("Task type '{$task->type}' does not trigger status progression");
-            return;
-        }
-
-        $newStatus = $statusMapping[$task->type];
-
-        // Check if all prerequisite tasks are completed for certain statuses
-        if (!$this->arePrerequisitesMet($task, $newStatus)) {
-            Log::info("Prerequisites not met for status '{$newStatus}' - skipping progression");
-            return;
-        }
-
-        // Update enquiry status
-        $oldEnquiryStatus = $enquiry->status;
-        $enquiry->status = $newStatus;
-        $enquiry->save();
-
-        Log::info("Enquiry {$enquiry->id} status progressed from '{$oldEnquiryStatus}' to '{$newStatus}' due to task '{$task->type}' completion");
-
-        // Handle special cases
-        $this->handleSpecialStatusCases($enquiry, $newStatus);
+        // The progression is now handled via the SyncEnquiryStatusAction 
+        // which is triggered by the EnquiryTaskObserver. 
+        // This method is kept for any legacy hooks but now delegates to the action.
+        app(SyncEnquiryStatusAction::class)->execute($enquiry->id);
     }
 
-    /**
-     * Check if prerequisites are met for status progression
-     */
-    private function arePrerequisitesMet(EnquiryTask $completedTask, string $newStatus): bool
-    {
-        $enquiry = $completedTask->enquiry;
 
-        // Define prerequisites for each status
-        $prerequisites = [
-            EnquiryConstants::STATUS_QUOTE_APPROVED => [
-                'required_tasks' => ['site-survey', 'design', 'materials', 'budget', 'quote'],
-                'all_required' => true, // All must be completed
-            ],
-            EnquiryConstants::STATUS_QUOTE_PREPARED => [
-                'required_tasks' => ['site-survey', 'design', 'materials', 'budget'],
-                'all_required' => true,
-            ],
-            EnquiryConstants::STATUS_BUDGET_CREATED => [
-                'required_tasks' => ['site-survey', 'design', 'materials'],
-                'all_required' => true,
-            ],
-            EnquiryConstants::STATUS_MATERIALS_SPECIFIED => [
-                'required_tasks' => ['site-survey', 'design'],
-                'all_required' => true,
-            ],
-            EnquiryConstants::STATUS_DESIGN_COMPLETED => [
-                'required_tasks' => ['site-survey'],
-                'all_required' => true,
-            ],
-        ];
-
-        if (!isset($prerequisites[$newStatus])) {
-            return true; // No prerequisites for this status
-        }
-
-        $requiredTasks = $prerequisites[$newStatus]['required_tasks'];
-        $allRequired = $prerequisites[$newStatus]['all_required'];
-
-        $completedTasks = EnquiryTask::where('project_enquiry_id', $enquiry->id)
-            ->whereIn('type', $requiredTasks)
-            ->whereIn('status', ['completed', 'skipped'])
-            ->pluck('type')
-            ->toArray();
-
-        if ($allRequired) {
-            // All required tasks must be completed
-            return count(array_intersect($requiredTasks, $completedTasks)) === count($requiredTasks);
-        } else {
-            // At least one required task must be completed (for future use)
-            return !empty(array_intersect($requiredTasks, $completedTasks));
-        }
-    }
 
     /**
      * Handle special cases for status progression
@@ -625,45 +579,26 @@ class EnquiryWorkflowService
      */
     private function calculateEnquiryStatusFromTasks(ProjectEnquiry $enquiry): string
     {
-        // Get all completed tasks for this enquiry
-        $completedTasks = EnquiryTask::where('project_enquiry_id', $enquiry->id)
-            ->whereIn('status', ['completed', 'skipped'])
-            ->pluck('type')
-            ->toArray();
-
-        // Define the progression order and required tasks for each status
-        $statusProgression = [
-            EnquiryConstants::STATUS_QUOTE_APPROVED => ['site-survey', 'design', 'materials', 'budget', 'quote', 'quote_approval'],
-            EnquiryConstants::STATUS_QUOTE_PREPARED => ['site-survey', 'design', 'materials', 'budget', 'quote'],
-            EnquiryConstants::STATUS_BUDGET_CREATED => ['site-survey', 'design', 'materials', 'budget'],
-            EnquiryConstants::STATUS_MATERIALS_SPECIFIED => ['site-survey', 'design', 'materials'],
-            EnquiryConstants::STATUS_DESIGN_COMPLETED => ['site-survey', 'design'],
-            EnquiryConstants::STATUS_SITE_SURVEY_COMPLETED => ['site-survey'],
-        ];
-
-        // Find the highest status where all required tasks are completed
-        foreach ($statusProgression as $status => $requiredTasks) {
-            if (count(array_intersect($requiredTasks, $completedTasks)) === count($requiredTasks)) {
-                return $status;
-            }
-        }
-
-        // If no tasks are completed, return initial status
-        return EnquiryConstants::STATUS_ENQUIRY_LOGGED;
+        return app(SyncEnquiryStatusAction::class)->execute($enquiry->id)->status;
     }
 
     /**
      * Validate if a task is ready to be marked as completed
      */
-    private function validateTaskCompletion(EnquiryTask $task): void
+    public function validateTaskCompletion(EnquiryTask $task): void
     {
-        // Note: Operational gates (Production, Procurement, Logistics) are now 
-        // handled via policies in the ProjectGovernanceService.
-        
+        // 0. Status Check
+        if ($task->status === 'completed') {
+            return;
+        }
+
+        $user = auth()->user();
+        $isAdmin = $user && $user->hasRole(\App\Constants\EnquiryConstants::ROLES_ADMIN);
+
         // 1. Materials Validation (Approvals)
         if ($task->type === 'materials') {
             $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
-            if ($materialsData) {
+            if ($materialsData && !$isAdmin) {
                 $status = $materialsData->project_info['approval_status'] ?? [];
                 if (!($status['all_approved'] ?? false)) {
                     throw new \Exception("Cannot complete Materials task. Project Approval is required.");
@@ -674,25 +609,16 @@ class EnquiryWorkflowService
         // 2. Budget Validation
         if ($task->type === 'budget') {
             $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $task->id)->first();
-            if (!$budgetData) {
+            if (!$budgetData && !$isAdmin) {
                 throw new \Exception("Cannot complete Budget task. Budget data is missing. Please save the budget before completing.");
-            }
-
-            $summary = $budgetData->budget_summary ?? [];
-            $total = (float)($summary['grandTotal'] ?? 0);
-            if ($total < 0) {
-                throw new \Exception("Cannot complete Budget task. The total budget amount cannot be negative.");
             }
         }
 
         // 3. Quote Validation
         if ($task->type === 'quote') {
             $quoteData = \App\Models\TaskQuoteData::where('enquiry_task_id', $task->id)->first();
-            if (!$quoteData) {
+            if (!$quoteData && !$isAdmin) {
                 throw new \Exception("Cannot complete Quote Preparation task. Quote data is missing. Please prepare the quote before completing.");
-            }
-            if (!$quoteData->budget_imported) {
-                throw new \Exception("Cannot complete Quote Preparation task. Budget data has not been imported. Please sync the budget first.");
             }
         }
 
@@ -700,7 +626,9 @@ class EnquiryWorkflowService
         if ($task->type === 'quote_approval') {
             $approval = \DB::table('quote_approvals')->where('task_id', $task->id)->first();
             if (!$approval || $approval->approval_status === 'pending') {
-                throw new \Exception("Cannot complete Quote Approval task. A final decision (Approved/Rejected) is required.");
+                if (!$isAdmin) {
+                    throw new \Exception("Cannot complete Quote Approval task. A final decision (Approved/Rejected) is required.");
+                }
             }
         }
     }

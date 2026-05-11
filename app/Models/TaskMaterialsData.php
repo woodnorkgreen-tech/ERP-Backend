@@ -30,6 +30,15 @@ class TaskMaterialsData extends Model
 {
     use HasFactory, \App\Traits\LogsActions;
 
+    protected static function booted()
+    {
+        static::saved(function ($model) {
+            if ($model->task) {
+                app(\App\Modules\Projects\Services\EnquiryWorkflowService::class)->tryAutoCompleteTask($model->task);
+            }
+        });
+    }
+
     protected $fillable = [
         'enquiry_task_id',
         'project_info'

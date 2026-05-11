@@ -100,188 +100,32 @@ class TaskController extends Controller
      */
     public function getAllEnquiryTasks(Request $request): JsonResponse
     {
-
         try {
-            $query = EnquiryTask::with('enquiry', 'creator', 'assignedTo', 'assignedUser', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers', 'materialsData');
+            $query = EnquiryTask::authorized()->with([
+                'enquiry', 
+                'department', 
+                'assignedUser', 
+                'assignedUsers', 
+                'assignmentHistory'
+            ]);
 
-            $user = Auth::user();
-            
-            // Strict Access Control
-            // If NOT Project Officer, Project Manager, or Super Admin, only show assigned tasks.
-            if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
-                 $query->where(function($q) use ($user) {
-                     $q->where('assigned_to', $user->id)
-                       ->orWhere('assigned_user_id', $user->id)
-                       ->orWhereHas('assignedUsers', function($subQ) use ($user) {
-                           $subQ->where('users.id', $user->id);
-                       });
+            $query = app(\Illuminate\Pipeline\Pipeline::class)
+                ->send($query)
+                ->through([
+                    \App\Modules\Projects\Filters\Task\SearchFilter::class,
+                    \App\Modules\Projects\Filters\Task\StatusFilter::class,
+                    \App\Modules\Projects\Filters\Task\DepartmentFilter::class,
+                    \App\Modules\Projects\Filters\Task\EnquiryFilter::class,
+                    \App\Modules\Projects\Filters\Task\PriorityFilter::class,
+                    \App\Modules\Projects\Filters\Task\AssignedUserFilter::class,
+                    \App\Modules\Projects\Filters\Task\VisibilityFilter::class,
+                ])
+                ->thenReturn();
 
-                     // Specific requirement: Designers see ALL Design & Materials tasks
-                     if ($user->hasRole('Designer')) {
-                        $q->orWhereIn('type', ['design', 'materials']);
-                     }
-
-                     // Specific requirement: Costings/Accounts see ALL Materials, Budget, Quote, Quote Approval tasks
-                     if ($user->hasRole(['Costing', 'Accounts'])) {
-                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
-                     }
-
-                     // Specific requirement: Stores/Procurement see ALL Budget, Procurement tasks
-                     if ($user->hasRole(['Stores', 'Procurement'])) {
-                        $q->orWhereIn('type', ['budget', 'procurement']);
-                     }
-
-                     // Specific requirement: Production see ALL Materials, Teams, Production, Budget tasks
-                     if ($user->hasRole('Production')) {
-                        $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
-                     }
-                 });
-            }
-            // Apply filters if provided
-            if ($request->has('status') && $request->status) {
-                $query->where('status', $request->status);
-            }
-
-            if ($request->has('priority') && $request->priority) {
-                $query->where('priority', $request->priority);
-            }
-
-            if ($request->has('assigned_user_id') && $request->assigned_user_id) {
-                $query->where(function($q) use ($request, $user) {
-                    $q->where('assigned_to', $request->assigned_user_id);
-                    
-                    // Specific requirement: Designers see unassigned Design & Materials tasks by default
-                    if ($user->hasRole('Designer')) {
-                        $q->orWhere(function($sq) {
-                            $sq->whereNull('assigned_to')
-                               ->whereIn('type', ['design', 'materials']);
-                        });
-                    }
-
-                    // Specific requirement: Costings/Accounts see unassigned Materials, Budget, Quote, Quote Approval tasks
-                    if ($user->hasRole(['Costing', 'Accounts'])) {
-                        $q->orWhere(function($sq) {
-                            $sq->whereNull('assigned_to')
-                               ->whereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
-                        });
-                    }
-
-                    // Specific requirement: Stores/Procurement see unassigned Budget, Procurement tasks
-                    if ($user->hasRole(['Stores', 'Procurement'])) {
-                        $q->orWhere(function($sq) {
-                            $sq->whereNull('assigned_to')
-                               ->whereIn('type', ['budget', 'procurement']);
-                        });
-                    }
-
-                    // Specific requirement: Production see unassigned Materials, Teams, Production, Budget tasks
-                    if ($user->hasRole('Production')) {
-                        $q->orWhere(function($sq) {
-                            $sq->whereIn('type', ['materials', 'teams', 'production', 'budget']);
-                        });
-                    }
-
-                    if ($user->hasRole('Designer')) {
-                        $q->orWhereIn('type', ['design', 'site-survey']);
-                    }
-
-                    if ($user->hasRole('Stores')) {
-                        $q->orWhereIn('type', ['materials', 'stores']);
-                    }
-
-                    if ($user->hasRole('Procurement')) {
-                        $q->orWhereIn('type', ['materials', 'procurement']);
-                    }
-
-                    if ($user->hasRole(['Costing', 'Accounts'])) {
-                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
-                    }
-                });
-            }
-
-            if ($request->has('enquiry_id') && $request->enquiry_id) {
-                $query->where('project_enquiry_id', $request->enquiry_id);
-            }
-
-            // Search functionality
-            if ($request->has('search') && $request->search) {
-                $searchTerm = $request->search;
-                $query->where(function ($q) use ($searchTerm) {
-                    $q->where('title', 'like', "%{$searchTerm}%")
-                      ->orWhereHas('enquiry', function ($enquiryQuery) use ($searchTerm) {
-                          $enquiryQuery->where('title', 'like', "%{$searchTerm}%");
-                      });
-                });
-            }
-
-            $tasks = $query->orderBy('id')->get(); // Order by ID for consistent ordering
-
-            // Enrich material tasks with approval status
-            $tasks->each(function ($task) {
-                if ($task->type === 'materials') {
-                    $materialsData = $task->materialsData;
-                    
-                    if ($materialsData) {
-                        $approvalStatus = $materialsData->project_info['approval_status'] ?? [];
-                        
-                        // Count approvals
-                        $totalApprovals = 0;
-                        $departments = ['design', 'production', 'finance'];
-                        foreach ($departments as $dept) {
-                            if (isset($approvalStatus[$dept]['approved']) && $approvalStatus[$dept]['approved']) {
-                                $totalApprovals++;
-                            }
-                        }
-                        
-                        // Get counts
-                        $elementCount = $materialsData->elements()->count();
-                        $materialCount = \App\Models\ElementMaterial::whereIn(
-                            'project_element_id', 
-                            $materialsData->elements()->pluck('id')
-                        )->count();
-
-                        // Check Design Gate
-                        $isGated = false;
-                        $gateMessage = '';
-                        
-                        $designTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
-                            ->where('type', 'design')
-                            ->first();
-
-                        if ($designTask) {
-                            $hasApprovedAssets = DesignAsset::where('enquiry_task_id', $designTask->id)
-                                ->where('status', 'approved')
-                                ->exists();
-                            
-                            if (!$hasApprovedAssets) {
-                                $isGated = true;
-                                $gateMessage = 'Materials approval is locked until the Design Task has approved assets.';
-                            }
-                        }
-                        
-                        $task->material_approval = [
-                            'needs_approval' => !($approvalStatus['all_approved'] ?? false),
-                            'approved_count' => $totalApprovals,
-                            'total_count' => 3,
-                            'all_approved' => $approvalStatus['all_approved'] ?? false,
-                            'element_count' => $elementCount,
-                            'material_count' => $materialCount,
-                            'is_gated' => $isGated,
-                            'gate_message' => $gateMessage,
-                            'departments' => [
-                                'design' => $approvalStatus['design']['approved'] ?? false,
-                                'production' => $approvalStatus['production']['approved'] ?? false,
-                                'finance' => $approvalStatus['finance']['approved'] ?? false,
-                            ]
-                        ];
-                    }
-                }
-            });
-
-            \Log::info("[DEBUG] getAllEnquiryTasks retrieved " . $tasks->count() . " tasks");
+            $tasks = $query->orderBy('task_order', 'asc')->paginate($request->get('per_page', 15));
 
             return response()->json([
-                'data' => $tasks,
+                'data' => \App\Modules\Projects\Resources\EnquiryTaskResource::collection($tasks)->response()->getData(true),
                 'message' => 'All enquiry tasks retrieved successfully'
             ]);
         } catch (\Exception $e) {
@@ -322,52 +166,16 @@ class TaskController extends Controller
     {
 
         try {
-            $query = EnquiryTask::where('project_enquiry_id', $enquiryId)
+            $query = EnquiryTask::authorized()
+                ->where('project_enquiry_id', $enquiryId)
                 ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers', 'materialsData');
 
             $user = Auth::user();
             
-            // Strict Access Control
-            if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
-                 $query->where(function($q) use ($user) {
-                     $q->where('assigned_to', $user->id)
-                       ->orWhere('assigned_user_id', $user->id)
-                       ->orWhereHas('assignedUsers', function($subQ) use ($user) {
-                           $subQ->where('users.id', $user->id);
-                       });
+            // Access Control: All users can see tasks in the project (Transparency)
+            // Interaction is gated via is_authorized flag on the task model
 
-                     // Specific requirement: Designers see ALL Design & Materials tasks
-                     if ($user->hasRole('Designer')) {
-                        $q->orWhereIn('type', ['design', 'materials']);
-                     }
-
-                     // Specific requirement: Costings/Accounts see ALL Materials, Budget, Quote, Quote Approval tasks
-                     if ($user->hasRole(['Costing', 'Accounts'])) {
-                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
-                     }
-
-                     // Specific requirement: Stores/Procurement see ALL Budget, Procurement tasks
-                     if ($user->hasRole(['Stores', 'Procurement'])) {
-                        $q->orWhereIn('type', ['budget', 'procurement']);
-                     }
-
-                     // Specific requirement: Production see ALL Materials, Teams, Production, Budget tasks
-                     if ($user->hasRole('Production')) {
-                        $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
-                     }
-                     if ($user->hasRole('Designer')) {
-                        $q->orWhereIn('type', ['design', 'site-survey']);
-                     }
-                     if ($user->hasRole(['Stores', 'Procurement'])) {
-                        $q->orWhereIn('type', ['materials', 'stores', 'procurement']);
-                     }
-                     if ($user->hasRole(['Costing', 'Accounts'])) {
-                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
-                     }
-                 });
-            }
-
-            $tasks = $query->orderBy('id')->get(); // Order by ID for consistent ordering
+            $tasks = $query->orderBy('task_order', 'asc')->get(); // Order by sequence for clear workflow
 
             // Enrich material tasks with approval status
             $tasks->each(function ($task) {
@@ -431,9 +239,9 @@ class TaskController extends Controller
                 }
             });
 
-            \Log::info("[DEBUG] getEnquiryTasks retrieved " . $tasks->count() . " tasks for enquiry {$enquiryId}");
+
             foreach ($tasks as $task) {
-                \Log::info("[DEBUG] Task {$task->id}: title='{$task->title}', status='{$task->status}', assigned_by=" . ($task->assigned_by ?? 'null') . ", history_count=" . ($task->assignmentHistory ? $task->assignmentHistory->count() : 0));
+
             }
 
             return response()->json([
@@ -457,7 +265,7 @@ class TaskController extends Controller
         // Permissions temporarily removed - will be implemented soon
 
         try {
-            $query = EnquiryTask::with('enquiry', 'department', 'assignedUser', 'creator');
+            $query = EnquiryTask::authorized()->with('enquiry', 'department', 'assignedUser', 'creator');
 
             // Filter by enquiry if provided
             if ($request->has('enquiry_id')) {
@@ -482,36 +290,8 @@ class TaskController extends Controller
             // Filter tasks by user's department
             $user = Auth::user();
 
-            // Strict Access Control
-            if (!$user->hasRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
-                 $query->where(function($q) use ($user) {
-                     $q->where('assigned_to', $user->id)
-                       ->orWhere('assigned_user_id', $user->id)
-                       ->orWhereHas('assignedUsers', function($subQ) use ($user) {
-                           $subQ->where('users.id', $user->id);
-                       });
-
-                     // Specific requirement: Designers see ALL Design & Materials tasks
-                     if ($user->hasRole('Designer')) {
-                        $q->orWhereIn('type', ['design', 'materials']);
-                     }
-
-                     // Specific requirement: Costings/Accounts see ALL Materials, Budget, Quote, Quote Approval tasks
-                     if ($user->hasRole(['Costing', 'Accounts'])) {
-                        $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
-                     }
-
-                     // Specific requirement: Stores/Procurement see ALL Budget, Procurement tasks
-                     if ($user->hasRole(['Stores', 'Procurement'])) {
-                        $q->orWhereIn('type', ['budget', 'procurement']);
-                     }
-
-                     // Specific requirement: Production see ALL Materials, Teams, Production, Budget tasks
-                     if ($user->hasRole('Production')) {
-                        $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
-                     }
-                 });
-            }
+            // Access Control: All users can see tasks in the project (Transparency)
+            // Interaction is gated via is_authorized flag on the task model
 
             // Removed privileged role check to allow standard users to see all tasks
             // if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
@@ -570,7 +350,7 @@ class TaskController extends Controller
     {
         // Permissions temporarily removed - will be implemented soon
 
-        \Log::info("[DEBUG] updateTaskStatus called for task {$taskId} with status: {$request->status}");
+
 
         $validator = Validator::make($request->all(), [
             'status' => 'required|string|in:pending,in_progress,completed,cancelled,skipped',
@@ -599,25 +379,15 @@ class TaskController extends Controller
 
             // Lock Check Removed - Users can edit any task regardless of assignment
 
-            \Log::info("[DEBUG] updateTaskStatus found task {$taskId}, current status: {$task->status}, title: {$task->title}, type: {$task->type}");
 
-            \Log::info("[DEBUG] updateTaskStatus calling workflowService->updateTaskStatus for task {$taskId} with status {$request->status}");
-        $updatedTask = $this->workflowService->updateTaskStatus($taskId, $request->status, $user->id);
-        \Log::info("[DEBUG] updateTaskStatus workflow service returned task with status: {$updatedTask->status}");
 
-        // Send notification if task is completed
-        if ($request->status === 'completed' && $task->status !== 'completed') {
-            $this->notificationService->sendEnquiryTaskCompleted($updatedTask, $user);
-            \Log::info("[DEBUG] Sent task completion notification for task {$taskId}");
-        }
+            // USE THE NEW ACTION CLASS (Less bureaucracy, more integrity)
+            $action = app(\App\Modules\Projects\Actions\UpdateTaskStatusAction::class);
+            $updatedTask = $action->execute($taskId, $request->status, $request->notes);
 
-            // Update notes if provided
-            if ($request->has('notes')) {
-                $task->notes = $request->notes;
-                $task->save();
-            }
 
-            \Log::info("[DEBUG] updateTaskStatus completed successfully for task {$taskId}, final status: {$updatedTask->status}");
+
+
             return response()->json([
                 'data' => $updatedTask->load('enquiry', 'department', 'assignedUser'),
                 'message' => 'Task status updated successfully'
@@ -625,7 +395,7 @@ class TaskController extends Controller
         } catch (\Exception $e) {
             \Log::error("[DEBUG] updateTaskStatus failed for task {$taskId}: " . $e->getMessage());
             return response()->json([
-                'message' => 'Failed to update task status',
+                'message' => $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -796,15 +566,12 @@ class TaskController extends Controller
             // Department check temporarily removed - will be implemented soon
             $user = Auth::user();
 
-            // Strict Access Control for Updates
-            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer']);
-            
-            // Department Check Removed for Transparency
-            // if (!$hasSpecialAccess && $task->department_id && $task->department_id !== $user->department_id) {
-            //    return response()->json(['message' => 'Unauthorized: Task belongs to another department'], 403);
-            // }
-
-            // Lock Check Removed - Users can edit any task regardless of assignment
+            // Check if user is authorized to interact with this task (Pool check)
+            if (!$task->isUserAuthorized($user)) {
+                return response()->json([
+                    'message' => 'Unauthorized: You can only interact with tasks in your pool.'
+                ], 403);
+            }
 
             $task->update($request->only([
                 'task_description',
@@ -820,7 +587,7 @@ class TaskController extends Controller
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to update task',
+                'message' => $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -864,15 +631,10 @@ class TaskController extends Controller
      */
     public function assignEnquiryTask(Request $request, int $taskId): JsonResponse
     {
-        \Log::info("[DEBUG] assignEnquiryTask HIT with ID: {$taskId} from User " . Auth::id());
-
-        // Permissions temporarily removed - will be implemented soon
-        $user = Auth::user();
-
         $validator = Validator::make($request->all(), [
             'assigned_user_id' => 'required|integer|exists:users,id',
             'priority' => 'nullable|string|in:low,medium,high,urgent',
-            'due_date' => 'nullable|date|after:yesterday', // Allow today
+            'due_date' => 'nullable|date|after:yesterday',
             'notes' => 'nullable|string|max:1000',
         ]);
 
@@ -884,44 +646,19 @@ class TaskController extends Controller
         }
 
         try {
-            $assignedUser = \App\Models\User::findOrFail($request->assigned_user_id);
-            \Log::info("[DEBUG] assignEnquiryTask found assigned user: {$assignedUser->id} ({$assignedUser->name}), department: " . ($assignedUser->department_id ?? 'null'));
-
-            // Additional validation: assigned user must have a department
-            // if (!$assignedUser->department_id) {
-            //     \Log::warning("[DEBUG] assignEnquiryTask failed: assigned user {$assignedUser->id} has no department");
-            //     return response()->json([
-            //         'message' => 'Cannot assign task to user without department'
-            //     ], 422);
-            // }
-
-            $assignmentData = array_filter([
-                'priority' => $request->priority,
-                'due_date' => $request->due_date ? \Carbon\Carbon::parse($request->due_date) : null,
-                'notes' => $request->notes,
-            ]);
-
-            \Log::info("[DEBUG] assignEnquiryTask calling workflowService->assignEnquiryTask with data: " . json_encode($assignmentData));
-
-            $task = $this->workflowService->assignEnquiryTask($taskId, $assignedUser->id, $user->id, $assignmentData);
-
-            \Log::info("[DEBUG] assignEnquiryTask workflow service returned task: {$task->id}, status: {$task->status}, assigned_by: " . ($task->assigned_by ?? 'null'));
-
-            // Send notification (for task assignment)
-        $this->notificationService->sendEnquiryTaskAssignment($task, $assignedUser, $user, false);
-
-            $loadedTask = $task->load('department', 'assignedBy', 'assignedTo', 'assignmentHistory');
-            \Log::info("[DEBUG] assignEnquiryTask loaded task with relationships, history count: " . ($loadedTask->assignmentHistory ? $loadedTask->assignmentHistory->count() : 0));
+            $assignmentData = array_filter($request->only(['priority', 'due_date', 'notes']));
+            
+            $action = app(\App\Modules\Projects\Actions\AssignTaskAction::class);
+            $task = $action->execute($taskId, $request->assigned_user_id, $assignmentData);
 
             return response()->json([
-                'data' => $loadedTask,
+                'data' => new \App\Modules\Projects\Resources\EnquiryTaskResource($task),
                 'message' => 'Task assigned successfully'
             ]);
         } catch (\Exception $e) {
-            \Log::error("[DEBUG] assignEnquiryTask failed: " . $e->getMessage() . "\nStack trace: " . $e->getTraceAsString());
+            \Log::error("[DEBUG] assignEnquiryTask failed for task {$taskId}: " . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to assign task',
-                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -1174,7 +911,7 @@ class TaskController extends Controller
         } catch (\Throwable $e) {
         \Log::error("[DEBUG] updateEnquiryTask failed for task {$taskId}: " . $e->getMessage());
         return response()->json([
-            'message' => 'Failed to update task',
+            'message' => $e->getMessage(),
             'error' => $e->getMessage()
         ], 500);
     }

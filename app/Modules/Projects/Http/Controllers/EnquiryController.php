@@ -42,15 +42,18 @@ class EnquiryController extends Controller
     protected $notificationService;
     protected $financeService;
     protected $governanceService;
+    protected $sequencingService;
 
     public function __construct(
         NotificationService $notificationService, 
         FinanceService $financeService,
-        ProjectGovernanceService $governanceService
+        ProjectGovernanceService $governanceService,
+        \App\Modules\Projects\Services\SequencingService $sequencingService
     ) {
         $this->notificationService = $notificationService;
         $this->financeService = $financeService;
         $this->governanceService = $governanceService;
+        $this->sequencingService = $sequencingService;
     }
 
     /**
@@ -61,7 +64,7 @@ class EnquiryController extends Controller
     {
         $projects = ProjectEnquiry::where('quote_approved', true)
             ->whereNotNull('job_number')
-            ->select('id', 'job_number', 'project_id', 'title')
+            ->select('id', 'job_number', 'title')
             // Sort by Year DESC, Month DESC, Sequential Number DESC
             // Format: WNG-MM-YYYY-NNN
             ->orderByRaw('
@@ -78,29 +81,6 @@ class EnquiryController extends Controller
         ]);
     }
 
-    /**
-     * Generate a unique enquiry number
-     */
-    private function generateEnquiryNumber(): string
-    {
-        $month = date('m');
-        $year = date('Y');
-        $prefix = EnquiryConstants::ENQUIRY_PREFIX . '-' . $month . '-' . $year . '-';
-
-        // Find the highest existing number for this month/year
-        $lastEnquiry = ProjectEnquiry::where('enquiry_number', 'like', $prefix . '%')
-            ->orderByRaw('CAST(SUBSTRING(enquiry_number, LENGTH(?) + 1) AS UNSIGNED) DESC', [$prefix])
-            ->first();
-
-        $nextNumber = 1;
-        if ($lastEnquiry) {
-            // Extract the number part after the prefix
-            $numberPart = substr($lastEnquiry->enquiry_number, strlen($prefix));
-            $nextNumber = intval($numberPart) + 1;
-        }
-
-        return $prefix . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
-    }
 
     /**
      * @OA\Get(
@@ -159,79 +139,25 @@ class EnquiryController extends Controller
     {
         $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo');
 
-        // Apply search filter
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('enquiry_number', 'like', "%{$search}%")
-                  ->orWhere('job_number', 'like', "%{$search}%")
-                  ->orWhereHas('client', function ($clientQuery) use ($search) {
-                      $clientQuery->where('full_name', 'like', "%{$search}%");
-                  })
-                  ->orWhere('contact_person', 'like', "%{$search}%");
-            });
-        }
+        $query = app(\Illuminate\Pipeline\Pipeline::class)
+            ->send($query)
+            ->through([
+                \App\Modules\Projects\Filters\Enquiry\SearchFilter::class,
+                \App\Modules\Projects\Filters\Enquiry\StatusFilter::class,
+                \App\Modules\Projects\Filters\Enquiry\ViewTypeFilter::class,
+                \App\Modules\Projects\Filters\Enquiry\DateRangeFilter::class,
+                \App\Modules\Projects\Filters\Enquiry\ClientFilter::class,
+                \App\Modules\Projects\Filters\Enquiry\OfficerFilter::class,
+            ])
+            ->thenReturn();
 
-        // Apply status filter (Direct match)
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->filled('client_id')) {
-            $query->where('client_id', $request->client_id);
-        }
-
-        if ($request->filled('department_id')) {
-            $query->where('department_id', $request->department_id);
-        }
-
-        // 1. Determine the core view filtering (Enquiries, Projects, Completed, Canceled)
-        $completedOnlyStatuses = ['completed'];
-        $cancelledStatuses = ['cancelled'];
-        $closedStatuses = array_merge($completedOnlyStatuses, $cancelledStatuses);
-        // awaiting_deposit is intentionally NOT here — it belongs in the enquiry pipeline view.
-        // Projects only become "active" once Finance releases them (planning/in_progress).
-        $activeProjectStatuses = ['quote_approved', 'planning', 'in_progress'];
-        // All statuses relevant to the Finance Billing & Deposits page
-        $receivableStatuses = ['quote_approved', 'awaiting_deposit', 'planning', 'in_progress', 'completed'];
-        
-        $view = $request->input('view', 'enquiries');
-        $isNonProfit = $request->boolean('is_non_profit');
-
-        // Apply View Filter (Phase)
-        if ($view === 'completed') {
-            $query->whereIn('status', $completedOnlyStatuses);
-        } else if ($view === 'canceled' || $view === 'cancelled') {
-            $query->whereIn('status', $cancelledStatuses);
-        } else if ($view === 'awaiting_deposit') {
-            $query->where('status', 'awaiting_deposit');
-        } else if ($view === 'projects') {
-            // Active projects only — after Finance Gate has released them
-            $query->whereIn('status', $activeProjectStatuses);
-        } else if ($view === 'receivables') {
-            // Finance Billing & Deposits: needs awaiting_deposit + active + completed
-            $query->whereIn('status', $receivableStatuses);
-        } else {
-            // Default Enquiries pipeline: everything not yet a project, not closed, NOT awaiting deposit
-            $query->whereNotIn('status', array_merge($activeProjectStatuses, $closedStatuses, ['awaiting_deposit']));
-        }
-
-        // Apply Global Non-Profit Filter
-        if ($isNonProfit) {
-            $query->whereIn('workflow_preset_type', ['internal_job', 'sponsorship']);
-        } else {
-            // Use a grouped where to treat NULL workflow_preset_type as a regular (non-internal) project.
-            // Plain whereNotIn() silently drops NULL rows in MySQL because NULL NOT IN (...) = UNKNOWN.
-            $query->where(function ($q) {
-                $q->whereNotIn('workflow_preset_type', ['internal_job', 'sponsorship'])
-                  ->orWhereNull('workflow_preset_type');
-            });
-        }
-
-        // 2. Apply "Sub-Tab" filtering (Status Groups)
+        // 2. Apply "Sub-Tab" filtering (Status Groups) - Kept for flexibility for now
         if ($request->filled('sub_status') && $request->sub_status !== 'all') {
             $subStatus = $request->sub_status;
+            $activeProjectStatuses = ['quote_approved', 'planning', 'in_progress'];
+            $completedOnlyStatuses = ['completed'];
+            $cancelledStatuses = ['cancelled'];
+            $closedStatuses = array_merge($completedOnlyStatuses, $cancelledStatuses);
             
             if ($subStatus === 'new' || $subStatus === 'pipeline') {
                 $query->whereNotIn('status', array_merge($activeProjectStatuses, $closedStatuses));
@@ -250,16 +176,11 @@ class EnquiryController extends Controller
             }
         }
 
-        if ($request->boolean('assigned_to_me')) {
-            $query->where('project_officer_id', Auth::id());
-        }
-
-        // Apply sorting
+        $view = $request->input('view', 'enquiries');
         $sortBy = $request->input('sort_by', 'created_at');
         $sortOrder = $request->input('sort_order', 'desc');
         $allowedSorts = ['created_at', 'expected_delivery_date', 'estimated_budget', 'title', 'priority', 'job_number'];
-        
-        // Special handling: When viewing projects (approved enquiries), default sort by job_number if not specified
+
         if ($view === 'projects' && !$request->has('sort_by')) {
             $sortBy = 'job_number';
         }
@@ -294,7 +215,7 @@ class EnquiryController extends Controller
         });
 
         return response()->json([
-            'data' => $enquiries,
+            'data' => \App\Modules\Projects\Resources\EnquiryResource::collection($enquiries)->response()->getData(true),
             'message' => 'Enquiries retrieved successfully'
         ]);
     }
@@ -336,132 +257,49 @@ class EnquiryController extends Controller
      *     @OA\Response(response=401, description="Unauthorized")
      * )
      */
-    public function store(Request $request): JsonResponse
+    public function store(\App\Http\Requests\Modules\Projects\Enquiry\StoreEnquiryRequest $request): JsonResponse
     {
         Log::info('Enquiry store request received', [
             'user_id' => Auth::id(),
-            'payload' => $request->except(['project_scope']), // Avoid logging large arrays if possible
+            'payload' => $request->except(['project_scope']),
         ]);
 
+        $validatedData = $request->validated();
+        
         // Handle field name alias for enquiry_title
-        if ($request->has('enquiry_title') && !$request->has('title')) {
-            $request->merge(['title' => $request->enquiry_title]);
-        }
-
-        // Sanitize nullable IDs (Handle empty strings from frontend Selects)
-        if ($request->has('client_id') && $request->client_id === '') {
-            $request->merge(['client_id' => null]);
-        }
-        if ($request->has('project_officer_id') && $request->project_officer_id === '') {
-            $request->merge(['project_officer_id' => null]);
-        }
-        if ($request->has('department_id') && $request->department_id === '') {
-            $request->merge(['department_id' => null]);
-        }
-        if ($request->has('assigned_po') && $request->assigned_po === '') {
-            $request->merge(['assigned_po' => null]);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'date_received' => 'required|date',
-            'expected_delivery_date' => 'nullable|date|after_or_equal:date_received',
-            'client_id' => 'required|integer|exists:clients,id',
-            'title' => 'required|string|max:255',
-            'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias
-            'description' => 'nullable|string',
-            'project_scope' => 'nullable', // Allow array or string
-            'priority' => 'nullable|string|in:' . implode(',', EnquiryConstants::getAllPriorities()),
-            'contact_person' => 'required|string|max:255',
-            'project_officer_id' => 'nullable|integer|exists:users,id',
-            'status' => 'required|string|in:' . implode(',', EnquiryConstants::getAllStatuses()),
-            'department_id' => 'nullable|integer|exists:departments,id',
-            'assigned_department' => 'nullable|string|max:255',
-            'project_deliverables' => 'nullable|string',
-            'assigned_po' => 'nullable|integer|exists:users,id',
-            'follow_up_notes' => 'nullable|string',
-            'venue' => 'nullable|string|max:255',
-            'site_survey_skipped' => 'nullable|boolean',
-            'site_survey_skip_reason' => 'nullable|string|required_if:site_survey_skipped,true',
-            'selected_workflow_tasks' => 'nullable|array',
-            'workflow_preset_type' => 'nullable|string',
-        ]);
-
-        if ($validator->fails()) {
-            Log::warning('Enquiry validation failed', ['errors' => $validator->errors()]);
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        // Validate project officer role if provided
-        if ($request->project_officer_id) {
-            $user = \App\Models\User::find($request->project_officer_id);
-            if (!$user || !$user->hasAnyRole(['Project Officer', 'Project Manager', 'Super Admin'])) {
-                 Log::warning('Invalid project officer role', ['user_id' => $request->project_officer_id]);
-                return response()->json([
-                    'message' => 'Invalid project officer assignment',
-                    'errors' => ['project_officer_id' => ['Selected user is not a valid project officer']]
-                ], 422);
-            }
+        if ($request->has('enquiry_title') && !isset($validatedData['title'])) {
+            $validatedData['title'] = $request->enquiry_title;
         }
 
         try {
             DB::beginTransaction();
 
-            // Generate enquiry number
-            $enquiryNumber = $this->generateEnquiryNumber();
-            Log::info('Generated enquiry number', ['enquiry_number' => $enquiryNumber]);
+            // Generate numbers using SequencingService
+            $validatedData['enquiry_number'] = $this->sequencingService->generateEnquiryNumber();
+            
+            $validatedData['created_by'] = Auth::id();
+            $validatedData['assigned_to'] = $validatedData['assigned_po'] ?? Auth::id();
 
-            $enquiry = ProjectEnquiry::create([
-                'date_received' => $request->date_received,
-                'expected_delivery_date' => $request->expected_delivery_date,
-                'client_id' => $request->client_id,
-                'title' => $request->title,
-                'description' => $request->description,
-                'project_scope' => $request->project_scope,
-                'priority' => $request->priority ?? EnquiryConstants::PRIORITY_MEDIUM,
-                'contact_person' => $request->contact_person,
-                'project_officer_id' => $request->project_officer_id,
-                'status' => $request->status,
-                'department_id' => $request->department_id,
-                'assigned_department' => $request->assigned_department,
-                'project_deliverables' => $request->project_deliverables,
-                'assigned_po' => $request->assigned_po,
-                'follow_up_notes' => $request->follow_up_notes,
-                'enquiry_number' => $enquiryNumber,
-                'venue' => $request->venue,
-                'site_survey_skipped' => $request->site_survey_skipped ?? false,
-                'site_survey_skip_reason' => $request->site_survey_skip_reason,
-                'selected_workflow_tasks' => $request->selected_workflow_tasks,
-                'workflow_preset_type' => $request->workflow_preset_type,
-                'created_by' => Auth::id(),
-            ]);
+            $enquiry = ProjectEnquiry::create($validatedData);
 
-            Log::info('Enquiry record created', ['id' => $enquiry->id]);
-
-            // Create workflow tasks for the enquiry
-            $workflowService = new EnquiryWorkflowService($this->notificationService, $this->governanceService);
-            $workflowService->createWorkflowTasksForEnquiry($enquiry);
+            // Auto-create initial tasks based on workflow preset
+            app(\App\Modules\Projects\Services\EnquiryWorkflowService::class)->initializeWorkflow($enquiry);
 
             DB::commit();
-            Log::info('Enquiry creation transaction committed successfully');
 
             return response()->json([
                 'message' => 'Enquiry created successfully',
-                'data' => $enquiry->load('client', 'department', 'projectOfficer', 'enquiryTasks'),
+                'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department'))
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Enquiry creation failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-
             return response()->json([
-                'message' => 'Failed to create enquiry. Please check system logs for details.',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal Server Error'
+                'message' => 'Failed to create enquiry',
+                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -549,31 +387,8 @@ class EnquiryController extends Controller
             'department',
             'projectOfficer',
             'enquiryTasks' => function ($query) {
-                $user = Auth::user();
-                // Check if user has privileged role
-                if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer'])) {
-                    $query->where(function($q) use ($user) {
-                        $q->where('assigned_to', $user->id)
-                          ->orWhere('assigned_user_id', $user->id)
-                          ->orWhereHas('assignedUsers', function($subQ) use ($user) {
-                              $subQ->where('users.id', $user->id);
-                          });
-
-                        // Role-based visibility exceptions
-                        if ($user->hasRole('Designer')) {
-                            $q->orWhereIn('type', ['design', 'materials']);
-                        }
-                        if ($user->hasRole(['Costing', 'Accounts'])) {
-                            $q->orWhereIn('type', ['materials', 'budget', 'quote', 'quote_approval']);
-                        }
-                        if ($user->hasRole(['Stores', 'Procurement'])) {
-                            $q->orWhereIn('type', ['budget', 'procurement']);
-                        }
-                        if ($user->hasRole('Production')) {
-                            $q->orWhereIn('type', ['materials', 'teams', 'production', 'budget']);
-                        }
-                    });
-                }
+                // Access Control: All users can see tasks in the project (Transparency)
+                // Interaction is gated via is_authorized flag on the task model
                 $query->with([
                     'assignedUser',
                     'quoteData',
@@ -821,7 +636,7 @@ class EnquiryController extends Controller
 
         $validator = Validator::make($request->all(), [
             'date_received' => 'sometimes|required|date',
-            'expected_delivery_date' => 'nullable|date|after_or_equal:date_received',
+            'expected_delivery_date' => 'sometimes|required|date|after_or_equal:date_received',
             'client_id' => 'sometimes|required|integer|exists:clients,id',
             'title' => 'sometimes|required|string|max:255',
             'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias
@@ -909,8 +724,7 @@ class EnquiryController extends Controller
         ]));
 
         // Sync workflow tasks (create any newly selected tasks)
-        $workflowService = new EnquiryWorkflowService($this->notificationService, $this->governanceService);
-        $workflowService->createWorkflowTasksForEnquiry($enquiry);
+        app(EnquiryWorkflowService::class)->initializeWorkflow($enquiry);
 
         return response()->json([
             'message' => 'Enquiry updated successfully',

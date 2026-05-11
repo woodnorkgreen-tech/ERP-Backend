@@ -6,6 +6,7 @@ use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
@@ -246,6 +247,31 @@ class EmployeeController
 
         return response()->json([
             'data' => $employee
+        ]);
+    }
+
+    /**
+     * Upload / replace the employee's profile photo.
+     */
+    public function uploadPhoto(Request $request, Employee $employee): JsonResponse
+    {
+        $request->validate([
+            'photo' => 'required|image|mimes:jpeg,jpg,png,webp|max:2048',
+        ]);
+
+        // Delete previous photo
+        if ($employee->profile_photo_path) {
+            Storage::disk('public')->delete($employee->profile_photo_path);
+        }
+
+        $path = $request->file('photo')->store('employees/photos', 'public');
+
+        $employee->update(['profile_photo_path' => $path]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Profile photo updated.',
+            'data' => $employee->fresh(),
         ]);
     }
 }

@@ -185,6 +185,16 @@ class Permissions
     const TASK_SKIP = 'task.skip';
 
     // ===========================================
+    // RECRUITMENT PERMISSIONS
+    // ===========================================
+    const RECRUITMENT_INTERVIEW_CREATE = 'recruitment.interview.create';
+    const RECRUITMENT_INTERVIEW_UPDATE = 'recruitment.interview.update';
+    const RECRUITMENT_INTERVIEW_DELETE = 'recruitment.interview.delete';
+    const RECRUITMENT_NOTIFY           = 'recruitment.notify';
+    const RECRUITMENT_BACKGROUND_CHECK_UPDATE = 'recruitment.background_check.update';
+    const RECRUITMENT_BACKGROUND_CHECK_COMPLETE = 'recruitment.background_check.complete';
+
+    // ===========================================
     // DASHBOARD PERMISSIONS
     // ===========================================
     const DASHBOARD_VIEW = 'dashboard.view';
@@ -264,6 +274,10 @@ class Permissions
             // Task Management
             self::TASK_CREATE, self::TASK_READ, self::TASK_UPDATE, self::TASK_DELETE,
             self::TASK_ASSIGN, self::TASK_COMPLETE, self::TASK_SKIP,
+
+            // Recruitment Permissions
+            self::RECRUITMENT_INTERVIEW_CREATE, self::RECRUITMENT_INTERVIEW_UPDATE, self::RECRUITMENT_INTERVIEW_DELETE,
+            self::RECRUITMENT_NOTIFY, self::RECRUITMENT_BACKGROUND_CHECK_UPDATE, self::RECRUITMENT_BACKGROUND_CHECK_COMPLETE,
 
             // Dashboard Permissions
             self::DASHBOARD_VIEW, self::DASHBOARD_ADMIN, self::DASHBOARD_HR, self::DASHBOARD_FINANCE, self::DASHBOARD_PROJECTS,
@@ -345,6 +359,10 @@ class Permissions
             'tasks' => [
                 self::TASK_CREATE, self::TASK_READ, self::TASK_UPDATE, self::TASK_DELETE,
                 self::TASK_ASSIGN, self::TASK_COMPLETE, self::TASK_SKIP,
+            ],
+            'recruitment' => [
+                self::RECRUITMENT_INTERVIEW_CREATE, self::RECRUITMENT_INTERVIEW_UPDATE, self::RECRUITMENT_INTERVIEW_DELETE,
+                self::RECRUITMENT_NOTIFY, self::RECRUITMENT_BACKGROUND_CHECK_UPDATE, self::RECRUITMENT_BACKGROUND_CHECK_COMPLETE,
             ],
             'dashboard' => [
                 self::DASHBOARD_VIEW, self::DASHBOARD_ADMIN, self::DASHBOARD_HR, self::DASHBOARD_FINANCE, self::DASHBOARD_PROJECTS,

@@ -41,7 +41,8 @@ class Employee extends Model
 
         'emergency_contact',
         'performance_rating',
-        'last_review_date'
+        'last_review_date',
+        'profile_photo_path',
     ];
 
     protected $casts = [
@@ -57,7 +58,8 @@ class Employee extends Model
 
     protected $appends = [
         'name',
-        'is_active'
+        'is_active',
+        'profile_photo_url',
     ];
 
     /**
@@ -114,6 +116,17 @@ class Employee extends Model
     public function getIsActiveAttribute(): bool
     {
         return $this->status === 'active';
+    }
+
+    /**
+     * Get the full public URL for the profile photo.
+     */
+    public function getProfilePhotoUrlAttribute(): ?string
+    {
+        if (!$this->profile_photo_path) {
+            return null;
+        }
+        return asset('storage/' . $this->profile_photo_path);
     }
 
     /**
@@ -205,6 +218,14 @@ class Employee extends Model
     public function payrollLedgers(): HasMany
     {
         return $this->hasMany(PayrollLedger::class);
+    }
+
+    /**
+     * Get the salary history for the employee.
+     */
+    public function salaryHistory(): HasMany
+    {
+        return $this->hasMany(EmployeeSalaryHistory::class)->orderBy('valid_from', 'desc');
     }
 
     /**
