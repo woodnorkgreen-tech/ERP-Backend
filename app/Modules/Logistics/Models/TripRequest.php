@@ -38,6 +38,8 @@ class TripRequest extends Model
         'assignment_notes',
         'started_at',
         'completed_at',
+        'batch_id',
+        'stop_order',
     ];
 
     protected $casts = [

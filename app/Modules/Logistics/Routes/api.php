@@ -63,6 +63,7 @@ Route::prefix('logistics')->group(function () {
     Route::get('/deliveries/{delivery}',                [DeliveryController::class, 'show']);
     Route::patch('/deliveries/{delivery}/start',        [DeliveryController::class, 'start']);
     Route::patch('/deliveries/{delivery}/cancel',       [DeliveryController::class, 'cancel']);
+    Route::patch('/deliveries/{delivery}/edit',         [DeliveryController::class, 'edit']);  
     Route::patch('/deliveries/{delivery}/stops/{stop}', [DeliveryController::class, 'updateStop']);
 
     // Driver App (Flutter)
@@ -77,9 +78,13 @@ Route::prefix('logistics')->group(function () {
         Route::post('/delivery/{delivery}/location',              [DriverDeliveryController::class, 'updateLocation']);
     });
 
+    // Analytics
+    Route::get('/analytics', [\App\Modules\Logistics\Controllers\LogisticsAnalyticsController::class, 'index']);
+
     // System GPS & Active Trips (Vue web app)
     Route::get('/active-trips', [DriverDeliveryController::class, 'activeTrips']);
     Route::get('/gps-tracking', [DriverDeliveryController::class, 'gpsTracking']);
+    Route::get('/delivery-history', [DriverDeliveryController::class, 'deliveryHistory']);
 
     // Maintenance
     Route::get('/maintenance/stats',                    [MaintenanceController::class, 'stats']);

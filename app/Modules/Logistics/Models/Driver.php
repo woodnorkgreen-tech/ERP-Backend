@@ -6,6 +6,8 @@ use App\Modules\HR\Models\Employee;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use App\Modules\Logistics\Models\Delivery;
 
 class Driver extends Model
 {
@@ -26,10 +28,17 @@ class Driver extends Model
     {
         return $this->belongsTo(Employee::class);
     }
-    // In App\Modules\Logistics\Models\Driver
-public function user(): HasOne
-{
-    // If your drivers table has a user_id column (for login)
-    return $this->hasOne(\App\Models\User::class, 'employee_id', 'employee_id');
-}
+    
+    public function user(): HasOne
+    {
+        return $this->hasOne(\App\Models\User::class, 'employee_id', 'employee_id');
+    }
+
+    // ✅ ADD THIS METHOD - Gets the driver's current active delivery
+    public function activeDelivery(): HasOne
+    {
+        return $this->hasOne(Delivery::class, 'driver_id')
+            ->whereIn('status', ['pending', 'in_transit'])
+            ->latest();
+    }
 }

@@ -5,6 +5,7 @@ namespace App\Modules\Logistics\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 class Vehicle extends Model
 {
@@ -13,6 +14,8 @@ class Vehicle extends Model
     protected $fillable = [
         'vehicle_id',
         'plate_number',
+        'make',
+        'model',
         'vehicle_type',
         'capacity_kg',
         'fuel_type',
@@ -24,6 +27,8 @@ class Vehicle extends Model
         'gps_last_updated',
         'status',
         'assigned_driver_id',
+        'photo_front',
+        'photo_side',
     ];
 
     protected $casts = [
@@ -39,6 +44,8 @@ class Vehicle extends Model
         'is_gps_active',
         'is_available',
         'insurance_is_expired',
+        'photo_front_url',
+        'photo_side_url',
     ];
 
     // ─── Relationships ────────────────────────────────────────────
@@ -65,6 +72,20 @@ class Vehicle extends Model
         return $this->insurance_expiry->isPast();
     }
 
+    public function getPhotoFrontUrlAttribute(): ?string
+    {
+        return $this->photo_front
+            ? Storage::disk('public')->url($this->photo_front)
+            : null;
+    }
+
+    public function getPhotoSideUrlAttribute(): ?string
+    {
+        return $this->photo_side
+            ? Storage::disk('public')->url($this->photo_side)
+            : null;
+    }
+
     // ─── Scopes ───────────────────────────────────────────────────
 
     public function scopeActive($query)
@@ -74,7 +95,6 @@ class Vehicle extends Model
 
     public function scopeAvailable($query)
     {
-        // Active and not currently booked
         return $query->where('status', 'active');
     }
 

@@ -134,58 +134,82 @@ class DispatchBatchController extends Controller
         return response()->json(['data' => $dispatchBatch]);
     }
 
-    public function confirm(DispatchBatch $dispatchBatch): JsonResponse
-    {
-        if ($dispatchBatch->status !== 'draft') {
-            return response()->json(['message' => 'Only draft batches can be confirmed.'], 422);
-        }
-
-        if (!$dispatchBatch->driver_id || !$dispatchBatch->vehicle_id) {
-            return response()->json(['message' => 'Assign a driver and vehicle before confirming.'], 422);
-        }
-
-        $trips = $dispatchBatch->tripRequests()->with(['requestedBy', 'project'])->get();
-
-        if ($trips->isEmpty()) {
-            return response()->json(['message' => 'Batch has no trip requests.'], 422);
-        }
-
-        DB::transaction(function () use ($dispatchBatch, $trips) {
-            $delivery = Delivery::create([
-                'batch_id'        => $dispatchBatch->id,
-                'driver_id'       => $dispatchBatch->driver_id,
-                'vehicle_id'      => $dispatchBatch->vehicle_id,
-                'total_stops'     => $trips->count(),
-                'completed_stops' => 0,
-                'status'          => 'pending',
-                'delivery_date'   => $dispatchBatch->dispatch_date,
-                'departure_time'  => $dispatchBatch->departure_time,
-                'notes'           => $dispatchBatch->notes,
-            ]);
-
-            foreach ($trips as $trip) {
-                DeliveryStop::create([
-                    'delivery_id'     => $delivery->id,
-                    'trip_request_id' => $trip->id,
-                    'stop_order'      => $trip->stop_order,
-                    'location'        => $trip->destination,
-                    'lat'             => $trip->destination_lat,
-                    'lng'             => $trip->destination_lng,
-                    'status'          => 'pending',
-                ]);
-            }
-
-            $dispatchBatch->update([
-                'status'       => 'confirmed',
-                'confirmed_at' => now(),
-            ]);
-
-            Vehicle::where('id', $dispatchBatch->vehicle_id)->update(['status' => 'booked']);
-        });
-
-        $dispatchBatch->load($this->with);
-        return response()->json(['data' => $dispatchBatch]);
+   public function confirm(DispatchBatch $dispatchBatch): JsonResponse
+{
+    if ($dispatchBatch->status !== 'draft') {
+        return response()->json(['message' => 'Only draft batches can be confirmed.'], 422);
     }
+
+    if (!$dispatchBatch->driver_id || !$dispatchBatch->vehicle_id) {
+        return response()->json(['message' => 'Assign a driver and vehicle before confirming.'], 422);
+    }
+
+    // ✅ ADD THIS - Check driver availability
+    $driverBusy = Delivery::where('driver_id', $dispatchBatch->driver_id)
+        ->whereIn('status', ['pending', 'in_transit'])
+        ->exists();
+    
+    if ($driverBusy) {
+        return response()->json(['message' => 'Driver is already on an active delivery.'], 422);
+    }
+
+    // ✅ ADD THIS - Check vehicle availability
+    $vehicleBusy = Delivery::where('vehicle_id', $dispatchBatch->vehicle_id)
+        ->whereIn('status', ['pending', 'in_transit'])
+        ->exists();
+    
+    if ($vehicleBusy) {
+        return response()->json(['message' => 'Vehicle is already in use on an active delivery.'], 422);
+    }
+
+    // ✅ ADD THIS - Check vehicle not in maintenance
+    $vehicle = Vehicle::find($dispatchBatch->vehicle_id);
+    if ($vehicle && $vehicle->status === 'maintenance') {
+        return response()->json(['message' => 'Vehicle is currently under maintenance.'], 422);
+    }
+
+    $trips = $dispatchBatch->tripRequests()->with(['requestedBy', 'project'])->get();
+
+    if ($trips->isEmpty()) {
+        return response()->json(['message' => 'Batch has no trip requests.'], 422);
+    }
+
+    DB::transaction(function () use ($dispatchBatch, $trips) {
+        $delivery = Delivery::create([
+            'batch_id'        => $dispatchBatch->id,
+            'driver_id'       => $dispatchBatch->driver_id,
+            'vehicle_id'      => $dispatchBatch->vehicle_id,
+            'total_stops'     => $trips->count(),
+            'completed_stops' => 0,
+            'status'          => 'pending',
+            'delivery_date'   => $dispatchBatch->dispatch_date,
+            'departure_time'  => $dispatchBatch->departure_time,
+            'notes'           => $dispatchBatch->notes,
+        ]);
+
+        foreach ($trips as $trip) {
+            DeliveryStop::create([
+                'delivery_id'     => $delivery->id,
+                'trip_request_id' => $trip->id,
+                'stop_order'      => $trip->stop_order,
+                'location'        => $trip->destination,
+                'lat'             => $trip->destination_lat,
+                'lng'             => $trip->destination_lng,
+                'status'          => 'pending',
+            ]);
+        }
+
+        $dispatchBatch->update([
+            'status'       => 'confirmed',
+            'confirmed_at' => now(),
+        ]);
+
+        Vehicle::where('id', $dispatchBatch->vehicle_id)->update(['status' => 'booked']);
+    });
+
+    $dispatchBatch->load($this->with);
+    return response()->json(['data' => $dispatchBatch]);
+}
 
     public function destroy(DispatchBatch $dispatchBatch): JsonResponse
     {

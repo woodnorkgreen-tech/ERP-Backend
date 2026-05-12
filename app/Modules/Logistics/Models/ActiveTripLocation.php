@@ -16,11 +16,17 @@ class ActiveTripLocation extends Model
         'speed_kmh',
         'vehicle_status',
         'recorded_at',
+        'distance_to_next_stop_km',
+        'eta_minutes',
+        'traffic_delay_minutes',
+        'route_polyline',
+        'next_stop_id',
     ];
 
     protected $casts = [
-        'recorded_at' => 'datetime',
-        'speed_kmh'   => 'decimal:2',
+        'recorded_at'               => 'datetime',
+        'speed_kmh'                 => 'decimal:2',
+        'distance_to_next_stop_km'  => 'decimal:3',
     ];
 
     public function delivery(): BelongsTo

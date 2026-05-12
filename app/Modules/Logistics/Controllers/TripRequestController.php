@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Logistics\Models\TripRequest;
 use App\Modules\Logistics\Models\Driver;
 use App\Modules\Logistics\Models\Vehicle;
+use App\Modules\Logistics\Models\Delivery;
 use App\Http\Resources\TripRequestResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,32 +15,24 @@ use Illuminate\Support\Facades\Auth;
 
 class TripRequestController extends Controller
 {
-    /**
-     * Default eager loads used across read methods.
-     */
     private array $with = [
-    'project',          // ← just load the project directly
-    'requestedBy',
-    'approvedBy',
-    'assignedDriver.employee',
-    'assignedVehicle',
-    'assignedBy',
-];
-    /**
-     * GET /logistics/trip-requests
-     *
-     * Logistics team sees all requests.
-     * Regular employees see only their own.
-     */
+        'project',
+        'requestedBy',
+        'approvedBy',
+        'assignedDriver.employee',
+        'assignedVehicle',
+        'assignedBy',
+    ];
+
     public function index(Request $request): AnonymousResourceCollection
     {
-        $user      = Auth::user();
+        $user        = Auth::user();
         $isLogistics = $this->isLogisticsTeam($user);
 
         $query = TripRequest::with($this->with)
             ->when(!$isLogistics, fn($q) => $q->where('requested_by_id', $user->employee?->id))
-            ->when($request->status,   fn($q) => $q->where('status', $request->status))
-            ->when($request->priority, fn($q) => $q->where('priority', $request->priority))
+            ->when($request->status,     fn($q) => $q->where('status', $request->status))
+            ->when($request->priority,   fn($q) => $q->where('priority', $request->priority))
             ->when($request->project_id, fn($q) => $q->where('project_id', $request->project_id))
             ->latest()
             ->paginate(25);
@@ -47,15 +40,11 @@ class TripRequestController extends Controller
         return TripRequestResource::collection($query);
     }
 
-    /**
-     * POST /logistics/trip-requests
-     * Any authenticated employee can create a request.
-     */
     public function store(Request $request): TripRequestResource|JsonResponse
     {
         $validated = $request->validate([
             'context_type'        => 'required|in:project,other',
-            'project_id'          => 'required_if:context_type,project|nullable|exists:projects,id',
+            'project_id'          => 'required_if:context_type,project|nullable|exists:project_enquiries,id',
             'delivery_type_label' => 'required|string|max:150',
             'requested_by_id'     => 'required|exists:employees,id',
             'priority'            => 'required|in:low,medium,high,emergency',
@@ -75,30 +64,21 @@ class TripRequestController extends Controller
         return new TripRequestResource($trip);
     }
 
-    /**
-     * GET /logistics/trip-requests/{trip}
-     */
     public function show(TripRequest $tripRequest): TripRequestResource
     {
         $tripRequest->load($this->with);
         return new TripRequestResource($tripRequest);
     }
 
-    /**
-     * PUT/PATCH /logistics/trip-requests/{trip}
-     * Only allowed when status is still 'requested'.
-     */
     public function update(Request $request, TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
         if ($tripRequest->status !== 'requested') {
-            return response()->json([
-                'message' => 'Only pending requests can be edited.'
-            ], 422);
+            return response()->json(['message' => 'Only pending requests can be edited.'], 422);
         }
 
         $validated = $request->validate([
             'context_type'        => 'sometimes|in:project,other',
-            'project_id'          => 'nullable|exists:projects,id',
+            'project_id'          => 'nullable|exists:project_enquiries,id',
             'delivery_type_label' => 'sometimes|string|max:150',
             'requested_by_id'     => 'sometimes|exists:employees,id',
             'priority'            => 'sometimes|in:low,medium,high,emergency',
@@ -118,16 +98,11 @@ class TripRequestController extends Controller
         return new TripRequestResource($tripRequest);
     }
 
-    /**
-     * PATCH /logistics/trip-requests/{trip}/approve
-     * Logistics team only.
-     */
     public function approve(Request $request, TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
         if (!$this->isLogisticsTeam(Auth::user())) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
-
         if ($tripRequest->status !== 'requested') {
             return response()->json(['message' => 'Only pending requests can be approved.'], 422);
         }
@@ -139,20 +114,14 @@ class TripRequestController extends Controller
         ]);
 
         $tripRequest->load($this->with);
-
         return new TripRequestResource($tripRequest);
     }
 
-    /**
-     * PATCH /logistics/trip-requests/{trip}/reject
-     * Logistics team only.
-     */
     public function reject(Request $request, TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
         if (!$this->isLogisticsTeam(Auth::user())) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
-
         if ($tripRequest->status !== 'requested') {
             return response()->json(['message' => 'Only pending requests can be rejected.'], 422);
         }
@@ -169,20 +138,14 @@ class TripRequestController extends Controller
         ]);
 
         $tripRequest->load($this->with);
-
         return new TripRequestResource($tripRequest);
     }
 
-    /**
-     * PATCH /logistics/trip-requests/{trip}/assign
-     * Logistics team only. Assigns a driver and vehicle.
-     */
     public function assign(Request $request, TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
         if (!$this->isLogisticsTeam(Auth::user())) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
-
         if ($tripRequest->status !== 'approved') {
             return response()->json(['message' => 'Only approved requests can be assigned.'], 422);
         }
@@ -193,9 +156,24 @@ class TripRequestController extends Controller
             'assignment_notes' => 'nullable|string|max:500',
         ]);
 
-        // Mark vehicle as booked
-        Vehicle::where('id', $validated['vehicle_id'])
-            ->update(['status' => 'booked']);
+        $driverBusy = Delivery::where('driver_id', $validated['driver_id'])
+            ->whereIn('status', ['pending', 'in_transit'])->exists();
+        if ($driverBusy) {
+            return response()->json(['message' => 'Driver is already assigned to an active delivery.'], 422);
+        }
+
+        $vehicleBusy = Delivery::where('vehicle_id', $validated['vehicle_id'])
+            ->whereIn('status', ['pending', 'in_transit'])->exists();
+        if ($vehicleBusy) {
+            return response()->json(['message' => 'Vehicle is already in use on an active delivery.'], 422);
+        }
+
+        $vehicle = Vehicle::find($validated['vehicle_id']);
+        if ($vehicle && $vehicle->status === 'maintenance') {
+            return response()->json(['message' => 'Vehicle is currently under maintenance.'], 422);
+        }
+
+        Vehicle::where('id', $validated['vehicle_id'])->update(['status' => 'booked']);
 
         $tripRequest->update([
             'status'              => 'assigned',
@@ -207,92 +185,56 @@ class TripRequestController extends Controller
         ]);
 
         $tripRequest->load($this->with);
-
         return new TripRequestResource($tripRequest);
     }
 
-    /**
-     * PATCH /logistics/trip-requests/{trip}/start
-     * Marks trip as in_transit.
-     */
     public function start(TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
         if (!$this->isLogisticsTeam(Auth::user())) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
-
         if ($tripRequest->status !== 'assigned') {
             return response()->json(['message' => 'Only assigned trips can be started.'], 422);
         }
 
-        $tripRequest->update([
-            'status'     => 'in_transit',
-            'started_at' => now(),
-        ]);
-
+        $tripRequest->update(['status' => 'in_transit', 'started_at' => now()]);
         $tripRequest->load($this->with);
-
         return new TripRequestResource($tripRequest);
     }
 
-    /**
-     * PATCH /logistics/trip-requests/{trip}/complete
-     * Marks trip as completed and frees the vehicle.
-     */
     public function complete(TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
         if (!$this->isLogisticsTeam(Auth::user())) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
-
         if ($tripRequest->status !== 'in_transit') {
             return response()->json(['message' => 'Only in-transit trips can be completed.'], 422);
         }
 
-        // Free the vehicle
         if ($tripRequest->assigned_vehicle_id) {
-            Vehicle::where('id', $tripRequest->assigned_vehicle_id)
-                ->update(['status' => 'active']);
+            Vehicle::where('id', $tripRequest->assigned_vehicle_id)->update(['status' => 'active']);
         }
 
-        $tripRequest->update([
-            'status'       => 'completed',
-            'completed_at' => now(),
-        ]);
-
+        $tripRequest->update(['status' => 'completed', 'completed_at' => now()]);
         $tripRequest->load($this->with);
-
         return new TripRequestResource($tripRequest);
     }
 
-    /**
-     * PATCH /logistics/trip-requests/{trip}/cancel
-     * Owner or logistics team can cancel a non-completed request.
-     */
     public function cancel(TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
-        $allowedStatuses = ['requested', 'approved', 'assigned'];
-
-        if (!in_array($tripRequest->status, $allowedStatuses)) {
+        if (!in_array($tripRequest->status, ['requested', 'approved', 'assigned'])) {
             return response()->json(['message' => 'This request cannot be cancelled.'], 422);
         }
 
-        // Free vehicle if it was assigned
         if ($tripRequest->assigned_vehicle_id) {
-            Vehicle::where('id', $tripRequest->assigned_vehicle_id)
-                ->update(['status' => 'active']);
+            Vehicle::where('id', $tripRequest->assigned_vehicle_id)->update(['status' => 'active']);
         }
 
         $tripRequest->update(['status' => 'cancelled']);
         $tripRequest->load($this->with);
-
         return new TripRequestResource($tripRequest);
     }
 
-    /**
-     * DELETE /logistics/trip-requests/{trip}
-     * Soft delete — logistics team only.
-     */
     public function destroy(TripRequest $tripRequest): JsonResponse
     {
         if (!$this->isLogisticsTeam(Auth::user())) {
@@ -300,11 +242,8 @@ class TripRequestController extends Controller
         }
 
         $tripRequest->delete();
-
         return response()->json(['message' => 'Trip request deleted.']);
     }
-
-    // ─── Helpers ──────────────────────────────────────────────────────────
 
     private function isLogisticsTeam($user): bool
     {

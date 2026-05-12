@@ -5,7 +5,6 @@ namespace App\Modules\Logistics\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Logistics\Models\Driver;
 use App\Http\Resources\DriverResource;
-
 use App\Modules\HR\Models\Employee;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,20 +14,39 @@ class DriverController extends Controller
 {
     /**
      * List all drivers with their employee info.
+     * Supports ?include_delivery=1 to load active delivery
      */
-    public function index(): AnonymousResourceCollection
+    public function index(Request $request): AnonymousResourceCollection
     {
-        $drivers = Driver::with('employee')
-            ->latest()
-            ->paginate(20);
+        $query = Driver::with('employee');
+        
+        // ✅ ADD THIS - Load active delivery if requested
+        if ($request->boolean('include_delivery')) {
+            $query->with('activeDelivery.vehicle', 'activeDelivery.stops');
+        }
+        
+        // ✅ ADD THIS - Filter by status if provided
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
+        
+        // ✅ ADD THIS - Search functionality
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->whereHas('employee', function($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                  ->orWhere('last_name', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%");
+            })->orWhere('license_number', 'like', "%{$search}%");
+        }
+        
+        $drivers = $query->latest()->paginate(20);
 
         return DriverResource::collection($drivers);
     }
 
     /**
      * Add a new driver.
-     * Frontend sends employee_id + license fields.
-     * Name and phone are pulled from the employee relationship.
      */
     public function store(Request $request): DriverResource|JsonResponse
     {
@@ -50,14 +68,12 @@ class DriverController extends Controller
      */
     public function show(Driver $driver): DriverResource
     {
-        $driver->load('employee');
-
+        $driver->load('employee', 'activeDelivery.vehicle', 'activeDelivery.stops');
         return new DriverResource($driver);
     }
 
     /**
      * Update license number, expiry, or status.
-     * employee_id is intentionally NOT updatable — reassign via delete + new record.
      */
     public function update(Request $request, Driver $driver): DriverResource
     {
@@ -79,29 +95,28 @@ class DriverController extends Controller
     public function destroy(Driver $driver): JsonResponse
     {
         $driver->delete();
-
         return response()->json(['message' => 'Driver removed successfully.']);
     }
 
     /**
      * Employees available to be assigned as drivers.
-     * Filters: active employees only, not already a driver.
-     * Used to populate the Add Driver employee dropdown.
+     * Returns plain array (not wrapped in 'data') for frontend consumption.
      */
     public function availableEmployees(): JsonResponse
     {
         $assignedEmployeeIds = Driver::pluck('employee_id');
 
-        $employees = Employee::active()                          // uses scopeActive() from your model
+        $employees = Employee::active()
             ->whereNotIn('id', $assignedEmployeeIds)
-            ->select('id', 'first_name', 'last_name', 'phone')  // only what the dropdown needs
+            ->select('id', 'first_name', 'last_name', 'phone')
             ->get()
             ->map(fn($e) => [
                 'id'    => $e->id,
-                'name'  => $e->name,   // triggers getNameAttribute()
+                'name'  => $e->name,
                 'phone' => $e->phone,
             ]);
 
+        // ✅ RETURN PLAIN ARRAY (not wrapped in 'data')
         return response()->json($employees);
     }
 }

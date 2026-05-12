@@ -84,6 +84,75 @@ class DeliveryController extends Controller
         $delivery->load($this->with);
         return response()->json(['data' => $delivery]);
     }
+    public function edit(Request $request, Delivery $delivery): JsonResponse
+{
+    if ($delivery->status !== 'pending') {
+        return response()->json(['message' => 'Only pending deliveries can be edited.'], 422);
+    }
+ 
+    $validated = $request->validate([
+        'driver_id'               => ['sometimes', 'nullable', 'integer', 'exists:drivers,id'],
+        'vehicle_id'              => ['sometimes', 'nullable', 'integer', 'exists:vehicles,id'],
+        'departure_time'          => ['sometimes', 'nullable', 'string', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
+        'notes'                   => ['sometimes', 'nullable', 'string', 'max:1000'],
+        'new_stop'                => ['sometimes', 'nullable', 'array'],
+        'new_stop.location'       => ['required_with:new_stop', 'string', 'max:500'],
+        'new_stop.receiver_name'  => ['sometimes', 'nullable', 'string', 'max:200'],
+        'new_stop.receiver_phone' => ['sometimes', 'nullable', 'string', 'max:30'],
+        'new_stop.delivery_note'  => ['sometimes', 'nullable', 'string', 'max:500'],
+    ]);
+ 
+    DB::transaction(function () use ($delivery, $validated) {
+ 
+        // ── Update core delivery fields ────────────────────────────────────
+        $updates = [];
+        foreach (['driver_id', 'vehicle_id', 'departure_time', 'notes'] as $field) {
+            if (array_key_exists($field, $validated)) {
+                $updates[$field] = $validated[$field];
+            }
+        }
+        if (!empty($updates)) {
+            $delivery->update($updates);
+        }
+ 
+        // ── Sync driver / vehicle / departure_time back to the batch ──────
+        if ($delivery->batch_id && !empty($updates)) {
+            $batchUpdates = array_intersect_key(
+                $updates,
+                array_flip(['driver_id', 'vehicle_id', 'departure_time'])
+            );
+            if (!empty($batchUpdates)) {
+                $delivery->batch()->update($batchUpdates);
+            }
+        }
+ 
+        // ── Append a new stop at the end ──────────────────────────────────
+        if (!empty($validated['new_stop']['location'])) {
+            $nextOrder = $delivery->stops()->max('stop_order') + 1;
+ 
+            DeliveryStop::create([
+                'delivery_id'    => $delivery->id,
+                'stop_order'     => $nextOrder,
+                'location'       => $validated['new_stop']['location'],
+                'receiver_name'  => $validated['new_stop']['receiver_name']  ?? null,
+                'receiver_phone' => $validated['new_stop']['receiver_phone'] ?? null,
+                'delivery_note'  => $validated['new_stop']['delivery_note']  ?? null,
+                'status'         => 'pending',
+            ]);
+ 
+            $delivery->update([
+                'total_stops' => $delivery->stops()->count(),
+            ]);
+        }
+    });
+ 
+    $delivery->load($this->with);
+ 
+    return response()->json([
+        'data'    => $delivery,
+        'message' => 'Delivery updated successfully.',
+    ]);
+}
 
     public function updateStop(Request $request, Delivery $delivery, DeliveryStop $stop): JsonResponse
     {

@@ -16,6 +16,7 @@ class Delivery extends Model
         'total_stops', 'completed_stops', 'status',
         'delivery_date', 'departure_time', 'notes',
         'started_at', 'completed_at',
+        'total_km', 'total_duration_minutes', 'avg_speed_kmh', 'on_time',
     ];
 
     protected $casts = [

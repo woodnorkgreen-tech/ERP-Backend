@@ -12,13 +12,21 @@ class DeliveryStop extends Model
         'location', 'lat', 'lng',
         'receiver_name', 'receiver_phone',
         'status', 'arrived_at', 'delivered_at', 'delivery_note',
+        'failure_reason',
+        'distance_from_prev_km',
+        'scheduled_eta_minutes',
+        'actual_duration_minutes',
+        'arrival_delta_minutes',
+        'traffic_encountered',
     ];
 
     protected $casts = [
-        'arrived_at'   => 'datetime',
-        'delivered_at' => 'datetime',
-        'lat'          => 'decimal:7',
-        'lng'          => 'decimal:7',
+        'arrived_at'              => 'datetime',
+        'delivered_at'            => 'datetime',
+        'lat'                     => 'decimal:7',
+        'lng'                     => 'decimal:7',
+        'distance_from_prev_km'   => 'decimal:3',
+        'traffic_encountered'     => 'boolean',
     ];
 
     public function delivery(): BelongsTo
