@@ -30,7 +30,7 @@ class EnquiryConstants
     const PRIORITY_URGENT = 'urgent';
 
     // Roles with full administrative access to projects
-    const ROLES_ADMIN = ['Super Admin', 'Project Manager', 'Project Officer', 'HR'];
+    const ROLES_ADMIN = ['Super Admin', 'Admin', 'Project Manager', 'Project Officer', 'HR'];
 
     // All roles that participate in the project workflow
     const ROLES_WORKFLOW = [
@@ -43,8 +43,11 @@ class EnquiryConstants
         'Designer' => ['design', 'site-survey', 'materials'],
         'Costing' => ['materials', 'budget', 'quote', 'quote_approval'],
         'Accounts' => ['materials', 'budget', 'quote', 'quote_approval'],
-        'Stores' => ['materials', 'stores'],
+        'Stores' => ['materials', 'stores', 'budget', 'procurement'],
+        'Store Keeper' => ['materials', 'stores', 'budget', 'procurement'],
+        'Storekeeper' => ['materials', 'stores', 'budget', 'procurement'],
         'Procurement' => ['materials', 'procurement', 'budget'],
+        'Procurement Officer' => ['materials', 'procurement', 'budget'],
         'Production' => ['materials', 'teams', 'production', 'budget'],
     ];
 
