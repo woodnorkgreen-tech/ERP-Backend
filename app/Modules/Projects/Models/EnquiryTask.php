@@ -128,6 +128,11 @@ class EnquiryTask extends Model
         return $this->hasMany(\App\Models\DesignAsset::class, 'enquiry_task_id');
     }
 
+    public function designRequirements()
+    {
+        return $this->hasMany(\App\Models\DesignRequirement::class, 'enquiry_task_id');
+    }
+
     public function quoteData()
     {
         return $this->hasOne(\App\Models\TaskQuoteData::class, 'enquiry_task_id');

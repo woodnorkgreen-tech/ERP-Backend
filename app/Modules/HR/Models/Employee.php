@@ -126,7 +126,8 @@ class Employee extends Model
         if (!$this->profile_photo_path) {
             return null;
         }
-        return asset('storage/' . $this->profile_photo_path);
+        $timestamp = $this->updated_at ? $this->updated_at->timestamp : time();
+        return "/api/hr/employees/{$this->id}/photo?t={$timestamp}";
     }
 
     /**

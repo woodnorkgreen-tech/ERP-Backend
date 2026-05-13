@@ -13,6 +13,7 @@ use App\Modules\Projects\Http\Controllers\EnquiryController;
 use App\Modules\Projects\Http\Controllers\DashboardController;
 use App\Modules\Projects\Http\Controllers\TaskController;
 use App\Modules\Projects\Http\Controllers\PhaseDepartmentalTaskController;
+use App\Modules\Projects\Http\Controllers\DeliverablesBlueprintController;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Models\TaskMaterialsData;
 use App\Http\Controllers\SiteSurveyController;
@@ -22,6 +23,7 @@ use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\HandoverSurveyController;
 use App\Http\Controllers\API\PublicHandoverController;
 use App\Modules\Production\Http\Controllers\JobCardController;
+use App\Http\Controllers\DesignRequirementController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
@@ -486,6 +488,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('tasks/{taskId}/survey/pdf', [SiteSurveyController::class, 'downloadTaskPdf']);
         Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
 
+        // Deliverables Blueprint Routes
+        Route::apiResource('deliverables-blueprints', DeliverablesBlueprintController::class);
+
         // Logistics Task Routes
         Route::prefix('tasks/{taskId}/logistics')->group(function () {
             Route::get('/', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'show']);
@@ -646,6 +651,11 @@ Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
     Route::get('/{asset}', [DesignAssetController::class, 'show']);
     Route::put('/{asset}', [DesignAssetController::class, 'update']);
     Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
+});
+
+Route::prefix('enquiry-tasks/{task}/design-requirements')->group(function () {
+    Route::get('/', [DesignRequirementController::class, 'index']);
+    Route::put('/', [DesignRequirementController::class, 'update']);
 });
         // Notifications
         Route::get('notifications', function () {

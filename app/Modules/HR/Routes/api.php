@@ -30,14 +30,16 @@ Route::prefix('hr')->group(function () {
     });
 });
 
+// Public HR Routes (for assets like photos)
+Route::get('hr/employees/{employee}/photo', [EmployeeController::class, 'getPhoto']);
+
 // Protected HR Routes
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('hr')->group(function () {
-        // Specifically define profile before the resource to avoid it being interpreted as an ID
-        // This MUST come before apiResource('employees')
-        Route::get('employees/profile', [EmployeeController::class, 'profile']);
-
         // Employee management
+        Route::get('employees/profile', [EmployeeController::class, 'profile']);
+        Route::post('employees/{employee}/photo', [EmployeeController::class, 'uploadPhoto']);
+
         Route::apiResource('employees', EmployeeController::class)->middleware([
             'index' => 'permission:' . Permissions::EMPLOYEE_READ,
             'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,

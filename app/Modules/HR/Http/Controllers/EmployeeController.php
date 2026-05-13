@@ -255,6 +255,7 @@ class EmployeeController
      */
     public function uploadPhoto(Request $request, Employee $employee): JsonResponse
     {
+        \Log::info("Uploading photo for employee {$employee->id}");
         $request->validate([
             'photo' => 'required|image|mimes:jpeg,jpg,png,webp|max:2048',
         ]);
@@ -265,13 +266,28 @@ class EmployeeController
         }
 
         $path = $request->file('photo')->store('employees/photos', 'public');
+        \Log::info("Photo stored at: {$path}");
 
         $employee->update(['profile_photo_path' => $path]);
 
         return response()->json([
             'success' => true,
             'message' => 'Profile photo updated.',
-            'data' => $employee->fresh(),
+            'data' => $employee->fresh()->load(['department', 'manager']),
         ]);
+    }
+
+    /**
+     * Get the employee's profile photo.
+     */
+    public function getPhoto(Employee $employee)
+    {
+        \Log::info("Fetching photo for employee {$employee->id}. Path: {$employee->profile_photo_path}");
+        if (!$employee->profile_photo_path || !Storage::disk('public')->exists($employee->profile_photo_path)) {
+            \Log::warning("Photo not found for employee {$employee->id}");
+            return response()->json(['message' => 'Photo not found'], 404);
+        }
+
+        return Storage::disk('public')->response($employee->profile_photo_path);
     }
 }
