@@ -509,8 +509,13 @@ class TaskController extends Controller
         // Permissions temporarily removed - will be implemented soon
 
         try {
-            $task = EnquiryTask::with('enquiry', 'department', 'assignedUser', 'creator')
-                ->findOrFail($taskId);
+            $task = EnquiryTask::with([
+                'enquiry.enquiryTasks.materialsData.elements',
+                'enquiry.enquiryTasks.designAssets',
+                'department',
+                'assignedUser',
+                'creator',
+            ])->findOrFail($taskId);
 
             // Security Check
             $user = Auth::user();
