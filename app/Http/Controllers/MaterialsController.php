@@ -262,7 +262,7 @@ class MaterialsController extends Controller
             'projectElements' => 'required|array',
             'projectElements.*.id' => 'required|string',
             'projectElements.*.elementType' => 'required|string',
-            'projectElements.*.name' => 'required|string',
+            'projectElements.*.name' => 'nullable|string',
             'projectElements.*.category' => 'required|in:production,hire,outsourced',
             'projectElements.*.materials' => 'required|array',
             'projectElements.*.materials.*.description' => 'required|string',

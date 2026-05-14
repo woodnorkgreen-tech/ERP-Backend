@@ -78,10 +78,9 @@ class DesignRequirementController extends Controller
                 ->whereNotIn('id', $existingReqIds)
                 ->delete();
 
-            return response()->json([
-                'message' => 'Requirements synchronized successfully',
-                'data' => DesignRequirement::where('enquiry_task_id', $task->id)->get()
-            ]);
+            return response()->json(
+                DesignRequirement::where('enquiry_task_id', $task->id)->with('asset')->get()
+            );
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Error synchronizing requirements',
