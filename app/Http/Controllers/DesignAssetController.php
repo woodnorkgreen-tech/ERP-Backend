@@ -54,13 +54,25 @@ class DesignAssetController extends Controller
             'category' => 'sometimes|string|in:concept,mockup,artwork,logo,ui-ux,illustration,prototype,presentation,other',
             'description' => 'sometimes|string|max:1000',
             'tags' => 'sometimes|array',
-            'tags.*' => 'string|max:50'
+            'tags.*' => 'string|max:50',
+            'requirement_id' => 'sometimes|integer|exists:design_requirements,id'
         ]);
 
         $assets = [];
         foreach ($request->file('files') as $file) {
             $asset = $this->processFileUpload($file, $task, $request);
             $assets[] = $asset;
+        }
+
+        // Link to requirement if provided
+        if ($request->has('requirement_id') && !empty($assets)) {
+            $requirement = \App\Models\DesignRequirement::find($request->requirement_id);
+            if ($requirement) {
+                $requirement->update([
+                    'asset_id' => $assets[0]->id,
+                    'status' => 'fulfilled'
+                ]);
+            }
         }
 
         return response()->json($assets, 201);

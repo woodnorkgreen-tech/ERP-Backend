@@ -9,11 +9,19 @@ use App\Modules\HR\Models\PayrollLedger;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Payslip;
 use App\Modules\HR\Models\PayrollTaxBand;
+use App\Modules\HR\Models\PayrollRun;
+use App\Modules\HR\Services\Payroll\PayrollService;
 use Carbon\Carbon;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class PayrollEngineController extends Controller
 {
+    protected PayrollService $payrollService;
+
+    public function __construct(PayrollService $payrollService)
+    {
+        $this->payrollService = $payrollService;
+    }
     // --- VARIABLES (SETTINGS) ---
     public function getVariables()
     {
@@ -113,18 +121,22 @@ class PayrollEngineController extends Controller
         return response()->json(['message' => 'Ledger entry removed']);
     }
 
-    public function exportLedgerTemplate()
+    public function exportLedgerTemplate(Request $request)
     {
+        $month = $request->query('month', date('Y-m'));
+        $employeeIds = $request->query('employee_ids', []);
+
         $headers = [
             'Content-Type' => 'text/csv',
-            'Content-Disposition' => 'attachment; filename="Ledger_Import_Template.csv"',
+            'Content-Disposition' => 'attachment; filename="Ledger_Import_Template_' . $month . '.csv"',
         ];
 
-        $callback = function() {
+        $callback = function() use ($month, $employeeIds) {
             $file = fopen('php://output', 'w');
             // Provide the headers
             fputcsv($file, [
                 'Employee_ID', 
+                'Employee_Name',
                 'Month(YYYY-MM)', 
                 'Type(addition/deduction)', 
                 'Amount_Type(fixed/percentage_of_basic)', 
@@ -134,17 +146,35 @@ class PayrollEngineController extends Controller
                 'Recurring(yes/no)'
             ]);
             
-            // Provide a sample row
-            fputcsv($file, [
-                'EMP001', 
-                date('Y-m'), 
-                'addition', 
-                'fixed', 
-                '5000', 
-                'Performance Bonus', 
-                'Q1 Performance', 
-                'no'
-            ]);
+            if (!empty($employeeIds) && is_array($employeeIds)) {
+                $employees = Employee::whereIn('id', $employeeIds)->get();
+                foreach ($employees as $emp) {
+                    fputcsv($file, [
+                        $emp->employee_id, 
+                        $emp->first_name . ' ' . $emp->last_name,
+                        $month, 
+                        'addition', 
+                        'fixed', 
+                        '', 
+                        '', 
+                        '', 
+                        'no'
+                    ]);
+                }
+            } else {
+                // Provide a sample row
+                fputcsv($file, [
+                    'EMP001', 
+                    'John Doe',
+                    $month, 
+                    'addition', 
+                    'fixed', 
+                    '5000', 
+                    'Performance Bonus', 
+                    'Q1 Performance', 
+                    'no'
+                ]);
+            }
             
             fclose($file);
         };
@@ -171,20 +201,53 @@ class PayrollEngineController extends Controller
         \DB::beginTransaction();
         try {
             while (($row = fgetcsv($handle, 1000, ',')) !== false) {
-                // If the row is empty or not matching header length, skip
-                if (count($row) < 8 || empty(trim($row[0]))) {
-                    continue;
+                // Determine format
+                $isLegacy = count($row) === 8;
+                $isModern = count($row) >= 9;
+
+                if (!$isLegacy && !$isModern) {
+                    continue; // invalid row
+                }
+                
+                $empIdRaw = trim($row[0]);
+                if (empty($empIdRaw) || strtolower($empIdRaw) === 'employee_id') {
+                    continue; // Skip header or empty row
+                }
+                
+                $monthIdx = $isLegacy ? 1 : 2;
+                $typeIdx = $isLegacy ? 2 : 3;
+                $amountTypeIdx = $isLegacy ? 3 : 4;
+                $amountIdx = $isLegacy ? 4 : 5;
+                $nameIdx = $isLegacy ? 5 : 6;
+                $descriptionIdx = $isLegacy ? 6 : 7;
+                $recurringIdx = $isLegacy ? 7 : 8;
+
+                $amount = trim($row[$amountIdx] ?? '');
+                $name = trim($row[$nameIdx] ?? '');
+                
+                // --- TRAP 1: Blank rows from pre-filled template ---
+                if ($amount === '' || $name === '') {
+                    continue; // Skip silently without recording a formal error
                 }
 
                 $results['total']++;
-                $empIdRaw = trim($row[0]);
-                $month = trim($row[1]);
-                $type = strtolower(trim($row[2]));
-                $amountType = strtolower(trim($row[3]));
-                $amount = trim($row[4]);
-                $name = trim($row[5]);
-                $description = trim($row[6]);
-                $recurring = strtolower(trim($row[7])) === 'yes' || strtolower(trim($row[7])) === 'true' || trim($row[7]) === '1' ? true : false;
+                $month = trim($row[$monthIdx] ?? '');
+                
+                // --- TRAP 4: Fuzzy matching percentage ---
+                $rawAmountType = strtolower(trim($row[$amountTypeIdx] ?? ''));
+                if (str_contains($rawAmountType, '%') || str_contains($rawAmountType, 'percent') || str_contains($rawAmountType, 'percentage')) {
+                    $amountType = 'percentage_of_basic';
+                } elseif (str_contains($rawAmountType, 'fix')) {
+                    $amountType = 'fixed';
+                } else {
+                    $amountType = $rawAmountType; 
+                }
+                
+                $type = strtolower(trim($row[$typeIdx] ?? ''));
+                $description = trim($row[$descriptionIdx] ?? '');
+                
+                $rawRecurring = strtolower(trim($row[$recurringIdx] ?? ''));
+                $recurring = in_array($rawRecurring, ['yes', 'true', '1']) ? true : false;
 
                 $employee = Employee::where('employee_id', $empIdRaw)->first();
 
@@ -205,7 +268,7 @@ class PayrollEngineController extends Controller
                 }
 
                 if (!in_array($amountType, ['fixed', 'percentage_of_basic'])) {
-                    $results['errors'][] = ['row' => $results['total'], 'message' => "Invalid amount_type {$amountType} for {$empIdRaw}"];
+                    $results['errors'][] = ['row' => $results['total'], 'message' => "Invalid amount_type {$rawAmountType} for {$empIdRaw}"];
                     continue;
                 }
 
@@ -214,21 +277,21 @@ class PayrollEngineController extends Controller
                     continue;
                 }
 
-                if (empty($name)) {
-                    $results['errors'][] = ['row' => $results['total'], 'message' => "Name is required for {$empIdRaw}"];
-                    continue;
-                }
-
-                PayrollLedger::create([
-                    'employee_id' => $employee->id,
-                    'ledger_month' => $month,
-                    'type' => $type,
-                    'amount_type' => $amountType,
-                    'amount_value' => (float)$amount,
-                    'name' => $name,
-                    'description' => $description,
-                    'is_recurring' => $recurring
-                ]);
+                // --- TRAP 2: Double submissions ---
+                PayrollLedger::updateOrCreate(
+                    [
+                        'employee_id' => $employee->id,
+                        'ledger_month' => $month,
+                        'name' => $name
+                    ],
+                    [
+                        'type' => $type,
+                        'amount_type' => $amountType,
+                        'amount_value' => (float)$amount,
+                        'description' => $description,
+                        'is_recurring' => $recurring
+                    ]
+                );
 
                 $results['processed']++;
             }
@@ -257,7 +320,23 @@ class PayrollEngineController extends Controller
             $query->where('payroll_month', $request->payroll_month);
         }
 
-        return response()->json($query->orderByDesc('payroll_month')->get());
+        $query->orderByDesc('payroll_month')->orderByDesc('created_at');
+
+        if ($request->has('per_page')) {
+            $payslips = $query->paginate($request->integer('per_page', 15));
+            return response()->json([
+                'success' => true,
+                'data' => $payslips->items(),
+                'meta' => [
+                    'current_page' => $payslips->currentPage(),
+                    'last_page' => $payslips->lastPage(),
+                    'total' => $payslips->total(),
+                    'per_page' => $payslips->perPage()
+                ]
+            ]);
+        }
+
+        return response()->json($query->get());
     }
 
     public function generatePayslip(Request $request)
@@ -268,167 +347,17 @@ class PayrollEngineController extends Controller
         ]);
 
         try {
-            $payslip = $this->calculateMonthlyFull($validated['employee_id'], $validated['payroll_month']);
+            $employee = Employee::findOrFail($validated['employee_id']);
+            $run = $this->payrollService->initializeRun($validated['payroll_month']);
+            $payslip = $this->payrollService->processEmployee($employee, $run);
+            
             return response()->json($payslip);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
     }
 
-    public function batchGenerate(Request $request)
-    {
-        $validated = $request->validate([
-            'payroll_month' => 'required|string|regex:/^\d{4}-\d{2}$/',
-            'department_id' => 'nullable|exists:departments,id'
-        ]);
-
-        $month = $validated['payroll_month'];
-        $query = Employee::where('status', 'active');
-        
-        if (!empty($validated['department_id'])) {
-            $query->where('department_id', $validated['department_id']);
-        }
-
-        $employees = $query->get();
-        $results = [
-            'total' => $employees->count(),
-            'processed' => 0,
-            'errors' => []
-        ];
-
-        foreach ($employees as $employee) {
-            try {
-                $this->calculateMonthlyFull($employee->id, $month);
-                $results['processed']++;
-            } catch (\Exception $e) {
-                $results['errors'][] = [
-                    'employee' => $employee->full_name,
-                    'message' => $e->getMessage()
-                ];
-            }
-        }
-
-        return response()->json($results);
-    }
-
-    private function calculateMonthlyFull($employeeId, $month)
-    {
-        $employee = Employee::findOrFail($employeeId);
-        $basicSalary = $employee->salary ?? 0;
-
-        // 1. Fetch Ledgers
-        $ledgers = PayrollLedger::where('employee_id', $employee->id)
-            ->where(function($q) use ($month) {
-                $q->where('ledger_month', $month)
-                  ->orWhere('is_recurring', true);
-            })->get();
-
-        $additions = 0;
-        $customDeductions = 0;
-        $ledgerDetails = [];
-
-        foreach ($ledgers as $ledger) {
-            $amount = 0;
-            if ($ledger->amount_type === 'percentage_of_basic') {
-                $amount = ($ledger->amount_value / 100) * $basicSalary;
-            } else {
-                $amount = $ledger->amount_value;
-            }
-
-            if ($ledger->type === 'addition') {
-                $additions += $amount;
-            } else {
-                $customDeductions += $amount;
-            }
-
-            $ledgerDetails[] = [
-                'name' => $ledger->name,
-                'type' => $ledger->type,
-                'amount' => $amount
-            ];
-        }
-
-        $grossPay = $basicSalary + $additions;
-
-        // 2. Statutory Vars (March 2026 Kenyan Requirements)
-        $allVars = PayrollVariable::all()->keyBy('name');
-        $getVar = function($name, $fallback = 0) use ($allVars) {
-            if (!isset($allVars[$name])) return $fallback;
-            return $allVars[$name]->is_active ? (float)$allVars[$name]->value : 0;
-        };
-        
-        $nssfRate = $getVar('NSSF_RATE', 0.06);
-        $nssfTierILimit = $getVar('NSSF_TIER_I_LIMIT', 9000);
-        $nssfTierIILimit = $getVar('NSSF_TIER_II_LIMIT', 108000);
-        
-        $shifRate = $getVar('SHIF_RATE', 0.0275);
-        $shifMin = $getVar('SHIF_MIN', 300);
-        
-        $housingLevyRate = $getVar('HOUSING_LEVY_RATE', 0.015);
-        $personalRelief = $getVar('PERSONAL_RELIEF', 2400);
-        
-        $insReliefRate = $getVar('INSURANCE_RELIEF_RATE', 0.15);
-        $insReliefCap = $getVar('INSURANCE_RELIEF_CAP', 5000);
-
-        // --- STATUTORY DEDUCTIONS ---
-        
-        // Tiered NSSF Calculation
-        $nssfTierI = $nssfRate * min($grossPay, $nssfTierILimit);
-        $nssfTierII = $nssfRate * max(0, min($grossPay, $nssfTierIILimit) - $nssfTierILimit);
-        $nssf = $nssfTierI + $nssfTierII;
-
-        // SHIF (Minimum Ksh 300, No Cap)
-        $shif = max($shifMin, $grossPay * $shifRate);
-
-        // Housing Levy (1.5%)
-        $housingLevy = $grossPay * $housingLevyRate;
-
-        // --- PAYE CALCULATION ---
-        
-        // Tax-Deductible items (NSSF, SHIF, and Housing Levy are now deductible before PAYE)
-        $taxablePay = $grossPay - $nssf - $shif - $housingLevy;
-        $calculatedPaye = 0;
-        $bands = PayrollTaxBand::where('is_active', true)->orderBy('sort_order')->get();
-
-        if ($bands->isEmpty()) {
-            throw new \Exception("No PAYE Tax Bands found. Please configure in Settings first.");
-        }
-
-        foreach ($bands as $band) {
-            $min = $band->min_amount;
-            $max = $band->max_amount;
-            $rate = $band->rate;
-
-            if ($taxablePay > $min) {
-                $taxableInBand = $max ? min($taxablePay - $min, $max - $min) : $taxablePay - $min;
-                $calculatedPaye += $taxableInBand * $rate;
-            }
-        }
-
-        // --- RELIEFS ---
-        
-        // Final PAYE = Total Band Tax - Personal Relief
-        $paye = max(0, $calculatedPaye - $personalRelief);
-        
-        $totalStatutory = $nssf + $shif + $housingLevy + $paye;
-        $netPay = $grossPay - $totalStatutory - $customDeductions;
-
-        return Payslip::updateOrCreate(
-            ['employee_id' => $employee->id, 'payroll_month' => $month],
-            [
-                'basic_salary' => $basicSalary,
-                'gross_pay' => $grossPay,
-                'net_pay' => $netPay,
-                'tax_breakdown' => [
-                    'paye' => $paye, 'nssf' => $nssf, 'shif' => $shif,
-                    'housing_levy' => $housingLevy, 'personal_relief' => $personalRelief
-                ],
-                'ledger_breakdown' => $ledgerDetails,
-                'status' => 'draft',
-                'updated_at' => now()
-            ]
-        );
-    }
+    // (LEGACY batchGenerate and calculateMonthlyFull REMOVED - Use PayrollRunController instead)
 
     public function generatePdf($id)
     {
@@ -445,9 +374,28 @@ class PayrollEngineController extends Controller
 
     public function destroyPayslip($id)
     {
-        $payslip = Payslip::findOrFail($id);
+        $payslip = Payslip::with('payrollRun')->findOrFail($id);
+
+        if ($payslip->payrollRun && in_array($payslip->payrollRun->status, ['locked', 'paid'])) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Cannot delete a payslip from a locked or paid payroll run. Rollback the run first.'
+            ], 422);
+        }
+
+        $run = $payslip->payrollRun;
         $payslip->delete();
-        return response()->json(['message' => 'Payslip record removed']);
+
+        // If this payslip belonged to a run, update the run totals instantly
+        if ($run) {
+            $totals = $run->payslips()->selectRaw('SUM(gross_pay) as gross, SUM(net_pay) as net')->first();
+            $run->update([
+                'total_gross' => $totals->gross ?? 0,
+                'total_net' => $totals->net ?? 0
+            ]);
+        }
+
+        return response()->json(['success' => true, 'message' => 'Payslip record removed and run totals updated']);
     }
 
     public function clearPayslips(Request $request)
@@ -455,6 +403,18 @@ class PayrollEngineController extends Controller
         $validated = $request->validate([
             'payroll_month' => 'required|string|regex:/^\d{4}-\d{2}$/'
         ]);
+
+        // Check if any associated runs for this month are locked/paid
+        $lockedRunsExist = PayrollRun::where('payroll_month', $validated['payroll_month'])
+            ->whereIn('status', ['locked', 'paid'])
+            ->exists();
+
+        if ($lockedRunsExist) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot clear payslips for this month because a locked or paid payroll run exists. Rollback those runs first.'
+            ], 422);
+        }
 
         $query = Payslip::where('payroll_month', $validated['payroll_month']);
         
@@ -683,46 +643,5 @@ class PayrollEngineController extends Controller
         return response()->stream($callback, 200, $headers);
     }
 
-    public function getComplianceSummary(Request $request)
-    {
-        $month = $request->get('payroll_month', date('Y-m'));
-        
-        $payslips = Payslip::where('payroll_month', $month)->get();
-        
-        $summary = [
-            'total_gross' => 0,
-            'total_paye' => 0,
-            'total_nssf' => 0,
-            'total_shif' => 0,
-            'total_housing_levy' => 0,
-            'employee_count' => $payslips->count(),
-            'paid_count' => $payslips->where('status', 'paid')->count(),
-        ];
-
-        foreach ($payslips as $slip) {
-            $tax = $slip->tax_breakdown;
-            $summary['total_gross'] += (float)$slip->gross_pay;
-            $summary['total_paye'] += (float)($tax['paye'] ?? 0);
-            $summary['total_nssf'] += (float)($tax['nssf'] ?? 0);
-            $summary['total_shif'] += (float)($tax['shif'] ?? 0);
-            $summary['total_housing_levy'] += (float)($tax['housing_levy'] ?? 0);
-        }
-
-        return response()->json($summary);
-    }
-
-    public function markAsPaid(Request $request)
-    {
-        $validated = $request->validate([
-            'payroll_month' => 'required|string',
-        ]);
-
-        Payslip::where('payroll_month', $validated['payroll_month'])
-            ->update([
-                'status' => 'paid',
-                'payment_date' => now()
-            ]);
-
-        return response()->json(['message' => 'All payslips for ' . $validated['payroll_month'] . ' marked as paid.']);
-    }
+    // (LEGACY getComplianceSummary and markAsPaid REMOVED)
 }

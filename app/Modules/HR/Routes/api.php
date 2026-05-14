@@ -4,6 +4,7 @@ use App\Modules\HR\Http\Controllers\EmployeeController;
 use App\Modules\HR\Http\Controllers\DepartmentController;
 use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\HR\Http\Controllers\PayrollEngineController;
+use App\Modules\HR\Http\Controllers\PayrollRunController;
 use App\Modules\HR\Http\Controllers\LeaveDashboardController;
 use App\Modules\HR\Http\Controllers\LeaveHandoverController;
 use App\Modules\HR\Http\Controllers\LeaveRequestController;
@@ -11,41 +12,34 @@ use App\Modules\HR\Http\Controllers\LeaveTypeController;
 use App\Modules\HR\Http\Controllers\HRActionController;
 use App\Modules\HR\Http\Controllers\EmployeeDocumentController;
 use App\Modules\HR\Http\Controllers\AnnouncementController;
+use App\Modules\HR\Http\Controllers\IncidentController;
+use App\Modules\HR\Http\Controllers\GrievanceController;
+use App\Modules\HR\Http\Controllers\DisciplineController;
+use App\Modules\HR\Http\Controllers\RecruitmentController;
+use App\Modules\HR\Http\Controllers\InterviewController;
+use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
 use App\Constants\Permissions;
 
-// Unprotected HR Routes 
+// Unprotected HR Routes (public recruitment only)
 Route::prefix('hr')->group(function () {
-    // Specifically define profile before the resource to avoid it being interpreted as an ID
-    Route::get('employees/profile', [EmployeeController::class, 'profile'])->middleware(['auth:sanctum', 'active']);
-    
-    // Employee management
-    Route::apiResource('employees', EmployeeController::class);
-    
-    // Department management
-    Route::get('departments', [DepartmentController::class, 'index']);
-    Route::post('departments', [DepartmentController::class, 'store']);
-    Route::get('departments/{department}', [DepartmentController::class, 'show']);
-    Route::put('departments/{department}', [DepartmentController::class, 'update']);
-    Route::patch('departments/{department}', [DepartmentController::class, 'update']);
-    Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
-
-    // Technical Labour Management
-    Route::get('technical-labour/template', [TechnicalLabourController::class, 'downloadTemplate']);
-    Route::post('technical-labour/import', [TechnicalLabourController::class, 'import']);
-    Route::get('technical-labour', [TechnicalLabourController::class, 'index']);
-    Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
-    Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
-    Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
+    // Public Recruitment — no auth required for job listings and applications
+    Route::prefix('recruitment')->group(function () {
+        Route::get('jobs', [RecruitmentController::class, 'publicJobs']);
+        Route::get('jobs/{id}', [RecruitmentController::class, 'publicJobDetails']);
+        Route::post('apply', [RecruitmentController::class, 'apply']);
+    });
 });
 
-// Protected HR Routes
-Route::middleware(['auth:sanctum', 'active'])->group(function () {
-    Route::prefix('hr')->group(function () {
-        // Specifically define profile before the resource to avoid it being interpreted as an ID
-        // This MUST come before apiResource('employees')
-        Route::get('employees/profile', [EmployeeController::class, 'profile']);
+// Public HR Routes (for assets like photos)
+Route::get('hr/employees/{employee}/photo', [EmployeeController::class, 'getPhoto']);
 
+// Protected HR Routes
+Route::middleware(['auth:sanctum'])->group(function () {
+    Route::prefix('hr')->group(function () {
         // Employee management
+        Route::get('employees/profile', [EmployeeController::class, 'profile']);
+        Route::post('employees/{employee}/photo', [EmployeeController::class, 'uploadPhoto']);
+
         Route::apiResource('employees', EmployeeController::class)->middleware([
             'index' => 'permission:' . Permissions::EMPLOYEE_READ,
             'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
@@ -97,23 +91,42 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::delete('payslips/{id}', [PayrollEngineController::class, 'destroyPayslip']);
             Route::delete('payslips', [PayrollEngineController::class, 'clearPayslips']);
 
-            // Batch Processing
-            Route::post('batch', [PayrollEngineController::class, 'batchGenerate']);
+            // Batch Processing (LEGACY REMOVED - Use Runs)
+            // Route::post('batch', [PayrollEngineController::class, 'batchGenerate']);
 
             // Exports
             Route::get('export/bank', [PayrollEngineController::class, 'exportBankRemittance']);
             Route::get('export/mpesa', [PayrollEngineController::class, 'exportMpesaRemittance']);
             Route::get('export/p9', [PayrollEngineController::class, 'exportP9']);
 
-            // Compliance & Payment 
-            Route::get('compliance-summary', [PayrollEngineController::class, 'getComplianceSummary']);
-            Route::post('mark-paid', [PayrollEngineController::class, 'markAsPaid']);
+            // Compliance & Payment (LEGACY REMOVED - Use Runs)
+            // Route::get('compliance-summary', [PayrollEngineController::class, 'getComplianceSummary']);
+            // Route::post('mark-paid', [PayrollEngineController::class, 'markAsPaid']);
+
+            // Payroll Runs (lifecycle management)
+            Route::get('runs', [PayrollRunController::class, 'index']);
+            Route::post('runs', [PayrollRunController::class, 'store']);
+            Route::get('runs/{payrollRun}', [PayrollRunController::class, 'show']);
+            Route::post('runs/{payrollRun}/process', [PayrollRunController::class, 'process']);
+            Route::post('runs/{payrollRun}/lock', [PayrollRunController::class, 'lock']);
+            Route::post('runs/{payrollRun}/mark-paid', [PayrollRunController::class, 'markPaid']);
+            Route::post('runs/{payrollRun}/rollback', [PayrollRunController::class, 'rollback']);
+            Route::delete('runs/{payrollRun}', [PayrollRunController::class, 'destroy']);
+            Route::get('runs/{payrollRun}/compliance-summary', [PayrollRunController::class, 'complianceSummary']);
         });
+
+        // Salary Advances
+        Route::get('advances', [SalaryAdvanceController::class, 'index']);
+        Route::post('advances/{id}/approve', [SalaryAdvanceController::class, 'approve']);
+        Route::post('advances/{id}/reject', [SalaryAdvanceController::class, 'reject']);
+        Route::get('my-advances', [SalaryAdvanceController::class, 'myRequests']);
+        Route::post('my-advances', [SalaryAdvanceController::class, 'store']);
 
         // Leave management
         Route::prefix('leave')->group(function () {
             // Dashboard
             Route::get('dashboard', [LeaveDashboardController::class, 'show']);
+            Route::get('projects', [LeaveDashboardController::class, 'projects']);
 
             // Leave types
             Route::get('types', [LeaveTypeController::class, 'index']);
@@ -156,12 +169,110 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('employees/{employee}/actions', [HRActionController::class, 'index']);
         Route::get('action-types', [HRActionController::class, 'actionTypes']);
         Route::post('actions', [HRActionController::class, 'store']);
+        Route::post('actions/{id}/approve', [HRActionController::class, 'approveAction']);
+        Route::post('profile/update-request', [HRActionController::class, 'requestProfileUpdate']);
+
+        // Employee Salary History
+        Route::get('employees/{employee}/salary-history', [PayrollRunController::class, 'salaryHistory']);
+        Route::post('employees/{employee}/salary-history', [PayrollRunController::class, 'storeSalaryHistory']);
 
         // Employee Documents
         Route::get('employees/{employeeId}/documents', [EmployeeDocumentController::class, 'index']);
         Route::post('employees/{employeeId}/documents', [EmployeeDocumentController::class, 'store']);
         Route::get('employees/{employeeId}/documents/{documentId}/download', [EmployeeDocumentController::class, 'download']);
         Route::delete('employees/{employeeId}/documents/{documentId}', [EmployeeDocumentController::class, 'destroy']);
+
+        // Incident management
+        Route::get('incidents', [IncidentController::class, 'index']);
+        Route::post('incidents', [IncidentController::class, 'store']);
+        Route::post('incidents/report', [IncidentController::class, 'store']);
+        Route::get('incidents/statistics', [IncidentController::class, 'statistics']);
+        Route::get('incidents/my', [IncidentController::class, 'myIncidents']);
+        Route::get('incidents/pending-reviews', [IncidentController::class, 'pendingReviews']);
+        Route::get('incidents/context', [IncidentController::class, 'userContext']);
+        Route::get('incidents/{id}', [IncidentController::class, 'show']);
+        Route::put('incidents/{id}', [IncidentController::class, 'update']);
+        Route::patch('incidents/{id}', [IncidentController::class, 'update']);
+        Route::delete('incidents/{id}', [IncidentController::class, 'destroy']);
+        Route::post('incidents/{id}/review', [IncidentController::class, 'review']);
+        Route::post('incidents/{id}/approve', [IncidentController::class, 'approve']);
+        Route::post('incidents/{id}/comments', [IncidentController::class, 'addComment']);
+        Route::get('incidents/{id}/pdf', [IncidentController::class, 'downloadPdf']);
+        Route::post('incidents/{id}/attachments', [IncidentController::class, 'uploadAttachments']);
+        Route::get('incidents/{id}/attachments/{filename}/view', [IncidentController::class, 'viewAttachment']);
+        Route::get('incidents/{id}/attachments/{filename}', [IncidentController::class, 'downloadAttachment']);
+
+        // Grievance management
+        Route::get('grievance', [GrievanceController::class, 'index']);
+        Route::post('grievance', [GrievanceController::class, 'store']);
+        Route::get('grievance/statistics', [GrievanceController::class, 'statistics']);
+        Route::get('grievance/{id}', [GrievanceController::class, 'show']);
+        Route::put('grievance/{id}', [GrievanceController::class, 'update']);
+        Route::patch('grievance/{id}', [GrievanceController::class, 'update']);
+        Route::post('grievance/{id}/resolve', [GrievanceController::class, 'resolve']);
+        Route::post('grievance/{id}/escalate', [GrievanceController::class, 'escalate']);
+        Route::post('grievance/{id}/comments', [GrievanceController::class, 'addComment']);
+        Route::post('grievance/{id}/attachments', [GrievanceController::class, 'uploadAttachments']);
+
+        // Discipline management
+        Route::get('discipline', [DisciplineController::class, 'index']);
+        Route::post('discipline', [DisciplineController::class, 'store']);
+        Route::get('discipline/statistics', [DisciplineController::class, 'statistics']);
+        Route::get('discipline/{id}', [DisciplineController::class, 'show']);
+        Route::post('discipline/{id}/show-cause', [DisciplineController::class, 'issueShowCause']);
+        Route::post('discipline/{id}/show-cause-response', [DisciplineController::class, 'submitShowCauseResponse']);
+        Route::post('discipline/{id}/schedule-hearing', [DisciplineController::class, 'scheduleHearing']);
+        Route::post('discipline/{id}/hearing-minutes', [DisciplineController::class, 'submitHearingMinutes']);
+        Route::post('discipline/{id}/issue-warning', [DisciplineController::class, 'issueWarning']);
+        Route::post('discipline/{id}/appeal', [DisciplineController::class, 'submitAppeal']);
+        Route::post('discipline/{id}/finalize', [DisciplineController::class, 'finalizeCase']);
+        Route::post('discipline/{id}/comments', [DisciplineController::class, 'addComment']);
+        Route::post('discipline/{id}/attachments', [DisciplineController::class, 'uploadAttachments']);
+
+        // Internal Recruitment (ATS)
+        Route::prefix('recruitment/admin')->group(function () {
+            // Jobs management
+            Route::get('jobs', [RecruitmentController::class, 'adminJobs']);
+            Route::post('jobs', [RecruitmentController::class, 'storeJob']);
+            Route::put('jobs/{id}', [RecruitmentController::class, 'updateJob']);
+            Route::delete('jobs/{id}', [RecruitmentController::class, 'destroyJob']);
+            Route::post('jobs/{id}/notify-shortlisted', [InterviewController::class, 'notifyShortlisted'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_NOTIFY);
+
+            // Shortlisting
+            Route::get('jobs/{id}/shortlist-criteria', [RecruitmentController::class, 'getShortlistCriteria']);
+            Route::put('jobs/{id}/shortlist-criteria', [RecruitmentController::class, 'saveShortlistCriteria']);
+            Route::post('jobs/{id}/shortlist-preview', [RecruitmentController::class, 'previewShortlist']);
+            Route::post('jobs/{id}/run-shortlist', [RecruitmentController::class, 'runShortlist']);
+
+            // Candidates management
+            Route::get('candidates', [RecruitmentController::class, 'adminCandidates']);
+            Route::get('candidates/{id}', [RecruitmentController::class, 'candidateDetails']);
+            Route::put('candidates/{id}/status', [RecruitmentController::class, 'updateCandidateStatus']);
+            Route::get('candidates/{id}/documents/{documentId}/download', [RecruitmentController::class, 'downloadDocument']);
+            Route::patch('candidates/{id}/background-check', [RecruitmentController::class, 'updateBackgroundCheck'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_BACKGROUND_CHECK_UPDATE);
+            Route::post('candidates/{id}/background-check/start', [RecruitmentController::class, 'startBackgroundCheck'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_BACKGROUND_CHECK_UPDATE);
+            Route::post('candidates/{id}/background-check/complete', [RecruitmentController::class, 'completeBackgroundCheck'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_BACKGROUND_CHECK_COMPLETE);
+            Route::get('candidates/{id}/interviews', [InterviewController::class, 'candidateInterviews']);
+            Route::post('candidates/{id}/interviews', [InterviewController::class, 'store'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_CREATE);
+
+            // Interviews management
+            Route::get('interviews', [InterviewController::class, 'index']);
+            Route::post('interviews/bulk', [InterviewController::class, 'bulkStore'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_CREATE);
+            Route::put('interviews/{id}', [InterviewController::class, 'update'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_UPDATE);
+            Route::patch('interviews/{id}/complete', [InterviewController::class, 'complete'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_UPDATE);
+            Route::delete('interviews/{id}', [InterviewController::class, 'destroy'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_INTERVIEW_DELETE);
+            Route::post('interviews/{id}/notify', [InterviewController::class, 'notifyCandidate'])
+                ->middleware('permission:' . Permissions::RECRUITMENT_NOTIFY);
+        });
     });
 
     // Announcements at root api/ level for Android app

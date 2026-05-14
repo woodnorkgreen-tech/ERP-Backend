@@ -40,25 +40,27 @@ class IncidentManagementService
                 'corrective_actions' => $data['corrective_actions'] ?? null,
                 'preventive_measures' => $data['preventive_measures'] ?? null,
                 'additional_notes' => $data['additional_notes'] ?? null,
+                'equipment_involved' => $data['equipment_involved'] ?? null,
                 'evidence_paths' => $data['evidence_paths'] ?? null,
                 'reporter_name' => $data['reporter_name'] ?? ($user ? $user->name : null),
                 'reporter_email' => $data['reporter_email'] ?? ($user ? $user->email : null),
                 'reported_by' => $user ? $user->id : null,
                 'department_id' => $data['department_id'] ?? ($user?->employee?->department_id ?? null),
-                'job_title' => $data['job_title'] ?? ($user?->employee?->job_title ?? null),
+                'job_title' => $data['job_title'] ?? ($user?->employee?->position ?? null),
                 'contact_info' => $data['contact_info'] ?? ($user?->employee?->phone ?? null),
                 'date_reported' => now(),
+                'is_guest_submission' => $user ? false : true,
             ]);
             
             // Log activity
-            IncidentActivityLog::log(
-                $incident->id,
-                'Incident created',
-                "Incident reported by " . ($user?->name ?? 'Guest')
-            );
+            // IncidentActivityLog::log(
+            //     $incident->id,
+            //     'Incident created',
+            //     "Incident reported by " . ($user?->name ?? 'Guest')
+            // );
             
             // Send notifications to HR/Admin
-            $this->notifyAdministrators($incident);
+            // $this->notifyAdministrators($incident);
             
             return $incident;
         });
@@ -71,15 +73,16 @@ class IncidentManagementService
     {
         return DB::transaction(function () use ($incident, $data) {
             $incident->update($data);
-            
+
             // Log activity
             IncidentActivityLog::log(
                 $incident->id,
                 'Incident updated',
                 'Incident details updated'
             );
-            
-            return $incident;
+
+            // Reload with relations
+            return Incident::with(['reporter.employee', 'department', 'reviewer'])->find($incident->id);
         });
     }
     
@@ -169,25 +172,61 @@ class IncidentManagementService
     }
     
     /**
+     * Determine the access tier for the current user:
+     *  'all'        — admin, HR: see every incident
+     *  'department' — lead/manager: see incidents from their department
+     *  'own'        — everyone else: see only their own reported incidents
+     */
+    protected function getAccessTier(?\App\Models\User $user): string
+    {
+        if (!$user) return 'own';
+        if ($user->hasAnyRole(['Super Admin', 'Admin', 'HR'])) return 'all';
+        if ($user->hasAnyRole(['Lead', 'Manager'])) return 'department';
+        return 'own';
+    }
+
+    /**
+     * Apply role-based scoping to an incident query
+     */
+    protected function applyAccessScope($query, ?\App\Models\User $user): void
+    {
+        $tier = $this->getAccessTier($user);
+        if ($tier === 'department') {
+            $deptId = $user->department_id ?? $user->employee?->department_id;
+            if ($deptId) {
+                $query->where('department_id', $deptId);
+            } else {
+                // No department assigned — fall back to own incidents
+                $query->reportedBy($user->id);
+            }
+        } elseif ($tier === 'own') {
+            $query->reportedBy($user->id);
+        }
+        // 'all' — no additional scope
+    }
+
+    /**
      * Get incidents with filters
      */
     public function getIncidents(Request $request): LengthAwarePaginator
     {
-        $query = Incident::with(['reporter', 'department', 'reviewer']);
-        
+        $user = auth()->user();
+        $query = Incident::with(['reporter.employee', 'department', 'reviewer']);
+
+        // Role-based scoping
+        $this->applyAccessScope($query, $user);
+
         // Apply filters
         if ($request->filled('status')) {
             $query->status($request->status);
         }
-        
         if ($request->filled('severity')) {
             $query->severity($request->severity);
         }
-        
-        if ($request->filled('department_id')) {
+        if ($request->filled('department_id') && $this->getAccessTier($user) === 'all') {
+            // Only admins/HR can filter by arbitrary department
             $query->department($request->department_id);
         }
-        
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -196,15 +235,54 @@ class IncidentManagementService
                   ->orWhere('location', 'like', "%{$search}%");
             });
         }
-        
-        // If user is not admin/hr, show only their own incidents
+
+        $incidents = $query->orderBy('date_reported', 'desc')
+                            ->paginate($request->per_page ?? 15);
+
+        // Add computed fields
+        $incidents->getCollection()->transform(function ($incident) {
+            $incident->reporter_name = $incident->reporter?->name ?? 'Guest';
+            $incident->department_name = $incident->department?->name ?? null;
+            $incident->days_old = floor($incident->date_reported->diffInDays(now())) + 1;
+            return $incident;
+        });
+
+        return $incidents;
+    }
+
+    /**
+     * Get incidents pending review (not Resolved or Closed), sorted by severity then age
+     * Only accessible to admin, HR, lead
+     */
+    public function getPendingReviews(Request $request): LengthAwarePaginator
+    {
         $user = auth()->user();
-        if ($user && !$user->hasAnyRole(['admin', 'hr_manager'])) {
-            $query->reportedBy($user->id);
+        $query = Incident::with(['reporter.employee', 'department'])
+            ->selectRaw('incidents.*, DATEDIFF(NOW(), incidents.date_reported) as days_old')
+            ->whereNotIn('status', [Incident::STATUS_RESOLVED, Incident::STATUS_CLOSED])
+            ->orderByRaw("FIELD(severity, 'Critical', 'High', 'Medium', 'Low')")
+            ->orderBy('date_reported', 'asc'); // oldest first within same severity
+
+        // Leads see their department; HR/Admin see all
+        if ($user->hasAnyRole(['Lead']) && !$user->hasAnyRole(['Super Admin', 'Admin', 'HR'])) {
+            $deptId = $user->department_id ?? $user->employee?->department_id;
+            if ($deptId) {
+                $query->where('department_id', $deptId);
+            }
         }
-        
-        return $query->orderBy('date_reported', 'desc')
-                     ->paginate($request->per_page ?? 15);
+
+        if ($request->filled('severity')) {
+            $query->severity($request->severity);
+        }
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('location', 'like', "%{$search}%");
+            });
+        }
+
+        return $query->paginate($request->per_page ?? 20);
     }
     
     /**
@@ -212,8 +290,8 @@ class IncidentManagementService
      */
     public function getIncidentById(int $id): ?Incident
     {
-        return Incident::with(['reporter', 'department', 'reviewer', 'approver', 'comments.user', 'activityLogs.user'])
-                       ->findOrFail($id);
+        return Incident::with(['reporter.employee', 'department', 'reviewer', 'approver', 'comments.user'])
+                        ->findOrFail($id);
     }
     
     /**
@@ -244,14 +322,11 @@ class IncidentManagementService
      */
     public function getStatistics(): array
     {
-        $query = Incident::query();
-        
-        // If user is not admin/hr, show only their own stats
         $user = auth()->user();
-        if ($user && !$user->hasAnyRole(['admin', 'hr_manager'])) {
-            $query->reportedBy($user->id);
-        }
-        
+        $query = Incident::query();
+
+        $this->applyAccessScope($query, $user);
+
         return [
             'total' => $query->count(),
             'open' => (clone $query)->where('status', Incident::STATUS_OPEN)->count(),
@@ -268,8 +343,8 @@ class IncidentManagementService
      */
     protected function notifyAdministrators(Incident $incident): void
     {
-        // Get HR admins and department heads
-        $admins = User::role(['admin', 'hr_manager'])->get();
+        // Get HR/Admin users
+        $admins = User::role(['Admin', 'HR'])->get();
         
         if ($admins->isNotEmpty()) {
             Notification::send($admins, new IncidentCreatedNotification($incident));
@@ -286,3 +361,4 @@ class IncidentManagementService
         }
     }
 }
+

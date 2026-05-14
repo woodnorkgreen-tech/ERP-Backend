@@ -30,7 +30,10 @@ class EventServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        \App\Modules\Projects\Models\EnquiryTask::observe(\App\Observers\EnquiryTaskObserver::class);
+        \App\Models\TaskMaterialsData::observe(\App\Observers\TaskMaterialsDataObserver::class);
+        \App\Models\TaskBudgetData::observe(\App\Observers\TaskBudgetDataObserver::class);
+        \App\Models\TaskQuoteData::observe(\App\Observers\TaskQuoteDataObserver::class);
     }
 
     /**

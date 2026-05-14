@@ -13,6 +13,7 @@ use App\Modules\Projects\Http\Controllers\EnquiryController;
 use App\Modules\Projects\Http\Controllers\DashboardController;
 use App\Modules\Projects\Http\Controllers\TaskController;
 use App\Modules\Projects\Http\Controllers\PhaseDepartmentalTaskController;
+use App\Modules\Projects\Http\Controllers\DeliverablesBlueprintController;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Models\TaskMaterialsData;
 use App\Http\Controllers\SiteSurveyController;
@@ -22,6 +23,7 @@ use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\HandoverSurveyController;
 use App\Http\Controllers\API\PublicHandoverController;
 use App\Modules\Production\Http\Controllers\JobCardController;
+use App\Http\Controllers\DesignRequirementController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
@@ -282,12 +284,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     });
 
     // Project Officers endpoint (accessible by Client Service for enquiry assignment)
-    Route::get('project-officers', [UserController::class, 'getProjectOfficers'])
-        ->middleware('permission:' . Permissions::ENQUIRY_UPDATE);
+    Route::get('project-officers', [UserController::class, 'getProjectOfficers']);
 
     // Users endpoint for task assignment (accessible by Project Managers)
-    Route::get('users', [UserController::class, 'index'])
-        ->middleware('permission:' . Permissions::USER_READ . ',' . Permissions::TASK_ASSIGN);
+    Route::get('users', [UserController::class, 'index']);
 
     // ClientService Module Routes
     Route::prefix('clientservice')->group(function () {
@@ -295,8 +295,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('handovers', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'index']);
         Route::get('handovers/{id}', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'show']);
         // Client management
-        Route::get('clients', [ClientController::class, 'index'])
-            ->middleware('permission:' . Permissions::CLIENT_READ);
+        Route::get('clients', [ClientController::class, 'index']);
         Route::get('clients/{client}', [ClientController::class, 'show'])
             ->middleware('permission:' . Permissions::CLIENT_READ);
         Route::post('clients', [ClientController::class, 'store'])
@@ -486,7 +485,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::apiResource('site-surveys', SiteSurveyController::class);
         Route::get('site-surveys/{survey}/pdf', [SiteSurveyController::class, 'generatePDF']);
         Route::post('tasks/{taskId}/survey/photos', [SiteSurveyController::class, 'uploadPhoto']);
+        Route::get('tasks/{taskId}/survey/pdf', [SiteSurveyController::class, 'downloadTaskPdf']);
         Route::delete('tasks/{taskId}/survey/photos/{photoId}', [SiteSurveyController::class, 'deletePhoto']);
+
+        // Deliverables Blueprint Routes
+        Route::apiResource('deliverables-blueprints', DeliverablesBlueprintController::class);
 
         // Logistics Task Routes
         Route::prefix('tasks/{taskId}/logistics')->group(function () {
@@ -590,6 +593,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
         Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
         Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
+        Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
+        Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);
         Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
 
         // Available project officers for enquiry assignment
@@ -634,21 +639,27 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             // Materials configuration
             Route::get('materials/config', [App\Http\Controllers\MaterialsController::class, 'getMaterialsConfig']);
 
-       // Design asset management
-Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
-    Route::get('/', [DesignAssetController::class, 'index']);
-    Route::post('/', [DesignAssetController::class, 'store']);
-    
-    // Specific routes FIRST
-    Route::get('/{asset}/download', [DesignAssetController::class, 'download']);
-    Route::post('/{asset}/approve', [DesignAssetController::class, 'approve']);
-    Route::post('/{asset}/reject', [DesignAssetController::class, 'reject']);
-    
-    // Generic routes LAST
-    Route::get('/{asset}', [DesignAssetController::class, 'show']);
-    Route::put('/{asset}', [DesignAssetController::class, 'update']);
-    Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
-});
+        // Design asset management
+        Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
+            Route::get('/', [DesignAssetController::class, 'index']);
+            Route::post('/', [DesignAssetController::class, 'store']);
+
+            // Specific routes FIRST
+            Route::get('/{asset}/download', [DesignAssetController::class, 'download']);
+            Route::post('/{asset}/approve', [DesignAssetController::class, 'approve']);
+            Route::post('/{asset}/reject', [DesignAssetController::class, 'reject']);
+
+            // Generic routes LAST
+            Route::get('/{asset}', [DesignAssetController::class, 'show']);
+            Route::put('/{asset}', [DesignAssetController::class, 'update']);
+            Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
+        });
+
+        // Design requirement management
+        Route::prefix('enquiry-tasks/{task}/design-requirements')->group(function () {
+            Route::get('/', [DesignRequirementController::class, 'index']);
+            Route::put('/', [DesignRequirementController::class, 'update']);
+        });
         // Notifications
         Route::get('notifications', function () {
             $user = auth()->user();

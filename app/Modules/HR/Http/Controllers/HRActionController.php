@@ -119,4 +119,77 @@ class HRActionController
             ], 201);
         });
     }
+
+    /**
+     * Employee self-service: request a profile update.
+     */
+    public function requestProfileUpdate(Request $request): JsonResponse
+    {
+        $employee = auth()->user()->employee; 
+        
+        if (!$employee) {
+            return response()->json(['message' => 'Profile not found'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'new_data' => 'required|array',
+            'reason' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $actionType = HRActionType::where('code', 'PROFILE_UPDATE')->first();
+
+        $action = HRAction::create([
+            'employee_id' => $employee->id,
+            'action_type_id' => $actionType->id,
+            'action_type' => $actionType->code,
+            'previous_data' => $employee->toArray(),
+            'new_data' => $request->new_data,
+            'effective_date' => now(),
+            'reason' => $request->reason ?? 'Profile update requested by employee',
+            'status' => 'pending_approval',
+            'recorded_by' => auth()->id(),
+        ]);
+
+        return response()->json([
+            'message' => 'Profile update request submitted for approval',
+            'data' => $action
+        ], 201);
+    }
+
+    /**
+     * HR: Approve a pending profile update or future-dated action.
+     */
+    public function approveAction(Request $request, $id): JsonResponse
+    {
+        $action = HRAction::with(['employee', 'type'])->findOrFail($id);
+
+        if ($action->status !== 'pending_approval' && $action->status !== 'pending_execution') {
+            return response()->json(['message' => 'Action cannot be approved in its current status'], 422);
+        }
+
+        return DB::transaction(function () use ($action) {
+            // Apply the new data to the employee if it's a profile update
+            if ($action->type && $action->type->code === 'PROFILE_UPDATE') {
+                $action->employee->update($action->new_data);
+            } elseif ($action->status === 'pending_execution') {
+                 // For future dated actions that are now being forced/approved
+                 $action->employee->update($action->new_data);
+            }
+
+            $action->update([
+                'status' => 'executed',
+                'executed_at' => now(),
+                'approved_by' => auth()->id()
+            ]);
+
+            return response()->json([
+                'message' => 'Action approved and executed successfully',
+                'data' => $action->load('employee')
+            ]);
+        });
+    }
 }

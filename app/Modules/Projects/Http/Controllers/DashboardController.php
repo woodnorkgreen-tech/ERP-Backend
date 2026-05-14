@@ -51,6 +51,28 @@ class DashboardController extends Controller
     }
 
     /**
+     * Centralized Admin Authorization
+     */
+    private function authorizeAdmin(): void
+    {
+        if (!Auth::user()->hasPermissionTo(\App\Constants\Permissions::DASHBOARD_PROJECTS) &&
+            !Auth::user()->hasRole(\App\Constants\EnquiryConstants::ROLES_ADMIN)) {
+            abort(403, 'Unauthorized access to project administration metrics');
+        }
+    }
+
+    /**
+     * Centralized Workflow Authorization
+     */
+    private function authorizeWorkflow(): void
+    {
+        if (!Auth::user()->hasPermissionTo(\App\Constants\Permissions::DASHBOARD_PROJECTS) &&
+            !Auth::user()->hasRole(\App\Constants\EnquiryConstants::ROLES_WORKFLOW)) {
+            abort(403, 'Unauthorized access to project dashboard');
+        }
+    }
+
+    /**
      * @OA\Get(
      *     path="/api/projects/dashboard/enquiry-metrics",
      *     summary="Get enquiry metrics for dashboard",
@@ -71,12 +93,7 @@ class DashboardController extends Controller
     public function enquiryMetrics(Request $request): JsonResponse
     {
         // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard metrics'
-            ], 403);
-        }
+        $this->authorizeAdmin();
 
         try {
             $metrics = $this->dashboardService->getEnquiryMetrics();
@@ -114,12 +131,7 @@ class DashboardController extends Controller
     public function taskMetrics(Request $request): JsonResponse
     {
         // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard metrics'
-            ], 403);
-        }
+        $this->authorizeAdmin();
 
         try {
             $metrics = $this->dashboardService->getTaskMetrics();
@@ -142,12 +154,7 @@ class DashboardController extends Controller
     public function projectMetrics(Request $request): JsonResponse
     {
         // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard metrics'
-            ], 403);
-        }
+        $this->authorizeAdmin();
 
         try {
             $metrics = $this->dashboardService->getProjectMetrics();
@@ -170,12 +177,7 @@ class DashboardController extends Controller
     public function financialMetrics(Request $request): JsonResponse
     {
         // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard metrics'
-            ], 403);
-        }
+        $this->authorizeAdmin();
 
         try {
             $metrics = $this->dashboardService->getFinancialMetrics();
@@ -219,12 +221,7 @@ class DashboardController extends Controller
     public function recentActivities(Request $request): JsonResponse
     {
         // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard activities'
-            ], 403);
-        }
+        $this->authorizeAdmin();
 
         try {
             $limit = $request->get('limit', 10);
@@ -248,12 +245,7 @@ class DashboardController extends Controller
     public function alerts(Request $request): JsonResponse
     {
         // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard alerts'
-            ], 403);
-        }
+        $this->authorizeAdmin();
 
         try {
             $alerts = $this->dashboardService->getAlerts();
@@ -282,12 +274,7 @@ class DashboardController extends Controller
      */
     public function commandCenter(Request $request): JsonResponse
     {
-         if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to command center'
-            ], 403);
-        }
+        $this->authorizeAdmin();
 
          try {
              $data = $this->dashboardService->getCommandCenterData();
@@ -347,17 +334,7 @@ class DashboardController extends Controller
             'timestamp' => now()
         ]);
 
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole($allowedRoles)) {
-            \Log::warning('Unauthorized dashboard access attempt', [
-                'user_id' => Auth::id(),
-                'user_name' => Auth::user()->name,
-                'roles' => Auth::user()->getRoleNames()
-            ]);
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard'
-            ], 403);
-        }
+        $this->authorizeWorkflow();
 
         try {
             \Log::info('Dashboard data fetch started', ['user_id' => Auth::id()]);

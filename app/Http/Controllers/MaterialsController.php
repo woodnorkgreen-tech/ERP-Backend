@@ -262,7 +262,7 @@ class MaterialsController extends Controller
             'projectElements' => 'required|array',
             'projectElements.*.id' => 'required|string',
             'projectElements.*.elementType' => 'required|string',
-            'projectElements.*.name' => 'required|string',
+            'projectElements.*.name' => 'nullable|string',
             'projectElements.*.category' => 'required|in:production,hire,outsourced',
             'projectElements.*.materials' => 'required|array',
             'projectElements.*.materials.*.description' => 'required|string',
@@ -375,7 +375,7 @@ class MaterialsController extends Controller
                     'task_materials_data_id' => $materialsData->id,
                     'template_id' => $elementData['templateId'] ?? null,
                     'element_type' => $elementData['elementType'],
-                    'name' => $elementData['name'],
+                    'name' => $elementData['name'] ?? null,
                     'persistent_id' => $elementData['persistent_id'] ?? $elementData['persistentId'] ?? null,
                     'category' => $elementData['category'],
                     'dimensions' => $elementData['dimensions'] ?? [],
@@ -1095,8 +1095,8 @@ class MaterialsController extends Controller
                                 : 'Additional: ' . $materialData['description'];
 
                             $additionDescription = $isBudgetCompleted
-                                ? 'Automatically created from Materials Task after budget completion - Element: ' . $elementData['name']
-                                : 'Automatically created from Materials Task - Element: ' . $elementData['name'];
+                                ? 'Automatically created from Materials Task after budget completion - Element: ' . ($elementData['name'] ?? 'Unnamed')
+                                : 'Automatically created from Materials Task - Element: ' . ($elementData['name'] ?? 'Unnamed');
 
                             \App\Models\BudgetAddition::create([
                                 'task_budget_data_id' => $budgetData->id,
@@ -1403,19 +1403,19 @@ class MaterialsController extends Controller
         // Normalize existing for lookups
         $existingMap = [];
         foreach ($existingElements as $element) {
-            $key = $element->element_type . ' : ' . $element->name;
+            $key = $element->element_type . ' : ' . ($element->name ?? '');
             $existingMap[$key] = $element;
         }
 
         // Track new/updated
         $newKeys = [];
         foreach ($newProjectElements as $element) {
-            $key = $element['elementType'] . ' : ' . $element['name'];
+            $key = $element['elementType'] . ' : ' . ($element['name'] ?? '');
             $newKeys[] = $key;
 
             if (!isset($existingMap[$key])) {
                 $count = count($element['materials'] ?? []);
-                $changes[] = ['type' => 'addition', 'message' => "Added Element: {$element['name']} ({$count} materials)"];
+                $changes[] = ['type' => 'addition', 'message' => "Added Element: " . ($element['name'] ?? 'Unnamed') . " ({$count} materials)"];
             } else {
                 $oldElement = $existingMap[$key];
                 $oldMaterialsMap = [];
@@ -1428,13 +1428,13 @@ class MaterialsController extends Controller
                 foreach ($newMaterials as $m) {
                     $desc = $m['description'];
                     if (!isset($oldMaterialsMap[$desc])) {
-                        $changes[] = ['type' => 'addition', 'message' => "Element '{$element['name']}': Added material '{$desc}'"];
+                        $changes[] = ['type' => 'addition', 'message' => "Element '" . ($element['name'] ?? 'Unnamed') . "': Added material '{$desc}'"];
                     } else {
                         $oldM = $oldMaterialsMap[$desc];
                         if ((float)$oldM->quantity !== (float)$m['quantity']) {
                             $changes[] = [
                                 'type' => 'modification', 
-                                'message' => "Element '{$element['name']}': Changed '{$desc}' qty: {$oldM->quantity} -> {$m['quantity']}"
+                                'message' => "Element '" . ($element['name'] ?? 'Unnamed') . "': Changed '{$desc}' qty: {$oldM->quantity} -> {$m['quantity']}"
                             ];
                         }
                     }
@@ -1444,7 +1444,7 @@ class MaterialsController extends Controller
                 $currentMaterialNames = collect($newMaterials)->pluck('description')->toArray();
                 foreach (array_keys($oldMaterialsMap) as $oldMName) {
                     if (!in_array($oldMName, $currentMaterialNames)) {
-                        $changes[] = ['type' => 'removal', 'message' => "Element '{$element['name']}': Removed material '{$oldMName}'"];
+                        $changes[] = ['type' => 'removal', 'message' => "Element '" . ($element['name'] ?? 'Unnamed') . "': Removed material '{$oldMName}'"];
                     }
                 }
             }
@@ -1453,7 +1453,7 @@ class MaterialsController extends Controller
         // Check for deleted elements
         foreach ($existingMap as $key => $element) {
             if (!in_array($key, $newKeys)) {
-                $changes[] = ['type' => 'removal', 'message' => "Removed Element: {$element->name}"];
+                $changes[] = ['type' => 'removal', 'message' => "Removed Element: " . ($element->name ?? 'Unnamed')];
             }
         }
 

@@ -37,15 +37,34 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         // Handle unauthenticated requests for API
         $exceptions->renderable(function (\Illuminate\Auth\AuthenticationException $e, \Illuminate\Http\Request $request) {
-            // If it's an API request (Accept: application/json or /api/* route), return JSON  
             if ($request->is('api/*') || $request->expectsJson()) {
                 return response()->json([
                     'message' => 'Unauthenticated. Please login again.',
                     'error' => 'Token expired or invalid'
                 ], 401);
             }
-            
-            // For web requests, use default behavior (redirect to login)
+            return null;
+        });
+
+        // Handle generic exceptions for API to ensure JSON response
+        $exceptions->renderable(function (\Throwable $e, \Illuminate\Http\Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                // If it's a validation exception, let Laravel handle it normally (returns 422 with errors)
+                if ($e instanceof \Illuminate\Validation\ValidationException) {
+                    return null;
+                }
+
+                $status = 500;
+                if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpExceptionInterface) {
+                    $status = $e->getStatusCode();
+                }
+
+                return response()->json([
+                    'message' => $e->getMessage() ?: 'A system error occurred.',
+                    'error' => class_basename($e),
+                    'trace' => config('app.debug') ? $e->getTrace() : null
+                ], $status);
+            }
             return null;
         });
     })->create();

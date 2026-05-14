@@ -2,6 +2,8 @@
 
 namespace App\Modules\HR\Services;
 
+use App\Models\Project;
+use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\LeaveRequest;
@@ -289,6 +291,44 @@ class LeaveManagementService
             'leave_types' => $this->getRequestableLeaveTypes(),
             'contact_employees' => $this->getContactEmployees($user),
         ];
+    }
+
+    public function getHandoverProjects(): array
+    {
+        $projects = Project::query()
+            ->with(['enquiry:id,title,job_number,status'])
+            ->orderByDesc('id')
+            ->limit(300)
+            ->get(['id', 'enquiry_id', 'project_id', 'status', 'created_at', 'updated_at'])
+            ->filter(fn (Project $project) => filled($project->project_id) || filled($project->enquiry?->title))
+            ->map(fn (Project $project) => [
+                'key' => 'project-' . $project->id,
+                'source' => 'project',
+                'source_id' => $project->id,
+                'project_id' => $project->project_id ?: $project->enquiry?->job_number ?: $project->enquiry?->project_id,
+                'name' => $project->enquiry?->title ?: $project->project_id,
+                'status' => $project->status,
+            ]);
+
+        $enquiries = ProjectEnquiry::query()
+            ->orderByDesc('id')
+            ->limit(300)
+            ->get(['id', 'title', 'status', 'job_number'])
+            ->filter(fn (ProjectEnquiry $enquiry) => filled($enquiry->title) || filled($enquiry->job_number))
+            ->map(fn (ProjectEnquiry $enquiry) => [
+                'key' => 'enquiry-' . $enquiry->id,
+                'source' => 'enquiry',
+                'source_id' => $enquiry->id,
+                'project_id' => $enquiry->job_number,
+                'name' => $enquiry->title ?: $enquiry->job_number,
+                'status' => $enquiry->status,
+            ]);
+
+        return $projects
+            ->concat($enquiries)
+            ->sortByDesc('source_id')
+            ->values()
+            ->all();
     }
 
     public function ensureBalanceAvailable(

@@ -9,6 +9,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class TaskBudgetData extends Model
 {
     use \App\Traits\LogsActions;
+
+    protected static function booted()
+    {
+        static::saved(function ($model) {
+            if ($model->task) {
+                app(\App\Modules\Projects\Services\EnquiryWorkflowService::class)->tryAutoCompleteTask($model->task);
+            }
+        });
+    }
+
     protected $fillable = [
         'enquiry_task_id', 'project_info', 'materials_data',
         'labour_data', 'expenses_data', 'logistics_data',

@@ -32,7 +32,7 @@ class UpdateMaterialRequest extends FormRequest
                 'max:100',
                 Rule::unique('library_materials', 'material_code')->ignore($materialId),
             ],
-            'material_name' => 'sometimes|string|max:255',
+            'material_name' => 'sometimes|nullable|string|max:255',
             'category' => 'nullable|string|max:100',
             'subcategory' => 'nullable|string|max:100',
             'unit_of_measure' => 'sometimes|string|max:50',
