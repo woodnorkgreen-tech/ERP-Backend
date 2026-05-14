@@ -36,6 +36,7 @@ class DesignRequirementController extends Controller
         try {
             $request->validate([
                 'requirements' => 'required|array',
+                'requirements.*.title' => 'nullable|string|max:255',
                 'requirements.*.category' => 'required|string',
                 'requirements.*.description' => 'nullable|string',
                 'requirements.*.status' => 'required|string|in:pending,fulfilled,approved,rejected',
@@ -51,20 +52,22 @@ class DesignRequirementController extends Controller
                     $req = DesignRequirement::updateOrCreate(
                         ['id' => $reqData['id'], 'enquiry_task_id' => $task->id],
                         [
-                            'category' => $reqData['category'],
+                            'title'       => $reqData['title'] ?? null,
+                            'category'    => $reqData['category'],
                             'description' => $reqData['description'] ?? null,
-                            'status' => $reqData['status'],
-                            'asset_id' => $reqData['asset_id'] ?? null,
+                            'status'      => $reqData['status'],
+                            'asset_id'    => $reqData['asset_id'] ?? null,
                         ]
                     );
                 } else {
-                    // Fallback to searching by metadata for new/unsaved items
+                    // New item — temp string ID from frontend
                     $req = DesignRequirement::create([
                         'enquiry_task_id' => $task->id,
-                        'category' => $reqData['category'],
-                        'description' => $reqData['description'] ?? null,
-                        'status' => $reqData['status'],
-                        'asset_id' => $reqData['asset_id'] ?? null,
+                        'title'           => $reqData['title'] ?? null,
+                        'category'        => $reqData['category'],
+                        'description'     => $reqData['description'] ?? null,
+                        'status'          => $reqData['status'],
+                        'asset_id'        => $reqData['asset_id'] ?? null,
                     ]);
                 }
                 $existingReqIds[] = $req->id;

@@ -636,7 +636,7 @@ class EnquiryController extends Controller
 
         $validator = Validator::make($request->all(), [
             'date_received' => 'sometimes|required|date',
-            'expected_delivery_date' => 'sometimes|required|date|after_or_equal:date_received',
+            'expected_delivery_date' => 'sometimes|nullable|date|after_or_equal:date_received',
             'client_id' => 'sometimes|required|integer|exists:clients,id',
             'title' => 'sometimes|required|string|max:255',
             'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias
@@ -846,6 +846,57 @@ class EnquiryController extends Controller
             ]);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to log payment: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Update an existing payment
+     */
+    public function updatePayment(Request $request, ProjectEnquiry $enquiry, $paymentId): JsonResponse
+    {
+        $payment = \App\Models\EnquiryPayment::findOrFail($paymentId);
+        
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:0',
+            'payment_date' => 'nullable|date',
+            'payment_method' => 'nullable|string',
+            'transaction_reference' => 'nullable|string',
+            'reason' => 'required|string|min:5', // Mandatory reason for correction
+        ]);
+
+        try {
+            $updatedPayment = $this->financeService->updatePayment($payment, $validated, $validated['reason']);
+
+            return response()->json([
+                'message' => 'Payment updated successfully',
+                'data' => $updatedPayment->load('recorder'),
+                'progress' => $this->financeService->getPaymentProgress($enquiry)
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Failed to update payment: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Delete a payment
+     */
+    public function deletePayment(Request $request, ProjectEnquiry $enquiry, $paymentId): JsonResponse
+    {
+        $payment = \App\Models\EnquiryPayment::findOrFail($paymentId);
+        
+        $validated = $request->validate([
+            'reason' => 'required|string|min:5', // Mandatory reason for deletion
+        ]);
+
+        try {
+            $this->financeService->deletePayment($payment, $validated['reason']);
+
+            return response()->json([
+                'message' => 'Payment deleted successfully',
+                'progress' => $this->financeService->getPaymentProgress($enquiry)
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Failed to delete payment: ' . $e->getMessage()], 500);
         }
     }
 

@@ -47,6 +47,62 @@ class FinanceService
     }
 
     /**
+     * Update an existing payment
+     */
+    public function updatePayment(EnquiryPayment $payment, array $data, string $reason): EnquiryPayment
+    {
+        return DB::transaction(function () use ($payment, $data, $reason) {
+            $oldAmount = $payment->amount;
+            $payment->update([
+                'amount' => $data['amount'],
+                'payment_date' => $data['payment_date'] ?? $payment->payment_date,
+                'payment_method' => $data['payment_method'] ?? $payment->payment_method,
+                'transaction_reference' => $data['transaction_reference'] ?? $payment->transaction_reference,
+                'notes' => ($payment->notes ? $payment->notes . "\n" : "") . "Updated on " . now()->format('d M Y') . ": $reason",
+            ]);
+
+            // Log governance if amount changed
+            if ((float)$oldAmount !== (float)$data['amount']) {
+                \App\Models\GovernanceAuditLog::create([
+                    'project_enquiry_id' => $payment->project_enquiry_id,
+                    'user_id' => Auth::id(),
+                    'gate_type' => 'Financial Correction',
+                    'action_status' => 'authorized',
+                    'model_type' => EnquiryPayment::class,
+                    'model_id' => $payment->id,
+                    'message' => "Payment amount corrected from $oldAmount to {$data['amount']}",
+                    'context' => ['reason' => $reason, 'old_amount' => $oldAmount, 'new_amount' => $data['amount']],
+                    'ip_address' => request()->ip()
+                ]);
+            }
+
+            return $payment;
+        });
+    }
+
+    /**
+     * Delete a payment
+     */
+    public function deletePayment(EnquiryPayment $payment, string $reason): bool
+    {
+        return DB::transaction(function () use ($payment, $reason) {
+            \App\Models\GovernanceAuditLog::create([
+                'project_enquiry_id' => $payment->project_enquiry_id,
+                'user_id' => Auth::id(),
+                'gate_type' => 'Financial Deletion',
+                'action_status' => 'authorized',
+                'model_type' => EnquiryPayment::class,
+                'model_id' => $payment->id,
+                'message' => "Payment of {$payment->amount} deleted",
+                'context' => ['reason' => $reason, 'deleted_amount' => $payment->amount],
+                'ip_address' => request()->ip()
+            ]);
+
+            return $payment->delete();
+        });
+    }
+
+    /**
      * Get the payment progress percentage
      */
     public function getPaymentProgress(ProjectEnquiry $enquiry): array

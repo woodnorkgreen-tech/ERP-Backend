@@ -593,6 +593,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
         Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
         Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
+        Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
+        Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);
         Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
 
         // Available project officers for enquiry assignment
@@ -637,26 +639,27 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             // Materials configuration
             Route::get('materials/config', [App\Http\Controllers\MaterialsController::class, 'getMaterialsConfig']);
 
-       // Design asset management
-Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
-    Route::get('/', [DesignAssetController::class, 'index']);
-    Route::post('/', [DesignAssetController::class, 'store']);
-    
-    // Specific routes FIRST
-    Route::get('/{asset}/download', [DesignAssetController::class, 'download']);
-    Route::post('/{asset}/approve', [DesignAssetController::class, 'approve']);
-    Route::post('/{asset}/reject', [DesignAssetController::class, 'reject']);
-    
-    // Generic routes LAST
-    Route::get('/{asset}', [DesignAssetController::class, 'show']);
-    Route::put('/{asset}', [DesignAssetController::class, 'update']);
-    Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
-});
+        // Design asset management
+        Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
+            Route::get('/', [DesignAssetController::class, 'index']);
+            Route::post('/', [DesignAssetController::class, 'store']);
 
-Route::prefix('enquiry-tasks/{task}/design-requirements')->group(function () {
-    Route::get('/', [DesignRequirementController::class, 'index']);
-    Route::put('/', [DesignRequirementController::class, 'update']);
-});
+            // Specific routes FIRST
+            Route::get('/{asset}/download', [DesignAssetController::class, 'download']);
+            Route::post('/{asset}/approve', [DesignAssetController::class, 'approve']);
+            Route::post('/{asset}/reject', [DesignAssetController::class, 'reject']);
+
+            // Generic routes LAST
+            Route::get('/{asset}', [DesignAssetController::class, 'show']);
+            Route::put('/{asset}', [DesignAssetController::class, 'update']);
+            Route::delete('/{asset}', [DesignAssetController::class, 'destroy']);
+        });
+
+        // Design requirement management
+        Route::prefix('enquiry-tasks/{task}/design-requirements')->group(function () {
+            Route::get('/', [DesignRequirementController::class, 'index']);
+            Route::put('/', [DesignRequirementController::class, 'update']);
+        });
         // Notifications
         Route::get('notifications', function () {
             $user = auth()->user();
