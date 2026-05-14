@@ -24,7 +24,7 @@ class StoreMaterialRequest extends FormRequest
         return [
             'workstation_id' => 'required|exists:workstations,id',
             'material_code' => 'required|string|max:100|unique:library_materials,material_code',
-            'material_name' => 'required|string|max:255',
+            'material_name' => 'nullable|string|max:255',
             'category' => 'nullable|string|max:100',
             'subcategory' => 'nullable|string|max:100',
             'unit_of_measure' => 'required|string|max:50',
