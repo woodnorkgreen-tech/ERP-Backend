@@ -165,6 +165,7 @@
                     </td>
                     <td style="width: 40%;">
                          <div class="mb-2"><span class="font-bold">Destination:</span> {{ $data['logistics_planning']['route']['destination'] ?? 'TBC' }}</div>
+                         <div class="mb-2"><span class="font-bold">Prepared By:</span> {{ $data['logistics_planning']['prepared_by'] ?? 'N/A' }}</div>
                          <div class="mb-2"><span class="font-bold">Status:</span> <span class="uppercase font-bold text-blue-600">{{ $task->status ?? 'In Progress' }}</span></div>
                     </td>
                 </tr>
@@ -182,7 +183,9 @@
                          <div class="text-gray-600 uppercase font-small mb-2">TRANSPORT</div>
                          <div class="mb-1"><span class="font-bold">Vehicle:</span> {{ $data['logistics_planning']['vehicle_type'] ?? 'N/A' }}</div>
                          <div class="mb-1"><span class="font-bold">Reg #:</span> {{ $data['logistics_planning']['vehicle_identification'] ?? 'N/A' }}</div>
+                         <div class="mb-1"><span class="font-bold">Crew Vehicle:</span> {{ $data['logistics_planning']['crew_vehicle'] ?? '-' }}</div>
                          <div class="mb-1"><span class="font-bold">Driver:</span> {{ $data['logistics_planning']['driver_name'] ?? 'N/A' }}</div>
+                         <div class="mb-1"><span class="font-bold">Team Captain:</span> {{ $data['logistics_planning']['team_captain'] ?? 'N/A' }}</div>
                     </div>
                 </td>
                 <td style="width: 33%; padding-right: 1%;">
@@ -196,9 +199,11 @@
                 <td style="width: 33%;">
                     <div class="summary-card bg-gray-100">
                          <div class="text-gray-600 uppercase font-small mb-2">TIMELINE</div>
-                         <div class="mb-1"><span class="font-bold">Departure:</span> {{ !empty($data['logistics_planning']['timeline']['departure_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['departure_time'])->format('H:i') : '--:--' }}</div>
-                         <div class="mb-1"><span class="font-bold">Arrival:</span> {{ !empty($data['logistics_planning']['timeline']['arrival_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['arrival_time'])->format('H:i') : '--:--' }}</div>
-                         <div class="mb-1"><span class="font-bold">Setup:</span> {{ !empty($data['logistics_planning']['timeline']['setup_start_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['setup_start_time'])->format('H:i') : '--:--' }}</div>
+                         <div class="mb-1"><span class="font-bold">Loading:</span> {{ $data['logistics_planning']['timeline']['loading_time'] ?? '--:--' }}</div>
+                         <div class="mb-1"><span class="font-bold">Departure:</span> {{ $data['logistics_planning']['timeline']['departure_time'] ?? '--:--' }}</div>
+                         <div class="mb-1"><span class="font-bold">Expected Arr:</span> {{ !empty($data['logistics_planning']['timeline']['setup_start_time']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['setup_start_time'])->format('d/m/Y') : 'TBC' }}</div>
+                         <div class="mb-1"><span class="font-bold">Setup Time:</span> {{ $data['logistics_planning']['timeline']['setup_start_hour'] ?? '--:--' }} ({{ $data['logistics_planning']['timeline']['setup_duration'] ?? '-' }})</div>
+                         <div class="mb-1"><span class="font-bold">Setdown:</span> {{ !empty($data['logistics_planning']['timeline']['setdown_date']) ? \Carbon\Carbon::parse($data['logistics_planning']['timeline']['setdown_date'])->format('d/m/Y') : 'TBC' }} {{ $data['logistics_planning']['timeline']['setdown_time'] ?? '' }}</div>
                     </div>
                 </td>
             </tr>
@@ -250,10 +255,11 @@
     <table class="data-table">
         <thead>
             <tr>
-                <th style="width: 40%;">Item Description</th>
-                <th style="width: 10%; text-align: center;">Qty</th>
-                <th style="width: 10%; text-align: center;">Unit</th>
-                <th style="width: 15%;">Category</th>
+                <th style="width: 35%;">Item Description</th>
+                <th style="width: 8%; text-align: center;">Qty</th>
+                <th style="width: 12%;">Category</th>
+                <th style="width: 10%; text-align: center;">Returns?</th>
+                <th style="width: 10%; text-align: center;">Type</th>
                 <th style="width: 25%;">Handling / Notes</th>
             </tr>
         </thead>
@@ -261,10 +267,21 @@
             @forelse($data['transport_items'] as $item)
             <tr>
                 <td>{{ $item['name'] }}</td>
-                <td class="text-center font-bold">{{ $item['quantity'] }}</td>
-                <td class="text-center">{{ $item['unit'] }}</td>
+                <td class="text-center font-bold">{{ $item['quantity'] }} {{ $item['unit'] }}</td>
                 <td class="uppercase">{{ $item['main_category'] ?? $item['category'] }}</td>
-                <td>{{ $item['special_handling'] ?? $item['description'] ?? '-' }}</td>
+                <td class="text-center font-bold {{ ($item['is_returnable'] ?? false) ? 'text-blue-600' : 'text-gray-600' }}">
+                    {{ ($item['is_returnable'] ?? false) ? 'YES' : 'NO' }}
+                </td>
+                <td class="text-center uppercase" style="font-size: 7px;">
+                    {{ $item['sub_type'] ?? '-' }}
+                </td>
+                <td>
+                    @if(($item['main_category'] ?? $item['category']) !== 'PRODUCTION')
+                        {{ $item['special_handling'] ?? $item['description'] ?? '-' }}
+                    @else
+                        -
+                    @endif
+                </td>
             </tr>
             @empty
             <tr>

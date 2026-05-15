@@ -18,6 +18,8 @@ class TransportItem extends Model
         'unit',
         'category',
         'main_category',
+        'is_returnable',
+        'sub_type',
         'element_category',
         'source',
         'weight',
@@ -27,6 +29,7 @@ class TransportItem extends Model
 
     protected $casts = [
         'quantity' => 'integer',
+        'is_returnable' => 'boolean',
         'category' => 'string',
         'source' => 'string',
     ];

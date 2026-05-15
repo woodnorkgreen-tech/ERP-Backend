@@ -104,15 +104,23 @@ class LogisticsTaskController extends Controller
             $validated = $request->validate([
                 'vehicle_type' => 'nullable|string|max:100',
                 'vehicle_identification' => 'nullable|string|max:100',
+                'crew_vehicle' => 'nullable|string|max:100',
                 'driver_name' => 'nullable|string|max:100',
                 'driver_contact' => 'nullable|string|max:20',
+                'team_captain' => 'nullable|string|max:100',
+                'prepared_by' => 'nullable|string|max:100',
                 'route.origin' => 'nullable|string|max:255',
                 'route.destination' => 'nullable|string|max:255',
                 'route.distance' => 'nullable|numeric|min:0',
                 'route.travel_time' => 'nullable|string|max:50',
+                'timeline.loading_time' => 'nullable|string|max:20',
                 'timeline.departure_time' => 'nullable|string|max:20',
                 'timeline.arrival_time' => 'nullable|string|max:20',
                 'timeline.setup_start_time' => 'nullable|string|max:20',
+                'timeline.setup_start_hour' => 'nullable|string|max:20',
+                'timeline.setup_duration' => 'nullable|string|max:100',
+                'timeline.setdown_date' => 'nullable|string|max:20',
+                'timeline.setdown_time' => 'nullable|string|max:20',
             ]);
 
             $logisticsTask = $this->logisticsService->saveLogisticsPlanning($taskId, $validated);
@@ -215,13 +223,24 @@ class LogisticsTaskController extends Controller
                 'description' => 'nullable|string|max:1000',
                 'quantity' => 'required|integer|min:1',
                 'unit' => 'required|string|max:50',
-                'category' => 'required|in:production,custom',
+                'category' => 'nullable|in:production,custom',
                 'main_category' => 'nullable|in:PRODUCTION,TOOLS_EQUIPMENTS,STORES,ELECTRICALS,CLIENT_ASSETS',
+                'is_returnable' => 'nullable|boolean',
+                'sub_type' => 'nullable|string|max:50',
                 'element_category' => 'nullable|string|max:100',
                 'source' => 'nullable|string|max:100',
                 'weight' => 'nullable|string|max:50',
                 'special_handling' => 'nullable|string|max:500',
             ]);
+
+            // Set default category if not provided based on main_category
+            if (empty($validated['category'])) {
+                if (isset($validated['main_category']) && $validated['main_category'] === 'PRODUCTION') {
+                    $validated['category'] = 'production';
+                } else {
+                    $validated['category'] = 'custom';
+                }
+            }
 
             \Log::info('[addTransportItem] Validation passed', ['validated' => $validated]);
 
@@ -262,13 +281,24 @@ class LogisticsTaskController extends Controller
                 'description' => 'nullable|string|max:1000',
                 'quantity' => 'sometimes|required|integer|min:1',
                 'unit' => 'sometimes|required|string|max:50',
-                'category' => 'sometimes|required|in:production,custom',
+                'category' => 'nullable|in:production,custom',
                 'main_category' => 'nullable|in:PRODUCTION,TOOLS_EQUIPMENTS,STORES,ELECTRICALS,CLIENT_ASSETS',
+                'is_returnable' => 'nullable|boolean',
+                'sub_type' => 'nullable|string|max:50',
                 'element_category' => 'nullable|string|max:100',
                 'source' => 'nullable|string|max:100',
                 'weight' => 'nullable|string|max:50',
                 'special_handling' => 'nullable|string|max:500',
             ]);
+
+            // Set default category if not provided based on main_category
+            if (isset($validated['main_category']) && empty($validated['category'])) {
+                if ($validated['main_category'] === 'PRODUCTION') {
+                    $validated['category'] = 'production';
+                } else {
+                    $validated['category'] = 'custom';
+                }
+            }
 
             $item = $this->logisticsService->updateTransportItem($itemId, $validated);
 

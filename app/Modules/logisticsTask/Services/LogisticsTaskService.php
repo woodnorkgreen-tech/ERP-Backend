@@ -59,17 +59,24 @@ class LogisticsTaskService
             $planning = [
                 'vehicle_type' => '',
                 'vehicle_identification' => '',
+                'crew_vehicle' => '',
                 'driver_name' => '',
                 'driver_contact' => '',
+                'team_captain' => '',
                 'route' => [
                     'origin' => 'Workshop',
                     'destination' => $logisticsTask->task->enquiry->venue ?? 'TBC',
                     'distance' => null,
                 ],
                 'timeline' => [
+                    'loading_time' => null,
                     'departure_time' => null,
                     'arrival_time' => null,
                     'setup_start_time' => null,
+                    'setup_start_hour' => null,
+                    'setup_duration' => null,
+                    'setdown_date' => null,
+                    'setdown_time' => null,
                 ]
             ];
         } else {
@@ -120,6 +127,8 @@ class LogisticsTaskService
                     'unit' => $item->unit,
                     'category' => $item->category,
                     'main_category' => $item->main_category,
+                    'is_returnable' => $item->is_returnable,
+                    'sub_type' => $item->sub_type,
                     'element_category' => $item->element_category,
                     'source' => $item->source,
                     'weight' => $item->weight,
@@ -225,6 +234,8 @@ class LogisticsTaskService
                 'unit' => $item->unit,
                 'category' => $item->category,
                 'main_category' => $item->main_category,
+                'is_returnable' => $item->is_returnable,
+                'sub_type' => $item->sub_type,
                 'element_category' => $item->element_category,
                 'source' => $item->source,
                 'weight' => $item->weight,
@@ -397,9 +408,8 @@ class LogisticsTaskService
                                 'name' => $element->name, // Update name in case it changed
                                 'description' => $description ?: null,
                                 'element_category' => $element->category,
-                                // We generally don't want to overwrite manual edits to quantity unless requested,
-                                // but for now, let's keep user edits to quantity unless it was 0? 
-                                // Actually, let's just update description and name to be safe.
+                                'is_returnable' => true, // Imported elements are generally returnable
+                                'sub_type' => $element->category === 'hire' ? 'hire' : null,
                             ]);
                             $transportItem = $existingItem;
                             
@@ -409,14 +419,15 @@ class LogisticsTaskService
                             ]);
                         } else {
                             // Create new item
-                             // Default to PRODUCTION for 'production' and 'outsourced'
                             $transportItem = $logisticsTask->transportItems()->create([
                                 'name' => $element->name,
                                 'description' => $description ?: null,
-                                'quantity' => 1, // Default quantity for project element
+                                'quantity' => 1, 
                                 'unit' => 'item',
-                                'category' => 'production', // Internal category
+                                'category' => 'production', 
                                 'main_category' => $mainCategory,
+                                'is_returnable' => true,
+                                'sub_type' => $element->category === 'hire' ? 'hire' : null,
                                 'element_category' => $element->category,
                                 'source' => 'project_element_' . $element->id,
                                 'weight' => null,
@@ -438,6 +449,8 @@ class LogisticsTaskService
                             'unit' => $transportItem->unit,
                             'category' => $transportItem->category,
                             'main_category' => $transportItem->main_category,
+                            'is_returnable' => $transportItem->is_returnable,
+                            'sub_type' => $transportItem->sub_type,
                             'element_category' => $transportItem->element_category,
                             'source' => $transportItem->source,
                             'weight' => $transportItem->weight,
@@ -462,6 +475,59 @@ class LogisticsTaskService
                     'importedCount' => count($importedItems),
                     'taskId' => $taskId
                 ]);
+
+                // --- Part 2: Import from Project Enquiry Deliverables ---
+                if ($task->enquiry && $task->enquiry->project_deliverables) {
+                    $rawDeliverables = $task->enquiry->project_deliverables;
+                    $deliverablesList = [];
+                    
+                    // Try JSON first
+                    $decoded = json_decode($rawDeliverables, true);
+                    if (is_array($decoded)) {
+                        $deliverablesList = $decoded;
+                    } else {
+                        // Fallback to newline separated
+                        $deliverablesList = array_filter(array_map('trim', explode("\n", $rawDeliverables)));
+                    }
+                    
+                    foreach ($deliverablesList as $deliverable) {
+                        $name = is_array($deliverable) ? ($deliverable['name'] ?? $deliverable['title'] ?? null) : $deliverable;
+                        if (!$name) continue;
+                        
+                        // Check for duplicates by name for this source
+                        $sourceKey = 'enquiry_deliverable_' . md5($name);
+                        $existingItem = $logisticsTask->transportItems()
+                            ->where('source', $sourceKey)
+                            ->first();
+                            
+                        if (!$existingItem) {
+                            $transportItem = $logisticsTask->transportItems()->create([
+                                'name' => $name,
+                                'description' => is_array($deliverable) ? ($deliverable['description'] ?? null) : "Imported from Enquiry Deliverables",
+                                'quantity' => is_array($deliverable) ? ($deliverable['quantity'] ?? 1) : 1,
+                                'unit' => is_array($deliverable) ? ($deliverable['unit'] ?? 'item') : 'item',
+                                'category' => 'production',
+                                'main_category' => 'PRODUCTION',
+                                'is_returnable' => true,
+                                'source' => $sourceKey,
+                                'created_by' => auth()->id(),
+                            ]);
+                            
+                            $importedItems[] = [
+                                'id' => $transportItem->id,
+                                'name' => $transportItem->name,
+                                'description' => $transportItem->description,
+                                'quantity' => $transportItem->quantity,
+                                'unit' => $transportItem->unit,
+                                'category' => $transportItem->category,
+                                'main_category' => $transportItem->main_category,
+                                'is_returnable' => $transportItem->is_returnable,
+                                'sub_type' => $transportItem->sub_type,
+                                'source' => $transportItem->source,
+                            ];
+                        }
+                    }
+                }
 
                 return $importedItems;
             } catch (\Exception $e) {
