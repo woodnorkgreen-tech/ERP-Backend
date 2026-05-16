@@ -733,6 +733,66 @@ class EnquiryController extends Controller
     }
 
     /**
+     * Update only the project deliverables/scope
+     */
+    public function updateDeliverables(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'project_scope' => 'present|array',
+        ]);
+
+        if ($validator->fails()) {
+            \Log::error('Deliverables update validation failed', [
+                'enquiry_id' => $enquiry->id,
+                'errors' => $validator->errors()->toArray(),
+                'request_data' => $request->all()
+            ]);
+            
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'received' => $request->all() // For debugging
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $newScope = $request->project_scope;
+
+            $enquiry->update([
+                'project_scope' => $newScope,
+                // Also update the text-based deliverables field for redundancy/legacy compatibility
+                'project_deliverables' => is_array($newScope) ? implode(' | ', $newScope) : $newScope
+            ]);
+
+            // Notification Logic: If a quote task already exists or enquiry is quote_approved
+            $hasQuote = $enquiry->enquiryTasks()->where('type', 'quote')->exists() || $enquiry->quote_approved;
+            
+            if ($hasQuote) {
+                $this->notificationService->sendDeliverablesUpdated(
+                    $enquiry->fresh(),
+                    Auth::user(),
+                    $newScope
+                );
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Deliverables updated successfully',
+                'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department', 'projectOfficer'))
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Failed to update deliverables',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * @OA\Delete(
      *     path="/api/projects/enquiries/{enquiry}",
      *     summary="Delete enquiry",

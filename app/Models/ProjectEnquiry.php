@@ -159,15 +159,6 @@ class ProjectEnquiry extends Model
         return app(\App\Modules\Projects\Services\SequencingService::class)->generateJobNumber($this->workflow_preset_type);
     }
 
-    /**
-     * Get the route key name for this model.
-     * This tells Laravel to use 'enquiry' as the route parameter name
-     * instead of the default 'project_enquiry'.
-     */
-    public function getRouteKeyName()
-    {
-        return 'enquiry';
-    }
 }
 
 // Alias for backward compatibility removed - use ProjectEnquiry directly

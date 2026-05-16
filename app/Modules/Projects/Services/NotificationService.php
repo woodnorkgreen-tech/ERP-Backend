@@ -771,4 +771,51 @@ class NotificationService
             Log::error("Failed to send requisition disbursed notification: " . $e->getMessage());
         }
     }
+
+    /**
+     * Send notification when project deliverables are updated after a quote exists
+     */
+    public function sendDeliverablesUpdated(
+        ProjectEnquiry $enquiry,
+        User $updatedBy,
+        array $newDeliverables
+    ): void {
+        try {
+            // Find Finance/Costing users (Users with 'Accountant', 'Finance', or 'Costing' roles)
+            $financeUsers = User::whereHas('roles', function ($query) {
+                $query->whereIn('name', ['Super Admin', 'Accountant', 'Finance', 'Costing', 'Finance Officer']);
+            })->get();
+
+            foreach ($financeUsers as $recipient) {
+                // Don't notify the person who made the change
+                if ($recipient->id === $updatedBy->id) continue;
+
+                Notification::create([
+                    'user_id' => $recipient->id,
+                    'type' => 'deliverables_updated',
+                    'title' => 'Project Scope Updated',
+                    'message' => "The deliverables for '{$enquiry->title}' (#{$enquiry->enquiry_number}) have been updated by {$updatedBy->name}. A quote revision may be required.",
+                    'notifiable_type' => ProjectEnquiry::class,
+                    'notifiable_id' => $enquiry->id,
+                    'data' => [
+                        'enquiry_id' => $enquiry->id,
+                        'enquiry_title' => $enquiry->title,
+                        'enquiry_number' => $enquiry->enquiry_number,
+                        'job_number' => $enquiry->job_number,
+                        'updated_by' => $updatedBy->name,
+                        'deliverables_count' => count($newDeliverables),
+                        'timestamp' => now()->toISOString(),
+                    ],
+                ]);
+            }
+
+            Log::info("Deliverables update notification sent to Finance", [
+                'enquiry_id' => $enquiry->id,
+                'updated_by' => $updatedBy->id,
+                'recipients_count' => $financeUsers->count()
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Failed to send deliverables update notification: " . $e->getMessage());
+        }
+    }
 }

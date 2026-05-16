@@ -22,6 +22,8 @@ class EnquiryResource extends JsonResource
             'expected_delivery_date' => $this->expected_delivery_date ? $this->expected_delivery_date->format('Y-m-d') : null,
             'estimated_budget' => (float) $this->estimated_budget,
             'venue' => $this->venue,
+            'project_scope' => $this->project_scope,
+            'project_deliverables' => $this->project_deliverables,
             
             // Progress Metadata
             'progress_percentage' => $this->calculateProgressPercentage(),

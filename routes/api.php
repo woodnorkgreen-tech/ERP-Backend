@@ -589,6 +589,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('enquiries/{enquiry}', [EnquiryController::class, 'update']);
         Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
+        Route::put('enquiries/{enquiry}/deliverables', [EnquiryController::class, 'updateDeliverables']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
         Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
         Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
