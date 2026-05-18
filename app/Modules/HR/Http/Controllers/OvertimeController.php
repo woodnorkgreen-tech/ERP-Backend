@@ -387,7 +387,7 @@ class OvertimeController extends Controller
         $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
 
         $query = \App\Modules\HR\Models\LedgerEntry::with([
-            'employee',
+            'employee.department',
             'technicalLabour',
             'otEntry.submitter',
             'compensation',
