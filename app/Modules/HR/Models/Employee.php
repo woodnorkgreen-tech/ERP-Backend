@@ -38,6 +38,7 @@ class Employee extends Model
         'employment_type',
         'manager_id',
         'address',
+        'date_of_birth',
 
         'emergency_contact',
         'performance_rating',
@@ -48,6 +49,7 @@ class Employee extends Model
     protected $casts = [
         'hire_date' => 'date',
         'probation_end_date' => 'date',
+        'date_of_birth' => 'date',
         'is_on_probation' => 'boolean',
         'contract_end_date' => 'date',
         'emergency_contact' => 'array',
