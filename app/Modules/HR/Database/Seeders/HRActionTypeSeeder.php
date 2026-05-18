@@ -68,6 +68,49 @@ class HRActionTypeSeeder extends Seeder
                 'requires_approval' => false,
                 'is_active' => true,
             ],
+            [
+                'name' => 'Suspension',
+                'code' => 'SUSPENSION',
+                'description' => 'Temporary suspension from duties.',
+                'fields_schema' => [
+                    ['name' => 'status', 'label' => 'New Status', 'type' => 'text', 'required' => true],
+                    ['name' => 'suspension_duration', 'label' => 'Duration (Days)', 'type' => 'number', 'required' => true],
+                    ['name' => 'details', 'label' => 'Reason for Suspension', 'type' => 'textarea', 'required' => true],
+                ],
+                'requires_approval' => false,
+                'is_active' => true,
+            ],
+            [
+                'name' => 'Demotion',
+                'code' => 'DEMOTION',
+                'description' => 'Moving an employee to a lower position or rank.',
+                'fields_schema' => [
+                    ['name' => 'position', 'label' => 'New Job Title', 'type' => 'text', 'required' => true],
+                    ['name' => 'salary', 'label' => 'New Base Salary', 'type' => 'number', 'required' => true],
+                    ['name' => 'details', 'label' => 'Reason', 'type' => 'textarea', 'required' => true],
+                ],
+                'requires_approval' => false,
+                'is_active' => true,
+            ],
+            [
+                'name' => 'Commendation / Award',
+                'code' => 'COMMENDATION',
+                'description' => 'Formal recognition of excellent performance.',
+                'fields_schema' => [
+                    ['name' => 'award_name', 'label' => 'Title of Commendation', 'type' => 'text', 'required' => true],
+                    ['name' => 'details', 'label' => 'Details', 'type' => 'textarea', 'required' => true],
+                ],
+                'requires_approval' => false,
+                'is_active' => true,
+            ],
+            [
+                'name' => 'Profile Update',
+                'code' => 'PROFILE_UPDATE',
+                'description' => 'Employee self-service profile update request.',
+                'fields_schema' => null,
+                'requires_approval' => true,
+                'is_active' => true,
+            ],
         ];
 
         foreach ($types as $type) {
