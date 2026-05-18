@@ -39,7 +39,8 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
             Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
             Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
-            Permissions::HR_VIEW_EMPLOYEES, Permissions::ADMIN_ACCESS, Permissions::DASHBOARD_ADMIN
+            Permissions::HR_VIEW_EMPLOYEES, Permissions::ADMIN_ACCESS, Permissions::DASHBOARD_ADMIN,
+            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE
         ]);
 
         $hrRole = Role::firstOrCreate(['name' => 'HR'], ['description' => 'Human Resources access']);
@@ -49,7 +50,9 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::DEPARTMENT_READ, Permissions::HR_VIEW_EMPLOYEES, Permissions::DASHBOARD_HR,
             Permissions::LEAVE_TYPE_CREATE, Permissions::LEAVE_TYPE_READ, Permissions::LEAVE_TYPE_UPDATE,
             Permissions::LEAVE_TYPE_DELETE, Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ,
-            Permissions::LEAVE_REQUEST_UPDATE, Permissions::LEAVE_REQUEST_APPROVE, Permissions::LEAVE_REQUEST_DELETE
+            Permissions::LEAVE_REQUEST_UPDATE, Permissions::LEAVE_REQUEST_APPROVE, Permissions::LEAVE_REQUEST_DELETE,
+            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::OVERTIME_MANAGE_FLAGS,
+            Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE
         ]);
 
         $clientServiceRole = Role::firstOrCreate(['name' => 'Client Service'], ['description' => 'Client acquisition and enquiry management']);
@@ -79,14 +82,16 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
             Permissions::FINANCE_PETTY_CASH_CREATE,
             Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
-            Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL
+            Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
+            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_SUPERVISOR, Permissions::COMPENSATION_READ
         ]);
 
         $employeeRole = Role::firstOrCreate(['name' => 'Employee'], ['description' => 'Basic employee access']);
         $employeeRole->givePermissionTo([
             Permissions::USER_READ, Permissions::PROJECT_READ, Permissions::TASK_READ,
             Permissions::TASK_UPDATE, Permissions::DASHBOARD_VIEW,
-            Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ, Permissions::LEAVE_REQUEST_UPDATE
+            Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ, Permissions::LEAVE_REQUEST_UPDATE,
+            Permissions::OVERTIME_CREATE, Permissions::OVERTIME_READ, Permissions::COMPENSATION_CREATE, Permissions::COMPENSATION_READ
         ]);
 
         // Finance Roles

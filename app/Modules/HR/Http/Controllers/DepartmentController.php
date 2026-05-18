@@ -49,7 +49,31 @@ class DepartmentController
             }
         }
 
-        $departments = $query->paginate($request->get('per_page', 15));
+        // By default, if no pagination params are sent, return all departments for dropdowns
+        if (!$request->has('per_page') && !$request->has('page')) {
+            $departments = $query->get();
+            $departments->transform(function ($department) {
+                $department->user_count = $department->employees->count();
+                return $department;
+            });
+            return response()->json([
+                'data' => $departments
+            ]);
+        }
+
+        $perPage = $request->get('per_page');
+        if ($perPage === 'all') {
+            $departments = $query->get();
+            $departments->transform(function ($department) {
+                $department->user_count = $department->employees->count();
+                return $department;
+            });
+            return response()->json([
+                'data' => $departments
+            ]);
+        }
+
+        $departments = $query->paginate($perPage ?? 1000);
 
         // Add user_count to each department
         $departments->getCollection()->transform(function ($department) {

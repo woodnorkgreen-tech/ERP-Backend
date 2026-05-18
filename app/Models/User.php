@@ -15,6 +15,7 @@ class User extends Authenticatable
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable, HasRoles;
       protected $with = ['roles'];
+      protected $appends = ['is_manager', 'is_dept_lead'];
 
     protected $guard_name = 'web';
 
@@ -60,6 +61,19 @@ class User extends Authenticatable
     }
 
     /**
+     * Virtual attributes for hierarchy awareness.
+     */
+    public function getIsManagerAttribute(): bool
+    {
+        return $this->isManager();
+    }
+
+    public function getIsDeptLeadAttribute(): bool
+    {
+        return $this->isDeptLead();
+    }
+
+    /**
      * Get the department that the user belongs to.
      */
     public function department(): BelongsTo
@@ -92,25 +106,43 @@ class User extends Authenticatable
     }
 
     /**
-     * Get user's accessible departments based on role.
+     * Get user's accessible departments based on role and leadership.
      */
     public function getAccessibleDepartments()
     {
-        if ($this->hasRole('Super Admin')) {
+        if ($this->hasRole(['Super Admin', 'HR Admin', 'HR'])) {
             return \App\Modules\HR\Models\Department::all();
         }
 
-        if ($this->hasRole('Admin')) {
-            // Admin doesn't access departments directly, but can see all for admin purposes
-            return collect();
+        $managedDepartmentIds = \App\Modules\HR\Models\Department::where('manager_id', $this->employee_id)->pluck('id');
+        
+        if ($managedDepartmentIds->isNotEmpty()) {
+            return \App\Modules\HR\Models\Department::whereIn('id', $managedDepartmentIds->merge([$this->department_id])->unique())->get();
         }
 
-        // Regular users can only access their own department
         if ($this->department) {
             return collect([$this->department]);
         }
 
         return collect();
+    }
+
+    /**
+     * Check if user is a Departmental Lead.
+     */
+    public function isDeptLead(): bool
+    {
+        if (!$this->employee_id) return false;
+        return \App\Modules\HR\Models\Department::where('manager_id', $this->employee_id)->exists();
+    }
+
+    /**
+     * Check if user is a Manager (has direct reports).
+     */
+    public function isManager(): bool
+    {
+        if (!$this->employee_id) return false;
+        return \App\Modules\HR\Models\Employee::where('manager_id', $this->employee_id)->exists();
     }
 
     /**
@@ -132,13 +164,15 @@ class User extends Authenticatable
     {
         $permissions = [
             'can_access_admin' => $this->hasRole(['Super Admin', 'Admin']),
-            'can_access_hr' => $this->hasRole(['Super Admin', 'Manager', 'Employee']),
+            'can_access_hr' => $this->hasRole(['Super Admin', 'Manager', 'Employee', 'HR Admin', 'HR']),
             'can_access_creatives' => $this->hasRole(['Super Admin', 'Designer']) ||
-                                     ($this->department && strtolower($this->department->name) === 'creatives'),
+                                      ($this->department && strtolower($this->department->name) === 'creatives'),
             'can_manage_users' => $this->can('user.create') || $this->can('user.update'),
             'can_manage_employees' => $this->can('employee.read'),
             'can_manage_departments' => $this->can('department.read'),
             'can_view_reports' => $this->can('admin.access'),
+            'is_manager' => $this->isManager(),
+            'is_dept_lead' => $this->isDeptLead(),
             'accessible_departments' => $this->getAccessibleDepartments()->pluck('id')->toArray(),
             'user_department' => $this->department ? [
                 'id' => $this->department->id,

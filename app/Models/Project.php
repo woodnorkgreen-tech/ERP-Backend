@@ -42,8 +42,13 @@ class Project extends Model
         return $this->hasMany(\App\Modules\Projects\Models\EnquiryTask::class, 'project_enquiry_id', 'enquiry_id');
     }
 
-    public function workOrders(): HasMany
+    public function workOrders()
     {
         return $this->hasMany(\App\Modules\Production\Models\WorkOrder::class, 'project_id');
+    }
+
+    public function otEntries()
+    {
+        return $this->hasMany(\App\Modules\HR\Models\OTEntry::class, 'project_id');
     }
 }

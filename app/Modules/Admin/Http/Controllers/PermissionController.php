@@ -30,7 +30,7 @@ class PermissionController
                 return [
                     'id' => $permission->id,
                     'name' => $permission->name,
-                    'description' => $permission->name, // Use name as description for now
+                    'description' => \App\Constants\Permissions::getLabel($permission->name),
                     'created_at' => $permission->created_at,
                     'updated_at' => $permission->updated_at,
                 ];
@@ -47,7 +47,7 @@ class PermissionController
             'data' => [
                 'id' => $permission->id,
                 'name' => $permission->name,
-                'description' => $permission->name,
+                'description' => \App\Constants\Permissions::getLabel($permission->name),
                 'created_at' => $permission->created_at,
                 'updated_at' => $permission->updated_at,
             ]

@@ -28,7 +28,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        Schema::defaultStringLength(191);
+        \Illuminate\Support\Facades\Schema::defaultStringLength(191);
+
+        // Super Admin Bypass: Grant unrestricted access to Super Administrators
+        \Illuminate\Support\Facades\Gate::before(function ($user, $ability) {
+            return $user->hasRole('Super Admin') ? true : null;
+        });
 
         // Disable foreign key checks during migrations in local environment
         if (app()->environment('local') && app()->runningInConsole()) {

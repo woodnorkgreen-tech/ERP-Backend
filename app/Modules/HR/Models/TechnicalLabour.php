@@ -28,6 +28,45 @@ class TechnicalLabour extends Model
         'rating' => 'decimal:2',
     ];
 
+    protected $appends = [
+        'name',
+        'ot_balance',
+    ];
+
+    public function getNameAttribute(): string
+    {
+        return $this->full_name;
+    }
+
+    /**
+     * Get overtime entries for the technical labour.
+     */
+    public function otEntries()
+    {
+        return $this->hasMany(OTEntry::class);
+    }
+
+    /**
+     * Get ledger entries for the technical labour.
+     */
+    public function ledgerEntries()
+    {
+        return $this->hasMany(LedgerEntry::class);
+    }
+
+    /**
+     * Get the current OT balance from the latest ledger entry.
+     */
+    public function getOtBalanceAttribute(): float
+    {
+        try {
+            $latest = $this->ledgerEntries()->latest('occurred_at')->first();
+            return $latest ? (float) $latest->balance_after : 0.0;
+        } catch (\Exception $e) {
+            return 0.0;
+        }
+    }
+
     /**
      * Scope to filter active technical labour.
      */

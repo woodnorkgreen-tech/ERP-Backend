@@ -290,4 +290,27 @@ class EmployeeController
 
         return Storage::disk('public')->response($employee->profile_photo_path);
     }
+    /**
+     * Get a compact list of employees for dropdowns.
+     */
+    public function compact(Request $request): JsonResponse
+    {
+        $employees = Employee::query()
+            ->accessibleByUser()
+            ->where('status', 'active')
+            ->select(['id', 'employee_id', 'first_name', 'last_name', 'department_id', 'manager_id'])
+            ->get()
+            ->map(function ($emp) {
+                return [
+                    'id' => $emp->id,
+                    'employee_id' => $emp->id, // Frontend uses DB ID for balance fetch usually
+                    'name' => "{$emp->first_name} {$emp->last_name}",
+                    'department_id' => $emp->department_id,
+                    'manager_id' => $emp->manager_id,
+                    'ot_balance' => $emp->ot_balance
+                ];
+            });
+
+        return response()->json($employees);
+    }
 }

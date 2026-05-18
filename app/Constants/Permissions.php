@@ -128,6 +128,16 @@ class Permissions
     const HR_CREATE_POSITION = 'hr.create_position';
     const HR_MANAGE_ATTENDANCE = 'hr.manage_attendance';
 
+    const OVERTIME_CREATE = 'hr.overtime.create';
+    const OVERTIME_READ = 'hr.overtime.read';
+    const OVERTIME_APPROVE_SUPERVISOR = 'hr.overtime.approve_supervisor';
+    const OVERTIME_APPROVE_HR = 'hr.overtime.approve_hr';
+    const OVERTIME_MANAGE_FLAGS = 'hr.overtime.manage_flags';
+
+    const COMPENSATION_CREATE = 'hr.compensation.create';
+    const COMPENSATION_READ = 'hr.compensation.read';
+    const COMPENSATION_APPROVE = 'hr.compensation.approve';
+
     // ===========================================
     // CREATIVES/DESIGN PERMISSIONS
     // ===========================================
@@ -256,6 +266,8 @@ class Permissions
 
             // HR Permissions
             self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
+            self::OVERTIME_CREATE, self::OVERTIME_READ, self::OVERTIME_APPROVE_SUPERVISOR, self::OVERTIME_APPROVE_HR,
+            self::OVERTIME_MANAGE_FLAGS, self::COMPENSATION_CREATE, self::COMPENSATION_READ, self::COMPENSATION_APPROVE,
 
             // Creatives Permissions
             self::CREATIVES_VIEW, self::CREATIVES_DESIGN_CREATE, self::CREATIVES_DESIGN_UPDATE,
@@ -287,6 +299,7 @@ class Permissions
             self::LOGISTICS_FLEET_MANAGE, self::LOGISTICS_ROUTES_MANAGE, self::LOGISTICS_TRACKING_VIEW,
         ];
     }
+
 
     /**
      * Get permissions grouped by module
@@ -341,6 +354,8 @@ class Permissions
             ],
             'hr' => [
                 self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
+                self::OVERTIME_CREATE, self::OVERTIME_READ, self::OVERTIME_APPROVE_SUPERVISOR, self::OVERTIME_APPROVE_HR,
+                self::OVERTIME_MANAGE_FLAGS, self::COMPENSATION_CREATE, self::COMPENSATION_READ, self::COMPENSATION_APPROVE,
             ],
             'creatives' => [
                 self::CREATIVES_VIEW, self::CREATIVES_DESIGN_CREATE, self::CREATIVES_DESIGN_UPDATE,
@@ -372,5 +387,82 @@ class Permissions
                 self::LOGISTICS_FLEET_MANAGE, self::LOGISTICS_ROUTES_MANAGE, self::LOGISTICS_TRACKING_VIEW,
             ],
         ];
+    }
+
+    /**
+     * Get descriptive labels for permissions
+     */
+    public static function getLabel(string $permission): string
+    {
+        $labels = [
+            // User Management
+            self::USER_CREATE => 'Create New User Accounts',
+            self::USER_READ => 'View User Profiles',
+            self::USER_UPDATE => 'Edit User Information',
+            self::USER_DELETE => 'Permanently Delete Users',
+            self::USER_ASSIGN_ROLE => 'Assign/Revoke System Roles',
+            self::USER_ASSIGN_DEPARTMENT => 'Assign Users to Departments',
+            self::USER_ACTIVATE => 'Activate Suspended Accounts',
+            self::USER_DEACTIVATE => 'Suspend Active Accounts',
+
+            // Role Management
+            self::ROLE_CREATE => 'Define New Clearance Levels',
+            self::ROLE_READ => 'View Clearance Protocols',
+            self::ROLE_UPDATE => 'Modify Role Clearance',
+            self::ROLE_DELETE => 'Purge Access Roles',
+            self::ROLE_ASSIGN_PERMISSION => 'Map Granular Permissions to Roles',
+
+            // HR / Employee
+            self::EMPLOYEE_CREATE => 'Onboard New Employees',
+            self::EMPLOYEE_READ => 'View Employee HR Data',
+            self::EMPLOYEE_UPDATE => 'Update Personnel Records',
+            self::EMPLOYEE_DELETE => 'Terminate/Delete Personnel',
+            
+            // Leave
+            self::LEAVE_TYPE_CREATE => 'Define Leave Categories',
+            self::LEAVE_TYPE_READ => 'View Leave Policies',
+            self::LEAVE_TYPE_UPDATE => 'Modify Leave Entitlements',
+            self::LEAVE_TYPE_DELETE => 'Delete Leave Categories',
+            self::LEAVE_REQUEST_CREATE => 'Submit Time-Off Requests',
+            self::LEAVE_REQUEST_READ => 'View Departmental Leave',
+            self::LEAVE_REQUEST_UPDATE => 'Modify Pending Requests',
+            self::LEAVE_REQUEST_APPROVE => 'Final Approval for Leave',
+            self::LEAVE_REQUEST_REJECT => 'Deny Leave Requests',
+            self::LEAVE_BALANCE_VIEW => 'Audit Leave Balances',
+
+            // Overtime
+            self::OVERTIME_CREATE => 'Log Overtime Hours',
+            self::OVERTIME_READ => 'View Overtime History',
+            self::OVERTIME_APPROVE_SUPERVISOR => 'Supervisor-Level OT Approval',
+            self::OVERTIME_APPROVE_HR => 'HR-Level Final OT Approval',
+            self::OVERTIME_MANAGE_FLAGS => 'Audit & Resolve OT Risk Flags',
+
+            // Compensation
+            self::COMPENSATION_CREATE => 'Request Compensatory Time-Off',
+            self::COMPENSATION_READ => 'View Compensation Requests',
+            self::COMPENSATION_APPROVE => 'Approve/Deduct Comp Time',
+
+            // Projects
+            self::PROJECT_CREATE => 'Initialize New Projects',
+            self::PROJECT_READ => 'Access Project Command Center',
+            self::PROJECT_UPDATE => 'Modify Project Parameters',
+            self::PROJECT_DELETE => 'Archive/Delete Projects',
+            self::PROJECT_ASSIGN_USERS => 'Allocate Staff to Projects',
+
+            // Finance
+            self::FINANCE_VIEW => 'Access Finance Module',
+            self::FINANCE_BUDGET_READ => 'Monitor Project Budgets',
+            self::FINANCE_BUDGET_UPDATE => 'Adjust Budget Allocations',
+            self::FINANCE_QUOTE_APPROVE => 'Authorize Project Quotes',
+            self::FINANCE_INVOICE_CREATE => 'Generate Client Invoices',
+            self::FINANCE_PETTY_CASH_ADMIN => 'Full Petty Cash Administration',
+
+            // Admin
+            self::ADMIN_ACCESS => 'Access System Control Panel',
+            self::ADMIN_SETTINGS => 'Modify Global System Config',
+            self::ADMIN_LOGS_VIEW => 'Audit System Activity Logs',
+        ];
+
+        return $labels[$permission] ?? ucwords(str_replace(['.', '_'], ' ', $permission));
     }
 }

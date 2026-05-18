@@ -18,6 +18,8 @@ use App\Modules\HR\Http\Controllers\DisciplineController;
 use App\Modules\HR\Http\Controllers\RecruitmentController;
 use App\Modules\HR\Http\Controllers\InterviewController;
 use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
+use App\Modules\HR\Http\Controllers\OvertimeController;
+use App\Modules\HR\Http\Controllers\CompensatoryLeaveController;
 use App\Constants\Permissions;
 
 // Unprotected HR Routes (public recruitment only)
@@ -38,6 +40,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('hr')->group(function () {
         // Employee management
         Route::get('employees/profile', [EmployeeController::class, 'profile']);
+        Route::get('employees/compact', [EmployeeController::class, 'compact']);
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'uploadPhoto']);
 
         Route::apiResource('employees', EmployeeController::class)->middleware([
@@ -163,6 +166,40 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::put('handovers/{handover}', [LeaveHandoverController::class, 'update']);
             Route::patch('handovers/{handover}', [LeaveHandoverController::class, 'update']);
             Route::delete('handovers/{handover}', [LeaveHandoverController::class, 'destroy']);
+        });
+
+        // Overtime Tracking
+        Route::prefix('overtime')->group(function () {
+            Route::get('/', [OvertimeController::class, 'index']);
+            Route::get('projects', [OvertimeController::class, 'projects']);
+            Route::post('/', [OvertimeController::class, 'store']);
+            Route::post('bulk', [OvertimeController::class, 'bulkStore']);
+            Route::post('{entry}/submit', [OvertimeController::class, 'submit']);
+            Route::post('{entry}/supervisor-approve', [OvertimeController::class, 'supervisorApprove']);
+            Route::post('{entry}/hr-approve', [OvertimeController::class, 'hrApprove']);
+            Route::post('{entry}/reject', [OvertimeController::class, 'reject']);
+            Route::post('{entry}/reopen', [OvertimeController::class, 'reopen']);
+            Route::post('reset-system', [OvertimeController::class, 'resetSystem']);
+            Route::delete('{id}', [OvertimeController::class, 'destroy']);
+            Route::get('balance/{type}/{id}', [OvertimeController::class, 'balance']);
+            Route::get('ledger', [OvertimeController::class, 'ledger']);
+
+            // Reports
+            Route::get('reports/ledger-audit', [\App\Modules\HR\Http\Controllers\OvertimeReportController::class, 'downloadLedgerAudit']);
+            Route::get('reports/fatigue-matrix', [\App\Modules\HR\Http\Controllers\OvertimeReportController::class, 'downloadFatigueMatrix']);
+            Route::get('reports/project-allocation', [\App\Modules\HR\Http\Controllers\OvertimeReportController::class, 'downloadProjectAllocation']);
+            Route::get('reports/technical-pool-analysis', [\App\Modules\HR\Http\Controllers\OvertimeReportController::class, 'downloadTechnicalPoolAnalysis']);
+            Route::get('reports/personal-statement/{type?}/{id?}', [\App\Modules\HR\Http\Controllers\OvertimeReportController::class, 'downloadPersonalStatement']);
+        });
+
+        // Compensatory Leave
+        Route::prefix('compensations')->group(function () {
+            Route::get('/', [CompensatoryLeaveController::class, 'index']);
+            Route::post('/', [CompensatoryLeaveController::class, 'store']);
+            Route::post('{compensation}/supervisor-approve', [CompensatoryLeaveController::class, 'supervisorApprove']);
+            Route::post('{compensation}/hr-approve', [CompensatoryLeaveController::class, 'hrApprove']);
+            Route::post('{compensation}/reject', [CompensatoryLeaveController::class, 'reject']);
+            Route::delete('{id}', [CompensatoryLeaveController::class, 'destroy']);
         });
 
         // Employee Actions (HR directives: promotions, transfers, warnings, etc.)

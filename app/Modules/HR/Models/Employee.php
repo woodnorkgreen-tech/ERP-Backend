@@ -60,6 +60,7 @@ class Employee extends Model
         'name',
         'is_active',
         'profile_photo_url',
+        'ot_balance',
     ];
 
     /**
@@ -162,13 +163,25 @@ class Employee extends Model
             return $query;
         }
 
-        // Admin can see all employees for admin purposes
-        if ($user->hasRole('Admin')) {
+        // Admin / HR / Project Officers can see all employees
+        if ($user->hasRole(['Admin', 'HR', 'HR Admin', 'Project Officer', 'Project Manager'])) {
             return $query;
         }
 
-        // Managers and Employees can only see employees in their department
-        return $query->where('department_id', $user->department_id);
+        // Managers and Department Leads
+        $managedDepartmentIds = \App\Modules\HR\Models\Department::where('manager_id', $user->employee_id)->pluck('id')->toArray();
+        if ($user->department_id) {
+            $managedDepartmentIds[] = $user->department_id;
+        }
+
+        return $query->where(function($q) use ($managedDepartmentIds, $user) {
+            if (!empty($managedDepartmentIds)) {
+                $q->whereIn('department_id', array_unique($managedDepartmentIds));
+            }
+            if ($user->employee_id) {
+                $q->orWhere('manager_id', $user->employee_id);
+            }
+        });
     }
 
     /**
@@ -188,12 +201,26 @@ class Employee extends Model
         }
 
         // Admin has access to all for admin purposes
-        if ($user->hasRole('Admin')) {
+        if ($user->hasRole(['Admin', 'HR', 'HR Admin'])) {
             return true;
         }
 
-        // Check if employee is in user's department
-        return $this->department_id === $user->department_id;
+        // Check if employee is in user's department or managed departments
+        $managedDepartmentIds = \App\Modules\HR\Models\Department::where('manager_id', $user->employee_id)->pluck('id')->toArray();
+        if ($user->department_id) {
+            $managedDepartmentIds[] = $user->department_id;
+        }
+
+        if (in_array($this->department_id, $managedDepartmentIds)) {
+            return true;
+        }
+
+        // Check if employee is a direct report
+        if ($user->employee_id && $this->manager_id === $user->employee_id) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -235,5 +262,42 @@ class Employee extends Model
     public function actions(): HasMany
     {
         return $this->hasMany(HRAction::class);
+    }
+
+    /**
+     * Get overtime entries for the employee.
+     */
+    public function otEntries(): HasMany
+    {
+        return $this->hasMany(OTEntry::class);
+    }
+
+    /**
+     * Get ledger entries for the employee.
+     */
+    public function ledgerEntries(): HasMany
+    {
+        return $this->hasMany(LedgerEntry::class);
+    }
+
+    /**
+     * Get compensations for the employee.
+     */
+    public function compensations(): HasMany
+    {
+        return $this->hasMany(Compensation::class);
+    }
+
+    /**
+     * Get the current OT balance from the latest ledger entry.
+     */
+    public function getOtBalanceAttribute(): float
+    {
+        try {
+            $latest = $this->ledgerEntries()->latest('occurred_at')->first();
+            return $latest ? (float) $latest->balance_after : 0.0;
+        } catch (\Exception $e) {
+            return 0.0;
+        }
     }
 }
