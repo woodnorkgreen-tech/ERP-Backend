@@ -103,14 +103,6 @@ class HRActionTypeSeeder extends Seeder
                 'requires_approval' => false,
                 'is_active' => true,
             ],
-            [
-                'name' => 'Profile Update',
-                'code' => 'PROFILE_UPDATE',
-                'description' => 'Employee self-service profile update request.',
-                'fields_schema' => null,
-                'requires_approval' => true,
-                'is_active' => true,
-            ],
         ];
 
         foreach ($types as $type) {

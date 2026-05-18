@@ -120,71 +120,7 @@ class HRActionController
         });
     }
 
-    /**
-     * Employee self-service: request a profile update.
-     */
-    public function requestProfileUpdate(Request $request): JsonResponse
-    {
-        $employee = auth()->user()->employee; 
-        
-        if (!$employee) {
-            return response()->json(['message' => 'Profile not found'], 404);
-        }
 
-        $validator = Validator::make($request->all(), [
-            'new_data' => 'required|array',
-            'reason' => 'nullable|string',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        // Only allow specific safe fields
-        $allowedFields = [
-            'first_name', 'last_name', 'date_of_birth',
-            'id_number', 'kra_pin', 'nssf_id', 'nhif_id',
-            'phone', 'email', 'address',
-            'bank_name', 'bank_branch', 'bank_code', 'account_number', 'payment_method',
-            'emergency_name', 'emergency_relationship', 'emergency_phone'
-        ];
-
-        $newData = [];
-        foreach ($allowedFields as $field) {
-            if (array_key_exists($field, $request->new_data)) {
-                $newData[$field] = $request->new_data[$field];
-            }
-        }
-
-        // Transform flat emergency fields to the expected JSON array structure
-        if (array_key_exists('emergency_name', $newData) || array_key_exists('emergency_relationship', $newData) || array_key_exists('emergency_phone', $newData)) {
-            $newData['emergency_contact'] = [
-                'name' => $newData['emergency_name'] ?? null,
-                'relationship' => $newData['emergency_relationship'] ?? null,
-                'phone' => $newData['emergency_phone'] ?? null,
-            ];
-            unset($newData['emergency_name'], $newData['emergency_relationship'], $newData['emergency_phone']);
-        }
-
-        $actionType = HRActionType::where('code', 'PROFILE_UPDATE')->first();
-
-        $action = HRAction::create([
-            'employee_id' => $employee->id,
-            'action_type_id' => $actionType->id,
-            'action_type' => $actionType->code,
-            'previous_data' => $employee->toArray(),
-            'new_data' => $newData,
-            'effective_date' => now(),
-            'reason' => $request->reason ?? 'Profile update requested by employee',
-            'status' => 'pending_approval',
-            'recorded_by' => auth()->id(),
-        ]);
-
-        return response()->json([
-            'message' => 'Profile update request submitted for approval',
-            'data' => $action
-        ], 201);
-    }
 
     /**
      * HR: Approve a pending profile update or future-dated action.
@@ -198,11 +134,8 @@ class HRActionController
         }
 
         return DB::transaction(function () use ($action) {
-            // Apply the new data to the employee if it's a profile update
-            if ($action->type && $action->type->code === 'PROFILE_UPDATE') {
-                $action->employee->update($action->new_data);
-            } elseif ($action->status === 'pending_execution') {
-                 // For future dated actions that are now being forced/approved
+            // For future dated actions that are now being forced/approved
+            if ($action->status === 'pending_execution') {
                  $action->employee->update($action->new_data);
             }
 

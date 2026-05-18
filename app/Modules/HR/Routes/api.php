@@ -207,7 +207,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('action-types', [HRActionController::class, 'actionTypes']);
         Route::post('actions', [HRActionController::class, 'store']);
         Route::post('actions/{id}/approve', [HRActionController::class, 'approveAction']);
-        Route::post('profile/update-request', [HRActionController::class, 'requestProfileUpdate']);
+
+        // Profile Updates (Employee Self-Service)
+        Route::post('profile-updates', [\App\Modules\HR\Http\Controllers\SelfServiceController::class, 'updateProfile']);
+        Route::get('profile-updates', [\App\Modules\HR\Http\Controllers\ProfileUpdateApprovalController::class, 'index']);
+        Route::post('profile-updates/{id}/approve', [\App\Modules\HR\Http\Controllers\ProfileUpdateApprovalController::class, 'approve']);
+        Route::post('profile-updates/{id}/reject', [\App\Modules\HR\Http\Controllers\ProfileUpdateApprovalController::class, 'reject']);
 
         // Employee Salary History
         Route::get('employees/{employee}/salary-history', [PayrollRunController::class, 'salaryHistory']);
