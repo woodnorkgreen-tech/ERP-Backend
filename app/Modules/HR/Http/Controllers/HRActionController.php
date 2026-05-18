@@ -140,6 +140,32 @@ class HRActionController
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
+        // Only allow specific safe fields
+        $allowedFields = [
+            'first_name', 'last_name', 'date_of_birth',
+            'id_number', 'kra_pin', 'nssf_id', 'nhif_id',
+            'phone', 'email', 'address',
+            'bank_name', 'bank_branch', 'bank_code', 'account_number', 'payment_method',
+            'emergency_name', 'emergency_relationship', 'emergency_phone'
+        ];
+
+        $newData = [];
+        foreach ($allowedFields as $field) {
+            if (array_key_exists($field, $request->new_data)) {
+                $newData[$field] = $request->new_data[$field];
+            }
+        }
+
+        // Transform flat emergency fields to the expected JSON array structure
+        if (array_key_exists('emergency_name', $newData) || array_key_exists('emergency_relationship', $newData) || array_key_exists('emergency_phone', $newData)) {
+            $newData['emergency_contact'] = [
+                'name' => $newData['emergency_name'] ?? null,
+                'relationship' => $newData['emergency_relationship'] ?? null,
+                'phone' => $newData['emergency_phone'] ?? null,
+            ];
+            unset($newData['emergency_name'], $newData['emergency_relationship'], $newData['emergency_phone']);
+        }
+
         $actionType = HRActionType::where('code', 'PROFILE_UPDATE')->first();
 
         $action = HRAction::create([
@@ -147,7 +173,7 @@ class HRActionController
             'action_type_id' => $actionType->id,
             'action_type' => $actionType->code,
             'previous_data' => $employee->toArray(),
-            'new_data' => $request->new_data,
+            'new_data' => $newData,
             'effective_date' => now(),
             'reason' => $request->reason ?? 'Profile update requested by employee',
             'status' => 'pending_approval',
