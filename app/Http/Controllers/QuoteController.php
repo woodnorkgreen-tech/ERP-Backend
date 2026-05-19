@@ -1471,10 +1471,20 @@ class QuoteController extends Controller
             \Log::info("Starting saveApproval logic for task {$taskId}");
             
             // Find the Approval Task first to get the enquiry ID
-            $approvalTask = EnquiryTask::find($taskId);
+            $approvalTask = EnquiryTask::with('enquiry')->find($taskId);
             if (!$approvalTask) {
                 \Log::error("Approval task {$taskId} not found");
                 return response()->json(['message' => 'Approval task not found'], 404);
+            }
+
+            // Enforce that quote cannot be approved until a Job Number has been generated
+            if ($request->approval_status === 'approved') {
+                $enquiry = $approvalTask->enquiry;
+                if (!$enquiry || !$enquiry->job_number) {
+                    return response()->json([
+                        'message' => 'Cannot approve quote. Please activate the project first to generate a Job Number.'
+                    ], 422);
+                }
             }
             
             \Log::info("Found approval task, enquiry ID: {$approvalTask->project_enquiry_id}");
