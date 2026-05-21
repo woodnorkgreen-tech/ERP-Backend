@@ -50,14 +50,12 @@ class PettyCashBalance extends Model
      */
     public static function current(): self
     {
-        $balance = static::firstOrCreate(['id' => 1], [
+        return static::firstOrCreate(['id' => 1], [
             'current_balance' => 0.00,
             'last_transaction_id' => null,
             'last_transaction_type' => null,
             'updated_at' => now(),
         ]);
-
-        return $balance->recalculateBalance();
     }
 
     /**

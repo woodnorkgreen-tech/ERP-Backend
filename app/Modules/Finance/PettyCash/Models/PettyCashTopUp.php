@@ -221,8 +221,13 @@ class PettyCashTopUp extends Model
      */
     private function updateBalance(string $operation, float $amount)
     {
-        // current() automatically calls recalculateBalance()
         $balance = PettyCashBalance::current();
+        
+        if ($operation === 'add') {
+            $balance->current_balance += $amount;
+        } else {
+            $balance->current_balance -= $amount;
+        }
         
         $balance->last_transaction_id = $this->id;
         $balance->last_transaction_type = 'top_up';
