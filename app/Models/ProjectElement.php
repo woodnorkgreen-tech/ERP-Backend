@@ -67,6 +67,7 @@ class ProjectElement extends Model
     protected $fillable = [
         'task_materials_data_id',
         'template_id',
+        'scope_id',
         'element_type',
         'name',
         'persistent_id',

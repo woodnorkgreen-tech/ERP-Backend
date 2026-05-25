@@ -99,6 +99,129 @@ class ProjectEnquiry extends Model
         return $this->hasOne(Project::class, 'enquiry_id');
     }
 
+    /**
+     * The "booted" method of the model.
+     */
+    protected static function booted()
+    {
+        static::saved(function ($enquiry) {
+            // Trigger sync of deliverables table on creation or updates of project_scope
+            $raw = $enquiry->getRawOriginal('project_scope');
+            if ($raw) {
+                $decoded = json_decode($raw, true);
+                if (is_array($decoded)) {
+                    $existingUuids = [];
+                    foreach ($decoded as $item) {
+                        if (is_array($item)) {
+                            $classification = $item['classification'] ?? 'PRE-DEFINED';
+                            $name = $item['name'] ?? 'Untitled';
+                            $status = $item['status'] ?? 'original';
+                            $uuid = $item['uuid'] ?? $item['id'] ?? \Illuminate\Support\Str::uuid()->toString();
+                        } else {
+                            $classification = 'PRE-DEFINED';
+                            $name = $item;
+                            $status = 'original';
+                            $uuid = \Illuminate\Support\Str::uuid()->toString();
+
+                            $parts = array_map('trim', explode('|', $item));
+                            $mainPart = $parts[0];
+
+                            if (preg_match('/^\[(.*?)\]\s*(.*)$/', $mainPart, $matches)) {
+                                $classification = trim($matches[1]);
+                                $name = trim($matches[2]);
+                            }
+
+                            foreach ($parts as $part) {
+                                if (str_starts_with($part, 'status:')) {
+                                    $status = trim(str_replace('status:', '', $part));
+                                } elseif (str_starts_with($part, 'id:')) {
+                                    $uuid = trim(str_replace('id:', '', $part));
+                                }
+                            }
+                        }
+
+                        $existingUuids[] = $uuid;
+
+                        $enquiry->deliverables()->updateOrCreate(
+                            ['uuid' => $uuid],
+                            [
+                                'name' => $name,
+                                'classification' => strtoupper($classification),
+                                'status' => $status
+                            ]
+                        );
+                    }
+                    $enquiry->deliverables()->whereNotIn('uuid', $existingUuids)->delete();
+                }
+            }
+        });
+    }
+
+    /**
+     * Get the deliverables for the enquiry.
+     */
+    public function deliverables(): HasMany
+    {
+        return $this->hasMany(ProjectDeliverable::class, 'enquiry_id');
+    }
+
+    /**
+     * Get the project scope as structured arrays (with raw string fallback).
+     */
+    public function getProjectScopeAttribute(): array
+    {
+        $deliverables = $this->deliverables;
+        if ($deliverables->isEmpty()) {
+            $value = $this->attributes['project_scope'] ?? null;
+            if (empty($value)) return [];
+            $decoded = json_decode($value, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return $deliverables->map(function ($d) {
+            return [
+                'id' => $d->uuid,
+                'uuid' => $d->uuid,
+                'name' => $d->name,
+                'classification' => $d->classification,
+                'status' => $d->status,
+                'raw' => "[{$d->classification}] {$d->name} | status:{$d->status} | id:{$d->uuid}"
+            ];
+        })->toArray();
+    }
+
+    /**
+     * Set the project scope and sync deliverables.
+     */
+    public function setProjectScopeAttribute($value)
+    {
+        $items = [];
+        if (is_array($value)) {
+            $items = $value;
+        } elseif (is_string($value)) {
+            if (str_starts_with($value, '[')) {
+                $decoded = json_decode($value, true);
+                if (is_array($decoded)) {
+                    $items = $decoded;
+                }
+            } else {
+                $items = preg_split('/\s*\|\s*(?=\[[^\]]+\])/', $value);
+            }
+        }
+
+        // Only trim if items are strings, otherwise keep them as is (e.g. structured arrays)
+        $processedItems = array_map(function($item) {
+            return is_string($item) ? trim($item) : $item;
+        }, $items);
+        
+        $processedItems = array_filter($processedItems, function($item) {
+            if (is_string($item)) return !empty($item);
+            return !empty($item);
+        });
+
+        $this->attributes['project_scope'] = json_encode(array_values($processedItems));
+    }
+
     public function enquiryTasks(): HasMany
     {
         return $this->hasMany(\App\Modules\Projects\Models\EnquiryTask::class, 'project_enquiry_id');

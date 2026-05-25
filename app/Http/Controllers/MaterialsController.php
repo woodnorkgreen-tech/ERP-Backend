@@ -362,6 +362,7 @@ class MaterialsController extends Controller
             $materialsData->elements()->delete();
 
             $idMapping = [];
+            $usedPersistentIds = [];
 
             // Save new elements and materials
             foreach ($request->projectElements as $index => $elementData) {
@@ -371,12 +372,20 @@ class MaterialsController extends Controller
                     'incoming_id' => $elementData['id'] ?? 'NULL'
                 ]);
 
+                // Ensure ProjectElement persistent_id is unique and not duplicate in this transaction or globally
+                $persistentId = $elementData['persistent_id'] ?? $elementData['persistentId'] ?? null;
+                if (empty($persistentId) || in_array($persistentId, $usedPersistentIds) || ProjectElement::where('persistent_id', $persistentId)->exists()) {
+                    $persistentId = (string) \Illuminate\Support\Str::uuid();
+                }
+                $usedPersistentIds[] = $persistentId;
+
                 $element = ProjectElement::create([
                     'task_materials_data_id' => $materialsData->id,
                     'template_id' => $elementData['templateId'] ?? null,
+                    'scope_id' => $elementData['scopeId'] ?? null,
                     'element_type' => $elementData['elementType'],
                     'name' => $elementData['name'] ?? null,
-                    'persistent_id' => $elementData['persistent_id'] ?? $elementData['persistentId'] ?? null,
+                    'persistent_id' => $persistentId,
                     'category' => $elementData['category'],
                     'dimensions' => $elementData['dimensions'] ?? [],
                     'is_included' => $elementData['isIncluded'] ?? true,
@@ -387,10 +396,17 @@ class MaterialsController extends Controller
                 $materialMapping = [];
 
                 foreach ($elementData['materials'] as $matIndex => $materialData) {
+                    // Ensure ElementMaterial persistent_id is unique and not duplicate
+                    $matPersistentId = $materialData['persistent_id'] ?? $materialData['persistentId'] ?? null;
+                    if (empty($matPersistentId) || in_array($matPersistentId, $usedPersistentIds) || ElementMaterial::where('persistent_id', $matPersistentId)->exists()) {
+                        $matPersistentId = (string) \Illuminate\Support\Str::uuid();
+                    }
+                    $usedPersistentIds[] = $matPersistentId;
+
                     $material = ElementMaterial::create([
                         'project_element_id' => $element->id,
                         'library_material_id' => $materialData['libraryMaterialId'] ?? null,
-                        'persistent_id' => $materialData['persistent_id'] ?? $materialData['persistentId'] ?? null,
+                        'persistent_id' => $matPersistentId,
                         'description' => $materialData['description'],
                         'unit_of_measurement' => $materialData['unitOfMeasurement'],
                         'quantity' => $materialData['quantity'],
@@ -1152,6 +1168,7 @@ class MaterialsController extends Controller
                     return [
                         'id' => (string) $element->id,
                         'templateId' => $element->template_id,
+                        'scopeId' => $element->scope_id,
                         'elementType' => $element->element_type,
                         'name' => $element->name,
                         'persistent_id' => $element->persistent_id,

@@ -373,132 +373,60 @@ class PettyCashRepository
     public function getFlatTransactions(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
         $page = $filters['page'] ?? 1;
+        $query = DB::table('petty_cash_ledger_entries')
+            ->orderBy('posted_at', 'desc')
+            ->orderBy('id', 'desc');
 
-        // Build Top-ups subquery
-        $topUps = DB::table('petty_cash_top_ups')
-            ->select(
-                'id',
-                DB::raw("'top_up' as type"),
-                'amount',
-                'previous_balance',
-                'date_topped_up as transaction_date',
-                'description',
-                DB::raw('NULL as receiver'),
-                DB::raw('NULL as account'),
-                DB::raw('NULL as project_name'),
-                DB::raw('NULL as venue'),
-                'payment_method',
-                DB::raw('NULL as classification'),
-                DB::raw('NULL as job_number'),
-                DB::raw("'active' as status"),
-                'transaction_code',
-                'created_at',
-                'is_archived',
-                'id as parent_id', // Group by its own ID
-                DB::raw('1 as type_priority'), // Top-up comes first in its group
-                // Union compatibility fields
-                DB::raw('NULL as requisition_status'),
-                DB::raw('NULL as received_at'),
-                DB::raw('NULL as signature'),
-                DB::raw('NULL as requisition_id'),
-                DB::raw('NULL as transaction_cost')
-            );
-
-        // Build Disbursements subquery
-        $disbursements = DB::table('petty_cash_disbursements')
-            ->leftJoin('petty_cash_requisitions', 'petty_cash_disbursements.requisition_id', '=', 'petty_cash_requisitions.id')
-            ->select(
-                'petty_cash_disbursements.id',
-                DB::raw("'disbursement' as type"),
-                'petty_cash_disbursements.amount',
-                DB::raw('NULL as previous_balance'),
-                'petty_cash_disbursements.date_disbursed as transaction_date',
-                'petty_cash_disbursements.description',
-                'petty_cash_disbursements.receiver',
-                'petty_cash_disbursements.account',
-                'petty_cash_disbursements.project_name',
-                'petty_cash_disbursements.venue',
-                'petty_cash_disbursements.payment_method',
-                'petty_cash_disbursements.classification',
-                'petty_cash_disbursements.job_number',
-                'petty_cash_disbursements.status',
-                'petty_cash_disbursements.transaction_code',
-                'petty_cash_disbursements.created_at',
-                'petty_cash_disbursements.is_archived',
-                'petty_cash_disbursements.top_up_id as parent_id', // Group by parent top-up ID
-                DB::raw('2 as type_priority'), // Disbursements follow the top-up
-                // Requisition details
-                'petty_cash_requisitions.status as requisition_status',
-                'petty_cash_requisitions.received_at as received_at',
-                'petty_cash_requisitions.digital_signature as signature',
-                'petty_cash_disbursements.requisition_id',
-                'petty_cash_disbursements.transaction_cost'
-            );
-
-        // Apply shared filters
+        // Apply filters
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $topUps->whereBetween('date_topped_up', [$filters['start_date'], $filters['end_date']]);
-            $disbursements->whereBetween('date_disbursed', [$filters['start_date'], $filters['end_date']]);
-        }
-
-        if (!empty($filters['payment_method'])) {
-            $topUps->where('payment_method', $filters['payment_method']);
-            $disbursements->where('payment_method', $filters['payment_method']);
+            $query->whereBetween('posted_at', [$filters['start_date'], $filters['end_date']]);
         }
 
         if (!empty($filters['search'])) {
             $search = '%' . $filters['search'] . '%';
-            $topUps->where(function($q) use ($search) {
-                $q->where('description', 'like', $search)
-                  ->orWhere('transaction_code', 'like', $search);
-            });
-            $disbursements->where(function($q) use ($search) {
-                $q->where('description', 'like', $search)
-                  ->orWhere('receiver', 'like', $search)
-                  ->orWhere('account', 'like', $search)
-                  ->orWhere('project_name', 'like', $search)
-                  ->orWhere('venue', 'like', $search)
-                  ->orWhere('transaction_code', 'like', $search);
+            $query->where(function ($q) use ($search) {
+                $q->where('reference_number', 'like', $search)
+                  ->orWhere('metadata->description', 'like', $search)
+                  ->orWhere('metadata->receiver', 'like', $search)
+                  ->orWhere('metadata->transaction_code', 'like', $search);
             });
         }
 
-        if (!empty($filters['project_name'])) {
-            $disbursements->where('project_name', 'like', '%' . $filters['project_name'] . '%');
-            // Top-ups don't have project names
-            $topUps->whereRaw('1 = 0');
-        }
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
-        // Apply archiving filters
-        $showArchived = filter_var($filters['show_archived'] ?? false, FILTER_VALIDATE_BOOLEAN);
-        $topUps->where('is_archived', $showArchived);
-        $disbursements->where('is_archived', $showArchived);
+        // Transform collection to match old flat transaction format
+        $paginator->getCollection()->transform(function ($item) {
+            $meta = json_decode($item->metadata, true) ?: [];
+            
+            // Reconstruct flat transaction columns
+            return (object)[
+                'id' => $item->id,
+                'type' => $item->type === 'credit' ? 'top_up' : 'disbursement',
+                'amount' => $item->type === 'credit' ? (float)$item->amount : (float)($meta['amount'] ?? ((float)$item->amount - (float)($meta['transaction_cost'] ?? 0))),
+                'previous_balance' => (float)$item->balance_snapshot - (float)($item->type === 'credit' ? $item->amount : -($item->amount)),
+                'transaction_date' => $item->posted_at,
+                'description' => $meta['description'] ?? '',
+                'receiver' => $meta['receiver'] ?? null,
+                'account' => $meta['account'] ?? null,
+                'project_name' => $meta['project_name'] ?? null,
+                'venue' => $meta['venue'] ?? null,
+                'payment_method' => $meta['payment_method'] ?? 'cash',
+                'classification' => $meta['classification'] ?? null,
+                'job_number' => $meta['job_number'] ?? null,
+                'status' => $meta['status'] ?? 'active',
+                'transaction_code' => $meta['transaction_code'] ?? null,
+                'created_at' => $item->created_at,
+                'is_archived' => false,
+                'requisition_status' => $meta['requisition_status'] ?? null,
+                'received_at' => $meta['received_at'] ?? null,
+                'signature' => $meta['signature'] ?? null,
+                'requisition_id' => $meta['requisition_id'] ?? null,
+                'transaction_cost' => $meta['transaction_cost'] ?? null,
+                'reference_number' => $item->reference_number
+            ];
+        });
 
-        // Apply disbursement-specific filters
-        if (!empty($filters['status'])) {
-            $disbursements->where('status', $filters['status']);
-            if ($filters['status'] !== 'active') {
-                $topUps->whereRaw('1 = 0');
-            }
-        }
-
-        if (!empty($filters['classification'])) {
-            $disbursements->where('classification', $filters['classification']);
-            $topUps->whereRaw('1 = 0');
-        }
-
-        // Create temporary table from union
-        $query = DB::table(function ($q) use ($topUps, $disbursements) {
-            $q->from($topUps->unionAll($disbursements), 'transactions');
-        }, 'transactions');
-
-        // Resulting Query
-        $results = $query
-            ->orderBy('transaction_date', 'desc')
-            ->orderBy('created_at', 'desc')
-            ->orderBy('type_priority', 'asc')
-            ->paginate($perPage, ['*'], 'page', $page);
-
-        return $results;
+        return $paginator;
     }
 
     /**

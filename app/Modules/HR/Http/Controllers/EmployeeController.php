@@ -255,26 +255,43 @@ class EmployeeController
      */
     public function uploadPhoto(Request $request, Employee $employee): JsonResponse
     {
+        $user = auth()->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        // Authorize: user can update their own profile OR must have HR admin roles
+        if ($user->employee_id != $employee->id && !$user->hasRole(['Admin', 'HR', 'HR Admin', 'Super Admin'])) {
+            return response()->json(['message' => 'Unauthorized to update this profile photo.'], 403);
+        }
+
         \Log::info("Uploading photo for employee {$employee->id}");
         $request->validate([
             'photo' => 'required|image|mimes:jpeg,jpg,png,webp|max:2048',
         ]);
 
-        // Delete previous photo
-        if ($employee->profile_photo_path) {
-            Storage::disk('public')->delete($employee->profile_photo_path);
+        try {
+            // Delete previous photo
+            if ($employee->profile_photo_path) {
+                Storage::disk('public')->delete($employee->profile_photo_path);
+            }
+
+            $path = $request->file('photo')->store('employees/photos', 'public');
+            \Log::info("Photo stored at: {$path}");
+
+            $employee->update(['profile_photo_path' => $path]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profile photo updated.',
+                'data' => $employee->fresh()->load(['department', 'manager']),
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("Failed to store profile photo: " . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to write profile photo to disk. Please verify storage permissions.'
+            ], 500);
         }
-
-        $path = $request->file('photo')->store('employees/photos', 'public');
-        \Log::info("Photo stored at: {$path}");
-
-        $employee->update(['profile_photo_path' => $path]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Profile photo updated.',
-            'data' => $employee->fresh()->load(['department', 'manager']),
-        ]);
     }
 
     /**

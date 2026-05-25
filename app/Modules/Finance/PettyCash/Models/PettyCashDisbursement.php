@@ -221,14 +221,15 @@ class PettyCashDisbursement extends Model
         // Update balance when disbursement is created
         static::created(function ($disbursement) {
             if ($disbursement->status === 'active' && !$disbursement->is_archived) {
-                $disbursement->updateBalance('subtract', (float) $disbursement->amount);
+                $totalCost = (float) $disbursement->amount + (float)($disbursement->transaction_cost ?? 0);
+                $disbursement->updateBalance('subtract', $totalCost);
             }
         });
 
         // Update balance when disbursement is updated (amount, status, or archived changes)
         static::updating(function ($disbursement) {
-            $oldAmount = (float) $disbursement->getOriginal('amount');
-            $newAmount = (float) $disbursement->amount;
+            $oldAmount = (float) $disbursement->getOriginal('amount') + (float)($disbursement->getOriginal('transaction_cost') ?? 0);
+            $newAmount = (float) $disbursement->amount + (float)($disbursement->transaction_cost ?? 0);
             
             $oldStatus = $disbursement->getOriginal('status');
             $newStatus = $disbursement->status;
@@ -259,7 +260,8 @@ class PettyCashDisbursement extends Model
         // Update balance when disbursement is deleted
         static::deleted(function ($disbursement) {
             if ($disbursement->status === 'active' && !$disbursement->is_archived) {
-                $disbursement->updateBalance('add', (float) $disbursement->amount);
+                $totalCost = (float) $disbursement->amount + (float)($disbursement->transaction_cost ?? 0);
+                $disbursement->updateBalance('add', $totalCost);
             }
         });
     }
@@ -269,8 +271,13 @@ class PettyCashDisbursement extends Model
      */
     private function updateBalance(string $operation, float $amount)
     {
-        // current() automatically calls recalculateBalance()
         $balance = PettyCashBalance::current();
+        
+        if ($operation === 'subtract') {
+            $balance->current_balance -= $amount;
+        } else {
+            $balance->current_balance += $amount;
+        }
         
         $balance->last_transaction_id = $this->id;
         $balance->last_transaction_type = 'disbursement';

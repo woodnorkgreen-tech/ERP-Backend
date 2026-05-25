@@ -1538,6 +1538,11 @@ class QuoteController extends Controller
                 'updated_at' => now()
             ]);
 
+            // Automatically create a frozen baseline snapshot upon quote approval
+            if ($request->approval_status === 'approved') {
+                $this->createFrozenSnapshot($quoteData, 'Baseline Approved');
+            }
+
             // Load the original quote task again for the formatter
             $task = EnquiryTask::find($originalQuoteTask->id);
 
@@ -1584,9 +1589,28 @@ class QuoteController extends Controller
      */
     private function formatQuoteResponse(TaskQuoteData $quoteData, ?EnquiryTask $task = null): array
     {
+        // Load relationships efficiently using loadMissing
+        if ($task) {
+            $task->loadMissing('enquiry.client', 'enquiry.deliverables');
+        } else {
+            $task = $quoteData->enquiryTask;
+            if ($task) {
+                $task->loadMissing('enquiry.client', 'enquiry.deliverables');
+            }
+        }
+
+        $projectInfo = $quoteData->project_info ?? [];
+        if ($task && $task->enquiry) {
+            $projectInfo['projectScope'] = $task->enquiry->project_scope;
+            $projectInfo['clientName'] = $task->enquiry->client->full_name ?? $projectInfo['clientName'] ?? 'Unknown Client';
+            $projectInfo['enquiryTitle'] = $task->enquiry->title ?? $projectInfo['enquiryTitle'] ?? 'Untitled Project';
+            $projectInfo['eventVenue'] = $task->enquiry->venue ?? $projectInfo['eventVenue'] ?? 'Venue TBC';
+            $projectInfo['setupDate'] = $task->enquiry->expected_delivery_date ?? $projectInfo['setupDate'] ?? 'Date TBC';
+        }
+
         $response = [
             'id' => $quoteData->id,
-            'projectInfo' => $quoteData->project_info,
+            'projectInfo' => $projectInfo,
             'budgetImported' => $quoteData->budget_imported,
             'budgetImportedAt' => $quoteData->budget_imported_at,
             'budgetUpdatedAt' => $quoteData->budget_updated_at,
@@ -1615,11 +1639,33 @@ class QuoteController extends Controller
             'updatedAt' => $quoteData->updated_at,
         ];
 
-        // Ensure client name is up to date if task is provided
-        if ($task && $task->enquiry && $task->enquiry->client) {
-            $response['projectInfo']['clientName'] = $task->enquiry->client->full_name ?? 'Unknown Client';
-        }
-
         return $response;
+    }
+
+    /**
+     * Automatically create a frozen quote snapshot upon approval
+     */
+    private function createFrozenSnapshot(TaskQuoteData $quoteData, string $label): void
+    {
+        try {
+            $latestVersion = $quoteData->versions()->max('version_number') ?? 0;
+            $newVersionNumber = $latestVersion + 1;
+
+            $quoteData->versions()->create([
+                'version_number' => $newVersionNumber,
+                'label' => $label,
+                'data' => $quoteData->fresh()->toArray(),
+                'created_by' => auth()->id() ?? 1
+            ]);
+
+            $quoteData->recordCustomAction('version_created', [
+                'version_number' => $newVersionNumber,
+                'label' => $label
+            ]);
+            
+            \Log::info("Automatic frozen quote snapshot created: Version {$newVersionNumber} ({$label})");
+        } catch (\Exception $e) {
+            \Log::error("Failed to automatically create frozen quote snapshot: " . $e->getMessage());
+        }
     }
 }

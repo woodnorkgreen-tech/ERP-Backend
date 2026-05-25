@@ -137,7 +137,7 @@ class EnquiryController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo');
+        $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo', 'deliverables');
 
         $query = app(\Illuminate\Pipeline\Pipeline::class)
             ->send($query)
@@ -386,6 +386,7 @@ class EnquiryController extends Controller
             'client',
             'department',
             'projectOfficer',
+            'deliverables',
             'enquiryTasks' => function ($query) {
                 // Access Control: All users can see tasks in the project (Transparency)
                 // Interaction is gated via is_authorized flag on the task model
@@ -763,8 +764,87 @@ class EnquiryController extends Controller
             $enquiry->update([
                 'project_scope' => $newScope,
                 // Also update the text-based deliverables field for redundancy/legacy compatibility
-                'project_deliverables' => is_array($newScope) ? implode(' | ', $newScope) : $newScope
+                'project_deliverables' => is_array($newScope) ? implode(' | ', array_map(function($i) {
+                    if (is_string($i)) return $i;
+                    return $i['raw'] ?? "[{$i['classification']}] {$i['name']} | status:{$i['status']} | id:" . ($i['uuid'] ?? $i['id'] ?? '');
+                }, $newScope)) : $newScope
             ]);
+
+            // Dynamic Synchronisation back to existing Quote & Material Tasks!
+            if (is_array($newScope)) {
+                // Parse each item in the new scope to match unique ID
+                $scopeItems = [];
+                foreach ($newScope as $scopeItem) {
+                    if (is_array($scopeItem)) {
+                        $deliverableName = $scopeItem['name'] ?? '';
+                        $deliverableId = $scopeItem['uuid'] ?? $scopeItem['id'] ?? '';
+                    } else {
+                        $parts = array_map('trim', explode('|', $scopeItem));
+                        $typeAndName = $parts[0];
+                        $deliverableName = $typeAndName;
+                        
+                        // Extract type prefix like [TYPE] Name
+                        if (preg_match('/^\[(.*?)\]\s*(.*)$/', $typeAndName, $matches)) {
+                            $deliverableName = trim($matches[2]);
+                        }
+                        
+                        $deliverableId = '';
+                        foreach ($parts as $p) {
+                            if (strpos($p, 'id:') === 0) {
+                                $deliverableId = trim(substr($p, 3));
+                            }
+                        }
+                    }
+                    
+                    if ($deliverableId) {
+                        $scopeItems[$deliverableId] = $deliverableName;
+                    }
+                }
+
+                // A. Sync Quote Tasks
+                $quoteTasks = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiry->id)
+                    ->where('type', 'quote')
+                    ->get();
+
+                foreach ($quoteTasks as $quoteTask) {
+                    $quoteData = \App\Models\TaskQuoteData::where('enquiry_task_id', $quoteTask->id)->first();
+                    if ($quoteData) {
+                        $materials = $quoteData->materials;
+                        if (is_array($materials)) {
+                            $updatedMaterials = [];
+                            foreach ($materials as $element) {
+                                $scopeId = $element['scopeId'] ?? null;
+                                if ($scopeId && isset($scopeItems[$scopeId])) {
+                                    $element['name'] = $scopeItems[$scopeId];
+                                }
+                                $updatedMaterials[] = $element;
+                            }
+                            $quoteData->update([
+                                'materials' => $updatedMaterials
+                            ]);
+                        }
+                    }
+                }
+
+                // B. Sync Material Task Elements
+                $materialsTasks = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiry->id)
+                    ->where('type', 'materials')
+                    ->get();
+
+                foreach ($materialsTasks as $materialsTask) {
+                    $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->first();
+                    if ($materialsData) {
+                        // Direct DB updates for any ProjectElement linked to these scope IDs
+                        foreach ($scopeItems as $scopeId => $newName) {
+                            \App\Models\ProjectElement::where('task_materials_data_id', $materialsData->id)
+                                ->where('scope_id', $scopeId)
+                                ->update([
+                                    'name' => $newName
+                                ]);
+                        }
+                    }
+                }
+            }
 
             // Notification Logic: If a quote task already exists or enquiry is quote_approved
             $hasQuote = $enquiry->enquiryTasks()->where('type', 'quote')->exists() || $enquiry->quote_approved;
