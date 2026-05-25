@@ -18,9 +18,10 @@ class GrievanceService
             $user = auth()->user();
 
             $grievance = Grievance::create([
-                'complainant_id' => $data['complainant_id'] ?? ($user ? $user->id : null),
+                'complainant_id' => $user->id,
                 'against_id' => $data['against_id'] ?? null,
                 'description' => $data['description'],
+                'category' => $data['category'] ?? null,
                 'date_reported' => now(),
                 'status' => Grievance::STATUS_REPORTED,
                 'witnesses' => $data['witnesses'] ?? null,
@@ -40,7 +41,11 @@ class GrievanceService
     public function getGrievances(Request $request): LengthAwarePaginator
     {
         $user = auth()->user();
-        $query = Grievance::with(['complainant', 'against', 'resolver']);
+        $query = Grievance::with([
+            'complainant.employee.department',
+            'against.employee.department',
+            'resolver',
+        ]);
 
         $this->applyAccessScope($query, $user);
 
@@ -49,6 +54,22 @@ class GrievanceService
         }
         if ($request->filled('complainant_id')) {
             $query->where('complainant_id', $request->complainant_id);
+        }
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('description', 'like', "%{$search}%")
+                    ->orWhere('witnesses', 'like', "%{$search}%")
+                    ->orWhere('category', 'like', "%{$search}%")
+                    ->orWhereHas('complainant', function ($userQuery) use ($search) {
+                        $userQuery->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    })
+                    ->orWhereHas('against', function ($userQuery) use ($search) {
+                        $userQuery->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    });
+            });
         }
         if ($request->filled('department_id')) {
             $query->whereHas('complainant.employee', function ($q) use ($request) {
@@ -62,29 +83,52 @@ class GrievanceService
 
     public function getGrievanceById(int $id): Grievance
     {
-        return Grievance::with(['complainant', 'against', 'resolver', 'comments.user', 'activityLogs'])
+        return Grievance::with([
+                'complainant.employee.department',
+                'against.employee.department',
+                'resolver',
+                'comments.user',
+                'activityLogs',
+            ])
                         ->findOrFail($id);
     }
 
     public function updateGrievance(Grievance $grievance, array $data): Grievance
     {
         return DB::transaction(function () use ($grievance, $data) {
+            $originalStatus = $grievance->status;
+
             $grievance->update($data);
+
+            if (isset($data['status']) && $data['status'] !== $originalStatus) {
+                GrievanceActivityLog::log(
+                    $grievance->id,
+                    'Status changed',
+                    "Status changed from {$originalStatus} to {$data['status']}"
+                );
+            }
+
             return $grievance;
         });
     }
 
-    public function resolveGrievance(Grievance $grievance, string $resolution): Grievance
+    public function resolveGrievance(Grievance $grievance, string $resolution, ?string $notes = null): Grievance
     {
-        return DB::transaction(function () use ($grievance, $resolution) {
+        return DB::transaction(function () use ($grievance, $resolution, $notes) {
             $user = auth()->user();
 
-            $grievance->update([
+            $updates = [
                 'status' => Grievance::STATUS_RESOLVED,
                 'resolution' => $resolution,
                 'resolved_by' => $user->id,
                 'resolved_at' => now(),
-            ]);
+            ];
+
+            if ($notes) {
+                $updates['investigation_notes'] = $notes;
+            }
+
+            $grievance->update($updates);
 
             GrievanceActivityLog::log(
                 $grievance->id,
@@ -158,12 +202,11 @@ class GrievanceService
             return;
         }
 
-        // Only HR and Super Admin can access grievances
-        if ($user->hasAnyRole(['Super Admin', 'HR'])) {
+        if ($user->hasAnyRole(['Super Admin', 'Admin', 'HR Admin', 'HR'])) {
             return;
         }
 
-        // All other roles are denied access
-        $query->whereNull('id');
+        // Employees can access grievances they filed.
+        $query->where('complainant_id', $user->id);
     }
 }

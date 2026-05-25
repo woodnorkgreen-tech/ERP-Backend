@@ -4,10 +4,11 @@ namespace App\Modules\HR\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Notifications\Notifiable;
 
 class Candidate extends Model
 {
-    use SoftDeletes;
+    use SoftDeletes, Notifiable;
 
     protected $table = 'hr_candidates';
     

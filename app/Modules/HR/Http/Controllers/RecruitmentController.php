@@ -8,6 +8,7 @@ use App\Modules\HR\Models\JobPosting;
 use App\Modules\HR\Models\Candidate;
 use App\Modules\HR\Models\CandidateDocument;
 use App\Modules\HR\Http\Requests\CandidateApplicationRequest;
+use App\Modules\HR\Notifications\CandidateRejectedNotification;
 use App\Modules\HR\Services\AutoShortlistService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -124,8 +125,12 @@ class RecruitmentController extends Controller
             'department' => 'nullable|string',
             'employment_type' => 'nullable|string',
             'location' => 'nullable|string',
+            'position_summary' => 'nullable|string',
             'description' => 'nullable|string',
-            'requirements' => 'nullable|string',
+            'responsibilities' => 'nullable|string',
+            'education_training' => 'nullable|string',
+            'experience' => 'nullable|string',
+            'software_tools' => 'nullable|string',
             'status' => 'required|in:Draft,Published,Closed,On Hold'
         ]);
 
@@ -144,8 +149,12 @@ class RecruitmentController extends Controller
             'department' => 'nullable|string',
             'employment_type' => 'nullable|string',
             'location' => 'nullable|string',
+            'position_summary' => 'nullable|string',
             'description' => 'nullable|string',
-            'requirements' => 'nullable|string',
+            'responsibilities' => 'nullable|string',
+            'education_training' => 'nullable|string',
+            'experience' => 'nullable|string',
+            'software_tools' => 'nullable|string',
             'status' => 'required|in:Draft,Published,Closed,On Hold'
         ]);
 
@@ -192,6 +201,16 @@ class RecruitmentController extends Controller
         }
 
         $candidate->update($updates);
+
+        if ($validated['status'] === 'Rejected' && !empty($candidate->email)) {
+            try {
+                $candidate->notify(new CandidateRejectedNotification(
+                    $candidate->jobPosting?->title ?? 'the position'
+                ));
+            } catch (\Exception $e) {
+                report($e);
+            }
+        }
 
         return response()->json($candidate);
     }

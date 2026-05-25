@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Employee extends Model
 {
@@ -76,9 +77,9 @@ class Employee extends Model
     /**
      * Get the user account associated with this employee.
      */
-    public function user(): BelongsTo
+    public function user(): HasOne
     {
-        return $this->belongsTo(\App\Models\User::class);
+        return $this->hasOne(\App\Models\User::class, 'employee_id');
     }
 
     /**

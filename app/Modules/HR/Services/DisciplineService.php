@@ -46,7 +46,24 @@ class DisciplineService
         $this->applyAccessScope($query, $user);
 
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $statuses = is_array($request->status)
+                ? $request->status
+                : array_filter(array_map('trim', explode(',', $request->status)));
+
+            if (count($statuses) === 1) {
+                $query->where('status', $statuses[0]);
+            } else {
+                $query->whereIn('status', $statuses);
+            }
+        }
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('allegations', 'like', "%{$search}%")
+                  ->orWhereHas('employee', function ($q) use ($search) {
+                      $q->where('name', 'like', "%{$search}%");
+                  });
+            });
         }
         if ($request->filled('employee_id')) {
             $query->where('employee_id', $request->employee_id);
@@ -245,12 +262,12 @@ class DisciplineService
             return;
         }
 
-        // Only HR and Super Admin can access disciplinary cases
+        // HR and Super Admin can access all disciplinary cases.
         if ($user->hasAnyRole(['Super Admin', 'HR'])) {
             return;
         }
 
-        // All other roles are denied access
-        $query->whereNull('id');
+        // Other authenticated users may only access their own cases.
+        $query->where('employee_id', $user->id);
     }
 }

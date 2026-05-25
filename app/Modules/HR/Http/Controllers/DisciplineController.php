@@ -7,6 +7,7 @@ use App\Modules\HR\Models\DisciplinaryCase;
 use App\Modules\HR\Services\DisciplineService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class DisciplineController extends Controller
@@ -111,8 +112,9 @@ class DisciplineController extends Controller
             $case = $this->disciplineService->getDisciplinaryCaseById($id);
             $user = auth()->user();
 
-            // Check permissions - only HR and Super Admin can view
-            if (!$user->hasAnyRole(['Super Admin', 'HR'])) {
+            // Check permissions - HR and Super Admin can view all cases.
+            // The accused employee may also view their own disciplinary case.
+            if (!$user->hasAnyRole(['Super Admin', 'HR']) && $case->employee_id !== $user->id) {
                 return response()->json([
                     'success' => false,
                     'message' => 'You do not have permission to view this case',
@@ -355,6 +357,8 @@ class DisciplineController extends Controller
             $validator = Validator::make($request->all(), [
                 'type' => 'required|in:verbal,first_written,second_written,final,termination',
                 'letter' => 'nullable|string',
+                'attachments' => 'nullable|array',
+                'attachments.*' => 'file|max:20480|mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,txt',
             ]);
 
             if ($validator->fails()) {
@@ -365,7 +369,36 @@ class DisciplineController extends Controller
                 ], 422);
             }
 
+            if ($request->type === 'verbal' && $request->hasFile('attachments')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Verbal warnings cannot include attachments',
+                ], 422);
+            }
+
             $case = $this->disciplineService->issueWarning($case, $request->type, $request->letter);
+
+            if ($request->hasFile('attachments') && $request->type !== 'verbal') {
+                $uploadedAttachments = [];
+                $storagePath = "disciplinary-cases/{$id}";
+
+                foreach ($request->file('attachments') as $file) {
+                    $originalName = $file->getClientOriginalName();
+                    $storedFilename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                    $path = $file->storeAs($storagePath, $storedFilename);
+                    $uploadedAttachments[] = [
+                        'id' => uniqid('att_', true),
+                        'path' => $path,
+                        'original_name' => $originalName,
+                    ];
+                }
+
+                $currentAttachments = $case->attachments ?? [];
+                $case->update([
+                    'attachments' => array_merge($currentAttachments, $uploadedAttachments),
+                ]);
+                $case->refresh();
+            }
 
             return response()->json([
                 'success' => true,
@@ -544,21 +577,26 @@ class DisciplineController extends Controller
                 ], 422);
             }
 
-            $uploadedPaths = [];
+            $uploadedAttachments = [];
             $storagePath = "disciplinary-cases/{$id}";
 
             if ($request->hasFile('attachments')) {
                 foreach ($request->file('attachments') as $file) {
-                    $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                    $path = $file->storeAs($storagePath, $filename);
-                    $uploadedPaths[] = $path;
+                    $originalName = $file->getClientOriginalName();
+                    $storedFilename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                    $path = $file->storeAs($storagePath, $storedFilename);
+                    $uploadedAttachments[] = [
+                        'id' => uniqid('att_', true),
+                        'path' => $path,
+                        'original_name' => $originalName,
+                    ];
                 }
             }
 
             // Update case attachments
-            $currentPaths = $case->attachments ?? [];
+            $currentAttachments = $case->attachments ?? [];
             $case->update([
-                'attachments' => array_merge($currentPaths, $uploadedPaths)
+                'attachments' => array_merge($currentAttachments, $uploadedAttachments)
             ]);
 
             return response()->json([
@@ -576,6 +614,114 @@ class DisciplineController extends Controller
                 'success' => false,
                 'message' => 'Failed to upload attachments: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * View attachment inline.
+     */
+    public function viewAttachment(int $id, string $filename): \Illuminate\Http\Response
+    {
+        try {
+            $case = DisciplinaryCase::findOrFail($id);
+            $attachmentPaths = $case->attachments ?? [];
+
+            $attachment = collect($attachmentPaths)->first(function ($item) use ($filename) {
+                if (is_array($item)) {
+                    return ($item['id'] ?? null) === $filename || ($item['original_name'] ?? null) === $filename;
+                }
+
+                return str_ends_with($item, $filename);
+            });
+
+            if (is_array($attachment)) {
+                $path = $attachment['path'] ?? null;
+                $downloadName = $attachment['original_name'] ?? $filename;
+            } else {
+                $path = $attachment;
+                $downloadName = $filename;
+            }
+
+            if (!$path) {
+                $path = "disciplinary-cases/{$id}/{$filename}";
+            }
+
+            if (!Storage::exists($path)) {
+                $fallbackPath = "private/{$path}";
+                if (!Storage::exists($fallbackPath)) {
+                    abort(404, 'File not found on disk');
+                }
+                $path = $fallbackPath;
+            }
+
+            $content = Storage::get($path);
+            $mimeType = Storage::mimeType($path) ?? 'application/octet-stream';
+            $size = Storage::size($path);
+
+            return response($content, 200, [
+                'Content-Type' => $mimeType,
+                'Content-Length' => $size,
+                'Content-Disposition' => 'inline; filename="' . $downloadName . '"',
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                'Pragma' => 'no-cache',
+                'Expires' => '0',
+            ]);
+        } catch (\Exception $e) {
+            abort(500, 'Failed to view file: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Download attachment.
+     */
+    public function downloadAttachment(int $id, string $filename): \Illuminate\Http\Response
+    {
+        try {
+            $case = DisciplinaryCase::findOrFail($id);
+            $attachmentPaths = $case->attachments ?? [];
+
+            $attachment = collect($attachmentPaths)->first(function ($item) use ($filename) {
+                if (is_array($item)) {
+                    return ($item['id'] ?? null) === $filename || ($item['original_name'] ?? null) === $filename;
+                }
+
+                return str_ends_with($item, $filename);
+            });
+
+            if (is_array($attachment)) {
+                $path = $attachment['path'] ?? null;
+                $downloadName = $attachment['original_name'] ?? $filename;
+            } else {
+                $path = $attachment;
+                $downloadName = $filename;
+            }
+
+            if (!$path) {
+                $path = "disciplinary-cases/{$id}/{$filename}";
+            }
+
+            if (!Storage::exists($path)) {
+                $fallbackPath = "private/{$path}";
+                if (!Storage::exists($fallbackPath)) {
+                    abort(404, 'File not found on disk');
+                }
+                $path = $fallbackPath;
+            }
+
+            $content = Storage::get($path);
+            $mimeType = Storage::mimeType($path) ?? 'application/octet-stream';
+            $size = Storage::size($path);
+
+            return response($content, 200, [
+                'Content-Type' => $mimeType,
+                'Content-Length' => $size,
+                'Content-Disposition' => 'attachment; filename="' . $downloadName . '"',
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                'Pragma' => 'no-cache',
+                'Expires' => '0',
+            ]);
+        } catch (\Exception $e) {
+            abort(500, 'Failed to download file: ' . $e->getMessage());
         }
     }
 }

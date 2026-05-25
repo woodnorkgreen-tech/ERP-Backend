@@ -297,14 +297,17 @@ class EmployeeController
     {
         $employees = Employee::query()
             ->accessibleByUser()
+            ->with('user:id,employee_id')
             ->where('status', 'active')
-            ->select(['id', 'employee_id', 'first_name', 'last_name', 'department_id', 'manager_id'])
+            ->select(['id', 'employee_id', 'first_name', 'last_name', 'position', 'department_id', 'manager_id'])
             ->get()
             ->map(function ($emp) {
                 return [
                     'id' => $emp->id,
+                    'user_id' => $emp->user?->id,
                     'employee_id' => $emp->id, // Frontend uses DB ID for balance fetch usually
                     'name' => "{$emp->first_name} {$emp->last_name}",
+                    'job_title' => $emp->position,
                     'department_id' => $emp->department_id,
                     'manager_id' => $emp->manager_id,
                     'ot_balance' => $emp->ot_balance

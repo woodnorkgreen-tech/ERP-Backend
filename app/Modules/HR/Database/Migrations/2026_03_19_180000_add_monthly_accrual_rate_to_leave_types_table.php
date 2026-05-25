@@ -25,7 +25,7 @@ return new class extends Migration
         DB::table('leave_types')->where('code', 'SICK')->update([
             'days_per_year' => 14,
             'monthly_accrual_rate' => null,
-            'description' => 'Kenya statutory sick leave baseline: 7 days full pay and 7 days half pay after two months of service.',
+            'description' => 'Kenya statutory sick leave baseline: 7 full-pay days and 7 half-pay days (total 14 days); half-pay applies after two months of service.',
             'updated_at' => now(),
         ]);
 

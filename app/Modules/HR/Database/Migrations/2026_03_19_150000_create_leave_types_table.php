@@ -43,7 +43,7 @@ return new class extends Migration
                 'days_per_year' => 14,
                 'color' => 'blue',
                 'icon' => 'mdi-medical-bag',
-                'description' => 'Kenya statutory sick leave baseline: 7 days full pay and 7 days half pay after two months of service.',
+                'description' => 'Kenya statutory sick leave baseline: 7 full-pay days and 7 half-pay days (total 14 days); half-pay applies after two months of service.',
                 'is_active' => true,
                 'requires_attachment' => true,
                 'created_at' => now(),

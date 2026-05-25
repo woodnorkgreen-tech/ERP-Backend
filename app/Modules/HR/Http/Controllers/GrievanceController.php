@@ -9,14 +9,35 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class GrievanceController extends Controller
 {
     protected $grievanceService;
 
+    private const GRIEVANCE_MANAGER_ROLES = ['Super Admin', 'Admin', 'HR Admin', 'HR'];
+
     public function __construct(GrievanceService $grievanceService)
     {
         $this->grievanceService = $grievanceService;
+    }
+
+    protected function canManageGrievances($user): bool
+    {
+        return $user && $user->hasAnyRole(self::GRIEVANCE_MANAGER_ROLES);
+    }
+
+    protected function canAccessGrievance($user, Grievance $grievance): bool
+    {
+        return $this->canManageGrievances($user) || ($user && $grievance->complainant_id === $user->id);
+    }
+
+    protected function forbiddenResponse(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], 403);
     }
 
     /**
@@ -35,6 +56,8 @@ class GrievanceController extends Controller
                     'last_page' => $grievances->lastPage(),
                     'per_page' => $grievances->perPage(),
                     'total' => $grievances->total(),
+                    'from' => $grievances->firstItem(),
+                    'to' => $grievances->lastItem(),
                 ],
             ]);
         } catch (\Exception $e) {
@@ -71,10 +94,27 @@ class GrievanceController extends Controller
     public function store(Request $request): JsonResponse
     {
         try {
+            if (!auth()->check()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated',
+                ], 401);
+            }
+
             $validator = Validator::make($request->all(), [
-                'complainant_id' => 'nullable|exists:users,id',
                 'against_id' => 'nullable|exists:users,id',
                 'description' => 'required|string',
+                'category' => [
+                    'required',
+                    'string',
+                    Rule::in([
+                        'Compensation & Benefits',
+                        'Workplace Health & Safety',
+                        'Bullying, Harassment & Discrimination',
+                        'Performance & Disciplinary Actions',
+                        'Work Assignments & Workloads',
+                    ]),
+                ],
                 'witnesses' => 'nullable|string',
                 'attachments' => 'nullable|array',
                 'attachments.*' => 'file|max:2048|mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,txt',
@@ -112,12 +152,8 @@ class GrievanceController extends Controller
             $grievance = $this->grievanceService->getGrievanceById($id);
             $user = auth()->user();
 
-            // Check permissions - only HR and Super Admin can view
-            if (!$user->hasAnyRole(['Super Admin', 'HR'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'You do not have permission to view this grievance',
-                ], 403);
+            if (!$this->canAccessGrievance($user, $grievance)) {
+                return $this->forbiddenResponse('You do not have permission to view this grievance');
             }
 
             return response()->json([
@@ -146,16 +182,14 @@ class GrievanceController extends Controller
             $grievance = Grievance::findOrFail($id);
             $user = auth()->user();
 
-            // Check permissions - only HR and Super Admin can update
-            if (!$user->hasAnyRole(['Super Admin', 'HR'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'You do not have permission to update this grievance',
-                ], 403);
+            if (!$this->canManageGrievances($user)) {
+                return $this->forbiddenResponse('You do not have permission to update this grievance');
             }
 
             $validator = Validator::make($request->all(), [
                 'description' => 'sometimes|string',
+                'category' => 'sometimes|string|in:Compensation & Benefits,Workplace Health & Safety,Bullying, Harassment & Discrimination,Performance & Disciplinary Actions,Work Assignments & Workloads',
+                'status' => 'sometimes|in:Reported,Investigating,Resolved,Escalated,Closed',
                 'witnesses' => 'nullable|string',
                 'investigation_notes' => 'nullable|string',
             ]);
@@ -197,16 +231,13 @@ class GrievanceController extends Controller
             $grievance = Grievance::findOrFail($id);
             $user = auth()->user();
 
-            // Check permission
-            if (!$user->hasAnyRole(['Super Admin', 'HR'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'You do not have permission to resolve grievances',
-                ], 403);
+            if (!$this->canManageGrievances($user)) {
+                return $this->forbiddenResponse('You do not have permission to resolve grievances');
             }
 
             $validator = Validator::make($request->all(), [
                 'resolution' => 'required|string',
+                'notes' => 'nullable|string',
             ]);
 
             if ($validator->fails()) {
@@ -217,7 +248,7 @@ class GrievanceController extends Controller
                 ], 422);
             }
 
-            $grievance = $this->grievanceService->resolveGrievance($grievance, $request->resolution);
+            $grievance = $this->grievanceService->resolveGrievance($grievance, $request->resolution, $request->notes);
 
             return response()->json([
                 'success' => true,
@@ -246,12 +277,8 @@ class GrievanceController extends Controller
             $grievance = Grievance::findOrFail($id);
             $user = auth()->user();
 
-            // Check permission
-            if (!$user->hasAnyRole(['Super Admin', 'HR'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'You do not have permission to escalate grievances',
-                ], 403);
+            if (!$this->canManageGrievances($user)) {
+                return $this->forbiddenResponse('You do not have permission to escalate grievances');
             }
 
             $validator = Validator::make($request->all(), [
@@ -293,6 +320,11 @@ class GrievanceController extends Controller
     {
         try {
             $grievance = Grievance::findOrFail($id);
+            $user = auth()->user();
+
+            if (!$this->canAccessGrievance($user, $grievance)) {
+                return $this->forbiddenResponse('You do not have permission to comment on this grievance');
+            }
 
             $validator = Validator::make($request->all(), [
                 'comment' => 'required|string',
@@ -333,6 +365,11 @@ class GrievanceController extends Controller
     {
         try {
             $grievance = Grievance::findOrFail($id);
+            $user = auth()->user();
+
+            if (!$this->canAccessGrievance($user, $grievance)) {
+                return $this->forbiddenResponse('You do not have permission to upload attachments for this grievance');
+            }
 
             $validator = Validator::make($request->all(), [
                 'attachments' => 'required|array|max:10',
@@ -380,5 +417,81 @@ class GrievanceController extends Controller
                 'message' => 'Failed to upload attachments: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * View attachment inline.
+     */
+    public function viewAttachment(int $id, string $filename): \Illuminate\Http\Response
+    {
+        try {
+            $grievance = Grievance::findOrFail($id);
+            $user = auth()->user();
+
+            if (!$this->canAccessGrievance($user, $grievance)) {
+                abort(403, 'You do not have permission to view this attachment');
+            }
+
+            return $this->streamAttachment($grievance, $filename, 'inline');
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            abort(404, 'Grievance not found');
+        } catch (\Exception $e) {
+            abort(500, 'Failed to view file: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Download attachment.
+     */
+    public function downloadAttachment(int $id, string $filename): \Illuminate\Http\Response
+    {
+        try {
+            $grievance = Grievance::findOrFail($id);
+            $user = auth()->user();
+
+            if (!$this->canAccessGrievance($user, $grievance)) {
+                abort(403, 'You do not have permission to download this attachment');
+            }
+
+            return $this->streamAttachment($grievance, $filename, 'attachment');
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            abort(404, 'Grievance not found');
+        } catch (\Exception $e) {
+            abort(500, 'Failed to download file');
+        }
+    }
+
+    protected function streamAttachment(Grievance $grievance, string $filename, string $disposition): \Illuminate\Http\Response
+    {
+        $attachmentPaths = $grievance->attachments ?? [];
+
+        $path = collect($attachmentPaths)->first(function ($p) use ($filename) {
+            return str_ends_with($p, $filename);
+        });
+
+        if (!$path) {
+            $path = "grievances/{$grievance->id}/{$filename}";
+        }
+
+        if (!Storage::exists($path)) {
+            $fallbackPath = "private/" . $path;
+            if (!Storage::exists($fallbackPath)) {
+                abort(404, 'File not found on disk');
+            }
+            $path = $fallbackPath;
+        }
+
+        $content = Storage::get($path);
+        $mimeType = Storage::mimeType($path) ?? 'application/octet-stream';
+        $size = Storage::size($path);
+
+        return response($content, 200, [
+            'Content-Type' => $mimeType,
+            'Content-Length' => $size,
+            'Content-Disposition' => $disposition . '; filename="' . $filename . '"',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+        ]);
     }
 }

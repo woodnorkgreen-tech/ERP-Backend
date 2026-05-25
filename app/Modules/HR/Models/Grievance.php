@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\User;
-use App\Modules\HR\Models\Department;
 
 class Grievance extends Model
 {
@@ -16,6 +15,7 @@ class Grievance extends Model
         'complainant_id',
         'against_id',
         'description',
+        'category',
         'date_reported',
         'status',
         'resolution',
@@ -52,11 +52,6 @@ class Grievance extends Model
     public function resolver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'resolved_by');
-    }
-
-    public function department(): BelongsTo
-    {
-        return $this->belongsTo(Department::class, 'complainant_id', 'id');
     }
 
     public function comments(): HasMany

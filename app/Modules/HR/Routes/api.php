@@ -255,6 +255,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('grievance/{id}/escalate', [GrievanceController::class, 'escalate']);
         Route::post('grievance/{id}/comments', [GrievanceController::class, 'addComment']);
         Route::post('grievance/{id}/attachments', [GrievanceController::class, 'uploadAttachments']);
+        Route::get('grievance/{id}/attachments/{filename}/view', [GrievanceController::class, 'viewAttachment']);
+        Route::get('grievance/{id}/attachments/{filename}', [GrievanceController::class, 'downloadAttachment']);
 
         // Discipline management
         Route::get('discipline', [DisciplineController::class, 'index']);
@@ -270,6 +272,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('discipline/{id}/finalize', [DisciplineController::class, 'finalizeCase']);
         Route::post('discipline/{id}/comments', [DisciplineController::class, 'addComment']);
         Route::post('discipline/{id}/attachments', [DisciplineController::class, 'uploadAttachments']);
+        Route::get('discipline/{id}/attachments/{filename}/view', [DisciplineController::class, 'viewAttachment']);
+        Route::get('discipline/{id}/attachments/{filename}', [DisciplineController::class, 'downloadAttachment']);
 
         // Internal Recruitment (ATS)
         Route::prefix('recruitment/admin')->group(function () {
