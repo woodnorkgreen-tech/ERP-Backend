@@ -23,6 +23,7 @@ use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\HandoverSurveyController;
 use App\Http\Controllers\API\PublicHandoverController;
 use App\Modules\Production\Http\Controllers\JobCardController;
+use App\Modules\Logistics\Controllers\DriverDeliveryController;
 use App\Http\Controllers\DesignRequirementController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
@@ -54,7 +55,7 @@ Route::post('public/leads', [App\Modules\ClientService\Http\Controllers\PublicLe
 Route::get('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'show']);
 Route::post('public/handover/{token}', [App\Http\Controllers\API\PublicHandoverController::class, 'store']);
 
-// Public routes for Petty Cash Requisition Sign-off 
+// Public routes for Petty Cash Requisition Sign-off
 Route::get('public/pcr/{token}', [PettyCashRequisitionController::class, 'getByToken']);
 Route::post('public/pcr/{token}/sign', [PettyCashRequisitionController::class, 'publicSignOff']);
 Route::post('public/pcr/{token}/item/{itemId}/sign', [PettyCashRequisitionController::class, 'publicItemSignOff']);
@@ -64,7 +65,7 @@ Route::prefix('public')->group(function () {
     Route::get('job-cards/{token}', [JobCardController::class, 'publicShow']);
     Route::post('job-cards/{token}', [JobCardController::class, 'publicUpdate']);
     Route::get('technicians', [JobCardController::class, 'publicTechnicians']);
-    
+
     // Public Petty Cash Requisition routes
     Route::get('petty-cash/form-data', [PettyCashRequisitionController::class, 'getPublicFormData']);
     Route::post('petty-cash/requisitions', [PettyCashRequisitionController::class, 'publicStore']);
@@ -77,17 +78,38 @@ Route::post('flash-quote/generate-pdf', [App\Http\Controllers\FlashQuoteControll
 
 Route::get('/storage/{path}', function ($path) {
     $file = storage_path('app/public/' . $path);
-    
+
     if (!file_exists($file)) {
         abort(404);
     }
-    
+
     $mimeType = mime_content_type($file);
     return response()->file($file, [
         'Content-Type' => $mimeType,
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
+Route::prefix('hr')->group(function () {
+    // Employee management
+    Route::apiResource('employees', EmployeeController::class);
+
+    // Department management
+    Route::get('departments', [DepartmentController::class, 'index']);
+    Route::post('departments', [DepartmentController::class, 'store']);
+    Route::get('departments/{department}', [DepartmentController::class, 'show']);
+    Route::put('departments/{department}', [DepartmentController::class, 'update']);
+    Route::patch('departments/{department}', [DepartmentController::class, 'update']);
+    Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
+
+    // Technical Labour Management
+    Route::get('technical-labour/template', [TechnicalLabourController::class, 'downloadTemplate']);
+    Route::post('technical-labour/import', [TechnicalLabourController::class, 'import']);
+    Route::get('technical-labour', [TechnicalLabourController::class, 'index']);
+    Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
+    Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
+    Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
+});
+
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware(['auth:sanctum', 'active']);
@@ -144,16 +166,16 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('projects/tasks/{taskId}/setdown')->group(function () {
         Route::get('/', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'show']);
         Route::post('/documentation', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'saveDocumentation']);
-        
+
         // Photos
         Route::post('/photos', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'uploadPhoto']);
         Route::delete('/photos/{photoId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deletePhoto']);
-        
+
         // Issues
         Route::post('/issues', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'addIssue']);
         Route::put('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateIssue']);
         Route::delete('/issues/{issueId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'deleteIssue']);
-        
+
         // Checklist
         Route::get('/checklist', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'getChecklist']);
         Route::patch('/checklist/items/{itemId}', [App\Modules\setdownTask\Http\Controllers\SetdownTaskController::class, 'updateChecklistItem']);
@@ -164,11 +186,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('projects/tasks/{taskId}/setup')->group(function () {
         Route::get('/', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'show']);
         Route::post('/documentation', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'saveDocumentation']);
-        
+
         // Photos
         Route::post('/photos', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'uploadPhoto']);
         Route::delete('/photos/{photoId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'deletePhoto']);
-        
+
         // Issues
         Route::post('/issues', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'addIssue']);
         Route::put('/issues/{issueId}', [App\Modules\setupTask\Http\Controllers\SetupTaskController::class, 'updateIssue']);
@@ -184,10 +206,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('/auto-populate', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'autoPopulate']);
         Route::post('/{reportId}/status', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'changeStatus']);
         Route::get('/{reportId}/analyze', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'analyze']);
-        
+
         // PDF
         Route::get('/{reportId}/pdf', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'generatePdf']);
-        
+
         // Attachments
         Route::post('/{reportId}/attachments', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'uploadAttachment']);
         Route::delete('/{reportId}/attachments/{attachmentId}', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'deleteAttachment']);
@@ -252,6 +274,69 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         $user = auth()->user();
         $user->update(['onesignal_player_id' => $request->player_id]);
         return response(['success' => true]);
+    });
+
+    Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
+    Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
+    Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
+    Route::get('/announcements/unread-count', 'App\Http\Controllers\AnnouncementController@unreadCount');
+    Route::delete('/announcements/{id}', 'App\Http\Controllers\AnnouncementController@destroy');
+
+    // Event Calendar Routes
+    // Get all events
+    Route::get('/events', 'App\Http\Controllers\EventController@index');
+
+    // Get single event
+    Route::get('/events/{id}', 'App\Http\Controllers\EventController@show');
+
+    // Save new event
+    Route::post('/events/save', 'App\Http\Controllers\EventController@save');
+
+    // Update event
+    Route::post('/events/update', 'App\Http\Controllers\EventController@update');
+
+    // Delete event
+    Route::post('/events/delete', 'App\Http\Controllers\EventController@delete');
+
+    // Get events by date range
+    Route::post('/events/range', 'App\Http\Controllers\EventController@getByDateRange');
+    // User permissions and navigation
+    Route::get('/user/permissions', function () {
+        return response()->json([
+            'permissions' => auth()->user()->getNavigationPermissions(),
+            'user_permissions' => auth()->user()->getAllPermissions()->pluck('name')->toArray(),
+            'roles' => auth()->user()->roles->pluck('name'),
+            'departments' => auth()->user()->getAccessibleDepartments()
+        ]);
+    });
+
+    // HR Module Routes
+    Route::prefix('hr')->group(function () {
+        // Employee management
+        Route::apiResource('employees', EmployeeController::class)->middleware([
+            'index' => 'permission:' . Permissions::EMPLOYEE_READ,
+            'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
+            'show' => 'permission:' . Permissions::EMPLOYEE_READ,
+            'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
+            'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
+        ]);
+
+        // Technical Labour management
+        Route::apiResource('technical-labour', App\Modules\HR\Http\Controllers\TechnicalLabourController::class);
+
+        // Department management
+        Route::get('departments', [DepartmentController::class, 'index'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
+        Route::post('departments', [DepartmentController::class, 'store'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_CREATE);
+        Route::get('departments/{department}', [DepartmentController::class, 'show'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
+        Route::put('departments/{department}', [DepartmentController::class, 'update'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
+        Route::patch('departments/{department}', [DepartmentController::class, 'update'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
+        Route::delete('departments/{department}', [DepartmentController::class, 'destroy'])
+            ->middleware('permission:' . Permissions::DEPARTMENT_DELETE);
     });
 
     // Admin Module Routes
@@ -335,12 +420,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('projects/tasks/{taskId}/materials')->group(function () {
         Route::get('/', [App\Http\Controllers\MaterialsController::class, 'getMaterialsData']);
         Route::post('/', [App\Http\Controllers\MaterialsController::class, 'saveMaterialsData']);
-        
+
         // Material versioning routes
         Route::post('/versions', [App\Http\Controllers\MaterialsController::class, 'createMaterialVersion']);
         Route::get('/versions', [App\Http\Controllers\MaterialsController::class, 'getMaterialVersions']);
         Route::post('/versions/{versionId}/restore', [App\Http\Controllers\MaterialsController::class, 'restoreMaterialVersion']);
-        
+
         // Excel template download and upload
         Route::get('/template/download', [App\Http\Controllers\MaterialsController::class, 'downloadTemplate']);
         Route::post('/template/upload', [App\Http\Controllers\MaterialsController::class, 'uploadTemplate']);
@@ -351,6 +436,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // PDF Generation
         Route::get('/pdf', [App\Http\Controllers\MaterialsController::class, 'downloadPdf']);
     });
+
 
     // Budget management routes
     Route::prefix('projects/tasks/{taskId}/budget')->group(function () {
@@ -386,12 +472,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('/budget-status', [App\Http\Controllers\QuoteController::class, 'checkBudgetStatus']);
         Route::get('/changes-preview', [App\Http\Controllers\QuoteController::class, 'previewBudgetChanges']);
         Route::post('/smart-merge', [App\Http\Controllers\QuoteController::class, 'smartMergeBudget']);
-        
+
         // Quote versioning routes (standardized to match materials/budget pattern)
         Route::post('/versions', [App\Http\Controllers\QuoteController::class, 'createVersion']);
         Route::get('/versions', [App\Http\Controllers\QuoteController::class, 'getVersions']);
         Route::post('/versions/{versionId}/restore', [App\Http\Controllers\QuoteController::class, 'restoreVersion']);
-        
+
         // Legacy routes (keep for backward compatibility)
         Route::post('/version', [App\Http\Controllers\QuoteController::class, 'createVersion']);
         Route::get('/version/{versionId}', [App\Http\Controllers\QuoteController::class, 'getVersion']);
@@ -432,10 +518,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'store']);
         Route::put('/{teamTaskId}', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'update']);
         Route::delete('/{teamTaskId}', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'destroy']);
-        
+
         // Bulk assign teams
         Route::post('/bulk-assign', [App\Modules\Teams\Controllers\TeamsTaskController::class, 'bulkAssign']);
-        
+
         // Team member management
         Route::prefix('/{teamTaskId}/members')->group(function () {
             Route::get('/', [App\Modules\Teams\Controllers\TeamMemberController::class, 'index']);
@@ -508,6 +594,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('/checklist/stats', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklistStats']);
         });
 
+
+
+
         // Archival Task Routes (Project Memorial Report)
         Route::prefix('tasks/{taskId}/archival')->group(function () {
             Route::get('/', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'index']);
@@ -520,7 +609,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('/{reportId}/status', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'changeStatus']);
             Route::get('/{reportId}/analyze', [App\Modules\ArchivalTask\Http\Controllers\ArchivalReportController::class, 'analyze']);
         });
- 
+
         // Production Task Routes
         Route::prefix('tasks/{taskId}/production')->group(function () {
             Route::get('/', [App\Http\Controllers\ProductionController::class, 'getProductionData']);
@@ -530,7 +619,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::delete('/quality-checkpoints', [App\Http\Controllers\ProductionController::class, 'deleteQualityCheckpoints']);
         });
 
-        
+
 
         // Drivers endpoint for logistics
         Route::get('/drivers', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getDrivers']);
@@ -623,7 +712,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('departmental-tasks/{task}/action', [PhaseDepartmentalTaskController::class, 'performAction']); // No permission for debugging
         Route::get('departmental-tasks-stats', [PhaseDepartmentalTaskController::class, 'getStats']); // No permission for debugging
 
-        
+
 
 
         // Materials management
@@ -632,13 +721,14 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('enquiries/{enquiryId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsByEnquiry']);
             Route::get('element-templates', [App\Http\Controllers\MaterialsController::class, 'getElementTemplates']);
             Route::post('element-templates', [App\Http\Controllers\MaterialsController::class, 'createElementTemplate']);
-            
+
             // Materials approval endpoints
             Route::post('tasks/{taskId}/materials/approve/{department}', [App\Http\Controllers\MaterialsController::class, 'approveMaterials']);
             Route::get('tasks/{taskId}/materials/approval-status', [App\Http\Controllers\MaterialsController::class, 'getApprovalStatus']);
-            
+
             // Materials configuration
             Route::get('materials/config', [App\Http\Controllers\MaterialsController::class, 'getMaterialsConfig']);
+    });
 
         // Design asset management
         Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
@@ -741,7 +831,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('search', [PettyCashController::class, 'search']);
             Route::get('voucher', [PettyCashController::class, 'voucher']);
             Route::get('voucher/pdf', [PettyCashController::class, 'downloadVoucherPdf']);
-            
+
             // Excel upload route
             Route::post('upload-excel', [PettyCashController::class, 'uploadExcel'])
                 ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
@@ -770,4 +860,4 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('requisitions/{id}/voucher', [PettyCashRequisitionController::class, 'downloadVoucher']);
         });
     });
-});
+
