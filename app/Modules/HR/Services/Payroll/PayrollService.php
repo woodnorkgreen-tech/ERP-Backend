@@ -70,14 +70,28 @@ class PayrollService
      */
     public function finalizeRun(PayrollRun $run): void
     {
-        $stats = $run->payslips()
-            ->selectRaw('SUM(gross_pay) as total_gross, SUM(net_pay) as total_net')
+        $stats = DB::table('payslips')
+            ->where('payroll_run_id', $run->id)
+            ->selectRaw('
+                SUM(gross_pay) as total_gross,
+                SUM(net_pay)   as total_net,
+                SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.paye"))         AS DECIMAL(12,2))) as total_paye,
+                SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.nssf"))         AS DECIMAL(12,2))) as total_nssf,
+                SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.shif"))         AS DECIMAL(12,2))) as total_shif,
+                SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.housing_levy")) AS DECIMAL(12,2))) as total_housing_levy
+            ')
             ->first();
 
+        $totalStatutory = ($stats->total_paye ?? 0)
+            + ($stats->total_nssf ?? 0)
+            + ($stats->total_shif ?? 0)
+            + ($stats->total_housing_levy ?? 0);
+
         $run->update([
-            'total_gross' => $stats->total_gross ?? 0,
-            'total_net' => $stats->total_net ?? 0,
-            'status' => 'locked'
+            'total_gross'     => $stats->total_gross ?? 0,
+            'total_net'       => $stats->total_net ?? 0,
+            'total_statutory' => $totalStatutory,
+            'status'          => 'locked',
         ]);
     }
 }

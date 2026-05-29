@@ -63,6 +63,16 @@
                 <div class="info-value">{{ $payslip->employee->position }}</div>
             </td>
         </tr>
+        <tr>
+            <td style="border: none;">
+                <div class="info-label">KRA PIN</div>
+                <div class="info-value">{{ $payslip->employee->kra_pin ?? '—' }}</div>
+            </td>
+            <td style="border: none;">
+                <div class="info-label">NSSF No.</div>
+                <div class="info-value">{{ $payslip->employee->nssf_id ?? '—' }}</div>
+            </td>
+        </tr>
     </table>
 
     <div class="section-title">Earnings & Additions</div>
@@ -93,7 +103,7 @@
         </tbody>
     </table>
 
-    <div class="section-title">Deductions (Statuntary & Others)</div>
+    <div class="section-title">Deductions (Statutory &amp; Others)</div>
     <table>
         <thead>
             <tr>
@@ -114,6 +124,22 @@
                 <td>Housing Levy</td>
                 <td class="amount">({{ number_format($payslip->tax_breakdown['housing_levy'], 2) }})</td>
             </tr>
+            @if(isset($payslip->tax_breakdown['calculated_paye']) && $payslip->tax_breakdown['calculated_paye'] > 0)
+            <tr style="color: #64748b; font-style: italic;">
+                <td style="padding-left: 24px;">Tax on Taxable Pay</td>
+                <td class="amount">({{ number_format($payslip->tax_breakdown['calculated_paye'], 2) }})</td>
+            </tr>
+            <tr style="color: #16a34a;">
+                <td style="padding-left: 24px;">Personal Relief</td>
+                <td class="amount">+{{ number_format($payslip->tax_breakdown['personal_relief'] ?? 0, 2) }}</td>
+            </tr>
+            @if(isset($payslip->tax_breakdown['insurance_relief']) && $payslip->tax_breakdown['insurance_relief'] > 0)
+            <tr style="color: #16a34a;">
+                <td style="padding-left: 24px;">Insurance Relief</td>
+                <td class="amount">+{{ number_format($payslip->tax_breakdown['insurance_relief'], 2) }}</td>
+            </tr>
+            @endif
+            @endif
             <tr>
                 <td>PAYE (Income Tax)</td>
                 <td class="amount">({{ number_format($payslip->tax_breakdown['paye'], 2) }})</td>

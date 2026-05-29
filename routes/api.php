@@ -25,6 +25,9 @@ use App\Http\Controllers\API\PublicHandoverController;
 use App\Modules\Production\Http\Controllers\JobCardController;
 use App\Modules\Logistics\Controllers\DriverDeliveryController;
 use App\Http\Controllers\DesignRequirementController;
+use App\Modules\HR\Http\Controllers\EmployeeController;
+use App\Modules\HR\Http\Controllers\DepartmentController;
+use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
@@ -89,26 +92,6 @@ Route::get('/storage/{path}', function ($path) {
         'Cache-Control' => 'public, max-age=31536000',
     ]);
 })->where('path', '.*');
-Route::prefix('hr')->group(function () {
-    // Employee management
-    Route::apiResource('employees', EmployeeController::class);
-
-    // Department management
-    Route::get('departments', [DepartmentController::class, 'index']);
-    Route::post('departments', [DepartmentController::class, 'store']);
-    Route::get('departments/{department}', [DepartmentController::class, 'show']);
-    Route::put('departments/{department}', [DepartmentController::class, 'update']);
-    Route::patch('departments/{department}', [DepartmentController::class, 'update']);
-    Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
-
-    // Technical Labour Management
-    Route::get('technical-labour/template', [TechnicalLabourController::class, 'downloadTemplate']);
-    Route::post('technical-labour/import', [TechnicalLabourController::class, 'import']);
-    Route::get('technical-labour', [TechnicalLabourController::class, 'index']);
-    Route::post('technical-labour', [TechnicalLabourController::class, 'store']);
-    Route::put('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'update']);
-    Route::delete('technical-labour/{technicalLabour}', [TechnicalLabourController::class, 'destroy']);
-});
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
@@ -312,7 +295,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // HR Module Routes
     Route::prefix('hr')->group(function () {
-        // Employee management
+        // Employee management — static routes MUST come before apiResource wildcard
+        Route::get('employees/profile', [EmployeeController::class, 'profile']);
+        Route::get('employees/compact', [EmployeeController::class, 'compact']);
         Route::apiResource('employees', EmployeeController::class)->middleware([
             'index' => 'permission:' . Permissions::EMPLOYEE_READ,
             'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
@@ -728,7 +713,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
             // Materials configuration
             Route::get('materials/config', [App\Http\Controllers\MaterialsController::class, 'getMaterialsConfig']);
-    });
 
         // Design asset management
         Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
@@ -861,3 +845,4 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         });
     });
 
+});

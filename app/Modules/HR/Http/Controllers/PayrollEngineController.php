@@ -13,6 +13,7 @@ use App\Modules\HR\Models\PayrollRun;
 use App\Modules\HR\Services\Payroll\PayrollService;
 use Carbon\Carbon;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\DB;
 
 class PayrollEngineController extends Controller
 {
@@ -386,12 +387,24 @@ class PayrollEngineController extends Controller
         $run = $payslip->payrollRun;
         $payslip->delete();
 
-        // If this payslip belonged to a run, update the run totals instantly
         if ($run) {
-            $totals = $run->payslips()->selectRaw('SUM(gross_pay) as gross, SUM(net_pay) as net')->first();
+            $totals = DB::table('payslips')
+                ->where('payroll_run_id', $run->id)
+                ->selectRaw('
+                    SUM(gross_pay) as gross,
+                    SUM(net_pay)   as net,
+                    SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.paye"))         AS DECIMAL(12,2)))
+                        + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.nssf"))         AS DECIMAL(12,2)))
+                        + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.shif"))         AS DECIMAL(12,2)))
+                        + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.housing_levy")) AS DECIMAL(12,2)))
+                        as total_statutory
+                ')
+                ->first();
+
             $run->update([
-                'total_gross' => $totals->gross ?? 0,
-                'total_net' => $totals->net ?? 0
+                'total_gross'     => $totals->gross ?? 0,
+                'total_net'       => $totals->net ?? 0,
+                'total_statutory' => $totals->total_statutory ?? 0,
             ]);
         }
 
@@ -474,6 +487,9 @@ class PayrollEngineController extends Controller
 
         $payslips = Payslip::with('employee')
             ->where('payroll_month', $validated['payroll_month'])
+            ->whereIn('status', ['generated', 'paid'])
+            ->whereHas('employee', fn($q) => $q->whereRaw("LOWER(payment_method) = 'bank'"))
+            ->orderBy('id')
             ->get();
 
         $headers = [
@@ -486,13 +502,21 @@ class PayrollEngineController extends Controller
             fputcsv($file, ['Beneficiary Bank Code', 'Beneficiary Name', 'Beneficiary Account', 'Amount', 'Currency', 'Remarks']);
 
             foreach ($payslips as $slip) {
+                $bankCode   = $slip->employee->bank_code ?? '';
+                $accountNo  = $slip->employee->account_number ?? '';
+
+                // Skip rows that will fail bank upload validation
+                if (empty($bankCode) || empty($accountNo)) {
+                    continue;
+                }
+
                 fputcsv($file, [
-                    $slip->employee->bank_code ?? '',
-                    $slip->employee->first_name . ' ' . $slip->employee->last_name,
-                    $slip->employee->account_number,
-                    $slip->net_pay,
+                    $bankCode,
+                    trim($slip->employee->first_name . ' ' . $slip->employee->last_name),
+                    $accountNo,
+                    number_format((float)$slip->net_pay, 2, '.', ''),
                     'KES',
-                    'Payroll - ' . $validated['payroll_month']
+                    'Salary ' . $validated['payroll_month'],
                 ]);
             }
             fclose($file);
@@ -509,6 +533,9 @@ class PayrollEngineController extends Controller
 
         $payslips = Payslip::with('employee')
             ->where('payroll_month', $validated['payroll_month'])
+            ->whereIn('status', ['generated', 'paid'])
+            ->whereHas('employee', fn($q) => $q->whereRaw("LOWER(payment_method) LIKE '%mpesa%'"))
+            ->orderBy('id')
             ->get();
 
         $headers = [
@@ -516,16 +543,30 @@ class PayrollEngineController extends Controller
             'Content-Disposition' => 'attachment; filename="MPESA_Remittance_' . $validated['payroll_month'] . '.csv"',
         ];
 
-        $callback = function() use ($payslips) {
+        $callback = function() use ($payslips, $validated) {
             $file = fopen('php://output', 'w');
             fputcsv($file, ['To (Phone number)', 'Amount', 'Remarks', 'Beneficiary (Name)']);
 
             foreach ($payslips as $slip) {
+                $raw = $slip->employee->phone ?? '';
+
+                if (empty($raw)) {
+                    continue; // Safaricom rejects blank phone rows
+                }
+
+                // Normalise to 254XXXXXXXXX (strip +, spaces, leading 0)
+                $phone = preg_replace('/\D/', '', $raw);
+                if (str_starts_with($phone, '0')) {
+                    $phone = '254' . substr($phone, 1);
+                } elseif (str_starts_with($phone, '7') || str_starts_with($phone, '1')) {
+                    $phone = '254' . $phone;
+                }
+
                 fputcsv($file, [
-                    $slip->employee->phone ?? '',
-                    $slip->net_pay,
-                    'Salary Payment',
-                    $slip->employee->first_name . ' ' . $slip->employee->last_name
+                    $phone,
+                    (int) round((float) $slip->net_pay), // MPESA requires whole numbers
+                    'Salary ' . $validated['payroll_month'],
+                    trim($slip->employee->first_name . ' ' . $slip->employee->last_name),
                 ]);
             }
             fclose($file);
@@ -592,9 +633,10 @@ class PayrollEngineController extends Controller
                 // Note: SHIF/Levy are deductible in calculation but P9 layout typically shows Pension/NSSF specifically.
                 $taxable = $gross - $nssf; 
                 
-                $finalPaye = (float)($tax['paye'] ?? 0);
-                $relief = (float)($tax['personal_relief'] ?? 0);
-                $taxCharged = $finalPaye + $relief; // Reconstruct tax before relief
+                $finalPaye  = (float)($tax['paye'] ?? 0);
+                $relief     = (float)($tax['personal_relief'] ?? 0) + (float)($tax['insurance_relief'] ?? 0);
+                // Use persisted raw band tax; fall back to reconstruction for payslips generated before this fix
+                $taxCharged = (float)($tax['calculated_paye'] ?? ($finalPaye + $relief));
 
                 $monthName = date('F', strtotime($slip->payroll_month . '-01'));
 

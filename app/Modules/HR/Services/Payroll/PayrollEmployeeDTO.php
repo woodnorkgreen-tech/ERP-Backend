@@ -32,16 +32,21 @@ class PayrollEmployeeDTO
      */
     public static function fromModel(Employee $employee, string $month, array $settings = []): self
     {
+        // Compute inclusive date bounds for the payroll month
+        $firstDay = $month . '-01';
+        $lastDay  = date('Y-m-t', strtotime($firstDay));
+
         return new self(
             employeeId: $employee->id,
             name: $employee->name,
             month: $month,
             baseSalary: (float)$employee->salary,
             salaryHistory: $employee->salaryHistory()
-                ->where(function($q) use ($month) {
-                    $q->where('valid_from', 'like', $month . '%')
-                      ->orWhereNull('valid_to')
-                      ->orWhere('valid_to', 'like', $month . '%');
+                ->where('valid_from', '<=', $lastDay)
+                ->where(function($q) use ($firstDay) {
+                    // Open-ended record (still active) OR record that hasn't expired yet
+                    $q->whereNull('valid_to')
+                      ->orWhere('valid_to', '>=', $firstDay);
                 })->get(),
             ledgers: $employee->payrollLedgers()
                 ->where(function($q) use ($month) {
