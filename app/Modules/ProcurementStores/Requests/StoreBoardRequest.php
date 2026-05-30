@@ -5,7 +5,6 @@ namespace App\Modules\ProcurementStores\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
-use App\Modules\MaterialsLibrary\Models\MaterialCategory;
 
 class StoreBoardRequest extends FormRequest
 {
@@ -40,7 +39,7 @@ class StoreBoardRequest extends FormRequest
      */
     private function validateBoardMaterial(int $materialId, callable $fail): void
     {
-        $material = LibraryMaterial::with('category.parent')->find($materialId);
+        $material = LibraryMaterial::with('materialCategory.parent')->find($materialId);
 
         if (!$material) {
             return; // 'exists' rule already handles this
@@ -53,11 +52,15 @@ class StoreBoardRequest extends FormRequest
         }
 
         // Enforce board-eligible parent categories
-        $boardParentNames = ['Boards', 'Sheet Materials', 'Veneer'];
+        $boardParentNames = config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']);
 
-        $parentCategoryName = $material->category?->parent?->name ?? $material->category?->name;
+        // Prefer FK-based parent; fall back to legacy category string
+        $parentCategoryName = $material->materialCategory?->parent?->name
+            ?? $material->materialCategory?->name
+            ?? $material->category
+            ?? '';
 
-        if (!in_array($parentCategoryName, $boardParentNames)) {
+        if (!in_array($parentCategoryName, $boardParentNames, true)) {
             $fail(
                 "Material '{$material->material_name}' belongs to category '{$parentCategoryName}', which is not eligible for board tracking. " .
                 "Only materials under: " . implode(', ', $boardParentNames) . " can be registered as boards."

@@ -17,6 +17,26 @@ class MaterialController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $materials = $this->buildMaterialQuery($request)->paginate($request->get('per_page', 50));
+        return response()->json($materials);
+    }
+
+    /**
+     * Display materials for a specific workstation.
+     */
+    public function byWorkstation($workstationId, Request $request): JsonResponse
+    {
+        $materials = $this->buildMaterialQuery($request, $workstationId)
+            ->paginate($request->get('per_page', 50));
+
+        return response()->json($materials);
+    }
+
+    /**
+     * Shared query builder used by index() and byWorkstation().
+     */
+    private function buildMaterialQuery(Request $request, ?int $workstationId = null)
+    {
         $query = LibraryMaterial::with(['workstation', 'stock']);
 
         if ($request->boolean('with_trashed')) {
@@ -25,50 +45,27 @@ class MaterialController extends Controller
             $query->active();
         }
 
-        if ($request->has('category')) {
-            $query->byCategory($request->category);
+        if ($workstationId) {
+            $query->where('workstation_id', $workstationId);
         }
 
-        if ($request->has('search')) {
+        if ($request->filled('category')) {
+            $query->where('category', $request->category);
+        }
+
+        if ($request->filled('subcategory')) {
+            $query->where('subcategory', $request->subcategory);
+        }
+
+        if ($request->filled('material_type')) {
+            $query->where('material_type', $request->material_type);
+        }
+
+        if ($request->filled('search')) {
             $query->search((string) $request->search);
         }
 
-        $materials = $query->latest()->paginate($request->get('per_page', 50));
-        
-        return response()->json($materials); // Pagination response
-    }
-
-    /**
-     * Display materials for a specific workstation.
-     */
-    public function byWorkstation($workstationId, Request $request): JsonResponse
-    {
-        try {
-            $query = LibraryMaterial::with(['workstation', 'stock'])
-                ->where('workstation_id', $workstationId);
-
-            if ($request->boolean('with_trashed')) {
-                $query->withTrashed();
-            } else {
-                $query->active();
-            }
-
-            if ($request->has('search')) {
-                $query->search((string) $request->search);
-            }
-
-            $materials = $query->latest()->get(); // Or paginate
-
-            return response()->json([
-                'data' => LibraryMaterialResource::collection($materials)
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Error fetching materials',
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ], 500);
-        }
+        return $query->latest();
     }
 
     /**
@@ -86,15 +83,7 @@ class MaterialController extends Controller
         }
 
         $material = LibraryMaterial::create($data);
-        
-        if (isset($data['quantity'])) {
-            $material->stock()->create([
-                'quantity_on_hand' => $data['quantity'],
-                'warehouse_code' => 'MAIN', // Default warehouse or could be configurable
-            ]);
-        }
-
-        $material->load('stock'); // Reload with stock
+        $material->load('stock');
 
         return response()->json([
             'message' => 'Material created successfully',
@@ -130,14 +119,6 @@ class MaterialController extends Controller
         }
 
         $material->update($data);
-
-        if (isset($data['quantity'])) {
-            $material->stock()->updateOrCreate(
-                ['material_id' => $material->id],
-                ['quantity_on_hand' => $data['quantity']]
-            );
-        }
-
         $material->load('stock');
 
         return response()->json([
@@ -203,4 +184,5 @@ class MaterialController extends Controller
             'message' => 'Material permanently deleted'
         ]);
     }
+
 }

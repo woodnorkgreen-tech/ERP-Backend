@@ -45,7 +45,7 @@ return [
         'Available' => ['Allocated', 'Scrapped'],
         'Allocated' => ['At Station', 'Available', 'Scrapped'],
         'At Station' => ['WIP', 'Available', 'Scrapped'],
-        'WIP' => ['Consumed', 'Scrapped'],
+        'WIP' => ['Consumed', 'Scrapped', 'Available'],
         'Consumed' => [],  // Terminal state
         'Scrapped' => [],  // Terminal state
     ],

@@ -5,6 +5,7 @@ use App\Modules\MaterialsLibrary\Controllers\WorkstationController;
 use App\Modules\MaterialsLibrary\Controllers\MaterialController;
 use App\Modules\MaterialsLibrary\Controllers\MaterialImportController;
 use App\Modules\MaterialsLibrary\Controllers\MaterialExportController;
+use App\Modules\MaterialsLibrary\Controllers\CategoryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -28,6 +29,11 @@ Route::post('materials/{id}/restore', [MaterialController::class, 'restore']);
 Route::delete('materials/{id}/force', [MaterialController::class, 'forceDelete']);
 Route::get('materials/workstation/{workstationId}', [MaterialController::class, 'byWorkstation']);
 Route::apiResource('materials', MaterialController::class);
+
+// Categories
+Route::get('categories/tree',    [CategoryController::class, 'tree']);
+Route::get('categories/suggest-code', [CategoryController::class, 'suggestCode']);
+Route::get('categories',         [CategoryController::class, 'index']);
 
 // Import
 Route::post('import', [MaterialImportController::class, 'import']);

@@ -25,6 +25,7 @@ class LibraryMaterial extends Model
         'material_name',
         'category',
         'subcategory',
+        'material_category_id',
         'material_type',
         'unit_of_measure',
         'unit_cost',
@@ -55,6 +56,15 @@ class LibraryMaterial extends Model
     public function workstation(): BelongsTo
     {
         return $this->belongsTo(Workstation::class);
+    }
+
+    /**
+     * The child category this material belongs to (e.g. "MDF Boards").
+     * Parent eligibility (Boards / Sheet Materials / Veneer) is via materialCategory.parent.
+     */
+    public function materialCategory(): BelongsTo
+    {
+        return $this->belongsTo(MaterialCategory::class, 'material_category_id');
     }
 
     /**
