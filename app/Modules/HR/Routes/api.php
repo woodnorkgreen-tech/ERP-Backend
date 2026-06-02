@@ -15,6 +15,7 @@ use App\Modules\HR\Http\Controllers\AnnouncementController;
 use App\Modules\HR\Http\Controllers\IncidentController;
 use App\Modules\HR\Http\Controllers\GrievanceController;
 use App\Modules\HR\Http\Controllers\DisciplineController;
+use App\Modules\HR\Http\Controllers\AttendanceController;
 use App\Modules\HR\Http\Controllers\RecruitmentController;
 use App\Modules\HR\Http\Controllers\InterviewController;
 use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
@@ -274,6 +275,20 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('discipline/{id}/attachments', [DisciplineController::class, 'uploadAttachments']);
         Route::get('discipline/{id}/attachments/{filename}/view', [DisciplineController::class, 'viewAttachment']);
         Route::get('discipline/{id}/attachments/{filename}', [DisciplineController::class, 'downloadAttachment']);
+
+        // Attendance Management
+        Route::get('attendance/summary', [AttendanceController::class, 'summary']);
+        Route::get('attendance/sync-logs', [AttendanceController::class, 'syncLogs']);
+        Route::post('attendance/sync', [AttendanceController::class, 'sync']);
+        Route::post('attendance/upload/preview', [AttendanceController::class, 'uploadPreview']);
+        Route::post('attendance/upload', [AttendanceController::class, 'upload']);
+        Route::get('attendance/overtime', [AttendanceController::class, 'overtime']);
+        Route::get('attendance', [AttendanceController::class, 'index']);
+        Route::post('attendance', [AttendanceController::class, 'store']);
+        Route::get('attendance/{id}', [AttendanceController::class, 'show']);
+        Route::put('attendance/{id}', [AttendanceController::class, 'update']);
+        Route::patch('attendance/{id}', [AttendanceController::class, 'update']);
+        Route::delete('attendance/{id}', [AttendanceController::class, 'destroy']);
 
         // Internal Recruitment (ATS)
         Route::prefix('recruitment/admin')->group(function () {

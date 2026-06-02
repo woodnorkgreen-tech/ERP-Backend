@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Console\Scheduling\Schedule;
 use App\Modules\HR\Console\Commands\SyncLeaveStatuses;
+use App\Modules\HR\Console\Commands\SyncHikvisionAttendance;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Observers\LeaveRequestObserver;
 
@@ -28,6 +29,7 @@ class HRServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 SyncLeaveStatuses::class,
+                SyncHikvisionAttendance::class,
             ]);
         }
 
@@ -42,6 +44,14 @@ class HRServiceProvider extends ServiceProvider
                 ->dailyAt('00:01')
                 ->withoutOverlapping()
                 ->appendOutputTo(storage_path('logs/leave-sync.log'));
+
+            $schedule = $this->app->make(Schedule::class);
+            foreach (['09:00', '18:00', '23:00'] as $time) {
+                $schedule->command('attendance:sync-hikvision')
+                    ->dailyAt($time)
+                    ->withoutOverlapping()
+                    ->appendOutputTo(storage_path('logs/hikvision-sync.log'));
+            }
         });
     }
 }

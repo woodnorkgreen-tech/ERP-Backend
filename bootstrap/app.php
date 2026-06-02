@@ -33,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule) {
         $schedule->command('hr:process-actions')->daily();
+        $schedule->command('attendance:sync-hikvision')->twiceDaily(8, 17);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Handle unauthenticated requests for API
