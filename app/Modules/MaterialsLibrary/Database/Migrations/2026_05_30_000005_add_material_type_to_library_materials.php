@@ -9,16 +9,25 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Add as nullable with default so existing rows are not affected
         Schema::table('library_materials', function (Blueprint $table) {
-            $table->string('material_type', 20)
-                  ->nullable()
-                  ->default('consumable')
-                  ->after('subcategory')
-                  ->comment('consumable | reusable — drives board tracking and inventory log behaviour');
-
-            $table->index('material_type');
+            if (!Schema::hasColumn('library_materials', 'material_type')) {
+                $table->string('material_type', 20)
+                      ->nullable()
+                      ->default('consumable')
+                      ->after('subcategory')
+                      ->comment('consumable | reusable — drives board tracking and inventory log behaviour');
+            }
         });
+
+        // Add index only if it doesn't already exist
+        $indexes = collect(DB::select("SHOW INDEX FROM library_materials"))
+            ->pluck('Key_name');
+
+        if (!$indexes->contains('library_materials_material_type_index')) {
+            Schema::table('library_materials', function (Blueprint $table) {
+                $table->index('material_type');
+            });
+        }
 
         // Backfill: any material that already has board records is reusable
         DB::statement("
@@ -35,8 +44,10 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('library_materials', function (Blueprint $table) {
-            $table->dropIndex(['material_type']);
-            $table->dropColumn('material_type');
+            if (Schema::hasColumn('library_materials', 'material_type')) {
+                $table->dropIndex(['material_type']);
+                $table->dropColumn('material_type');
+            }
         });
     }
 };

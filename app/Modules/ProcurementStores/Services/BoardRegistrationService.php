@@ -47,7 +47,10 @@ class BoardRegistrationService
     ): array {
         $material->loadMissing(['workstation', 'materialCategory.parent']);
 
-        $attrs     = is_array($material->attributes) ? $material->attributes : [];
+        // MaterialController wraps attributes as { "attributes": { ... } } on save.
+        // Unwrap one level so dimension keys are directly accessible.
+        $raw       = is_array($material->attributes) ? $material->attributes : [];
+        $attrs     = $raw['attributes'] ?? $raw;
         $length    = $length    ?? ($attrs['standard_length_mm'] ?? config('boards.default_dimensions.length', 2440));
         $width     = $width     ?? ($attrs['standard_width_mm']  ?? config('boards.default_dimensions.width',  1220));
         $thickness = $thickness ?? ($attrs['thickness_mm']       ?? config('boards.default_dimensions.thickness', 18));
@@ -106,7 +109,10 @@ class BoardRegistrationService
 
         $this->validateMaterial($material);
 
-        $attrs     = is_array($material->attributes) ? $material->attributes : [];
+        // MaterialController wraps attributes as { "attributes": { ... } } on save.
+        // Unwrap one level so dimension keys are directly accessible.
+        $raw       = is_array($material->attributes) ? $material->attributes : [];
+        $attrs     = $raw['attributes'] ?? $raw;
         $length    = $length    ?? ($attrs['standard_length_mm'] ?? config('boards.default_dimensions.length', 2440));
         $width     = $width     ?? ($attrs['standard_width_mm']  ?? config('boards.default_dimensions.width',  1220));
         $thickness = $thickness ?? ($attrs['thickness_mm']       ?? config('boards.default_dimensions.thickness', 18));

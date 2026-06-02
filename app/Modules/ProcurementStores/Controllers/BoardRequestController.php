@@ -8,12 +8,15 @@ use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\BoardRequest;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use App\Modules\ProcurementStores\Models\Stock;
+use App\Modules\ProcurementStores\Services\BoardWorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class BoardRequestController extends Controller
 {
+    public function __construct(private readonly BoardWorkflowService $workflow) {}
+
     /**
      * GET /board-requests
      * List requests — pending ones first, optionally filtered by job.
@@ -32,6 +35,11 @@ class BoardRequestController extends Controller
             $query->where('status', $request->status);
         }
 
+        // ?mine=1 — Production users fetch only their own requests
+        if ($request->boolean('mine')) {
+            $query->where('requested_by', auth()->id());
+        }
+
         return response()->json($query->paginate($request->get('per_page', 30)));
     }
 
@@ -42,7 +50,8 @@ class BoardRequestController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'job_ref'     => 'required|string|max:100',
+            'job_ref'  => 'required|string|max:100',
+            'job_name' => 'nullable|string|max:255',
             'material_id' => 'required|integer|exists:library_materials,id',
             'qty'         => 'required|integer|min:1|max:200',
             'notes'       => 'nullable|string|max:500',
@@ -54,15 +63,46 @@ class BoardRequestController extends Controller
             ->count();
 
         if ($available < $request->qty) {
+            // Count every board for this material grouped by status so the
+            // caller can tell the user exactly why nothing is available
+            // (e.g. all allocated vs all consumed vs never checked in).
+            $breakdown = Board::where('library_material_id', $material->id)
+                ->selectRaw('status, COUNT(*) as count')
+                ->groupBy('status')
+                ->pluck('count', 'status')
+                ->toArray();
+
+            $total = array_sum($breakdown);
+            $onJob = ($breakdown['Allocated'] ?? 0)
+                   + ($breakdown['At Station'] ?? 0)
+                   + ($breakdown['WIP'] ?? 0);
+
+            if ($total === 0) {
+                $reason = 'No boards have been checked into stores for this material yet.';
+            } elseif ($onJob === $total) {
+                $reason = "All {$total} board(s) are currently out on jobs.";
+            } elseif ($onJob > 0) {
+                $consumed = ($breakdown['Consumed'] ?? 0) + ($breakdown['Scrapped'] ?? 0);
+                $reason   = "{$onJob} board(s) are out on jobs" . ($consumed > 0 ? ", {$consumed} consumed/scrapped." : '.');
+            } else {
+                $consumed = ($breakdown['Consumed'] ?? 0) + ($breakdown['Scrapped'] ?? 0);
+                $reason   = $consumed > 0
+                    ? "All {$consumed} board(s) have been consumed or scrapped."
+                    : 'No boards are currently available.';
+            }
+
             return response()->json([
-                'message'   => "Only {$available} {$material->material_name} board(s) available in stores. Requested: {$request->qty}.",
+                'message'   => "Only {$available} {$material->material_name} board(s) available. Requested: {$request->qty}.",
                 'available' => $available,
+                'reason'    => $reason,
+                'breakdown' => $breakdown,
             ], 422);
         }
 
         $boardRequest = DB::transaction(function () use ($request, $material) {
             $br = BoardRequest::create([
                 'job_ref'      => $request->job_ref,
+                'job_name'     => $request->job_name,
                 'material_id'  => $material->id,
                 'qty_requested'=> $request->qty,
                 'status'       => 'pending',
@@ -89,6 +129,9 @@ class BoardRequestController extends Controller
 
             return $br;
         });
+
+        // Kick off the workflow chain: notify Stores team
+        $this->workflow->onRequestRaised($boardRequest);
 
         return response()->json([
             'message' => "Board request raised. {$request->qty} {$material->material_name} board(s) reserved for job [{$request->job_ref}].",
@@ -176,6 +219,9 @@ class BoardRequestController extends Controller
                 'logged_at'    => now(),
             ]);
         });
+
+        // Advance the workflow: create Logistics dispatch task + notify
+        $this->workflow->onRequestFulfilled($boardRequest, $boards);
 
         return response()->json([
             'message'      => "{$boards->count()} board(s) issued to job [{$boardRequest->job_ref}].",

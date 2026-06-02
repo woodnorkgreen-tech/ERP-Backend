@@ -82,6 +82,14 @@ Route::delete('/board-requests/{id}',                [BoardRequestController::cl
 
 Route::post('/boards/ingest',                        [BoardController::class, 'ingest']);
 
+// Workflow task inbox (role-filtered — must be before /{id} params)
+Route::get('/boards/workflow-tasks',                        [BoardController::class, 'workflowTasks']);
+Route::post('/boards/workflow-tasks/{taskId}/claim',        [BoardController::class, 'claimWorkflowTask']);
+Route::post('/boards/workflow-tasks/{taskId}/return-offcut',[BoardController::class, 'returnOffcut']);
+
+// Production WIP board list
+Route::get('/boards/my-wip',                               [BoardController::class, 'myWipBoards']);
+
 // Dashboard / analytics
 Route::get('/boards/command-center-metrics',         [BoardController::class, 'commandCenterMetrics']);
 Route::get('/boards/stock-registry',                 [BoardController::class, 'stockRegistry']);
@@ -94,10 +102,16 @@ Route::get('/boards/by-code/{trackingCode}',         [BoardController::class, 's
 // Query endpoints
 Route::get('/boards/available',                      [BoardController::class, 'available']);
 Route::get('/boards/job/{jobRef}',                   [BoardController::class, 'byJob']);
-Route::post('/boards/job/{jobRef}/calculate-variance',[BoardController::class, 'calculateVariance']);
+Route::post('/boards/job/{jobRef}/calculate-variance', [BoardController::class, 'calculateVariance']);
+Route::post('/boards/job/{jobRef}/dispatch-to-station',[BoardController::class, 'dispatchToStation']);
+Route::post('/boards/job/{jobRef}/start-wip',          [BoardController::class, 'startWip']);
 
 // Label confirmation
 Route::post('/boards/batch/{batchNumber}/confirm-labels', [BoardController::class, 'confirmLabels']);
+
+// Reconciliation
+Route::get('/boards/reconciliation/latest',  [BoardController::class, 'latestReconciliation']);
+Route::post('/boards/reconciliation',        [BoardController::class, 'saveReconciliation']);
 
 // Lifecycle transitions
 Route::post('/boards/{id}/allocate',                 [BoardController::class, 'allocate']);

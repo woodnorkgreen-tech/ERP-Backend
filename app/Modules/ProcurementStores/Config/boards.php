@@ -42,11 +42,12 @@ return [
      */
     'valid_transitions' => [
         'Quarantine' => ['Available', 'Scrapped'],
-        'Available' => ['Allocated', 'Scrapped'],
-        'Allocated' => ['At Station', 'Available', 'Scrapped'],
-        'At Station' => ['WIP', 'Available', 'Scrapped'],
-        'WIP' => ['Consumed', 'Scrapped', 'Available'],
-        'Consumed' => [],  // Terminal state
-        'Scrapped' => [],  // Terminal state
+        'Available'  => ['Allocated', 'Scrapped'],
+        // Quarantine added as return destination — Grade C/D boards go back for supervisor review
+        'Allocated'  => ['At Station', 'Available', 'Quarantine', 'Scrapped'],
+        'At Station' => ['WIP', 'Available', 'Quarantine', 'Scrapped'],
+        'WIP'        => ['Consumed', 'Available', 'Quarantine', 'Scrapped'],
+        'Consumed'   => [],  // Terminal state
+        'Scrapped'   => [],  // Terminal state
     ],
 ];

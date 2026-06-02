@@ -21,6 +21,7 @@ class Board extends Model
         'thickness',
         'area_m2',
         'current_value',
+        'condition_grade',
         'status',
         'parent_board_id',
         'is_offcut',
@@ -99,10 +100,18 @@ class Board extends Model
 
     /**
      * Transition board to a new status, recording a movement.
+     * Condition grade and scrap reason are stored on the movement for full audit trail,
+     * and the board's condition_grade is updated whenever a grade is supplied.
      * Throws \InvalidArgumentException if the transition is not allowed.
      */
-    public function transitionTo(string $newStatus, ?int $userId = null, ?string $notes = null, ?string $jobRef = null): void
-    {
+    public function transitionTo(
+        string  $newStatus,
+        ?int    $userId          = null,
+        ?string $notes           = null,
+        ?string $jobRef          = null,
+        ?string $conditionGrade  = null,
+        ?string $scrapReasonCode = null,
+    ): void {
         if (!$this->canTransitionTo($newStatus)) {
             throw new \InvalidArgumentException(
                 "Cannot transition board [{$this->tracking_code}] from [{$this->status}] to [{$newStatus}]."
@@ -118,20 +127,27 @@ class Board extends Model
         }
 
         // Clear job assignment when board returns to stores
-        if ($newStatus === 'Available') {
+        if (in_array($newStatus, ['Available', 'Quarantine'])) {
             $this->assigned_job_ref = null;
+        }
+
+        // Update the board's own condition grade whenever one is provided
+        if ($conditionGrade !== null) {
+            $this->condition_grade = $conditionGrade;
         }
 
         $this->save();
 
-        // Append immutable movement record
+        // Append immutable movement record — every field relevant to this transition
         BoardMovement::create([
-            'board_id'     => $this->id,
-            'from_status'  => $fromStatus,
-            'to_status'    => $newStatus,
-            'performed_by' => $userId,
-            'notes'        => $notes,
-            'job_ref'      => $previousJob ?? $jobRef,
+            'board_id'          => $this->id,
+            'from_status'       => $fromStatus,
+            'to_status'         => $newStatus,
+            'performed_by'      => $userId,
+            'notes'             => $notes,
+            'job_ref'           => $previousJob ?? $jobRef,
+            'condition_grade'   => $conditionGrade,
+            'scrap_reason_code' => $scrapReasonCode,
         ]);
     }
 

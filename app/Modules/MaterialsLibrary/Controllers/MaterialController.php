@@ -10,6 +10,8 @@ use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+use Illuminate\Support\Facades\DB;
+
 class MaterialController extends Controller
 {
     /**
@@ -18,7 +20,28 @@ class MaterialController extends Controller
     public function index(Request $request): JsonResponse
     {
         $materials = $this->buildMaterialQuery($request)->paginate($request->get('per_page', 50));
-        return response()->json($materials);
+        
+        $stats = [
+            'total_value' => (float) LibraryMaterial::active()
+                ->join('stocks', 'library_materials.id', '=', 'stocks.material_id')
+                ->sum(DB::raw('stocks.quantity_on_hand * library_materials.unit_cost')),
+            'low_stock_count' => (int) LibraryMaterial::active()
+                ->whereHas('stock', function ($q) {
+                    $q->where('min_stock_level', '>', 0)
+                      ->whereRaw('(quantity_on_hand - quantity_reserved) <= min_stock_level');
+                })->count(),
+            'out_of_stock_count' => (int) LibraryMaterial::active()
+                ->where(function ($q) {
+                    $q->whereHas('stock', function ($sq) {
+                        $sq->where('quantity_on_hand', '<=', 0);
+                    })->orWhereDoesntHave('stock');
+                })->count(),
+        ];
+
+        return response()->json(array_merge(
+            $materials->toArray(),
+            ['stats' => $stats]
+        ));
     }
 
     /**
@@ -65,7 +88,73 @@ class MaterialController extends Controller
             $query->search((string) $request->search);
         }
 
-        return $query->latest();
+        // Advanced Filters
+        if ($request->filled('stock_status')) {
+            $status = $request->stock_status;
+            if ($status === 'low_stock') {
+                $query->whereHas('stock', function ($q) {
+                    $q->where('min_stock_level', '>', 0)
+                      ->whereRaw('(quantity_on_hand - quantity_reserved) <= min_stock_level');
+                });
+            } elseif ($status === 'out_of_stock') {
+                $query->where(function ($q) {
+                    $q->whereHas('stock', function ($sq) {
+                        $sq->where('quantity_on_hand', '<=', 0);
+                    })->orWhereDoesntHave('stock');
+                });
+            } elseif ($status === 'optimal') {
+                $query->whereHas('stock', function ($q) {
+                    $q->whereRaw('(quantity_on_hand - quantity_reserved) > min_stock_level')
+                      ->orWhere('min_stock_level', '<=', 0);
+                });
+            }
+        }
+
+        if ($request->filled('thickness')) {
+            $query->where('attributes->attributes->thickness_size', $request->thickness);
+        }
+
+        if ($request->filled('supplier')) {
+            $query->where('attributes->attributes->preferred_supplier', 'like', "%{$request->supplier}%");
+        }
+
+        if ($request->filled('location_bin')) {
+            $query->whereHas('stock', function ($q) use ($request) {
+                $q->where('location_bin', 'like', "%{$request->location_bin}%");
+            });
+        }
+
+        // Sorting
+        if ($request->filled('sort_by')) {
+            $sortBy = $request->sort_by;
+            $sortOrder = $request->get('sort_order', 'asc') === 'desc' ? 'desc' : 'asc';
+            
+            if (in_array($sortBy, ['quantity_on_hand', 'available', 'min_stock_level', 'location_bin'])) {
+                $query->leftJoin('stocks', 'library_materials.id', '=', 'stocks.material_id')
+                      ->select('library_materials.*');
+                
+                if ($sortBy === 'available') {
+                    $query->orderByRaw('(stocks.quantity_on_hand - stocks.quantity_reserved) ' . $sortOrder);
+                } elseif ($sortBy === 'quantity_on_hand') {
+                    $query->orderBy('stocks.quantity_on_hand', $sortOrder);
+                } elseif ($sortBy === 'min_stock_level') {
+                    $query->orderBy('stocks.min_stock_level', $sortOrder);
+                } elseif ($sortBy === 'location_bin') {
+                    $query->orderBy('stocks.location_bin', $sortOrder);
+                }
+            } else {
+                $allowedColumns = ['material_name', 'material_code', 'category', 'subcategory', 'unit_cost', 'created_at'];
+                if (in_array($sortBy, $allowedColumns)) {
+                    $query->orderBy('library_materials.' . $sortBy, $sortOrder);
+                } else {
+                    $query->latest('library_materials.created_at');
+                }
+            }
+        } else {
+            $query->latest('library_materials.created_at');
+        }
+
+        return $query;
     }
 
     /**

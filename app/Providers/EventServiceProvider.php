@@ -23,6 +23,20 @@ class EventServiceProvider extends ServiceProvider
         \App\Events\FinanceReleased::class => [
             \App\Listeners\ActivateProjectAfterFinance::class,
         ],
+
+        // ── Board Material Workflow ───────────────────────────────────────────
+        \App\Events\Stores\BoardRequestRaised::class => [
+            \App\Listeners\Stores\NotifyStorekeepersOfPendingRequest::class,
+        ],
+        \App\Events\Stores\BoardRequestFulfilled::class => [
+            \App\Listeners\Stores\NotifyLogisticsToDispatch::class,
+        ],
+        \App\Events\Stores\BoardsDispatchedToStation::class => [
+            \App\Listeners\Stores\NotifyOperatorBoardsArrived::class,
+        ],
+        \App\Events\Stores\OffcutRegistered::class => [
+            \App\Listeners\Stores\NotifyStorekeeperReturnOffcut::class,
+        ],
     ];
 
     /**

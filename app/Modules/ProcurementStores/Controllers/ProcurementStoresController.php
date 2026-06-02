@@ -258,6 +258,18 @@ class ProcurementStoresController extends Controller
             'notes' => 'nullable|string'
         ]);
 
+        // Board materials must be returned through the Board Lifecycle endpoint so that
+        // individual Board records transition back to Available and stock stays in sync.
+        $material = LibraryMaterial::find($request->material_id);
+        if ($material && $material->material_type === 'reusable') {
+            return response()->json([
+                'message'  => "'{$material->material_name}' is a tracked board material. "
+                    . 'Return individual boards via POST /boards/{id}/transition with status=Available.',
+                'status'   => 'error',
+                'redirect' => 'board_lifecycle',
+            ], 422);
+        }
+
         $service = new InventoryService();
         $log = $service->adjustStock(
             $request->material_id, 
@@ -284,8 +296,20 @@ class ProcurementStoresController extends Controller
             'notes' => 'required|string|min:5'
         ]);
 
+        // Board materials must be scrapped through the Board Lifecycle endpoint so that
+        // individual Board records transition to Scrapped and stock stays in sync.
+        $material = LibraryMaterial::find($request->material_id);
+        if ($material && $material->material_type === 'reusable') {
+            return response()->json([
+                'message'  => "'{$material->material_name}' is a tracked board material. "
+                    . 'Scrap individual boards via POST /boards/{id}/transition with status=Scrapped.',
+                'status'   => 'error',
+                'redirect' => 'board_lifecycle',
+            ], 422);
+        }
+
         $service = new InventoryService();
-        
+
         // Check if we have enough stock to mark as defective
         $stock = Stock::where('material_id', $request->material_id)->first();
         if (!$stock || $stock->quantity_on_hand < $request->quantity) {
@@ -402,13 +426,25 @@ class ProcurementStoresController extends Controller
 
         $service = new InventoryService();
         
-        // Validate stock availability for all items first
+        // Validate all items before processing any — board guard first, then stock
         foreach ($request->items as $item) {
+            $material = LibraryMaterial::find($item['material_id']);
+
+            // Board materials must go through the board request flow so individual
+            // Board records are allocated and stock stays in sync.
+            if ($material && $material->material_type === 'reusable') {
+                return response()->json([
+                    'message'  => "'{$material->material_name}' is a tracked board material. "
+                        . 'Issue it via a Board Request so individual boards are assigned to the job.',
+                    'status'   => 'error',
+                    'redirect' => 'board_request',
+                ], 422);
+            }
+
             $stock = Stock::where('material_id', $item['material_id'])->first();
             if (!$stock || ($stock->quantity_on_hand - $stock->quantity_reserved) < $item['quantity']) {
-                $material = LibraryMaterial::find($item['material_id']);
                 return response()->json([
-                    'message' => "Insufficient stock for material: {$material->material_name}",
+                    'message' => 'Insufficient stock for material: ' . ($material?->material_name ?? $item['material_id']),
                     'status' => 'error'
                 ], 422);
             }

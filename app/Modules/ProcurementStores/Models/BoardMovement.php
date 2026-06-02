@@ -21,6 +21,8 @@ class BoardMovement extends Model
         'job_ref',
         'performed_by',
         'notes',
+        'condition_grade',
+        'scrap_reason_code',
         'ts',
     ];
 

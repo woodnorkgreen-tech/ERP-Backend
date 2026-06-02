@@ -9,6 +9,7 @@ use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Requests\StoreBoardRequest;
 use App\Modules\ProcurementStores\Services\BoardIngestionService;
 use App\Modules\ProcurementStores\Services\BoardRegistrationService;
+use App\Modules\ProcurementStores\Services\BoardWorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,7 @@ class BoardController extends Controller
     public function __construct(
         private readonly BoardIngestionService    $ingestionService,
         private readonly BoardRegistrationService $registrationService,
+        private readonly BoardWorkflowService     $workflow,
     ) {}
 
     // ─── Ingestion ────────────────────────────────────────────────────────────
@@ -101,6 +103,7 @@ class BoardController extends Controller
                 'current_value'    => $board->current_value,
                 'is_offcut'        => $board->is_offcut,
                 'assigned_job_ref' => $board->assigned_job_ref,
+                'condition_grade'  => $board->condition_grade,
                 'label_printed'    => $board->label_printed,
                 // Age 1 — time in current status (immutable movement log timestamp)
                 'last_movement_at' => $board->movements->first()?->ts,
@@ -269,10 +272,142 @@ class BoardController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
+        // When a board goes WIP, close the Production boards_at_station task for that job
+        if ($next === 'WIP' && $board->assigned_job_ref) {
+            $this->workflow->startWip($board->assigned_job_ref, collect([$board]), auth()->user());
+        }
+
         return response()->json([
             'message' => "Board [{$board->tracking_code}] advanced to [{$next}].",
             'board'   => $this->formatBoardDetail($board->fresh(['movements', 'libraryMaterial'])),
         ]);
+    }
+
+    /**
+     * POST /boards/job/{jobRef}/dispatch-to-station
+     * Logistics marks all Allocated boards for a job as delivered to the station.
+     * Transitions Allocated → At Station and fires the workflow event.
+     */
+    public function dispatchToStation(Request $request, string $jobRef): JsonResponse
+    {
+        $request->validate([
+            'board_ids' => 'nullable|array',
+            'board_ids.*' => 'integer|exists:boards,id',
+        ]);
+
+        $query = Board::where('assigned_job_ref', $jobRef)->where('status', 'Allocated');
+
+        if (!empty($request->board_ids)) {
+            $query->whereIn('id', $request->board_ids);
+        }
+
+        $boards = $query->get();
+
+        if ($boards->isEmpty()) {
+            return response()->json(['message' => "No Allocated boards found for job [{$jobRef}]."], 422);
+        }
+
+        try {
+            $this->workflow->onBoardsDispatched($jobRef, $boards, auth()->user());
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return response()->json(['message' => 'No pending dispatch task found for this job. Has the request been fulfilled yet?'], 422);
+        }
+
+        return response()->json([
+            'message'        => "{$boards->count()} board(s) delivered to station for job [{$jobRef}].",
+            'boards_at_station' => $boards->pluck('tracking_code'),
+        ]);
+    }
+
+    /**
+     * GET /boards/workflow-tasks
+     * Returns pending workflow tasks for the authenticated user's role.
+     */
+    public function workflowTasks(): JsonResponse
+    {
+        $role = auth()->user()->getRoleNames()->first() ?? '';
+
+        $tasks = $this->workflow->pendingTasksForRole($role);
+
+        return response()->json(['data' => $tasks]);
+    }
+
+    /**
+     * POST /workflow-tasks/{taskId}/claim
+     * Atomically claim a pending task to prevent double-processing.
+     */
+    public function claimWorkflowTask(int $taskId): JsonResponse
+    {
+        try {
+            $task = $this->workflow->claimTask($taskId, auth()->user());
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return response()->json(['message' => 'Task not found or already claimed.'], 404);
+        }
+
+        return response()->json(['data' => $task]);
+    }
+
+    /**
+     * POST /workflow-tasks/{taskId}/return-offcut
+     * Storekeeper marks an offcut as returned to the rack.
+     * Transitions offcut board Quarantine → Available and closes the task.
+     */
+    public function returnOffcut(int $taskId): JsonResponse
+    {
+        try {
+            $task = $this->workflow->returnOffcut($taskId, auth()->user());
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return response()->json(['message' => 'Task not found or already completed.'], 404);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['message' => 'Offcut returned to stores rack.', 'data' => $task]);
+    }
+
+    /**
+     * POST /boards/job/{jobRef}/start-wip
+     * Production batch-starts WIP for all At Station boards on a job.
+     * Closes the boards_at_station workflow task.
+     */
+    public function startWip(Request $request, string $jobRef): JsonResponse
+    {
+        $boards = Board::where('assigned_job_ref', $jobRef)
+            ->where('status', 'At Station')
+            ->get();
+
+        if ($boards->isEmpty()) {
+            return response()->json(['message' => "No boards at station found for job [{$jobRef}]."], 422);
+        }
+
+        $this->workflow->startWip($jobRef, $boards, auth()->user());
+
+        return response()->json([
+            'message'   => "{$boards->count()} board(s) moved to WIP for job [{$jobRef}].",
+            'board_ids' => $boards->pluck('id'),
+        ]);
+    }
+
+    /**
+     * GET /boards/my-wip
+     * Returns all WIP boards for the current Production user to consume.
+     */
+    public function myWipBoards(): JsonResponse
+    {
+        $boards = Board::with('libraryMaterial')
+            ->where('status', 'WIP')
+            ->orderBy('updated_at')
+            ->get()
+            ->map(fn (Board $b) => [
+                'id'            => $b->id,
+                'tracking_code' => $b->tracking_code,
+                'job_ref'       => $b->assigned_job_ref,
+                'material'      => $b->libraryMaterial?->material_name,
+                'dimensions'    => "{$b->length}×{$b->width}×{$b->thickness}mm",
+                'status'        => $b->status,
+            ]);
+
+        return response()->json(['data' => $boards]);
     }
 
     /**
@@ -299,8 +434,28 @@ class BoardController extends Controller
             }
         }
 
-        $offcut = null;
+        $offcut    = null;
         $hasOffcut = $request->filled('offcut_length') && $request->filled('offcut_width');
+
+        // Offcut dimensions must be physically possible — reject anything that exceeds the parent.
+        if ($hasOffcut) {
+            $errors = [];
+            if ((int) $request->offcut_length > $board->length) {
+                $errors[] = "Offcut length ({$request->offcut_length}mm) exceeds parent board length ({$board->length}mm).";
+            }
+            if ((int) $request->offcut_width > $board->width) {
+                $errors[] = "Offcut width ({$request->offcut_width}mm) exceeds parent board width ({$board->width}mm).";
+            }
+            if ($request->filled('offcut_thickness') && (int) $request->offcut_thickness > $board->thickness) {
+                $errors[] = "Offcut thickness ({$request->offcut_thickness}mm) exceeds parent board thickness ({$board->thickness}mm).";
+            }
+            if ($errors) {
+                return response()->json([
+                    'message' => implode(' ', $errors),
+                    'parent'  => ['length' => $board->length, 'width' => $board->width, 'thickness' => $board->thickness],
+                ], 422);
+            }
+        }
 
         try {
             if ($hasOffcut) {
@@ -320,6 +475,11 @@ class BoardController extends Controller
 
         // Stock was already decremented when the board was issued to the job (fulfil endpoint).
         // We only write a production note to the activity log — no stock movement here.
+
+        // If an offcut was created, fire the return-to-rack workflow task for Stores
+        if ($offcut) {
+            $this->workflow->onOffcutRegistered($offcut);
+        }
 
         return response()->json([
             'message' => "Board [{$board->tracking_code}] consumed." . ($offcut ? " Offcut [{$offcut->tracking_code}] created." : ''),
@@ -358,17 +518,44 @@ class BoardController extends Controller
         $offcuts   = (int) $counts->offcuts;
         $overdue   = (int) $counts->overdue;
 
+        // Condition grade breakdown for active (non-terminal) boards
+        $gradeCounts = DB::table('boards')
+            ->selectRaw("condition_grade, COUNT(*) as cnt")
+            ->whereNotIn('status', ['Consumed', 'Scrapped'])
+            ->whereNotNull('condition_grade')
+            ->groupBy('condition_grade')
+            ->pluck('cnt', 'condition_grade');
+
+        $ungradedCount = DB::table('boards')
+            ->whereNotIn('status', ['Consumed', 'Scrapped'])
+            ->whereNull('condition_grade')
+            ->count();
+
+        // Top scrap reasons over last 90 days
+        $scrapReasons = DB::table('board_movements')
+            ->selectRaw("scrap_reason_code, COUNT(*) as cnt")
+            ->where('to_status', 'Scrapped')
+            ->whereNotNull('scrap_reason_code')
+            ->where('ts', '>=', now()->subDays(90))
+            ->groupBy('scrap_reason_code')
+            ->orderByDesc('cnt')
+            ->limit(5)
+            ->get()
+            ->map(fn($r) => ['reason' => $r->scrap_reason_code, 'count' => (int) $r->cnt]);
+
         // Recent activity — last 10 movements
         $recentActivity = BoardMovement::with(['board', 'performer'])
             ->latest('ts')
             ->limit(10)
             ->get()
             ->map(fn($m) => [
-                'board_code'   => $m->board->tracking_code ?? '—',
-                'from_status'  => $m->from_status,
-                'to_status'    => $m->to_status,
-                'performed_by' => $m->performer?->name ?? 'System',
-                'ts'           => $m->ts,
+                'board_code'       => $m->board->tracking_code ?? '—',
+                'from_status'      => $m->from_status,
+                'to_status'        => $m->to_status,
+                'performed_by'     => $m->performer?->name ?? 'System',
+                'condition_grade'  => $m->condition_grade,
+                'scrap_reason_code'=> $m->scrap_reason_code,
+                'ts'               => $m->ts,
             ]);
 
         return response()->json([
@@ -387,6 +574,14 @@ class BoardController extends Controller
                 'consumed'  => $consumed,
                 'scrapped'  => $scrapped,
             ],
+            'condition_breakdown' => [
+                'A'        => (int) ($gradeCounts['A'] ?? 0),
+                'B'        => (int) ($gradeCounts['B'] ?? 0),
+                'C'        => (int) ($gradeCounts['C'] ?? 0),
+                'D'        => (int) ($gradeCounts['D'] ?? 0),
+                'ungraded' => (int) $ungradedCount,
+            ],
+            'top_scrap_reasons'    => $scrapReasons,
             'recent_gate_activity' => $recentActivity,
             'open_exceptions'      => [],
         ]);
@@ -398,19 +593,26 @@ class BoardController extends Controller
      */
     public function stockRegistry(Request $request): JsonResponse
     {
-        // Pre-load all available-board counts in one query — eliminates N+1
+        // Pre-load per-material counts in two queries — eliminates N+1
         $availableCounts = Board::query()
             ->selectRaw('library_material_id, COUNT(*) as cnt')
             ->where('status', 'Available')
             ->groupBy('library_material_id')
             ->pluck('cnt', 'library_material_id');
 
+        $onJobCounts = Board::query()
+            ->selectRaw('library_material_id, COUNT(*) as cnt')
+            ->whereIn('status', ['Allocated', 'At Station', 'WIP'])
+            ->groupBy('library_material_id')
+            ->pluck('cnt', 'library_material_id');
+
         $stocks = Stock::with(['material.workstation'])
             ->where('tracking_mode', Stock::TRACK_BY_AREA)
             ->get()
-            ->map(function ($stock) use ($availableCounts) {
+            ->map(function ($stock) use ($availableCounts, $onJobCounts) {
                 $material   = $stock->material;
                 $boardCount = (int) ($availableCounts[$material?->id] ?? 0);
+                $onJob      = (int) ($onJobCounts[$material?->id]    ?? 0);
 
                 $statusLabel = match (true) {
                     $boardCount === 0                                                      => 'Critical',
@@ -419,17 +621,19 @@ class BoardController extends Controller
                 };
 
                 return [
-                    'id'           => $stock->id,
-                    'sku'          => $material?->material_code ?? '—',
-                    'name'         => $material?->material_name ?? '—',
-                    'workstation'  => $material?->workstation?->name ?? '—',
-                    'qty'          => $boardCount,
-                    'reorder_point'=> (int) $stock->min_stock_level,
-                    'status'       => $statusLabel,
-                    'is_board'     => true,
-                    'unit_label'   => 'boards',
-                    'unit_cost'    => (float) ($material?->unit_cost ?? 0),
-                    'total_value'  => round($boardCount * ($material?->unit_cost ?? 0), 2),
+                    'id'                  => $stock->id,
+                    'library_material_id' => $material?->id,
+                    'sku'                 => $material?->material_code ?? '—',
+                    'name'                => $material?->material_name ?? '—',
+                    'workstation'         => $material?->workstation?->name ?? '—',
+                    'qty'                 => $boardCount,
+                    'on_job'              => $onJob,
+                    'reorder_point'       => (int) $stock->min_stock_level,
+                    'status'              => $statusLabel,
+                    'is_board'            => true,
+                    'unit_label'          => 'boards',
+                    'unit_cost'           => (float) ($material?->unit_cost ?? 0),
+                    'total_value'         => round($boardCount * ($material?->unit_cost ?? 0), 2),
                 ];
             });
 
@@ -506,6 +710,80 @@ class BoardController extends Controller
                 'waste_m2'       => 0,
                 'offcuts_m2'     => round($offcutArea, 4),
                 'consumed_m2'    => round($consumedArea, 4),
+            ],
+        ]);
+    }
+
+    // ─── Reconciliation ───────────────────────────────────────────────────────
+
+    /**
+     * POST /boards/reconciliation
+     * Persist a completed reconciliation session to the database.
+     * This is the single source of truth — localStorage is no longer the record.
+     */
+    public function saveReconciliation(Request $request): JsonResponse
+    {
+        $request->validate([
+            'reconciler_name'  => 'required|string|max:255',
+            'physical_count'   => 'nullable|integer|min:0',
+            'system_count'     => 'required|integer|min:0',
+            'variance'         => 'nullable|integer',
+            'steps_completed'  => 'required|array|size:6',
+            'steps_completed.*'=> 'boolean',
+            'status_snapshot'  => 'required|array',
+            'gap_notes'        => 'nullable|string|max:5000',
+            'started_at'       => 'required|date',
+        ]);
+
+        $record = DB::table('board_reconciliations')->insertGetId([
+            'performed_by'    => auth()->id(),
+            'reconciler_name' => $request->reconciler_name,
+            'physical_count'  => $request->physical_count,
+            'system_count'    => $request->system_count,
+            'variance'        => $request->variance,
+            'steps_completed' => json_encode($request->steps_completed),
+            'status_snapshot' => json_encode($request->status_snapshot),
+            'gap_notes'       => $request->gap_notes,
+            'started_at'      => $request->started_at,
+            'completed_at'    => now(),
+            'created_at'      => now(),
+            'updated_at'      => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Reconciliation saved.',
+            'id'      => $record,
+        ], 201);
+    }
+
+    /**
+     * GET /boards/reconciliation/latest
+     * Return the most recently completed reconciliation session.
+     * Used by the frontend to show "last reconciled X days ago by Y" across all devices.
+     */
+    public function latestReconciliation(): JsonResponse
+    {
+        $row = DB::table('board_reconciliations')
+            ->whereNotNull('completed_at')
+            ->orderByDesc('completed_at')
+            ->first();
+
+        if (!$row) {
+            return response()->json(['data' => null]);
+        }
+
+        return response()->json([
+            'data' => [
+                'id'              => $row->id,
+                'reconciler_name' => $row->reconciler_name,
+                'physical_count'  => $row->physical_count,
+                'system_count'    => $row->system_count,
+                'variance'        => $row->variance,
+                'steps_completed' => json_decode($row->steps_completed, true),
+                'status_snapshot' => json_decode($row->status_snapshot, true),
+                'gap_notes'       => $row->gap_notes,
+                'started_at'      => $row->started_at,
+                'completed_at'    => $row->completed_at,
             ],
         ]);
     }
@@ -647,31 +925,59 @@ class BoardController extends Controller
 
     /**
      * POST /boards/batch/{batchNumber}/confirm-labels
-     * Mark all boards in a batch as label_printed and transition Quarantine → Available.
-     * Called after the storekeeper prints and sticks labels on physical boards.
+     * Apply condition grades, mark labels printed, and transition Quarantine → Available.
+     * Called after the storekeeper inspects, grades, and prints labels on the batch.
+     *
+     * Payload:
+     *   condition_grade  — batch-level default grade (A/B/C/D)
+     *   condition_notes  — optional free text about the batch condition
+     *   board_grades[]   — optional per-board overrides: [{ id, condition_grade }]
      */
-    public function confirmLabels(string $batchNumber): JsonResponse
+    public function confirmLabels(Request $request, string $batchNumber): JsonResponse
     {
+        $request->validate([
+            'condition_grade'                => 'required|in:A,B,C,D',
+            'condition_notes'                => 'nullable|string|max:500',
+            'board_grades'                   => 'nullable|array',
+            'board_grades.*.id'              => 'required|integer|exists:boards,id',
+            'board_grades.*.condition_grade' => 'required|in:A,B,C,D',
+        ]);
+
+        $batchGrade  = $request->condition_grade;
+        $perBoardMap = collect($request->board_grades ?? [])
+            ->keyBy('id')
+            ->map(fn($bg) => $bg['condition_grade']);
+
         $boards = Board::where('batch_number', $batchNumber)
             ->where('status', 'Quarantine')
-            ->where('label_printed', false)
             ->get();
 
         if ($boards->isEmpty()) {
             return response()->json([
-                'message' => "No boards pending label confirmation in batch [{$batchNumber}].",
+                'message' => "No Quarantine boards found for batch [{$batchNumber}].",
             ], 404);
         }
 
         $confirmed = 0;
-        DB::transaction(function () use ($boards, &$confirmed) {
+        DB::transaction(function () use ($boards, $batchGrade, $perBoardMap, $request, &$confirmed) {
             foreach ($boards as $board) {
+                // Use per-board override if provided; fall back to batch default
+                $grade = $perBoardMap[$board->id] ?? $batchGrade;
+
                 $board->update([
                     'label_printed'    => true,
                     'label_printed_by' => auth()->id(),
                     'label_printed_at' => now(),
                 ]);
-                $board->transitionTo('Available', auth()->id(), 'Labels printed and confirmed by storekeeper');
+
+                $board->transitionTo(
+                    'Available',
+                    auth()->id(),
+                    $request->condition_notes ?? "Grade {$grade} — labels confirmed",
+                    null,
+                    $grade,
+                    null,
+                );
                 $confirmed++;
             }
         });
@@ -694,13 +1000,17 @@ class BoardController extends Controller
     public function transition(Request $request, int $id): JsonResponse
     {
         $request->validate([
-            'status'  => ['required', 'string', 'in:' . implode(',', config('boards.statuses', []))],
-            'notes'   => 'nullable|string|max:500',
-            'job_ref' => 'nullable|string|max:100',
+            'status'            => ['required', 'string', 'in:' . implode(',', config('boards.statuses', []))],
+            'notes'             => 'nullable|string|max:500',
+            'job_ref'           => 'nullable|string|max:100',
+            'condition_grade'   => 'nullable|string|in:A,B,C,D,Reject',
+            'scrap_reason_code' => 'nullable|string|max:80',
         ]);
 
         $board          = Board::findOrFail($id);
         $previousStatus = $board->status;
+        // Capture before transitionTo() clears assigned_job_ref on → Available / Quarantine
+        $previousJobRef = $board->assigned_job_ref;
 
         try {
             $board->transitionTo(
@@ -708,6 +1018,8 @@ class BoardController extends Controller
                 auth()->id(),
                 $request->notes,
                 $request->job_ref,
+                $request->condition_grade,
+                $request->scrap_reason_code,
             );
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -715,9 +1027,9 @@ class BoardController extends Controller
 
         $stock = Stock::where('material_id', $board->library_material_id)->first();
 
-        // Return to stores — board came back intact from a job
-        // Triggered from: Allocated, At Station, or WIP → Available
-        if ($request->status === 'Available' && in_array($previousStatus, ['Allocated', 'At Station', 'WIP'])) {
+        // Return to stores — board came back from a job (Available = intact, Quarantine = Grade C/D for review)
+        // Triggered from: Allocated, At Station, or WIP → Available or Quarantine
+        if (in_array($request->status, ['Available', 'Quarantine']) && in_array($previousStatus, ['Allocated', 'At Station', 'WIP'])) {
             if ($stock) {
                 $stock->increment('quantity_on_hand', 1);
             }
@@ -729,10 +1041,19 @@ class BoardController extends Controller
                 'batch_number' => $board->batch_number,
                 'quantity'     => 1,
                 'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
+                // reference_no ties this return to its check_out so outstandingReusables()
+                // can net the two off and stop showing the board as still outstanding.
+                'reference_no' => $previousJobRef,
                 'notes'        => "Board returned to stores: {$board->tracking_code}. "
                     . ($request->notes ?? 'Returned intact from job.'),
                 'logged_at'    => now(),
             ]);
+
+            // If the board was on the production floor, prompt Stores to physically rack it.
+            if (in_array($previousStatus, ['At Station', 'WIP'])) {
+                app(\App\Modules\ProcurementStores\Services\BoardWorkflowService::class)
+                    ->onBoardReturned($board, $previousJobRef);
+            }
         }
 
         // Scrap: stock handling depends on where the board was in its lifecycle.
@@ -810,6 +1131,7 @@ class BoardController extends Controller
             'tracking_code'   => $board->tracking_code,
             'batch_number'    => $board->batch_number,
             'status'          => $board->status,
+            'condition_grade' => $board->condition_grade,
             'length'          => $board->length,
             'width'           => $board->width,
             'thickness'       => $board->thickness,
@@ -828,12 +1150,14 @@ class BoardController extends Controller
             ] : null,
             'movements'       => $board->relationLoaded('movements')
                 ? $board->movements->map(fn($m) => [
-                    'from_status'  => $m->from_status,
-                    'to_status'    => $m->to_status,
-                    'job_ref'      => $m->job_ref,
-                    'performed_by' => $m->performer?->name ?? 'System',
-                    'notes'        => $m->notes,
-                    'ts'           => $m->ts,
+                    'from_status'      => $m->from_status,
+                    'to_status'        => $m->to_status,
+                    'job_ref'          => $m->job_ref,
+                    'performed_by'     => $m->performer?->name ?? 'System',
+                    'notes'            => $m->notes,
+                    'condition_grade'  => $m->condition_grade,
+                    'scrap_reason_code'=> $m->scrap_reason_code,
+                    'ts'               => $m->ts,
                 ])
                 : [],
             'offcuts'         => $board->relationLoaded('offcuts')
