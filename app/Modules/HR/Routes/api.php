@@ -21,6 +21,7 @@ use App\Modules\HR\Http\Controllers\InterviewController;
 use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
 use App\Modules\HR\Http\Controllers\OvertimeController;
 use App\Modules\HR\Http\Controllers\CompensatoryLeaveController;
+use App\Modules\HR\Http\Controllers\OnboardingController;
 use App\Constants\Permissions;
 
 // Unprotected HR Routes (public recruitment only)
@@ -289,6 +290,25 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('attendance/{id}', [AttendanceController::class, 'update']);
         Route::patch('attendance/{id}', [AttendanceController::class, 'update']);
         Route::delete('attendance/{id}', [AttendanceController::class, 'destroy']);
+
+        // Onboarding
+        Route::prefix('onboarding')->group(function () {
+            Route::get('hired-candidates', [OnboardingController::class, 'hiredCandidates']);
+            Route::get('/', [OnboardingController::class, 'index']);
+            Route::post('/', [OnboardingController::class, 'store']);
+            Route::get('{id}', [OnboardingController::class, 'show']);
+            Route::post('{id}/link-employee', [OnboardingController::class, 'linkEmployee']);
+            Route::post('{id}/hr-approve', [OnboardingController::class, 'approveHRGate']);
+            Route::post('{id}/handover', [OnboardingController::class, 'recordHandover']);
+            Route::post('{id}/reviews', [OnboardingController::class, 'submitReview']);
+            Route::post('{id}/cancel', [OnboardingController::class, 'cancel']);
+            Route::get('{id}/activity-log', [OnboardingController::class, 'activityLog']);
+            Route::post('tasks/{taskId}/complete', [OnboardingController::class, 'completeTask']);
+            Route::post('tasks/{taskId}/reopen', [OnboardingController::class, 'reopenTask']);
+            Route::patch('tasks/{taskId}/toggle-optional', [OnboardingController::class, 'toggleOptionalTask']);
+            Route::patch('documents/{requirementId}/status', [OnboardingController::class, 'updateDocumentStatus']);
+            Route::post('welcome-kit/{itemId}/toggle', [OnboardingController::class, 'toggleWelcomeKitItem']);
+        });
 
         // Internal Recruitment (ATS)
         Route::prefix('recruitment/admin')->group(function () {
