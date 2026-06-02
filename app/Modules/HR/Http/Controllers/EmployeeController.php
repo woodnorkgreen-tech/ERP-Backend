@@ -77,6 +77,7 @@ class EmployeeController
     {
         $validator = Validator::make($request->all(), [
             'employee_id' => 'nullable|string|unique:employees,employee_id',
+            'hikvision_id' => 'nullable|string|max:50|unique:employees,hikvision_id',
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
             'email' => 'required|email|unique:employees,email',
@@ -151,6 +152,7 @@ class EmployeeController
     {
         $validator = Validator::make($request->all(), [
             'employee_id' => ['sometimes', Rule::unique('employees')->ignore($employee->id)],
+            'hikvision_id' => ['nullable', 'string', 'max:50', Rule::unique('employees')->ignore($employee->id)],
             'first_name' => 'sometimes|required|string|max:255',
             'last_name' => 'sometimes|required|string|max:255',
             'email' => ['sometimes', 'required', 'email', Rule::unique('employees')->ignore($employee->id)],

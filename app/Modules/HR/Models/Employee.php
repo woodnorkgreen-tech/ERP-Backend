@@ -14,6 +14,7 @@ class Employee extends Model
 
     protected $fillable = [
         'employee_id',
+        'hikvision_id',
         'first_name',
         'last_name',
         'id_number',
