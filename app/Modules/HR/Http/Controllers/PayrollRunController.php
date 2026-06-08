@@ -111,12 +111,25 @@ class PayrollRunController extends Controller
             $service->processEmployee($employee, $payrollRun);
         }
 
-        // Re-calculate totals for the run instantly so they appear in the table
-        $totals = $payrollRun->payslips()->selectRaw('SUM(gross_pay) as gross, SUM(net_pay) as net')->first();
+        // Re-calculate totals (including statutory) so they appear in the table immediately
+        $totals = DB::table('payslips')
+            ->where('payroll_run_id', $payrollRun->id)
+            ->selectRaw('
+                SUM(gross_pay) as gross,
+                SUM(net_pay)   as net,
+                SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.paye"))         AS DECIMAL(12,2)))
+                    + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.nssf"))         AS DECIMAL(12,2)))
+                    + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.shif"))         AS DECIMAL(12,2)))
+                    + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.housing_levy")) AS DECIMAL(12,2)))
+                    as total_statutory
+            ')
+            ->first();
+
         $payrollRun->update([
-            'total_gross' => $totals->gross ?? 0,
-            'total_net' => $totals->net ?? 0,
-            'status' => 'processing' // Keep it at processing as requested
+            'total_gross'     => $totals->gross ?? 0,
+            'total_net'       => $totals->net ?? 0,
+            'total_statutory' => $totals->total_statutory ?? 0,
+            'status'          => 'processing',
         ]);
 
         return response()->json([

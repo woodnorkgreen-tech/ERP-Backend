@@ -12,11 +12,8 @@ class ProcurementStoresServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        // Register module config
-        $configPath = __DIR__.'/../Config/procurement-stores.php';
-        if (file_exists($configPath)) {
-            $this->mergeConfigFrom($configPath, 'procurement-stores');
-        }
+        $this->mergeConfigFrom(__DIR__.'/../Config/procurement-stores.php', 'procurement-stores');
+        $this->mergeConfigFrom(__DIR__.'/../Config/boards.php', 'boards');
     }
 
     /**

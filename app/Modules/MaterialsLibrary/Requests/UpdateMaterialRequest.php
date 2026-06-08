@@ -35,12 +35,13 @@ class UpdateMaterialRequest extends FormRequest
             'material_name' => 'sometimes|nullable|string|max:255',
             'category' => 'nullable|string|max:100',
             'subcategory' => 'nullable|string|max:100',
+            'material_type'       => 'nullable|in:consumable,reusable',
+            'material_category_id'=> 'nullable|integer|exists:material_categories,id',
             'unit_of_measure' => 'sometimes|string|max:50',
             'unit_cost' => 'nullable|numeric|min:0',
             'attributes' => 'nullable|array',
             'is_active' => 'boolean',
             'notes' => 'nullable|string',
-            'quantity' => 'nullable|numeric|min:0',
         ];
     }
 }

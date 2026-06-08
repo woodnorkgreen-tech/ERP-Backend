@@ -5,6 +5,8 @@ namespace Database\Seeders;
 use App\Models\User;
 // use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use App\Modules\MaterialsLibrary\Database\Seeders\WorkstationSeeder;
+use App\Modules\MaterialsLibrary\Database\Seeders\MaterialCategorySeeder;
 
 class DatabaseSeeder extends Seeder
 {
@@ -39,6 +41,10 @@ class DatabaseSeeder extends Seeder
             DesignerUserSeeder::class,
             ProjectsUserSeeder::class,
         ]);
+
+        // Materials Library — workstations and category taxonomy
+        $this->call(WorkstationSeeder::class);
+        $this->call(MaterialCategorySeeder::class);
 
         // Seed Universal Task System data
         // $this->call(UniversalTaskSeeder::class); TODO: FRANSIS

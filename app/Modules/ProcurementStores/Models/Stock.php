@@ -11,13 +11,18 @@ class Stock extends Model
 {
     use SoftDeletes;
 
+    // Tracking mode — board materials are tracked individually; consumables by count
+    const TRACK_BY_AREA  = 'individual';
+    const TRACK_BY_COUNT = 'count';
+
     protected $fillable = [
         'material_id',
         'quantity_on_hand',
         'quantity_reserved',
         'min_stock_level',
         'warehouse_code',
-        'location_bin'
+        'location_bin',
+        'tracking_mode',
     ];
 
     protected $casts = [

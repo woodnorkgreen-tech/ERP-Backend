@@ -8,6 +8,8 @@ use App\Modules\ProcurementStores\Controllers\PurchaseOrderController;
 use App\Modules\ProcurementStores\Controllers\InvoiceController;
 use App\Modules\ProcurementStores\Controllers\BillController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
+use App\Modules\ProcurementStores\Controllers\BoardController;
+use App\Modules\ProcurementStores\Controllers\BoardRequestController;
 use App\Modules\ProcurementStores\Controllers\POVerificationController;
 
 Route::get('/test', [ProcurementStoresController::class, 'test']);
@@ -68,3 +70,57 @@ Route::get('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'sho
 Route::post('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'store']);
 Route::put('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'update']);
 Route::delete('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'destroy']);
+
+// ── Board Requests (MRF) ────────────────────────────────────────────────────
+Route::get('/board-requests',                        [BoardRequestController::class, 'index']);
+Route::post('/board-requests',                       [BoardRequestController::class, 'store']);
+Route::post('/board-requests/{id}/fulfil',           [BoardRequestController::class, 'fulfil']);
+Route::delete('/board-requests/{id}',                [BoardRequestController::class, 'cancel']);
+
+// ── Board Tracking ──────────────────────────────────────────────────────────
+// Specific routes BEFORE parameterised {id} to avoid conflicts
+
+Route::post('/boards/ingest',                        [BoardController::class, 'ingest']);
+
+// Workflow task inbox (role-filtered — must be before /{id} params)
+Route::get('/boards/workflow-tasks',                        [BoardController::class, 'workflowTasks']);
+Route::post('/boards/workflow-tasks/{taskId}/claim',        [BoardController::class, 'claimWorkflowTask']);
+Route::post('/boards/workflow-tasks/{taskId}/return-offcut',[BoardController::class, 'returnOffcut']);
+
+// Production WIP board list
+Route::get('/boards/my-wip',                               [BoardController::class, 'myWipBoards']);
+
+// Dashboard / analytics
+Route::get('/boards/command-center-metrics',         [BoardController::class, 'commandCenterMetrics']);
+Route::get('/boards/stock-registry',                 [BoardController::class, 'stockRegistry']);
+Route::get('/boards/compliance-exceptions',          [BoardController::class, 'complianceExceptions']);
+Route::get('/boards/consumption-details',            [BoardController::class, 'consumptionDetails']);
+
+// QR scan lookup — must be before /{id} to avoid conflict
+Route::get('/boards/by-code/{trackingCode}',         [BoardController::class, 'showByCode']);
+
+// Query endpoints
+Route::get('/boards/available',                      [BoardController::class, 'available']);
+Route::get('/boards/job/{jobRef}',                   [BoardController::class, 'byJob']);
+Route::post('/boards/job/{jobRef}/calculate-variance', [BoardController::class, 'calculateVariance']);
+Route::post('/boards/job/{jobRef}/dispatch-to-station',[BoardController::class, 'dispatchToStation']);
+Route::post('/boards/job/{jobRef}/start-wip',          [BoardController::class, 'startWip']);
+
+// Label confirmation
+Route::post('/boards/batch/{batchNumber}/confirm-labels', [BoardController::class, 'confirmLabels']);
+
+// Reconciliation
+Route::get('/boards/reconciliation/latest',  [BoardController::class, 'latestReconciliation']);
+Route::post('/boards/reconciliation',        [BoardController::class, 'saveReconciliation']);
+
+// Lifecycle transitions
+Route::post('/boards/{id}/allocate',                 [BoardController::class, 'allocate']);
+Route::post('/boards/{id}/start-processing',         [BoardController::class, 'startProcessing']);
+Route::post('/boards/{id}/consume',                  [BoardController::class, 'consume']);
+Route::post('/boards/{id}/transition',               [BoardController::class, 'transition']);
+
+// CRUD
+Route::get('/boards',                                [BoardController::class, 'index']);
+Route::get('/boards/{id}',                           [BoardController::class, 'show']);
+Route::put('/boards/{id}',                           [BoardController::class, 'update']);
+Route::delete('/boards/{id}',                        [BoardController::class, 'destroy']);

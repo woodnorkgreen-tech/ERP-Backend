@@ -24,10 +24,11 @@ class StatutoryProcessor implements PayrollProcessorInterface
         $nssfTierII = $nssfRate * max(0, min($grossPay, $nssfTierIILimit) - $nssfTierILimit);
         $nssf = $nssfTierI + $nssfTierII;
 
-        // 2. SHIF (2.75%, Min 300)
+        // 2. SHIF (2.75%, Min KES 300) — compute first, then apply floor
         $shifRate = $getVar('SHIF_RATE', 0.0275);
-        $shifMin = $getVar('SHIF_MIN', 300);
-        $shif = max($shifMin, $grossPay * $shifRate);
+        $shifMin  = $getVar('SHIF_MIN', 300);
+        $shif     = $grossPay * $shifRate;
+        if ($shif < $shifMin) $shif = $shifMin;
 
         // 3. Housing Levy (1.5%)
         $housingLevyRate = $getVar('HOUSING_LEVY_RATE', 0.015);
@@ -54,9 +55,14 @@ class StatutoryProcessor implements PayrollProcessorInterface
         }
 
         // Insurance Relief (15% of premiums paid, capped at KES 5,000/month)
-        // Premium amount is read from employee ledger if tagged as 'insurance_premium'
-        // Fallback: use a configurable INSURANCE_PREMIUM_AMOUNT variable
-        $premiumPaid = $getVar('INSURANCE_PREMIUM_AMOUNT', 0);
+        // Read actual premium from ledger deductions tagged 'insurance_premium'; fall back to variable
+        $premiumPaid = collect($dto->ledgerDetails)
+            ->where('type', 'deduction')
+            ->filter(fn($l) => stripos($l['name'], 'insurance_premium') !== false)
+            ->sum('amount');
+        if ($premiumPaid == 0) {
+            $premiumPaid = $getVar('INSURANCE_PREMIUM_AMOUNT', 0);
+        }
         $insuranceRelief = min($premiumPaid * $insReliefRate, $insReliefCap);
 
         // Final PAYE = Band Tax - Personal Relief - Insurance Relief
@@ -68,12 +74,12 @@ class StatutoryProcessor implements PayrollProcessorInterface
 
         $dto->taxBreakdown = [
             'paye'               => round($finalPaye, 2),
+            'calculated_paye'    => round($calculatedPaye, 2), // raw band tax before reliefs — P9 column I "Tax Charged"
             'nssf'               => round($nssf, 2),
             'shif'               => round($shif, 2),
             'housing_levy'       => round($housingLevy, 2),
             'personal_relief'    => round($personalRelief, 2),
             'insurance_relief'   => round($insuranceRelief, 2),
-            // Employer costs — for financial reporting/budgeting
             'employer_nssf'      => round($employerNssf, 2),
         ];
 
