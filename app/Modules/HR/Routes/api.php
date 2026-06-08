@@ -150,13 +150,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('requests/{leaveRequest}', [LeaveRequestController::class, 'show']);
             Route::put('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
             Route::patch('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
-            Route::post('requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])
-                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
-            Route::post('requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])
-                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
+            Route::post('requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve']);
+            Route::post('requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject']);
             Route::post('requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel']);
-            Route::post('requests/{leaveRequest}/recall', [LeaveRequestController::class, 'recall'])
-                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
+            Route::post('requests/{leaveRequest}/recall', [LeaveRequestController::class, 'recall']);
             Route::get('statistics', [LeaveRequestController::class, 'statistics']);
             Route::post('adjust-balance', [LeaveRequestController::class, 'adjustBalance'])
                 ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
@@ -303,11 +300,17 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('{id}/reviews', [OnboardingController::class, 'submitReview']);
             Route::post('{id}/cancel', [OnboardingController::class, 'cancel']);
             Route::get('{id}/activity-log', [OnboardingController::class, 'activityLog']);
+            Route::post('cards/{cardId}/tasks', [OnboardingController::class, 'createTask']);
             Route::post('tasks/{taskId}/complete', [OnboardingController::class, 'completeTask']);
             Route::post('tasks/{taskId}/reopen', [OnboardingController::class, 'reopenTask']);
             Route::patch('tasks/{taskId}/toggle-optional', [OnboardingController::class, 'toggleOptionalTask']);
+            Route::patch('tasks/{taskId}', [OnboardingController::class, 'updateTaskFlags']);
+            Route::post('cases/{caseId}/documents', [OnboardingController::class, 'createDocumentRequirement']);
             Route::patch('documents/{requirementId}/status', [OnboardingController::class, 'updateDocumentStatus']);
+            Route::patch('documents/{requirementId}', [OnboardingController::class, 'updateDocumentRequirement']);
+            Route::post('cases/{caseId}/welcome-kit', [OnboardingController::class, 'createWelcomeKitItem']);
             Route::post('welcome-kit/{itemId}/toggle', [OnboardingController::class, 'toggleWelcomeKitItem']);
+            Route::patch('welcome-kit/{itemId}', [OnboardingController::class, 'updateWelcomeKitItem']);
         });
 
         // Internal Recruitment (ATS)

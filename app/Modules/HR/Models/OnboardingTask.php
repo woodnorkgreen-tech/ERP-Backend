@@ -15,6 +15,8 @@ class OnboardingTask extends Model
         'is_required'  => 'boolean',
         'is_optional'  => 'boolean',
         'is_active'    => 'boolean',
+        'is_applicable'=> 'boolean',
+        'is_needed'    => 'boolean',
         'completed_at' => 'datetime',
         'due_date'     => 'date',
     ];

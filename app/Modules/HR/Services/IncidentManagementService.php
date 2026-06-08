@@ -181,7 +181,7 @@ class IncidentManagementService
     {
         if (!$user) return 'own';
         if ($user->hasAnyRole(['Super Admin', 'Admin', 'HR'])) return 'all';
-        if ($user->hasAnyRole(['Lead', 'Manager'])) return 'department';
+        if ($user->isDeptLead() || $user->isManager()) return 'department';
         return 'own';
     }
 
@@ -192,11 +192,10 @@ class IncidentManagementService
     {
         $tier = $this->getAccessTier($user);
         if ($tier === 'department') {
-            $deptId = $user->department_id ?? $user->employee?->department_id;
-            if ($deptId) {
-                $query->where('department_id', $deptId);
+            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+            if (!empty($accessibleDeptIds)) {
+                $query->whereIn('department_id', $accessibleDeptIds);
             } else {
-                // No department assigned — fall back to own incidents
                 $query->reportedBy($user->id);
             }
         } elseif ($tier === 'own') {
@@ -263,11 +262,11 @@ class IncidentManagementService
             ->orderByRaw("FIELD(severity, 'Critical', 'High', 'Medium', 'Low')")
             ->orderBy('date_reported', 'asc'); // oldest first within same severity
 
-        // Leads see their department; HR/Admin see all
-        if ($user->hasAnyRole(['Lead']) && !$user->hasAnyRole(['Super Admin', 'Admin', 'HR'])) {
-            $deptId = $user->department_id ?? $user->employee?->department_id;
-            if ($deptId) {
-                $query->where('department_id', $deptId);
+        // Dept leads see their departments; HR/Admin see all
+        if ($user->isDeptLead() && !$user->hasAnyRole(['Super Admin', 'Admin', 'HR'])) {
+            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+            if (!empty($accessibleDeptIds)) {
+                $query->whereIn('department_id', $accessibleDeptIds);
             }
         }
 

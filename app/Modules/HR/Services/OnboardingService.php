@@ -178,6 +178,90 @@ class OnboardingService
         return $task;
     }
 
+    public function createTask(int $cardId, array $fields): OnboardingTask
+    {
+        $card = OnboardingCard::findOrFail($cardId);
+        $isOptional = array_key_exists('is_optional', $fields) && (bool)$fields['is_optional'];
+
+        $slug = preg_replace('/[^A-Z0-9]+/', '_', strtoupper($fields['title']));
+        $slug = trim($slug, '_');
+        $code = $slug ?: 'CUSTOM_TASK';
+        $baseCode = $code;
+        $suffix = 1;
+        while (OnboardingTask::where('onboarding_case_id', $card->onboarding_case_id)->where('task_code', $code)->exists()) {
+            $code = $baseCode . '_' . $suffix++;
+        }
+
+        $highestOrder = OnboardingTask::where('card_id', $cardId)->max('sequence_order') ?? 0;
+
+        $task = OnboardingTask::create([
+            'onboarding_case_id' => $card->onboarding_case_id,
+            'card_id'            => $cardId,
+            'task_code'          => $code,
+            'title'              => $fields['title'],
+            'description'        => $fields['description'] ?? null,
+            'assignee_role'      => $fields['assignee_role'] ?? null,
+            'is_required'        => !$isOptional,
+            'is_optional'        => $isOptional,
+            'is_active'          => true,
+            'is_applicable'      => true,
+            'is_needed'          => true,
+            'sequence_order'     => $highestOrder + 1,
+            'status'             => 'pending',
+        ]);
+
+        $this->recalculateProgress($card->onboarding_case_id);
+        $this->log($card->onboarding_case_id, 'task_created', "Custom task created: {$task->title}");
+
+        return $task;
+    }
+
+    public function createDocumentRequirement(int $caseId, array $fields): OnboardingDocumentRequirement
+    {
+        $case = OnboardingCase::findOrFail($caseId);
+        $slug = preg_replace('/[^a-z0-9]+/', '_', strtolower($fields['label']));
+        $slug = trim($slug, '_');
+        $key = $slug ?: 'custom_document';
+        $baseKey = $key;
+        $suffix = 1;
+        while (OnboardingDocumentRequirement::where('onboarding_case_id', $caseId)->where('document_key', $key)->exists()) {
+            $key = $baseKey . '_' . $suffix++;
+        }
+
+        $req = OnboardingDocumentRequirement::create([
+            'onboarding_case_id' => $caseId,
+            'document_key'       => $key,
+            'label'              => $fields['label'],
+            'is_required'        => array_key_exists('is_required', $fields) ? (bool)$fields['is_required'] : true,
+            'is_applicable'      => true,
+            'is_needed'          => true,
+            'status'             => 'pending',
+        ]);
+
+        $this->log($caseId, 'document_created', "Custom document requirement created: {$req->label}");
+        $this->recalculateProgress($caseId);
+
+        return $req;
+    }
+
+    public function createWelcomeKitItem(int $caseId, array $fields): OnboardingWelcomeKitItem
+    {
+        $case = OnboardingCase::findOrFail($caseId);
+
+        $item = OnboardingWelcomeKitItem::create([
+            'onboarding_case_id' => $caseId,
+            'item_name'          => $fields['item_name'],
+            'is_ready'           => false,
+            'is_applicable'      => true,
+            'is_needed'          => true,
+        ]);
+
+        $this->log($caseId, 'welcome_kit_item_created', "Custom welcome kit item created: {$item->item_name}");
+        $this->recalculateProgress($caseId);
+
+        return $item;
+    }
+
     public function approveHRGate(int $caseId, ?string $notes = null): OnboardingCase
     {
         $case = OnboardingCase::findOrFail($caseId);
@@ -226,7 +310,7 @@ class OnboardingService
         $case->update(['status' => 'handover']);
         $this->log($caseId, 'handover_completed', 'HR formally handed over onboarding to line manager');
 
-        return $handover->load(['handedOverByUser', 'lineManager']);
+        return $handover->load(['handedOverByUser', 'departmentLead']);
     }
 
     public function submitReview(int $caseId, array $data): OnboardingReview
@@ -284,13 +368,46 @@ class OnboardingService
 
         $req->update($updateData);
         $this->log($req->onboarding_case_id, 'document_updated', "Document '{$req->label}' → {$status}");
+        $this->recalculateProgress($req->onboarding_case_id);
 
         return $req;
+    }
+
+    public function updateWelcomeKitItem(int $itemId, array $fields): OnboardingWelcomeKitItem
+    {
+        $item = OnboardingWelcomeKitItem::findOrFail($itemId);
+        $updateData = [];
+
+        if (array_key_exists('is_applicable', $fields)) {
+            $updateData['is_applicable'] = (bool)$fields['is_applicable'];
+            if (!$updateData['is_applicable']) {
+                $updateData['is_ready'] = false;
+                $updateData['marked_ready_by'] = null;
+                $updateData['marked_ready_at'] = null;
+            }
+        }
+
+        if (array_key_exists('is_needed', $fields)) {
+            $updateData['is_needed'] = (bool)$fields['is_needed'];
+            if (!$updateData['is_needed']) {
+                $updateData['is_ready'] = false;
+                $updateData['marked_ready_by'] = null;
+                $updateData['marked_ready_at'] = null;
+            }
+        }
+
+        if (!empty($updateData)) {
+            $item->update($updateData);
+            $this->recalculateProgress($item->onboarding_case_id);
+        }
+
+        return $item;
     }
 
     public function toggleWelcomeKitItem(int $itemId): OnboardingWelcomeKitItem
     {
         $item = OnboardingWelcomeKitItem::findOrFail($itemId);
+        abort_if(!$item->is_applicable || !$item->is_needed, 422, 'Item is not applicable.');
 
         $item->update([
             'is_ready'        => !$item->is_ready,
@@ -298,6 +415,7 @@ class OnboardingService
             'marked_ready_at' => now(),
         ]);
 
+        $this->recalculateProgress($item->onboarding_case_id);
         return $item;
     }
 
@@ -329,10 +447,35 @@ class OnboardingService
                 continue;
             }
 
-            $tasks         = OnboardingTask::where('card_id', $card->id)->where('is_active', true)->get();
-            $cardTotal     = $tasks->count();
-            $cardCompleted = $tasks->where('status', 'completed')->count();
-            $cardProgress  = $cardTotal > 0 ? round(($cardCompleted / $cardTotal) * 100, 2) : 0;
+            if ($card->card_type === 'welcome_kit') {
+                $items = OnboardingWelcomeKitItem::where('onboarding_case_id', $caseId)
+                    ->where('is_applicable', true)
+                    ->where('is_needed', true)
+                    ->get();
+
+                $cardTotal     = $items->count();
+                $cardCompleted = $items->where('is_ready', true)->count();
+            } elseif ($card->card_type === 'documents') {
+                $requirements = OnboardingDocumentRequirement::where('onboarding_case_id', $caseId)
+                    ->where('is_applicable', true)
+                    ->where('is_needed', true)
+                    ->get();
+
+                $cardTotal     = $requirements->count();
+                $cardCompleted = $requirements->filter(function ($req) {
+                    return in_array($req->status, ['submitted', 'verified']);
+                })->count();
+            } else {
+                $tasks         = OnboardingTask::where('card_id', $card->id)
+                    ->where('is_active', true)
+                    ->where('is_applicable', true)
+                    ->where('is_needed', true)
+                    ->get();
+                $cardTotal     = $tasks->count();
+                $cardCompleted = $tasks->where('status', 'completed')->count();
+            }
+
+            $cardProgress = $cardTotal > 0 ? round(($cardCompleted / $cardTotal) * 100, 2) : 0;
 
             $card->update([
                 'progress' => $cardProgress,
@@ -344,7 +487,16 @@ class OnboardingService
         }
 
         $overall = $totalActive > 0 ? round(($totalCompleted / $totalActive) * 100, 2) : 0;
-        OnboardingCase::where('id', $caseId)->update(['overall_progress' => $overall]);
+
+        $case = OnboardingCase::find($caseId);
+        if ($case) {
+            $updateData = ['overall_progress' => $overall];
+            if ($overall >= 100 && !in_array($case->status, ['handover', 'hr_handover_completed', 'post_onboarding_review', 'completed', 'cancelled'], true)) {
+                $updateData['status'] = 'handover';
+                $this->log($caseId, 'auto_handover', 'Onboarding case moved to handover automatically at 100% progress');
+            }
+            $case->update($updateData);
+        }
     }
 
     private function resolveCardStatus(bool $isLocked, int $completed, int $total): string
@@ -378,6 +530,8 @@ class OnboardingService
                         'is_optional'        => $t['is_optional'],
                         'is_required'        => !$t['is_optional'],
                         'is_active'          => !$t['is_optional'], // optional tasks start inactive
+                        'is_applicable'      => true,
+                        'is_needed'          => true,
                         'sequence_order'     => $t['seq'],
                         'status'             => 'pending',
                     ]);
@@ -393,6 +547,8 @@ class OnboardingService
                 'onboarding_case_id' => $case->id,
                 'item_name'          => $item,
                 'is_ready'           => false,
+                'is_applicable'      => true,
+                'is_needed'          => true,
             ]);
         }
     }
@@ -405,9 +561,52 @@ class OnboardingService
                 'document_key'       => $doc['key'],
                 'label'              => $doc['label'],
                 'is_required'        => $doc['is_required'],
+                'is_applicable'      => true,
+                'is_needed'          => true,
                 'status'             => 'pending',
             ]);
         }
+    }
+
+    public function updateTaskFlags(int $taskId, array $fields): OnboardingTask
+    {
+        $task = OnboardingTask::findOrFail($taskId);
+        $updateData = [];
+
+        if (array_key_exists('is_applicable', $fields)) {
+            $updateData['is_applicable'] = (bool)$fields['is_applicable'];
+        }
+
+        if (array_key_exists('is_needed', $fields)) {
+            $updateData['is_needed'] = (bool)$fields['is_needed'];
+        }
+
+        if (!empty($updateData)) {
+            $task->update($updateData);
+            $this->recalculateProgress($task->onboarding_case_id);
+        }
+
+        return $task;
+    }
+
+    public function updateDocumentRequirementFlags(int $requirementId, array $fields): OnboardingDocumentRequirement
+    {
+        $req = OnboardingDocumentRequirement::findOrFail($requirementId);
+        $updateData = [];
+
+        if (array_key_exists('is_applicable', $fields)) {
+            $updateData['is_applicable'] = (bool)$fields['is_applicable'];
+        }
+
+        if (array_key_exists('is_needed', $fields)) {
+            $updateData['is_needed'] = (bool)$fields['is_needed'];
+        }
+
+        if (!empty($updateData)) {
+            $req->update($updateData);
+        }
+
+        return $req;
     }
 
     private function log(int $caseId, string $action, string $description, array $metadata = []): void

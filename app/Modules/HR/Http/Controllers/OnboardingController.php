@@ -111,6 +111,66 @@ class OnboardingController extends Controller
         return response()->json($task);
     }
 
+    public function createTask(Request $request, int $cardId): JsonResponse
+    {
+        $validated = $request->validate([
+            'title'       => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'is_optional' => 'nullable|boolean',
+        ]);
+
+        $task = $this->service->createTask($cardId, $validated);
+
+        return response()->json($task);
+    }
+
+    public function updateTaskFlags(Request $request, int $taskId): JsonResponse
+    {
+        $validated = $request->validate([
+            'is_applicable' => 'nullable|boolean',
+            'is_needed'     => 'nullable|boolean',
+        ]);
+
+        $task = $this->service->updateTaskFlags($taskId, $validated);
+
+        return response()->json($task);
+    }
+
+    public function updateDocumentRequirement(Request $request, int $requirementId): JsonResponse
+    {
+        $validated = $request->validate([
+            'is_applicable' => 'nullable|boolean',
+            'is_needed'     => 'nullable|boolean',
+        ]);
+
+        $req = $this->service->updateDocumentRequirementFlags($requirementId, $validated);
+
+        return response()->json($req);
+    }
+
+    public function createDocumentRequirement(Request $request, int $caseId): JsonResponse
+    {
+        $validated = $request->validate([
+            'label'       => 'required|string|max:255',
+            'is_required' => 'nullable|boolean',
+        ]);
+
+        $req = $this->service->createDocumentRequirement($caseId, $validated);
+
+        return response()->json($req);
+    }
+
+    public function createWelcomeKitItem(Request $request, int $caseId): JsonResponse
+    {
+        $validated = $request->validate([
+            'item_name' => 'required|string|max:255',
+        ]);
+
+        $item = $this->service->createWelcomeKitItem($caseId, $validated);
+
+        return response()->json($item);
+    }
+
     public function approveHRGate(Request $request, int $id): JsonResponse
     {
         $request->validate(['notes' => 'nullable|string']);
@@ -168,6 +228,18 @@ class OnboardingController extends Controller
     public function toggleWelcomeKitItem(int $itemId): JsonResponse
     {
         $item = $this->service->toggleWelcomeKitItem($itemId);
+        return response()->json($item);
+    }
+
+    public function updateWelcomeKitItem(Request $request, int $itemId): JsonResponse
+    {
+        $validated = $request->validate([
+            'is_applicable' => 'nullable|boolean',
+            'is_needed'     => 'nullable|boolean',
+        ]);
+
+        $item = $this->service->updateWelcomeKitItem($itemId, $validated);
+
         return response()->json($item);
     }
 

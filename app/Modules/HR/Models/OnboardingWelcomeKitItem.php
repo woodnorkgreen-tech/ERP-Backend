@@ -13,6 +13,8 @@ class OnboardingWelcomeKitItem extends Model
 
     protected $casts = [
         'is_ready'        => 'boolean',
+        'is_applicable'   => 'boolean',
+        'is_needed'       => 'boolean',
         'marked_ready_at' => 'datetime',
     ];
 

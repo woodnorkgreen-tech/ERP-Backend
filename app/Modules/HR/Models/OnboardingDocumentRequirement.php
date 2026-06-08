@@ -13,6 +13,8 @@ class OnboardingDocumentRequirement extends Model
 
     protected $casts = [
         'is_required'  => 'boolean',
+        'is_applicable'=> 'boolean',
+        'is_needed'    => 'boolean',
         'submitted_at' => 'datetime',
         'verified_at'  => 'datetime',
     ];

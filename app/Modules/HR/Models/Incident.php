@@ -165,7 +165,8 @@ class Incident extends Model
      */
     public function canBeReviewedBy(User $user): bool
     {
-        return $user->hasAnyRole(['Super Admin', 'Admin', 'HR', 'Lead']);
+        return $user->hasAnyRole(['Super Admin', 'Admin', 'HR'])
+            || $user->isDeptLead();
     }
     
     /**

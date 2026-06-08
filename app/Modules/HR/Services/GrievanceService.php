@@ -206,7 +206,27 @@ class GrievanceService
             return;
         }
 
-        // Employees can access grievances they filed.
+        // Dept lead: see own grievances + dept members' grievances, but NEVER ones filed against them
+        if ($user->isDeptLead()) {
+            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+            $query->where(function ($q) use ($user, $accessibleDeptIds) {
+                $q->where('complainant_id', $user->id);
+                if (!empty($accessibleDeptIds)) {
+                    $q->orWhere(function ($inner) use ($user, $accessibleDeptIds) {
+                        $inner->whereHas('complainant', function ($userQ) use ($accessibleDeptIds) {
+                            $userQ->whereIn('department_id', $accessibleDeptIds);
+                        })
+                        ->where(function ($notAccused) use ($user) {
+                            $notAccused->whereNull('against_id')
+                                       ->orWhere('against_id', '!=', $user->id);
+                        });
+                    });
+                }
+            });
+            return;
+        }
+
+        // Regular employees see only what they filed
         $query->where('complainant_id', $user->id);
     }
 }
