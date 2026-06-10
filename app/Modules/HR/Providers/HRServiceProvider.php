@@ -7,6 +7,7 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Console\Scheduling\Schedule;
 use App\Modules\HR\Console\Commands\SyncLeaveStatuses;
 use App\Modules\HR\Console\Commands\SyncHikvisionAttendance;
+use App\Modules\HR\Console\Commands\NotifyExpiringContracts;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Observers\LeaveRequestObserver;
 
@@ -30,6 +31,7 @@ class HRServiceProvider extends ServiceProvider
             $this->commands([
                 SyncLeaveStatuses::class,
                 SyncHikvisionAttendance::class,
+                NotifyExpiringContracts::class,
             ]);
         }
 
@@ -44,6 +46,12 @@ class HRServiceProvider extends ServiceProvider
                 ->dailyAt('00:01')
                 ->withoutOverlapping()
                 ->appendOutputTo(storage_path('logs/leave-sync.log'));
+
+            $this->app->make(Schedule::class)
+                ->command('hr:notify-expiring-contracts')
+                ->dailyAt('07:00')
+                ->withoutOverlapping()
+                ->appendOutputTo(storage_path('logs/contract-expiry.log'));
 
             $schedule = $this->app->make(Schedule::class);
             foreach (['09:00', '18:00', '23:00'] as $time) {

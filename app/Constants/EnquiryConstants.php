@@ -61,6 +61,11 @@ class EnquiryConstants
         self::STATUS_SITE_SURVEY_COMPLETED => ['site-survey'],
     ];
 
+    // Closure-phase task types that must be completed (or skipped) before a project
+    // can transition to STATUS_COMPLETED. Only tasks actually selected for the project
+    // are evaluated — unselected closure tasks do not block completion.
+    const PROJECT_COMPLETION_REQUISITES = ['handover', 'report'];
+
     // Enquiry number prefix
     const ENQUIRY_PREFIX = 'ENQ';
 
@@ -131,5 +136,52 @@ class EnquiryConstants
             self::STATUS_PLANNING,
             self::STATUS_IN_PROGRESS,
         ];
+    }
+
+    /** Enquiries that have an approved quote and are live projects */
+    public static function getApprovedProjectStatuses(): array
+    {
+        return [
+            self::STATUS_QUOTE_APPROVED,
+            self::STATUS_PLANNING,
+            self::STATUS_IN_PROGRESS,
+        ];
+    }
+
+    /** Pipeline: post-logging, pre-quote-approval */
+    public static function getInProgressEnquiryStatuses(): array
+    {
+        return [
+            self::STATUS_SITE_SURVEY_COMPLETED,
+            self::STATUS_DESIGN_COMPLETED,
+            self::STATUS_DESIGN_APPROVED,
+            self::STATUS_MATERIALS_SPECIFIED,
+            self::STATUS_BUDGET_CREATED,
+            self::STATUS_QUOTE_PREPARED,
+        ];
+    }
+
+    /** Pre-production: quote approved but not yet in progress */
+    public static function getPreProductionStatuses(): array
+    {
+        return [
+            self::STATUS_QUOTE_APPROVED,
+            self::STATUS_PLANNING,
+        ];
+    }
+
+    public static function getCompletedStatuses(): array
+    {
+        return [self::STATUS_COMPLETED];
+    }
+
+    public static function getCancelledStatuses(): array
+    {
+        return [self::STATUS_CANCELLED];
+    }
+
+    public static function getClosedStatuses(): array
+    {
+        return [self::STATUS_COMPLETED, self::STATUS_CANCELLED];
     }
 }

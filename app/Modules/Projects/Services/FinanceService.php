@@ -36,10 +36,6 @@ class FinanceService
      */
     public function releaseProject(ProjectEnquiry $enquiry, ?string $notes = null): bool
     {
-        if ($enquiry->status !== EnquiryConstants::STATUS_AWAITING_DEPOSIT && $enquiry->status !== EnquiryConstants::STATUS_QUOTE_APPROVED) {
-            // Can only release if it's waiting for deposit or already quote approved (re-release)
-        }
-
         return $enquiry->update([
             'status' => EnquiryConstants::STATUS_PLANNING, // Move to planning
             'follow_up_notes' => ($enquiry->follow_up_notes ? $enquiry->follow_up_notes . "\n" : "") . "Manually Released for Production on " . now()->format('d M Y') . ($notes ? ": $notes" : "")
@@ -121,7 +117,10 @@ class FinanceService
             $isClientApproved = false;
         }
 
-        $totalPaid = $enquiry->payments()->sum('amount');
+        // Use loaded collection when available to avoid N+1 on paginated lists
+        $totalPaid = $enquiry->relationLoaded('payments')
+            ? $enquiry->payments->sum('amount')
+            : $enquiry->payments()->sum('amount');
         $percentage = $totalQuoteAmount > 0 ? ($totalPaid / $totalQuoteAmount) * 100 : 0;
 
         return [

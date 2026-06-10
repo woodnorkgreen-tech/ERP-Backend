@@ -46,7 +46,8 @@ class Permissions
     const EMPLOYEE_READ = 'employee.read';
     const EMPLOYEE_UPDATE = 'employee.update';
     const EMPLOYEE_DELETE = 'employee.delete';
-    
+    const EMPLOYEE_VIEW_SALARY = 'employee.view_salary';
+
     const LEAVE_TYPE_CREATE = 'leave.type.create';
     const LEAVE_TYPE_READ = 'leave.type.read';
     const LEAVE_TYPE_UPDATE = 'leave.type.update';
@@ -232,6 +233,7 @@ class Permissions
 
             // Employee Management (including Leave)
             self::EMPLOYEE_CREATE, self::EMPLOYEE_READ, self::EMPLOYEE_UPDATE, self::EMPLOYEE_DELETE,
+            self::EMPLOYEE_VIEW_SALARY,
             self::LEAVE_TYPE_CREATE, self::LEAVE_TYPE_READ, self::LEAVE_TYPE_UPDATE, self::LEAVE_TYPE_DELETE,
             self::LEAVE_REQUEST_CREATE, self::LEAVE_REQUEST_READ, self::LEAVE_REQUEST_UPDATE, 
             self::LEAVE_REQUEST_APPROVE, self::LEAVE_REQUEST_REJECT, self::LEAVE_REQUEST_RECALL, 
@@ -320,6 +322,7 @@ class Permissions
             ],
             'employee_management' => [
                 self::EMPLOYEE_CREATE, self::EMPLOYEE_READ, self::EMPLOYEE_UPDATE, self::EMPLOYEE_DELETE,
+                self::EMPLOYEE_VIEW_SALARY,
                 self::LEAVE_TYPE_CREATE, self::LEAVE_TYPE_READ, self::LEAVE_TYPE_UPDATE, self::LEAVE_TYPE_DELETE,
                 self::LEAVE_REQUEST_CREATE, self::LEAVE_REQUEST_READ, self::LEAVE_REQUEST_UPDATE,
                 self::LEAVE_REQUEST_APPROVE, self::LEAVE_REQUEST_REJECT, self::LEAVE_REQUEST_RECALL,
@@ -417,6 +420,7 @@ class Permissions
             self::EMPLOYEE_READ => 'View Employee HR Data',
             self::EMPLOYEE_UPDATE => 'Update Personnel Records',
             self::EMPLOYEE_DELETE => 'Terminate/Delete Personnel',
+            self::EMPLOYEE_VIEW_SALARY => 'View Employee Salary & Bank Details',
             
             // Leave
             self::LEAVE_TYPE_CREATE => 'Define Leave Categories',

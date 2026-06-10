@@ -25,18 +25,6 @@ return [
             'notes' => 'Create design concepts and mockups'
         ],
         [
-            'title' => 'Material & Cost Listing',
-            'type' => 'materials',
-            'phase' => 'Financials & Approval',
-            'notes' => 'Specify and source materials for the project'
-        ],
-        [
-            'title' => 'Budget Creation',
-            'type' => 'budget',
-            'phase' => 'Financials & Approval',
-            'notes' => 'Create budget for the project'
-        ],
-        [
             'title' => 'Quote Preparation',
             'type' => 'quote',
             'phase' => 'Financials & Approval',
@@ -47,6 +35,18 @@ return [
             'type' => 'quote_approval',
             'phase' => 'Financials & Approval',
             'notes' => 'Approve the prepared quote'
+        ],
+        [
+            'title' => 'Material & Cost Listing',
+            'type' => 'materials',
+            'phase' => 'Financials & Approval',
+            'notes' => 'Specify and source materials for the project'
+        ],
+        [
+            'title' => 'Budget Creation',
+            'type' => 'budget',
+            'phase' => 'Financials & Approval',
+            'notes' => 'Create budget for the project'
         ],
         [
             'title' => 'Procurement & Inventory Management',

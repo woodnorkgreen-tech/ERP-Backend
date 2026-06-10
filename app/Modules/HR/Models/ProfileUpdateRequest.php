@@ -19,7 +19,8 @@ class ProfileUpdateRequest extends Model
         'reason',
         'status',
         'reviewed_by',
-        'reviewed_at'
+        'reviewed_at',
+        'rejection_reason',
     ];
 
     protected $casts = [

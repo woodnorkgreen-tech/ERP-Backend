@@ -7,10 +7,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Employee extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'employee_id',
@@ -172,18 +173,20 @@ class Employee extends Model
             return $query;
         }
 
-        // Managers and Department Leads
+        // Department managers: departments where this employee is listed as manager
         $managedDepartmentIds = \App\Modules\HR\Models\Department::where('manager_id', $user->employee_id)->pluck('id')->toArray();
-        if ($user->department_id) {
-            $managedDepartmentIds[] = $user->department_id;
-        }
 
         return $query->where(function($q) use ($managedDepartmentIds, $user) {
             if (!empty($managedDepartmentIds)) {
                 $q->whereIn('department_id', array_unique($managedDepartmentIds));
             }
+            // Direct reports regardless of department
             if ($user->employee_id) {
                 $q->orWhere('manager_id', $user->employee_id);
+            }
+            // Own record only — not the whole department
+            if ($user->employee_id) {
+                $q->orWhere('id', $user->employee_id);
             }
         });
     }
@@ -209,30 +212,43 @@ class Employee extends Model
             return true;
         }
 
-        // Check if employee is in user's department or managed departments
+        // Department managers can see everyone in their departments
         $managedDepartmentIds = \App\Modules\HR\Models\Department::where('manager_id', $user->employee_id)->pluck('id')->toArray();
-        if ($user->department_id) {
-            $managedDepartmentIds[] = $user->department_id;
-        }
-
         if (in_array($this->department_id, $managedDepartmentIds)) {
             return true;
         }
 
-        // Check if employee is a direct report
+        // Direct reports
         if ($user->employee_id && $this->manager_id === $user->employee_id) {
+            return true;
+        }
+
+        // Own record
+        if ($user->employee_id && $this->id === $user->employee_id) {
             return true;
         }
 
         return false;
     }
 
-    /**
-     * Get the documents for the employee.
-     */
     public function documents(): HasMany
     {
         return $this->hasMany(EmployeeDocument::class);
+    }
+
+    public function skills(): HasMany
+    {
+        return $this->hasMany(EmployeeSkill::class);
+    }
+
+    public function certifications(): HasMany
+    {
+        return $this->hasMany(EmployeeCertification::class)->orderBy('expiry_date');
+    }
+
+    public function performanceReviews(): HasMany
+    {
+        return $this->hasMany(PerformanceReview::class)->orderBy('review_date', 'desc');
     }
 
 
