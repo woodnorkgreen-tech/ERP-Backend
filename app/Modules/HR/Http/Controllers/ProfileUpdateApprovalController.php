@@ -17,7 +17,7 @@ class ProfileUpdateApprovalController extends Controller
     {
         $status = $request->query('status', 'pending');
         
-        $requests = ProfileUpdateRequest::with('employee:id,employee_id,first_name,last_name,department_id,position')
+        $requests = ProfileUpdateRequest::with(['employee', 'reviewer:id,name'])
             ->where('status', $status)
             ->orderBy('created_at', 'asc')
             ->paginate(20);
@@ -67,6 +67,7 @@ class ProfileUpdateApprovalController extends Controller
             'status' => 'rejected',
             'reviewed_by' => auth()->id(),
             'reviewed_at' => now(),
+            'rejection_reason' => $request->input('rejection_reason'),
         ]);
 
         return response()->json([

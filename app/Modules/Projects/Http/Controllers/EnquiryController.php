@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Log;
 use App\Modules\Projects\Services\FinanceService;
 use App\Modules\Projects\Actions\ApproveQuoteAction;
 use App\Modules\Projects\Actions\ReleaseFinanceGateAction;
+use App\Modules\Projects\Actions\CompleteProjectAction;
 use App\Services\Governance\ProjectGovernanceService;
 
 /**
@@ -137,7 +138,7 @@ class EnquiryController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo', 'deliverables');
+        $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo', 'deliverables', 'payments');
 
         $query = app(\Illuminate\Pipeline\Pipeline::class)
             ->send($query)
@@ -154,25 +155,24 @@ class EnquiryController extends Controller
         // 2. Apply "Sub-Tab" filtering (Status Groups) - Kept for flexibility for now
         if ($request->filled('sub_status') && $request->sub_status !== 'all') {
             $subStatus = $request->sub_status;
-            $activeProjectStatuses = ['quote_approved', 'planning', 'in_progress'];
-            $completedOnlyStatuses = ['completed'];
-            $cancelledStatuses = ['cancelled'];
-            $closedStatuses = array_merge($completedOnlyStatuses, $cancelledStatuses);
-            
+
             if ($subStatus === 'new' || $subStatus === 'pipeline') {
-                $query->whereNotIn('status', array_merge($activeProjectStatuses, $closedStatuses));
+                $query->whereNotIn('status', array_merge(
+                    EnquiryConstants::getApprovedProjectStatuses(),
+                    EnquiryConstants::getClosedStatuses()
+                ));
             } elseif ($subStatus === 'in_progress_active' || $subStatus === 'active') {
-                $query->whereIn('status', $activeProjectStatuses);
+                $query->whereIn('status', EnquiryConstants::getApprovedProjectStatuses());
             } elseif ($subStatus === 'completed' || $subStatus === 'finished') {
-                $query->whereIn('status', $completedOnlyStatuses);
+                $query->whereIn('status', EnquiryConstants::getCompletedStatuses());
             } elseif ($subStatus === 'cancelled' || $subStatus === 'canceled') {
-                $query->whereIn('status', $cancelledStatuses);
+                $query->whereIn('status', EnquiryConstants::getCancelledStatuses());
             } elseif ($subStatus === 'internal_job' || $subStatus === 'sponsorship') {
                 $query->where('workflow_preset_type', $subStatus);
             } elseif ($subStatus === 'in_progress_enquiry') {
-                $query->whereIn('status', ['site_survey_completed', 'design_completed', 'design_approved', 'materials_specified', 'budget_created', 'quote_prepared']);
+                $query->whereIn('status', EnquiryConstants::getInProgressEnquiryStatuses());
             } elseif ($subStatus === 'pre_prod') {
-                $query->whereIn('status', ['quote_approved', 'planning']);
+                $query->whereIn('status', EnquiryConstants::getPreProductionStatuses());
             }
         }
 
@@ -265,11 +265,6 @@ class EnquiryController extends Controller
         ]);
 
         $validatedData = $request->validated();
-        
-        // Handle field name alias for enquiry_title
-        if ($request->has('enquiry_title') && !isset($validatedData['title'])) {
-            $validatedData['title'] = $request->enquiry_title;
-        }
 
         try {
             DB::beginTransaction();
@@ -289,7 +284,7 @@ class EnquiryController extends Controller
 
             return response()->json([
                 'message' => 'Enquiry created successfully',
-                'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department'))
+                'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department', 'deliverables'))
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -627,12 +622,61 @@ class EnquiryController extends Controller
      *     @OA\Response(response=401, description="Unauthorized")
      * )
      */
-    public function update(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    public function update(Request $request, ProjectEnquiry $enquiry, CompleteProjectAction $completionAction): JsonResponse
     {
 
-        // Handle field name alias for enquiry_title
         if ($request->has('enquiry_title') && !$request->has('title')) {
             $request->merge(['title' => $request->enquiry_title]);
+        }
+
+        // Completion is gated — check conditions, push a notification to the acting user,
+        // and return an intelligent error describing exactly what still needs to happen.
+        if ($request->input('status') === EnquiryConstants::STATUS_COMPLETED) {
+            $readiness = $completionAction->buildReadiness($enquiry);
+            $user      = Auth::user();
+
+            if (!$readiness['can_complete']) {
+                // Push a persistent, actionable notification to the user's notification center
+                $this->notificationService->sendProjectCompletionBlocked($enquiry, $user, $readiness);
+
+                $lines = [];
+                foreach ($readiness['blocking_closure_tasks'] as $task) {
+                    $lines[] = [
+                        'type'     => 'closure_task',
+                        'task_id'  => $task['id'],
+                        'title'    => $task['title'],
+                        'status'   => $task['status'],
+                        'action'   => "Complete or skip \"{$task['title']}\" before closing the project.",
+                        'severity' => 'blocking',
+                    ];
+                }
+                foreach ($readiness['in_progress_tasks'] as $task) {
+                    $lines[] = [
+                        'type'     => 'in_progress_task',
+                        'task_id'  => $task['id'],
+                        'title'    => $task['title'],
+                        'status'   => $task['status'],
+                        'action'   => "\"{$task['title']}\" is still in progress — finish or skip it first.",
+                        'severity' => 'warning',
+                    ];
+                }
+
+                return response()->json([
+                    'message'        => 'This project cannot be marked complete yet. A notification has been added to your notification center with a full checklist.',
+                    'hint'           => 'Resolve all items below, then use POST /enquiries/{id}/complete to finalise.',
+                    'can_complete'   => false,
+                    'task_summary'   => $readiness['task_summary'],
+                    'blocking_items' => $lines,
+                ], 422);
+            }
+
+            // All conditions already met — redirect to the dedicated endpoint (no notification needed)
+            return response()->json([
+                'message'        => 'All completion conditions are met. Use POST /enquiries/{id}/complete to finalise — the action will be recorded in the governance log.',
+                'can_complete'   => true,
+                'task_summary'   => $readiness['task_summary'],
+                'blocking_items' => [],
+            ], 422);
         }
 
         $validator = Validator::make($request->all(), [
@@ -640,16 +684,15 @@ class EnquiryController extends Controller
             'expected_delivery_date' => 'sometimes|nullable|date|after_or_equal:date_received',
             'client_id' => 'sometimes|required|integer|exists:clients,id',
             'title' => 'sometimes|required|string|max:255',
-            'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias
+            'enquiry_title' => 'nullable|string|max:255',
             'description' => 'sometimes|nullable|string',
-            'project_scope' => 'nullable', // Allow array or string
+            'project_scope' => 'nullable',
             'priority' => 'nullable|string|in:' . implode(',', EnquiryConstants::getAllPriorities()),
             'contact_person' => 'sometimes|nullable|string|max:255',
             'project_officer_id' => 'nullable|integer|exists:users,id',
             'status' => 'sometimes|required|string|in:' . implode(',', EnquiryConstants::getAllStatuses()),
             'department_id' => 'nullable|integer|exists:departments,id',
             'assigned_department' => 'nullable|string|max:255',
-            'project_deliverables' => 'nullable|string',
             'assigned_po' => 'nullable|integer|exists:users,id',
             'follow_up_notes' => 'nullable|string',
             'venue' => 'nullable|string|max:255',
@@ -713,7 +756,6 @@ class EnquiryController extends Controller
             'status',
             'department_id',
             'assigned_department',
-            'project_deliverables',
             'assigned_po',
             'follow_up_notes',
             'venue',
@@ -729,7 +771,7 @@ class EnquiryController extends Controller
 
         return response()->json([
             'message' => 'Enquiry updated successfully',
-            'data' => $enquiry->load('client', 'department', 'projectOfficer')
+            'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department', 'projectOfficer', 'deliverables'))
         ]);
     }
 
@@ -752,7 +794,6 @@ class EnquiryController extends Controller
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $validator->errors(),
-                'received' => $request->all() // For debugging
             ], 422);
         }
 
@@ -761,69 +802,92 @@ class EnquiryController extends Controller
 
             $newScope = $request->project_scope;
 
-            $enquiry->update([
-                'project_scope' => $newScope,
-                // Also update the text-based deliverables field for redundancy/legacy compatibility
-                'project_deliverables' => is_array($newScope) ? implode(' | ', array_map(function($i) {
-                    if (is_string($i)) return $i;
-                    return $i['raw'] ?? "[{$i['classification']}] {$i['name']} | status:{$i['status']} | id:" . ($i['uuid'] ?? $i['id'] ?? '');
-                }, $newScope)) : $newScope
-            ]);
+            $enquiry->update(['project_scope' => $newScope]);
 
             // Dynamic Synchronisation back to existing Quote & Material Tasks!
             if (is_array($newScope)) {
-                // Parse each item in the new scope to match unique ID
+                // Build scopeId → name map for materials task propagation
                 $scopeItems = [];
                 foreach ($newScope as $scopeItem) {
-                    if (is_array($scopeItem)) {
-                        $deliverableName = $scopeItem['name'] ?? '';
-                        $deliverableId = $scopeItem['uuid'] ?? $scopeItem['id'] ?? '';
-                    } else {
-                        $parts = array_map('trim', explode('|', $scopeItem));
-                        $typeAndName = $parts[0];
-                        $deliverableName = $typeAndName;
-                        
-                        // Extract type prefix like [TYPE] Name
-                        if (preg_match('/^\[(.*?)\]\s*(.*)$/', $typeAndName, $matches)) {
-                            $deliverableName = trim($matches[2]);
-                        }
-                        
-                        $deliverableId = '';
-                        foreach ($parts as $p) {
-                            if (strpos($p, 'id:') === 0) {
-                                $deliverableId = trim(substr($p, 3));
-                            }
-                        }
-                    }
-                    
+                    $deliverableName = $scopeItem['name'] ?? '';
+                    $deliverableId   = $scopeItem['uuid'] ?? $scopeItem['id'] ?? '';
                     if ($deliverableId) {
                         $scopeItems[$deliverableId] = $deliverableName;
                     }
                 }
 
-                // A. Sync Quote Tasks
+                // A. Sync Quote Task materials — propagate renames, category changes,
+                //    and inject new scope items that don't yet have a matching element.
                 $quoteTasks = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiry->id)
                     ->where('type', 'quote')
                     ->get();
 
+                // Build a full structured map: scopeId → { name, classification }
+                // Items are always structured arrays (via EnquiryResource / project_scope accessor)
+                $scopeStructured = [];
+                foreach ($newScope as $scopeItem) {
+                    $id = $scopeItem['uuid'] ?? $scopeItem['id'] ?? null;
+                    if ($id) {
+                        $scopeStructured[$id] = [
+                            'name'           => $scopeItem['name'] ?? 'Scope Item',
+                            'classification' => strtoupper($scopeItem['classification'] ?? 'PRE-DEFINED'),
+                        ];
+                    }
+                }
+
+                // Template mapping delegated to the single source of truth
+                // @see App\Constants\ScopeClassification
+
                 foreach ($quoteTasks as $quoteTask) {
-                    $quoteData = \App\Models\TaskQuoteData::where('enquiry_task_id', $quoteTask->id)->first();
-                    if ($quoteData) {
-                        $materials = $quoteData->materials;
-                        if (is_array($materials)) {
-                            $updatedMaterials = [];
-                            foreach ($materials as $element) {
-                                $scopeId = $element['scopeId'] ?? null;
-                                if ($scopeId && isset($scopeItems[$scopeId])) {
-                                    $element['name'] = $scopeItems[$scopeId];
-                                }
-                                $updatedMaterials[] = $element;
-                            }
-                            $quoteData->update([
-                                'materials' => $updatedMaterials
-                            ]);
+                    $quoteData = \App\Models\TaskQuoteData::firstOrCreate(
+                        ['enquiry_task_id' => $quoteTask->id]
+                    );
+
+                    $materials = is_array($quoteData->materials) ? $quoteData->materials : [];
+
+                    // Map existing elements by their scopeId for quick lookup
+                    $existingScopeIds = [];
+                    $updatedMaterials = [];
+                    foreach ($materials as $element) {
+                        $scopeId = $element['scopeId'] ?? null;
+                        if ($scopeId && isset($scopeStructured[$scopeId])) {
+                            // Update name AND category from the new scope
+                            $element['name']     = $scopeStructured[$scopeId]['name'];
+                            $element['category'] = $scopeStructured[$scopeId]['classification'];
+                        }
+                        if ($scopeId) $existingScopeIds[$scopeId] = true;
+                        $updatedMaterials[] = $element;
+                    }
+
+                    // Inject new scope items (in scope but not yet in quote materials)
+                    foreach ($scopeStructured as $scopeId => $info) {
+                        if (!isset($existingScopeIds[$scopeId])) {
+                            $cls  = $info['classification'];
+                            $updatedMaterials[] = [
+                                'id'               => (string) \Illuminate\Support\Str::uuid(),
+                                'scopeId'          => $scopeId,
+                                'name'             => $info['name'],
+                                'category'         => $cls,
+                                'description'      => '',
+                                'quantity'         => 1,
+                                'baseTotal'        => 0,
+                                'marginAmount'     => 0,
+                                'marginPercentage' => \App\Constants\ScopeClassification::defaultMargin($cls),
+                                'finalTotal'       => 0,
+                                'templateId'       => \App\Constants\ScopeClassification::toTemplateId($cls),
+                                'materials'        => [],
+                            ];
                         }
                     }
+
+                    // Remove elements that are scope-linked but no longer in scope
+                    $updatedMaterials = array_values(array_filter($updatedMaterials, function ($el) use ($scopeStructured) {
+                        $sid = $el['scopeId'] ?? null;
+                        // Keep manually-added elements (no scopeId) and elements still in scope
+                        return !$sid || isset($scopeStructured[$sid]);
+                    }));
+
+                    $quoteData->update(['materials' => $updatedMaterials]);
                 }
 
                 // B. Sync Material Task Elements
@@ -861,7 +925,7 @@ class EnquiryController extends Controller
 
             return response()->json([
                 'message' => 'Deliverables updated successfully',
-                'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department', 'projectOfficer'))
+                'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department', 'projectOfficer', 'deliverables'))
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -869,6 +933,59 @@ class EnquiryController extends Controller
                 'message' => 'Failed to update deliverables',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Return a transparency snapshot of whether this project satisfies all
+     * completion conditions, and what is blocking it if not.
+     *
+     * Front-ends use this to render a "Complete Project" button (enabled/disabled)
+     * and a checklist of outstanding items.
+     */
+    public function completionReadiness(ProjectEnquiry $enquiry, CompleteProjectAction $action): JsonResponse
+    {
+        $readiness = $action->buildReadiness($enquiry);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $readiness,
+        ]);
+    }
+
+    /**
+     * Mark a project as completed after verifying all conditions are met.
+     *
+     * Conditions (enforced hard-gates — not bypassable via the general update endpoint):
+     *  1. Project must be in_progress.
+     *  2. All selected closure tasks (handover, report) must be completed or skipped.
+     *  3. No tasks may currently be in_progress.
+     *
+     * The action is logged to the governance audit trail with the acting user's identity.
+     */
+    public function completeProject(Request $request, ProjectEnquiry $enquiry, CompleteProjectAction $action): JsonResponse
+    {
+        $validated = $request->validate([
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        try {
+            $completed = $action->execute($enquiry, Auth::id(), $validated['notes'] ?? null);
+
+            return response()->json([
+                'message' => 'Project completed successfully.',
+                'data'    => $completed->load('client', 'projectOfficer'),
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('completeProject blocked', [
+                'enquiry_id' => $enquiry->id,
+                'user_id'    => Auth::id(),
+                'reason'     => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 422);
         }
     }
 
@@ -954,13 +1071,12 @@ class EnquiryController extends Controller
 
     public function updatePhase(Request $request, ProjectEnquiry $enquiry): JsonResponse
     {
-
-        // Implementation for updating enquiry phase
-        // This might involve updating status or other phase-related fields
+        // Phase progression is driven automatically by task completion via SyncEnquiryStatusAction.
+        // Manual phase overrides should use the update() endpoint with an explicit status field.
         return response()->json([
-            'message' => 'Phase updated successfully',
-            'data' => $enquiry
-        ]);
+            'message' => 'Phase is managed automatically by task completion. Use the update endpoint to set status directly.',
+            'data' => $enquiry->only(['id', 'status', 'current_phase'])
+        ], 200);
     }
 
     /**

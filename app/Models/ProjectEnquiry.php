@@ -30,7 +30,6 @@ class ProjectEnquiry extends Model
         'department_id',
         'assigned_department',
         'estimated_budget',
-        'project_deliverables',
         'contact_person',
         'project_officer_id',
         'assigned_po',
@@ -67,7 +66,6 @@ class ProjectEnquiry extends Model
         'end_date' => 'date',
         'budget' => 'decimal:2',
         'assigned_users' => 'array',
-        'project_scope' => 'array',
         'selected_workflow_tasks' => 'array',
         'current_phase' => 'integer',
         'job_number' => 'string',
@@ -105,8 +103,14 @@ class ProjectEnquiry extends Model
     protected static function booted()
     {
         static::saved(function ($enquiry) {
-            // Trigger sync of deliverables table on creation or updates of project_scope
-            $raw = $enquiry->getRawOriginal('project_scope');
+            if (!$enquiry->wasRecentlyCreated && !$enquiry->wasChanged('project_scope')) {
+                return;
+            }
+
+            // getRawOriginal() reads $this->original, which for newly created models is
+            // empty until syncOriginalAttributes() runs — which happens AFTER saved fires.
+            // getAttributes() reads $this->attributes, always set by setProjectScopeAttribute.
+            $raw = $enquiry->getAttributes()['project_scope'] ?? null;
             if ($raw) {
                 $decoded = json_decode($raw, true);
                 if (is_array($decoded)) {
@@ -170,22 +174,14 @@ class ProjectEnquiry extends Model
      */
     public function getProjectScopeAttribute(): array
     {
-        $deliverables = $this->deliverables;
-        if ($deliverables->isEmpty()) {
-            $value = $this->attributes['project_scope'] ?? null;
-            if (empty($value)) return [];
-            $decoded = json_decode($value, true);
-            return is_array($decoded) ? $decoded : [];
-        }
-
-        return $deliverables->map(function ($d) {
+        return $this->deliverables->map(function ($d) {
             return [
-                'id' => $d->uuid,
-                'uuid' => $d->uuid,
-                'name' => $d->name,
+                'id'             => $d->uuid,
+                'uuid'           => $d->uuid,
+                'name'           => $d->name,
                 'classification' => $d->classification,
-                'status' => $d->status,
-                'raw' => "[{$d->classification}] {$d->name} | status:{$d->status} | id:{$d->uuid}"
+                'status'         => $d->status,
+                'raw'            => "[{$d->classification}] {$d->name} | status:{$d->status} | id:{$d->uuid}",
             ];
         })->toArray();
     }
@@ -283,5 +279,3 @@ class ProjectEnquiry extends Model
     }
 
 }
-
-// Alias for backward compatibility removed - use ProjectEnquiry directly

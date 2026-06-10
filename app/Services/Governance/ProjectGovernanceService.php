@@ -70,6 +70,28 @@ class ProjectGovernanceService
     }
 
     /**
+     * Write a named governance event directly to the audit log without running a policy.
+     * Use this for explicit, trusted actions (e.g. project completion) that don't need
+     * a policy evaluation but must still be auditable.
+     */
+    public function logEvent(ProjectEnquiry $enquiry, string $eventType, int $userId, array $context = []): void
+    {
+        try {
+            \App\Models\GovernanceAuditLog::create([
+                'project_enquiry_id' => $enquiry->id,
+                'user_id'            => $userId,
+                'gate_type'          => $eventType,
+                'action_status'      => 'authorized',
+                'message'            => "Event recorded: {$eventType}",
+                'context'            => $context,
+                'ip_address'         => request()->ip(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Governance: Failed to log event [{$eventType}]: " . $e->getMessage());
+        }
+    }
+
+    /**
      * Helper to evaluate a specific task's readiness.
      */
     public function evaluateTask(EnquiryTask $task): GateResult

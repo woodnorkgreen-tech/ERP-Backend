@@ -18,39 +18,11 @@ class LogisticsTaskService
     public function getLogisticsForTask(int $taskId): ?array
     {
         $logisticsTask = LogisticsTask::where('task_id', $taskId)
-            ->with(['transportItems', 'checklist.checklistItems', 'team.category', 'team.teamType', 'task.enquiry.projectOfficer'])
+            ->with(['transportItems', 'checklist.checklistItems', 'task.enquiry.projectOfficer'])
             ->first();
 
         if (!$logisticsTask) {
-            return null; // Return null when no logistics data exists
-        }
-
-        // Fetch all teams for the project/enquiry
-        $enquiryId = $logisticsTask->task->project_enquiry_id;
-        $projectTeams = [];
-        
-        if ($enquiryId) {
-            $projectTeams = \App\Modules\Teams\Models\TeamsTask::whereHas('task', function($query) use ($enquiryId) {
-                $query->where('project_enquiry_id', $enquiryId);
-            })
-            ->with(['category', 'teamType', 'activeMembers'])
-            ->get()
-            ->map(function ($team) {
-                return [
-                    'id' => $team->id,
-                    'category_name' => $team->category->display_name ?? $team->category->name ?? 'N/A',
-                    'team_type_name' => $team->teamType->display_name ?? $team->teamType->name ?? 'N/A',
-                    'status' => $team->status,
-                    'members' => $team->activeMembers->map(function ($member) {
-                        return [
-                            'name' => $member->member_name,
-                            'phone' => $member->member_phone,
-                            'is_lead' => $member->is_lead,
-                        ];
-                    })->toArray(),
-                ];
-            })
-            ->toArray();
+            return null;
         }
 
         // Prepare logistics planning with defaults if empty
@@ -100,24 +72,11 @@ class LogisticsTaskService
         return [
             'id' => $logisticsTask->id,
             'task_id' => $logisticsTask->task_id,
-            'team' => $logisticsTask->team ? [
-                'id' => $logisticsTask->team->id,
-                'category' => $logisticsTask->team->category->name ?? null,
-                'team_type' => $logisticsTask->team->teamType->name ?? null,
-                'status' => $logisticsTask->team->status,
-                'required_members' => $logisticsTask->team->required_members,
-                'assigned_members_count' => $logisticsTask->team->assigned_members_count,
-            ] : null,
-            'project_teams' => $projectTeams,
             'project_officer' => [
                 'name' => $logisticsTask->task->enquiry->projectOfficer->name ?? $logisticsTask->task->enquiry->project_officer_name ?? 'N/A',
                 'email' => $logisticsTask->task->enquiry->projectOfficer->email ?? null,
             ],
             'logistics_planning' => $planning,
-            'team_confirmation' => [
-                'setup_teams_confirmed' => $logisticsTask->setup_teams_confirmed,
-                'notes' => $logisticsTask->team_confirmation_notes,
-            ],
             'transport_items' => $logisticsTask->transportItems->map(function ($item) {
                 return [
                     'id' => $item->id,
@@ -162,57 +121,6 @@ class LogisticsTaskService
             return $logisticsTask->fresh();
         });
     }
-
-    /**
-     * Update team confirmation
-     */
-    public function updateTeamConfirmation(int $taskId, array $data): LogisticsTask
-    {
-        return DB::transaction(function () use ($taskId, $data) {
-            $logisticsTask = LogisticsTask::firstOrCreate(
-                ['task_id' => $taskId],
-                [
-                    'project_id' => $this->getProjectIdFromTask($taskId),
-                    'created_by' => auth()->id(),
-                ]
-            );
-
-            $logisticsTask->update([
-                'setup_teams_confirmed' => $data['setup_teams_confirmed'] ?? false,
-                'team_confirmation_notes' => $data['notes'] ?? null,
-                'updated_by' => auth()->id(),
-            ]);
-
-            return $logisticsTask->fresh();
-        });
-    }
-
-    /**
-     * Assign a team to a logistics task
-     */
-    public function assignTeam(int $taskId, int $teamTaskId): LogisticsTask
-    {
-        return DB::transaction(function () use ($taskId, $teamTaskId) {
-            // Verify team exists
-            $team = \App\Modules\Teams\Models\TeamsTask::findOrFail($teamTaskId);
-            
-            $logisticsTask = LogisticsTask::firstOrCreate(
-                ['task_id' => $taskId],
-                [
-                    'project_id' => $this->getProjectIdFromTask($taskId),
-                    'created_by' => auth()->id(),
-                ]
-            );
-
-            $logisticsTask->update([
-                'team_id' => $teamTaskId,
-                'updated_by' => auth()->id(),
-            ]);
-
-            return $logisticsTask->fresh(['team.category', 'team.teamType', 'team.members']);
-        });
-    }
-
 
     /**
      * Get transport items for a task
@@ -477,55 +385,41 @@ class LogisticsTaskService
                 ]);
 
                 // --- Part 2: Import from Project Enquiry Deliverables ---
-                if ($task->enquiry && $task->enquiry->project_deliverables) {
-                    $rawDeliverables = $task->enquiry->project_deliverables;
-                    $deliverablesList = [];
-                    
-                    // Try JSON first
-                    $decoded = json_decode($rawDeliverables, true);
-                    if (is_array($decoded)) {
-                        $deliverablesList = $decoded;
-                    } else {
-                        // Fallback to newline separated
-                        $deliverablesList = array_filter(array_map('trim', explode("\n", $rawDeliverables)));
-                    }
-                    
-                    foreach ($deliverablesList as $deliverable) {
-                        $name = is_array($deliverable) ? ($deliverable['name'] ?? $deliverable['title'] ?? null) : $deliverable;
-                        if (!$name) continue;
-                        
-                        // Check for duplicates by name for this source
-                        $sourceKey = 'enquiry_deliverable_' . md5($name);
-                        $existingItem = $logisticsTask->transportItems()
-                            ->where('source', $sourceKey)
-                            ->first();
-                            
-                        if (!$existingItem) {
-                            $transportItem = $logisticsTask->transportItems()->create([
-                                'name' => $name,
-                                'description' => is_array($deliverable) ? ($deliverable['description'] ?? null) : "Imported from Enquiry Deliverables",
-                                'quantity' => is_array($deliverable) ? ($deliverable['quantity'] ?? 1) : 1,
-                                'unit' => is_array($deliverable) ? ($deliverable['unit'] ?? 'item') : 'item',
-                                'category' => 'production',
-                                'main_category' => 'PRODUCTION',
-                                'is_returnable' => true,
-                                'source' => $sourceKey,
-                                'created_by' => auth()->id(),
-                            ]);
-                            
-                            $importedItems[] = [
-                                'id' => $transportItem->id,
-                                'name' => $transportItem->name,
-                                'description' => $transportItem->description,
-                                'quantity' => $transportItem->quantity,
-                                'unit' => $transportItem->unit,
-                                'category' => $transportItem->category,
-                                'main_category' => $transportItem->main_category,
-                                'is_returnable' => $transportItem->is_returnable,
-                                'sub_type' => $transportItem->sub_type,
-                                'source' => $transportItem->source,
-                            ];
-                        }
+                $scopeItems = $task->enquiry ? ($task->enquiry->project_scope ?? []) : [];
+                foreach ($scopeItems as $deliverable) {
+                    $name = $deliverable['name'] ?? null;
+                    if (!$name) continue;
+
+                    $sourceKey = 'enquiry_deliverable_' . md5($name);
+                    $existingItem = $logisticsTask->transportItems()
+                        ->where('source', $sourceKey)
+                        ->first();
+
+                    if (!$existingItem) {
+                        $transportItem = $logisticsTask->transportItems()->create([
+                            'name'          => $name,
+                            'description'   => null,
+                            'quantity'      => 1,
+                            'unit'          => 'item',
+                            'category'      => 'production',
+                            'main_category' => 'PRODUCTION',
+                            'is_returnable' => true,
+                            'source'        => $sourceKey,
+                            'created_by'    => auth()->id(),
+                        ]);
+
+                        $importedItems[] = [
+                            'id'           => $transportItem->id,
+                            'name'         => $transportItem->name,
+                            'description'  => $transportItem->description,
+                            'quantity'     => $transportItem->quantity,
+                            'unit'         => $transportItem->unit,
+                            'category'     => $transportItem->category,
+                            'main_category'=> $transportItem->main_category,
+                            'is_returnable'=> $transportItem->is_returnable,
+                            'sub_type'     => $transportItem->sub_type,
+                            'source'       => $transportItem->source,
+                        ];
                     }
                 }
 
@@ -556,7 +450,8 @@ class LogisticsTaskService
     }
 
     /**
-     * Update checklist data
+     * Update checklist data — merges into existing so return_items and other
+     * fields not included in partial payloads are never silently wiped.
      */
     public function updateChecklist(int $taskId, array $data): LogisticsChecklist
     {
@@ -577,7 +472,8 @@ class LogisticsTaskService
                 $checklist->created_by = auth()->id();
             }
 
-            $checklist->checklist_data = $data;
+            $existing = is_array($checklist->checklist_data) ? $checklist->checklist_data : [];
+            $checklist->checklist_data = array_merge($existing, $data);
             $checklist->updated_by = auth()->id();
             $checklist->save();
 
@@ -605,26 +501,121 @@ class LogisticsTaskService
             ];
         })->toArray();
 
-        $checklistData = [
-            'items' => $items,
-            'teams' => [
-                'workshop' => false,
-                'setup' => false,
-                'setdown' => false,
-            ],
-            'safety' => [
-                'ppe' => false,
-                'first_aid' => false,
-                'fire_extinguisher' => false,
-            ],
-            'equipment' => [
-                'tools' => false,
-                'vehicles' => false,
-                'communication' => false,
-            ],
-        ];
+        // Get or create checklist record and merge — preserves any existing
+        // return_items / gate states already saved from a previous generate.
+        $checklist = LogisticsChecklist::firstOrNew(
+            ['logistics_task_id' => $logisticsTask->id],
+            ['created_by' => auth()->id()]
+        );
+
+        $existing = is_array($checklist->checklist_data) ? $checklist->checklist_data : [];
+
+        $checklistData = array_merge($existing, [
+            'items'     => $items,
+            'teams'     => $existing['teams']     ?? ['workshop' => false, 'setup' => false, 'setdown' => false],
+            'safety'    => $existing['safety']    ?? ['ppe' => false, 'first_aid' => false, 'fire_extinguisher' => false],
+            'equipment' => $existing['equipment'] ?? ['tools' => false, 'vehicles' => false, 'communication' => false],
+        ]);
+
+        $checklist->checklist_data = $checklistData;
+        $checklist->updated_by     = auth()->id();
+        $checklist->save();
 
         return $checklistData;
+    }
+
+    /**
+     * Generate return checklist items from returnable transport items.
+     * Merges into existing checklist_data without wiping existing return progress.
+     */
+    public function generateReturnChecklistItems(int $taskId): array
+    {
+        return DB::transaction(function () use ($taskId) {
+            $logisticsTask = LogisticsTask::where('task_id', $taskId)
+                ->with('transportItems')
+                ->firstOrFail();
+
+            $returnableItems = $logisticsTask->transportItems
+                ->filter(fn($item) => $item->is_returnable);
+
+            // Get or create the checklist record
+            $checklist = LogisticsChecklist::firstOrNew(
+                ['logistics_task_id' => $logisticsTask->id],
+                ['created_by' => auth()->id()]
+            );
+
+            $existing = is_array($checklist->checklist_data) ? $checklist->checklist_data : [];
+
+            // Preserve any already-saved return progress, only add new items
+            $existingReturnItems = collect($existing['return_items'] ?? [])
+                ->keyBy('id')
+                ->toArray();
+
+            $generated = [];
+            foreach ($returnableItems as $item) {
+                $key = 'return_' . $item->id;
+                if (isset($existingReturnItems[$key])) {
+                    // Preserve return progress — only update name/qty if manifest changed
+                    $existing_entry = $existingReturnItems[$key];
+                    $existing_entry['name']                = $item->name;
+                    $existing_entry['quantity_dispatched'] = $item->quantity;
+                    $existingReturnItems[$key]             = $existing_entry;
+                } else {
+                    $existingReturnItems[$key] = [
+                        'id'                  => $key,
+                        'transport_item_id'   => $item->id,
+                        'name'                => $item->name,
+                        'quantity_dispatched' => $item->quantity,
+                        'quantity_returned'   => 0,
+                        'unit'                => $item->unit,
+                        'main_category'       => $item->main_category,
+                        'status'              => 'pending',
+                        'condition'           => 'good',
+                        'notes'               => null,
+                        'returned_at'         => null,
+                    ];
+                }
+                $generated[] = $existingReturnItems[$key];
+            }
+
+            // Persist merged return_items back into checklist_data
+            $existing['return_items']      = array_values($existingReturnItems);
+            $existing['setdown_confirmed'] = $existing['setdown_confirmed'] ?? false;
+            $existing['return_authorized'] = $existing['return_authorized'] ?? false;
+
+            $checklist->checklist_data = $existing;
+            $checklist->updated_by     = auth()->id();
+            $checklist->save();
+
+            return $generated;
+        });
+    }
+
+    /**
+     * Stamp return_authorized = true with timestamp in checklist_data.
+     */
+    public function authorizeReturn(int $taskId, ?string $notes): array
+    {
+        return DB::transaction(function () use ($taskId, $notes) {
+            $logisticsTask = LogisticsTask::where('task_id', $taskId)->firstOrFail();
+
+            $checklist = LogisticsChecklist::where('logistics_task_id', $logisticsTask->id)
+                ->firstOrFail();
+
+            $data = is_array($checklist->checklist_data) ? $checklist->checklist_data : [];
+
+            $data['return_authorized']    = true;
+            $data['return_authorized_at'] = now()->toISOString();
+            if ($notes) {
+                $data['setdown_notes'] = $notes;
+            }
+
+            $checklist->checklist_data = $data;
+            $checklist->updated_by     = auth()->id();
+            $checklist->save();
+
+            return $data;
+        });
     }
 
     /**
@@ -655,10 +646,6 @@ class LogisticsTaskService
         return [
             'task_id' => $taskId,
             'logistics_planning' => [],
-            'team_confirmation' => [
-                'setup_teams_confirmed' => false,
-                'notes' => null,
-            ],
             'transport_items' => [],
             'checklist' => $this->getEmptyChecklistStructure(),
             'status' => 'pending',
@@ -671,22 +658,14 @@ class LogisticsTaskService
     private function getEmptyChecklistStructure(): array
     {
         return [
-            'items' => [],
-            'teams' => [
-                'workshop' => false,
-                'setup' => false,
-                'setdown' => false,
-            ],
-            'safety' => [
-                'ppe' => false,
-                'first_aid' => false,
-                'fire_extinguisher' => false,
-            ],
-            'equipment' => [
-                'tools' => false,
-                'vehicles' => false,
-                'communication' => false,
-            ],
+            'items'                => [],
+            'teams'                => ['workshop' => false, 'setup' => false, 'setdown' => false],
+            'safety'               => ['ppe' => false, 'first_aid' => false, 'fire_extinguisher' => false],
+            'equipment'            => ['tools' => false, 'vehicles' => false, 'communication' => false],
+            'return_items'         => [],
+            'setdown_confirmed'    => false,
+            'return_authorized'    => false,
+            'return_authorized_at' => null,
         ];
     }
 
@@ -695,20 +674,33 @@ class LogisticsTaskService
      */
     private function formatChecklistData(?LogisticsChecklist $checklist): array
     {
+        $empty = $this->getEmptyChecklistStructure();
+
         if (!$checklist) {
-            return $this->getEmptyChecklistStructure();
+            return $empty;
         }
 
         $data = $checklist->checklist_data;
 
-        // Handle potential double-encoding or string format legacy data
         if (is_string($data)) {
             $decoded = json_decode($data, true);
-            if (is_array($decoded)) {
-                $data = $decoded;
-            }
+            $data = is_array($decoded) ? $decoded : [];
         }
 
-        return is_array($data) ? $data : $this->getEmptyChecklistStructure();
+        if (!is_array($data)) {
+            return $empty;
+        }
+
+        return [
+            'items'                => isset($data['items'])        && is_array($data['items'])        ? $data['items']        : [],
+            'teams'                => isset($data['teams'])        && is_array($data['teams'])        ? $data['teams']        : $empty['teams'],
+            'safety'               => isset($data['safety'])       && is_array($data['safety'])       ? $data['safety']       : $empty['safety'],
+            'equipment'            => isset($data['equipment'])    && is_array($data['equipment'])    ? $data['equipment']    : $empty['equipment'],
+            'return_items'         => isset($data['return_items']) && is_array($data['return_items']) ? $data['return_items'] : [],
+            'setdown_confirmed'    => $data['setdown_confirmed']    ?? false,
+            'return_authorized'    => $data['return_authorized']    ?? false,
+            'return_authorized_at' => $data['return_authorized_at'] ?? null,
+            'setdown_notes'        => $data['setdown_notes']        ?? null,
+        ];
     }
 }

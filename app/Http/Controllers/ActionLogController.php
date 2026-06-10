@@ -23,6 +23,7 @@ class ActionLogController extends Controller
             'production' => \App\Modules\Production\Models\WorkOrder::class,
             'project' => \App\Models\Project::class,
             'enquiry_task' => \App\Modules\Projects\Models\EnquiryTask::class,
+            'enquiry' => \App\Models\ProjectEnquiry::class,
         ];
 
         if (!array_key_exists($type, $typeMap)) {

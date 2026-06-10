@@ -45,30 +45,34 @@ class TaskQuoteData extends Model
         'approval_comments',
         'quote_amount',
         'viewer_settings',
+        // Margin governance audit trail
+        'justification',
+        'justification_history',
         'created_at',
         'updated_at'
     ];
 
     protected $casts = [
-        'project_info' => 'array',
-        'budget_imported' => 'boolean',
-        'budget_imported_at' => 'datetime',
-        'budget_updated_at' => 'datetime',
-        'materials' => 'array',
-        'labour' => 'array',
-        'expenses' => 'array',
-        'logistics' => 'array',
-        'margins' => 'array',
-        'custom_margins' => 'array',
-        'discount_amount' => 'decimal:2',
-        'vat_percentage' => 'decimal:2',
-        'vat_enabled' => 'boolean',
-        'totals' => 'array',
-        'approval_date' => 'date',
-        'quote_amount' => 'decimal:2',
-        'viewer_settings' => 'array',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime'
+        'project_info'         => 'array',
+        'budget_imported'      => 'boolean',
+        'budget_imported_at'   => 'datetime',
+        'budget_updated_at'    => 'datetime',
+        'materials'            => 'array',
+        'labour'               => 'array',
+        'expenses'             => 'array',
+        'logistics'            => 'array',
+        'margins'              => 'array',
+        'custom_margins'       => 'array',
+        'discount_amount'      => 'decimal:2',
+        'vat_percentage'       => 'decimal:2',
+        'vat_enabled'          => 'boolean',
+        'totals'               => 'array',
+        'approval_date'        => 'date',
+        'quote_amount'         => 'decimal:2',
+        'viewer_settings'      => 'array',
+        'justification_history' => 'array',
+        'created_at'           => 'datetime',
+        'updated_at'           => 'datetime',
     ];
 
     public function enquiryTask(): BelongsTo

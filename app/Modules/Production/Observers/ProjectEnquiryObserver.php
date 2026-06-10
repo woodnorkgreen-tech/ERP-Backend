@@ -2,24 +2,48 @@
 
 namespace App\Modules\Production\Observers;
 
+use App\Models\ActionLog;
 use App\Models\ProjectEnquiry;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Request;
 
 class ProjectEnquiryObserver
 {
+    private const AUDITED_FIELDS = [
+        'title', 'description', 'status', 'priority', 'client_id',
+        'contact_person', 'project_officer_id', 'department_id',
+        'estimated_budget', 'venue', 'expected_delivery_date', 'date_received',
+        'follow_up_notes', 'site_survey_skipped', 'site_survey_skip_reason',
+        'quote_approved', 'quote_approved_by', 'quote_approved_at',
+        'job_number', 'workflow_preset_type', 'start_date', 'end_date',
+        'budget', 'client_approved_quote',
+    ];
+
+    private function snapshot(ProjectEnquiry $enquiry): array
+    {
+        return $enquiry->only(self::AUDITED_FIELDS);
+    }
+
+    private function writeLog(ProjectEnquiry $enquiry, string $action, ?array $original, ?array $changed): void
+    {
+        ActionLog::create([
+            'user_id'       => auth()->id(),
+            'action'        => $action,
+            'loggable_type' => ProjectEnquiry::class,
+            'loggable_id'   => $enquiry->id,
+            'original_data' => $original,
+            'changed_data'  => $changed,
+            'ip_address'    => Request::ip(),
+            'user_agent'    => Request::userAgent(),
+        ]);
+    }
+
     /**
      * Handle the ProjectEnquiry "created" event.
      */
     public function created(ProjectEnquiry $enquiry): void
     {
-        Log::info('ProjectEnquiry created', [
-            'enquiry_id' => $enquiry->id,
-            'title' => $enquiry->title,
-            'client_id' => $enquiry->client_id,
-            'status' => $enquiry->status,
-            'priority' => $enquiry->priority,
-            'created_by' => auth()->id()
-        ]);
+        $this->writeLog($enquiry, 'created', null, $this->snapshot($enquiry));
     }
 
     /**
@@ -27,27 +51,21 @@ class ProjectEnquiryObserver
      */
     public function updated(ProjectEnquiry $enquiry): void
     {
-        $changes = $enquiry->getDirty();
-        
-        foreach ($changes as $field => $newValue) {
-            // Skip timestamps
-            if (in_array($field, ['updated_at', 'created_at'])) {
-                continue;
-            }
+        $dirty = array_intersect_key($enquiry->getDirty(), array_flip(self::AUDITED_FIELDS));
 
-            $oldValue = $enquiry->getOriginal($field);
-            
-            // Log important changes
-            if (in_array($field, ['status', 'priority', 'assigned_to', 'expected_delivery_date'])) {
-                Log::info('ProjectEnquiry updated', [
-                    'enquiry_id' => $enquiry->id,
-                    'field' => $field,
-                    'old_value' => $oldValue,
-                    'new_value' => $newValue,
-                    'updated_by' => auth()->id()
-                ]);
-            }
+        if (empty($dirty)) {
+            return;
         }
+
+        $original = [];
+        $changed  = [];
+
+        foreach ($dirty as $field => $newValue) {
+            $original[$field] = $enquiry->getOriginal($field);
+            $changed[$field]  = $newValue;
+        }
+
+        $this->writeLog($enquiry, 'updated', $original, $changed);
     }
 
     /**
@@ -55,11 +73,7 @@ class ProjectEnquiryObserver
      */
     public function deleted(ProjectEnquiry $enquiry): void
     {
-        Log::info('ProjectEnquiry deleted', [
-            'enquiry_id' => $enquiry->id,
-            'title' => $enquiry->title,
-            'deleted_by' => auth()->id()
-        ]);
+        $this->writeLog($enquiry, 'deleted', $this->snapshot($enquiry), null);
     }
 
     /**

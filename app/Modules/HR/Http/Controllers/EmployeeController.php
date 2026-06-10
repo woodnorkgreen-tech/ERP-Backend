@@ -2,6 +2,7 @@
 
 namespace App\Modules\HR\Http\Controllers;
 
+use App\Constants\Permissions;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Department;
 use Illuminate\Http\Request;
@@ -46,27 +47,37 @@ class EmployeeController
             });
         }
 
+        $canViewSalary = auth()->user()?->can(Permissions::EMPLOYEE_VIEW_SALARY)
+            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR', 'HR Admin']);
+
         // Check if pagination is requested
         if ($request->has('per_page')) {
-            // Return paginated results
             $employees = $query->paginate($request->get('per_page', 15));
-            
+
+            // Unfiltered base for global KPI counts (ignores status/search/dept filters)
+            $statsBase = Employee::query()->accessibleByUser();
+
             return response()->json([
-                'data' => $employees->items(),
+                'data' => collect($employees->items())->map(fn ($e) => $this->maskSalary($e, $canViewSalary)),
                 'meta' => [
                     'current_page' => $employees->currentPage(),
-                    'per_page' => $employees->perPage(),
-                    'total' => $employees->total(),
-                    'last_page' => $employees->lastPage(),
-                    'from' => $employees->firstItem(),
-                    'to' => $employees->lastItem(),
+                    'per_page'     => $employees->perPage(),
+                    'total'        => $employees->total(),
+                    'last_page'    => $employees->lastPage(),
+                    'from'         => $employees->firstItem(),
+                    'to'           => $employees->lastItem(),
+                    'stats' => [
+                        'total'    => (clone $statsBase)->count(),
+                        'active'   => (clone $statsBase)->where('status', 'active')->count(),
+                        'on_leave' => (clone $statsBase)->where('status', 'on-leave')->count(),
+                        'inactive' => (clone $statsBase)->whereIn('status', ['inactive', 'terminated'])->count(),
+                    ],
                 ]
             ]);
         } else {
-            // Return all employees (no pagination)
             $employees = $query->get();
-            
-            return response()->json($employees);
+
+            return response()->json($employees->map(fn ($e) => $this->maskSalary($e, $canViewSalary)));
         }
     }
 
@@ -120,14 +131,14 @@ class EmployeeController
         }
 
         $validatedData = $validator->validated();
-
-        // Generate employee_id if not provided
-        if (empty($validatedData['employee_id'])) {
-            $nextId = Employee::max('id') + 1;
-            $validatedData['employee_id'] = 'EMP' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
-        }
+        $customId = $validatedData['employee_id'] ?? null;
+        unset($validatedData['employee_id']);
 
         $employee = Employee::create($validatedData);
+
+        // Use the real auto-increment ID as the basis — avoids race conditions
+        $employee->employee_id = $customId ?: 'EMP' . str_pad($employee->id, 4, '0', STR_PAD_LEFT);
+        $employee->save();
 
         return response()->json([
             'message' => 'Employee created successfully',
@@ -140,8 +151,14 @@ class EmployeeController
      */
     public function show(Employee $employee): JsonResponse
     {
+        $canViewSalary = auth()->user()?->can(Permissions::EMPLOYEE_VIEW_SALARY)
+            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR', 'HR Admin'])
+            || auth()->user()?->employee_id === $employee->id; // own record
+
+        $data = $employee->load(['department', 'manager']);
+
         return response()->json([
-            'data' => $employee->load(['department', 'manager'])
+            'data' => $this->maskSalary($data, $canViewSalary)
         ]);
     }
 
@@ -193,10 +210,9 @@ class EmployeeController
 
         $validatedData = $validator->validated();
 
-        // Generate employee_id if not provided and employee doesn't have one
+        // Backfill employee_id if the record never had one
         if (empty($validatedData['employee_id']) && empty($employee->employee_id)) {
-            $nextId = Employee::max('id') + 1;
-            $validatedData['employee_id'] = 'EMP' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+            $validatedData['employee_id'] = 'EMP' . str_pad($employee->id, 4, '0', STR_PAD_LEFT);
         }
 
         $employee->update($validatedData);
@@ -208,21 +224,22 @@ class EmployeeController
     }
 
     /**
-     * Remove the specified employee.
+     * Terminate the specified employee (soft-delete + status transition).
+     * Hard deletion is intentionally prevented to preserve payroll/audit history.
      */
     public function destroy(Employee $employee): JsonResponse
     {
-        // Check if employee has associated user
         if ($employee->user) {
             return response()->json([
-                'message' => 'Cannot delete employee with associated user account'
+                'message' => 'Cannot terminate an employee who has an active user account. Deactivate their user account first.'
             ], 422);
         }
 
-        $employee->delete();
+        $employee->update(['status' => 'terminated']);
+        $employee->delete(); // soft delete — record is retained, deleted_at is set
 
         return response()->json([
-            'message' => 'Employee deleted successfully'
+            'message' => 'Employee record terminated and archived.'
         ]);
     }
 
@@ -310,6 +327,22 @@ class EmployeeController
         return Storage::disk('public')->response($employee->profile_photo_path);
     }
     /**
+     * Return company-wide employee counts by status.
+     * Used by the roster KPI cards so they show totals across all pages.
+     */
+    public function stats(Request $request): JsonResponse
+    {
+        $base = Employee::query()->accessibleByUser();
+
+        return response()->json([
+            'total'      => (clone $base)->count(),
+            'active'     => (clone $base)->where('status', 'active')->count(),
+            'on_leave'   => (clone $base)->where('status', 'on-leave')->count(),
+            'inactive'   => (clone $base)->whereIn('status', ['inactive', 'terminated'])->count(),
+        ]);
+    }
+
+    /**
      * Get a compact list of employees for dropdowns.
      */
     public function compact(Request $request): JsonResponse
@@ -334,5 +367,22 @@ class EmployeeController
             });
 
         return response()->json($employees);
+    }
+
+    /**
+     * Strip salary and bank fields from an employee payload unless the caller
+     * holds the employee.view_salary permission.
+     */
+    private function maskSalary(Employee $employee, bool $canView): array
+    {
+        $data = $employee->toArray();
+
+        if (!$canView) {
+            foreach (['salary', 'bank_name', 'bank_branch', 'bank_code', 'account_number', 'payment_method'] as $field) {
+                unset($data[$field]);
+            }
+        }
+
+        return $data;
     }
 }

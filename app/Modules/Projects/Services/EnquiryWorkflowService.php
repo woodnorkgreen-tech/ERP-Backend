@@ -189,10 +189,6 @@ class EnquiryWorkflowService
                 $this->handleEnquiryStatusProgression($task);
             }
             $this->handleTaskSpecificTransitions($task, $status);
-        } elseif (in_array($oldStatus, ['completed', 'skipped']) && $status !== 'completed') {
-            // Handle status reversion when task is reopened
-            // Manual reversion preferred for all tasks
-            // $this->handleEnquiryStatusReversion($task);
         } elseif ($status === 'in_progress') {
             $this->handleTaskSpecificTransitions($task, $status);
         }
@@ -540,47 +536,6 @@ class EnquiryWorkflowService
     }
 
 
-
-    /**
-     * Handle special cases for status progression
-     */
-    private function handleSpecialStatusCases(ProjectEnquiry $enquiry, string $newStatus): void
-    {
-        // No special cases needed when project conversion is removed
-    }
-
-    /**
-     * Handle enquiry status reversion when a task is reopened
-     */
-    private function handleEnquiryStatusReversion(EnquiryTask $task): void
-    {
-        $enquiry = $task->enquiry;
-
-        if (!$enquiry) {
-            Log::warning("Cannot revert enquiry status for task {$task->id}: Enquiry not found.");
-            return;
-        }
-
-        // Recalculate the appropriate status based on completed tasks
-        $newStatus = $this->calculateEnquiryStatusFromTasks($enquiry);
-
-        // Only update if the status has changed
-        if ($newStatus !== $enquiry->status) {
-            $oldEnquiryStatus = $enquiry->status;
-            $enquiry->status = $newStatus;
-            $enquiry->save();
-
-            Log::info("Enquiry {$enquiry->id} status reverted from '{$oldEnquiryStatus}' to '{$newStatus}' due to task '{$task->type}' reopening");
-        }
-    }
-
-    /**
-     * Calculate the appropriate enquiry status based on completed tasks
-     */
-    private function calculateEnquiryStatusFromTasks(ProjectEnquiry $enquiry): string
-    {
-        return app(SyncEnquiryStatusAction::class)->execute($enquiry->id)->status;
-    }
 
     /**
      * Validate if a task is ready to be marked as completed
