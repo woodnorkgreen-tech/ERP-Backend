@@ -65,7 +65,10 @@ class Employee extends Model
         'name',
         'is_active',
         'profile_photo_url',
-        'ot_balance',
+        // 'ot_balance' is intentionally NOT auto-appended: the accessor runs a
+        // ledger query per model, causing an N+1 on every employee list/dashboard.
+        // Endpoints that need it (e.g. compact() for the compensation dropdown)
+        // append it explicitly, and direct ->ot_balance reads still work on demand.
     ];
 
     /**
@@ -314,7 +317,10 @@ class Employee extends Model
     public function getOtBalanceAttribute(): float
     {
         try {
-            $latest = $this->ledgerEntries()->latest('occurred_at')->first();
+            $latest = $this->ledgerEntries()
+                ->orderByDesc('occurred_at')
+                ->orderByDesc('id')
+                ->first();
             return $latest ? (float) $latest->balance_after : 0.0;
         } catch (\Exception $e) {
             return 0.0;

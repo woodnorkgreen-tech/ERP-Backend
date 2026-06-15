@@ -44,7 +44,12 @@ class PayrollService
         
         $this->pipeline->calculate($dto);
 
-        return DB::transaction(function () use ($dto, $run, $employee) {
+        // Surface any deductions that exceeded gross (net floored at 0) inside the
+        // keyed tax_breakdown JSON so the shortfall is persisted and reviewable.
+        $taxBreakdown = $dto->taxBreakdown;
+        $taxBreakdown['uncovered_deductions'] = round($dto->uncoveredDeductions, 2);
+
+        return DB::transaction(function () use ($dto, $run, $employee, $taxBreakdown) {
             $payslip = Payslip::updateOrCreate(
                 [
                     'employee_id' => $employee->id,
@@ -55,7 +60,7 @@ class PayrollService
                     'basic_salary' => $dto->computedBasic,
                     'gross_pay' => $dto->grossPay,
                     'net_pay' => $dto->netPay,
-                    'tax_breakdown' => $dto->taxBreakdown,
+                    'tax_breakdown' => $taxBreakdown,
                     'ledger_breakdown' => $dto->ledgerDetails,
                     'status' => 'generated'
                 ]

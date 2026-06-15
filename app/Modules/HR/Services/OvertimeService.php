@@ -84,18 +84,26 @@ class OvertimeService
             throw new \Exception("Cannot process ledger: entry is not linked to any personnel.");
         }
 
-        $currentBalance = $subject->ot_balance;
-        $newBalance = $currentBalance + $entry->hours;
-
-        // Get previous hash
-        $previousEntryQuery = LedgerEntry::query();
+        // Lock this subject's ledger tail so concurrent approvals serialize:
+        // without this, two transactions read the same balance/hash and fork the
+        // tamper-evident chain (lost update). Deterministic ordering (occurred_at
+        // then id) breaks same-timestamp ties so the chain head is unambiguous.
+        $previousEntryQuery = LedgerEntry::query()->lockForUpdate();
         if ($entry->employee_id) {
             $previousEntryQuery->where('employee_id', $entry->employee_id);
         } else {
             $previousEntryQuery->where('technical_labour_id', $entry->technical_labour_id);
         }
-        $previousEntry = $previousEntryQuery->latest('occurred_at')->first();
+        $previousEntry = $previousEntryQuery
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id')
+            ->first();
         $previousHash = $previousEntry ? $previousEntry->chain_hash : null;
+
+        // Derive the running balance from the locked chain head, not the unlocked
+        // ot_balance accessor, so the figure is consistent under concurrency.
+        $currentBalance = $previousEntry ? (float) $previousEntry->balance_after : 0.0;
+        $newBalance = $currentBalance + $entry->hours;
 
         $ledgerData = [
             'kind' => 'credit',
@@ -134,7 +142,10 @@ class OvertimeService
     {
         // 1. Fatigue/Burnout Check (15+ hours in the trailing 7 days)
         // We include the hours of the current entry in the check.
-        $recentHoursQuery = OTEntry::where('work_date', '>', $entry->work_date->subDays(7))
+        // NOTE: use copy() — subDays() mutates the Carbon instance in place,
+        // which would otherwise corrupt $entry->work_date and the second bound below.
+        $windowStart = $entry->work_date->copy()->subDays(7);
+        $recentHoursQuery = OTEntry::where('work_date', '>', $windowStart)
             ->where('work_date', '<=', $entry->work_date)
             ->where('id', '!=', $entry->id)
             ->whereIn('status', ['submitted', 'under_review', 'approved', 'done']);
@@ -216,9 +227,8 @@ class OvertimeService
                 throw new \Exception("Cannot process compensation: not linked to any personnel.");
             }
 
-            if ($subject->ot_balance < $comp->hours) {
-                throw new \Exception("Insufficient balance for this compensation.");
-            }
+            // Balance sufficiency is enforced inside debitLedger() under a row lock
+            // so the check and the write are atomic; a pre-check here would be racy.
 
             $comp->update([
                 'status' => 'approved',
@@ -248,19 +258,29 @@ class OvertimeService
             throw new \Exception("Cannot process ledger: compensation is not linked to any personnel.");
         }
 
-        $currentBalance = $subject->ot_balance;
-        $newBalance = $currentBalance - $comp->hours;
-
-        // Get previous hash
-        $previousEntryQuery = LedgerEntry::query();
+        // Lock this subject's ledger tail so concurrent debits/credits serialize
+        // (see creditLedger). Deterministic ordering breaks same-timestamp ties.
+        $previousEntryQuery = LedgerEntry::query()->lockForUpdate();
         if ($comp->employee_id) {
             $previousEntryQuery->where('employee_id', $comp->employee_id);
         } else {
             $previousEntryQuery->where('technical_labour_id', $comp->technical_labour_id);
         }
 
-        $previousEntry = $previousEntryQuery->latest('occurred_at')->first();
+        $previousEntry = $previousEntryQuery
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id')
+            ->first();
         $previousHash = $previousEntry ? $previousEntry->chain_hash : null;
+
+        // Derive balance from the locked chain head and enforce the overdraft
+        // guard here, atomically with the write, so concurrent debits cannot both
+        // pass an out-of-lock balance check and drive the balance negative.
+        $currentBalance = $previousEntry ? (float) $previousEntry->balance_after : 0.0;
+        if ($currentBalance < $comp->hours) {
+            throw new \Exception("Insufficient balance for this compensation.");
+        }
+        $newBalance = $currentBalance - $comp->hours;
 
         $ledgerData = [
             'kind' => 'debit',

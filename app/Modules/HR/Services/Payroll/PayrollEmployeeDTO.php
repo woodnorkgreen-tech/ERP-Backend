@@ -23,6 +23,10 @@ class PayrollEmployeeDTO
         public float $totalDeductions = 0,
         public float $grossPay = 0,
         public float $netPay = 0,
+        // Amount of deductions that could NOT be taken because they exceeded gross
+        // pay. Net is floored at 0; this records the shortfall so it is never
+        // silently lost and can be carried forward / flagged for HR review.
+        public float $uncoveredDeductions = 0,
         public array $taxBreakdown = [],
         public array $ledgerDetails = []
     ) {}
