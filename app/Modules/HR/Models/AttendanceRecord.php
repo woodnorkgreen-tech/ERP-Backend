@@ -2,9 +2,12 @@
 
 namespace App\Modules\HR\Models;
 
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class AttendanceRecord extends Model
@@ -15,15 +18,24 @@ class AttendanceRecord extends Model
 
     protected $fillable = [
         'employee_id',
+        'work_schedule_id',
         'date',
         'clock_in',
         'clock_out',
         'device_clock_in',
         'device_clock_out',
         'status',
+        'is_holiday_work',
+        'holiday_name',
         'work_hours',
         'overtime_hours',
+        'proposed_overtime_hours',
+        'approved_overtime_hours',
+        'overtime_status',
         'is_manual',
+        'correction_reason',
+        'corrected_by',
+        'corrected_at',
         'notes',
         'synced_at',
     ];
@@ -32,7 +44,11 @@ class AttendanceRecord extends Model
         'date' => 'date',
         'work_hours' => 'float',
         'overtime_hours' => 'float',
+        'proposed_overtime_hours' => 'float',
+        'approved_overtime_hours' => 'float',
         'is_manual' => 'boolean',
+        'is_holiday_work' => 'boolean',
+        'corrected_at' => 'datetime',
         'synced_at' => 'datetime',
     ];
 
@@ -64,6 +80,28 @@ class AttendanceRecord extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'employee_id');
+    }
+
+    public function workSchedule(): BelongsTo
+    {
+        return $this->belongsTo(AttendanceWorkSchedule::class, 'work_schedule_id');
+    }
+
+    public function correctedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'corrected_by');
+    }
+
+    public function auditLogs(): HasMany
+    {
+        return $this->hasMany(HRAuditLog::class, 'model_id')
+            ->where('model_type', self::class)
+            ->latest();
+    }
+
+    public function overtimeEntry(): HasOne
+    {
+        return $this->hasOne(OTEntry::class);
     }
 
     public function scopeByDate($query, string $date)
@@ -106,7 +144,7 @@ class AttendanceRecord extends Model
             return 0;
         }
 
-        $shiftStart = config('hikvision.shift_start', '08:00');
+        $shiftStart = $this->workSchedule?->shift_start ?? config('hikvision.shift_start', '08:00');
         $clockIn = Carbon::createFromFormat('H:i:s', strlen($this->clock_in) === 5 ? $this->clock_in . ':00' : $this->clock_in);
         $start = Carbon::createFromFormat('H:i:s', strlen($shiftStart) === 5 ? $shiftStart . ':00' : $shiftStart);
 
@@ -115,14 +153,14 @@ class AttendanceRecord extends Model
 
     public function getEarlyByMinutesAttribute(): int
     {
-        if (!$this->clock_in) {
+        if (!$this->clock_out) {
             return 0;
         }
 
-        $shiftStart = config('hikvision.shift_start', '08:00');
-        $clockIn = Carbon::createFromFormat('H:i:s', strlen($this->clock_in) === 5 ? $this->clock_in . ':00' : $this->clock_in);
-        $start = Carbon::createFromFormat('H:i:s', strlen($shiftStart) === 5 ? $shiftStart . ':00' : $shiftStart);
+        $shiftEnd = $this->workSchedule?->shift_end ?? config('hikvision.shift_end', '17:00');
+        $clockOut = Carbon::createFromFormat('H:i:s', strlen($this->clock_out) === 5 ? $this->clock_out . ':00' : $this->clock_out);
+        $end = Carbon::createFromFormat('H:i:s', strlen($shiftEnd) === 5 ? $shiftEnd . ':00' : $shiftEnd);
 
-        return max(0, $clockIn->diffInMinutes($start, false));
+        return max(0, $clockOut->diffInMinutes($end, false));
     }
 }

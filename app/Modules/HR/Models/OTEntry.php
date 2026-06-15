@@ -18,6 +18,8 @@ class OTEntry extends Model
 
     protected $fillable = [
         'employee_id',
+        'attendance_record_id',
+        'source_type',
         'technical_labour_id',
         'project_id',
         'job_title',
@@ -47,6 +49,11 @@ class OTEntry extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    public function attendanceRecord(): BelongsTo
+    {
+        return $this->belongsTo(AttendanceRecord::class);
     }
 
     public function technicalLabour(): BelongsTo

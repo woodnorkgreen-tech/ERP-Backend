@@ -11,6 +11,8 @@ use App\Modules\HR\Models\OnboardingHandover;
 use App\Modules\HR\Models\OnboardingReview;
 use App\Modules\HR\Models\OnboardingActivityLog;
 use App\Modules\HR\Models\Candidate;
+use App\Modules\HR\Models\Employee;
+use App\Modules\HR\Models\Department;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -89,18 +91,24 @@ class OnboardingService
     public function startOnboarding(array $data): OnboardingCase
     {
         return DB::transaction(function () use ($data) {
+            $departmentId = $data['department_id'] ?? null;
+
+            // Resolve line manager from the department if not explicitly provided
+            $departmentLeadId = $data['department_lead_id']
+                ?? ($departmentId ? Department::find($departmentId)?->manager_id : null);
+
             $case = OnboardingCase::create([
-                'candidate_id'    => $data['candidate_id'],
-                'job_posting_id'  => $data['job_posting_id'] ?? null,
-                'started_from'    => 'recruitment',
-                'status'          => 'pre_onboarding', // starts in Pre-Onboarding column
-                'start_date'      => $data['start_date'] ?? null,
-                'hr_owner_id'     => $data['hr_owner_id'] ?? Auth::id(),
-                'department_lead_id' => $data['department_lead_id'] ?? null,
-                'employment_type' => $data['employment_type'] ?? 'full-time',
-                'department_id'   => $data['department_id'] ?? null,
-                'position'        => $data['position'] ?? null,
-                'notes'           => $data['notes'] ?? null,
+                'candidate_id'       => $data['candidate_id'],
+                'job_posting_id'     => $data['job_posting_id'] ?? null,
+                'started_from'       => 'recruitment',
+                'status'             => 'pre_onboarding',
+                'start_date'         => $data['start_date'] ?? null,
+                'hr_owner_id'        => $data['hr_owner_id'] ?? Auth::id(),
+                'department_lead_id' => $departmentLeadId,
+                'employment_type'    => $data['employment_type'] ?? 'full-time',
+                'department_id'      => $departmentId,
+                'position'           => $data['position'] ?? null,
+                'notes'              => $data['notes'] ?? null,
             ]);
 
             $this->seedCards($case);
@@ -117,6 +125,14 @@ class OnboardingService
     {
         $case = OnboardingCase::findOrFail($caseId);
         $case->update(['employee_id' => $employeeId]);
+
+        // department_lead_id is the single source of truth for the line manager —
+        // stamp it onto employees.manager_id so overtime, grievances, and incidents
+        // all resolve the same person via employees.manager_id
+        if ($case->department_lead_id) {
+            Employee::where('id', $employeeId)
+                ->update(['manager_id' => $case->department_lead_id]);
+        }
 
         // Auto-complete the employee profile task
         OnboardingTask::where('onboarding_case_id', $caseId)
@@ -307,8 +323,8 @@ class OnboardingService
             ]
         );
 
-        $case->update(['status' => 'handover']);
-        $this->log($caseId, 'handover_completed', 'HR formally handed over onboarding to line manager');
+        $case->update(['status' => 'post_onboarding_review']);
+        $this->log($caseId, 'handover_completed', 'HR formally handed over onboarding to line manager — case moved to post-onboarding review');
 
         return $handover->load(['handedOverByUser', 'departmentLead']);
     }

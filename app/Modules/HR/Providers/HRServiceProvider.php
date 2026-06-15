@@ -7,6 +7,10 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Console\Scheduling\Schedule;
 use App\Modules\HR\Console\Commands\SyncLeaveStatuses;
 use App\Modules\HR\Console\Commands\SyncHikvisionAttendance;
+use App\Modules\HR\Console\Commands\ReprocessAttendance;
+use App\Modules\HR\Console\Commands\ReconcileAttendance;
+use App\Modules\HR\Console\Commands\SyncKenyaHolidays;
+use App\Modules\HR\Console\Commands\SyncAttendanceOvertime;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Observers\LeaveRequestObserver;
 
@@ -30,6 +34,10 @@ class HRServiceProvider extends ServiceProvider
             $this->commands([
                 SyncLeaveStatuses::class,
                 SyncHikvisionAttendance::class,
+                ReprocessAttendance::class,
+                ReconcileAttendance::class,
+                SyncKenyaHolidays::class,
+                SyncAttendanceOvertime::class,
             ]);
         }
 
@@ -50,8 +58,21 @@ class HRServiceProvider extends ServiceProvider
                 $schedule->command('attendance:sync-hikvision')
                     ->dailyAt($time)
                     ->withoutOverlapping()
+                    ->onOneServer()
                     ->appendOutputTo(storage_path('logs/hikvision-sync.log'));
             }
+
+            $schedule->command('attendance:reconcile')
+                ->dailyAt('23:30')
+                ->withoutOverlapping()
+                ->onOneServer()
+                ->appendOutputTo(storage_path('logs/attendance-reconciliation.log'));
+
+            $schedule->command('attendance:sync-kenya-holidays')
+                ->monthlyOn(1, '02:30')
+                ->withoutOverlapping()
+                ->onOneServer()
+                ->appendOutputTo(storage_path('logs/attendance-holidays.log'));
         });
     }
 }

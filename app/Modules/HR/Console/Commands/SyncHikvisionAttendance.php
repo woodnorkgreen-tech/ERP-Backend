@@ -3,13 +3,14 @@
 namespace App\Modules\HR\Console\Commands;
 
 use App\Modules\HR\Services\HikvisionSyncService;
+use App\Modules\HR\Models\AttendanceDeviceSyncLog;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 
 class SyncHikvisionAttendance extends Command
 {
     protected $signature = 'attendance:sync-hikvision
-                            {--from= : Start datetime (Y-m-d H:i:s). Defaults to 24 hours ago.}
+                            {--from= : Start datetime (Y-m-d H:i:s). Defaults to the configured lookback.}
                             {--to=   : End datetime (Y-m-d H:i:s). Defaults to now.}';
 
     protected $description = 'Sync attendance data from the Hikvision fingerprint access-control device';
@@ -24,12 +25,18 @@ class SyncHikvisionAttendance extends Command
         $from = $this->option('from') ? Carbon::parse($this->option('from')) : null;
         $to   = $this->option('to')   ? Carbon::parse($this->option('to'))   : null;
 
-        $this->info('Syncing Hikvision attendance' . ($from ? " from {$from}" : ' (last 24 hours)') . '...');
+        $defaultRange = (int) config('hikvision.sync_lookback_days', 30);
+        $this->info('Syncing Hikvision attendance' . ($from ? " from {$from}" : " (last {$defaultRange} days)") . '...');
 
         $log = $this->syncService->sync($from, $to);
 
-        if ($log->status === 'success') {
+        if ($log->status === AttendanceDeviceSyncLog::STATUS_SUCCESS) {
             $this->info("Sync complete. Imported: {$log->records_imported} events, processed: {$log->records_processed} records.");
+            return Command::SUCCESS;
+        }
+
+        if ($log->status === AttendanceDeviceSyncLog::STATUS_PARTIAL) {
+            $this->warn($log->error ?: 'Sync completed with attendance processing exceptions.');
             return Command::SUCCESS;
         }
 

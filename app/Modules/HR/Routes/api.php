@@ -275,18 +275,29 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('discipline/{id}/attachments/{filename}', [DisciplineController::class, 'downloadAttachment']);
 
         // Attendance Management
-        Route::get('attendance/summary', [AttendanceController::class, 'summary']);
-        Route::get('attendance/sync-logs', [AttendanceController::class, 'syncLogs']);
-        Route::post('attendance/sync', [AttendanceController::class, 'sync']);
-        Route::post('attendance/upload/preview', [AttendanceController::class, 'uploadPreview']);
-        Route::post('attendance/upload', [AttendanceController::class, 'upload']);
-        Route::get('attendance/overtime', [AttendanceController::class, 'overtime']);
-        Route::get('attendance', [AttendanceController::class, 'index']);
-        Route::post('attendance', [AttendanceController::class, 'store']);
-        Route::get('attendance/{id}', [AttendanceController::class, 'show']);
-        Route::put('attendance/{id}', [AttendanceController::class, 'update']);
-        Route::patch('attendance/{id}', [AttendanceController::class, 'update']);
-        Route::delete('attendance/{id}', [AttendanceController::class, 'destroy']);
+        Route::middleware('permission:' . Permissions::HR_MANAGE_ATTENDANCE)
+            ->prefix('attendance')
+            ->group(function () {
+                Route::get('summary', [AttendanceController::class, 'summary']);
+                Route::post('manual-preview', [AttendanceController::class, 'manualPreview']);
+                Route::get('sync-logs', [AttendanceController::class, 'syncLogs']);
+                Route::get('exceptions/unmapped', [AttendanceController::class, 'unmappedExceptions']);
+                Route::post('exceptions/unmapped/{personId}/map', [AttendanceController::class, 'mapUnmappedPerson']);
+                Route::post('reprocess', [AttendanceController::class, 'reprocess']);
+                Route::post('sync', [AttendanceController::class, 'sync']);
+                Route::get('sync/{syncRequest}', [AttendanceController::class, 'syncStatus']);
+                Route::post('upload/preview', [AttendanceController::class, 'uploadPreview']);
+                Route::post('upload', [AttendanceController::class, 'upload']);
+                Route::get('overtime', [AttendanceController::class, 'overtime']);
+                Route::get('overtime/export', [AttendanceController::class, 'exportOvertime']);
+                Route::get('/', [AttendanceController::class, 'index']);
+                Route::post('/', [AttendanceController::class, 'store']);
+                Route::get('{id}', [AttendanceController::class, 'show']);
+                Route::put('{id}', [AttendanceController::class, 'update']);
+                Route::patch('{id}', [AttendanceController::class, 'update']);
+                Route::post('{id}/restore', [AttendanceController::class, 'restore']);
+                Route::delete('{id}', [AttendanceController::class, 'destroy']);
+            });
 
         // Onboarding
         Route::prefix('onboarding')->group(function () {
