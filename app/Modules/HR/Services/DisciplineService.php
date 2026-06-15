@@ -267,7 +267,8 @@ class DisciplineService
             return;
         }
 
-        // Other authenticated users may only access their own cases.
-        $query->where('employee_id', $user->id);
+        // Other authenticated users may only access their own cases
+        // (employee_id references the employees table).
+        $query->where('employee_id', $user->employee_id);
     }
 }

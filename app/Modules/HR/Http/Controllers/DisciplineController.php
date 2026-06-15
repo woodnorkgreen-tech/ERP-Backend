@@ -72,7 +72,7 @@ class DisciplineController extends Controller
     {
         try {
             $validator = Validator::make($request->all(), [
-                'employee_id' => 'required|exists:users,id',
+                'employee_id' => 'required|exists:employees,id',
                 'allegations' => 'required|string',
                 'offense_category' => 'required|in:minor,gross_misconduct',
                 'witnesses' => 'nullable|string',
@@ -114,7 +114,7 @@ class DisciplineController extends Controller
 
             // Check permissions - HR and Super Admin can view all cases.
             // The accused employee may also view their own disciplinary case.
-            if (!$user->hasAnyRole(['Super Admin', 'HR']) && $case->employee_id !== $user->id) {
+            if (!$user->hasAnyRole(['Super Admin', 'HR']) && $case->employee_id !== $user->employee_id) {
                 return response()->json([
                     'success' => false,
                     'message' => 'You do not have permission to view this case',
@@ -197,7 +197,7 @@ class DisciplineController extends Controller
             $user = auth()->user();
 
             // Check if user is the accused employee
-            if ($case->employee_id !== $user->id) {
+            if ($case->employee_id !== $user->employee_id) {
                 return response()->json([
                     'success' => false,
                     'message' => 'You can only submit responses for your own cases',
@@ -428,7 +428,7 @@ class DisciplineController extends Controller
             $user = auth()->user();
 
             // Check if user is the accused employee
-            if ($case->employee_id !== $user->id) {
+            if ($case->employee_id !== $user->employee_id) {
                 return response()->json([
                     'success' => false,
                     'message' => 'You can only submit appeals for your own cases',

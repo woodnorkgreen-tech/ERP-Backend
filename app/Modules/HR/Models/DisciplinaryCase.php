@@ -61,11 +61,13 @@ class DisciplinaryCase extends Model
     const STATUS_APPEALED = 'Appealed';
     const STATUS_FINAL = 'Final';
 
+    // The subject of the case is an Employee (employee_id -> employees.id).
     public function employee(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'employee_id');
+        return $this->belongsTo(Employee::class, 'employee_id');
     }
 
+    // The reporter is a system user (who logged the case).
     public function reporter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reported_by');
