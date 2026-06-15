@@ -745,6 +745,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('/', [DesignRequirementController::class, 'index']);
             Route::put('/', [DesignRequirementController::class, 'update']);
         });
+
+
         // Notifications
         Route::get('notifications', function () {
             $user = auth()->user();

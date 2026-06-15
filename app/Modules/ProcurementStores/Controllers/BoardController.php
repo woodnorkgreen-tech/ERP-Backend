@@ -30,6 +30,10 @@ class BoardController extends Controller
      */
     public function ingest(StoreBoardRequest $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can ingest boards.'], 403);
+        }
+
         try {
             $boards = $this->ingestionService->ingestBatch(
                 libraryMaterialId: $request->library_material_id,
@@ -209,6 +213,10 @@ class BoardController extends Controller
      */
     public function allocate(Request $request, int $id): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to allocate boards.'], 403);
+        }
+
         $request->validate(['job_ref' => 'required|string|max:100']);
 
         $board = Board::findOrFail($id);
@@ -220,6 +228,16 @@ class BoardController extends Controller
                 $stock = Stock::where('material_id', $board->library_material_id)->first();
                 if ($stock) {
                     $stock->decrement('quantity_on_hand', 1);
+
+                    // Direct allocation bypasses the board-request reservation flow.
+                    // If a pending request had soft-reserved this material, the board we
+                    // just issued may have been one of the reserved units — clamp reserved
+                    // down to on-hand so available_quantity (on_hand − reserved) can't go
+                    // negative and the later fulfil() can't over-issue.
+                    $fresh = $stock->fresh();
+                    if ($fresh->quantity_reserved > $fresh->quantity_on_hand) {
+                        $fresh->update(['quantity_reserved' => $fresh->quantity_on_hand]);
+                    }
                 }
 
                 \App\Modules\ProcurementStores\Models\InventoryLog::create([
@@ -252,6 +270,10 @@ class BoardController extends Controller
      */
     public function startProcessing(int $id): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to process boards.'], 403);
+        }
+
         $board = Board::findOrFail($id);
 
         $next = match ($board->status) {
@@ -290,6 +312,10 @@ class BoardController extends Controller
      */
     public function dispatchToStation(Request $request, string $jobRef): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Production, Stores or Managers can dispatch boards to station.'], 403);
+        }
+
         $request->validate([
             'board_ids' => 'nullable|array',
             'board_ids.*' => 'integer|exists:boards,id',
@@ -372,6 +398,10 @@ class BoardController extends Controller
      */
     public function startWip(Request $request, string $jobRef): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Production, Stores or Managers can start WIP.'], 403);
+        }
+
         $boards = Board::where('assigned_job_ref', $jobRef)
             ->where('status', 'At Station')
             ->get();
@@ -416,6 +446,10 @@ class BoardController extends Controller
      */
     public function consume(Request $request, int $id): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to consume boards.'], 403);
+        }
+
         $request->validate([
             'offcut_length'    => 'nullable|integer|min:1',
             'offcut_width'     => 'nullable|integer|min:1',
@@ -606,10 +640,19 @@ class BoardController extends Controller
             ->groupBy('library_material_id')
             ->pluck('cnt', 'library_material_id');
 
+        // Value from each board's stored current_value, not the live material
+        // unit_cost. Offcuts carry a reduced proportional value, and editing a
+        // material's price must not retroactively restate already-received stock.
+        $availableValues = Board::query()
+            ->selectRaw('library_material_id, SUM(current_value) as val')
+            ->where('status', 'Available')
+            ->groupBy('library_material_id')
+            ->pluck('val', 'library_material_id');
+
         $stocks = Stock::with(['material.workstation'])
             ->where('tracking_mode', Stock::TRACK_BY_AREA)
             ->get()
-            ->map(function ($stock) use ($availableCounts, $onJobCounts) {
+            ->map(function ($stock) use ($availableCounts, $onJobCounts, $availableValues) {
                 $material   = $stock->material;
                 $boardCount = (int) ($availableCounts[$material?->id] ?? 0);
                 $onJob      = (int) ($onJobCounts[$material?->id]    ?? 0);
@@ -633,7 +676,7 @@ class BoardController extends Controller
                     'is_board'            => true,
                     'unit_label'          => 'boards',
                     'unit_cost'           => (float) ($material?->unit_cost ?? 0),
-                    'total_value'         => round($boardCount * ($material?->unit_cost ?? 0), 2),
+                    'total_value'         => round((float) ($availableValues[$material?->id] ?? 0), 2),
                 ];
             });
 
@@ -935,6 +978,10 @@ class BoardController extends Controller
      */
     public function confirmLabels(Request $request, string $batchNumber): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can confirm labels.'], 403);
+        }
+
         $request->validate([
             'condition_grade'                => 'required|in:A,B,C,D',
             'condition_notes'                => 'nullable|string|max:500',
@@ -999,11 +1046,20 @@ class BoardController extends Controller
      */
     public function transition(Request $request, int $id): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to change board status.'], 403);
+        }
+
+        // Allocated is excluded — callers must use POST /boards/{id}/allocate so that
+        // quantity_on_hand is decremented and an inventory log entry is written.
+        // This endpoint handles everything else: Scrap, Quarantine returns, At Station, WIP.
+        $allowedStatuses = array_diff(config('boards.statuses', []), ['Allocated']);
+
         $request->validate([
-            'status'            => ['required', 'string', 'in:' . implode(',', config('boards.statuses', []))],
+            'status'            => ['required', 'string', 'in:' . implode(',', $allowedStatuses)],
             'notes'             => 'nullable|string|max:500',
             'job_ref'           => 'nullable|string|max:100',
-            'condition_grade'   => 'nullable|string|in:A,B,C,D,Reject',
+            'condition_grade'   => 'nullable|string|in:A,B,C,D',
             'scrap_reason_code' => 'nullable|string|max:80',
         ]);
 
@@ -1013,19 +1069,17 @@ class BoardController extends Controller
         $previousJobRef = $board->assigned_job_ref;
 
         try {
-            $board->transitionTo(
-                $request->status,
-                auth()->id(),
-                $request->notes,
-                $request->job_ref,
-                $request->condition_grade,
-                $request->scrap_reason_code,
-            );
-        } catch (\InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
+            DB::transaction(function () use ($request, $board, $previousStatus, $previousJobRef) {
+                $board->transitionTo(
+                    $request->status,
+                    auth()->id(),
+                    $request->notes,
+                    $request->job_ref,
+                    $request->condition_grade,
+                    $request->scrap_reason_code,
+                );
 
-        $stock = Stock::where('material_id', $board->library_material_id)->first();
+                $stock = Stock::where('material_id', $board->library_material_id)->first();
 
         // Return to stores — board came back from a job (Available = intact, Quarantine = Grade C/D for review)
         // Triggered from: Allocated, At Station, or WIP → Available or Quarantine
@@ -1099,6 +1153,10 @@ class BoardController extends Controller
                     . ($request->notes ?? 'No reason recorded.'),
                 'logged_at'    => now(),
             ]);
+                }
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json([
