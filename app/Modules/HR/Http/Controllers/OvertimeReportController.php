@@ -8,6 +8,7 @@ use App\Modules\HR\Models\Compensation;
 use App\Modules\HR\Models\LedgerEntry;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\TechnicalLabour;
+use App\Modules\HR\Support\Pdf\AuthorizesHrDocuments;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -16,15 +17,14 @@ use Carbon\Carbon;
 
 class OvertimeReportController extends Controller
 {
+    use AuthorizesHrDocuments;
+
     /**
      * Tamper-Evident Labor Audit Trail (Ledger of Truth)
      */
     public function downloadLedgerAudit(Request $request)
     {
-        $user = auth()->user();
-        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'HR Admin', 'HR'])) {
-            abort(403, 'Unauthorized to download global ledger audit.');
-        }
+        $this->ensureHrAccess();
 
         $query = LedgerEntry::with(['employee.department', 'technicalLabour', 'otEntry', 'compensation'])
                             ->orderBy('occurred_at', 'desc');
@@ -44,10 +44,7 @@ class OvertimeReportController extends Controller
      */
     public function downloadFatigueMatrix(Request $request)
     {
-        $user = auth()->user();
-        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'HR Admin', 'HR', 'Manager', 'Lead'])) {
-            abort(403, 'Unauthorized.');
-        }
+        $this->ensureHrAccess(['Manager', 'Lead']);
 
         $days = $request->input('days', 30);
         $threshold = $request->input('threshold', 20); // Flag if > 20 hours OT in period
@@ -84,10 +81,7 @@ class OvertimeReportController extends Controller
      */
     public function downloadProjectAllocation(Request $request)
     {
-        $user = auth()->user();
-        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'HR Admin', 'HR', 'Project Manager', 'Project Officer'])) {
-            abort(403, 'Unauthorized.');
-        }
+        $this->ensureHrAccess(['Project Manager', 'Project Officer']);
 
         $projects = \App\Models\Project::with(['otEntries' => function($q) {
             $q->whereIn('status', ['approved', 'done'])->with(['employee', 'technicalLabour']);
@@ -104,10 +98,7 @@ class OvertimeReportController extends Controller
      */
     public function downloadTechnicalPoolAnalysis(Request $request)
     {
-        $user = auth()->user();
-        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'HR Admin', 'HR'])) {
-            abort(403, 'Unauthorized.');
-        }
+        $this->ensureHrAccess();
 
         $internalHours = OTEntry::whereNotNull('employee_id')->whereIn('status', ['approved', 'done'])->sum('hours');
         $techHours = OTEntry::whereNotNull('technical_labour_id')->whereIn('status', ['approved', 'done'])->sum('hours');
@@ -138,16 +129,14 @@ class OvertimeReportController extends Controller
     public function downloadPersonalStatement(Request $request, $type = 'emp', $id = null)
     {
         $user = auth()->user();
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
 
         if (!$id) {
             $id = $user->employee_id;
             $type = 'emp';
         }
 
-        if (!$isGlobal && ($type !== 'emp' || $id != $user->employee_id)) {
-            abort(403, 'Unauthorized to view statement for another user.');
-        }
+        // Employees may pull their own statement; anything else needs HR access.
+        $this->ensureHrAccessOrOwner($type === 'emp' ? (int) $id : null);
 
         if ($type === 'tech') {
             $subject = TechnicalLabour::findOrFail($id);

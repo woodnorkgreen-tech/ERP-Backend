@@ -1,6 +1,8 @@
 <?php
 use Illuminate\Support\Facades\Route;
 use App\Modules\HR\Http\Controllers\EmployeeController;
+use App\Modules\HR\Http\Controllers\HRDashboardController;
+use App\Modules\HR\Http\Controllers\HrDocumentController;
 use App\Modules\HR\Http\Controllers\DepartmentController;
 use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\HR\Http\Controllers\PayrollEngineController;
@@ -41,6 +43,14 @@ Route::get('hr/employees/{employee}/photo', [EmployeeController::class, 'getPhot
 // Protected HR Routes
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('hr')->group(function () {
+        // Cross-domain HR overview (server-side aggregation)
+        Route::get('dashboard/overview', [HRDashboardController::class, 'overview'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+
+        // HR PDF documents
+        Route::get('employees/{employee}/certificate-of-service', [HrDocumentController::class, 'certificateOfService']);
+        Route::get('discipline/{case}/letters/{type}', [HrDocumentController::class, 'disciplinaryLetter']);
+
         // Employee management
         Route::get('employees/profile', [EmployeeController::class, 'profile']);
         Route::get('employees/compact', [EmployeeController::class, 'compact']);
@@ -123,6 +133,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('export/bank', [PayrollEngineController::class, 'exportBankRemittance']);
             Route::get('export/mpesa', [PayrollEngineController::class, 'exportMpesaRemittance']);
             Route::get('export/p9', [PayrollEngineController::class, 'exportP9']);
+            Route::get('export/p9/pdf', [PayrollEngineController::class, 'exportP9Pdf']);
 
             // Compliance & Payment (LEGACY REMOVED - Use Runs)
             // Route::get('compliance-summary', [PayrollEngineController::class, 'getComplianceSummary']);
