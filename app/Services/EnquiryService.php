@@ -114,10 +114,9 @@ class EnquiryService
 
     private function resolveDepartmentIdForTaskType($type)
     {
-        $mapping = \App\Modules\Projects\Models\EnquiryTask::TASK_TYPE_DEPARTMENT_MAPPING;
-        // Handle generic cases if not in mapping
-        $deptName = $mapping[$type] ?? null;
-        
+        // Route to the primary (owning) department for this task type.
+        $deptName = \App\Modules\Projects\Models\EnquiryTask::primaryDepartmentName($type);
+
         if ($deptName) {
             $dept = \App\Modules\HR\Models\Department::where('name', $deptName)->first();
             return $dept ? $dept->id : null;

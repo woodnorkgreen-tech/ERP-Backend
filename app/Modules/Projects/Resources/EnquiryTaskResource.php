@@ -8,6 +8,11 @@ class EnquiryTaskResource extends JsonResource
 {
     public function toArray($request)
     {
+        // Workflow ordering state for the UI: which prerequisite tasks (if any)
+        // still block this one. Only meaningful while the task is still open.
+        $blockedBy = $this->blockingPrerequisiteTitles();
+        $isOpen = !in_array($this->status, ['completed', 'skipped', 'cancelled'], true);
+
         return [
             'id' => $this->id,
             'title' => $this->title,
@@ -21,6 +26,8 @@ class EnquiryTaskResource extends JsonResource
             'phase' => $this->resolvePhase(),
             'is_gated' => (bool) $this->is_gated,
             'is_authorized' => (bool) $this->is_authorized,
+            'is_blocked' => $isOpen && !empty($blockedBy),
+            'blocked_by' => $blockedBy,
             
             // Parent Relation
             'project_enquiry_id' => $this->project_enquiry_id,
@@ -46,6 +53,8 @@ class EnquiryTaskResource extends JsonResource
                 'id' => $this->department?->id,
                 'name' => $this->department?->name,
             ],
+            // Primary owner first, then collaborating departments (from task-type mapping)
+            'collaborating_departments' => \App\Modules\Projects\Models\EnquiryTask::departmentNamesForType($this->type),
             
             // Metadata
             'assignment_history_count' => $this->assignmentHistory->count(),

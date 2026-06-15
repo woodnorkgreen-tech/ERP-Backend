@@ -500,6 +500,41 @@ class NotificationService
     }
 
     /**
+     * Notify a user that a task is now ready to start because its prerequisite
+     * tasks have all been completed. Drives proactive workflow coordination.
+     */
+    public function sendTaskReadyNotification(EnquiryTask $task, User $user): void
+    {
+        try {
+            $task->loadMissing('enquiry.client');
+
+            $enquiryTitle = $task->enquiry ? $task->enquiry->title : 'Unknown Project';
+            $enquiryNumber = $task->enquiry ? $task->enquiry->enquiry_number : 'N/A';
+
+            Notification::create([
+                'user_id' => $user->id,
+                'type' => 'enquiry_task_ready',
+                'title' => 'Task Ready to Start',
+                'message' => "\"{$task->title}\" is ready to start for {$enquiryTitle} (#{$enquiryNumber}) — its prerequisites are complete.",
+                'notifiable_type' => EnquiryTask::class,
+                'notifiable_id' => $task->id,
+                'data' => [
+                    'task_id' => $task->id,
+                    'enquiry_id' => $task->project_enquiry_id,
+                    'enquiry_title' => $enquiryTitle,
+                    'enquiry_number' => $enquiryNumber,
+                    'task_type' => $task->type,
+                    'department_id' => $task->department_id,
+                    'priority' => $task->priority,
+                    'due_date' => $task->due_date?->toISOString(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Failed to send task-ready notification: " . $e->getMessage());
+        }
+    }
+
+    /**
      * Send notification when Universal Task is completed
      */
     public function sendUniversalTaskCompleted(UniversalTask $task, User $completedBy): void

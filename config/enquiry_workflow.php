@@ -174,17 +174,33 @@ return [
     | Task Dependencies
     |--------------------------------------------------------------------------
     |
-    | Define task dependencies for validation warnings
+    | The single source of truth for workflow ordering. Each key is a task type;
+    | the value lists the task types that must be completed (or skipped) before
+    | it. A dependency is only enforced when that prerequisite actually exists on
+    | the enquiry, so presets that omit a task type are unaffected.
+    |
+    | Consumed by:
+    |   - EnquiryWorkflowService (gates completion, announces unblocked tasks)
+    |   - EnquiryTask::blockingPrerequisiteTitles() -> API is_blocked/blocked_by
+    |   - the frontend (via is_blocked/blocked_by), so UI locks and backend
+    |     enforcement never drift. Keep this list authoritative.
     |
     */
 
     'task_dependencies' => [
-        'quote_approval' => [], // Standardized flexibility
-        'procurement' => ['materials'],
-        'production' => ['materials', 'budget'],
-        'logistics' => ['procurement'],
-        'setup' => ['logistics'],
-        'setdown' => ['setup'],
+        'design'         => ['site-survey'],
+        'materials'      => ['design'],
+        'budget'         => ['materials'],
+        'quote'          => ['budget'],
+        'quote_approval' => ['quote'],
+        'procurement'    => ['quote_approval', 'quote'],
+        'production'     => ['quote_approval', 'quote'],
+        'teams'          => ['quote_approval', 'design'],
+        'logistics'      => ['production'],
+        'setup'          => ['logistics', 'production'],
+        'handover'       => ['setup', 'production', 'logistics'],
+        'setdown'        => ['handover'],
+        'report'         => ['handover', 'setdown'],
     ],
 
     /*

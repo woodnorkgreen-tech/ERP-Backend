@@ -24,3 +24,6 @@ Homestead.yaml
 Thumbs.db
 .ddev/
 .history/
+
+# graphify generated knowledge graph (not source)
+graphify-out/

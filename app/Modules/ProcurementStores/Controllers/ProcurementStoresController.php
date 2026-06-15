@@ -50,27 +50,60 @@ class ProcurementStoresController extends Controller
 
         $paginator = $query->latest()->paginate($request->get('per_page', 50));
 
-        $paginator->getCollection()->transform(fn($material) => [
-            'id'                => $material->id,
-            'workstation_id'    => $material->workstation_id,
-            'material_name'     => $material->material_name,
-            'material_code'     => $material->material_code,
-            'category'          => $material->category,
-            'subcategory'       => $material->subcategory,
-            'unit_of_measure'   => $material->unit_of_measure,
-            'unit_cost'         => $material->unit_cost,
-            'workstation'       => $material->workstation,
-            'workstation_name'  => $material->workstation?->name ?? 'N/A',
-            'attributes'        => $material->attributes ?? [],
-            'is_active'         => $material->is_active,
-            'notes'             => $material->notes,
-            'material_type'     => $material->material_type ?? 'consumable',
-            'quantity_on_hand'  => (float) ($material->stock?->quantity_on_hand ?? 0),
-            'quantity_reserved' => (float) ($material->stock?->quantity_reserved ?? 0),
-            'available'         => (float) ($material->stock ? ($material->stock->quantity_on_hand - $material->stock->quantity_reserved) : 0),
-            'min_stock_level'   => (float) ($material->stock?->min_stock_level ?? 0),
-            'location'          => $material->stock?->location_bin ?? 'Not Set',
-        ]);
+        // For board-tracked (individual) materials, quantity_on_hand on the stock row
+        // also counts ungraded Quarantine boards, which overstates what's actually
+        // issuable. Derive the figures from board records instead so the master
+        // inventory matches the board registry:
+        //   on_hand   = boards physically in stores (Available + Quarantine)
+        //   available = ready-to-issue (Available) minus soft reservations
+        $boardMaterialIds = $paginator->getCollection()
+            ->filter(fn($m) => optional($m->stock)->tracking_mode === Stock::TRACK_BY_AREA)
+            ->pluck('id');
+
+        $boardCounts = $boardMaterialIds->isNotEmpty()
+            ? Board::whereIn('library_material_id', $boardMaterialIds)
+                ->selectRaw("library_material_id,
+                    SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) AS available_cnt,
+                    SUM(CASE WHEN status IN ('Available', 'Quarantine') THEN 1 ELSE 0 END) AS in_stores_cnt")
+                ->groupBy('library_material_id')
+                ->get()
+                ->keyBy('library_material_id')
+            : collect();
+
+        $paginator->getCollection()->transform(function ($material) use ($boardCounts) {
+            $isBoard = optional($material->stock)->tracking_mode === Stock::TRACK_BY_AREA;
+            $bc      = $isBoard ? $boardCounts->get($material->id) : null;
+
+            $reserved   = (float) ($material->stock?->quantity_reserved ?? 0);
+            $onHand     = $bc
+                ? (float) $bc->in_stores_cnt
+                : (float) ($material->stock?->quantity_on_hand ?? 0);
+            $available  = $bc
+                ? max(0.0, (float) $bc->available_cnt - $reserved)
+                : (float) ($material->stock ? ($material->stock->quantity_on_hand - $reserved) : 0);
+
+            return [
+                'id'                => $material->id,
+                'workstation_id'    => $material->workstation_id,
+                'material_name'     => $material->material_name,
+                'material_code'     => $material->material_code,
+                'category'          => $material->category,
+                'subcategory'       => $material->subcategory,
+                'unit_of_measure'   => $material->unit_of_measure,
+                'unit_cost'         => $material->unit_cost,
+                'workstation'       => $material->workstation,
+                'workstation_name'  => $material->workstation?->name ?? 'N/A',
+                'attributes'        => $material->attributes ?? [],
+                'is_active'         => $material->is_active,
+                'notes'             => $material->notes,
+                'material_type'     => $material->material_type ?? 'consumable',
+                'quantity_on_hand'  => $onHand,
+                'quantity_reserved' => $reserved,
+                'available'         => $available,
+                'min_stock_level'   => (float) ($material->stock?->min_stock_level ?? 0),
+                'location'          => $material->stock?->location_bin ?? 'Not Set',
+            ];
+        });
 
         return response()->json([
             'data'   => $paginator,
@@ -83,6 +116,10 @@ class ProcurementStoresController extends Controller
      */
     public function checkIn(Request $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can check stock in.'], 403);
+        }
+
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
@@ -95,48 +132,42 @@ class ProcurementStoresController extends Controller
             'logged_at' => 'nullable|date'
         ]);
 
-        $service = new InventoryService();
-        $log = $service->adjustStock(
-            $request->material_id,
-            $request->quantity,
-            'check_in',
-            $request->all()
-        );
+        $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->findOrFail($request->material_id);
 
-        // ── Board material hook ───────────────────────────────────────────────
-        // If the checked-in material is reusable and board-eligible, create
-        // individual board records so each sheet is physically trackable.
+        $log    = null;
         $boards = [];
-        $material = LibraryMaterial::with(
-            ['materialCategory.parent', 'workstation']
-        )->find($request->material_id);
 
-        if ($material && $material->material_type === 'reusable') {
-            $registration = new BoardRegistrationService();
+        // Wrap adjustStock + createBoardRecords in ONE transaction so a board
+        // creation failure rolls back the stock increment, preventing a state
+        // where quantity_on_hand is incremented but no board records exist.
+        DB::transaction(function () use ($request, $material, &$log, &$boards) {
+            $service = new InventoryService();
+            $log = $service->adjustStock(
+                $request->material_id,
+                $request->quantity,
+                'check_in',
+                $request->all()
+            );
 
-            try {
-                $registration->validateMaterial($material);
-
-                // createBoardRecords — NOT registerBatch.
-                // adjustStock() already handled stock + inventory_log above.
-                // registerBatch() would double both.
-                $boards = $registration->createBoardRecords(
-                    material:    $material,
-                    quantity:    (int) $request->quantity,
-                    batchNumber: $log->batch_number,
-                    length:      $request->length    ?? null,
-                    width:       $request->width     ?? null,
-                    thickness:   $request->thickness ?? null,
-                    userId:      auth()->id(),
-                );
-
-                // Mark the inventory log entry as reusable so reports can filter correctly
-                $log->update(['usage_type' => 'reusable']);
-
-            } catch (\InvalidArgumentException $e) {
-                // Material is reusable but not board-eligible (e.g. Timber) — skip silently
+            if ($material->material_type === 'reusable') {
+                $registration = new BoardRegistrationService();
+                try {
+                    $registration->validateMaterial($material);
+                    $boards = $registration->createBoardRecords(
+                        material:    $material,
+                        quantity:    (int) $request->quantity,
+                        batchNumber: $log->batch_number,
+                        length:      $request->length    ?? null,
+                        width:       $request->width     ?? null,
+                        thickness:   $request->thickness ?? null,
+                        userId:      auth()->id(),
+                    );
+                    $log->update(['usage_type' => 'reusable']);
+                } catch (\InvalidArgumentException) {
+                    // Reusable but not board-eligible (e.g. Timber) — skip
+                }
             }
-        }
+        });
 
         return response()->json([
             'message'      => 'Stock updated successfully',
@@ -151,7 +182,7 @@ class ProcurementStoresController extends Controller
                 'width'         => $b->width,
                 'thickness'     => $b->thickness,
                 'batch_number'  => $b->batch_number,
-                'material'      => ['name' => $material?->material_name, 'code' => $material?->material_code],
+                'material'      => ['name' => $material->material_name, 'code' => $material->material_code],
             ], $boards),
         ]);
     }
@@ -165,6 +196,10 @@ class ProcurementStoresController extends Controller
      */
     public function checkOut(Request $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
+        }
+
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
@@ -215,6 +250,10 @@ class ProcurementStoresController extends Controller
      */
     public function updateStockSettings(Request $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can update stock settings.'], 403);
+        }
+
         $request->validate([
             'material_id'     => 'required|exists:library_materials,id',
             'min_stock_level' => 'nullable|numeric|min:0',
@@ -251,6 +290,10 @@ class ProcurementStoresController extends Controller
      */
     public function returns(Request $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can record returns.'], 403);
+        }
+
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
@@ -290,6 +333,10 @@ class ProcurementStoresController extends Controller
      */
     public function markDefective(Request $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can mark stock defective.'], 403);
+        }
+
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
@@ -338,6 +385,10 @@ class ProcurementStoresController extends Controller
      */
     public function batchCheckIn(Request $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can check stock in.'], 403);
+        }
+
         $request->validate([
             'items' => 'required|array|min:1',
             'items.*.material_id' => 'required|exists:library_materials,id',
@@ -348,54 +399,49 @@ class ProcurementStoresController extends Controller
             'logged_at' => 'nullable|date'
         ]);
 
-        $service = new InventoryService();
-        $batchNumber = $service->generateBatchNumber();
-        $logs = [];
-        $allBoards = [];
+        $service    = new InventoryService();
+        $logs       = [];
+        $allBoards  = [];
+        $batchNumber = null;
 
-        foreach ($request->items as $item) {
-            $meta = array_merge(
-                $item,
-                [
-                    'batch_number'  => $batchNumber,
-                    'warehouse_code'=> $request->warehouse_code ?? 'MAIN',
-                    'logged_at'     => $request->logged_at ?? now(),
-                ]
-            );
+        // Single outer transaction: if any item's board creation fails the
+        // entire batch rolls back — no partial stock increments without records.
+        DB::transaction(function () use ($request, $service, &$logs, &$allBoards, &$batchNumber) {
+            $batchNumber = $service->generateBatchNumber();
 
-            $log = $service->adjustStock(
-                $item['material_id'],
-                $item['quantity'],
-                'check_in',
-                $meta
-            );
-            $logs[] = $log;
+            foreach ($request->items as $item) {
+                $meta = array_merge($item, [
+                    'batch_number'   => $batchNumber,
+                    'warehouse_code' => $request->warehouse_code ?? 'MAIN',
+                    'logged_at'      => $request->logged_at ?? now(),
+                ]);
 
-            // Board hook — same logic as single checkIn()
-            $material = LibraryMaterial::with(
-                ['materialCategory.parent', 'workstation']
-            )->find($item['material_id']);
+                $log    = $service->adjustStock($item['material_id'], $item['quantity'], 'check_in', $meta);
+                $logs[] = $log;
 
-            if ($material && $material->material_type === 'reusable') {
-                $registration = new BoardRegistrationService();
-                try {
-                    $registration->validateMaterial($material);
-                    $boards = $registration->createBoardRecords(
-                        material:    $material,
-                        quantity:    (int) $item['quantity'],
-                        batchNumber: $batchNumber,
-                        length:      $item['length']    ?? null,
-                        width:       $item['width']     ?? null,
-                        thickness:   $item['thickness'] ?? null,
-                        userId:      auth()->id(),
-                    );
-                    $log->update(['usage_type' => 'reusable']);
-                    $allBoards = array_merge($allBoards, $boards);
-                } catch (\InvalidArgumentException) {
-                    // Reusable but not board-eligible — skip
+                $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->find($item['material_id']);
+
+                if ($material && $material->material_type === 'reusable') {
+                    $registration = new BoardRegistrationService();
+                    try {
+                        $registration->validateMaterial($material);
+                        $boards = $registration->createBoardRecords(
+                            material:    $material,
+                            quantity:    (int) $item['quantity'],
+                            batchNumber: $batchNumber,
+                            length:      $item['length']    ?? null,
+                            width:       $item['width']     ?? null,
+                            thickness:   $item['thickness'] ?? null,
+                            userId:      auth()->id(),
+                        );
+                        $log->update(['usage_type' => 'reusable']);
+                        $allBoards = array_merge($allBoards, $boards);
+                    } catch (\InvalidArgumentException) {
+                        // Reusable but not board-eligible — skip
+                    }
                 }
             }
-        }
+        });
 
         return response()->json([
             'message'         => 'Batch check-in processed successfully',
@@ -412,6 +458,10 @@ class ProcurementStoresController extends Controller
      */
     public function batchCheckOut(Request $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
+        }
+
         $request->validate([
             'items' => 'required|array|min:1',
             'items.*.material_id' => 'required|exists:library_materials,id',
@@ -592,11 +642,16 @@ class ProcurementStoresController extends Controller
      */
     public function destroyLog($id): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can delete inventory logs.'], 403);
+        }
+
         return DB::transaction(function () use ($id) {
             $log = InventoryLog::findOrFail($id);
 
             // Guard: refuse if boards were created from this batch
-            if ($log->usage_type === 'reusable' && $log->type === 'check_in' && $log->batch_number) {
+            $isBoardCheckIn = $log->usage_type === 'reusable' && $log->type === 'check_in' && $log->batch_number;
+            if ($isBoardCheckIn) {
                 $boardCount = Board::where('batch_number', $log->batch_number)
                     ->whereNotIn('status', ['Consumed', 'Scrapped'])
                     ->count();
@@ -610,10 +665,17 @@ class ProcurementStoresController extends Controller
                 }
             }
 
-            $stock = Stock::where('material_id', $log->material_id)->first();
-            if ($stock) {
-                $stock->quantity_on_hand -= $log->quantity;
-                $stock->save();
+            // Reverse the stock movement — but NOT for a board check-in log.
+            // By the time deletion is allowed for a board batch, every board has been
+            // Consumed/Scrapped and each already decremented quantity_on_hand through the
+            // board lifecycle (fulfil/allocate/scrap). Subtracting the original check-in
+            // quantity again would double-count and drive on-hand negative.
+            if (!$isBoardCheckIn) {
+                $stock = Stock::where('material_id', $log->material_id)->first();
+                if ($stock) {
+                    $stock->quantity_on_hand -= $log->quantity;
+                    $stock->save();
+                }
             }
 
             $log->delete();

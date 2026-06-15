@@ -44,14 +44,32 @@ trait AuthorizedVisibility
             return true;
         }
 
-        // Check pivot table assignments
-        if ($this->assignedUsers()->where('users.id', $user->id)->exists()) {
+        // Check pivot table assignments. Use the loaded relation when present so
+        // task lists (which eager-load assignedUsers) don't fire a query per row.
+        $assignedViaPivot = $this->relationLoaded('assignedUsers')
+            ? $this->assignedUsers->contains('id', $user->id)
+            : $this->assignedUsers()->where('users.id', $user->id)->exists();
+        if ($assignedViaPivot) {
             return true;
         }
 
         // 3. Role-based visibility/interaction
         foreach (EnquiryConstants::TASK_VISIBILITY_MAPPING as $role => $types) {
             if ($user->hasRole($role) && in_array($this->type, $types)) {
+                return true;
+            }
+        }
+
+        // 4. Department-pool access: the task's owning department, plus any
+        //    department its task type collaborates with (TASK_TYPE_DEPARTMENT_MAPPING).
+        if ($user->department_id) {
+            if ($this->department_id && (int) $this->department_id === (int) $user->department_id) {
+                return true;
+            }
+
+            $userDepartmentName = $user->department?->name;
+            if ($userDepartmentName
+                && in_array($userDepartmentName, \App\Modules\Projects\Models\EnquiryTask::departmentNamesForType($this->type), true)) {
                 return true;
             }
         }
