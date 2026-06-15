@@ -101,11 +101,10 @@ class TaskController extends Controller
     public function getAllEnquiryTasks(Request $request): JsonResponse
     {
         try {
-            $query = EnquiryTask::authorized()->with([
-                'enquiry', 
-                'department', 
-                'assignedUser', 
-                'assignedUsers', 
+            $query = EnquiryTask::authorized()->withTaskData()->with([
+                'enquiry',
+                'department',
+                'assignedUser',
                 'assignmentHistory'
             ]);
 
@@ -168,7 +167,8 @@ class TaskController extends Controller
         try {
             $query = EnquiryTask::authorized()
                 ->where('project_enquiry_id', $enquiryId)
-                ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers', 'materialsData');
+                ->withTaskData()
+                ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy');
 
             $user = Auth::user();
             
@@ -261,13 +261,15 @@ class TaskController extends Controller
         try {
             // Visibility: all authenticated users can see tasks for project transparency.
             // Interaction rights are enforced per-task via the is_authorized flag.
-            $query = EnquiryTask::authorized()->with('enquiry', 'department', 'assignedUser', 'creator');
+            $query = EnquiryTask::authorized()->withTaskData()->with('enquiry', 'department', 'assignedUser', 'creator');
 
             if ($request->filled('enquiry_id')) {
                 $query->where('project_enquiry_id', $request->enquiry_id);
             }
             if ($request->filled('department_id')) {
-                $query->where('department_id', $request->department_id);
+                // Department board: include tasks this department owns AND those
+                // its task types make it a collaborator on.
+                $query->forDepartmentPool($request->department_id);
             }
             if ($request->filled('status')) {
                 $query->where('status', $request->status);

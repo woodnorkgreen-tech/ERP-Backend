@@ -18,16 +18,16 @@ class PhaseDepartmentalTaskController extends Controller
     public function index(Request $request): JsonResponse
     {
         // ... (existing implementation)
-        $query = EnquiryTask::with('enquiry', 'department', 'assignedUser');
+        $query = EnquiryTask::withTaskData()->with('enquiry', 'department', 'assignedUser');
 
         // Filter by enquiry if provided
         if ($request->has('enquiry_id')) {
             $query->where('project_enquiry_id', $request->enquiry_id);
         }
 
-        // Filter by department if provided
+        // Filter by department if provided — include owned + collaborator tasks.
         if ($request->has('department_id')) {
-            $query->where('department_id', $request->department_id);
+            $query->forDepartmentPool($request->department_id);
         }
 
         // Filter by status
