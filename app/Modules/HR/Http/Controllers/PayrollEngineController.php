@@ -11,6 +11,8 @@ use App\Modules\HR\Models\Payslip;
 use App\Modules\HR\Models\PayrollTaxBand;
 use App\Modules\HR\Models\PayrollRun;
 use App\Modules\HR\Services\Payroll\PayrollService;
+use App\Modules\HR\Services\Payroll\P9CardService;
+use App\Modules\HR\Support\Pdf\Documents\P9CardDocument;
 use Carbon\Carbon;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
@@ -573,6 +575,22 @@ class PayrollEngineController extends Controller
         };
 
         return response()->stream($callback, 200, $headers);
+    }
+
+    /**
+     * Export the KRA P9A annual tax card as a PDF (the employee-facing tax
+     * certificate). Shares figures with the CSV export via P9CardService.
+     */
+    public function exportP9Pdf(Request $request, P9CardService $p9Service)
+    {
+        $validated = $request->validate([
+            'employee_id' => 'required|exists:employees,id',
+            'year' => 'required|integer|min:2020|max:2030'
+        ]);
+
+        $p9 = $p9Service->build((int) $validated['employee_id'], (string) $validated['year']);
+
+        return (new P9CardDocument($p9))->download();
     }
 
     public function exportP9(Request $request)

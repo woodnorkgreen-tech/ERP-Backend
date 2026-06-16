@@ -49,69 +49,83 @@ class QuoteController extends Controller
     }
 
     /**
-     * Save quote data for a task
+     * Save quote data for a task.
+     *
+     * Handles both full saves (with all sections) and partial auto-saves.
+     * `status` is optional — defaults to the current record's status or 'draft'.
      */
     public function saveQuoteData(Request $request, int $taskId): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'projectInfo' => 'required|array',
-            'budgetImported' => 'boolean',
-            'materials' => 'present|array',
-            'labour' => 'present|array',
-            'expenses' => 'present|array',
-            'logistics' => 'present|array',
-            'margins' => 'required|array',
-            'margins.materials' => 'numeric|min:0|max:1000', // Allow up to 1000% just in case
-            'margins.labour' => 'numeric|min:0|max:1000',
-            'margins.expenses' => 'numeric|min:0|max:1000',
-            'margins.logistics' => 'numeric|min:0|max:1000',
-            'customMargins' => 'nullable|array',
-            'discountAmount' => 'numeric|min:0',
-            'vatPercentage' => 'numeric|min:0|max:100',
-            'vatEnabled' => 'boolean',
-            'totals' => 'required|array',
-            'status' => 'required|in:draft,pending,approved,rejected',
-            'viewerSettings' => 'nullable|array'
+            'projectInfo'            => 'nullable|array',
+            'budgetImported'         => 'boolean',
+            'materials'              => 'present|array',
+            'labour'                 => 'present|array',
+            'expenses'               => 'present|array',
+            'logistics'              => 'present|array',
+            'margins'                => 'required|array',
+            'margins.materials'      => 'numeric|min:0|max:1000',
+            'margins.labour'         => 'numeric|min:0|max:1000',
+            'margins.expenses'       => 'numeric|min:0|max:1000',
+            'margins.logistics'      => 'numeric|min:0|max:1000',
+            'customMargins'          => 'nullable|array',
+            'discountAmount'         => 'numeric|min:0',
+            'vatPercentage'          => 'numeric|min:0|max:100',
+            'vatEnabled'             => 'boolean',
+            'totals'                 => 'required|array',
+            // status is optional — the frontend does not always include it
+            'status'                 => 'nullable|in:draft,pending,approved,rejected',
+            'viewerSettings'         => 'nullable|array',
+            // Margin governance audit trail
+            'justification'          => 'nullable|string|max:2000',
+            'justificationHistory'   => 'nullable|array',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors'  => $validator->errors(),
             ], 422);
         }
 
         try {
+            // Preserve existing status unless the caller explicitly sends a new one
+            $existing = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+            $status   = $request->status ?? $existing?->status ?? 'draft';
+
             $quoteData = TaskQuoteData::updateOrCreate(
                 ['enquiry_task_id' => $taskId],
                 [
-                    'project_info' => $request->projectInfo,
-                    'budget_imported' => $request->budgetImported ?? false,
-                    'materials' => $request->materials,
-                    'labour' => $request->labour,
-                    'expenses' => $request->expenses,
-                    'logistics' => $request->logistics,
-                    'margins' => $request->margins,
-                    'custom_margins' => $request->customMargins ?? [],
-                    'discount_amount' => $request->discountAmount ?? 0,
-                    'vat_percentage' => $request->vatPercentage ?? 16,
-                    'vat_enabled' => $request->vatEnabled ?? true,
-                    'totals' => $request->totals,
-                    'status' => $request->status,
-                    'viewer_settings' => $request->viewerSettings ?? [],
-                    'updated_at' => now()
+                    'project_info'          => $request->projectInfo ?? $existing?->project_info ?? [],
+                    'budget_imported'        => $request->budgetImported ?? $existing?->budget_imported ?? false,
+                    'materials'              => $request->materials,
+                    'labour'                 => $request->labour,
+                    'expenses'               => $request->expenses,
+                    'logistics'              => $request->logistics,
+                    'margins'                => $request->margins,
+                    'custom_margins'         => $request->customMargins ?? $existing?->custom_margins ?? [],
+                    'discount_amount'        => $request->discountAmount ?? 0,
+                    'vat_percentage'         => $request->vatPercentage ?? 16,
+                    'vat_enabled'            => $request->vatEnabled ?? true,
+                    'totals'                 => $request->totals,
+                    'status'                 => $status,
+                    'viewer_settings'        => $request->viewerSettings ?? $existing?->viewer_settings ?? [],
+                    // Persist governance fields
+                    'justification'          => $request->justification ?? $existing?->justification,
+                    'justification_history'  => $request->justificationHistory ?? $existing?->justification_history ?? [],
+                    'updated_at'             => now(),
                 ]
             );
 
             return response()->json([
-                'data' => $this->formatQuoteResponse($quoteData->fresh()),
-                'message' => 'Quote data saved successfully'
+                'data'    => $this->formatQuoteResponse($quoteData->fresh()),
+                'message' => 'Quote data saved successfully',
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to save quote data',
-                'error' => $e->getMessage()
+                'error'   => $e->getMessage(),
             ], 500);
         }
     }
@@ -1294,6 +1308,148 @@ class QuoteController extends Controller
     }
 
     /**
+     * Server-side scope → quote sync.
+     *
+     * Reads the latest project_scope from the enquiry (via the deliverables table),
+     * then:
+     *   - Creates quote material elements for new scope items
+     *   - Updates name/category on elements whose scope item was renamed/reclassified
+     *   - Removes elements whose scopeId no longer exists in scope (manual elements kept)
+     *   - Applies hire-days from expected_delivery_date to new empty line items
+     *
+     * Returns the updated quote data so the frontend can replace its local state.
+     */
+    public function syncScope(int $taskId): JsonResponse
+    {
+        try {
+            $task = EnquiryTask::with('enquiry.deliverables')->find($taskId);
+            if (!$task) {
+                return response()->json(['message' => 'Task not found'], 404);
+            }
+
+            $enquiry   = $task->enquiry;
+            $rawScope  = $enquiry?->project_scope ?? [];
+
+            // Build structured map: scopeId → { name, classification }
+            // project_scope accessor always returns structured arrays from the deliverables table
+            $scopeMap  = [];
+            foreach ($rawScope as $item) {
+                $id  = $item['uuid'] ?? $item['id'] ?? null;
+                $cls = strtoupper($item['classification'] ?? 'PRE-DEFINED');
+                $nm  = $item['name'] ?? '';
+                if ($id && $nm) {
+                    $scopeMap[$id] = ['name' => $nm, 'classification' => $cls];
+                }
+            }
+
+            // Margin and template defaults delegated to single source of truth
+            // @see App\Constants\ScopeClassification
+
+            // Hire-days from delivery date
+            $hireDays = 1;
+            if ($enquiry?->expected_delivery_date) {
+                $diff = now()->diffInDays($enquiry->expected_delivery_date, false);
+                $hireDays = max(1, (int) $diff);
+            }
+
+            $quoteRecord = TaskQuoteData::firstOrCreate(
+                ['enquiry_task_id' => $taskId],
+                $this->getDefaultQuoteStructure($taskId)
+            );
+
+            $materials        = is_array($quoteRecord->materials) ? $quoteRecord->materials : [];
+            $existingScopeIds = [];
+            $result           = ['added' => [], 'updated' => [], 'removed' => []];
+
+            // 1. Update existing elements
+            $updatedMaterials = [];
+            foreach ($materials as $element) {
+                $sid = $element['scopeId'] ?? null;
+                if ($sid && isset($scopeMap[$sid])) {
+                    $changed = false;
+                    if (($element['name'] ?? '') !== $scopeMap[$sid]['name']) {
+                        $element['name'] = $scopeMap[$sid]['name'];
+                        $changed = true;
+                    }
+                    if (($element['category'] ?? '') !== $scopeMap[$sid]['classification']) {
+                        $element['category'] = $scopeMap[$sid]['classification'];
+                        $changed = true;
+                    }
+                    if ($changed) $result['updated'][] = $element['name'];
+                    $existingScopeIds[$sid] = true;
+                    $updatedMaterials[] = $element;
+                } elseif (!$sid) {
+                    // Manually-added element — always keep
+                    $updatedMaterials[] = $element;
+                } else {
+                    // scopeId set but no longer in scope — remove
+                    $result['removed'][] = $element['name'] ?? $sid;
+                }
+            }
+
+            // 2. Add new scope items not yet in the quote
+            foreach ($scopeMap as $sid => $info) {
+                if (isset($existingScopeIds[$sid])) continue;
+                $cls    = $info['classification'];
+                $margin = \App\Constants\ScopeClassification::defaultMargin($cls);
+                $tmpl   = \App\Constants\ScopeClassification::toTemplateId($cls);
+                $updatedMaterials[] = [
+                    'id'               => (string) \Illuminate\Support\Str::uuid(),
+                    'scopeId'          => $sid,
+                    'name'             => $info['name'],
+                    'category'         => $cls,
+                    'description'      => '',
+                    'quantity'         => 1,
+                    'baseTotal'        => 0,
+                    'marginAmount'     => 0,
+                    'marginPercentage' => $margin,
+                    'finalTotal'       => 0,
+                    'templateId'       => $tmpl,
+                    'materials'        => [
+                        [
+                            'id'               => (string) \Illuminate\Support\Str::uuid(),
+                            'description'      => '',
+                            'unitPrice'        => 0,
+                            'quantity'         => 1,
+                            'days'             => $hireDays,
+                            'totalPrice'       => 0,
+                            'marginPercentage' => $margin,
+                            'marginAmount'     => 0,
+                            'finalPrice'       => 0,
+                            'isVisible'        => true,
+                            'isAddition'       => false,
+                        ]
+                    ],
+                ];
+                $result['added'][] = $info['name'];
+            }
+
+            $quoteRecord->update(['materials' => $updatedMaterials]);
+
+            $totalChanges = count($result['added']) + count($result['updated']) + count($result['removed']);
+
+            return response()->json([
+                'data'    => $this->formatQuoteResponse($quoteRecord->fresh(), $task),
+                'changes' => $result,
+                'message' => $totalChanges > 0
+                    ? implode(' · ', array_filter([
+                        count($result['added'])   ? count($result['added'])   . ' added'   : null,
+                        count($result['updated']) ? count($result['updated']) . ' updated' : null,
+                        count($result['removed']) ? count($result['removed']) . ' removed' : null,
+                    ]))
+                    : 'Quote already in sync with scope',
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error("Scope sync failed for task {$taskId}: " . $e->getMessage());
+            return response()->json([
+                'message' => 'Scope sync failed',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Get default quote structure
      */
     private function getDefaultQuoteStructure(int $taskId): array
@@ -1315,14 +1471,17 @@ class QuoteController extends Controller
             'expenses' => [],
             'logistics' => [],
             'margins' => [
-                'materials' => 20,
-                'labour' => 0,
-                'expenses' => 0,
-                'logistics' => 0
+                'materials' => 30,
+                'labour'    => 30,
+                'expenses'  => 10,
+                'logistics' => 20,
+                'global'    => 30,
             ],
-            'discountAmount' => 0,
-            'vatPercentage' => 16,
-            'vatEnabled' => true,
+            'discountAmount'       => 0,
+            'vatPercentage'        => 16,
+            'vatEnabled'           => true,
+            'justification'         => null,
+            'justification_history' => [],
             'totals' => [
                 'materialsBase' => 0,
                 'materialsMargin' => 0,
@@ -1585,11 +1744,11 @@ class QuoteController extends Controller
     }
 
     /**
-     * Format quote data for frontend response (camelCase)
+     * Format quote data for frontend response (camelCase).
+     * Always includes all fields the frontend model expects.
      */
     private function formatQuoteResponse(TaskQuoteData $quoteData, ?EnquiryTask $task = null): array
     {
-        // Load relationships efficiently using loadMissing
         if ($task) {
             $task->loadMissing('enquiry.client', 'enquiry.deliverables');
         } else {
@@ -1601,45 +1760,60 @@ class QuoteController extends Controller
 
         $projectInfo = $quoteData->project_info ?? [];
         if ($task && $task->enquiry) {
-            $projectInfo['projectScope'] = $task->enquiry->project_scope;
-            $projectInfo['clientName'] = $task->enquiry->client->full_name ?? $projectInfo['clientName'] ?? 'Unknown Client';
-            $projectInfo['enquiryTitle'] = $task->enquiry->title ?? $projectInfo['enquiryTitle'] ?? 'Untitled Project';
-            $projectInfo['eventVenue'] = $task->enquiry->venue ?? $projectInfo['eventVenue'] ?? 'Venue TBC';
-            $projectInfo['setupDate'] = $task->enquiry->expected_delivery_date ?? $projectInfo['setupDate'] ?? 'Date TBC';
+            // Always refresh scope from the deliverables table so edits in the enquiry
+            // are reflected immediately when the quote is re-fetched.
+            $projectInfo['projectScope']  = $task->enquiry->project_scope;
+            $projectInfo['clientName']    = $task->enquiry->client->full_name    ?? $projectInfo['clientName']    ?? 'Unknown Client';
+            $projectInfo['enquiryTitle']  = $task->enquiry->title               ?? $projectInfo['enquiryTitle']  ?? 'Untitled Project';
+            $projectInfo['eventVenue']    = $task->enquiry->venue               ?? $projectInfo['eventVenue']    ?? 'Venue TBC';
+            $projectInfo['setupDate']     = $task->enquiry->expected_delivery_date
+                ? $task->enquiry->expected_delivery_date->format('Y-m-d')
+                : ($projectInfo['setupDate'] ?? 'Date TBC');
+            $projectInfo['code']          = $task->enquiry->job_number ?? $task->enquiry->enquiry_number ?? '';
         }
 
-        $response = [
-            'id' => $quoteData->id,
-            'projectInfo' => $projectInfo,
-            'budgetImported' => $quoteData->budget_imported,
-            'budgetImportedAt' => $quoteData->budget_imported_at,
-            'budgetUpdatedAt' => $quoteData->budget_updated_at,
-            'budgetVersion' => $quoteData->budget_version,
-            'materials' => $quoteData->materials,
-            'labour' => $quoteData->labour,
-            'expenses' => $quoteData->expenses,
-            'logistics' => $quoteData->logistics,
-            'margins' => $quoteData->margins,
-            'customMargins' => $quoteData->custom_margins ?? [],
-            'discountAmount' => (float) ($quoteData->discount_amount ?? 0),
-            'vatPercentage' => (float) ($quoteData->vat_percentage ?? 16),
-            'vatEnabled' => (bool) ($quoteData->vat_enabled ?? true),
-            'totals' => $quoteData->totals,
-            'status' => $quoteData->status,
-            'viewerSettings' => $quoteData->viewer_settings ?? [
-                'descriptions' => (object)[],
-                'overrides' => (object)[]
+        return [
+            'id'                   => $quoteData->id,
+            'projectInfo'          => $projectInfo,
+            'budgetImported'       => (bool) $quoteData->budget_imported,
+            'budgetImportedAt'     => $quoteData->budget_imported_at,
+            'budgetUpdatedAt'      => $quoteData->budget_updated_at,
+            'budgetVersion'        => $quoteData->budget_version,
+            'materials'            => $quoteData->materials       ?? [],
+            'labour'               => $quoteData->labour          ?? [],
+            'expenses'             => $quoteData->expenses        ?? [],
+            'logistics'            => $quoteData->logistics       ?? [],
+            'margins'              => $quoteData->margins ?? [
+                'materials' => 30,
+                'labour'    => 30,
+                'expenses'  => 10,
+                'logistics' => 20,
+                'global'    => 30,
             ],
-            'approvedBy' => $quoteData->approved_by,
-            'approvalDate' => $quoteData->approval_date ? $quoteData->approval_date->format('Y-m-d') : null,
-            'rejectionReason' => $quoteData->rejection_reason,
-            'approvalComments' => $quoteData->approval_comments,
-            'quoteAmount' => (float) ($quoteData->quote_amount ?? 0),
-            'createdAt' => $quoteData->created_at,
-            'updatedAt' => $quoteData->updated_at,
+            'customMargins'        => $quoteData->custom_margins  ?? [],
+            'discountAmount'       => (float) ($quoteData->discount_amount  ?? 0),
+            'vatPercentage'        => (float) ($quoteData->vat_percentage   ?? 16),
+            'vatEnabled'           => (bool)  ($quoteData->vat_enabled      ?? true),
+            'totals'               => $quoteData->totals,
+            'status'               => $quoteData->status ?? 'draft',
+            'viewerSettings'       => $quoteData->viewer_settings ?? [
+                'descriptions' => (object)[],
+                'overrides'    => (object)[],
+            ],
+            // Margin governance
+            'justification'        => $quoteData->justification,
+            'justificationHistory' => $quoteData->justification_history ?? [],
+            // Approval fields
+            'approvalStatus'       => $quoteData->approval_status ?? $quoteData->status ?? 'draft',
+            'enquiryQuoteApproved' => $task && $task->enquiry ? (bool) $task->enquiry->quote_approved : false,
+            'approvedBy'           => $quoteData->approved_by,
+            'approvalDate'         => $quoteData->approval_date ? $quoteData->approval_date->format('Y-m-d') : null,
+            'rejectionReason'      => $quoteData->rejection_reason,
+            'approvalComments'     => $quoteData->approval_comments,
+            'quoteAmount'          => (float) ($quoteData->quote_amount ?? 0),
+            'createdAt'            => $quoteData->created_at,
+            'updatedAt'            => $quoteData->updated_at,
         ];
-
-        return $response;
     }
 
     /**

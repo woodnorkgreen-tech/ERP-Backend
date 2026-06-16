@@ -275,11 +275,20 @@ class ProductionTaskAlignmentService
     {
         try {
             $workOrder = WorkOrder::where('enquiry_task_id', $taskId)->firstOrFail();
-            
+
             if (isset($data['productionData']['status'])) {
                 $workOrder->update(['status' => $data['productionData']['status']]);
             }
-            
+
+            // Persist individual WorkOrderTask status changes sent as { elementId: status }
+            if (isset($data['elementStatuses']) && is_array($data['elementStatuses'])) {
+                foreach ($data['elementStatuses'] as $elementId => $status) {
+                    WorkOrderTask::where('work_order_id', $workOrder->id)
+                        ->where('id', (int) $elementId)
+                        ->update(['status' => $status]);
+                }
+            }
+
             return true;
         } catch (\Exception $e) {
             Log::error("Failed to save alignment data: " . $e->getMessage());

@@ -500,6 +500,41 @@ class NotificationService
     }
 
     /**
+     * Notify a user that a task is now ready to start because its prerequisite
+     * tasks have all been completed. Drives proactive workflow coordination.
+     */
+    public function sendTaskReadyNotification(EnquiryTask $task, User $user): void
+    {
+        try {
+            $task->loadMissing('enquiry.client');
+
+            $enquiryTitle = $task->enquiry ? $task->enquiry->title : 'Unknown Project';
+            $enquiryNumber = $task->enquiry ? $task->enquiry->enquiry_number : 'N/A';
+
+            Notification::create([
+                'user_id' => $user->id,
+                'type' => 'enquiry_task_ready',
+                'title' => 'Task Ready to Start',
+                'message' => "\"{$task->title}\" is ready to start for {$enquiryTitle} (#{$enquiryNumber}) — its prerequisites are complete.",
+                'notifiable_type' => EnquiryTask::class,
+                'notifiable_id' => $task->id,
+                'data' => [
+                    'task_id' => $task->id,
+                    'enquiry_id' => $task->project_enquiry_id,
+                    'enquiry_title' => $enquiryTitle,
+                    'enquiry_number' => $enquiryNumber,
+                    'task_type' => $task->type,
+                    'department_id' => $task->department_id,
+                    'priority' => $task->priority,
+                    'due_date' => $task->due_date?->toISOString(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Failed to send task-ready notification: " . $e->getMessage());
+        }
+    }
+
+    /**
      * Send notification when Universal Task is completed
      */
     public function sendUniversalTaskCompleted(UniversalTask $task, User $completedBy): void
@@ -769,6 +804,93 @@ class NotificationService
             ]);
         } catch (\Exception $e) {
             Log::error("Failed to send requisition disbursed notification: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Send a notification to the acting user when they attempt to complete a project
+     * but the required conditions are not met.
+     *
+     * Creates a persistent, actionable entry in the notification center so the user
+     * can revisit what needs to happen even after dismissing the immediate API error.
+     */
+    public function sendProjectCompletionBlocked(
+        ProjectEnquiry $enquiry,
+        User $attemptedBy,
+        array $readiness
+    ): void {
+        try {
+            $enquiry->loadMissing(['client']);
+
+            $blockingClosure  = $readiness['blocking_closure_tasks'] ?? [];
+            $inProgressTasks  = $readiness['in_progress_tasks'] ?? [];
+            $summary          = $readiness['task_summary'] ?? [];
+
+            // Build a concise but specific message for the notification body
+            $messageParts = [];
+            if (!empty($blockingClosure)) {
+                $names = implode(', ', array_column($blockingClosure, 'title'));
+                $messageParts[] = "Closure tasks not done: {$names}";
+            }
+            if (!empty($inProgressTasks)) {
+                $names = implode(', ', array_column($inProgressTasks, 'title'));
+                $messageParts[] = "Tasks still in progress: {$names}";
+            }
+
+            $message = empty($messageParts)
+                ? "All conditions are met. Use the Complete Project action to finalise."
+                : implode(' | ', $messageParts);
+
+            // Build per-task action steps for the front-end to render as a checklist
+            $actionItems = [];
+            foreach ($blockingClosure as $task) {
+                $actionItems[] = [
+                    'task_id' => $task['id'],
+                    'type'    => $task['type'],
+                    'title'   => $task['title'],
+                    'status'  => $task['status'],
+                    'action'  => "Complete or skip \"{$task['title']}\" to unblock project closure.",
+                    'severity' => 'blocking',
+                ];
+            }
+            foreach ($inProgressTasks as $task) {
+                $actionItems[] = [
+                    'task_id' => $task['id'],
+                    'type'    => $task['type'],
+                    'title'   => $task['title'],
+                    'status'  => $task['status'],
+                    'action'  => "Finish or skip \"{$task['title']}\" — a project cannot close while work is still in progress.",
+                    'severity' => 'warning',
+                ];
+            }
+
+            Notification::create([
+                'user_id'         => $attemptedBy->id,
+                'type'            => 'project_completion_blocked',
+                'title'           => 'Project Cannot Be Completed Yet',
+                'message'         => "'{$enquiry->title}' — {$message}",
+                'notifiable_type' => ProjectEnquiry::class,
+                'notifiable_id'   => $enquiry->id,
+                'data' => [
+                    'enquiry_id'     => $enquiry->id,
+                    'enquiry_title'  => $enquiry->title,
+                    'enquiry_number' => $enquiry->enquiry_number,
+                    'job_number'     => $enquiry->job_number,
+                    'client_name'    => $enquiry->client?->name ?? $enquiry->client?->full_name ?? 'Unknown Client',
+                    'can_complete'   => false,
+                    'task_summary'   => $summary,
+                    'action_items'   => $actionItems,
+                    'attempted_at'   => now()->toISOString(),
+                ],
+            ]);
+
+            Log::info("Project completion blocked notification sent", [
+                'enquiry_id'    => $enquiry->id,
+                'user_id'       => $attemptedBy->id,
+                'blocking_count' => count($blockingClosure) + count($inProgressTasks),
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Failed to send project completion blocked notification: " . $e->getMessage());
         }
     }
 

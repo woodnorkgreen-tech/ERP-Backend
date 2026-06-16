@@ -60,7 +60,10 @@ class TechnicalLabour extends Model
     public function getOtBalanceAttribute(): float
     {
         try {
-            $latest = $this->ledgerEntries()->latest('occurred_at')->first();
+            $latest = $this->ledgerEntries()
+                ->orderByDesc('occurred_at')
+                ->orderByDesc('id')
+                ->first();
             return $latest ? (float) $latest->balance_after : 0.0;
         } catch (\Exception $e) {
             return 0.0;

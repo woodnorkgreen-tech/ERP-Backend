@@ -101,11 +101,10 @@ class TaskController extends Controller
     public function getAllEnquiryTasks(Request $request): JsonResponse
     {
         try {
-            $query = EnquiryTask::authorized()->with([
-                'enquiry', 
-                'department', 
-                'assignedUser', 
-                'assignedUsers', 
+            $query = EnquiryTask::authorized()->withTaskData()->with([
+                'enquiry',
+                'department',
+                'assignedUser',
                 'assignmentHistory'
             ]);
 
@@ -129,7 +128,7 @@ class TaskController extends Controller
                 'message' => 'All enquiry tasks retrieved successfully'
             ]);
         } catch (\Exception $e) {
-            \Log::error("[DEBUG] getAllEnquiryTasks failed: " . $e->getMessage());
+            \Log::error("getAllEnquiryTasks failed: " . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve all enquiry tasks',
                 'error' => $e->getMessage()
@@ -168,7 +167,8 @@ class TaskController extends Controller
         try {
             $query = EnquiryTask::authorized()
                 ->where('project_enquiry_id', $enquiryId)
-                ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy', 'assignedUsers', 'materialsData');
+                ->withTaskData()
+                ->with('enquiry', 'creator', 'assignedTo', 'assignedBy', 'assignmentHistory.assignedTo', 'assignmentHistory.assignedBy');
 
             $user = Auth::user();
             
@@ -240,16 +240,12 @@ class TaskController extends Controller
             });
 
 
-            foreach ($tasks as $task) {
-
-            }
-
             return response()->json([
                 'data' => $tasks,
                 'message' => 'Enquiry tasks retrieved successfully'
             ]);
         } catch (\Exception $e) {
-            \Log::error("[DEBUG] getEnquiryTasks failed for enquiry {$enquiryId}: " . $e->getMessage());
+            \Log::error("getEnquiryTasks failed for enquiry {$enquiryId}: " . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve enquiry tasks',
                 'error' => $e->getMessage()
@@ -262,41 +258,25 @@ class TaskController extends Controller
      */
     public function getDepartmentalTasks(Request $request): JsonResponse
     {
-        // Permissions temporarily removed - will be implemented soon
-
         try {
-            $query = EnquiryTask::authorized()->with('enquiry', 'department', 'assignedUser', 'creator');
+            // Visibility: all authenticated users can see tasks for project transparency.
+            // Interaction rights are enforced per-task via the is_authorized flag.
+            $query = EnquiryTask::authorized()->withTaskData()->with('enquiry', 'department', 'assignedUser', 'creator');
 
-            // Filter by enquiry if provided
-            if ($request->has('enquiry_id')) {
+            if ($request->filled('enquiry_id')) {
                 $query->where('project_enquiry_id', $request->enquiry_id);
             }
-
-            // Filter by department if provided
-            if ($request->has('department_id')) {
-                $query->where('department_id', $request->department_id);
+            if ($request->filled('department_id')) {
+                // Department board: include tasks this department owns AND those
+                // its task types make it a collaborator on.
+                $query->forDepartmentPool($request->department_id);
             }
-
-            // Filter by status if provided
-            if ($request->has('status')) {
+            if ($request->filled('status')) {
                 $query->where('status', $request->status);
             }
-
-            // Filter by assigned user if provided
-            if ($request->has('assigned_user_id')) {
+            if ($request->filled('assigned_user_id')) {
                 $query->where('assigned_user_id', $request->assigned_user_id);
             }
-
-            // Filter tasks by user's department
-            $user = Auth::user();
-
-            // Access Control: All users can see tasks in the project (Transparency)
-            // Interaction is gated via is_authorized flag on the task model
-
-            // Removed privileged role check to allow standard users to see all tasks
-            // if (!$user->hasRole(['Super Admin', 'HR', 'Project Manager', 'Project Officer', 'Client Service'])) {
-            //    $query->assignedToUser($user->id);
-            // }
 
             $tasks = $query->orderBy('created_at', 'desc')->paginate(15);
 
@@ -348,17 +328,12 @@ class TaskController extends Controller
      */
     public function updateTaskStatus(Request $request, int $taskId): JsonResponse
     {
-        // Permissions temporarily removed - will be implemented soon
-
-
-
         $validator = Validator::make($request->all(), [
             'status' => 'required|string|in:pending,in_progress,completed,cancelled,skipped',
             'notes' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
-            \Log::error("[DEBUG] updateTaskStatus validation failed for task {$taskId}: " . json_encode($validator->errors()));
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $validator->errors()
@@ -366,37 +341,17 @@ class TaskController extends Controller
         }
 
         try {
-            $task = EnquiryTask::findOrFail($taskId);
-            $user = Auth::user();
-
-            // Strict Access Control
-            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer']);
-            
-            // Department Check Removed - All users can see tasks (Transparency)
-            // if (!$hasSpecialAccess && $task->department_id && $task->department_id !== $user->department_id) {
-            //    return response()->json(['message' => 'Unauthorized: Task belongs to another department'], 403);
-            // }
-
-            // Lock Check Removed - Users can edit any task regardless of assignment
-
-
-
-            // USE THE NEW ACTION CLASS (Less bureaucracy, more integrity)
             $action = app(\App\Modules\Projects\Actions\UpdateTaskStatusAction::class);
             $updatedTask = $action->execute($taskId, $request->status, $request->notes);
-
-
-
 
             return response()->json([
                 'data' => $updatedTask->load('enquiry', 'department', 'assignedUser'),
                 'message' => 'Task status updated successfully'
             ]);
         } catch (\Exception $e) {
-            \Log::error("[DEBUG] updateTaskStatus failed for task {$taskId}: " . $e->getMessage());
+            \Log::error("updateTaskStatus failed for task {$taskId}: " . $e->getMessage());
             return response()->json([
                 'message' => $e->getMessage(),
-                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -406,8 +361,6 @@ class TaskController extends Controller
      */
     public function assignTask(Request $request, int $taskId): JsonResponse
     {
-        // Permissions temporarily removed - will be implemented soon
-
         $validator = Validator::make($request->all(), [
             'assigned_user_id' => 'required|integer|exists:users,id',
         ]);
@@ -450,22 +403,7 @@ class TaskController extends Controller
                 'assigned_by' => $user->id,
             ]);
 
-            // Refresh the model to get updated relationships
             $task = $task->fresh(['enquiry', 'department', 'assignedUser', 'assignedTo']);
-
-            \Log::info('[ASSIGN TASK DEBUG]', [
-                'task_id' => $task->id,
-                'assigned_user_id' => $task->assigned_user_id,
-                'assigned_to' => $task->assigned_to,
-                'assignedUser' => $task->assignedUser ? [
-                    'id' => $task->assignedUser->id,
-                    'name' => $task->assignedUser->name
-                ] : null,
-                'assignedTo' => $task->assignedTo ? [
-                    'id' => $task->assignedTo->id,
-                    'name' => $task->assignedTo->name
-                ] : null,
-            ]);
 
             return response()->json([
                 'data' => $task,
@@ -506,8 +444,6 @@ class TaskController extends Controller
      */
     public function show(int $taskId): JsonResponse
     {
-        // Permissions temporarily removed - will be implemented soon
-
         try {
             $task = EnquiryTask::with([
                 'enquiry.enquiryTasks.materialsData.elements',
@@ -517,19 +453,8 @@ class TaskController extends Controller
                 'creator',
             ])->findOrFail($taskId);
 
-            // Security Check
-            $user = Auth::user();
-            $hasSpecialAccess = $user->hasRole(['Super Admin', 'Project Manager', 'Project Officer']);
-
-            // Strict Access Check Removed - Users can view any task in the system
-
-            // Lock Check Removed - Tasks are no longer locked based on assignment
-            $isLocked = false;
-            $lockedByUser = null;
-
-            // Append lock status to task
-            $task->is_locked_for_user = $isLocked;
-            $task->locked_by_user = $lockedByUser;
+            $task->is_locked_for_user = false;
+            $task->locked_by_user = null;
 
             return response()->json([
                 'data' => $task,
@@ -548,13 +473,11 @@ class TaskController extends Controller
      */
     public function update(Request $request, int $taskId): JsonResponse
     {
-        // Permissions temporarily removed - will be implemented soon
-
         $validator = Validator::make($request->all(), [
             'task_description' => 'nullable|string',
             'priority' => 'nullable|string|in:low,medium,high,urgent',
             'estimated_hours' => 'nullable|numeric|min:0',
-            'due_date' => 'nullable|date|after:yesterday', // Allow today
+            'due_date' => 'nullable|date|after:yesterday',
             'notes' => 'nullable|string',
         ]);
 
@@ -567,8 +490,6 @@ class TaskController extends Controller
 
         try {
             $task = EnquiryTask::findOrFail($taskId);
-
-            // Department check temporarily removed - will be implemented soon
             $user = Auth::user();
 
             // Check if user is authorized to interact with this task (Pool check)
@@ -661,7 +582,7 @@ class TaskController extends Controller
                 'message' => 'Task assigned successfully'
             ]);
         } catch (\Exception $e) {
-            \Log::error("[DEBUG] assignEnquiryTask failed for task {$taskId}: " . $e->getMessage());
+            \Log::error("assignEnquiryTask failed for task {$taskId}: " . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to assign task',
             ], 500);
@@ -673,8 +594,6 @@ class TaskController extends Controller
      */
     public function getTaskAssignmentHistory(int $taskId): JsonResponse
     {
-        // Permissions temporarily removed - will be implemented soon
-
         try {
             $history = TaskAssignmentHistory::where('enquiry_task_id', $taskId)
                 ->with('assignedTo', 'assignedBy')
@@ -729,7 +648,6 @@ class TaskController extends Controller
      */
     public function reassignEnquiryTask(Request $request, int $taskId): JsonResponse
     {
-        // Permissions temporarily removed - will be implemented soon
         $user = Auth::user();
 
         $validator = Validator::make($request->all(), [
@@ -746,13 +664,6 @@ class TaskController extends Controller
 
         try {
             $newAssignedUser = \App\Models\User::findOrFail($request->new_assigned_user_id);
-
-            // Additional validation: new assigned user must have a department
-            // if (!$newAssignedUser->department_id) {
-            //     return response()->json([
-            //         'message' => 'Cannot reassign task to user without department'
-            //     ], 422);
-            // }
 
             $task = $this->workflowService->reassignEnquiryTask(
                 $taskId,
@@ -864,13 +775,12 @@ class TaskController extends Controller
      */
     public function updateEnquiryTask(Request $request, int $taskId): JsonResponse
     {
-        // Permissions temporarily removed - will be implemented soon
         $user = Auth::user();
 
         $validator = Validator::make($request->all(), [
             'title' => 'nullable|string|max:255',
             'priority' => 'nullable|string|in:low,medium,high,urgent',
-            'due_date' => 'nullable|date|after:yesterday', // Allow today
+            'due_date' => 'nullable|date|after:yesterday',
             'notes' => 'nullable|string|max:1000',
             'status' => 'nullable|string|in:pending,in_progress,completed,cancelled,skipped',
         ]);
@@ -896,31 +806,25 @@ class TaskController extends Controller
                 'notes',
             ]));
 
-            // Use workflow service for status updates to trigger automatic progression/reversion
             if ($request->has('status') && $request->status !== $oldStatus) {
-                \Log::info("[DEBUG] updateEnquiryTask updating status from {$oldStatus} to {$request->status} for task {$taskId}");
                 $task = $this->workflowService->updateTaskStatus($taskId, $request->status, $user->id);
 
-                // Send notification if task was marked as completed
                 if ($oldStatus !== 'completed' && $request->status === 'completed') {
                     $this->notificationService->sendTaskCompletedNotification($task, $user);
                 }
             }
-
-            \Log::info("[DEBUG] updateEnquiryTask completed successfully for task {$taskId}, final status: {$task->status}");
 
             return response()->json([
                 'data' => $task->load('assignedBy', 'assignmentHistory'),
                 'message' => 'Task updated successfully'
             ]);
         } catch (\Throwable $e) {
-        \Log::error("[DEBUG] updateEnquiryTask failed for task {$taskId}: " . $e->getMessage());
-        return response()->json([
-            'message' => $e->getMessage(),
-            'error' => $e->getMessage()
-        ], 500);
+            \Log::error("updateEnquiryTask failed for task {$taskId}: " . $e->getMessage());
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 500);
+        }
     }
-}
 
     /**
      * Get Universal Tasks associated with a project

@@ -70,6 +70,18 @@ class BoardRegistrationService
                     notes:     "Received — batch {$batchNumber}. Awaiting label print.",
                 );
             }
+
+            // Mark the stock row as individually tracked so the board registry and
+            // every tracking_mode-aware query treat this material as boards.
+            // The caller (checkIn / batchCheckIn) has already created the stock row
+            // via adjustStock; the legacy registerBatch() path does this inline.
+            // Without it, a board material received through the main check-in path
+            // keeps the default 'count' mode and disappears from /boards/stock-registry.
+            $stock = Stock::where('material_id', $material->id)->first();
+            if ($stock && $stock->tracking_mode !== Stock::TRACK_BY_AREA) {
+                $stock->update(['tracking_mode' => Stock::TRACK_BY_AREA]);
+            }
+
             return $boards;
         });
     }

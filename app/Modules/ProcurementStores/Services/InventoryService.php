@@ -15,23 +15,24 @@ class InventoryService
      */
     public function generateBatchNumber(): string
     {
-        $today = now()->format('Ymd');
-        $prefix = "ISS-{$today}-";
-        
-        // Get the last batch number for today
-        $lastBatch = InventoryLog::where('batch_number', 'like', "{$prefix}%")
-            ->orderBy('batch_number', 'desc')
-            ->first();
-        
-        if ($lastBatch) {
-            // Extract the sequence number and increment
-            $lastSequence = (int) substr($lastBatch->batch_number, -4);
-            $newSequence = $lastSequence + 1;
-        } else {
-            $newSequence = 1;
-        }
-        
-        return $prefix . str_pad($newSequence, 4, '0', STR_PAD_LEFT);
+        // Wrapped in a transaction so lockForUpdate() is effective.
+        // Nested calls (from within adjustStock's own transaction) are safe —
+        // Laravel uses savepoints for nested transactions in MySQL.
+        return DB::transaction(function () {
+            $today  = now()->format('Ymd');
+            $prefix = "ISS-{$today}-";
+
+            $lastBatch = InventoryLog::where('batch_number', 'like', "{$prefix}%")
+                ->lockForUpdate()
+                ->orderBy('batch_number', 'desc')
+                ->first();
+
+            $seq = $lastBatch
+                ? ((int) substr($lastBatch->batch_number, -4)) + 1
+                : 1;
+
+            return $prefix . str_pad($seq, 4, '0', STR_PAD_LEFT);
+        });
     }
 
     /**
@@ -46,13 +47,16 @@ class InventoryService
     public function adjustStock(int $materialId, float $quantity, string $type, array $meta = [])
     {
         return DB::transaction(function () use ($materialId, $quantity, $type, $meta) {
-            // 1. Get or Create Stock record
-            $stock = Stock::firstOrCreate(
+            // Ensure the row exists before locking; insert has no race risk.
+            Stock::firstOrCreate(
                 ['material_id' => $materialId],
                 ['quantity_on_hand' => 0, 'warehouse_code' => $meta['warehouse_code'] ?? 'MAIN']
             );
 
-            // 2. Calculate new balance
+            // Lock the row for the duration of this transaction so concurrent
+            // check-outs cannot both read the same balance and race to negative.
+            $stock = Stock::where('material_id', $materialId)->lockForUpdate()->firstOrFail();
+
             $stock->quantity_on_hand += $quantity;
             $stock->save();
 
@@ -62,7 +66,7 @@ class InventoryService
             // 4. Log the movement with batch number
             return InventoryLog::create([
                 'material_id' => $materialId,
-                'user_id' => Auth::id() ?? 1,
+                'user_id' => Auth::id(),
                 'type' => $type,
                 'batch_number' => $batchNumber,
                 'quantity' => $quantity,

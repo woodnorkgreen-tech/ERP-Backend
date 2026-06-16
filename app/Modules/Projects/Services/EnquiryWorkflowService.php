@@ -6,6 +6,7 @@ use App\Models\ProjectEnquiry;
 use App\Models\TaskAssignmentHistory;
 use App\Models\User;
 use App\Modules\Projects\Models\EnquiryTask;
+use App\Modules\HR\Models\Department;
 use Illuminate\Support\Facades\Log;
 use App\Constants\EnquiryConstants;
 use App\Services\Governance\ProjectGovernanceService;
@@ -34,7 +35,19 @@ class EnquiryWorkflowService
 
         try {
             $taskTemplates = config('enquiry_workflow.task_templates', []);
-            
+
+            // Auto-routing: resolve each task type to its owning department once,
+            // so newly created tasks land in the right department pool instead of
+            // requiring a coordinator to assign them manually. Single query, no N+1.
+            $mappedDepartmentNames = collect(EnquiryTask::TASK_TYPE_DEPARTMENT_MAPPING)
+                ->flatten()->unique()->all();
+            $departmentIdByName = Department::whereIn('name', $mappedDepartmentNames)
+                ->pluck('id', 'name');
+            $departmentForType = static function (string $type) use ($departmentIdByName): ?int {
+                $name = EnquiryTask::primaryDepartmentName($type);
+                return $name ? ($departmentIdByName[$name] ?? null) : null;
+            };
+
             // Get selected tasks or use all if none specified (backward compatibility)
             $selectedTaskTypes = $enquiry->selected_workflow_tasks ?? 
                                 array_column($taskTemplates, 'type');
@@ -59,10 +72,16 @@ class EnquiryWorkflowService
                 $type = $template['type'];
                 $idealOrder = $index + 1; // Use canonical order from template config base-1
 
-                // If task exists, update its order to ensure sequence is correct (e.g. if we insert a task)
+                // If task exists, keep its order correct and backfill the owning
+                // department if it was never routed (do not override a manual assignment).
                 if ($existingTasks->has($type)) {
-                    $existingTasks[$type]->update(['task_order' => $idealOrder]);
-                    continue; 
+                    $existing = $existingTasks[$type];
+                    $updates = ['task_order' => $idealOrder];
+                    if (empty($existing->department_id) && ($deptId = $departmentForType($type))) {
+                        $updates['department_id'] = $deptId;
+                    }
+                    $existing->update($updates);
+                    continue;
                 }
 
                 // If not selected, skip creation
@@ -91,7 +110,8 @@ class EnquiryWorkflowService
                     'priority' => EnquiryConstants::PRIORITY_MEDIUM,
                     'notes' => $notes, // Fixed syntax error here previously
                     'created_by' => $enquiry->created_by,
-                    'task_order' => $idealOrder, 
+                    'task_order' => $idealOrder,
+                    'department_id' => $departmentForType($type), // Auto-route to owning department
                 ]);
 
                 Log::info("Created new {$type} task for enquiry {$enquiry->id}");
@@ -189,10 +209,6 @@ class EnquiryWorkflowService
                 $this->handleEnquiryStatusProgression($task);
             }
             $this->handleTaskSpecificTransitions($task, $status);
-        } elseif (in_array($oldStatus, ['completed', 'skipped']) && $status !== 'completed') {
-            // Handle status reversion when task is reopened
-            // Manual reversion preferred for all tasks
-            // $this->handleEnquiryStatusReversion($task);
         } elseif ($status === 'in_progress') {
             $this->handleTaskSpecificTransitions($task, $status);
         }
@@ -408,9 +424,12 @@ class EnquiryWorkflowService
      */
     public function checkAndEscalateOverdueTasks(): void
     {
+        // Escalate every overdue, still-open task — including unassigned ones,
+        // which are themselves a coordination failure worth surfacing. Recipient
+        // resolution (pivot assignees, legacy column, or the project manager) is
+        // handled per task in sendOverdueNotifications().
         $overdueTasks = EnquiryTask::where('due_date', '<', now())
-            ->where('status', '!=', 'completed')
-            ->whereNotNull('assigned_to')
+            ->whereNotIn('status', ['completed', 'skipped', 'cancelled'])
             ->get();
 
         foreach ($overdueTasks as $task) {
@@ -542,47 +561,6 @@ class EnquiryWorkflowService
 
 
     /**
-     * Handle special cases for status progression
-     */
-    private function handleSpecialStatusCases(ProjectEnquiry $enquiry, string $newStatus): void
-    {
-        // No special cases needed when project conversion is removed
-    }
-
-    /**
-     * Handle enquiry status reversion when a task is reopened
-     */
-    private function handleEnquiryStatusReversion(EnquiryTask $task): void
-    {
-        $enquiry = $task->enquiry;
-
-        if (!$enquiry) {
-            Log::warning("Cannot revert enquiry status for task {$task->id}: Enquiry not found.");
-            return;
-        }
-
-        // Recalculate the appropriate status based on completed tasks
-        $newStatus = $this->calculateEnquiryStatusFromTasks($enquiry);
-
-        // Only update if the status has changed
-        if ($newStatus !== $enquiry->status) {
-            $oldEnquiryStatus = $enquiry->status;
-            $enquiry->status = $newStatus;
-            $enquiry->save();
-
-            Log::info("Enquiry {$enquiry->id} status reverted from '{$oldEnquiryStatus}' to '{$newStatus}' due to task '{$task->type}' reopening");
-        }
-    }
-
-    /**
-     * Calculate the appropriate enquiry status based on completed tasks
-     */
-    private function calculateEnquiryStatusFromTasks(ProjectEnquiry $enquiry): string
-    {
-        return app(SyncEnquiryStatusAction::class)->execute($enquiry->id)->status;
-    }
-
-    /**
      * Validate if a task is ready to be marked as completed
      */
     public function validateTaskCompletion(EnquiryTask $task): void
@@ -594,6 +572,9 @@ class EnquiryWorkflowService
 
         $user = auth()->user();
         $isAdmin = $user && $user->hasRole(\App\Constants\EnquiryConstants::ROLES_ADMIN);
+
+        // Workflow ordering: prerequisite task types must be satisfied first.
+        $this->validateTaskDependencies($task, (bool) $isAdmin);
 
         // 1. Materials Validation (Approvals)
         if ($task->type === 'materials') {
@@ -634,6 +615,77 @@ class EnquiryWorkflowService
     }
 
     /**
+     * Enforce workflow ordering: a task cannot be completed until its
+     * prerequisite task types are satisfied. Admins may override, but the
+     * bypass is logged for the governance trail.
+     */
+    private function validateTaskDependencies(EnquiryTask $task, bool $isAdmin): void
+    {
+        $blocking = $task->blockingPrerequisiteTitles();
+
+        if (empty($blocking)) {
+            return;
+        }
+
+        $blockingList = implode(', ', $blocking);
+
+        if ($isAdmin) {
+            Log::warning("Admin override: completing '{$task->type}' task {$task->id} before prerequisites are done: {$blockingList}");
+            return;
+        }
+
+        throw new \Exception(
+            "Cannot complete \"{$task->title}\" yet. Finish the prerequisite task(s) first: {$blockingList}."
+        );
+    }
+
+    /**
+     * When a task is completed, proactively notify the owners of any tasks that
+     * this completion has just unblocked, so coordination happens automatically
+     * rather than people polling the board. Recipients are the dependent task's
+     * assigned users, or — if unassigned — its owning department pool.
+     */
+    private function notifyUnblockedDependents(EnquiryTask $completedTask): void
+    {
+        $dependencyMap = config('enquiry_workflow.task_dependencies', []);
+
+        // Task types that list the just-completed type as a prerequisite.
+        $dependentTypes = [];
+        foreach ($dependencyMap as $type => $prerequisites) {
+            if (in_array($completedTask->type, $prerequisites, true)) {
+                $dependentTypes[] = $type;
+            }
+        }
+
+        if (empty($dependentTypes)) {
+            return;
+        }
+
+        $dependentTasks = EnquiryTask::where('project_enquiry_id', $completedTask->project_enquiry_id)
+            ->whereIn('type', $dependentTypes)
+            ->where('status', 'pending')
+            ->with('assignedUsers')
+            ->get();
+
+        foreach ($dependentTasks as $dependent) {
+            // Only announce tasks that are now fully unblocked.
+            if (!empty($dependent->blockingPrerequisiteTitles())) {
+                continue;
+            }
+
+            $recipients = $dependent->assignedUsers->isNotEmpty()
+                ? $dependent->assignedUsers
+                : ($dependent->department_id
+                    ? User::where('department_id', $dependent->department_id)->get()
+                    : collect());
+
+            foreach ($recipients as $recipient) {
+                $this->notificationService->sendTaskReadyNotification($dependent, $recipient);
+            }
+        }
+    }
+
+    /**
      * Handle transitions for specific task types (e.g. Handover, Production)
      */
     private function handleTaskSpecificTransitions(EnquiryTask $task, string $status): void
@@ -644,6 +696,11 @@ class EnquiryWorkflowService
         
         if (in_array($task->type, $triggerTypes) && (in_array($status, ['completed', 'skipped']) || ($task->type === 'handover' && $status === 'in_progress'))) {
             $this->initializeHandoverSurvey($task);
+        }
+
+        // 2. Proactively notify the owners of any tasks this completion unblocks.
+        if (in_array($status, ['completed', 'skipped'], true)) {
+            $this->notifyUnblockedDependents($task);
         }
     }
 

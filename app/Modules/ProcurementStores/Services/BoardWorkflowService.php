@@ -237,16 +237,26 @@ class BoardWorkflowService
             $boardId = $task->payload['offcut_id'] ?? $task->payload['board_id'] ?? null;
             if ($boardId) {
                 $board = Board::findOrFail($boardId);
-                if ($board->hasStatus('Available') || $board->hasStatus('Quarantine')) {
+                $note  = $task->task_type === BoardWorkflowTask::TYPE_OFFCUT_TO_RETURN
+                    ? 'Offcut physically returned to rack by storekeeper'
+                    : 'Board physically returned to rack by storekeeper';
+
+                if ($board->hasStatus('Quarantine')) {
+                    // Board was graded C/D and placed in Quarantine on return from production.
+                    // Storekeeper now confirms it is racked and available — use transitionTo()
+                    // so board.status is properly updated (not just the movement log).
+                    $board->transitionTo('Available', $actor->id, $note);
+                    $board->update(['assigned_job_ref' => null]);
+                } elseif ($board->hasStatus('Available')) {
+                    // Board already Available (normal offcut path) — clear job ref and
+                    // write a racking confirmation note without changing status.
                     $board->update(['assigned_job_ref' => null]);
                     \App\Modules\ProcurementStores\Models\BoardMovement::create([
                         'board_id'     => $board->id,
-                        'from_status'  => $board->status,
+                        'from_status'  => 'Available',
                         'to_status'    => 'Available',
                         'performed_by' => $actor->id,
-                        'notes'        => $task->task_type === BoardWorkflowTask::TYPE_OFFCUT_TO_RETURN
-                            ? 'Offcut physically returned to rack by storekeeper'
-                            : 'Board physically returned to rack by storekeeper',
+                        'notes'        => $note,
                     ]);
                 }
             }

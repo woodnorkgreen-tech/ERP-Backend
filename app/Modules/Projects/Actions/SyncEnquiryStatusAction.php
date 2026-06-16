@@ -37,7 +37,10 @@ class SyncEnquiryStatusAction
             ->pluck('type')
             ->toArray();
 
-        // Use centralized progression order from constants
+        // Use centralized progression order from constants.
+        // CONTRACT: ENQUIRY_STATUS_REQUISITES MUST be ordered highest milestone
+        // first. The loop below breaks on the first satisfied status, so that
+        // ordering is what makes it resolve to the *furthest* milestone reached.
         $statusProgression = EnquiryConstants::ENQUIRY_STATUS_REQUISITES;
 
         $newStatus = EnquiryConstants::STATUS_ENQUIRY_LOGGED;

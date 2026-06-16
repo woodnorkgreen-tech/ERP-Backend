@@ -99,8 +99,11 @@ Route::post('/logout', [AuthController::class, 'logout'])->middleware(['auth:san
 
 
 Route::get('/user', function () {
-    $user = auth()->user();
-    return response()->json($user->load('roles'));
+    $user = auth()->user()->load(['roles', 'employee:id,profile_photo_path,updated_at']);
+    $data = $user->toArray();
+    $data['profile_photo_url'] = $user->employee?->profile_photo_url;
+    unset($data['employee']);
+    return response()->json($data);
 })->middleware(['auth:sanctum', 'active']);
 //location apis
 Route::get('/locations', 'App\Http\Controllers\LocationController@index');
@@ -457,6 +460,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('/budget-status', [App\Http\Controllers\QuoteController::class, 'checkBudgetStatus']);
         Route::get('/changes-preview', [App\Http\Controllers\QuoteController::class, 'previewBudgetChanges']);
         Route::post('/smart-merge', [App\Http\Controllers\QuoteController::class, 'smartMergeBudget']);
+        // Server-side scope → quote sync (creates/updates/removes material elements to match enquiry scope)
+        Route::post('/sync-scope', [App\Http\Controllers\QuoteController::class, 'syncScope']);
 
         // Quote versioning routes (standardized to match materials/budget pattern)
         Route::post('/versions', [App\Http\Controllers\QuoteController::class, 'createVersion']);
@@ -567,16 +572,19 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('/', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'show']);
             Route::get('/pdf', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generatePdf']);
             Route::post('/planning', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'savePlanning']);
-            Route::put('/team-confirmation', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTeamConfirmation']);
-            Route::get('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getTransportItems']);
+            Route::get('/transport-items',   [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getTransportItems']);
             Route::post('/transport-items', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'addTransportItem']);
             Route::put('/transport-items/{itemId}', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateTransportItem']);
             Route::delete('/transport-items/{itemId}', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'deleteTransportItem']);
             Route::post('/import-production-elements', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'importProductionElements']);
             Route::get('/checklist', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklist']);
             Route::post('/checklist', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'updateChecklist']);
-            Route::post('/checklist/generate', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateChecklist']);
-            Route::get('/checklist/stats', [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklistStats']);
+            Route::post('/checklist/generate',                    [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateChecklist']);
+            Route::get('/checklist/stats',                       [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'getChecklistStats']);
+            Route::get('/checklist/pdf',                         [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'downloadChecklistPdf']);
+            Route::post('/return-checklist/generate',            [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateReturnChecklist']);
+            Route::post('/return-checklist/authorize',           [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'authorizeReturn']);
+            Route::get('/return-checklist/pdf',                  [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'downloadReturnChecklistPdf']);
         });
 
 
@@ -671,6 +679,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
         Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);
         Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
+        Route::get('enquiries/{enquiry}/completion-readiness', [EnquiryController::class, 'completionReadiness']);
+        Route::post('enquiries/{enquiry}/complete', [EnquiryController::class, 'completeProject']);
 
         // Available project officers for enquiry assignment
         Route::get('available-project-officers', function () {
@@ -735,6 +745,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('/', [DesignRequirementController::class, 'index']);
             Route::put('/', [DesignRequirementController::class, 'update']);
         });
+
+
         // Notifications
         Route::get('notifications', function () {
             $user = auth()->user();

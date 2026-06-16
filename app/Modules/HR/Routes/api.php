@@ -1,6 +1,8 @@
 <?php
 use Illuminate\Support\Facades\Route;
 use App\Modules\HR\Http\Controllers\EmployeeController;
+use App\Modules\HR\Http\Controllers\HRDashboardController;
+use App\Modules\HR\Http\Controllers\HrDocumentController;
 use App\Modules\HR\Http\Controllers\DepartmentController;
 use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 use App\Modules\HR\Http\Controllers\PayrollEngineController;
@@ -21,6 +23,8 @@ use App\Modules\HR\Http\Controllers\InterviewController;
 use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
 use App\Modules\HR\Http\Controllers\OvertimeController;
 use App\Modules\HR\Http\Controllers\CompensatoryLeaveController;
+use App\Modules\HR\Http\Controllers\EmployeeSkillController;
+use App\Modules\HR\Http\Controllers\PerformanceReviewController;
 use App\Modules\HR\Http\Controllers\OnboardingController;
 use App\Constants\Permissions;
 
@@ -40,9 +44,18 @@ Route::get('hr/employees/{employee}/photo', [EmployeeController::class, 'getPhot
 // Protected HR Routes
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('hr')->group(function () {
+        // Cross-domain HR overview (server-side aggregation)
+        Route::get('dashboard/overview', [HRDashboardController::class, 'overview'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+
+        // HR PDF documents
+        Route::get('employees/{employee}/certificate-of-service', [HrDocumentController::class, 'certificateOfService']);
+        Route::get('discipline/{case}/letters/{type}', [HrDocumentController::class, 'disciplinaryLetter']);
+
         // Employee management
         Route::get('employees/profile', [EmployeeController::class, 'profile']);
         Route::get('employees/compact', [EmployeeController::class, 'compact']);
+        Route::get('employees/stats', [EmployeeController::class, 'stats'])->middleware('permission:' . Permissions::EMPLOYEE_READ);
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'uploadPhoto']);
 
         Route::apiResource('employees', EmployeeController::class)->middleware([
@@ -52,6 +65,24 @@ Route::middleware(['auth:sanctum'])->group(function () {
             'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
             'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
         ]);
+
+        // Employee skills & certifications
+        Route::prefix('employees/{employee}')->group(function () {
+            Route::get('skills',                           [EmployeeSkillController::class, 'indexSkills']);
+            Route::post('skills',                          [EmployeeSkillController::class, 'storeSkill']);
+            Route::put('skills/{skill}',                   [EmployeeSkillController::class, 'updateSkill']);
+            Route::delete('skills/{skill}',                [EmployeeSkillController::class, 'destroySkill']);
+
+            Route::get('certifications',                   [EmployeeSkillController::class, 'indexCertifications']);
+            Route::post('certifications',                  [EmployeeSkillController::class, 'storeCertification']);
+            Route::put('certifications/{certification}',   [EmployeeSkillController::class, 'updateCertification']);
+            Route::delete('certifications/{certification}',[EmployeeSkillController::class, 'destroyCertification']);
+
+            Route::get('performance-reviews',              [PerformanceReviewController::class, 'index']);
+            Route::post('performance-reviews',             [PerformanceReviewController::class, 'store']);
+            Route::put('performance-reviews/{review}',     [PerformanceReviewController::class, 'update']);
+            Route::delete('performance-reviews/{review}',  [PerformanceReviewController::class, 'destroy']);
+        });
 
         // Technical Labour management
         Route::apiResource('technical-labour', TechnicalLabourController::class);
@@ -103,6 +134,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('export/bank', [PayrollEngineController::class, 'exportBankRemittance']);
             Route::get('export/mpesa', [PayrollEngineController::class, 'exportMpesaRemittance']);
             Route::get('export/p9', [PayrollEngineController::class, 'exportP9']);
+            Route::get('export/p9/pdf', [PayrollEngineController::class, 'exportP9Pdf']);
 
             // Compliance & Payment (LEGACY REMOVED - Use Runs)
             // Route::get('compliance-summary', [PayrollEngineController::class, 'getComplianceSummary']);
@@ -206,6 +238,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('action-types', [HRActionController::class, 'actionTypes']);
         Route::post('actions', [HRActionController::class, 'store']);
         Route::post('actions/{id}/approve', [HRActionController::class, 'approveAction']);
+        Route::get('action-attachments/{id}/view', [HRActionController::class, 'viewAttachment']);
+        Route::get('action-attachments/{id}/download', [HRActionController::class, 'downloadAttachment']);
 
         // Profile Updates (Employee Self-Service)
         Route::post('profile-updates', [\App\Modules\HR\Http\Controllers\SelfServiceController::class, 'updateProfile']);

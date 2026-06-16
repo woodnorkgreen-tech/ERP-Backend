@@ -4,12 +4,12 @@ namespace App\Modules\MaterialsLibrary\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
+use App\Modules\MaterialsLibrary\Models\MaterialCategory;
 use App\Modules\MaterialsLibrary\Requests\StoreMaterialRequest;
 use App\Modules\MaterialsLibrary\Requests\UpdateMaterialRequest;
 use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-
 use Illuminate\Support\Facades\DB;
 
 class MaterialController extends Controller
@@ -73,11 +73,22 @@ class MaterialController extends Controller
         }
 
         if ($request->filled('category')) {
-            $query->where('category', $request->category);
+            // Match on the legacy string column OR via the normalised category FK so
+            // materials registered through either path are equally discoverable.
+            $query->where(function ($q) use ($request) {
+                $q->where('category', $request->category)
+                  ->orWhereHas('materialCategory', function ($cq) use ($request) {
+                      $cq->where('name', $request->category)
+                         ->orWhereHas('parent', fn ($pq) => $pq->where('name', $request->category));
+                  });
+            });
         }
 
         if ($request->filled('subcategory')) {
-            $query->where('subcategory', $request->subcategory);
+            $query->where(function ($q) use ($request) {
+                $q->where('subcategory', $request->subcategory)
+                  ->orWhereHas('materialCategory', fn ($cq) => $cq->where('name', $request->subcategory));
+            });
         }
 
         if ($request->filled('material_type')) {
@@ -171,6 +182,9 @@ class MaterialController extends Controller
              $data['attributes'] = ['attributes' => $data['attributes']];
         }
 
+        // Keep legacy string fields in sync with the FK so both lookup paths agree.
+        $data = $this->syncCategoryStrings($data);
+
         $material = LibraryMaterial::create($data);
         $material->load('stock');
 
@@ -197,15 +211,16 @@ class MaterialController extends Controller
     public function update(UpdateMaterialRequest $request, $id): JsonResponse
     {
         $material = LibraryMaterial::findOrFail($id);
-        
+
         $data = $request->validated();
         $data['updated_by'] = auth()->id();
 
          // Wrap attributes in 'attributes' key for JSON column if not already
          if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
-            // Merge with existing or overwrite? simpler to overwrite structure
              $data['attributes'] = ['attributes' => $data['attributes']];
         }
+
+        $data = $this->syncCategoryStrings($data);
 
         $material->update($data);
         $material->load('stock');
@@ -262,16 +277,72 @@ class MaterialController extends Controller
     }
 
     /**
+     * When material_category_id is provided, write matching values into the legacy
+     * category/subcategory string columns so both lookup paths stay consistent.
+     * The root category name maps to `category`; the leaf name maps to `subcategory`.
+     */
+    private function syncCategoryStrings(array $data): array
+    {
+        if (empty($data['material_category_id'])) {
+            return $data;
+        }
+
+        $cat = MaterialCategory::with('parent')->find($data['material_category_id']);
+        if (!$cat) {
+            return $data;
+        }
+
+        if ($cat->parent) {
+            // Leaf category: parent is the root
+            $data['category']    = $data['category']    ?? $cat->parent->name;
+            $data['subcategory'] = $data['subcategory'] ?? $cat->name;
+        } else {
+            // Root category: use it directly, leave subcategory untouched
+            $data['category'] = $data['category'] ?? $cat->name;
+        }
+
+        return $data;
+    }
+
+    /**
      * Permanently delete a material.
+     * Restricted to Super Admin and only allowed when no active board records exist,
+     * because library_materials → boards has cascadeOnDelete() which would destroy
+     * the complete audit trail for every board ever made from this material.
      */
     public function forceDelete($id): JsonResponse
     {
+        if (!auth()->user()?->hasRole('Super Admin')) {
+            return response()->json(['message' => 'Only Super Admins can permanently delete materials.'], 403);
+        }
+
         $material = LibraryMaterial::withTrashed()->findOrFail($id);
+
+        // library_materials → boards is cascadeOnDelete, so a force-delete here wipes
+        // EVERY board record (and its board_movements) ever made from this material —
+        // including the Consumed/Scrapped history that is the asset audit trail.
+        // Block while ANY board references the material, not just active ones.
+        $boardCount = \App\Modules\ProcurementStores\Models\Board::where('library_material_id', $id)->count();
+
+        if ($boardCount > 0) {
+            $activeBoards = \App\Modules\ProcurementStores\Models\Board::where('library_material_id', $id)
+                ->whereNotIn('status', ['Consumed', 'Scrapped'])
+                ->count();
+
+            $detail = $activeBoards > 0
+                ? "{$boardCount} board(s) are linked to this material ({$activeBoards} still active)."
+                : "{$boardCount} historical board record(s) are linked to this material.";
+
+            return response()->json([
+                'message' => "Cannot permanently delete — {$detail} "
+                    . 'Permanently deleting would erase the board tracking history for this material. '
+                    . 'Keep it soft-deleted instead.',
+            ], 422);
+        }
+
         $material->forceDelete();
 
-        return response()->json([
-            'message' => 'Material permanently deleted'
-        ]);
+        return response()->json(['message' => 'Material permanently deleted']);
     }
 
 }

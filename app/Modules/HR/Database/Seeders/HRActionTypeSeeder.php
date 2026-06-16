@@ -62,8 +62,8 @@ class HRActionTypeSeeder extends Seeder
                 'code' => 'TERMINATION',
                 'description' => 'Ending the employment relationship.',
                 'fields_schema' => [
-                    ['name' => 'status', 'label' => 'Final Status', 'type' => 'text', 'required' => true],
                     ['name' => 'termination_type', 'label' => 'Type', 'type' => 'select', 'options' => ['Resignation', 'Dismissal', 'Redundancy', 'Retirement'], 'required' => true],
+                    ['name' => 'status', 'label' => 'Employee Status', 'type' => 'select', 'options' => ['terminated'], 'required' => true],
                 ],
                 'requires_approval' => false,
                 'is_active' => true,
@@ -73,7 +73,7 @@ class HRActionTypeSeeder extends Seeder
                 'code' => 'SUSPENSION',
                 'description' => 'Temporary suspension from duties.',
                 'fields_schema' => [
-                    ['name' => 'status', 'label' => 'New Status', 'type' => 'text', 'required' => true],
+                    ['name' => 'status', 'label' => 'Employee Status', 'type' => 'select', 'options' => ['inactive', 'on-leave'], 'required' => true],
                     ['name' => 'suspension_duration', 'label' => 'Duration (Days)', 'type' => 'number', 'required' => true],
                     ['name' => 'details', 'label' => 'Reason for Suspension', 'type' => 'textarea', 'required' => true],
                 ],

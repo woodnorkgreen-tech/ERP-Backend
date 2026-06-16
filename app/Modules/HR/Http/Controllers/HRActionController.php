@@ -123,6 +123,52 @@ class HRActionController
 
 
     /**
+     * Stream an attachment inline for preview (PDF, image, etc.)
+     */
+    public function viewAttachment(int $id): \Illuminate\Http\Response
+    {
+        $attachment = HRActionAttachment::findOrFail($id);
+
+        if (!Storage::disk('public')->exists($attachment->file_path)) {
+            abort(404, 'File not found');
+        }
+
+        $content  = Storage::disk('public')->get($attachment->file_path);
+        $mimeType = Storage::disk('public')->mimeType($attachment->file_path) ?? 'application/octet-stream';
+        $size     = Storage::disk('public')->size($attachment->file_path);
+
+        return response($content, 200, [
+            'Content-Type'        => $mimeType,
+            'Content-Length'      => $size,
+            'Content-Disposition' => 'inline; filename="' . $attachment->file_name . '"',
+            'Cache-Control'       => 'private, no-cache',
+        ]);
+    }
+
+    /**
+     * Force-download an attachment.
+     */
+    public function downloadAttachment(int $id): \Illuminate\Http\Response
+    {
+        $attachment = HRActionAttachment::findOrFail($id);
+
+        if (!Storage::disk('public')->exists($attachment->file_path)) {
+            abort(404, 'File not found');
+        }
+
+        $content  = Storage::disk('public')->get($attachment->file_path);
+        $mimeType = Storage::disk('public')->mimeType($attachment->file_path) ?? 'application/octet-stream';
+        $size     = Storage::disk('public')->size($attachment->file_path);
+
+        return response($content, 200, [
+            'Content-Type'        => $mimeType,
+            'Content-Length'      => $size,
+            'Content-Disposition' => 'attachment; filename="' . $attachment->file_name . '"',
+            'Cache-Control'       => 'private, no-cache',
+        ]);
+    }
+
+    /**
      * HR: Approve a pending profile update or future-dated action.
      */
     public function approveAction(Request $request, $id): JsonResponse

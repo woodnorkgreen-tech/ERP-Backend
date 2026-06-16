@@ -32,7 +32,7 @@ class LogisticsTaskController extends Controller
                 return response()->json([
                     'message' => 'No logistics data found for this task',
                     'data' => null
-                ], 404);
+                ]);
             }
 
             return response()->json([
@@ -138,56 +138,6 @@ class LogisticsTaskController extends Controller
     }
 
     /**
-     * Update team confirmation
-     */
-    public function updateTeamConfirmation(Request $request, int $taskId): JsonResponse
-    {
-        try {
-            $validated = $request->validate([
-                'setup_teams_confirmed' => 'required|boolean',
-                'notes' => 'nullable|string|max:1000',
-            ]);
-
-            $logisticsTask = $this->logisticsService->updateTeamConfirmation($taskId, $validated);
-
-            return response()->json([
-                'message' => 'Team confirmation updated successfully',
-                'data' => $logisticsTask
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to update team confirmation',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Assign a team to a logistics task
-     */
-    public function assignTeam(Request $request, int $taskId): JsonResponse
-    {
-        try {
-            $validated = $request->validate([
-                'team_task_id' => 'required|integer|exists:teams_tasks,id',
-            ]);
-
-            $logisticsTask = $this->logisticsService->assignTeam($taskId, $validated['team_task_id']);
-
-            return response()->json([
-                'message' => 'Team assigned successfully',
-                'data' => $logisticsTask
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to assign team',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-
-    /**
      * Get transport items for a task
      */
     public function getTransportItems(int $taskId): JsonResponse
@@ -213,11 +163,6 @@ class LogisticsTaskController extends Controller
     public function addTransportItem(Request $request, int $taskId): JsonResponse
     {
         try {
-            \Log::info('[addTransportItem] Request received', [
-                'task_id' => $taskId,
-                'data' => $request->all()
-            ]);
-
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
                 'description' => 'nullable|string|max:1000',
@@ -242,27 +187,15 @@ class LogisticsTaskController extends Controller
                 }
             }
 
-            \Log::info('[addTransportItem] Validation passed', ['validated' => $validated]);
-
             $item = $this->logisticsService->addTransportItem($taskId, $validated);
-
-            \Log::info('[addTransportItem] Item created successfully', ['item_id' => $item->id]);
 
             return response()->json([
                 'message' => 'Transport item added successfully',
                 'data' => $item
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            \Log::error('[addTransportItem] Validation failed', [
-                'errors' => $e->errors()
-            ]);
             throw $e;
         } catch (\Exception $e) {
-            \Log::error('[addTransportItem] Failed to add transport item', [
-                'task_id' => $taskId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
             return response()->json([
                 'message' => 'Failed to add transport item',
                 'error' => $e->getMessage()
@@ -380,25 +313,40 @@ class LogisticsTaskController extends Controller
     {
         try {
             $validated = $request->validate([
-                'items' => 'required|array',
-                'items.*.id' => 'required|string',
-                'items.*.item_name' => 'required|string|max:255',
-                'items.*.status' => 'required|in:present,missing,coming_later',
-                'items.*.notes' => 'nullable|string|max:500',
-                'items.*.checkedBy' => 'nullable|string|max:255',
-                'items.*.checkedAt' => 'nullable|date',
-                'teams' => 'required|array',
-                'teams.workshop' => 'boolean',
-                'teams.setup' => 'boolean',
-                'teams.setdown' => 'boolean',
-                'safety' => 'required|array',
-                'safety.ppe' => 'boolean',
-                'safety.first_aid' => 'boolean',
-                'safety.fire_extinguisher' => 'boolean',
-                'equipment' => 'array',
-                'equipment.tools' => 'boolean',
-                'equipment.vehicles' => 'boolean',
-                'equipment.communication' => 'boolean',
+                'items'                          => 'required|array',
+                'items.*.id'                     => 'required|string',
+                'items.*.item_name'              => 'required|string|max:255',
+                'items.*.status'                 => 'required|in:present,missing,coming_later',
+                'items.*.notes'                  => 'nullable|string|max:500',
+                'items.*.checkedBy'              => 'nullable|string|max:255',
+                'items.*.checkedAt'              => 'nullable',
+                'teams'                          => 'nullable|array',
+                'teams.workshop'                 => 'nullable|boolean',
+                'teams.setup'                    => 'nullable|boolean',
+                'teams.setdown'                  => 'nullable|boolean',
+                'safety'                         => 'required|array',
+                'safety.ppe'                     => 'boolean',
+                'safety.first_aid'               => 'boolean',
+                'safety.fire_extinguisher'       => 'boolean',
+                'equipment'                      => 'nullable|array',
+                'equipment.tools'                => 'nullable|boolean',
+                'equipment.vehicles'             => 'nullable|boolean',
+                'equipment.communication'        => 'nullable|boolean',
+                'return_items'                   => 'nullable|array',
+                'return_items.*.id'              => 'nullable|string',
+                'return_items.*.name'            => 'nullable|string|max:255',
+                'return_items.*.quantity_dispatched' => 'nullable|integer|min:0',
+                'return_items.*.quantity_returned'   => 'nullable|integer|min:0',
+                'return_items.*.unit'            => 'nullable|string|max:50',
+                'return_items.*.main_category'   => 'nullable|string',
+                'return_items.*.status'          => 'nullable|in:pending,returned,partial,missing,damaged',
+                'return_items.*.condition'       => 'nullable|in:good,worn,damaged',
+                'return_items.*.notes'           => 'nullable|string|max:500',
+                'return_items.*.returned_at'     => 'nullable|string',
+                'setdown_confirmed'              => 'nullable|boolean',
+                'return_authorized'              => 'nullable|boolean',
+                'return_authorized_at'           => 'nullable|string',
+                'setdown_notes'                  => 'nullable|string|max:1000',
             ]);
 
             $checklist = $this->logisticsService->updateChecklist($taskId, $validated);
@@ -460,6 +408,107 @@ class LogisticsTaskController extends Controller
                 'message' => 'Failed to retrieve checklist statistics',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Generate return checklist from returnable manifest items.
+     * Merges into existing checklist_data — safe to call multiple times (idempotent).
+     */
+    public function generateReturnChecklist(int $taskId): JsonResponse
+    {
+        try {
+            $returnItems = $this->logisticsService->generateReturnChecklistItems($taskId);
+
+            return response()->json([
+                'message' => 'Return checklist generated successfully',
+                'data'    => $returnItems,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate return checklist',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Authorize return as complete — stamps return_authorized + timestamp in checklist_data.
+     */
+    public function authorizeReturn(Request $request, int $taskId): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'notes' => 'nullable|string|max:1000',
+            ]);
+
+            $checklist = $this->logisticsService->authorizeReturn($taskId, $validated['notes'] ?? null);
+
+            return response()->json([
+                'message' => 'Return authorized successfully',
+                'data'    => $checklist,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to authorize return',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Download loading checklist as PDF
+     */
+    public function downloadChecklistPdf(int $taskId)
+    {
+        try {
+            $data = $this->logisticsService->getLogisticsForTask($taskId);
+
+            if (!$data) {
+                return response()->json(['message' => 'No logistics data found.'], 404);
+            }
+
+            $task = EnquiryTask::with(['enquiry.client', 'enquiry.project'])->findOrFail($taskId);
+
+            $pdf = Pdf::loadView('reports.logistics-loading-checklist', [
+                'data'   => $data,
+                'task'   => $task,
+                'client' => $task->enquiry->client ?? null,
+            ]);
+
+            $ref = optional($task->enquiry->project)->project_id ?? $task->enquiry->enquiry_number ?? $taskId;
+            return $pdf->download('loading-checklist-' . $ref . '.pdf');
+        } catch (\Exception $e) {
+            Log::error("Failed to generate loading checklist PDF for task {$taskId}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to generate PDF', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Download return checklist as PDF
+     */
+    public function downloadReturnChecklistPdf(int $taskId)
+    {
+        try {
+            $data = $this->logisticsService->getLogisticsForTask($taskId);
+
+            if (!$data) {
+                return response()->json(['message' => 'No logistics data found.'], 404);
+            }
+
+            $task = EnquiryTask::with(['enquiry.client', 'enquiry.project'])->findOrFail($taskId);
+
+            $pdf = Pdf::loadView('reports.logistics-return-checklist', [
+                'data'   => $data,
+                'task'   => $task,
+                'client' => $task->enquiry->client ?? null,
+            ]);
+
+            $ref = optional($task->enquiry->project)->project_id ?? $task->enquiry->enquiry_number ?? $taskId;
+            return $pdf->download('return-checklist-' . $ref . '.pdf');
+        } catch (\Exception $e) {
+            Log::error("Failed to generate return checklist PDF for task {$taskId}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to generate PDF', 'error' => $e->getMessage()], 500);
         }
     }
 

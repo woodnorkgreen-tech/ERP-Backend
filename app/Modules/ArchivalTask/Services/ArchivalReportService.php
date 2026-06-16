@@ -222,27 +222,35 @@ class ArchivalReportService
             // Update main report
             $report->update($data);
 
-            // Update setup items if provided
+            // Update setup items if provided (upsert — keep existing IDs)
             if ($setupItems !== null) {
-                // Delete existing items
-                $report->setupItems()->delete();
-                
-                // Create new items
+                $incomingIds = collect($setupItems)->pluck('id')->filter()->values()->all();
+                $report->setupItems()->whereNotIn('id', $incomingIds)->delete();
+
                 foreach ($setupItems as $item) {
-                    if (!empty($item['deliverable_item'])) {
+                    if (empty($item['deliverable_item'])) continue;
+                    $id = $item['id'] ?? null;
+                    unset($item['id']);
+                    if ($id) {
+                        $report->setupItems()->where('id', $id)->update($item);
+                    } else {
                         $report->setupItems()->create($item);
                     }
                 }
             }
 
-            // Update item placements if provided
+            // Update item placements if provided (upsert — keep existing IDs)
             if ($itemPlacements !== null) {
-                // Delete existing placements
-                $report->itemPlacements()->delete();
-                
-                // Create new placements
+                $incomingIds = collect($itemPlacements)->pluck('id')->filter()->values()->all();
+                $report->itemPlacements()->whereNotIn('id', $incomingIds)->delete();
+
                 foreach ($itemPlacements as $placement) {
-                    if (!empty($placement['section_area'])) {
+                    if (empty($placement['section_area'])) continue;
+                    $id = $placement['id'] ?? null;
+                    unset($placement['id']);
+                    if ($id) {
+                        $report->itemPlacements()->where('id', $id)->update($placement);
+                    } else {
                         $report->itemPlacements()->create($placement);
                     }
                 }

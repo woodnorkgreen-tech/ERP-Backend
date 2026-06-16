@@ -146,6 +146,10 @@ class BoardRequestController extends Controller
      */
     public function fulfil(Request $request, int $id): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can fulfil board requests.'], 403);
+        }
+
         $request->validate([
             'board_ids' => 'nullable|array',
             'board_ids.*' => 'integer|exists:boards,id',
