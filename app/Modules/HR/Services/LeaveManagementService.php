@@ -196,7 +196,7 @@ class LeaveManagementService
         $cursor = $start->copy();
 
         while ($cursor->lte($end)) {
-            if (!$cursor->isWeekend()) {
+            if (!$cursor->isSunday()) {
                 $days++;
             }
 
@@ -208,6 +208,19 @@ class LeaveManagementService
         }
 
         return (float) $days;
+    }
+
+    public function calculateResumptionDate(string|Carbon $endDate): Carbon
+    {
+        $resumptionDate = $endDate instanceof Carbon
+            ? $endDate->copy()->startOfDay()
+            : Carbon::parse($endDate)->startOfDay();
+
+        do {
+            $resumptionDate->addDay();
+        } while ($resumptionDate->isSunday());
+
+        return $resumptionDate;
     }
 
     public function validateDateRange(string $startDate, string $endDate): void
@@ -367,9 +380,10 @@ class LeaveManagementService
         }
 
         $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year, $asOfDate);
+        $carryForwardDays = $this->calculateCarryForwardDays($employee, $leaveType, $year);
         $remaining = $leaveType->allow_advance
-            ? $metrics['year_entitlement_days'] - ($approved + $pending)
-            : $metrics['earned_days'] - ($approved + $pending);
+            ? ($metrics['year_entitlement_days'] + $carryForwardDays) - ($approved + $pending)
+            : ($metrics['earned_days'] + $carryForwardDays) - ($approved + $pending);
 
         if ($daysRequested > $remaining) {
             throw new \InvalidArgumentException(sprintf(
@@ -598,7 +612,7 @@ class LeaveManagementService
         $summary = $this->getLeaveSummaryForEmployee($employee, $year);
         $balance = $summary->firstWhere('leave_type_id', $leaveTypeId);
 
-        return $balance ? $balance->toArray() : [
+        return $balance ?: [
             'leave_type_id' => $leaveTypeId,
             'used_days' => 0,
             'available_days' => 0,

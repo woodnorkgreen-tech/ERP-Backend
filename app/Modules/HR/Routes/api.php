@@ -178,6 +178,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
             // Leave requests
             Route::get('requests', [LeaveRequestController::class, 'index']);
+            Route::post('requests/preview', [LeaveRequestController::class, 'preview']);
             Route::post('requests', [LeaveRequestController::class, 'store']);
             Route::get('requests/{leaveRequest}', [LeaveRequestController::class, 'show']);
             Route::put('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);

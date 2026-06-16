@@ -199,6 +199,94 @@ class LeaveRequestController extends Controller
         ], 201);
     }
 
+    public function preview(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'employee_id' => ['nullable', 'integer', 'exists:employees,id'],
+            'leave_type_id' => ['required', 'integer', 'exists:leave_types,id'],
+            'start_date' => ['required', 'date'],
+            'end_date' => ['required', 'date', 'after_or_equal:start_date'],
+            'session' => ['required', Rule::in(['full_day', 'first_half', 'second_half'])],
+            'ignore_request_id' => ['nullable', 'integer', 'exists:leave_requests,id'],
+        ]);
+
+        $employee = $this->resolveTargetEmployee($user, $validated['employee_id'] ?? null);
+        $leaveType = LeaveType::findOrFail($validated['leave_type_id']);
+        $year = (int) date('Y', strtotime($validated['start_date']));
+        $ignoreRequestId = $validated['ignore_request_id'] ?? null;
+
+        try {
+            $this->leaveService->validateDateRange($validated['start_date'], $validated['end_date']);
+            $this->leaveService->ensureNoOverlap(
+                $employee,
+                $validated['start_date'],
+                $validated['end_date'],
+                $ignoreRequestId
+            );
+
+            $daysRequested = $this->leaveService->calculateBusinessDays(
+                $validated['start_date'],
+                $validated['end_date'],
+                $validated['session']
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json([
+                'success' => false,
+                'message' => $exception->getMessage(),
+                'errors' => [
+                    'date_range' => [$exception->getMessage()],
+                ],
+            ], 422);
+        }
+
+        $balance = $this->leaveService->getLeaveBalance($employee->id, $leaveType->id, $year);
+        $requestableBefore = (float) ($balance['requestable_days'] ?? $balance['available_days'] ?? 0);
+        $availableBefore = (float) ($balance['available_days'] ?? 0);
+        $canRequest = true;
+        $validationMessage = null;
+
+        try {
+            $this->leaveService->ensureBalanceAvailable(
+                $employee,
+                $leaveType,
+                $daysRequested,
+                $year,
+                $ignoreRequestId,
+                $validated['start_date']
+            );
+        } catch (\InvalidArgumentException $exception) {
+            $canRequest = false;
+            $validationMessage = $exception->getMessage();
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'employee_id' => $employee->id,
+                'leave_type_id' => $leaveType->id,
+                'year' => $year,
+                'days_requested' => $daysRequested,
+                'resumption_date' => $this->leaveService
+                    ->calculateResumptionDate($validated['end_date'])
+                    ->toDateString(),
+                'can_request' => $canRequest,
+                'validation_message' => $validationMessage,
+                'balance' => $balance,
+                'projected_balance' => [
+                    'available_days' => max($availableBefore - $daysRequested, 0),
+                    'requestable_days' => max($requestableBefore - $daysRequested, 0),
+                ],
+                'working_days_policy' => [
+                    'saturday_is_working_day' => true,
+                    'sunday_is_working_day' => false,
+                    'excluded_weekdays' => ['sunday'],
+                ],
+            ],
+        ]);
+    }
+
     public function update(Request $request, LeaveRequest $leaveRequest): JsonResponse
     {
         $user = $request->user();
@@ -581,14 +669,14 @@ class LeaveRequestController extends Controller
             }
         }
 
-        $totalRequests = $query->count();
-        $approvedRequests = $query->where('status', LeaveRequest::STATUS_APPROVED)->count();
-        $pendingRequests = $query->where('status', LeaveRequest::STATUS_PENDING)->count();
-        $rejectedRequests = $query->where('status', LeaveRequest::STATUS_REJECTED)->count();
-        $cancelledRequests = $query->where('status', LeaveRequest::STATUS_CANCELLED)->count();
+        $totalRequests = (clone $query)->count();
+        $approvedRequests = (clone $query)->where('status', LeaveRequest::STATUS_APPROVED)->count();
+        $pendingRequests = (clone $query)->where('status', LeaveRequest::STATUS_PENDING)->count();
+        $rejectedRequests = (clone $query)->where('status', LeaveRequest::STATUS_REJECTED)->count();
+        $cancelledRequests = (clone $query)->where('status', LeaveRequest::STATUS_CANCELLED)->count();
 
-        $totalDays = $query->sum('days_requested');
-        $approvedDays = $query->where('status', LeaveRequest::STATUS_APPROVED)->sum('days_requested');
+        $totalDays = (clone $query)->sum('days_requested');
+        $approvedDays = (clone $query)->where('status', LeaveRequest::STATUS_APPROVED)->sum('days_requested');
 
         $byLeaveType = LeaveRequest::query()
             ->whereYear('start_date', $year)
