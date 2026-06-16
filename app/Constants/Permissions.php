@@ -196,6 +196,16 @@ class Permissions
     const TASK_SKIP = 'task.skip';
 
     // ===========================================
+    // ONBOARDING PERMISSIONS
+    // ===========================================
+    const ONBOARDING_VIEW    = 'onboarding.view';
+    const ONBOARDING_CREATE  = 'onboarding.create';
+    const ONBOARDING_MANAGE  = 'onboarding.manage';
+    const ONBOARDING_APPROVE = 'onboarding.approve';
+    const ONBOARDING_IT      = 'onboarding.it';
+    const ONBOARDING_SOPS    = 'onboarding.sops';
+
+    // ===========================================
     // RECRUITMENT PERMISSIONS
     // ===========================================
     const RECRUITMENT_INTERVIEW_CREATE = 'recruitment.interview.create';
@@ -289,6 +299,10 @@ class Permissions
             self::TASK_CREATE, self::TASK_READ, self::TASK_UPDATE, self::TASK_DELETE,
             self::TASK_ASSIGN, self::TASK_COMPLETE, self::TASK_SKIP,
 
+            // Onboarding Permissions
+            self::ONBOARDING_VIEW, self::ONBOARDING_CREATE, self::ONBOARDING_MANAGE,
+            self::ONBOARDING_APPROVE, self::ONBOARDING_IT, self::ONBOARDING_SOPS,
+
             // Recruitment Permissions
             self::RECRUITMENT_INTERVIEW_CREATE, self::RECRUITMENT_INTERVIEW_UPDATE, self::RECRUITMENT_INTERVIEW_DELETE,
             self::RECRUITMENT_NOTIFY, self::RECRUITMENT_BACKGROUND_CHECK_UPDATE, self::RECRUITMENT_BACKGROUND_CHECK_COMPLETE,
@@ -377,6 +391,10 @@ class Permissions
             'tasks' => [
                 self::TASK_CREATE, self::TASK_READ, self::TASK_UPDATE, self::TASK_DELETE,
                 self::TASK_ASSIGN, self::TASK_COMPLETE, self::TASK_SKIP,
+            ],
+            'onboarding' => [
+                self::ONBOARDING_VIEW, self::ONBOARDING_CREATE, self::ONBOARDING_MANAGE,
+                self::ONBOARDING_APPROVE, self::ONBOARDING_IT, self::ONBOARDING_SOPS,
             ],
             'recruitment' => [
                 self::RECRUITMENT_INTERVIEW_CREATE, self::RECRUITMENT_INTERVIEW_UPDATE, self::RECRUITMENT_INTERVIEW_DELETE,

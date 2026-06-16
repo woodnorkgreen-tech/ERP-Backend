@@ -27,9 +27,27 @@ class GrievanceController extends Controller
         return $user && $user->hasAnyRole(self::GRIEVANCE_MANAGER_ROLES);
     }
 
+    /**
+     * Dept lead can access/manage a grievance only if:
+     *  - they are actually a dept lead
+     *  - they are NOT the accused party (against_id)
+     *  - the complainant belongs to one of their accessible departments
+     */
+    protected function isDeptLeadForGrievance($user, Grievance $grievance): bool
+    {
+        if (!$user || !$user->isDeptLead()) return false;
+        if ($grievance->against_id && $grievance->against_id === $user->id) return false;
+        $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+        if (empty($accessibleDeptIds)) return false;
+        $complainantDeptId = $grievance->complainant?->department_id;
+        return $complainantDeptId && in_array($complainantDeptId, $accessibleDeptIds);
+    }
+
     protected function canAccessGrievance($user, Grievance $grievance): bool
     {
-        return $this->canManageGrievances($user) || ($user && $grievance->complainant_id === $user->id);
+        return $this->canManageGrievances($user)
+            || ($user && $grievance->complainant_id === $user->id)
+            || $this->isDeptLeadForGrievance($user, $grievance);
     }
 
     protected function forbiddenResponse(string $message): JsonResponse
@@ -182,7 +200,7 @@ class GrievanceController extends Controller
             $grievance = Grievance::findOrFail($id);
             $user = auth()->user();
 
-            if (!$this->canManageGrievances($user)) {
+            if (!$this->canManageGrievances($user) && !$this->isDeptLeadForGrievance($user, $grievance)) {
                 return $this->forbiddenResponse('You do not have permission to update this grievance');
             }
 
@@ -231,7 +249,7 @@ class GrievanceController extends Controller
             $grievance = Grievance::findOrFail($id);
             $user = auth()->user();
 
-            if (!$this->canManageGrievances($user)) {
+            if (!$this->canManageGrievances($user) && !$this->isDeptLeadForGrievance($user, $grievance)) {
                 return $this->forbiddenResponse('You do not have permission to resolve grievances');
             }
 
@@ -277,7 +295,7 @@ class GrievanceController extends Controller
             $grievance = Grievance::findOrFail($id);
             $user = auth()->user();
 
-            if (!$this->canManageGrievances($user)) {
+            if (!$this->canManageGrievances($user) && !$this->isDeptLeadForGrievance($user, $grievance)) {
                 return $this->forbiddenResponse('You do not have permission to escalate grievances');
             }
 

@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use App\Modules\MaterialsLibrary\Database\Seeders\MaterialCategorySeeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -10,12 +11,14 @@ return new class extends Migration
     public function up(): void
     {
         // Add column without FK first so we can populate it safely
-        Schema::table('library_materials', function (Blueprint $table) {
-            $table->unsignedBigInteger('material_category_id')
-                  ->nullable()
-                  ->after('subcategory')
-                  ->comment('FK to material_categories (child/subcategory level)');
-        });
+        if (!Schema::hasColumn('library_materials', 'material_category_id')) {
+            Schema::table('library_materials', function (Blueprint $table) {
+                $table->unsignedBigInteger('material_category_id')
+                      ->nullable()
+                      ->after('subcategory')
+                      ->comment('FK to material_categories (child/subcategory level)');
+            });
+        }
 
         // ── Data migration ──────────────────────────────────────────────────────
         // Match existing category/subcategory strings to material_categories rows.
@@ -25,6 +28,10 @@ return new class extends Migration
         //   2. Fall back to parent category name if no subcategory match
         //
         // This preserves all existing materials without losing their category.
+
+        if (DB::table('material_categories')->count() === 0) {
+            app(MaterialCategorySeeder::class)->run();
+        }
 
         $categories = DB::table('material_categories')
             ->whereNull('deleted_at')

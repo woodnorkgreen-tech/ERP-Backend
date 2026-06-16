@@ -13,6 +13,10 @@ use Carbon\Carbon;
 
 class OvertimeService
 {
+    public function __construct(
+        private readonly AttendanceOvertimeService $attendanceOvertimeService
+    ) {}
+
     /**
      * Submit an OT entry for approval.
      */
@@ -22,12 +26,18 @@ class OvertimeService
             'status' => 'submitted',
             'submitted_by' => auth()->id(),
         ]);
+        $this->attendanceOvertimeService->markStatus($entry, 'submitted');
 
         SystemEvent::log('submitted', 'ot_entry', $entry->id, $entry->toArray());
 
         $this->generateIntelligenceFlags($entry);
 
         return $entry;
+    }
+
+    public function syncAttendanceStatus(OTEntry $entry, string $status): void
+    {
+        $this->attendanceOvertimeService->markStatus($entry, $status);
     }
 
     /**
@@ -40,6 +50,7 @@ class OvertimeService
             'supervisor_approved_by' => auth()->id(),
             'supervisor_approved_at' => now(),
         ]);
+        $this->attendanceOvertimeService->markStatus($entry, 'under_review');
 
         SystemEvent::log('supervisor_approved', 'ot_entry', $entry->id, [
             'approver' => auth()->user()->name
@@ -64,6 +75,7 @@ class OvertimeService
             $this->creditLedger($entry);
 
             $entry->update(['status' => 'done']);
+            $this->attendanceOvertimeService->markApproved($entry);
 
             SystemEvent::log('hr_approved', 'ot_entry', $entry->id, [
                 'approver' => auth()->user()->name

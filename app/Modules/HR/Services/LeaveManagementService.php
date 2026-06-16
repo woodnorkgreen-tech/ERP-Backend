@@ -136,7 +136,15 @@ class LeaveManagementService
 
     public function canManage(User $user): bool
     {
-        return $user->hasRole(['Super Admin', 'Admin', 'HR', 'Manager', 'Lead'])
+        return $user->hasRole(['Super Admin', 'Admin', 'HR', 'Manager'])
+            || $user->isDeptLead()
+            || $user->can('leave.request.approve')
+            || $user->can('leave.type.update');
+    }
+
+    public function isGlobalManager(User $user): bool
+    {
+        return $user->hasRole(['Super Admin', 'Admin', 'HR', 'Manager'])
             || $user->can('leave.request.approve')
             || $user->can('leave.type.update');
     }
@@ -146,11 +154,22 @@ class LeaveManagementService
         if ($employeeId) {
             $employee = Employee::findOrFail($employeeId);
 
-            if (!$this->canManage($user) && (int) $user->employee_id !== (int) $employee->id) {
-                throw new AuthorizationException('You are not allowed to access this employee leave profile.');
+            if ((int) $user->employee_id === (int) $employee->id) {
+                return $employee;
             }
 
-            return $employee;
+            if ($this->isGlobalManager($user)) {
+                return $employee;
+            }
+
+            if ($user->isDeptLead()) {
+                $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+                if (in_array($employee->department_id, $accessibleDeptIds)) {
+                    return $employee;
+                }
+            }
+
+            throw new AuthorizationException('You are not allowed to access this employee leave profile.');
         }
 
         if ($user->employee_id) {

@@ -2,17 +2,27 @@
 
 namespace App\Modules\HR\Services;
 
+use App\Modules\HR\Exceptions\AttendanceRecordConflictException;
 use App\Modules\HR\Models\AttendanceDeviceSyncLog;
+use App\Modules\HR\Models\AttendanceHoliday;
 use App\Modules\HR\Models\AttendanceRecord;
+use App\Modules\HR\Models\Employee;
+use App\Modules\HR\Models\HRAuditLog;
+use App\Modules\HR\Models\LeaveRequest;
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AttendanceService
 {
     public function __construct(
-        private readonly HikvisionSyncService $hikvisionSyncService
+        private readonly HikvisionSyncService $hikvisionSyncService,
+        private readonly AttendanceScheduleService $scheduleService = new AttendanceScheduleService(),
+        private readonly AttendanceOvertimeService $overtimeService = new AttendanceOvertimeService(),
+        private readonly AttendanceStatusPolicy $statusPolicy = new AttendanceStatusPolicy()
     ) {}
 
     public function getRecords(Request $request): LengthAwarePaginator
@@ -67,115 +77,193 @@ class AttendanceService
 
     public function getRecord(int $id): AttendanceRecord
     {
-        return AttendanceRecord::with(['employee'])->findOrFail($id);
+        return AttendanceRecord::with(['employee', 'correctedBy', 'auditLogs.user'])->findOrFail($id);
     }
 
-    public function createRecord(array $data): AttendanceRecord
+    public function createRecord(array $data, ?int $actorId = null, ?string $ipAddress = null): AttendanceRecord
     {
-        return DB::transaction(function () use ($data) {
-            $record = AttendanceRecord::create(array_merge($data, [
+        return DB::transaction(function () use ($data, $actorId, $ipAddress) {
+            $this->ensureEmployeeDayIsAvailable((int) $data['employee_id'], $data['date']);
+
+            $reason = $data['correction_reason'];
+            $calculation = $this->calculateManualRecord($data);
+            $record = AttendanceRecord::create(array_merge($data, $calculation, [
                 'is_manual' => true,
-                'work_hours' => $this->calculateWorkHoursFromTimes(
-                    $data['clock_in'] ?? null,
-                    $data['clock_out'] ?? null
-                ),
-                'overtime_hours' => $this->calculateOvertimeFromClockOut($data['clock_out'] ?? null),
+                'corrected_by' => $actorId,
+                'corrected_at' => now(),
             ]));
 
-            return $record;
+            $this->writeAudit($record, 'attendance_created_manually', $reason, null, $record->attributesToArray(), $actorId, $ipAddress);
+            $this->overtimeService->syncProposal(
+                $record,
+                $this->scheduleService->forEmployee($record->employee, $record->date)
+            );
+
+            return $record->load(['employee', 'correctedBy']);
         });
     }
 
-    public function updateRecord(int $id, array $data): AttendanceRecord
+    public function updateRecord(int $id, array $data, ?int $actorId = null, ?string $ipAddress = null): AttendanceRecord
     {
-        return DB::transaction(function () use ($id, $data) {
+        return DB::transaction(function () use ($id, $data, $actorId, $ipAddress) {
             $record = AttendanceRecord::findOrFail($id);
+            $before = $record->attributesToArray();
+            $reason = $data['correction_reason'];
+            $date = $data['date'] ?? $record->date->toDateString();
+
+            $this->ensureEmployeeDayIsAvailable($record->employee_id, $date, $record->id);
 
             $clockIn  = $data['clock_in']  ?? $record->clock_in;
             $clockOut = $data['clock_out'] ?? $record->clock_out;
+            $calculation = $this->calculateManualRecord([
+                ...$data,
+                'employee_id' => $record->employee_id,
+                'date' => $date,
+                'clock_in' => $clockIn,
+                'clock_out' => $clockOut,
+            ]);
 
-            $record->update(array_merge($data, [
-                'work_hours'    => $this->calculateWorkHoursFromTimes($clockIn, $clockOut),
-                'overtime_hours' => $this->calculateOvertimeFromClockOut($clockOut),
+            $record->update(array_merge($data, $calculation, [
+                'date' => $date,
+                'is_manual' => true,
+                'corrected_by' => $actorId,
+                'corrected_at' => now(),
             ]));
+
+            $this->writeAudit(
+                $record,
+                'attendance_corrected',
+                $reason,
+                $before,
+                $record->fresh()->attributesToArray(),
+                $actorId,
+                $ipAddress
+            );
+            $record->load('employee');
+            $this->overtimeService->syncProposal(
+                $record,
+                $this->scheduleService->forEmployee($record->employee, $record->date)
+            );
 
             return $record->fresh(['employee']);
         });
     }
 
-    public function deleteRecord(int $id): void
+    public function deleteRecord(int $id, string $reason, ?int $actorId = null, ?string $ipAddress = null): void
     {
-        AttendanceRecord::findOrFail($id)->delete();
+        DB::transaction(function () use ($id, $reason, $actorId, $ipAddress) {
+            $record = AttendanceRecord::findOrFail($id);
+            $before = $record->attributesToArray();
+            $record->delete();
+
+            $this->writeAudit($record, 'attendance_deleted', $reason, $before, null, $actorId, $ipAddress);
+        });
+    }
+
+    public function restoreRecord(int $id, string $reason, ?int $actorId = null, ?string $ipAddress = null): AttendanceRecord
+    {
+        return DB::transaction(function () use ($id, $reason, $actorId, $ipAddress) {
+            $record = AttendanceRecord::withTrashed()->findOrFail($id);
+
+            if (!$record->trashed()) {
+                return $record->load(['employee', 'correctedBy']);
+            }
+
+            $this->ensureEmployeeDayIsAvailable($record->employee_id, $record->date->toDateString(), $record->id);
+            $record->restore();
+            $record->update([
+                'is_manual' => true,
+                'correction_reason' => $reason,
+                'corrected_by' => $actorId,
+                'corrected_at' => now(),
+            ]);
+
+            $this->writeAudit(
+                $record,
+                'attendance_restored',
+                $reason,
+                null,
+                $record->fresh()->attributesToArray(),
+                $actorId,
+                $ipAddress
+            );
+
+            return $record->fresh(['employee', 'correctedBy']);
+        });
     }
 
     public function getSummary(?string $date = null, ?string $dateFrom = null, ?string $dateTo = null): array
     {
-        $date = $date ?: null;
+        [$from, $to] = $this->summaryRange($date, $dateFrom, $dateTo);
+        $records = AttendanceRecord::query()
+            ->whereDate('date', '>=', $from->toDateString())
+            ->whereDate('date', '<=', $to->toDateString())
+            ->get();
+        $counts = $records->countBy('status')->all();
+        $expectedKeys = [];
+        $eligibleEmployees = [];
 
-        $base = AttendanceRecord::query();
-        if ($date) {
-            $base->where('date', $date);
-        } elseif ($dateFrom && $dateTo) {
-            $base->whereBetween('date', [$dateFrom, $dateTo]);
-        } elseif ($dateFrom) {
-            $base->where('date', '>=', $dateFrom);
-        } elseif ($dateTo) {
-            $base->where('date', '<=', $dateTo);
-        } else {
-            $date = today()->toDateString();
-            $base->where('date', $date);
+        $employees = Employee::query()->where('status', 'active')->get();
+        foreach ($employees as $employee) {
+            foreach (CarbonPeriod::create($from, $to) as $workDate) {
+                if (!$this->isEmployedOn($employee, $workDate)) {
+                    continue;
+                }
+
+                $eligibleEmployees[$employee->id] = true;
+                $schedule = $this->scheduleService->forEmployee($employee, $workDate);
+                if (
+                    !$this->scheduleService->isWorkingDay($schedule, $workDate)
+                    || $this->isHoliday($workDate)
+                    || $this->isOnApprovedLeave($employee->id, $workDate)
+                ) {
+                    continue;
+                }
+
+                $expectedKeys[$employee->id . '|' . $workDate->toDateString()] = true;
+            }
         }
 
-        $counts = (clone $base)->selectRaw('status, COUNT(*) as count')
-            ->groupBy('status')
-            ->pluck('count', 'status')
-            ->toArray();
-
-        $totalEmployees = (clone $base)->count();
-        $clockedIn = (clone $base)->whereNotNull('clock_in')->count();
-        $late = $this->countLateArrivals(clone $base);
-        $present = $clockedIn;
-        $attendanceRate = $totalEmployees > 0 ? round(($present / $totalEmployees) * 100, 1) : 0;
-
-        // Total overtime hours for the day
-        $totalOvertimeHours = (clone $base)->sum('overtime_hours');
+        $attendedExpectedDays = $records
+            ->filter(fn (AttendanceRecord $record) => $record->clock_in
+                && isset($expectedKeys[
+                    $record->employee_id . '|' . $record->date
+                        ->copy()
+                        ->timezone(config('app.timezone'))
+                        ->toDateString()
+                ]))
+            ->count();
+        $expectedWorkdays = count($expectedKeys);
+        $attendanceRate = $expectedWorkdays > 0
+            ? round(($attendedExpectedDays / $expectedWorkdays) * 100, 1)
+            : 0;
+        $present = $records->whereNotNull('clock_in')->count();
 
         return [
             'date'             => $date,
             'date_from'        => $dateFrom,
             'date_to'          => $dateTo,
-            'total_employees'  => $totalEmployees,
+            'total_employees'  => count($eligibleEmployees),
+            'expected_workdays' => $expectedWorkdays,
+            'attended_expected_workdays' => $attendedExpectedDays,
             'present'          => $present,
             'absent'           => $counts['absent'] ?? 0,
-            'late'             => $late,
+            'late'             => $counts[AttendanceRecord::STATUS_LATE] ?? 0,
             'early_departure'  => $counts['early_departure'] ?? 0,
             'half_day'         => $counts['half_day'] ?? 0,
             'missing_clock_out' => $counts['missing_clock_out'] ?? 0,
             'on_leave'         => $counts['on_leave'] ?? 0,
             'holiday'          => $counts['holiday'] ?? 0,
             'attendance_rate'  => $attendanceRate,
-            'total_overtime_hours' => round((float) $totalOvertimeHours, 2),
+            'total_overtime_hours' => round((float) $records->sum('proposed_overtime_hours'), 2),
+            'approved_overtime_hours' => round((float) $records->sum('approved_overtime_hours'), 2),
         ];
-    }
-
-    private function countLateArrivals($query): int
-    {
-        $shiftStart = config('hikvision.shift_start', '08:00');
-        $lateThresholdMinutes = (int) config('hikvision.late_threshold_minutes', 10);
-
-        $threshold = Carbon::createFromFormat('H:i:s', strlen($shiftStart) === 5 ? $shiftStart . ':00' : $shiftStart)
-            ->addMinutes($lateThresholdMinutes)
-            ->format('H:i:s');
-
-        return $query->whereNotNull('clock_in')
-            ->where('clock_in', '>', $threshold)
-            ->count();
     }
 
     public function getOvertimeReport(Request $request): LengthAwarePaginator
     {
-        $query = AttendanceRecord::with(['employee'])
-            ->withOvertime();
+        $query = AttendanceRecord::with(['employee', 'overtimeEntry'])
+            ->where('proposed_overtime_hours', '>', 0);
 
         if ($request->filled('date_from') && $request->filled('date_to')) {
             $query->byDateRange($request->date_from, $request->date_to);
@@ -195,7 +283,11 @@ class AttendanceService
             });
         }
 
-        return $query->orderBy('overtime_hours', 'desc')
+        if ($request->filled('overtime_status')) {
+            $query->where('overtime_status', $request->overtime_status);
+        }
+
+        return $query->orderBy('proposed_overtime_hours', 'desc')
                      ->paginate($request->per_page ?? 10);
     }
 
@@ -209,37 +301,175 @@ class AttendanceService
         return AttendanceDeviceSyncLog::latest('synced_at')->limit($limit)->get();
     }
 
-    private function calculateWorkHoursFromTimes(?string $clockIn, ?string $clockOut): ?float
+    public function calculateManualRecord(array $data): array
     {
-        if (!$clockIn || !$clockOut) {
+        $employee = Employee::findOrFail((int) $data['employee_id']);
+        $workDate = Carbon::parse($data['date'])->startOfDay();
+        $schedule = $this->scheduleService->forEmployee($employee, $workDate);
+        $clockIn = $this->attendanceDateTime($workDate, $data['clock_in'] ?? null);
+        $clockOut = $this->attendanceDateTime($workDate, $data['clock_out'] ?? null);
+
+        if ($clockIn && $clockOut && ($schedule->is_overnight || $clockOut->lte($clockIn))) {
+            $clockOut->addDay();
+        }
+
+        $holiday = $this->holidayForDate($workDate);
+        $isNonWorkingDay = !$this->scheduleService->isWorkingDay($schedule, $workDate);
+        $isHolidayWork = (bool) ($clockIn && ($holiday || $isNonWorkingDay));
+        $workHours = $clockIn && $clockOut
+            ? round(max(0, $clockIn->diffInMinutes($clockOut, false) - (int) $schedule->break_minutes) / 60, 2)
+            : null;
+
+        if ($clockIn) {
+            $status = $this->statusPolicy->determine($clockIn, $clockOut, $schedule, $workDate);
+        } elseif ($holiday || $isNonWorkingDay) {
+            $status = AttendanceRecord::STATUS_HOLIDAY;
+        } elseif ($this->isOnApprovedLeave($employee->id, $workDate)) {
+            $status = AttendanceRecord::STATUS_ON_LEAVE;
+        } else {
+            $status = AttendanceRecord::STATUS_ABSENT;
+        }
+
+        $overtimeHours = $this->calculateManualOvertime($clockIn, $clockOut, $workHours, $isHolidayWork);
+
+        $calculation = [
+            'work_schedule_id' => $schedule->exists ? $schedule->id : null,
+            'status' => $status,
+            'work_hours' => $workHours,
+            'overtime_hours' => $overtimeHours,
+            'proposed_overtime_hours' => $overtimeHours,
+            'is_holiday_work' => $isHolidayWork,
+            'holiday_name' => $holiday?->name
+                ?? ($isNonWorkingDay ? 'Scheduled non-working day' : null),
+        ];
+
+        return array_filter(
+            $calculation,
+            fn (string $column) => Schema::hasColumn('attendance_records', $column),
+            ARRAY_FILTER_USE_KEY
+        );
+    }
+
+    private function attendanceDateTime(Carbon $workDate, ?string $time): ?Carbon
+    {
+        if (!$time) {
             return null;
         }
 
-        $in  = Carbon::createFromFormat('H:i:s', strlen($clockIn) === 5 ? $clockIn . ':00' : $clockIn);
-        $out = Carbon::createFromFormat('H:i:s', strlen($clockOut) === 5 ? $clockOut . ':00' : $clockOut);
-
-        $diff = $in->diffInMinutes($out, false);
-        if ($diff < 0) {
-            $diff = 1440 + $diff;
-        }
-
-        return round($diff / 60, 2);
+        return $workDate->copy()->setTimeFromTimeString($time);
     }
 
-    private function calculateOvertimeFromClockOut(?string $clockOut): float
-    {
-        if (!$clockOut) {
+    private function calculateManualOvertime(
+        ?Carbon $clockIn,
+        ?Carbon $clockOut,
+        ?float $workHours,
+        bool $isHolidayWork
+    ): float {
+        if (!$clockIn || !$clockOut) {
             return 0.0;
         }
 
-        $overtimeStart = config('hikvision.overtime_start', '18:00');
-        $out = Carbon::createFromFormat('H:i:s', strlen($clockOut) === 5 ? $clockOut . ':00' : $clockOut);
-        $start = Carbon::createFromFormat('H:i', $overtimeStart);
-
-        if ($out->gt($start)) {
-            return round($start->diffInMinutes($out) / 60, 2);
+        if ($isHolidayWork) {
+            return round((float) $workHours, 2);
         }
 
-        return 0.0;
+        $threshold = $clockOut->copy()->setTimeFromTimeString(
+            config('hikvision.overtime_start', '18:00')
+        );
+
+        return $clockOut->gt($threshold)
+            ? round($threshold->diffInMinutes($clockOut) / 60, 2)
+            : 0.0;
+    }
+
+    private function ensureEmployeeDayIsAvailable(int $employeeId, string $date, ?int $exceptId = null): void
+    {
+        $query = AttendanceRecord::withTrashed()
+            ->where('employee_id', $employeeId)
+            ->whereDate('date', $date);
+
+        if ($exceptId !== null) {
+            $query->whereKeyNot($exceptId);
+        }
+
+        if ($query->exists()) {
+            throw new AttendanceRecordConflictException(
+                'An attendance record already exists for this employee and date.'
+            );
+        }
+    }
+
+    private function writeAudit(
+        AttendanceRecord $record,
+        string $action,
+        string $reason,
+        ?array $before,
+        ?array $after,
+        ?int $actorId,
+        ?string $ipAddress
+    ): void {
+        HRAuditLog::create([
+            'user_id' => $actorId,
+            'employee_id' => $record->employee_id,
+            'action' => $action,
+            'model_type' => AttendanceRecord::class,
+            'model_id' => $record->id,
+            'message' => $reason,
+            'context' => [
+                'reason' => $reason,
+                'before' => $before,
+                'after' => $after,
+            ],
+            'ip_address' => $ipAddress,
+        ]);
+    }
+
+    private function summaryRange(?string $date, ?string $dateFrom, ?string $dateTo): array
+    {
+        $today = today();
+        $from = Carbon::parse($date ?? $dateFrom ?? $dateTo ?? $today)->startOfDay();
+        $to = Carbon::parse($date ?? $dateTo ?? $dateFrom ?? $today)->startOfDay();
+
+        if ($from->gt($to)) {
+            [$from, $to] = [$to, $from];
+        }
+
+        if ($to->gt($today)) {
+            $to = $today;
+        }
+
+        return [$from, $to];
+    }
+
+    private function isEmployedOn(Employee $employee, Carbon $date): bool
+    {
+        return (!$employee->hire_date || $date->gte($employee->hire_date->copy()->startOfDay()))
+            && (!$employee->contract_end_date || $date->lte($employee->contract_end_date->copy()->startOfDay()));
+    }
+
+    private function isHoliday(Carbon $date): bool
+    {
+        return (bool) $this->holidayForDate($date);
+    }
+
+    private function holidayForDate(Carbon $date): ?AttendanceHoliday
+    {
+        return Schema::hasTable('attendance_holidays')
+            ? AttendanceHoliday::query()
+                ->where('is_active', true)
+                ->whereDate('date', $date)
+                ->first()
+            : null;
+    }
+
+    private function isOnApprovedLeave(int $employeeId, Carbon $date): bool
+    {
+        return Schema::hasTable('leave_requests')
+            && LeaveRequest::query()
+                ->where('employee_id', $employeeId)
+                ->where('status', LeaveRequest::STATUS_APPROVED)
+                ->whereDate('start_date', '<=', $date)
+                ->whereDate('end_date', '>=', $date)
+                ->exists();
     }
 }

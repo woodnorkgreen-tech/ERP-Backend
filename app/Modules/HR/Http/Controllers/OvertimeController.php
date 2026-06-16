@@ -339,6 +339,7 @@ class OvertimeController extends Controller
             'status' => 'rejected',
             'rejected_reason' => $request->reason,
         ]);
+        $this->overtimeService->syncAttendanceStatus($entry, 'rejected');
 
         \App\Modules\HR\Models\SystemEvent::log('rejected', 'ot_entry', $entry->id, [
             'reason' => $request->reason,
@@ -370,6 +371,7 @@ class OvertimeController extends Controller
             'status' => 'submitted',
             'rejected_reason' => null,
         ]);
+        $this->overtimeService->syncAttendanceStatus($entry, 'submitted');
 
         \App\Modules\HR\Models\SystemEvent::log('reopened', 'ot_entry', $entry->id, [
             'actor' => $user->name

@@ -29,7 +29,8 @@ class LeaveRequestController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $canManage = $this->leaveService->canManage($user);
+        $isGlobal = $this->leaveService->isGlobalManager($user);
+        $isDeptLead = $user->isDeptLead();
 
         $query = LeaveRequest::query()
             ->with(['employee.department', 'leaveType', 'creator', 'approver', 'contactEmployee.department'])
@@ -48,7 +49,14 @@ class LeaveRequestController extends Controller
             if ($employee) {
                 $query->where('employee_id', $employee->id);
             }
-        } elseif (!$canManage) {
+        } elseif ($isGlobal) {
+            // Full visibility — no filter
+        } elseif ($isDeptLead) {
+            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+            $query->whereHas('employee', function (Builder $q) use ($accessibleDeptIds) {
+                $q->whereIn('department_id', $accessibleDeptIds);
+            });
+        } else {
             $employee = $this->leaveService->resolveEmployeeForUser($user);
             $query->where('employee_id', $employee?->id ?? 0);
         }
@@ -347,6 +355,20 @@ class LeaveRequestController extends Controller
         string $status,
         string $message
     ): JsonResponse {
+        $user = $request->user();
+
+        if (!$this->leaveService->canManage($user)) {
+            abort(403, 'You are not authorised to review leave requests.');
+        }
+
+        if (!$this->leaveService->isGlobalManager($user) && $user->isDeptLead()) {
+            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+            $employee = $leaveRequest->employee ?? $leaveRequest->load('employee')->employee;
+            if (!$employee || !in_array($employee->department_id, $accessibleDeptIds)) {
+                abort(403, 'You can only review leave requests for employees in your department.');
+            }
+        }
+
         if ($leaveRequest->status !== LeaveRequest::STATUS_PENDING) {
             return response()->json([
                 'success' => false,
@@ -439,13 +461,23 @@ class LeaveRequestController extends Controller
 
     protected function authorizeAccessToRequest($user, LeaveRequest $leaveRequest, bool $allowManage = false): void
     {
-        if ($allowManage && $this->leaveService->canManage($user)) {
+        if ($allowManage && $this->leaveService->isGlobalManager($user)) {
             return;
         }
 
-        if ((int) $user->employee_id !== (int) $leaveRequest->employee_id) {
-            abort(403, 'You are not allowed to access this leave request.');
+        if ((int) $user->employee_id === (int) $leaveRequest->employee_id) {
+            return;
         }
+
+        if ($user->isDeptLead()) {
+            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+            $employee = $leaveRequest->employee ?? $leaveRequest->load('employee')->employee;
+            if ($employee && in_array($employee->department_id, $accessibleDeptIds)) {
+                return;
+            }
+        }
+
+        abort(403, 'You are not allowed to access this leave request.');
     }
 
     protected function ensureContactEmployeeIsDifferent(int $employeeId, ?int $contactEmployeeId): void
@@ -644,6 +676,17 @@ class LeaveRequestController extends Controller
                 'success' => false,
                 'message' => 'Only managers can recall employees from leave.',
             ], 403);
+        }
+
+        if (!$this->leaveService->isGlobalManager($user) && $user->isDeptLead()) {
+            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+            $employee = $leaveRequest->employee ?? $leaveRequest->load('employee')->employee;
+            if (!$employee || !in_array($employee->department_id, $accessibleDeptIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You can only recall employees in your department.',
+                ], 403);
+            }
         }
 
         // Validate that the leave request is approved

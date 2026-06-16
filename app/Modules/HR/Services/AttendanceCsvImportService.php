@@ -4,19 +4,24 @@ namespace App\Modules\HR\Services;
 
 use App\Modules\HR\Models\AttendanceDeviceRawEvent;
 use App\Modules\HR\Models\AttendanceDeviceSyncLog;
-use App\Modules\HR\Models\Employee;
+use App\Modules\HR\Support\AttendancePersonId;
+use App\Modules\HR\Support\AttendanceTimestampNormalizer;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 
 class AttendanceCsvImportService
 {
+    private AttendanceEmployeeResolver $employeeResolver;
+
     public function __construct(
-        private readonly AttendanceProcessingService $processingService
-    ) {}
+        private readonly AttendanceProcessingService $processingService,
+        ?AttendanceEmployeeResolver $employeeResolver = null
+    ) {
+        $this->employeeResolver = $employeeResolver ?? new AttendanceEmployeeResolver();
+    }
 
     /**
      * Parse the file and return a preview summary without writing to the database.
@@ -36,7 +41,7 @@ class AttendanceCsvImportService
         }
 
         $personIds = $rows->pluck('person_id')
-            ->map(fn ($id) => trim((string) $id))
+            ->map(fn ($id) => AttendancePersonId::normalize($id))
             ->filter()
             ->unique()
             ->values()
@@ -77,38 +82,68 @@ class AttendanceCsvImportService
             'device_id' => 'manual_upload',
             'device_name' => 'Manual CSV Upload',
             'synced_at' => now(),
+            'range_from' => $rows->min('event_datetime'),
+            'range_to' => $rows->max('event_datetime'),
+            'records_fetched' => $rows->count(),
             'records_imported' => 0,
             'records_processed' => 0,
             'status' => AttendanceDeviceSyncLog::STATUS_SUCCESS,
         ]);
 
+        Log::info('attendance.sync.started', [
+            'sync_log_id' => $syncLog->id,
+            'source' => AttendanceDeviceRawEvent::SOURCE_CSV_UPLOAD,
+            'event_count' => $rows->count(),
+        ]);
+
         try {
-            $imported = $this->insertRawEvents($rows, $syncLog->id, AttendanceDeviceRawEvent::SOURCE_CSV_UPLOAD);
+            [$imported, $processingResult, $status] = DB::transaction(function () use ($rows, $syncLog) {
+                $imported = $this->insertRawEvents($rows, $syncLog->id, AttendanceDeviceRawEvent::SOURCE_CSV_UPLOAD);
+                $personIds = $rows->pluck('person_id')->unique()->values()->toArray();
+                $datetimes = $rows->pluck('event_datetime')->filter()->sort()->values();
+                $query = AttendanceDeviceRawEvent::whereIn('person_id', $personIds);
+                if ($datetimes->isNotEmpty()) {
+                    $query->whereBetween('event_datetime', [
+                        Carbon::parse($datetimes->first())->startOfDay(),
+                        Carbon::parse($datetimes->last())->endOfDay(),
+                    ]);
+                }
+                $processingResult = $this->processingService->processRawEventsDetailed($query->get(), $syncLog->id);
+                $status = $processingResult->isPartial()
+                    ? AttendanceDeviceSyncLog::STATUS_PARTIAL
+                    : AttendanceDeviceSyncLog::STATUS_SUCCESS;
+                $syncLog->update([
+                    'records_imported' => $imported,
+                    'records_duplicate' => max(0, $rows->count() - $imported),
+                    'records_processed' => $processingResult->recordsProcessed,
+                    'records_unmapped' => $processingResult->unmappedPersonCount,
+                    'records_failed' => $processingResult->failedPersonDayCount,
+                    'status' => $status,
+                    'error' => $processingResult->summary(),
+                ]);
+                return [$imported, $processingResult, $status];
+            });
 
-            // Fetch all matching events by person_id + date range (not sync_log_id) so that
-            // re-uploads of the same file still process correctly even when rows already exist.
-            $personIds = $rows->pluck('person_id')->unique()->values()->toArray();
-            $datetimes = $rows->pluck('event_datetime')->filter()->sort()->values();
-
-            $query = AttendanceDeviceRawEvent::whereIn('person_id', $personIds);
-            if ($datetimes->isNotEmpty()) {
-                $minDate = Carbon::parse($datetimes->first())->toDateString();
-                $maxDate = Carbon::parse($datetimes->last())->toDateString();
-                $query->whereBetween(DB::raw('DATE(event_datetime)'), [$minDate, $maxDate]);
-            }
-            $savedEvents = $query->get();
-            $processed = $this->processingService->processRawEvents($savedEvents, $syncLog->id);
-
-            $syncLog->update([
+            Log::info('attendance.sync.completed', [
+                'sync_log_id' => $syncLog->id,
+                'source' => AttendanceDeviceRawEvent::SOURCE_CSV_UPLOAD,
+                'events_fetched' => $rows->count(),
                 'records_imported' => $imported,
-                'records_processed' => $processed,
-                'status' => AttendanceDeviceSyncLog::STATUS_SUCCESS,
+                'records_processed' => $processingResult->recordsProcessed,
+                'unmapped_person_count' => $processingResult->unmappedPersonCount,
+                'failed_person_day_count' => $processingResult->failedPersonDayCount,
+                'status' => $status,
             ]);
         } catch (\Throwable $e) {
-            Log::error('AttendanceCsvImportService commit failed: ' . $e->getMessage());
             $syncLog->update([
                 'status' => AttendanceDeviceSyncLog::STATUS_FAILED,
                 'error' => $e->getMessage(),
+            ]);
+            Log::error('attendance.sync.failed', [
+                'sync_log_id' => $syncLog->id,
+                'source' => AttendanceDeviceRawEvent::SOURCE_CSV_UPLOAD,
+                'failure_type' => 'runtime_exception',
+                'exception_class' => $e::class,
             ]);
             throw $e;
         }
@@ -234,7 +269,7 @@ class AttendanceCsvImportService
         }
 
         // Column 0: Person ID - strip leading apostrophe and numeric formatting.
-        $personId = preg_replace('/[\s,]/', '', ltrim(trim((string) ($cells[0] ?? '')), "'"));
+        $personId = AttendancePersonId::normalize($cells[0] ?? '');
         if ($personId === '') {
             return null;
         }
@@ -245,7 +280,11 @@ class AttendanceCsvImportService
         // Column 3: Time — "YYYY-MM-DD HH:MM:SS"
         $rawTime = trim((string) ($cells[3] ?? ''));
         try {
-            $eventDatetime = Carbon::createFromFormat('Y-m-d H:i:s', $rawTime);
+            $eventDatetime = AttendanceTimestampNormalizer::deviceToStorage(
+                $rawTime,
+                (string) config('hikvision.device_timezone'),
+                (string) config('hikvision.storage_timezone')
+            );
         } catch (\Throwable) {
             return null; // Invalid datetime — skip row
         }
@@ -260,7 +299,7 @@ class AttendanceCsvImportService
             'person_id'       => $personId,
             'person_name'     => $personName,
             'department'      => $department,
-            'event_datetime'  => $eventDatetime->format('Y-m-d H:i:s'),
+            'event_datetime'  => $eventDatetime,
             'check_point'     => $checkPoint,
         ];
     }
@@ -303,25 +342,6 @@ class AttendanceCsvImportService
      */
     private function mappedPersonIds(array $personIds): array
     {
-        $columns = ['id'];
-        if (Schema::hasColumn('employees', 'hikvision_id')) {
-            $columns[] = 'hikvision_id';
-        }
-        if (Schema::hasColumn('employees', 'id_number')) {
-            $columns[] = 'id_number';
-        }
-
-        return Employee::query()
-            ->get($columns)
-            ->flatMap(function ($employee) {
-                return [
-                    trim((string) ($employee->hikvision_id ?? '')),
-                    trim((string) ($employee->id_number ?? '')),
-                ];
-            })
-            ->filter()
-            ->intersect($personIds)
-            ->values()
-            ->toArray();
+        return $this->employeeResolver->map($personIds)->keys()->all();
     }
 }

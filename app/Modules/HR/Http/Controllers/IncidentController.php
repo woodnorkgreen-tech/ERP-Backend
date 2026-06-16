@@ -176,9 +176,9 @@ class IncidentController extends Controller
 
             $isReporter = $incident->reported_by === $user->id;
             $isAdminOrHR = $user->hasAnyRole(['Super Admin', 'Admin', 'HR']);
-            $isDeptLeadOrMgr = $user->hasAnyRole(['Lead', 'Manager']);
-            $deptId = $user->department_id ?? $user->employee?->department_id;
-            $sameDepartment = $deptId && $incident->department_id && ((int) $deptId === (int) $incident->department_id);
+            $isDeptLeadOrMgr = $user->isDeptLead() || $user->isManager();
+            $accessibleDeptIds = $isDeptLeadOrMgr ? $user->getAccessibleDepartments()->pluck('id')->toArray() : [];
+            $sameDepartment = $incident->department_id && in_array($incident->department_id, $accessibleDeptIds);
 
             if (!$isAdminOrHR && !$isReporter && !($isDeptLeadOrMgr && $sameDepartment)) {
                 return response()->json([
@@ -215,8 +215,8 @@ class IncidentController extends Controller
             $incident = Incident::findOrFail($id);
             $user = auth()->user();
 
-            // HR/Lead can update broadly; self-service can update limited fields while Open
-            $canReview = $user->hasAnyRole(['Super Admin', 'Admin', 'HR', 'Lead']);
+            // HR/Dept Lead can update broadly; self-service can update limited fields while Open
+            $canReview = $user->hasAnyRole(['Super Admin', 'Admin', 'HR']) || $user->isDeptLead();
             $isReporter = $incident->reported_by === $user->id;
             $isOpen = $incident->status === Incident::STATUS_OPEN;
 
@@ -306,6 +306,16 @@ class IncidentController extends Controller
                     'success' => false,
                     'message' => 'You do not have permission to review incidents',
                 ], 403);
+            }
+
+            if (!$user->hasAnyRole(['Super Admin', 'Admin', 'HR']) && $user->isDeptLead()) {
+                $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+                if (!in_array($incident->department_id, $accessibleDeptIds)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You can only review incidents from your department',
+                    ], 403);
+                }
             }
             
             $validator = Validator::make($request->all(), [
@@ -439,7 +449,7 @@ class IncidentController extends Controller
     {
         try {
             $user = auth()->user();
-            if (!$user->hasAnyRole(['Super Admin', 'Admin', 'HR', 'Lead'])) {
+            if (!$user->hasAnyRole(['Super Admin', 'Admin', 'HR']) && !$user->isDeptLead()) {
                 return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
             }
 
@@ -486,10 +496,10 @@ class IncidentController extends Controller
         $user = auth()->user();
         $roles = $user->getRoleNames()->toArray();
 
-        $canReview = $user->hasAnyRole(['Super Admin', 'Admin', 'HR', 'Lead']);
+        $canReview = $user->hasAnyRole(['Super Admin', 'Admin', 'HR']) || $user->isDeptLead();
         $canApprove = $user->hasAnyRole(['Super Admin', 'Admin', 'HR']);
         $canViewAll = $user->hasAnyRole(['Super Admin', 'Admin', 'HR']);
-        $canViewDepartment = $user->hasAnyRole(['Lead', 'Manager']);
+        $canViewDepartment = $user->isDeptLead() || $user->isManager();
 
         return response()->json([
             'success' => true,

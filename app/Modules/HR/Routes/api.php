@@ -25,6 +25,7 @@ use App\Modules\HR\Http\Controllers\OvertimeController;
 use App\Modules\HR\Http\Controllers\CompensatoryLeaveController;
 use App\Modules\HR\Http\Controllers\EmployeeSkillController;
 use App\Modules\HR\Http\Controllers\PerformanceReviewController;
+use App\Modules\HR\Http\Controllers\OnboardingController;
 use App\Constants\Permissions;
 
 // Unprotected HR Routes (public recruitment only)
@@ -181,13 +182,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('requests/{leaveRequest}', [LeaveRequestController::class, 'show']);
             Route::put('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
             Route::patch('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
-            Route::post('requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])
-                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
-            Route::post('requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])
-                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
+            Route::post('requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve']);
+            Route::post('requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject']);
             Route::post('requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel']);
-            Route::post('requests/{leaveRequest}/recall', [LeaveRequestController::class, 'recall'])
-                ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
+            Route::post('requests/{leaveRequest}/recall', [LeaveRequestController::class, 'recall']);
             Route::get('statistics', [LeaveRequestController::class, 'statistics']);
             Route::post('adjust-balance', [LeaveRequestController::class, 'adjustBalance'])
                 ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
@@ -311,18 +309,54 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('discipline/{id}/attachments/{filename}', [DisciplineController::class, 'downloadAttachment']);
 
         // Attendance Management
-        Route::get('attendance/summary', [AttendanceController::class, 'summary']);
-        Route::get('attendance/sync-logs', [AttendanceController::class, 'syncLogs']);
-        Route::post('attendance/sync', [AttendanceController::class, 'sync']);
-        Route::post('attendance/upload/preview', [AttendanceController::class, 'uploadPreview']);
-        Route::post('attendance/upload', [AttendanceController::class, 'upload']);
-        Route::get('attendance/overtime', [AttendanceController::class, 'overtime']);
-        Route::get('attendance', [AttendanceController::class, 'index']);
-        Route::post('attendance', [AttendanceController::class, 'store']);
-        Route::get('attendance/{id}', [AttendanceController::class, 'show']);
-        Route::put('attendance/{id}', [AttendanceController::class, 'update']);
-        Route::patch('attendance/{id}', [AttendanceController::class, 'update']);
-        Route::delete('attendance/{id}', [AttendanceController::class, 'destroy']);
+        Route::middleware('permission:' . Permissions::HR_MANAGE_ATTENDANCE)
+            ->prefix('attendance')
+            ->group(function () {
+                Route::get('summary', [AttendanceController::class, 'summary']);
+                Route::post('manual-preview', [AttendanceController::class, 'manualPreview']);
+                Route::get('sync-logs', [AttendanceController::class, 'syncLogs']);
+                Route::get('exceptions/unmapped', [AttendanceController::class, 'unmappedExceptions']);
+                Route::post('exceptions/unmapped/{personId}/map', [AttendanceController::class, 'mapUnmappedPerson']);
+                Route::post('reprocess', [AttendanceController::class, 'reprocess']);
+                Route::post('sync', [AttendanceController::class, 'sync']);
+                Route::get('sync/{syncRequest}', [AttendanceController::class, 'syncStatus']);
+                Route::post('upload/preview', [AttendanceController::class, 'uploadPreview']);
+                Route::post('upload', [AttendanceController::class, 'upload']);
+                Route::get('overtime', [AttendanceController::class, 'overtime']);
+                Route::get('overtime/export', [AttendanceController::class, 'exportOvertime']);
+                Route::get('/', [AttendanceController::class, 'index']);
+                Route::post('/', [AttendanceController::class, 'store']);
+                Route::get('{id}', [AttendanceController::class, 'show']);
+                Route::put('{id}', [AttendanceController::class, 'update']);
+                Route::patch('{id}', [AttendanceController::class, 'update']);
+                Route::post('{id}/restore', [AttendanceController::class, 'restore']);
+                Route::delete('{id}', [AttendanceController::class, 'destroy']);
+            });
+
+        // Onboarding
+        Route::prefix('onboarding')->group(function () {
+            Route::get('hired-candidates', [OnboardingController::class, 'hiredCandidates']);
+            Route::get('/', [OnboardingController::class, 'index']);
+            Route::post('/', [OnboardingController::class, 'store']);
+            Route::get('{id}', [OnboardingController::class, 'show']);
+            Route::post('{id}/link-employee', [OnboardingController::class, 'linkEmployee']);
+            Route::post('{id}/hr-approve', [OnboardingController::class, 'approveHRGate']);
+            Route::post('{id}/handover', [OnboardingController::class, 'recordHandover']);
+            Route::post('{id}/reviews', [OnboardingController::class, 'submitReview']);
+            Route::post('{id}/cancel', [OnboardingController::class, 'cancel']);
+            Route::get('{id}/activity-log', [OnboardingController::class, 'activityLog']);
+            Route::post('cards/{cardId}/tasks', [OnboardingController::class, 'createTask']);
+            Route::post('tasks/{taskId}/complete', [OnboardingController::class, 'completeTask']);
+            Route::post('tasks/{taskId}/reopen', [OnboardingController::class, 'reopenTask']);
+            Route::patch('tasks/{taskId}/toggle-optional', [OnboardingController::class, 'toggleOptionalTask']);
+            Route::patch('tasks/{taskId}', [OnboardingController::class, 'updateTaskFlags']);
+            Route::post('cases/{caseId}/documents', [OnboardingController::class, 'createDocumentRequirement']);
+            Route::patch('documents/{requirementId}/status', [OnboardingController::class, 'updateDocumentStatus']);
+            Route::patch('documents/{requirementId}', [OnboardingController::class, 'updateDocumentRequirement']);
+            Route::post('cases/{caseId}/welcome-kit', [OnboardingController::class, 'createWelcomeKitItem']);
+            Route::post('welcome-kit/{itemId}/toggle', [OnboardingController::class, 'toggleWelcomeKitItem']);
+            Route::patch('welcome-kit/{itemId}', [OnboardingController::class, 'updateWelcomeKitItem']);
+        });
 
         // Internal Recruitment (ATS)
         Route::prefix('recruitment/admin')->group(function () {

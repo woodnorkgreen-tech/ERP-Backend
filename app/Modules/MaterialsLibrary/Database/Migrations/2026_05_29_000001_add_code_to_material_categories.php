@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (!Schema::hasTable('material_categories') || Schema::hasColumn('material_categories', 'code')) {
+            return;
+        }
+
         Schema::table('material_categories', function (Blueprint $table) {
             $table->string('code', 6)
                 ->nullable()
@@ -20,6 +24,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (!Schema::hasTable('material_categories') || !Schema::hasColumn('material_categories', 'code')) {
+            return;
+        }
+
         Schema::table('material_categories', function (Blueprint $table) {
             $table->dropIndex(['code']);
             $table->dropColumn('code');
