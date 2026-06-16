@@ -83,7 +83,9 @@ class OvertimeReportController extends Controller
     {
         $this->ensureHrAccess(['Project Manager', 'Project Officer']);
 
-        $projects = \App\Models\Project::with(['otEntries' => function($q) {
+        // OTEntry.project_id references project_enquiries (see OTEntry::project()),
+        // so labour allocation must aggregate through ProjectEnquiry — not Project.
+        $projects = \App\Models\ProjectEnquiry::with(['otEntries' => function($q) {
             $q->whereIn('status', ['approved', 'done'])->with(['employee', 'technicalLabour']);
         }])->whereHas('otEntries', function($q) {
             $q->whereIn('status', ['approved', 'done']);
@@ -133,6 +135,12 @@ class OvertimeReportController extends Controller
         if (!$id) {
             $id = $user->employee_id;
             $type = 'emp';
+        }
+
+        // A user without a linked employee record (e.g. a system admin) has no
+        // personal statement to pull — fail clearly instead of a 500.
+        if (!$id) {
+            abort(422, 'No employee record is linked to your account, so a personal time statement cannot be generated.');
         }
 
         // Employees may pull their own statement; anything else needs HR access.

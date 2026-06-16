@@ -16,7 +16,9 @@ class PayrollEmployeeDTO
         public Collection $ledgers,
         public array $variables,
         public array $taxBands,
-        
+        // Statutory deduction codes this employee is exempt from (paye, nssf, shif, housing_levy)
+        public array $statutoryExemptions = [],
+
         // Results (filled by processors)
         public float $computedBasic = 0,
         public float $totalAdditions = 0,
@@ -58,7 +60,8 @@ class PayrollEmployeeDTO
                       ->orWhere('is_recurring', true);
                 })->get(),
             variables: $settings['variables'] ?? [],
-            taxBands: $settings['tax_bands'] ?? []
+            taxBands: $settings['tax_bands'] ?? [],
+            statutoryExemptions: $employee->statutory_exemptions ?? []
         );
     }
 }

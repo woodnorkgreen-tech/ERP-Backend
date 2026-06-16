@@ -13,6 +13,12 @@ class Employee extends Model
 {
     use HasFactory, SoftDeletes;
 
+    /**
+     * Statutory deduction codes an employee can be exempted from during payroll.
+     * Stored as an array in the `statutory_exemptions` column.
+     */
+    public const STATUTORY_EXEMPTIONS = ['paye', 'nssf', 'shif', 'housing_levy'];
+
     protected $fillable = [
         'employee_id',
         'hikvision_id',
@@ -38,6 +44,7 @@ class Employee extends Model
         'bank_code',
         'account_number',
         'payment_method',
+        'statutory_exemptions',
         'employment_type',
         'manager_id',
         'address',
@@ -58,7 +65,8 @@ class Employee extends Model
         'emergency_contact' => 'array',
         'performance_rating' => 'decimal:1',
         'last_review_date' => 'date',
-        'salary' => 'float'
+        'salary' => 'float',
+        'statutory_exemptions' => 'array',
     ];
 
     protected $appends = [

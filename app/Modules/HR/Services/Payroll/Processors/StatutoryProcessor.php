@@ -15,24 +15,30 @@ class StatutoryProcessor implements PayrollProcessorInterface
 
         $grossPay = $dto->grossPay;
 
+        // Per-employee statutory exemptions. An exempt deduction is computed as 0
+        // so it falls out of the employee's net pay and of the PAYE taxable base.
+        $exemptions = $dto->statutoryExemptions ?? [];
+        $isExempt = fn (string $code) => in_array($code, $exemptions, true);
+
         // 1. NSSF (Tiered)
         $nssfRate = $getVar('NSSF_RATE', 0.06);
         $nssfTierILimit = $getVar('NSSF_TIER_I_LIMIT', 9000);
         $nssfTierIILimit = $getVar('NSSF_TIER_II_LIMIT', 108000);
-        
+
         $nssfTierI = $nssfRate * min($grossPay, $nssfTierILimit);
         $nssfTierII = $nssfRate * max(0, min($grossPay, $nssfTierIILimit) - $nssfTierILimit);
-        $nssf = $nssfTierI + $nssfTierII;
+        $nssf = $isExempt('nssf') ? 0.0 : ($nssfTierI + $nssfTierII);
 
         // 2. SHIF (2.75%, Min KES 300) — compute first, then apply floor
         $shifRate = $getVar('SHIF_RATE', 0.0275);
         $shifMin  = $getVar('SHIF_MIN', 300);
         $shif     = $grossPay * $shifRate;
         if ($shif < $shifMin) $shif = $shifMin;
+        if ($isExempt('shif')) $shif = 0.0;
 
         // 3. Housing Levy (1.5%)
         $housingLevyRate = $getVar('HOUSING_LEVY_RATE', 0.015);
-        $housingLevy = $grossPay * $housingLevyRate;
+        $housingLevy = $isExempt('housing_levy') ? 0.0 : ($grossPay * $housingLevyRate);
 
         // 4. PAYE Calculation
         $personalRelief   = $getVar('PERSONAL_RELIEF', 2400);
@@ -66,10 +72,14 @@ class StatutoryProcessor implements PayrollProcessorInterface
         $insuranceRelief = min($premiumPaid * $insReliefRate, $insReliefCap);
 
         // Final PAYE = Band Tax - Personal Relief - Insurance Relief
-        $finalPaye = max(0, $calculatedPaye - $personalRelief - $insuranceRelief);
+        $finalPaye = $isExempt('paye') ? 0.0 : max(0, $calculatedPaye - $personalRelief - $insuranceRelief);
+        if ($isExempt('paye')) {
+            $calculatedPaye = 0.0;
+            $insuranceRelief = 0.0;
+        }
 
         // Employer-side costs (not deducted from employee but tracked for budgeting)
-        $employerNssf = $nssf; // Employer matches employee NSSF contribution
+        $employerNssf = $nssf; // Employer matches employee NSSF contribution (0 if NSSF-exempt)
         $employerShif = 0;    // Employer SHIF is separate; can be added as variable if needed
 
         $dto->taxBreakdown = [
@@ -81,6 +91,7 @@ class StatutoryProcessor implements PayrollProcessorInterface
             'personal_relief'    => round($personalRelief, 2),
             'insurance_relief'   => round($insuranceRelief, 2),
             'employer_nssf'      => round($employerNssf, 2),
+            'exemptions'         => array_values($exemptions), // statutory items skipped for this employee
         ];
 
         // Add employee-side deductions only

@@ -10,7 +10,7 @@
     @foreach($projects as $project)
         <div style="margin-bottom: 25px; border: 1px solid #94a3b8; padding: 12px; border-radius: 4px; page-break-inside: avoid; background-color: #ffffff;">
             <h3 style="margin-top: 0; color: #166534; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; font-size: 11px;">
-                PROJECT: {{ $project->title ?? $project->name }} ({{ $project->job_number ?? $project->project_code ?? 'N/A' }})
+                PROJECT: {{ $project->title ?? $project->name ?? 'Untitled' }} ({{ $project->enquiry_number ?? $project->job_number ?? $project->project_code ?? 'N/A' }})
             </h3>
             
             <table class="data-table" style="margin-bottom: 0;">

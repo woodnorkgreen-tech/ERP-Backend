@@ -2,6 +2,7 @@
 
 namespace App\Modules\HR\Http\Controllers;
 
+use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\TechnicalLabour;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -119,6 +120,93 @@ class TechnicalLabourController
         return response()->json([
             'message' => 'Technical labour deleted successfully'
         ]);
+    }
+
+    /**
+     * Promote a technical-labour specialist into a full Employee record.
+     *
+     * Carries over the identity fields already held on the specialist
+     * (name, contacts, ID, specialization → position, rating) and merges in the
+     * HR-supplied fields that have no equivalent on the registry (department,
+     * hire date, salary, employment type). Request input wins over carried-over
+     * defaults so HR can correct anything in the promotion form.
+     *
+     * The source TechnicalLabour record is intentionally left untouched, and no
+     * overtime/ledger history is migrated — first rollout creates the employee
+     * with a clean slate.
+     */
+    public function promote(Request $request, TechnicalLabour $technicalLabour): JsonResponse
+    {
+        // Default first/last name from the registry's single full_name field.
+        $nameParts = preg_split('/\s+/', trim((string) $technicalLabour->full_name), 2);
+
+        $payload = array_merge(
+            [
+                'first_name'         => $nameParts[0] ?? '',
+                'last_name'          => $nameParts[1] ?? '',
+                'email'              => $technicalLabour->email,
+                'phone'              => $technicalLabour->phone,
+                'id_number'          => $technicalLabour->id_number,
+                'position'           => $technicalLabour->specialization,
+                'performance_rating' => $technicalLabour->rating,
+                'status'             => 'active',
+            ],
+            // Drop blank request values so they don't clobber the carried-over defaults.
+            array_filter($request->all(), fn ($v) => $v !== null && $v !== '')
+        );
+
+        $validator = Validator::make($payload, [
+            'first_name'         => 'required|string|max:255',
+            'last_name'          => 'required|string|max:255',
+            'email'              => 'nullable|email|unique:employees,email',
+            'phone'              => 'nullable|string|max:20',
+            'id_number'          => 'nullable|string|max:20',
+            'department_id'      => 'required|exists:departments,id',
+            'position'           => 'required|string|max:255',
+            'hire_date'          => 'required|date',
+            'salary'             => 'nullable|numeric|min:0',
+            'employment_type'    => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],
+            'status'             => ['required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
+            'manager_id'         => 'nullable|exists:employees,id',
+            'kra_pin'            => 'nullable|string|max:20',
+            'nssf_id'            => 'nullable|string|max:20',
+            'nhif_id'            => 'nullable|string|max:20',
+            'bank_name'          => 'nullable|string|max:255',
+            'bank_branch'        => 'nullable|string|max:255',
+            'bank_code'          => 'nullable|string|max:20',
+            'account_number'     => 'nullable|string|max:50',
+            'payment_method'     => ['nullable', Rule::in(['bank', 'mpesa', 'mobile_money', 'cash', 'cheque'])],
+            'date_of_birth'      => 'nullable|date',
+            'address'            => 'nullable|string',
+            'performance_rating' => 'nullable|numeric|min:0|max:5',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $employee = DB::transaction(function () use ($validator) {
+            $data = $validator->validated();
+
+            // employees.employee_id is NOT NULL + UNIQUE with no default, so it must
+            // be present at insert. Use a transient unique placeholder, then derive
+            // the final staff number from the real auto-increment id (race-safe).
+            $data['employee_id'] = 'PENDING-' . uniqid('', true);
+            $employee = Employee::create($data);
+
+            $employee->employee_id = 'EMP' . str_pad((string) $employee->id, 4, '0', STR_PAD_LEFT);
+            $employee->save();
+
+            return $employee;
+        });
+
+        return response()->json([
+            'message' => 'Specialist promoted to employee successfully',
+            'data' => $employee->load(['department', 'manager'])
+        ], 201);
     }
 
     /**

@@ -85,6 +85,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         });
 
         // Technical Labour management
+        Route::post('technical-labour/{technicalLabour}/promote', [TechnicalLabourController::class, 'promote']);
         Route::apiResource('technical-labour', TechnicalLabourController::class);
 
         // Department management
@@ -241,6 +242,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('actions/{id}/approve', [HRActionController::class, 'approveAction']);
         Route::get('action-attachments/{id}/view', [HRActionController::class, 'viewAttachment']);
         Route::get('action-attachments/{id}/download', [HRActionController::class, 'downloadAttachment']);
+
+        // Employee Self-Service
+        Route::get('self-service/activity', [\App\Modules\HR\Http\Controllers\SelfServiceController::class, 'activity']);
 
         // Profile Updates (Employee Self-Service)
         Route::post('profile-updates', [\App\Modules\HR\Http\Controllers\SelfServiceController::class, 'updateProfile']);

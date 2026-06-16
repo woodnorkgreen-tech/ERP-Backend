@@ -91,7 +91,7 @@ class EmployeeController
             'hikvision_id' => 'nullable|string|max:50|unique:employees,hikvision_id',
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
-            'email' => 'required|email|unique:employees,email',
+            'email' => 'nullable|email|unique:employees,email',
             'phone' => 'nullable|string|max:20',
             'department_id' => 'required|exists:departments,id',
             'position' => 'required|string|max:255',
@@ -106,6 +106,8 @@ class EmployeeController
             'bank_code' => 'nullable|string|max:20',
             'account_number' => 'nullable|string|max:50',
             'payment_method' => ['nullable', Rule::in(['bank', 'mpesa', 'mobile_money', 'cash', 'cheque'])],
+            'statutory_exemptions' => 'nullable|array',
+            'statutory_exemptions.*' => ['string', Rule::in(Employee::STATUTORY_EXEMPTIONS)],
             'probation_end_date' => 'nullable|date',
             'is_on_probation' => 'nullable|boolean',
             'contract_end_date' => 'nullable|date',
@@ -132,13 +134,19 @@ class EmployeeController
 
         $validatedData = $validator->validated();
         $customId = $validatedData['employee_id'] ?? null;
-        unset($validatedData['employee_id']);
+
+        // employees.employee_id is NOT NULL + UNIQUE with no default, so it must be
+        // present at insert. Use the supplied id, otherwise a transient unique
+        // placeholder, then derive the final staff number from the real
+        // auto-increment id (race-safe).
+        $validatedData['employee_id'] = $customId ?: 'PENDING-' . uniqid('', true);
 
         $employee = Employee::create($validatedData);
 
-        // Use the real auto-increment ID as the basis — avoids race conditions
-        $employee->employee_id = $customId ?: 'EMP' . str_pad($employee->id, 4, '0', STR_PAD_LEFT);
-        $employee->save();
+        if (!$customId) {
+            $employee->employee_id = 'EMP' . str_pad($employee->id, 4, '0', STR_PAD_LEFT);
+            $employee->save();
+        }
 
         return response()->json([
             'message' => 'Employee created successfully',
@@ -172,7 +180,7 @@ class EmployeeController
             'hikvision_id' => ['nullable', 'string', 'max:50', Rule::unique('employees')->ignore($employee->id)],
             'first_name' => 'sometimes|required|string|max:255',
             'last_name' => 'sometimes|required|string|max:255',
-            'email' => ['sometimes', 'required', 'email', Rule::unique('employees')->ignore($employee->id)],
+            'email' => ['sometimes', 'nullable', 'email', Rule::unique('employees')->ignore($employee->id)],
             'phone' => 'nullable|string|max:20',
             'department_id' => 'sometimes|required|exists:departments,id',
             'position' => 'sometimes|required|string|max:255',
@@ -187,6 +195,8 @@ class EmployeeController
             'bank_code' => 'nullable|string|max:20',
             'account_number' => 'nullable|string|max:50',
             'payment_method' => ['nullable', Rule::in(['bank', 'mpesa', 'mobile_money', 'cash', 'cheque'])],
+            'statutory_exemptions' => 'nullable|array',
+            'statutory_exemptions.*' => ['string', Rule::in(Employee::STATUTORY_EXEMPTIONS)],
             'probation_end_date' => 'nullable|date',
             'is_on_probation' => 'nullable|boolean',
             'contract_end_date' => 'nullable|date',

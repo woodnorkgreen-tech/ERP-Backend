@@ -98,6 +98,16 @@ class ProjectEnquiry extends Model
     }
 
     /**
+     * Overtime entries logged against this enquiry. OTEntry.project_id references
+     * project_enquiries (see OTEntry::project()), so labour-allocation reporting
+     * aggregates through this relation.
+     */
+    public function otEntries()
+    {
+        return $this->hasMany(\App\Modules\HR\Models\OTEntry::class, 'project_id');
+    }
+
+    /**
      * The "booted" method of the model.
      */
     protected static function booted()
