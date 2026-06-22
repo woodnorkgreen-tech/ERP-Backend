@@ -12,6 +12,7 @@ class LeaveRequest extends Model
     use HasFactory;
 
     public const STATUS_PENDING = 'pending';
+    public const STATUS_LEAD_APPROVED = 'lead_approved';
     public const STATUS_APPROVED = 'approved';
     public const STATUS_REJECTED = 'rejected';
     public const STATUS_CANCELLED = 'cancelled';
@@ -23,6 +24,7 @@ class LeaveRequest extends Model
         'leave_type_id',
         'created_by',
         'approved_by',
+        'lead_approved_by',
         'start_date',
         'end_date',
         'days_requested',
@@ -34,7 +36,9 @@ class LeaveRequest extends Model
         'handover_notes',
         'attachment_path',
         'review_notes',
+        'lead_review_notes',
         'approved_at',
+        'lead_approved_at',
         'cancelled_at',
         'recalled_at',
         'recalled_by',
@@ -47,6 +51,7 @@ class LeaveRequest extends Model
         'days_requested' => 'decimal:1',
         'carry_forward_days' => 'decimal:1',
         'approved_at' => 'datetime',
+        'lead_approved_at' => 'datetime',
         'cancelled_at' => 'datetime',
         'recalled_at' => 'datetime',
     ];
@@ -78,6 +83,11 @@ class LeaveRequest extends Model
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function leadApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'lead_approved_by');
     }
 
     public function recalledBy(): BelongsTo
