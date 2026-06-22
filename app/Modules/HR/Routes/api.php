@@ -183,6 +183,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('requests/{leaveRequest}', [LeaveRequestController::class, 'show']);
             Route::put('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
             Route::patch('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
+            Route::post('requests/{leaveRequest}/lead-approve', [LeaveRequestController::class, 'leadApprove']);
             Route::post('requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve']);
             Route::post('requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject']);
             Route::post('requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel']);

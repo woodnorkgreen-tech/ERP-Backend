@@ -4,10 +4,12 @@ namespace App\Modules\HR\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Modules\HR\Models\Department;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Models\LeaveType;
 use App\Modules\HR\Notifications\LeaveRequestApprovedNotification;
+use App\Modules\HR\Notifications\LeaveRequestLeadApprovedNotification;
 use App\Modules\HR\Notifications\LeaveRequestRejectedNotification;
 use App\Modules\HR\Notifications\LeaveRequestSubmittedNotification;
 use App\Modules\HR\Services\LeaveManagementService;
@@ -100,7 +102,7 @@ class LeaveRequestController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $leaveRequest->load(['employee.department', 'leaveType', 'creator', 'approver', 'contactEmployee.department']),
+            'data' => $leaveRequest->load(['employee.department', 'leaveType', 'creator', 'approver', 'leadApprover', 'contactEmployee.department']),
         ]);
     }
 
@@ -195,7 +197,7 @@ class LeaveRequestController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Leave request submitted successfully.',
-            'data' => $leaveRequest->load(['employee.department', 'leaveType', 'creator', 'approver', 'contactEmployee.department']),
+            'data' => $leaveRequest->load(['employee.department', 'leaveType', 'creator', 'approver', 'leadApprover', 'contactEmployee.department']),
         ], 201);
     }
 
@@ -313,6 +315,7 @@ class LeaveRequestController extends Controller
             'review_notes' => ['nullable', 'string'],
             'status' => ['sometimes', Rule::in([
                 LeaveRequest::STATUS_PENDING,
+                LeaveRequest::STATUS_LEAD_APPROVED,
                 LeaveRequest::STATUS_APPROVED,
                 LeaveRequest::STATUS_REJECTED,
                 LeaveRequest::STATUS_CANCELLED,
@@ -388,18 +391,141 @@ class LeaveRequestController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Leave request updated successfully.',
-            'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'contactEmployee.department']),
+            'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'leadApprover', 'contactEmployee.department']),
+        ]);
+    }
+
+    public function leadApprove(Request $request, LeaveRequest $leaveRequest): JsonResponse
+    {
+        $user = $request->user();
+
+        // HR-level users should use the hr-approve endpoint instead
+        if ($this->leaveService->isHRLevel($user)) {
+            abort(403, 'HR users should use the final approval endpoint, not lead approval.');
+        }
+
+        // Structural authorisation: user must be the department lead or direct manager of the employee
+        $employee = $leaveRequest->employee ?? $leaveRequest->load('employee')->employee;
+
+        if (!$employee) {
+            abort(403, 'Cannot determine the employee for this leave request.');
+        }
+
+        $isDeptLeadOfEmployee = $employee->department_id &&
+            Department::where('id', $employee->department_id)
+                ->where('manager_id', $user->employee_id)
+                ->exists();
+
+        $isDirectManager = $employee->manager_id && (int) $employee->manager_id === (int) $user->employee_id;
+
+        if (!$isDeptLeadOfEmployee && !$isDirectManager) {
+            abort(403, 'You can only approve leave for employees in your department or your direct reports.');
+        }
+
+        if ($leaveRequest->status !== LeaveRequest::STATUS_PENDING) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only pending requests can receive lead approval.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'review_notes' => ['nullable', 'string'],
+        ]);
+
+        $leaveRequest->update([
+            'status' => LeaveRequest::STATUS_LEAD_APPROVED,
+            'lead_approved_by' => $user->id,
+            'lead_approved_at' => now(),
+            'lead_review_notes' => $validated['review_notes'] ?? null,
+        ]);
+
+        $this->notifyHRAfterLeadApprovalResponse($leaveRequest->id);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Leave request approved. Awaiting final HR approval.',
+            'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'leadApprover', 'contactEmployee.department']),
         ]);
     }
 
     public function approve(Request $request, LeaveRequest $leaveRequest): JsonResponse
     {
-        return $this->review($request, $leaveRequest, LeaveRequest::STATUS_APPROVED, 'Leave request approved.');
+        $user = $request->user();
+
+        if (!$this->leaveService->isHRLevel($user)) {
+            abort(403, 'Only HR can give final approval for leave requests.');
+        }
+
+        $approvableStatuses = [LeaveRequest::STATUS_PENDING, LeaveRequest::STATUS_LEAD_APPROVED];
+        if (!in_array($leaveRequest->status, $approvableStatuses, true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only pending or lead-approved requests can receive HR approval.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'review_notes' => ['nullable', 'string'],
+        ]);
+
+        $leaveRequest->update([
+            'status' => LeaveRequest::STATUS_APPROVED,
+            'approved_by' => $user->id,
+            'approved_at' => now(),
+            'review_notes' => $validated['review_notes'] ?? null,
+        ]);
+
+        $this->notifyEmployeeAfterResponse($leaveRequest->id, LeaveRequest::STATUS_APPROVED);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Leave request approved.',
+            'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'leadApprover', 'contactEmployee.department']),
+        ]);
     }
 
     public function reject(Request $request, LeaveRequest $leaveRequest): JsonResponse
     {
-        return $this->review($request, $leaveRequest, LeaveRequest::STATUS_REJECTED, 'Leave request rejected.');
+        $user = $request->user();
+
+        if (!$this->leaveService->canManage($user)) {
+            abort(403, 'You are not authorised to reject leave requests.');
+        }
+
+        if (!$this->leaveService->isGlobalManager($user) && $user->isDeptLead()) {
+            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
+            $employee = $leaveRequest->employee ?? $leaveRequest->load('employee')->employee;
+            if (!$employee || !in_array($employee->department_id, $accessibleDeptIds)) {
+                abort(403, 'You can only reject leave requests for employees in your department.');
+            }
+        }
+
+        if (!in_array($leaveRequest->status, [LeaveRequest::STATUS_PENDING, LeaveRequest::STATUS_LEAD_APPROVED], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only pending or lead-approved requests can be rejected.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'review_notes' => ['required', 'string'],
+        ]);
+
+        $leaveRequest->update([
+            'status' => LeaveRequest::STATUS_REJECTED,
+            'approved_by' => $user->id,
+            'approved_at' => null,
+            'review_notes' => $validated['review_notes'],
+        ]);
+
+        $this->notifyEmployeeAfterResponse($leaveRequest->id, LeaveRequest::STATUS_REJECTED);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Leave request rejected.',
+            'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'leadApprover', 'contactEmployee.department']),
+        ]);
     }
 
     public function cancel(Request $request, LeaveRequest $leaveRequest): JsonResponse
@@ -407,10 +533,11 @@ class LeaveRequestController extends Controller
         $user = $request->user();
         $this->authorizeAccessToRequest($user, $leaveRequest, allowManage: true);
 
-        if (!in_array($leaveRequest->status, [LeaveRequest::STATUS_PENDING, LeaveRequest::STATUS_APPROVED], true)) {
+        $cancelableStatuses = [LeaveRequest::STATUS_PENDING, LeaveRequest::STATUS_LEAD_APPROVED, LeaveRequest::STATUS_APPROVED];
+        if (!in_array($leaveRequest->status, $cancelableStatuses, true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only pending or approved requests can be cancelled.',
+                'message' => 'Only pending, lead-approved, or approved requests can be cancelled.',
             ], 422);
         }
 
@@ -427,71 +554,13 @@ class LeaveRequestController extends Controller
         $leaveRequest->update([
             'status' => LeaveRequest::STATUS_CANCELLED,
             'cancelled_at' => now(),
-            'review_notes' => $request->input('review_notes', $leaveRequest->review_notes),
+            'review_notes' => $request->input('review_notes'),
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Leave request cancelled successfully.',
-            'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'contactEmployee.department']),
-        ]);
-    }
-
-    protected function review(
-        Request $request,
-        LeaveRequest $leaveRequest,
-        string $status,
-        string $message
-    ): JsonResponse {
-        $user = $request->user();
-
-        if (!$this->leaveService->canManage($user)) {
-            abort(403, 'You are not authorised to review leave requests.');
-        }
-
-        if (!$this->leaveService->isGlobalManager($user) && $user->isDeptLead()) {
-            $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
-            $employee = $leaveRequest->employee ?? $leaveRequest->load('employee')->employee;
-            if (!$employee || !in_array($employee->department_id, $accessibleDeptIds)) {
-                abort(403, 'You can only review leave requests for employees in your department.');
-            }
-        }
-
-        if ($leaveRequest->status !== LeaveRequest::STATUS_PENDING) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Only pending requests can be reviewed.',
-            ], 422);
-        }
-
-        $validated = $request->validate([
-            'review_notes' => ['nullable', 'string'],
-        ]);
-
-        if ($status === LeaveRequest::STATUS_REJECTED && blank($validated['review_notes'] ?? null)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'A reason is required when rejecting a leave request.',
-                'errors' => [
-                    'review_notes' => ['A reason is required when rejecting a leave request.'],
-                ],
-            ], 422);
-        }
-
-        $leaveRequest->update([
-            'status' => $status,
-            'approved_by' => $request->user()->id,
-            'approved_at' => $status === LeaveRequest::STATUS_APPROVED ? now() : null,
-            'review_notes' => $validated['review_notes'] ?? null,
-        ]);
-
-        // Avoid blocking the review response on notification delivery.
-        $this->notifyEmployeeAfterResponse($leaveRequest->id, $status);
-
-        return response()->json([
-            'success' => true,
-            'message' => $message,
-            'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'contactEmployee.department']),
+            'data' => $leaveRequest->fresh()->load(['employee.department', 'leaveType', 'creator', 'approver', 'leadApprover', 'contactEmployee.department']),
         ]);
     }
 
@@ -506,15 +575,23 @@ class LeaveRequestController extends Controller
                 'status' => LeaveRequest::STATUS_PENDING,
                 'approved_by' => null,
                 'approved_at' => null,
+                'lead_approved_by' => null,
+                'lead_approved_at' => null,
                 'cancelled_at' => null,
                 'review_notes' => $reviewNotes,
+                'lead_review_notes' => null,
+            ],
+            LeaveRequest::STATUS_LEAD_APPROVED => [
+                'status' => LeaveRequest::STATUS_LEAD_APPROVED,
+                'lead_approved_by' => $actorId,
+                'lead_approved_at' => $leaveRequest->lead_approved_at ?? now(),
+                'cancelled_at' => null,
+                'lead_review_notes' => $reviewNotes,
             ],
             LeaveRequest::STATUS_APPROVED => [
                 'status' => LeaveRequest::STATUS_APPROVED,
                 'approved_by' => $actorId,
-                'approved_at' => $leaveRequest->status === LeaveRequest::STATUS_APPROVED && $leaveRequest->approved_at
-                    ? $leaveRequest->approved_at
-                    : now(),
+                'approved_at' => $leaveRequest->approved_at ?? now(),
                 'cancelled_at' => null,
                 'review_notes' => $reviewNotes,
             ],
@@ -527,9 +604,7 @@ class LeaveRequestController extends Controller
             ],
             LeaveRequest::STATUS_CANCELLED => [
                 'status' => LeaveRequest::STATUS_CANCELLED,
-                'cancelled_at' => $leaveRequest->status === LeaveRequest::STATUS_CANCELLED && $leaveRequest->cancelled_at
-                    ? $leaveRequest->cancelled_at
-                    : now(),
+                'cancelled_at' => $leaveRequest->cancelled_at ?? now(),
                 'review_notes' => $reviewNotes,
             ],
             default => [],
@@ -613,6 +688,37 @@ class LeaveRequestController extends Controller
         }
     }
 
+    protected function notifyHRAfterLeadApprovalResponse(int $leaveRequestId): void
+    {
+        dispatch(static function () use ($leaveRequestId): void {
+            try {
+                $leaveRequest = LeaveRequest::query()
+                    ->with(['employee', 'leaveType', 'leadApprover'])
+                    ->find($leaveRequestId);
+
+                if (!$leaveRequest) {
+                    return;
+                }
+
+                $hrUsers = User::query()
+                    ->whereHas('roles', function (Builder $query) {
+                        $query->whereIn('name', ['Super Admin', 'Admin', 'HR']);
+                    })
+                    ->whereNotNull('email')
+                    ->get();
+
+                foreach ($hrUsers as $hrUser) {
+                    $hrUser->notify(new LeaveRequestLeadApprovedNotification($leaveRequest));
+                }
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to send leave lead-approved HR notification.', [
+                    'leave_request_id' => $leaveRequestId,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        })->afterResponse();
+    }
+
     protected function notifyEmployeeAfterResponse(int $leaveRequestId, string $status): void
     {
         dispatch(static function () use ($leaveRequestId, $status): void {
@@ -672,6 +778,7 @@ class LeaveRequestController extends Controller
         $totalRequests = (clone $query)->count();
         $approvedRequests = (clone $query)->where('status', LeaveRequest::STATUS_APPROVED)->count();
         $pendingRequests = (clone $query)->where('status', LeaveRequest::STATUS_PENDING)->count();
+        $leadApprovedRequests = (clone $query)->where('status', LeaveRequest::STATUS_LEAD_APPROVED)->count();
         $rejectedRequests = (clone $query)->where('status', LeaveRequest::STATUS_REJECTED)->count();
         $cancelledRequests = (clone $query)->where('status', LeaveRequest::STATUS_CANCELLED)->count();
 
@@ -702,6 +809,7 @@ class LeaveRequestController extends Controller
                 'total_requests' => $totalRequests,
                 'approved_requests' => $approvedRequests,
                 'pending_requests' => $pendingRequests,
+                'lead_approved_requests' => $leadApprovedRequests,
                 'rejected_requests' => $rejectedRequests,
                 'cancelled_requests' => $cancelledRequests,
                 'total_days' => $totalDays,

@@ -149,6 +149,11 @@ class LeaveManagementService
             || $user->can('leave.type.update');
     }
 
+    public function isHRLevel(User $user): bool
+    {
+        return $user->hasRole(['Super Admin', 'Admin', 'HR']);
+    }
+
     public function resolveEmployeeForUser(User $user, ?int $employeeId = null): ?Employee
     {
         if ($employeeId) {
