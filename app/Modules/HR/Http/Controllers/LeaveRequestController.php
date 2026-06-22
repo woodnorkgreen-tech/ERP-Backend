@@ -65,6 +65,24 @@ class LeaveRequestController extends Controller
             $query->whereYear('start_date', $request->integer('year'));
         }
 
+        if ($request->filled('period')) {
+            $period = (string) $request->string('period');
+
+            if ($period === 'this_week') {
+                $query->whereBetween('start_date', [
+                    now()->startOfWeek()->toDateString(),
+                    now()->endOfWeek()->toDateString(),
+                ]);
+            } elseif ($period === 'this_month') {
+                $query->whereBetween('start_date', [
+                    now()->startOfMonth()->toDateString(),
+                    now()->endOfMonth()->toDateString(),
+                ]);
+            } elseif ($period === 'recent') {
+                $query->where('created_at', '>=', now()->subDays(14));
+            }
+        }
+
         if ($request->filled('search')) {
             $search = (string) $request->string('search');
             $query->where(function (Builder $builder) use ($search) {
