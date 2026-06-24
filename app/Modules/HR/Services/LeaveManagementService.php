@@ -149,6 +149,11 @@ class LeaveManagementService
             || $user->can('leave.type.update');
     }
 
+    public function isHRLevel(User $user): bool
+    {
+        return $user->hasRole(['Super Admin', 'Admin', 'HR']);
+    }
+
     public function resolveEmployeeForUser(User $user, ?int $employeeId = null): ?Employee
     {
         if ($employeeId) {
@@ -325,12 +330,31 @@ class LeaveManagementService
         ];
     }
 
-    public function getHandoverProjects(): array
+    public function getHandoverProjects(?string $search = null, int $limit = 20): array
     {
-        $projects = Project::query()
-            ->with(['enquiry:id,title,job_number,status'])
+        $search = trim((string) $search);
+        $limit = max(1, min($limit, 50));
+
+        $projectsQuery = Project::query()
+            ->with(['enquiry:id,title,job_number,status']);
+
+        if ($search !== '') {
+            $projectsQuery->where(function (Builder $query) use ($search) {
+                $query
+                    ->where('project_id', 'like', "%{$search}%")
+                    ->orWhere('status', 'like', "%{$search}%")
+                    ->orWhereHas('enquiry', function (Builder $enquiryQuery) use ($search) {
+                        $enquiryQuery
+                            ->where('title', 'like', "%{$search}%")
+                            ->orWhere('job_number', 'like', "%{$search}%")
+                            ->orWhere('status', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        $projects = $projectsQuery
             ->orderByDesc('id')
-            ->limit(300)
+            ->limit($limit)
             ->get(['id', 'enquiry_id', 'project_id', 'status', 'created_at', 'updated_at'])
             ->filter(fn (Project $project) => filled($project->project_id) || filled($project->enquiry?->title))
             ->map(fn (Project $project) => [
@@ -342,9 +366,20 @@ class LeaveManagementService
                 'status' => $project->status,
             ]);
 
-        $enquiries = ProjectEnquiry::query()
+        $enquiriesQuery = ProjectEnquiry::query();
+
+        if ($search !== '') {
+            $enquiriesQuery->where(function (Builder $query) use ($search) {
+                $query
+                    ->where('title', 'like', "%{$search}%")
+                    ->orWhere('job_number', 'like', "%{$search}%")
+                    ->orWhere('status', 'like', "%{$search}%");
+            });
+        }
+
+        $enquiries = $enquiriesQuery
             ->orderByDesc('id')
-            ->limit(300)
+            ->limit($limit)
             ->get(['id', 'title', 'status', 'job_number'])
             ->filter(fn (ProjectEnquiry $enquiry) => filled($enquiry->title) || filled($enquiry->job_number))
             ->map(fn (ProjectEnquiry $enquiry) => [
@@ -359,6 +394,7 @@ class LeaveManagementService
         return $projects
             ->concat($enquiries)
             ->sortByDesc('source_id')
+            ->take($limit)
             ->values()
             ->all();
     }

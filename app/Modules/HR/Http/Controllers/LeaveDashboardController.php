@@ -27,11 +27,14 @@ class LeaveDashboardController extends Controller
         ]);
     }
 
-    public function projects(): JsonResponse
+    public function projects(Request $request): JsonResponse
     {
         return response()->json([
             'success' => true,
-            'data' => $this->leaveService->getHandoverProjects(),
+            'data' => $this->leaveService->getHandoverProjects(
+                (string) $request->input('search', $request->input('q', '')),
+                $request->integer('limit') ?: 20,
+            ),
         ]);
     }
 }

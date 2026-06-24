@@ -34,6 +34,14 @@ class RecruitmentController extends Controller
 
     public function apply(CandidateApplicationRequest $request)
     {
+        $job = JobPosting::findOrFail($request->job_posting_id);
+
+        if (! $job->is_accepting_applications) {
+            return response()->json([
+                'message' => 'Applications are closed for this posting.',
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
             // 1. Create Base Candidate Profile
@@ -131,6 +139,8 @@ class RecruitmentController extends Controller
             'education_training' => 'nullable|string',
             'experience' => 'nullable|string',
             'software_tools' => 'nullable|string',
+            'skillset' => 'nullable|string',
+            'application_deadline' => 'nullable|date',
             'status' => 'required|in:Draft,Published,Closed,On Hold'
         ]);
 
@@ -155,11 +165,53 @@ class RecruitmentController extends Controller
             'education_training' => 'nullable|string',
             'experience' => 'nullable|string',
             'software_tools' => 'nullable|string',
+            'skillset' => 'nullable|string',
+            'application_deadline' => 'nullable|date',
             'status' => 'required|in:Draft,Published,Closed,On Hold'
         ]);
 
         $job->update($validated);
         return response()->json($job);
+    }
+
+    public function repostJob(Request $request, $id)
+    {
+        $source = JobPosting::findOrFail($id);
+
+        $validated = $request->validate([
+            'application_deadline' => 'nullable|date',
+            'status' => 'required|in:Draft,Published',
+        ]);
+
+        $copyFields = [
+            'title',
+            'department',
+            'employment_type',
+            'location',
+            'position_summary',
+            'description',
+            'responsibilities',
+            'education_training',
+            'experience',
+            'software_tools',
+            'skillset',
+            'requirements',
+            'shortlisting_criteria',
+            'shortlist_threshold',
+        ];
+
+        $payload = collect($source->only($copyFields))
+            ->merge([
+                'status' => $validated['status'],
+                'application_deadline' => $validated['application_deadline'] ?? null,
+                'reposted_from_id' => $source->id,
+                'created_by' => $request->user()->id,
+            ])
+            ->all();
+
+        $job = JobPosting::create($payload);
+
+        return response()->json($job, 201);
     }
 
     public function destroyJob($id)
@@ -255,9 +307,9 @@ class RecruitmentController extends Controller
             ->whereIn('status', ['New', 'Shortlisted'])
             ->get();
 
-        $allSkills             = collect();
+        $allSkills             = collect($this->splitPostingList($job->skillset));
         $allCerts              = collect();
-        $allSoftware           = collect();
+        $allSoftware           = collect($this->splitPostingList($job->software_tools));
         $allQKeys              = collect();
         $allFieldsOfStudy      = collect();
         $allQuestionnaireAnswers = [];
@@ -265,7 +317,7 @@ class RecruitmentController extends Controller
         foreach ($candidates as $c) {
             $allSkills   = $allSkills->merge($c->skills ?? []);
             $allCerts    = $allCerts->merge($c->certifications ?? []);
-            $allSoftware = $allSoftware->merge($c->software_proficiency ?? []);
+            $allSoftware = $allSoftware->merge($this->normalizeSoftwareList($c->software_proficiency ?? []));
 
             foreach ($c->educations as $edu) {
                 if (!empty($edu->field_of_study)) {
@@ -284,13 +336,16 @@ class RecruitmentController extends Controller
             }
         }
 
+        $suggestedCriteria = $this->buildSuggestedShortlistCriteria($job);
+
         return response()->json([
             'criteria'          => $job->shortlisting_criteria ?? [],
+            'suggested_criteria' => $suggestedCriteria,
             'threshold'         => $job->shortlist_threshold ?? 60,
             'available_options' => [
-                'skills'              => $allSkills->unique()->values(),
-                'certifications'      => $allCerts->unique()->values(),
-                'software'            => $allSoftware->unique()->values(),
+                'skills'              => $allSkills->filter()->unique()->values(),
+                'certifications'      => $allCerts->filter()->unique()->values(),
+                'software'            => $allSoftware->filter()->unique()->values(),
                 'fields_of_study'     => $allFieldsOfStudy->unique()->values(),
                 'questionnaire_keys'  => $allQKeys->unique()->values(),
                 'questionnaire_answers' => $allQuestionnaireAnswers,
@@ -336,6 +391,10 @@ class RecruitmentController extends Controller
             'criteria.software.value' => 'sometimes|array',
             'criteria.software.value.*' => 'string',
             'criteria.software.weight' => 'sometimes|integer|min:0',
+            'criteria.expected_salary_range' => 'sometimes|array',
+            'criteria.expected_salary_range.enabled' => 'sometimes|boolean',
+            'criteria.expected_salary_range.min' => 'sometimes|nullable|integer|min:0',
+            'criteria.expected_salary_range.max' => 'sometimes|nullable|integer|min:0',
             'criteria.questionnaire_rules' => 'sometimes|array',
             'criteria.questionnaire_rules.enabled' => 'sometimes|boolean',
             'criteria.questionnaire_rules.weight' => 'sometimes|integer|min:0',
@@ -392,6 +451,10 @@ class RecruitmentController extends Controller
             'criteria.software.value' => 'sometimes|array',
             'criteria.software.value.*' => 'string',
             'criteria.software.weight' => 'sometimes|integer|min:0',
+            'criteria.expected_salary_range' => 'sometimes|array',
+            'criteria.expected_salary_range.enabled' => 'sometimes|boolean',
+            'criteria.expected_salary_range.min' => 'sometimes|nullable|integer|min:0',
+            'criteria.expected_salary_range.max' => 'sometimes|nullable|integer|min:0',
             'criteria.questionnaire_rules' => 'sometimes|array',
             'criteria.questionnaire_rules.enabled' => 'sometimes|boolean',
             'criteria.questionnaire_rules.weight' => 'sometimes|integer|min:0',
@@ -406,10 +469,15 @@ class RecruitmentController extends Controller
         $service  = new AutoShortlistService();
         $results  = $service->preview($job, $validated['criteria'], $validated['threshold']);
         $wouldPass = collect($results)->where('would_pass', true)->count();
+        $wouldReturnToNew = collect($results)
+            ->where('current_status', 'Shortlisted')
+            ->where('would_pass', false)
+            ->count();
 
         return response()->json([
             'total'       => count($results),
             'would_pass'  => $wouldPass,
+            'would_return_to_new' => $wouldReturnToNew,
             'candidates'  => $results,
         ]);
     }
@@ -451,6 +519,10 @@ class RecruitmentController extends Controller
             'criteria.software.value' => 'sometimes|array',
             'criteria.software.value.*' => 'string',
             'criteria.software.weight' => 'sometimes|integer|min:0',
+            'criteria.expected_salary_range' => 'sometimes|array',
+            'criteria.expected_salary_range.enabled' => 'sometimes|boolean',
+            'criteria.expected_salary_range.min' => 'sometimes|nullable|integer|min:0',
+            'criteria.expected_salary_range.max' => 'sometimes|nullable|integer|min:0',
             'criteria.questionnaire_rules' => 'sometimes|array',
             'criteria.questionnaire_rules.enabled' => 'sometimes|boolean',
             'criteria.questionnaire_rules.weight' => 'sometimes|integer|min:0',
@@ -586,5 +658,58 @@ class RecruitmentController extends Controller
         }
 
         return $documents->unique()->values()->all();
+    }
+
+    private function splitPostingList(?string $value): array
+    {
+        if (empty($value)) {
+            return [];
+        }
+
+        return collect(preg_split('/[\r\n,;]+/', $value))
+            ->map(fn ($item) => trim(preg_replace('/^[-*\s]+/', '', (string) $item)))
+            ->filter()
+            ->unique(fn ($item) => strtolower($item))
+            ->values()
+            ->all();
+    }
+
+    private function normalizeSoftwareList($software): array
+    {
+        return collect((array) $software)
+            ->map(function ($item) {
+                if (is_array($item)) {
+                    return $item['name'] ?? $item['software'] ?? $item['tool'] ?? null;
+                }
+
+                if (is_object($item)) {
+                    return $item->name ?? $item->software ?? $item->tool ?? null;
+                }
+
+                return $item;
+            })
+            ->map(fn ($item) => trim((string) $item))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function buildSuggestedShortlistCriteria(JobPosting $job): array
+    {
+        $skills = $this->splitPostingList($job->skillset);
+        $software = $this->splitPostingList($job->software_tools);
+
+        return [
+            'skills' => [
+                'enabled' => ! empty($skills),
+                'value' => $skills,
+                'weight' => 25,
+            ],
+            'software' => [
+                'enabled' => ! empty($software),
+                'value' => $software,
+                'weight' => 10,
+            ],
+        ];
     }
 }

@@ -196,6 +196,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('requests/{leaveRequest}', [LeaveRequestController::class, 'show']);
             Route::put('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
             Route::patch('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
+            Route::post('requests/{leaveRequest}/lead-approve', [LeaveRequestController::class, 'leadApprove']);
             Route::post('requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve']);
             Route::post('requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject']);
             Route::post('requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel']);
@@ -382,6 +383,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('jobs', [RecruitmentController::class, 'adminJobs']);
             Route::post('jobs', [RecruitmentController::class, 'storeJob']);
             Route::put('jobs/{id}', [RecruitmentController::class, 'updateJob']);
+            Route::post('jobs/{id}/repost', [RecruitmentController::class, 'repostJob']);
             Route::delete('jobs/{id}', [RecruitmentController::class, 'destroyJob']);
             Route::post('jobs/{id}/notify-shortlisted', [InterviewController::class, 'notifyShortlisted'])
                 ->middleware('permission:' . Permissions::RECRUITMENT_NOTIFY);
