@@ -76,9 +76,6 @@ Route::prefix('public')->group(function () {
     Route::get('petty-cash/requisitions/project-team-members', [PettyCashRequisitionController::class, 'getPublicProjectTeamMembers']);
 });
 
-// Flash Quote PDF Generation
-Route::post('flash-quote/generate-pdf', [App\Http\Controllers\FlashQuoteController::class, 'generatePdf']);
-
 Route::get('/storage/{path}', function ($path) {
     $file = storage_path('app/public/' . $path);
 
@@ -621,18 +618,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Logistics Log Routes
         Route::apiResource('logistics-log', App\Http\Controllers\LogisticsLogController::class);
 
-        // Dashboard routes
-        Route::get('dashboard/command-center', [DashboardController::class, 'commandCenter']);
+        // Dashboard route (lean: one endpoint → KPIs + ranked signals)
         Route::get('dashboard', [DashboardController::class, 'dashboard']);
-        Route::get('dashboard/enquiry-metrics', [DashboardController::class, 'enquiryMetrics']);
-        Route::get('dashboard/task-metrics', [DashboardController::class, 'taskMetrics']);
-        Route::get('dashboard/project-metrics', [DashboardController::class, 'projectMetrics']);
-        Route::get('dashboard/financial-metrics', [DashboardController::class, 'financialMetrics']);
-        Route::get('dashboard/recent-activities', [DashboardController::class, 'recentActivities']);
-        Route::get('dashboard/alerts', [DashboardController::class, 'alerts']);
-        Route::post('dashboard/filter', [DashboardController::class, 'filterDashboard']);
-        Route::get('dashboard/export/pdf', [DashboardController::class, 'exportToPDF']);
-        Route::get('dashboard/export/excel', [DashboardController::class, 'exportToExcel']);
 
         // Task management routes
         Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);

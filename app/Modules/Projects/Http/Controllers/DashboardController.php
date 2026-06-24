@@ -9,453 +9,92 @@ use Illuminate\Support\Facades\Auth;
 use App\Modules\Projects\Services\ProjectsDashboardService;
 use App\Modules\Projects\Http\Controllers\Concerns\HandlesProjectErrors;
 use App\Constants\Permissions;
+use App\Constants\EnquiryConstants;
+use Carbon\Carbon;
 
 /**
- * @OA\Schema(
- *     schema="DashboardMetrics",
- *     @OA\Property(property="total_enquiries", type="integer", example=25),
- *     @OA\Property(property="active_enquiries", type="integer", example=12),
- *     @OA\Property(property="completed_enquiries", type="integer", example=8),
- *     @OA\Property(property="pending_enquiries", type="integer", example=5),
- *     @OA\Property(property="total_tasks", type="integer", example=45),
- *     @OA\Property(property="completed_tasks", type="integer", example=32),
- *     @OA\Property(property="overdue_tasks", type="integer", example=3),
- *     @OA\Property(property="total_projects", type="integer", example=15)
- * )
- *
- * @OA\Schema(
- *     schema="ActivityItem",
- *     @OA\Property(property="id", type="integer"),
- *     @OA\Property(property="type", type="string", enum={"task_completed","enquiry_created","task_assigned","quote_approved"}),
- *     @OA\Property(property="description", type="string", example="Task 'Site Survey' was completed"),
- *     @OA\Property(property="user_name", type="string", example="John Doe"),
- *     @OA\Property(property="created_at", type="string", format="date-time")
- * )
- *
- * @OA\Schema(
- *     schema="AlertItem",
- *     @OA\Property(property="id", type="integer"),
- *     @OA\Property(property="type", type="string", enum={"overdue_task","upcoming_deadline","unassigned_task"}),
- *     @OA\Property(property="title", type="string", example="Overdue Task Alert"),
- *     @OA\Property(property="message", type="string", example="Task 'Design Review' is 2 days overdue"),
- *     @OA\Property(property="priority", type="string", enum={"low","medium","high","urgent"}),
- *     @OA\Property(property="created_at", type="string", format="date-time")
- * )
+ * Lean projects dashboard — one endpoint, one payload.
  */
 class DashboardController extends Controller
 {
     use HandlesProjectErrors;
 
-    protected ProjectsDashboardService $dashboardService;
-
-    public function __construct(ProjectsDashboardService $dashboardService)
+    public function __construct(private ProjectsDashboardService $dashboardService)
     {
-        $this->dashboardService = $dashboardService;
-    }
-
-    /**
-     * Centralized Admin Authorization
-     */
-    private function authorizeAdmin(): void
-    {
-        if (!Auth::user()->hasPermissionTo(\App\Constants\Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(\App\Constants\EnquiryConstants::ROLES_ADMIN)) {
-            abort(403, 'Unauthorized access to project administration metrics');
-        }
-    }
-
-    /**
-     * Centralized Workflow Authorization
-     */
-    private function authorizeWorkflow(): void
-    {
-        if (!Auth::user()->hasPermissionTo(\App\Constants\Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(\App\Constants\EnquiryConstants::ROLES_WORKFLOW)) {
-            abort(403, 'Unauthorized access to project dashboard');
-        }
-    }
-
-    /**
-     * @OA\Get(
-     *     path="/api/projects/dashboard/enquiry-metrics",
-     *     summary="Get enquiry metrics for dashboard",
-     *     tags={"Dashboard"},
-     *     security={{"bearerAuth":{}}},
-     *     @OA\Response(
-     *         response=200,
-     *         description="Enquiry metrics retrieved successfully",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="data", ref="#/components/schemas/DashboardMetrics"),
-     *             @OA\Property(property="message", type="string")
-     *         )
-     *     ),
-     *     @OA\Response(response=403, description="Unauthorized"),
-     *     @OA\Response(response=500, description="Internal server error")
-     * )
-     */
-    public function enquiryMetrics(Request $request): JsonResponse
-    {
-        // Check permissions
-        $this->authorizeAdmin();
-
-        return $this->safe(function () {
-            $metrics = $this->dashboardService->getEnquiryMetrics();
-
-            return response()->json([
-                'data' => $metrics,
-                'message' => 'Enquiry metrics retrieved successfully'
-            ]);
-        }, 'Enquiry metrics', 500);
-    }
-
-    /**
-     * @OA\Get(
-     *     path="/api/projects/dashboard/task-metrics",
-     *     summary="Get task metrics for dashboard",
-     *     tags={"Dashboard"},
-     *     security={{"bearerAuth":{}}},
-     *     @OA\Response(
-     *         response=200,
-     *         description="Task metrics retrieved successfully",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="data", ref="#/components/schemas/DashboardMetrics"),
-     *             @OA\Property(property="message", type="string")
-     *         )
-     *     ),
-     *     @OA\Response(response=403, description="Unauthorized"),
-     *     @OA\Response(response=500, description="Internal server error")
-     * )
-     */
-    public function taskMetrics(Request $request): JsonResponse
-    {
-        // Check permissions
-        $this->authorizeAdmin();
-
-        return $this->safe(function () {
-            $metrics = $this->dashboardService->getTaskMetrics();
-
-            return response()->json([
-                'data' => $metrics,
-                'message' => 'Task metrics retrieved successfully'
-            ]);
-        }, 'Task metrics', 500);
-    }
-
-    /**
-     * Get project metrics for dashboard
-     */
-    public function projectMetrics(Request $request): JsonResponse
-    {
-        // Check permissions
-        $this->authorizeAdmin();
-
-        return $this->safe(function () {
-            $metrics = $this->dashboardService->getProjectMetrics();
-
-            return response()->json([
-                'data' => $metrics,
-                'message' => 'Project metrics retrieved successfully'
-            ]);
-        }, 'Project metrics', 500);
-    }
-
-    /**
-     * Get financial metrics for dashboard
-     */
-    public function financialMetrics(Request $request): JsonResponse
-    {
-        // Check permissions
-        $this->authorizeAdmin();
-
-        return $this->safe(function () {
-            $metrics = $this->dashboardService->getFinancialMetrics();
-
-            return response()->json([
-                'data' => $metrics,
-                'message' => 'Financial metrics retrieved successfully'
-            ]);
-        }, 'Financial metrics', 500);
-    }
-
-    /**
-     * @OA\Get(
-     *     path="/api/projects/dashboard/recent-activities",
-     *     summary="Get recent activities for dashboard",
-     *     tags={"Dashboard"},
-     *     security={{"bearerAuth":{}}},
-     *     @OA\Parameter(
-     *         name="limit",
-     *         in="query",
-     *         description="Number of activities to retrieve",
-     *         @OA\Schema(type="integer", default=10, minimum=1, maximum=50)
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Recent activities retrieved successfully",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="data", type="array", @OA\Items(ref="#/components/schemas/ActivityItem")),
-     *             @OA\Property(property="message", type="string")
-     *         )
-     *     ),
-     *     @OA\Response(response=403, description="Unauthorized"),
-     *     @OA\Response(response=500, description="Internal server error")
-     * )
-     */
-    public function recentActivities(Request $request): JsonResponse
-    {
-        // Check permissions
-        $this->authorizeAdmin();
-
-        return $this->safe(function () use ($request) {
-            $limit = $request->get('limit', 10);
-            $activities = $this->dashboardService->getRecentActivities($limit);
-
-            return response()->json([
-                'data' => $activities,
-                'message' => 'Recent activities retrieved successfully'
-            ]);
-        }, 'Recent activities', 500);
-    }
-
-    /**
-     * Get alerts for dashboard
-     */
-    public function alerts(Request $request): JsonResponse
-    {
-        // Check permissions
-        $this->authorizeAdmin();
-
-        return $this->safe(function () {
-            $alerts = $this->dashboardService->getAlerts();
-
-            return response()->json([
-                'data' => $alerts,
-                'message' => 'Alerts retrieved successfully'
-            ]);
-        }, 'Alerts', 500);
-    }
-
-    /**
-     * @OA\Get(
-     *     path="/api/projects/dashboard/command-center",
-     *     summary="Get Project Command Center data",
-     *     tags={"Dashboard"},
-     *     security={{"bearerAuth":{}}},
-     *     @OA\Response(response=200, description="Success"),
-     *     @OA\Response(response=403, description="Unauthorized")
-     * )
-     */
-    public function commandCenter(Request $request): JsonResponse
-    {
-        $this->authorizeAdmin();
-
-        return $this->safe(function () {
-            $data = $this->dashboardService->getCommandCenterData();
-            return response()->json([
-                'data' => $data,
-                'message' => 'Command Center data retrieved'
-            ]);
-        }, 'Command center', 500);
     }
 
     /**
      * @OA\Get(
      *     path="/api/projects/dashboard",
-     *     summary="Get comprehensive dashboard data",
+     *     summary="Get the projects dashboard (KPIs + ranked signals)",
      *     tags={"Dashboard"},
      *     security={{"bearerAuth":{}}},
-     *     @OA\Response(
-     *         response=200,
-     *         description="Dashboard data retrieved successfully",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="data", type="object",
-     *                 @OA\Property(property="enquiry_metrics", ref="#/components/schemas/DashboardMetrics"),
-     *                 @OA\Property(property="task_metrics", ref="#/components/schemas/DashboardMetrics"),
-     *                 @OA\Property(property="project_metrics", ref="#/components/schemas/DashboardMetrics"),
-     *                 @OA\Property(property="recent_activities", type="array", @OA\Items(ref="#/components/schemas/ActivityItem")),
-     *                 @OA\Property(property="alerts", type="array", @OA\Items(ref="#/components/schemas/AlertItem"))
-     *             ),
-     *             @OA\Property(property="message", type="string")
-     *         )
-     *     ),
-     *     @OA\Response(response=403, description="Unauthorized"),
-     *     @OA\Response(response=500, description="Internal server error")
+     *     @OA\Parameter(name="period", in="query", description="current_month (default), month, or all", @OA\Schema(type="string")),
+     *     @OA\Parameter(name="month", in="query", description="Target month as YYYY-MM (used when period=month)", @OA\Schema(type="string")),
+     *     @OA\Response(response=200, description="Dashboard data retrieved successfully"),
+     *     @OA\Response(response=403, description="Unauthorized")
      * )
      */
     public function dashboard(Request $request): JsonResponse
     {
-        // Check permissions - Allow all project-related roles
-        $allowedRoles = [
-            'Super Admin', 'Admin', 'Project Manager', 'Project Officer', 'HR',
-            'Designer', 'Procurement', 'Production', 'Logistics', 'Stores', 'Accounts', 'Client Service', 'Costing'
-        ];
+        $this->authorizeDashboard();
 
-        \Log::info('Dashboard access attempt', [
-            'user_id' => Auth::id(),
-            'user_name' => Auth::user()->name ?? 'Unknown',
-            'roles' => Auth::user()->getRoleNames(),
-            'permissions' => Auth::user()->getAllPermissions()->pluck('name')->toArray(),
-            'has_dashboard_permission' => Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS),
-            'has_allowed_role' => Auth::user()->hasRole($allowedRoles),
-            'ip' => $request->ip(),
-            'user_agent' => $request->userAgent(),
-            'timestamp' => now()
-        ]);
+        $period = $this->resolvePeriod($request);
 
-        $this->authorizeWorkflow();
-
-        return $this->safe(function () {
-            \Log::info('Dashboard data fetch started', ['user_id' => Auth::id()]);
-            $data = [
-                'enquiry_metrics' => $this->dashboardService->getEnquiryMetrics(),
-                'task_metrics' => $this->dashboardService->getTaskMetrics(),
-                'project_metrics' => $this->dashboardService->getProjectMetrics(),
-                'financial_metrics' => $this->dashboardService->getFinancialMetrics(),
-                'recent_activities' => $this->dashboardService->getRecentActivities(10),
-                'alerts' => $this->dashboardService->getAlerts(),
-                'suggestions' => $this->dashboardService->getSuggestions(),
-                'command_center_data' => $this->dashboardService->getCommandCenterData(),
-                'metadata' => $this->dashboardService->getMetadata(),
-            ];
-
+        return $this->safe(function () use ($period) {
             return response()->json([
-                'data' => $data,
-                'message' => 'Dashboard data retrieved successfully'
+                'data' => $this->dashboardService->getDashboard($period),
+                'message' => 'Dashboard data retrieved successfully',
             ]);
         }, 'Dashboard', 500);
     }
 
     /**
-     * Filter dashboard data
+     * Turn the request into a period: current month (default), a specific
+     * month (YYYY-MM), or all-time (a null range).
+     *
+     * @return array{key:string,label:string,start:?Carbon,end:?Carbon}
      */
-    public function filterDashboard(Request $request): JsonResponse
+    private function resolvePeriod(Request $request): array
     {
-        // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard filtering'
-            ], 403);
+        $period = $request->query('period', 'current_month');
+
+        if ($period === 'all') {
+            return ['key' => 'all', 'label' => 'All time', 'start' => null, 'end' => null];
         }
 
-        return $this->safe(function () use ($request) {
-            $filters = $request->all();
-            $filteredData = $this->dashboardService->getFilteredDashboardData($filters);
+        $month = $period === 'month' ? $request->query('month') : null;
+        $key = $period === 'month' ? 'month' : 'current_month';
 
-            return response()->json([
-                'data' => $filteredData,
-                'message' => 'Filtered dashboard data retrieved successfully'
-            ]);
-        }, 'Filter dashboard', 500);
+        try {
+            $anchor = $month
+                ? Carbon::createFromFormat('Y-m', $month)->startOfMonth()
+                : Carbon::now()->startOfMonth();
+        } catch (\Throwable) {
+            // Bad month string falls back to the current month.
+            $anchor = Carbon::now()->startOfMonth();
+            $key = 'current_month';
+        }
+
+        return [
+            'key' => $key,
+            'label' => $anchor->format('F Y'),
+            'start' => $anchor->copy()->startOfMonth(),
+            'end' => $anchor->copy()->endOfMonth(),
+        ];
     }
 
     /**
-     * @OA\Post(
-     *     path="/api/projects/dashboard/export/pdf",
-     *     summary="Export dashboard data to PDF",
-     *     tags={"Dashboard"},
-     *     security={{"bearerAuth":{}}},
-     *     @OA\RequestBody(
-     *         @OA\JsonContent(
-     *             @OA\Property(property="filters", type="object",
-     *                 @OA\Property(property="date_from", type="string", format="date"),
-     *                 @OA\Property(property="date_to", type="string", format="date"),
-     *                 @OA\Property(property="department_id", type="integer"),
-     *                 @OA\Property(property="status", type="string")
-     *             )
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="PDF export generated successfully",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="data", type="object",
-     *                 @OA\Property(property="file_path", type="string"),
-     *                 @OA\Property(property="download_url", type="string")
-     *             ),
-     *             @OA\Property(property="message", type="string")
-     *         )
-     *     ),
-     *     @OA\Response(response=403, description="Unauthorized"),
-     *     @OA\Response(response=500, description="Internal server error")
-     * )
+     * Dashboard is visible to anyone with the projects-dashboard permission
+     * or a workflow role.
      */
-    public function exportToPDF(Request $request): JsonResponse
+    private function authorizeDashboard(): void
     {
-        // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard export'
-            ], 403);
+        if (
+            !Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
+            !Auth::user()->hasRole(EnquiryConstants::ROLES_WORKFLOW)
+        ) {
+            abort(403, 'Unauthorized access to project dashboard');
         }
-
-        return $this->safe(function () use ($request) {
-            $filters = $request->get('filters', []);
-            $filePath = $this->dashboardService->exportToPDF($filters);
-
-            return response()->json([
-                'data' => [
-                    'file_path' => $filePath,
-                    'download_url' => url('storage/' . $filePath)
-                ],
-                'message' => 'PDF export generated successfully'
-            ]);
-        }, 'Export dashboard PDF', 500);
-    }
-
-    /**
-     * @OA\Post(
-     *     path="/api/projects/dashboard/export/excel",
-     *     summary="Export dashboard data to Excel",
-     *     tags={"Dashboard"},
-     *     security={{"bearerAuth":{}}},
-     *     @OA\RequestBody(
-     *         @OA\JsonContent(
-     *             @OA\Property(property="filters", type="object",
-     *                 @OA\Property(property="date_from", type="string", format="date"),
-     *                 @OA\Property(property="date_to", type="string", format="date"),
-     *                 @OA\Property(property="department_id", type="integer"),
-     *                 @OA\Property(property="status", type="string")
-     *             )
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Excel export generated successfully",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="data", type="object",
-     *                 @OA\Property(property="file_path", type="string"),
-     *                 @OA\Property(property="download_url", type="string")
-     *             ),
-     *             @OA\Property(property="message", type="string")
-     *         )
-     *     ),
-     *     @OA\Response(response=403, description="Unauthorized"),
-     *     @OA\Response(response=500, description="Internal server error")
-     * )
-     */
-    public function exportToExcel(Request $request): JsonResponse
-    {
-        // Check permissions
-        if (!Auth::user()->hasPermissionTo(Permissions::DASHBOARD_PROJECTS) &&
-            !Auth::user()->hasRole(['Super Admin', 'Project Manager', 'Project Officer', 'HR'])) {
-            return response()->json([
-                'message' => 'Unauthorized access to dashboard export'
-            ], 403);
-        }
-
-        return $this->safe(function () use ($request) {
-            $filters = $request->get('filters', []);
-            $filePath = $this->dashboardService->exportToExcel($filters);
-
-            return response()->json([
-                'data' => [
-                    'file_path' => $filePath,
-                    'download_url' => url('storage/' . $filePath)
-                ],
-                'message' => 'Excel export generated successfully'
-            ]);
-        }, 'Export dashboard Excel', 500);
     }
 }
