@@ -353,7 +353,7 @@ class EnquiryTask extends Model
 
         return static::where('project_enquiry_id', $this->project_enquiry_id)
             ->whereIn('type', $prerequisites)
-            ->whereNotIn('status', ['completed', 'skipped'])
+            ->where('status', '!=', 'completed')
             ->pluck('title')
             ->all();
     }

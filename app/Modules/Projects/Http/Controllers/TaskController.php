@@ -16,6 +16,7 @@ use App\Modules\UniversalTask\Services\TaskService as UniversalTaskService;
 use App\Modules\UniversalTask\Models\Task as UniversalTask;
 use App\Http\Controllers\MaterialsController;
 use App\Models\DesignAsset;
+use App\Modules\Projects\Http\Controllers\Concerns\HandlesProjectErrors;
 
 /**
  * @OA\Schema(
@@ -37,6 +38,8 @@ use App\Models\DesignAsset;
  */
 class TaskController extends Controller
 {
+    use HandlesProjectErrors;
+
     protected EnquiryWorkflowService $workflowService;
     protected NotificationService $notificationService;
     protected UniversalTaskService $universalTaskService;
@@ -100,7 +103,7 @@ class TaskController extends Controller
      */
     public function getAllEnquiryTasks(Request $request): JsonResponse
     {
-        try {
+        return $this->safe(function () use ($request) {
             $query = EnquiryTask::authorized()->withTaskData()->with([
                 'enquiry',
                 'department',
@@ -127,13 +130,7 @@ class TaskController extends Controller
                 'data' => \App\Modules\Projects\Resources\EnquiryTaskResource::collection($tasks)->response()->getData(true),
                 'message' => 'All enquiry tasks retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            \Log::error("getAllEnquiryTasks failed: " . $e->getMessage());
-            return response()->json([
-                'message' => 'Failed to retrieve all enquiry tasks',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'List all enquiry tasks', 500);
     }
 
     /**
@@ -164,7 +161,7 @@ class TaskController extends Controller
     public function getEnquiryTasks(int $enquiryId): JsonResponse
     {
 
-        try {
+        return $this->safe(function () use ($enquiryId) {
             $query = EnquiryTask::authorized()
                 ->where('project_enquiry_id', $enquiryId)
                 ->withTaskData()
@@ -244,13 +241,7 @@ class TaskController extends Controller
                 'data' => $tasks,
                 'message' => 'Enquiry tasks retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            \Log::error("getEnquiryTasks failed for enquiry {$enquiryId}: " . $e->getMessage());
-            return response()->json([
-                'message' => 'Failed to retrieve enquiry tasks',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'List enquiry tasks', 500);
     }
 
     /**
@@ -258,7 +249,7 @@ class TaskController extends Controller
      */
     public function getDepartmentalTasks(Request $request): JsonResponse
     {
-        try {
+        return $this->safe(function () use ($request) {
             // Visibility: all authenticated users can see tasks for project transparency.
             // Interaction rights are enforced per-task via the is_authorized flag.
             $query = EnquiryTask::authorized()->withTaskData()->with('enquiry', 'department', 'assignedUser', 'creator');
@@ -284,12 +275,7 @@ class TaskController extends Controller
                 'data' => $tasks,
                 'message' => 'Departmental tasks retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve departmental tasks',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'List departmental tasks', 500);
     }
 
     /**
@@ -329,7 +315,7 @@ class TaskController extends Controller
     public function updateTaskStatus(Request $request, int $taskId): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'status' => 'required|string|in:pending,in_progress,completed,cancelled,skipped',
+            'status' => 'required|string|in:pending,in_progress,completed,cancelled',
             'notes' => 'nullable|string',
         ]);
 
@@ -340,7 +326,7 @@ class TaskController extends Controller
             ], 422);
         }
 
-        try {
+        return $this->safe(function () use ($request, $taskId) {
             $action = app(\App\Modules\Projects\Actions\UpdateTaskStatusAction::class);
             $updatedTask = $action->execute($taskId, $request->status, $request->notes);
 
@@ -348,12 +334,7 @@ class TaskController extends Controller
                 'data' => $updatedTask->load('enquiry', 'department', 'assignedUser'),
                 'message' => 'Task status updated successfully'
             ]);
-        } catch (\Exception $e) {
-            \Log::error("updateTaskStatus failed for task {$taskId}: " . $e->getMessage());
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 500);
-        }
+        }, 'Update task status');
     }
 
     /**
@@ -372,7 +353,7 @@ class TaskController extends Controller
             ], 422);
         }
 
-        try {
+        return $this->safe(function () use ($request, $taskId) {
             $task = EnquiryTask::findOrFail($taskId);
 
             // Security check: Must belong to department OR have the specialized role for this task type
@@ -409,12 +390,7 @@ class TaskController extends Controller
                 'data' => $task,
                 'message' => 'Task assigned successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to assign task',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Assign task');
     }
 
     /**
@@ -444,7 +420,7 @@ class TaskController extends Controller
      */
     public function show(int $taskId): JsonResponse
     {
-        try {
+        return $this->safe(function () use ($taskId) {
             $task = EnquiryTask::with([
                 'enquiry.enquiryTasks.materialsData.elements',
                 'enquiry.enquiryTasks.designAssets',
@@ -460,12 +436,7 @@ class TaskController extends Controller
                 'data' => $task,
                 'message' => 'Task details retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve task details',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Show task', 500);
     }
 
     /**
@@ -488,7 +459,7 @@ class TaskController extends Controller
             ], 422);
         }
 
-        try {
+        return $this->safe(function () use ($request, $taskId) {
             $task = EnquiryTask::findOrFail($taskId);
             $user = Auth::user();
 
@@ -511,12 +482,7 @@ class TaskController extends Controller
                 'data' => $task->load('enquiry', 'department', 'assignedUser'),
                 'message' => 'Task updated successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Update task');
     }
 
     /**
@@ -571,9 +537,9 @@ class TaskController extends Controller
             ], 422);
         }
 
-        try {
+        return $this->safe(function () use ($request, $taskId) {
             $assignmentData = array_filter($request->only(['priority', 'due_date', 'notes']));
-            
+
             $action = app(\App\Modules\Projects\Actions\AssignTaskAction::class);
             $task = $action->execute($taskId, $request->assigned_user_id, $assignmentData);
 
@@ -581,12 +547,7 @@ class TaskController extends Controller
                 'data' => new \App\Modules\Projects\Resources\EnquiryTaskResource($task),
                 'message' => 'Task assigned successfully'
             ]);
-        } catch (\Exception $e) {
-            \Log::error("assignEnquiryTask failed for task {$taskId}: " . $e->getMessage());
-            return response()->json([
-                'message' => 'Failed to assign task',
-            ], 500);
-        }
+        }, 'Assign enquiry task');
     }
 
     /**
@@ -594,7 +555,7 @@ class TaskController extends Controller
      */
     public function getTaskAssignmentHistory(int $taskId): JsonResponse
     {
-        try {
+        return $this->safe(function () use ($taskId) {
             $history = TaskAssignmentHistory::where('enquiry_task_id', $taskId)
                 ->with('assignedTo', 'assignedBy')
                 ->orderBy('assigned_at', 'desc')
@@ -604,12 +565,7 @@ class TaskController extends Controller
                 'data' => $history,
                 'message' => 'Task assignment history retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve task assignment history',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Get task assignment history', 500);
     }
 
     /**
@@ -662,7 +618,7 @@ class TaskController extends Controller
             ], 422);
         }
 
-        try {
+        return $this->safe(function () use ($request, $taskId, $user) {
             $newAssignedUser = \App\Models\User::findOrFail($request->new_assigned_user_id);
 
             $task = $this->workflowService->reassignEnquiryTask(
@@ -679,12 +635,7 @@ class TaskController extends Controller
                 'data' => $task->load('department', 'assignedBy', 'assignmentHistory'),
                 'message' => 'Task reassigned successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to reassign task',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Reassign enquiry task');
     }
 
     /**
@@ -712,9 +663,9 @@ class TaskController extends Controller
             ], 422);
         }
 
-        try {
+        return $this->safe(function () use ($request, $taskId, $user) {
             $task = EnquiryTask::findOrFail($taskId);
-            
+
             // Check permissions: Must be assignee OR Admin/Manager
             $isAssignee = $task->assigned_to == $user->id;
             $isAdmin = $user->hasRole(['Super Admin', 'Project Manager']);
@@ -729,13 +680,7 @@ class TaskController extends Controller
                 'data' => $task->load('department', 'assignedBy'),
                 'message' => 'Task released to pool successfully'
             ]);
-        } catch (\Exception $e) {
-            \Log::error("Failed to release task: " . $e->getMessage());
-            return response()->json([
-                'message' => 'Failed to release task',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Release enquiry task');
     }
 
     /**
@@ -782,7 +727,7 @@ class TaskController extends Controller
             'priority' => 'nullable|string|in:low,medium,high,urgent',
             'due_date' => 'nullable|date|after:yesterday',
             'notes' => 'nullable|string|max:1000',
-            'status' => 'nullable|string|in:pending,in_progress,completed,cancelled,skipped',
+            'status' => 'nullable|string|in:pending,in_progress,completed,cancelled',
         ]);
 
         if ($validator->fails()) {
@@ -792,7 +737,7 @@ class TaskController extends Controller
             ], 422);
         }
 
-        try {
+        return $this->safe(function () use ($request, $taskId) {
             $task = EnquiryTask::findOrFail($taskId);
             $user = Auth::user();
 
@@ -818,12 +763,7 @@ class TaskController extends Controller
                 'data' => $task->load('assignedBy', 'assignmentHistory'),
                 'message' => 'Task updated successfully'
             ]);
-        } catch (\Throwable $e) {
-            \Log::error("updateEnquiryTask failed for task {$taskId}: " . $e->getMessage());
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 500);
-        }
+        }, 'Update enquiry task');
     }
 
     /**
@@ -831,7 +771,7 @@ class TaskController extends Controller
      */
     public function getProjectUniversalTasks(int $projectId): JsonResponse
     {
-        try {
+        return $this->safe(function () use ($projectId) {
             $user = Auth::user();
 
             // Get Universal Tasks associated with this project
@@ -845,12 +785,7 @@ class TaskController extends Controller
                 'data' => $universalTasks,
                 'message' => 'Project Universal Tasks retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve project Universal Tasks',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'List project universal tasks', 500);
     }
 
     /**
@@ -877,7 +812,7 @@ class TaskController extends Controller
             ], 422);
         }
 
-        try {
+        return $this->safe(function () use ($request, $projectId) {
             $user = Auth::user();
 
             // Prepare task data with project context
@@ -893,12 +828,7 @@ class TaskController extends Controller
                 'data' => $universalTask->load(['department', 'assignedUser', 'creator']),
                 'message' => 'Universal Task created successfully for project'
             ], 201);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to create Universal Task',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Create project universal task');
     }
 
     /**
@@ -906,7 +836,7 @@ class TaskController extends Controller
      */
     public function getDepartmentUniversalTasks(Request $request): JsonResponse
     {
-        try {
+        return $this->safe(function () use ($request) {
             $user = Auth::user();
 
             $query = UniversalTask::with(['department', 'assignedUser', 'creator', 'taskable'])
@@ -931,11 +861,6 @@ class TaskController extends Controller
                 'data' => $universalTasks,
                 'message' => 'Department Universal Tasks retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve department Universal Tasks',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'List department universal tasks', 500);
     }
 }

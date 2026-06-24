@@ -64,7 +64,7 @@ class EnquiryConstants
     // Closure-phase task types that must be completed (or skipped) before a project
     // can transition to STATUS_COMPLETED. Only tasks actually selected for the project
     // are evaluated — unselected closure tasks do not block completion.
-    const PROJECT_COMPLETION_REQUISITES = ['handover', 'report'];
+    const PROJECT_COMPLETION_REQUISITES = ['report'];
 
     // Enquiry number prefix
     const ENQUIRY_PREFIX = 'ENQ';

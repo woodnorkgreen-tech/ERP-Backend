@@ -3,6 +3,8 @@
 namespace App\Modules\HR\Http\Controllers;
 
 use App\Constants\Permissions;
+use App\Modules\HR\Exports\EmployeesTemplateExport;
+use App\Modules\HR\Imports\EmployeesTemplateImport;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Department;
 use Illuminate\Http\Request;
@@ -10,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Maatwebsite\Excel\Facades\Excel;
 
 class EmployeeController
 {
@@ -38,6 +41,16 @@ class EmployeeController
             $query->where('status', $status);
         }
 
+        // Deactivated staff (inactive / terminated) are hidden from general lists and
+        // every employee dropdown by default — they must not be selectable anywhere.
+        // The HR roster opts back in with include_inactive=true; an explicit status /
+        // is_active filter above is honoured as-is and takes precedence over this.
+        $hasExplicitStatusFilter = $request->filled('status')
+            || ($request->has('is_active') && $request->is_active !== null);
+        if (! $hasExplicitStatusFilter && ! $request->boolean('include_inactive', false)) {
+            $query->whereNotIn('status', ['inactive', 'terminated']);
+        }
+
         if ($request->has('search') && $request->search) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -48,7 +61,7 @@ class EmployeeController
         }
 
         $canViewSalary = auth()->user()?->can(Permissions::EMPLOYEE_VIEW_SALARY)
-            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR', 'HR Admin']);
+            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR']);
 
         // Check if pagination is requested
         if ($request->has('per_page')) {
@@ -160,7 +173,7 @@ class EmployeeController
     public function show(Employee $employee): JsonResponse
     {
         $canViewSalary = auth()->user()?->can(Permissions::EMPLOYEE_VIEW_SALARY)
-            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR', 'HR Admin'])
+            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR'])
             || auth()->user()?->employee_id === $employee->id; // own record
 
         $data = $employee->load(['department', 'manager']);
@@ -290,7 +303,7 @@ class EmployeeController
         }
 
         // Authorize: user can update their own profile OR must have HR admin roles
-        if ($user->employee_id != $employee->id && !$user->hasRole(['Admin', 'HR', 'HR Admin', 'Super Admin'])) {
+        if ($user->employee_id != $employee->id && !$user->hasRole(['Admin', 'HR', 'Super Admin'])) {
             return response()->json(['message' => 'Unauthorized to update this profile photo.'], 403);
         }
 
@@ -377,6 +390,77 @@ class EmployeeController
             });
 
         return response()->json($employees);
+    }
+
+    /**
+     * Download the bulk-edit Excel template, pre-filled with every employee the
+     * caller may access. Edit the rows and reupload via previewImport/commitImport.
+     */
+    public function downloadTemplate(Request $request)
+    {
+        $filename = 'Employees_' . now()->format('Y-m-d_His') . '.xlsx';
+
+        return Excel::download(
+            new EmployeesTemplateExport($this->canViewSalary()),
+            $filename
+        );
+    }
+
+    /**
+     * Dry-run a reuploaded template: validate and return the create/update/error diff.
+     * Nothing is written — the user reviews this before committing.
+     */
+    public function previewImport(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv|max:5120',
+        ]);
+
+        $import = new EmployeesTemplateImport($this->canViewSalary(), $this->canCreate());
+        Excel::import($import, $request->file('file'));
+
+        return response()->json($import->getAnalysis());
+    }
+
+    /**
+     * Commit a reuploaded template: apply every non-error row (create + update) in a
+     * single transaction. Salary changes are routed to salary history by EmployeeObserver.
+     */
+    public function commitImport(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv|max:5120',
+        ]);
+
+        $import = new EmployeesTemplateImport($this->canViewSalary(), $this->canCreate());
+        Excel::import($import, $request->file('file'));
+
+        $result = $import->apply();
+
+        return response()->json([
+            'message' => "Import complete: {$result['created']} created, {$result['updated']} updated, {$result['skipped']} skipped.",
+            'result'  => $result,
+        ]);
+    }
+
+    /**
+     * Whether the current user may see/edit salary and bank columns.
+     */
+    private function canViewSalary(): bool
+    {
+        return auth()->user()?->can(Permissions::EMPLOYEE_VIEW_SALARY)
+            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR'])
+            || false;
+    }
+
+    /**
+     * Whether the current user may create new employees through the bulk template.
+     * The commit route is gated on EMPLOYEE_UPDATE; without this check an update-only
+     * user could add brand-new staff via spare rows, bypassing EMPLOYEE_CREATE.
+     */
+    private function canCreate(): bool
+    {
+        return auth()->user()?->can(Permissions::EMPLOYEE_CREATE) ?? false;
     }
 
     /**

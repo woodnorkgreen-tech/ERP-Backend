@@ -180,7 +180,7 @@ class Employee extends Model
         }
 
         // Admin / HR / Project Officers can see all employees
-        if ($user->hasRole(['Admin', 'HR', 'HR Admin', 'Project Officer', 'Project Manager'])) {
+        if ($user->hasRole(['Admin', 'HR', 'Project Officer', 'Project Manager'])) {
             return $query;
         }
 
@@ -219,7 +219,7 @@ class Employee extends Model
         }
 
         // Admin has access to all for admin purposes
-        if ($user->hasRole(['Admin', 'HR', 'HR Admin'])) {
+        if ($user->hasRole(['Admin', 'HR'])) {
             return true;
         }
 

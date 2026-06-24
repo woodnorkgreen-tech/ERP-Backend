@@ -87,7 +87,8 @@ class PayrollEngineController extends Controller
             'amount_value' => 'required|numeric|min:0',
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'is_recurring' => 'boolean'
+            'is_recurring' => 'boolean',
+            'recurring_end_month' => 'nullable|string|regex:/^\d{4}-\d{2}$/|after_or_equal:ledger_month'
         ]);
 
         $ledger = PayrollLedger::create($validated);
@@ -108,7 +109,8 @@ class PayrollEngineController extends Controller
             'amount_value' => 'required|numeric|min:0',
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'is_recurring' => 'boolean'
+            'is_recurring' => 'boolean',
+            'recurring_end_month' => 'nullable|string|regex:/^\d{4}-\d{2}$/|after_or_equal:ledger_month'
         ]);
 
         $ledger->update($validated);
@@ -566,7 +568,7 @@ class PayrollEngineController extends Controller
 
                 fputcsv($file, [
                     $phone,
-                    (int) round((float) $slip->net_pay), // MPESA requires whole numbers
+                    number_format((float) $slip->net_pay, 2, '.', ''), // exactly 2dp, no symbol/comma e.g. 35000.00
                     'Salary ' . $validated['payroll_month'],
                     trim($slip->employee->first_name . ' ' . $slip->employee->last_name),
                 ]);

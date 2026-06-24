@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
 use App\Modules\Projects\Services\ProjectsDashboardService;
+use App\Modules\Projects\Http\Controllers\Concerns\HandlesProjectErrors;
 use App\Constants\Permissions;
 
 /**
@@ -43,6 +44,8 @@ use App\Constants\Permissions;
  */
 class DashboardController extends Controller
 {
+    use HandlesProjectErrors;
+
     protected ProjectsDashboardService $dashboardService;
 
     public function __construct(ProjectsDashboardService $dashboardService)
@@ -95,19 +98,14 @@ class DashboardController extends Controller
         // Check permissions
         $this->authorizeAdmin();
 
-        try {
+        return $this->safe(function () {
             $metrics = $this->dashboardService->getEnquiryMetrics();
 
             return response()->json([
                 'data' => $metrics,
                 'message' => 'Enquiry metrics retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve enquiry metrics',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Enquiry metrics', 500);
     }
 
     /**
@@ -133,19 +131,14 @@ class DashboardController extends Controller
         // Check permissions
         $this->authorizeAdmin();
 
-        try {
+        return $this->safe(function () {
             $metrics = $this->dashboardService->getTaskMetrics();
 
             return response()->json([
                 'data' => $metrics,
                 'message' => 'Task metrics retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve task metrics',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Task metrics', 500);
     }
 
     /**
@@ -156,19 +149,14 @@ class DashboardController extends Controller
         // Check permissions
         $this->authorizeAdmin();
 
-        try {
+        return $this->safe(function () {
             $metrics = $this->dashboardService->getProjectMetrics();
 
             return response()->json([
                 'data' => $metrics,
                 'message' => 'Project metrics retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve project metrics',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Project metrics', 500);
     }
 
     /**
@@ -179,19 +167,14 @@ class DashboardController extends Controller
         // Check permissions
         $this->authorizeAdmin();
 
-        try {
+        return $this->safe(function () {
             $metrics = $this->dashboardService->getFinancialMetrics();
 
             return response()->json([
                 'data' => $metrics,
                 'message' => 'Financial metrics retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve financial metrics',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Financial metrics', 500);
     }
 
     /**
@@ -223,7 +206,7 @@ class DashboardController extends Controller
         // Check permissions
         $this->authorizeAdmin();
 
-        try {
+        return $this->safe(function () use ($request) {
             $limit = $request->get('limit', 10);
             $activities = $this->dashboardService->getRecentActivities($limit);
 
@@ -231,12 +214,7 @@ class DashboardController extends Controller
                 'data' => $activities,
                 'message' => 'Recent activities retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve recent activities',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Recent activities', 500);
     }
 
     /**
@@ -247,19 +225,14 @@ class DashboardController extends Controller
         // Check permissions
         $this->authorizeAdmin();
 
-        try {
+        return $this->safe(function () {
             $alerts = $this->dashboardService->getAlerts();
 
             return response()->json([
                 'data' => $alerts,
                 'message' => 'Alerts retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve alerts',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Alerts', 500);
     }
 
     /**
@@ -276,18 +249,13 @@ class DashboardController extends Controller
     {
         $this->authorizeAdmin();
 
-         try {
-             $data = $this->dashboardService->getCommandCenterData();
-             return response()->json([
-                 'data' => $data,
-                 'message' => 'Command Center data retrieved'
-             ]);
-         } catch (\Exception $e) {
-             return response()->json([
-                 'message' => 'Failed to retrieve command center data',
-                 'error' => $e->getMessage()
-             ], 500);
-         }
+        return $this->safe(function () {
+            $data = $this->dashboardService->getCommandCenterData();
+            return response()->json([
+                'data' => $data,
+                'message' => 'Command Center data retrieved'
+            ]);
+        }, 'Command center', 500);
     }
 
     /**
@@ -336,7 +304,7 @@ class DashboardController extends Controller
 
         $this->authorizeWorkflow();
 
-        try {
+        return $this->safe(function () {
             \Log::info('Dashboard data fetch started', ['user_id' => Auth::id()]);
             $data = [
                 'enquiry_metrics' => $this->dashboardService->getEnquiryMetrics(),
@@ -354,20 +322,7 @@ class DashboardController extends Controller
                 'data' => $data,
                 'message' => 'Dashboard data retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            \Log::error('Dashboard data fetch failed', [
-                'user_id' => Auth::id(),
-                'error_message' => $e->getMessage(),
-                'error_file' => $e->getFile(),
-                'error_line' => $e->getLine(),
-                'stack_trace' => $e->getTraceAsString(),
-                'timestamp' => now()
-            ]);
-            return response()->json([
-                'message' => 'Failed to retrieve dashboard data',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Dashboard', 500);
     }
 
     /**
@@ -383,7 +338,7 @@ class DashboardController extends Controller
             ], 403);
         }
 
-        try {
+        return $this->safe(function () use ($request) {
             $filters = $request->all();
             $filteredData = $this->dashboardService->getFilteredDashboardData($filters);
 
@@ -391,12 +346,7 @@ class DashboardController extends Controller
                 'data' => $filteredData,
                 'message' => 'Filtered dashboard data retrieved successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to filter dashboard data',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Filter dashboard', 500);
     }
 
     /**
@@ -440,7 +390,7 @@ class DashboardController extends Controller
             ], 403);
         }
 
-        try {
+        return $this->safe(function () use ($request) {
             $filters = $request->get('filters', []);
             $filePath = $this->dashboardService->exportToPDF($filters);
 
@@ -451,12 +401,7 @@ class DashboardController extends Controller
                 ],
                 'message' => 'PDF export generated successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to generate PDF export',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Export dashboard PDF', 500);
     }
 
     /**
@@ -500,7 +445,7 @@ class DashboardController extends Controller
             ], 403);
         }
 
-        try {
+        return $this->safe(function () use ($request) {
             $filters = $request->get('filters', []);
             $filePath = $this->dashboardService->exportToExcel($filters);
 
@@ -511,11 +456,6 @@ class DashboardController extends Controller
                 ],
                 'message' => 'Excel export generated successfully'
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to generate Excel export',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        }, 'Export dashboard Excel', 500);
     }
 }

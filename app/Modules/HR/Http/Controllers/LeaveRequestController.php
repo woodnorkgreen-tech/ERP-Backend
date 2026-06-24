@@ -601,14 +601,26 @@ class LeaveRequestController extends Controller
     {
         $leaveRequest->loadMissing(['employee', 'leaveType']);
 
+        // Notify users with management roles (real seeded roles only)
         $managers = User::query()
             ->whereHas('roles', function (Builder $query) {
-                $query->whereIn('name', ['Super Admin', 'Admin', 'HR', 'Manager', 'Lead']);
+                $query->whereIn('name', ['Super Admin', 'Admin', 'HR', 'Manager']);
             })
             ->whereNotNull('email')
             ->get();
 
-        foreach ($managers as $manager) {
+        // Also notify department leads (data-driven, not role-based)
+        $deptLeads = User::query()
+            ->whereNotNull('employee_id')
+            ->whereNotNull('email')
+            ->whereHas('employee', function (Builder $query) {
+                $query->whereIn('id', \App\Modules\HR\Models\Department::whereNotNull('manager_id')->pluck('manager_id'));
+            })
+            ->get();
+
+        $recipients = $managers->merge($deptLeads)->unique('id');
+
+        foreach ($recipients as $manager) {
             $manager->notify(new LeaveRequestSubmittedNotification($leaveRequest));
         }
     }

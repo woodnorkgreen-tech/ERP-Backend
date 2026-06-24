@@ -15,7 +15,7 @@ class GrievanceController extends Controller
 {
     protected $grievanceService;
 
-    private const GRIEVANCE_MANAGER_ROLES = ['Super Admin', 'Admin', 'HR Admin', 'HR'];
+    private const GRIEVANCE_MANAGER_ROLES = ['Super Admin', 'Admin', 'HR'];
 
     public function __construct(GrievanceService $grievanceService)
     {
