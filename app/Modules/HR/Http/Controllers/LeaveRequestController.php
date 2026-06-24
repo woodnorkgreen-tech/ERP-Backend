@@ -417,11 +417,6 @@ class LeaveRequestController extends Controller
     {
         $user = $request->user();
 
-        // HR-level users should use the hr-approve endpoint instead
-        if ($this->leaveService->isHRLevel($user)) {
-            abort(403, 'HR users should use the final approval endpoint, not lead approval.');
-        }
-
         // Structural authorisation: user must be the department lead or direct manager of the employee
         $employee = $leaveRequest->employee ?? $leaveRequest->load('employee')->employee;
 
@@ -435,9 +430,10 @@ class LeaveRequestController extends Controller
                 ->exists();
 
         $isDirectManager = $employee->manager_id && (int) $employee->manager_id === (int) $user->employee_id;
+        $isHRLevel = $this->leaveService->isHRLevel($user);
 
-        if (!$isDeptLeadOfEmployee && !$isDirectManager) {
-            abort(403, 'You can only approve leave for employees in your department or your direct reports.');
+        if (!$isHRLevel && !$isDeptLeadOfEmployee && !$isDirectManager) {
+            abort(403, 'Only HR, the department lead, or the direct manager can perform lead approval.');
         }
 
         if ($leaveRequest->status !== LeaveRequest::STATUS_PENDING) {

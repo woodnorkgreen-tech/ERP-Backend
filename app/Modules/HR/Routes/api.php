@@ -370,6 +370,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('jobs', [RecruitmentController::class, 'adminJobs']);
             Route::post('jobs', [RecruitmentController::class, 'storeJob']);
             Route::put('jobs/{id}', [RecruitmentController::class, 'updateJob']);
+            Route::post('jobs/{id}/repost', [RecruitmentController::class, 'repostJob']);
             Route::delete('jobs/{id}', [RecruitmentController::class, 'destroyJob']);
             Route::post('jobs/{id}/notify-shortlisted', [InterviewController::class, 'notifyShortlisted'])
                 ->middleware('permission:' . Permissions::RECRUITMENT_NOTIFY);

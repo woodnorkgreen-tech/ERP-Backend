@@ -20,16 +20,18 @@ class AutoShortlistService
             ->get();
 
         return $candidates->map(function ($candidate) use ($criteria, $threshold) {
-            ['score' => $score, 'breakdown' => $breakdown] = $this->scoreCandidate($candidate, $criteria);
+            ['score' => $score, 'breakdown' => $breakdown, 'disqualified' => $disqualified] = $this->scoreCandidate($candidate, $criteria);
             return [
                 'candidate_id' => $candidate->id,
                 'name'         => $candidate->first_name . ' ' . $candidate->last_name,
                 'email'        => $candidate->email,
+                'current_status' => $candidate->status,
                 'score'        => $score,
                 'breakdown'    => $breakdown,
-                'would_pass'   => $score >= $threshold,
+                'disqualified' => $disqualified,
+                'would_pass'   => ! $disqualified && $score >= $threshold,
             ];
-        })->toArray();
+        })->sortByDesc('score')->values()->toArray();
     }
 
     /**
@@ -48,9 +50,9 @@ class AutoShortlistService
         $returnedToNew  = 0;
 
         foreach ($candidates as $candidate) {
-            ['score' => $score, 'breakdown' => $breakdown] = $this->scoreCandidate($candidate, $criteria);
+            ['score' => $score, 'breakdown' => $breakdown, 'disqualified' => $disqualified] = $this->scoreCandidate($candidate, $criteria);
 
-            $newStatus = $score >= $threshold ? 'Shortlisted' : 'New';
+            $newStatus = (! $disqualified && $score >= $threshold) ? 'Shortlisted' : 'New';
 
             if ($newStatus === 'Shortlisted' && $candidate->status !== 'Shortlisted') $shortlisted++;
             if ($newStatus === 'New' && $candidate->status === 'Shortlisted') $returnedToNew++;
@@ -78,6 +80,7 @@ class AutoShortlistService
         $totalPoints  = 0;
         $earnedPoints = 0;
         $breakdown    = [];
+        $disqualified = false;
 
         // ── 1. Min Experience Years ──────────────────────────────
         if (!empty($criteria['min_experience_years']['enabled'])) {
@@ -160,11 +163,11 @@ class AutoShortlistService
 
         // ── 4. Required Skills ───────────────────────────────────
         if (!empty($criteria['skills']['enabled']) && !empty($criteria['skills']['value'])) {
-            $required = array_map('strtolower', $criteria['skills']['value']);
+            $required = $this->normalizeStringList($criteria['skills']['value']);
             $weight   = (int) ($criteria['skills']['weight'] ?? 20);
             $totalPoints += $weight;
 
-            $candidateSkills = array_map('strtolower', $candidate->skills ?? []);
+            $candidateSkills = $this->normalizeStringList($candidate->skills ?? []);
             $matched = count(array_intersect($required, $candidateSkills));
             $total   = count($required);
 
@@ -183,11 +186,11 @@ class AutoShortlistService
 
         // ── 5. Required Certifications ───────────────────────────
         if (!empty($criteria['certifications']['enabled']) && !empty($criteria['certifications']['value'])) {
-            $required = array_map('strtolower', $criteria['certifications']['value']);
+            $required = $this->normalizeStringList($criteria['certifications']['value']);
             $weight   = (int) ($criteria['certifications']['weight'] ?? 15);
             $totalPoints += $weight;
 
-            $candidateCerts = array_map('strtolower', $candidate->certifications ?? []);
+            $candidateCerts = $this->normalizeStringList($candidate->certifications ?? []);
             $matched = count(array_intersect($required, $candidateCerts));
             $total   = count($required);
 
@@ -206,11 +209,11 @@ class AutoShortlistService
 
         // ── 6. Required Software ─────────────────────────────────
         if (!empty($criteria['software']['enabled']) && !empty($criteria['software']['value'])) {
-            $required = array_map('strtolower', $criteria['software']['value']);
+            $required = $this->normalizeStringList($criteria['software']['value']);
             $weight   = (int) ($criteria['software']['weight'] ?? 10);
             $totalPoints += $weight;
 
-            $candidateSoftware = array_map('strtolower', $candidate->software_proficiency ?? []);
+            $candidateSoftware = $this->normalizeSoftwareList($candidate->software_proficiency ?? []);
             $matched = count(array_intersect($required, $candidateSoftware));
             $total   = count($required);
 
@@ -228,6 +231,31 @@ class AutoShortlistService
         }
 
         // ── 7. Questionnaire Rules ───────────────────────────────
+        if (!empty($criteria['expected_salary_range']['enabled'])) {
+            $min = $this->parseMoney($criteria['expected_salary_range']['min'] ?? null);
+            $max = $this->parseMoney($criteria['expected_salary_range']['max'] ?? null);
+            $responses = $candidate->questionnaire_responses ?? [];
+            $actual = $this->parseMoney($responses['expected_salary'] ?? null);
+
+            $passed = $actual !== null
+                && ($min === null || $actual >= $min)
+                && ($max === null || $actual <= $max);
+
+            if (! $passed) {
+                $disqualified = true;
+            }
+
+            $breakdown['expected_salary'] = [
+                'label' => 'Expected Salary',
+                'required' => $this->formatSalaryRange($min, $max),
+                'actual' => $actual === null ? 'Not provided' : 'KES ' . number_format($actual),
+                'earned' => $passed ? 1 : 0,
+                'max' => 1,
+                'passed' => $passed,
+                'hard_gate' => true,
+            ];
+        }
+
         if (!empty($criteria['questionnaire_rules']['enabled']) && !empty($criteria['questionnaire_rules']['rules'])) {
             $rules  = $criteria['questionnaire_rules']['rules'];
             $weight = (int) ($criteria['questionnaire_rules']['weight'] ?? 5);
@@ -279,7 +307,7 @@ class AutoShortlistService
 
         $score = $totalPoints > 0 ? (int) round(($earnedPoints / $totalPoints) * 100) : 0;
 
-        return ['score' => $score, 'breakdown' => $breakdown];
+        return ['score' => $score, 'breakdown' => $breakdown, 'disqualified' => $disqualified];
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -301,7 +329,7 @@ class AutoShortlistService
     {
         $highest = 0;
         foreach ($educations as $edu) {
-            $level = $levels[$edu->level_of_study] ?? 0;
+            $level = $levels[$this->normalizeEducationLevel($edu->level_of_study)] ?? 0;
             if ($level > $highest) $highest = $level;
         }
         return $highest;
@@ -311,5 +339,76 @@ class AutoShortlistService
     {
         $flipped = array_flip($levels);
         return $flipped[$level] ?? 'N/A';
+    }
+
+    private function normalizeStringList($values): array
+    {
+        return collect((array) $values)
+            ->map(fn ($value) => strtolower(trim((string) $value)))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function normalizeSoftwareList($values): array
+    {
+        return collect((array) $values)
+            ->map(function ($value) {
+                if (is_array($value)) {
+                    return $value['name'] ?? $value['software'] ?? $value['tool'] ?? null;
+                }
+
+                if (is_object($value)) {
+                    return $value->name ?? $value->software ?? $value->tool ?? null;
+                }
+
+                return $value;
+            })
+            ->map(fn ($value) => strtolower(trim((string) $value)))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function normalizeEducationLevel(?string $value): string
+    {
+        $clean = strtolower(trim((string) $value));
+
+        return match (true) {
+            str_contains($clean, 'phd'), str_contains($clean, 'doctor') => 'PhD',
+            str_contains($clean, 'master') => 'Masters',
+            str_contains($clean, 'bachelor'), str_contains($clean, 'degree') => 'Degree',
+            str_contains($clean, 'diploma') => 'Diploma',
+            str_contains($clean, 'certificate') => 'Certificate',
+            default => (string) $value,
+        };
+    }
+
+    private function parseMoney($value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', (string) $value);
+
+        return $digits === '' ? null : (int) $digits;
+    }
+
+    private function formatSalaryRange(?int $min, ?int $max): string
+    {
+        if ($min !== null && $max !== null) {
+            return 'KES ' . number_format($min) . ' - KES ' . number_format($max);
+        }
+
+        if ($min !== null) {
+            return 'At least KES ' . number_format($min);
+        }
+
+        if ($max !== null) {
+            return 'Up to KES ' . number_format($max);
+        }
+
+        return 'Any salary';
     }
 }
