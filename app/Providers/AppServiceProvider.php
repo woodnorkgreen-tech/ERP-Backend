@@ -52,6 +52,13 @@ class AppServiceProvider extends ServiceProvider
         ProjectEnquiry::observe(ProjectEnquiryObserver::class);
         Project::observe(ProjectObserver::class);
 
+        // Authorization policies (HR). Centralises authz that was previously inline role
+        // checks scattered across the controllers.
+        \Illuminate\Support\Facades\Gate::policy(
+            \App\Modules\HR\Models\OTEntry::class,
+            \App\Modules\HR\Policies\OvertimePolicy::class,
+        );
+
         // Route model binding
         Route::bind('enquiry', function ($value) {
             return \App\Models\ProjectEnquiry::findOrFail($value);

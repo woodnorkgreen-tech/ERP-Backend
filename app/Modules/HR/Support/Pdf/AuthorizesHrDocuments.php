@@ -15,7 +15,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 trait AuthorizesHrDocuments
 {
     /** Roles allowed to access any HR document. */
-    protected array $hrPrivilegedRoles = ['Super Admin', 'Admin', 'HR Admin', 'HR'];
+    protected array $hrPrivilegedRoles = ['Super Admin', 'Admin', 'HR'];
 
     /**
      * Require a privileged HR role (optionally widened with extra roles for

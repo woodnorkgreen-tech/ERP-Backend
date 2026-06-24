@@ -137,6 +137,15 @@ class TechnicalLabourController
      */
     public function promote(Request $request, TechnicalLabour $technicalLabour): JsonResponse
     {
+        // Idempotency: a specialist may only be promoted once. Without this guard a repeat
+        // promotion mints a duplicate employee (email — the only DB dedupe — is nullable).
+        if ($technicalLabour->isPromoted()) {
+            return response()->json([
+                'message' => 'This specialist has already been promoted to an employee.',
+                'data'    => $technicalLabour->employee()->with(['department', 'manager'])->first(),
+            ], 409);
+        }
+
         // Default first/last name from the registry's single full_name field.
         $nameParts = preg_split('/\s+/', trim((string) $technicalLabour->full_name), 2);
 
@@ -160,7 +169,7 @@ class TechnicalLabourController
             'last_name'          => 'required|string|max:255',
             'email'              => 'nullable|email|unique:employees,email',
             'phone'              => 'nullable|string|max:20',
-            'id_number'          => 'nullable|string|max:20',
+            'id_number'          => 'nullable|string|max:20|unique:employees,id_number',
             'department_id'      => 'required|exists:departments,id',
             'position'           => 'required|string|max:255',
             'hire_date'          => 'required|date',
@@ -188,7 +197,7 @@ class TechnicalLabourController
             ], 422);
         }
 
-        $employee = DB::transaction(function () use ($validator) {
+        $employee = DB::transaction(function () use ($validator, $technicalLabour) {
             $data = $validator->validated();
 
             // employees.employee_id is NOT NULL + UNIQUE with no default, so it must
@@ -199,6 +208,14 @@ class TechnicalLabourController
 
             $employee->employee_id = 'EMP' . str_pad((string) $employee->id, 4, '0', STR_PAD_LEFT);
             $employee->save();
+
+            // Link the registry record to the new staff record and retire it from the
+            // bookable pool, so the same person can't be promoted (or scheduled) twice.
+            $technicalLabour->update([
+                'employee_id' => $employee->id,
+                'promoted_at' => now(),
+                'status'      => 'inactive',
+            ]);
 
             return $employee;
         });

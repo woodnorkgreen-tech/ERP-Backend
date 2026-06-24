@@ -28,7 +28,7 @@ class CompensatoryLeaveController extends Controller
         $query = Compensation::with(['employee.department', 'approver:id,name']);
 
         // Intelligent Data Isolation: Role & Hierarchy aware
-        if (!$user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR'])) {
+        if (!$user->hasRole(['Super Admin', 'Admin', 'HR'])) {
             $employeeId = $user->employee_id;
             $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
             $isDeptLead = $user->isDeptLead();
@@ -94,7 +94,7 @@ class CompensatoryLeaveController extends Controller
             : \App\Modules\HR\Models\TechnicalLabour::findOrFail($targetTechId);
 
         // Security: Can I request for this person?
-        $isGlobal = $user->hasRole(['Super Admin', 'HR Admin', 'HR']);
+        $isGlobal = $user->hasRole(['Super Admin', 'HR']);
         $isOwn = $targetEmployeeId && ($targetEmployeeId == $user->employee_id);
         
         if ($targetEmployeeId) {
@@ -137,7 +137,7 @@ class CompensatoryLeaveController extends Controller
     public function supervisorApprove(Compensation $compensation)
     {
         $user = auth()->user();
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
+        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR']);
         $employee = $compensation->employee;
 
         // Prevent Self-Approval
@@ -183,7 +183,7 @@ class CompensatoryLeaveController extends Controller
     public function hrApprove(Compensation $compensation)
     {
         $user = auth()->user();
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
+        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR']);
         
         // Authorization check: Only Global Admins can finalize deductions
         if (!$isGlobal) {
@@ -204,7 +204,7 @@ class CompensatoryLeaveController extends Controller
     public function reject(\Illuminate\Http\Request $request, Compensation $compensation)
     {
         $user = auth()->user();
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
+        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR']);
         $employee = $compensation->employee;
         $technicalLabour = $compensation->technicalLabour;
 

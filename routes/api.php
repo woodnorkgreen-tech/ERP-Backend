@@ -286,21 +286,22 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Get events by date range
     Route::post('/events/range', 'App\Http\Controllers\EventController@getByDateRange');
-    // User permissions and navigation
-    Route::get('/user/permissions', function () {
-        return response()->json([
-            'permissions' => auth()->user()->getNavigationPermissions(),
-            'user_permissions' => auth()->user()->getAllPermissions()->pluck('name')->toArray(),
-            'roles' => auth()->user()->roles->pluck('name'),
-            'departments' => auth()->user()->getAccessibleDepartments()
-        ]);
-    });
 
     // HR Module Routes
+
     Route::prefix('hr')->group(function () {
         // Employee management — static routes MUST come before apiResource wildcard
         Route::get('employees/profile', [EmployeeController::class, 'profile']);
         Route::get('employees/compact', [EmployeeController::class, 'compact']);
+
+        // Bulk edit-and-reupload: download the prefilled template, dry-run a diff, then commit.
+        Route::get('employees/template', [EmployeeController::class, 'downloadTemplate'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+        Route::post('employees/template/preview', [EmployeeController::class, 'previewImport'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+        Route::post('employees/template/commit', [EmployeeController::class, 'commitImport'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+
         Route::apiResource('employees', EmployeeController::class)->middleware([
             'index' => 'permission:' . Permissions::EMPLOYEE_READ,
             'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,

@@ -192,11 +192,6 @@ class EnquiryWorkflowService
             $this->validateTaskCompletion($task);
         }
 
-        // If task is skipped, we mark it as completed but bypass validation
-        if ($status === 'skipped') {
-            $status = 'completed';
-        }
-
         $task->status = $status;
         $task->save();
 
@@ -694,12 +689,12 @@ class EnquiryWorkflowService
         // When Production is done OR Setup is done OR Handover task is started
         $triggerTypes = ['production', 'setup', 'handover'];
         
-        if (in_array($task->type, $triggerTypes) && (in_array($status, ['completed', 'skipped']) || ($task->type === 'handover' && $status === 'in_progress'))) {
+        if (in_array($task->type, $triggerTypes) && ($status === 'completed' || ($task->type === 'handover' && $status === 'in_progress'))) {
             $this->initializeHandoverSurvey($task);
         }
 
         // 2. Proactively notify the owners of any tasks this completion unblocks.
-        if (in_array($status, ['completed', 'skipped'], true)) {
+        if ($status === 'completed') {
             $this->notifyUnblockedDependents($task);
         }
     }

@@ -20,12 +20,15 @@ class TechnicalLabour extends Model
         'day_rate',
         'status',
         'rating',
-        'notes'
+        'notes',
+        'employee_id',
+        'promoted_at',
     ];
 
     protected $casts = [
         'day_rate' => 'decimal:2',
         'rating' => 'decimal:2',
+        'promoted_at' => 'datetime',
     ];
 
     protected $appends = [
@@ -36,6 +39,22 @@ class TechnicalLabour extends Model
     public function getNameAttribute(): string
     {
         return $this->full_name;
+    }
+
+    /**
+     * The staff record this specialist was promoted into, if any.
+     */
+    public function employee()
+    {
+        return $this->belongsTo(Employee::class);
+    }
+
+    /**
+     * Whether this specialist has already been promoted onto the staff roster.
+     */
+    public function isPromoted(): bool
+    {
+        return $this->employee_id !== null || $this->promoted_at !== null;
     }
 
     /**

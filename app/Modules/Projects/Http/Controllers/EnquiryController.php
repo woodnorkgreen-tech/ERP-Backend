@@ -3,6 +3,7 @@
 namespace App\Modules\Projects\Http\Controllers;
 
 use App\Models\ProjectEnquiry;
+use App\Modules\Projects\Http\Controllers\Concerns\HandlesProjectErrors;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -40,6 +41,8 @@ use App\Services\Governance\ProjectGovernanceService;
  */
 class EnquiryController extends Controller
 {
+    use HandlesProjectErrors;
+
     protected $notificationService;
     protected $financeService;
     protected $governanceService;
@@ -63,23 +66,25 @@ class EnquiryController extends Controller
      */
     public function approvedWngList(): JsonResponse
     {
-        $projects = ProjectEnquiry::where('quote_approved', true)
-            ->whereNotNull('job_number')
-            ->select('id', 'job_number', 'title')
-            // Sort by Year DESC, Month DESC, Sequential Number DESC
-            // Format: WNG-MM-YYYY-NNN
-            ->orderByRaw('
-                CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 3), "-", -1) AS UNSIGNED) DESC,
-                CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 2), "-", -1) AS UNSIGNED) DESC,
-                CAST(SUBSTRING_INDEX(job_number, "-", -1) AS UNSIGNED) DESC
-            ')
-            ->take(100)
-            ->get();
+        return $this->safe(function () {
+            $projects = ProjectEnquiry::where('quote_approved', true)
+                ->whereNotNull('job_number')
+                ->select('id', 'job_number', 'title')
+                // Sort by Year DESC, Month DESC, Sequential Number DESC
+                // Format: WNG-MM-YYYY-NNN
+                ->orderByRaw('
+                    CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 3), "-", -1) AS UNSIGNED) DESC,
+                    CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 2), "-", -1) AS UNSIGNED) DESC,
+                    CAST(SUBSTRING_INDEX(job_number, "-", -1) AS UNSIGNED) DESC
+                ')
+                ->take(100)
+                ->get();
 
-        return response()->json([
-            'success' => true,
-            'data' => $projects
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $projects
+            ]);
+        }, 'List approved WNG projects');
     }
 
 
@@ -137,6 +142,11 @@ class EnquiryController extends Controller
      * )
      */
     public function index(Request $request): JsonResponse
+    {
+        return $this->safe(fn () => $this->runIndex($request), 'List enquiries', 500);
+    }
+
+    private function runIndex(Request $request): JsonResponse
     {
         $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo', 'deliverables', 'payments');
 
@@ -326,27 +336,29 @@ class EnquiryController extends Controller
      */
     public function show(ProjectEnquiry $enquiry): JsonResponse
     {
-        return response()->json([
+        return $this->safe(fn () => response()->json([
             'data' => $enquiry->load('client', 'department', 'projectOfficer', 'enquiryTasks'),
             'message' => 'Enquiry retrieved successfully'
-        ]);
+        ]), 'Show enquiry');
     }
 
     /**
      * Get project by enquiry ID
      */
-    public function getByProjectEnquiryId($enquiryId)
+    public function getByProjectEnquiryId($enquiryId): JsonResponse
     {
-        $project = \App\Models\Project::where('enquiry_id', $enquiryId)->first();
+        return $this->safe(function () use ($enquiryId) {
+            $project = \App\Models\Project::where('enquiry_id', $enquiryId)->first();
 
-        if (!$project) {
-            return response()->json(['message' => 'Project not found'], 404);
-        }
+            if (!$project) {
+                return response()->json(['message' => 'Project not found'], 404);
+            }
 
-        return response()->json([
-            'data' => $project,
-            'message' => 'Project retrieved successfully'
-        ]);
+            return response()->json([
+                'data' => $project,
+                'message' => 'Project retrieved successfully'
+            ]);
+        }, 'Get project by enquiry');
     }
 
     /**
@@ -375,6 +387,11 @@ class EnquiryController extends Controller
      * )
      */
     public function getCompleteDetails(ProjectEnquiry $enquiry): JsonResponse
+    {
+        return $this->safe(fn () => $this->buildCompleteDetails($enquiry), 'Enquiry complete details', 500);
+    }
+
+    private function buildCompleteDetails(ProjectEnquiry $enquiry): JsonResponse
     {
         // Load all relationships
         $enquiry->load([
@@ -945,12 +962,14 @@ class EnquiryController extends Controller
      */
     public function completionReadiness(ProjectEnquiry $enquiry, CompleteProjectAction $action): JsonResponse
     {
-        $readiness = $action->buildReadiness($enquiry);
+        return $this->safe(function () use ($enquiry, $action) {
+            $readiness = $action->buildReadiness($enquiry);
 
-        return response()->json([
-            'success' => true,
-            'data'    => $readiness,
-        ]);
+            return response()->json([
+                'success' => true,
+                'data'    => $readiness,
+            ]);
+        }, 'Project completion readiness');
     }
 
     /**
@@ -1015,11 +1034,13 @@ class EnquiryController extends Controller
      */
     public function destroy(ProjectEnquiry $enquiry): JsonResponse
     {
-        $enquiry->delete();
+        return $this->safe(function () use ($enquiry) {
+            $enquiry->delete();
 
-        return response()->json([
-            'message' => 'Enquiry deleted successfully'
-        ]);
+            return response()->json([
+                'message' => 'Enquiry deleted successfully'
+            ]);
+        }, 'Delete enquiry');
     }
 
     /**

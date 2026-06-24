@@ -56,8 +56,18 @@ class PayrollEmployeeDTO
                 })->get(),
             ledgers: $employee->payrollLedgers()
                 ->where(function($q) use ($month) {
-                    $q->where('ledger_month', $month)
-                      ->orWhere('is_recurring', true);
+                    $q->where(function($sub) use ($month) {
+                        $sub->where('is_recurring', false)
+                            ->where('ledger_month', $month);
+                    })
+                    ->orWhere(function($sub) use ($month) {
+                        $sub->where('is_recurring', true)
+                            ->where('ledger_month', '<=', $month)
+                            ->where(function($end) use ($month) {
+                                $end->whereNull('recurring_end_month')
+                                    ->orWhere('recurring_end_month', '>=', $month);
+                            });
+                    });
                 })->get(),
             variables: $settings['variables'] ?? [],
             taxBands: $settings['tax_bands'] ?? [],
