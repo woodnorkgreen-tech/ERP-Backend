@@ -382,4 +382,58 @@ class ClientController
             'message' => 'Client deleted successfully'
         ]);
     }
+
+    /**
+     * @OA\Get(
+     *     path="/api/clientservice/clients/lead-sources",
+     *     summary="Get unique lead sources",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Unique lead sources retrieved successfully"
+     *     )
+     * )
+     */
+    public function getLeadSources(): JsonResponse
+    {
+        $leadSources = Client::select('lead_source')
+            ->distinct()
+            ->whereNotNull('lead_source')
+            ->where('lead_source', '!=', '')
+            ->pluck('lead_source');
+
+        return response()->json([
+            'data' => $leadSources
+        ]);
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/api/clientservice/clients/export",
+     *     summary="Export clients to Excel",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="lead_source",
+     *         in="query",
+     *         description="Filter by lead source",
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Excel file download"
+     *     )
+     * )
+     */
+    public function export(Request $request)
+    {
+        $leadSource = $request->input('lead_source');
+        $filename = 'clients_export_' . date('Y_m_d_His') . '.xlsx';
+
+        return \Maatwebsite\Excel\Facades\Excel::download(
+            new \App\Modules\ClientService\Exports\ClientsExport($leadSource),
+            $filename
+        );
+    }
 }

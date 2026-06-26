@@ -367,6 +367,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('handovers/{id}', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'show']);
         // Client management
         Route::get('clients', [ClientController::class, 'index']);
+        Route::get('clients/export', [ClientController::class, 'export'])
+            ->middleware('permission:' . Permissions::CLIENT_READ);
+        Route::get('clients/lead-sources', [ClientController::class, 'getLeadSources'])
+            ->middleware('permission:' . Permissions::CLIENT_READ);
         Route::get('clients/{client}', [ClientController::class, 'show'])
             ->middleware('permission:' . Permissions::CLIENT_READ);
         Route::post('clients', [ClientController::class, 'store'])
