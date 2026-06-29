@@ -59,6 +59,13 @@ class AppServiceProvider extends ServiceProvider
             \App\Modules\HR\Policies\OvertimePolicy::class,
         );
 
+        // Employee management policy — centralises view / create / update / delete /
+        // viewSalary / viewPii / uploadPhoto authz in one place.
+        \Illuminate\Support\Facades\Gate::policy(
+            \App\Modules\HR\Models\Employee::class,
+            \App\Modules\HR\Policies\EmployeePolicy::class,
+        );
+
         // Route model binding
         Route::bind('enquiry', function ($value) {
             return \App\Models\ProjectEnquiry::findOrFail($value);

@@ -364,6 +364,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('clientservice')->group(function () {
         Route::get('dashboard', [App\Modules\ClientService\Http\Controllers\DashboardController::class, 'index']);
         Route::get('handovers', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'index']);
+        Route::get('handovers/stats', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'stats']);
         Route::get('handovers/{id}', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'show']);
         // Client management
         Route::get('clients', [ClientController::class, 'index']);

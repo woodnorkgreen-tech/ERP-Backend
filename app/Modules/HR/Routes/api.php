@@ -68,12 +68,16 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
 
         Route::apiResource('employees', EmployeeController::class)->middleware([
-            'index' => 'permission:' . Permissions::EMPLOYEE_READ,
-            'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
-            'show' => 'permission:' . Permissions::EMPLOYEE_READ,
-            'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
+            'index'   => 'permission:' . Permissions::EMPLOYEE_READ,
+            'store'   => 'permission:' . Permissions::EMPLOYEE_CREATE,
+            'show'    => 'permission:' . Permissions::EMPLOYEE_READ,
+            'update'  => 'permission:' . Permissions::EMPLOYEE_UPDATE,
             'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
         ]);
+
+        // Reinstatement — restore a soft-deleted (terminated) employee.
+        Route::post('employees/{id}/restore', [EmployeeController::class, 'restore'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_DELETE);
 
         // Employee skills & certifications
         Route::prefix('employees/{employee}')->group(function () {

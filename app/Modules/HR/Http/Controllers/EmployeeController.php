@@ -5,13 +5,14 @@ namespace App\Modules\HR\Http\Controllers;
 use App\Constants\Permissions;
 use App\Modules\HR\Exports\EmployeesTemplateExport;
 use App\Modules\HR\Imports\EmployeesTemplateImport;
+use App\Modules\HR\Http\Requests\StoreEmployeeRequest;
+use App\Modules\HR\Http\Requests\UpdateEmployeeRequest;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 use Maatwebsite\Excel\Facades\Excel;
 
 class EmployeeController
@@ -21,6 +22,8 @@ class EmployeeController
      */
     public function index(Request $request): JsonResponse
     {
+        Gate::authorize('viewAny', Employee::class);
+
         $query = Employee::with(['department', 'manager']);
 
         // Apply department access control first
@@ -60,8 +63,8 @@ class EmployeeController
             });
         }
 
-        $canViewSalary = auth()->user()?->can(Permissions::EMPLOYEE_VIEW_SALARY)
-            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR']);
+        $canViewSalary = $this->canViewSalary();
+        $canViewPii    = $this->canViewPii();
 
         // Check if pagination is requested
         if ($request->has('per_page')) {
@@ -71,7 +74,7 @@ class EmployeeController
             $statsBase = Employee::query()->accessibleByUser();
 
             return response()->json([
-                'data' => collect($employees->items())->map(fn ($e) => $this->maskSalary($e, $canViewSalary)),
+                'data' => collect($employees->items())->map(fn ($e) => $this->maskSensitive($e, $canViewSalary, $canViewPii)),
                 'meta' => [
                     'current_page' => $employees->currentPage(),
                     'per_page'     => $employees->perPage(),
@@ -90,63 +93,17 @@ class EmployeeController
         } else {
             $employees = $query->get();
 
-            return response()->json($employees->map(fn ($e) => $this->maskSalary($e, $canViewSalary)));
+            return response()->json($employees->map(fn ($e) => $this->maskSensitive($e, $canViewSalary, $canViewPii)));
         }
     }
 
     /**
      * Store a newly created employee.
      */
-    public function store(Request $request): JsonResponse
+    public function store(StoreEmployeeRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'employee_id' => 'nullable|string|unique:employees,employee_id',
-            'hikvision_id' => 'nullable|string|max:50|unique:employees,hikvision_id',
-            'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'email' => 'nullable|email|unique:employees,email',
-            'phone' => 'nullable|string|max:20',
-            'department_id' => 'required|exists:departments,id',
-            'position' => 'required|string|max:255',
-            'hire_date' => 'required|date',
-            'salary' => 'nullable|numeric|min:0',
-            'id_number' => 'nullable|string|max:20',
-            'kra_pin' => 'nullable|string|max:20',
-            'nssf_id' => 'nullable|string|max:20',
-            'nhif_id' => 'nullable|string|max:20',
-            'bank_name' => 'nullable|string|max:255',
-            'bank_branch' => 'nullable|string|max:255',
-            'bank_code' => 'nullable|string|max:20',
-            'account_number' => 'nullable|string|max:50',
-            'payment_method' => ['nullable', Rule::in(['bank', 'mpesa', 'mobile_money', 'cash', 'cheque'])],
-            'statutory_exemptions' => 'nullable|array',
-            'statutory_exemptions.*' => ['string', Rule::in(Employee::STATUTORY_EXEMPTIONS)],
-            'probation_end_date' => 'nullable|date',
-            'is_on_probation' => 'nullable|boolean',
-            'contract_end_date' => 'nullable|date',
-
-            'status' => ['required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
-            'employment_type' => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],
-            'manager_id' => 'nullable|exists:employees,id',
-            'address' => 'nullable|string',
-
-            'emergency_contact' => 'nullable|array',
-            'emergency_contact.name' => 'nullable|string|max:255',
-            'emergency_contact.relationship' => 'nullable|string|max:255',
-            'emergency_contact.phone' => 'nullable|string|max:20',
-            'performance_rating' => 'nullable|numeric|min:0|max:5',
-            'last_review_date' => 'nullable|date',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $validatedData = $validator->validated();
-        $customId = $validatedData['employee_id'] ?? null;
+        $validatedData = $request->validated();
+        $customId      = $validatedData['employee_id'] ?? null;
 
         // employees.employee_id is NOT NULL + UNIQUE with no default, so it must be
         // present at insert. Use the supplied id, otherwise a transient unique
@@ -156,14 +113,14 @@ class EmployeeController
 
         $employee = Employee::create($validatedData);
 
-        if (!$customId) {
+        if (! $customId) {
             $employee->employee_id = 'EMP' . str_pad($employee->id, 4, '0', STR_PAD_LEFT);
             $employee->save();
         }
 
         return response()->json([
             'message' => 'Employee created successfully',
-            'data' => $employee->load(['department', 'manager'])
+            'data'    => $employee->load(['department', 'manager'])
         ], 201);
     }
 
@@ -172,66 +129,27 @@ class EmployeeController
      */
     public function show(Employee $employee): JsonResponse
     {
-        $canViewSalary = auth()->user()?->can(Permissions::EMPLOYEE_VIEW_SALARY)
-            || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR'])
-            || auth()->user()?->employee_id === $employee->id; // own record
+        Gate::authorize('view', $employee);
 
         $data = $employee->load(['department', 'manager']);
 
         return response()->json([
-            'data' => $this->maskSalary($data, $canViewSalary)
+            'data' => $this->maskSensitive(
+                $data,
+                Gate::allows('viewSalary', $employee),
+                Gate::allows('viewPii', $employee)
+            )
         ]);
     }
 
     /**
      * Update the specified employee.
      */
-    public function update(Request $request, Employee $employee): JsonResponse
+    public function update(UpdateEmployeeRequest $request, Employee $employee): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'employee_id' => ['sometimes', Rule::unique('employees')->ignore($employee->id)],
-            'hikvision_id' => ['nullable', 'string', 'max:50', Rule::unique('employees')->ignore($employee->id)],
-            'first_name' => 'sometimes|required|string|max:255',
-            'last_name' => 'sometimes|required|string|max:255',
-            'email' => ['sometimes', 'nullable', 'email', Rule::unique('employees')->ignore($employee->id)],
-            'phone' => 'nullable|string|max:20',
-            'department_id' => 'sometimes|required|exists:departments,id',
-            'position' => 'sometimes|required|string|max:255',
-            'hire_date' => 'sometimes|required|date',
-            'salary' => 'nullable|numeric|min:0',
-            'id_number' => 'nullable|string|max:20',
-            'kra_pin' => 'nullable|string|max:20',
-            'nssf_id' => 'nullable|string|max:20',
-            'nhif_id' => 'nullable|string|max:20',
-            'bank_name' => 'nullable|string|max:255',
-            'bank_branch' => 'nullable|string|max:255',
-            'bank_code' => 'nullable|string|max:20',
-            'account_number' => 'nullable|string|max:50',
-            'payment_method' => ['nullable', Rule::in(['bank', 'mpesa', 'mobile_money', 'cash', 'cheque'])],
-            'statutory_exemptions' => 'nullable|array',
-            'statutory_exemptions.*' => ['string', Rule::in(Employee::STATUTORY_EXEMPTIONS)],
-            'probation_end_date' => 'nullable|date',
-            'is_on_probation' => 'nullable|boolean',
-            'contract_end_date' => 'nullable|date',
+        // UpdateEmployeeRequest::authorize() already checks isAccessibleBy() + permission.
 
-            'status' => ['sometimes', 'required', Rule::in(['active', 'inactive', 'terminated', 'on-leave'])],
-            'employment_type' => ['nullable', Rule::in(['full-time', 'part-time', 'contract', 'intern'])],
-            'manager_id' => 'nullable|exists:employees,id',
-            'address' => 'nullable|string',
-
-            'emergency_contact' => 'nullable|array',
-            'performance_rating' => 'nullable|numeric|min:0|max:5',
-            'last_review_date' => 'nullable|date',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $validatedData = $validator->validated();
+        $validatedData = $request->validated();
 
         // Backfill employee_id if the record never had one
         if (empty($validatedData['employee_id']) && empty($employee->employee_id)) {
@@ -242,27 +160,74 @@ class EmployeeController
 
         return response()->json([
             'message' => 'Employee updated successfully',
-            'data' => $employee->load(['department', 'manager'])
+            'data'    => $employee->load(['department', 'manager'])
         ]);
     }
 
     /**
      * Terminate the specified employee (soft-delete + status transition).
+     *
+     * Unlike the old implementation, termination is allowed even when the employee
+     * has a linked user account — HR should revoke the user account separately; blocking
+     * the HR workflow because an IT task is outstanding is the wrong gate. Instead, we
+     * warn the caller if the account is still active so they know to act on it.
+     *
      * Hard deletion is intentionally prevented to preserve payroll/audit history.
      */
-    public function destroy(Employee $employee): JsonResponse
+    public function destroy(Request $request, Employee $employee): JsonResponse
     {
+        Gate::authorize('delete', $employee);
+
+        $request->validate([
+            'termination_reason' => 'nullable|string|max:1000',
+            'termination_type'   => ['nullable', \Illuminate\Validation\Rule::in([
+                'resignation', 'dismissal', 'redundancy', 'contract_expiry',
+                'retirement', 'mutual_agreement', 'other',
+            ])],
+            'termination_date'   => 'nullable|date',
+        ]);
+
+        $employee->update([
+            'status'             => 'terminated',
+            'termination_reason' => $request->termination_reason,
+            'termination_type'   => $request->termination_type,
+            'termination_date'   => $request->termination_date ?? now()->toDateString(),
+        ]);
+
+        $employee->delete(); // soft delete — deleted_at is set; record is retained
+
+        $warnings = [];
         if ($employee->user) {
-            return response()->json([
-                'message' => 'Cannot terminate an employee who has an active user account. Deactivate their user account first.'
-            ], 422);
+            $warnings[] = 'The employee\'s user account is still active. Deactivate it via User Management to revoke system access.';
         }
 
-        $employee->update(['status' => 'terminated']);
-        $employee->delete(); // soft delete — record is retained, deleted_at is set
+        return response()->json([
+            'message'  => 'Employee record terminated and archived.',
+            'warnings' => $warnings,
+        ]);
+    }
+
+    /**
+     * Reinstate a terminated (soft-deleted) employee.
+     * Only HR admins may reinstate — gated by EmployeePolicy::restore.
+     */
+    public function restore(int $id): JsonResponse
+    {
+        $employee = Employee::withTrashed()->findOrFail($id);
+
+        Gate::authorize('restore', $employee);
+
+        $employee->restore();
+        $employee->update([
+            'status'             => 'active',
+            'termination_reason' => null,
+            'termination_type'   => null,
+            'termination_date'   => null,
+        ]);
 
         return response()->json([
-            'message' => 'Employee record terminated and archived.'
+            'message' => 'Employee reinstated successfully.',
+            'data'    => $employee->load(['department', 'manager']),
         ]);
     }
 
@@ -272,7 +237,7 @@ class EmployeeController
     public function profile(Request $request): JsonResponse
     {
         $user = auth()->user();
-        
+
         if (!$user || !$user->employee_id) {
             return response()->json([
                 'message' => 'No employee profile associated with this user account'
@@ -297,15 +262,7 @@ class EmployeeController
      */
     public function uploadPhoto(Request $request, Employee $employee): JsonResponse
     {
-        $user = auth()->user();
-        if (!$user) {
-            return response()->json(['message' => 'Unauthenticated'], 401);
-        }
-
-        // Authorize: user can update their own profile OR must have HR admin roles
-        if ($user->employee_id != $employee->id && !$user->hasRole(['Admin', 'HR', 'Super Admin'])) {
-            return response()->json(['message' => 'Unauthorized to update this profile photo.'], 403);
-        }
+        Gate::authorize('uploadPhoto', $employee);
 
         \Log::info("Uploading photo for employee {$employee->id}");
         $request->validate([
@@ -326,7 +283,7 @@ class EmployeeController
             return response()->json([
                 'success' => true,
                 'message' => 'Profile photo updated.',
-                'data' => $employee->fresh()->load(['department', 'manager']),
+                'data'    => $employee->fresh()->load(['department', 'manager']),
             ]);
         } catch (\Exception $e) {
             \Log::error("Failed to store profile photo: " . $e->getMessage());
@@ -349,19 +306,22 @@ class EmployeeController
 
         return Storage::disk('public')->response($employee->profile_photo_path);
     }
+
     /**
      * Return company-wide employee counts by status.
      * Used by the roster KPI cards so they show totals across all pages.
      */
     public function stats(Request $request): JsonResponse
     {
+        Gate::authorize('viewAny', Employee::class);
+
         $base = Employee::query()->accessibleByUser();
 
         return response()->json([
-            'total'      => (clone $base)->count(),
-            'active'     => (clone $base)->where('status', 'active')->count(),
-            'on_leave'   => (clone $base)->where('status', 'on-leave')->count(),
-            'inactive'   => (clone $base)->whereIn('status', ['inactive', 'terminated'])->count(),
+            'total'    => (clone $base)->count(),
+            'active'   => (clone $base)->where('status', 'active')->count(),
+            'on_leave' => (clone $base)->where('status', 'on-leave')->count(),
+            'inactive' => (clone $base)->whereIn('status', ['inactive', 'terminated'])->count(),
         ]);
     }
 
@@ -378,14 +338,14 @@ class EmployeeController
             ->get()
             ->map(function ($emp) {
                 return [
-                    'id' => $emp->id,
-                    'user_id' => $emp->user?->id,
-                    'employee_id' => $emp->id, // Frontend uses DB ID for balance fetch usually
-                    'name' => "{$emp->first_name} {$emp->last_name}",
-                    'job_title' => $emp->position,
+                    'id'            => $emp->id,
+                    'user_id'       => $emp->user?->id,
+                    'employee_id'   => $emp->id, // Frontend uses DB ID for balance fetch usually
+                    'name'          => "{$emp->first_name} {$emp->last_name}",
+                    'job_title'     => $emp->position,
                     'department_id' => $emp->department_id,
-                    'manager_id' => $emp->manager_id,
-                    'ot_balance' => $emp->ot_balance
+                    'manager_id'    => $emp->manager_id,
+                    'ot_balance'    => $emp->ot_balance
                 ];
             });
 
@@ -443,11 +403,19 @@ class EmployeeController
         ]);
     }
 
+    // ── Private helpers ──────────────────────────────────────────────────────
+
     /**
      * Whether the current user may see/edit salary and bank columns.
+     * Uses the EmployeePolicy::viewSalary ability, falling back to role check
+     * for calls where no specific Employee model is in scope (e.g. index).
      */
-    private function canViewSalary(): bool
+    private function canViewSalary(?Employee $employee = null): bool
     {
+        if ($employee) {
+            return Gate::allows('viewSalary', $employee);
+        }
+
         return auth()->user()?->can(Permissions::EMPLOYEE_VIEW_SALARY)
             || auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR'])
             || false;
@@ -464,15 +432,38 @@ class EmployeeController
     }
 
     /**
-     * Strip salary and bank fields from an employee payload unless the caller
-     * holds the employee.view_salary permission.
+     * Whether the current user may see regulated personal data (national ID,
+     * KRA PIN, NSSF/NHIF numbers, date of birth, home address, next-of-kin).
+     *
+     * Without a specific employee in scope (e.g. index), falls back to role check;
+     * with a specific employee, delegates to EmployeePolicy::viewPii.
      */
-    private function maskSalary(Employee $employee, bool $canView): array
+    private function canViewPii(?Employee $employee = null): bool
+    {
+        if ($employee) {
+            return Gate::allows('viewPii', $employee);
+        }
+
+        return auth()->user()?->hasRole(['Super Admin', 'Admin', 'HR']) ?? false;
+    }
+
+    /**
+     * Strip fields the caller is not entitled to see from an employee payload:
+     *  - salary + bank details unless they may view salary,
+     *  - regulated PII (ID/KRA/NSSF/NHIF/DOB/address/next-of-kin) unless they may view PII.
+     */
+    private function maskSensitive(Employee $employee, bool $canViewSalary, bool $canViewPii): array
     {
         $data = $employee->toArray();
 
-        if (!$canView) {
+        if (! $canViewSalary) {
             foreach (['salary', 'bank_name', 'bank_branch', 'bank_code', 'account_number', 'payment_method'] as $field) {
+                unset($data[$field]);
+            }
+        }
+
+        if (! $canViewPii) {
+            foreach (['id_number', 'kra_pin', 'nssf_id', 'nhif_id', 'date_of_birth', 'address', 'emergency_contact'] as $field) {
                 unset($data[$field]);
             }
         }
