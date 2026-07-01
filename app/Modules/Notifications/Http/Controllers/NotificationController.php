@@ -67,6 +67,28 @@ class NotificationController extends Controller
         return response()->json(['count' => $count]);
     }
 
+    public function stats(Request $request): JsonResponse
+    {
+        $userId = $request->user()->id;
+
+        $totalsByModule = AppNotification::query()
+            ->where('user_id', $userId)
+            ->selectRaw('module, count(*) as total')
+            ->groupBy('module')
+            ->pluck('total', 'module');
+
+        return response()->json([
+            'total' => $totalsByModule->sum(),
+            'starred' => AppNotification::query()
+                ->where('user_id', $userId)
+                ->where('is_starred', true)
+                ->count(),
+            'modules' => $totalsByModule
+                ->map(fn (int $total, string $module) => ['module' => $module, 'total' => $total])
+                ->values(),
+        ]);
+    }
+
     public function show(Request $request, string $id): JsonResponse
     {
         $notification = $this->notificationForUser($request, $id);
@@ -79,6 +101,25 @@ class NotificationController extends Controller
     {
         $notification = $this->notificationForUser($request, $id);
         $notification->markAsRead();
+
+        return response()->json(['success' => true]);
+    }
+
+    public function markManyAsRead(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['string'],
+        ]);
+
+        AppNotification::query()
+            ->where('user_id', $request->user()->id)
+            ->whereIn('id', $validated['ids'])
+            ->where('is_read', false)
+            ->update([
+                'is_read' => true,
+                'read_at' => now(),
+            ]);
 
         return response()->json(['success' => true]);
     }

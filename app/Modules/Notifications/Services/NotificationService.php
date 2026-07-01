@@ -58,9 +58,15 @@ class NotificationService
         $urgency = $registeredType['urgency'] ?? $urgency;
         $defaultChannels = $registeredType['default_channels'] ?? ['database'];
 
-        $recipients = $this->resolveRecipients($users, $role, $permission, $notifyModule, $all)
-            ->filter(fn (User $user) => $this->userCanSeeModule($user, $module))
-            ->values();
+        // Explicitly named recipients (e.g. "your own leave request was approved") are always
+        // notified about their own record — module-visibility only applies to broadcast targeting
+        // (role/permission/notifyModule/all), where it protects against over-notifying.
+        $explicitRecipients = $this->resolveExplicitUsers($users);
+
+        $broadcastRecipients = $this->resolveBroadcastRecipients($role, $permission, $notifyModule, $all)
+            ->filter(fn (User $user) => $this->userCanSeeModule($user, $module));
+
+        $recipients = $explicitRecipients->merge($broadcastRecipients)->unique('id')->values();
 
         return $recipients->map(function (User $user) use ($type, $title, $message, $module, $urgency, $data, $defaultChannels) {
             $enabledChannels = $this->enabledChannelsFor($user, $type, $defaultChannels);
@@ -112,8 +118,18 @@ class NotificationService
         return $registered;
     }
 
-    protected function resolveRecipients(
-        array $users,
+    protected function resolveExplicitUsers(array $users): Collection
+    {
+        if ($users === []) {
+            return collect();
+        }
+
+        $ids = collect($users)->map(fn ($user) => $user instanceof User ? $user->id : $user)->filter();
+
+        return User::query()->whereIn('id', $ids)->get();
+    }
+
+    protected function resolveBroadcastRecipients(
         string|array $role,
         string|array $permission,
         string $notifyModule,
@@ -123,11 +139,6 @@ class NotificationService
 
         if ($all) {
             $resolved = $resolved->merge(User::query()->active()->get());
-        }
-
-        if ($users !== []) {
-            $ids = collect($users)->map(fn ($user) => $user instanceof User ? $user->id : $user)->filter();
-            $resolved = $resolved->merge(User::query()->whereIn('id', $ids)->get());
         }
 
         foreach ($this->asArray($role) as $roleName) {
