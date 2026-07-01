@@ -3,75 +3,87 @@
 namespace App\Modules\Projects\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Projects\Http\Controllers\Concerns\HandlesProjectErrors;
 use App\Modules\Projects\Models\DeliverablesBlueprint;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class DeliverablesBlueprintController extends Controller
 {
-    public function index()
+    use HandlesProjectErrors;
+
+    public function index(): JsonResponse
     {
-        $blueprints = DeliverablesBlueprint::latest()->get();
-        return response()->json([
-            'success' => true,
-            'data' => $blueprints
-        ]);
+        return $this->safe(function () {
+            $blueprints = DeliverablesBlueprint::latest()->get();
+            return response()->json([
+                'success' => true,
+                'data' => $blueprints
+            ]);
+        }, 'List deliverables blueprints');
     }
 
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'category' => 'nullable|string',
-            'description' => 'nullable|string',
-            'materials' => 'nullable|array',
-            'labour' => 'nullable|array',
-            'keywords' => 'nullable|array',
-        ]);
+        return $this->safe(function () use ($request) {
+            $validated = $request->validate([
+                'name' => 'required|string|max:255',
+                'category' => 'nullable|string',
+                'description' => 'nullable|string',
+                'materials' => 'nullable|array',
+                'labour' => 'nullable|array',
+                'keywords' => 'nullable|array',
+            ]);
 
-        $blueprint = DeliverablesBlueprint::create($validated);
+            $blueprint = DeliverablesBlueprint::create($validated);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Architecture created successfully',
-            'data' => $blueprint
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Architecture created successfully',
+                'data' => $blueprint
+            ], 201);
+        }, 'Create deliverables blueprint');
     }
 
-    public function show(DeliverablesBlueprint $deliverablesBlueprint)
+    public function show(DeliverablesBlueprint $deliverablesBlueprint): JsonResponse
     {
-        return response()->json([
+        return $this->safe(fn () => response()->json([
             'success' => true,
             'data' => $deliverablesBlueprint
-        ]);
+        ]), 'Show deliverables blueprint');
     }
 
-    public function update(Request $request, DeliverablesBlueprint $deliverablesBlueprint)
+    public function update(Request $request, DeliverablesBlueprint $deliverablesBlueprint): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'category' => 'nullable|string',
-            'description' => 'nullable|string',
-            'materials' => 'nullable|array',
-            'labour' => 'nullable|array',
-            'keywords' => 'nullable|array',
-        ]);
+        return $this->safe(function () use ($request, $deliverablesBlueprint) {
+            $validated = $request->validate([
+                'name' => 'required|string|max:255',
+                'category' => 'nullable|string',
+                'description' => 'nullable|string',
+                'materials' => 'nullable|array',
+                'labour' => 'nullable|array',
+                'keywords' => 'nullable|array',
+            ]);
 
-        $deliverablesBlueprint->update($validated);
+            $deliverablesBlueprint->update($validated);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Architecture updated successfully',
-            'data' => $deliverablesBlueprint
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Architecture updated successfully',
+                'data' => $deliverablesBlueprint
+            ]);
+        }, 'Update deliverables blueprint');
     }
 
-    public function destroy(DeliverablesBlueprint $deliverablesBlueprint)
+    public function destroy(DeliverablesBlueprint $deliverablesBlueprint): JsonResponse
     {
-        $deliverablesBlueprint->delete();
+        return $this->safe(function () use ($deliverablesBlueprint) {
+            $deliverablesBlueprint->delete();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Architecture decommissioned successfully'
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Architecture decommissioned successfully'
+            ]);
+        }, 'Delete deliverables blueprint');
     }
 }

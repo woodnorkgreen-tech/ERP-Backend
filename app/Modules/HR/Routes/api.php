@@ -58,13 +58,26 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('employees/stats', [EmployeeController::class, 'stats'])->middleware('permission:' . Permissions::EMPLOYEE_READ);
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'uploadPhoto']);
 
+        // Bulk employee edit via Excel: download with data → edit → reupload (preview, then commit).
+        // Registered before the apiResource so 'template' is not captured as an {employee} param.
+        Route::get('employees/template', [EmployeeController::class, 'downloadTemplate'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+        Route::post('employees/template/preview', [EmployeeController::class, 'previewImport'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+        Route::post('employees/template/commit', [EmployeeController::class, 'commitImport'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+
         Route::apiResource('employees', EmployeeController::class)->middleware([
-            'index' => 'permission:' . Permissions::EMPLOYEE_READ,
-            'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
-            'show' => 'permission:' . Permissions::EMPLOYEE_READ,
-            'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
+            'index'   => 'permission:' . Permissions::EMPLOYEE_READ,
+            'store'   => 'permission:' . Permissions::EMPLOYEE_CREATE,
+            'show'    => 'permission:' . Permissions::EMPLOYEE_READ,
+            'update'  => 'permission:' . Permissions::EMPLOYEE_UPDATE,
             'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
         ]);
+
+        // Reinstatement — restore a soft-deleted (terminated) employee.
+        Route::post('employees/{id}/restore', [EmployeeController::class, 'restore'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_DELETE);
 
         // Employee skills & certifications
         Route::prefix('employees/{employee}')->group(function () {
@@ -85,7 +98,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
         });
 
         // Technical Labour management
-        Route::post('technical-labour/{technicalLabour}/promote', [TechnicalLabourController::class, 'promote']);
+        // Promotion creates a real staff record, so it requires the employee-create permission
+        // (the route is otherwise only auth-gated and would bypass employee.create entirely).
+        Route::post('technical-labour/{technicalLabour}/promote', [TechnicalLabourController::class, 'promote'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_CREATE);
         Route::apiResource('technical-labour', TechnicalLabourController::class);
 
         // Department management
@@ -217,6 +233,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::delete('{id}', [OvertimeController::class, 'destroy']);
             Route::get('balance/{type}/{id}', [OvertimeController::class, 'balance']);
             Route::get('ledger', [OvertimeController::class, 'ledger']);
+            Route::post('ledger/{ledgerEntry}/reverse', [OvertimeController::class, 'reverseLedger']);
 
             // Reports
             Route::get('reports/ledger-audit', [\App\Modules\HR\Http\Controllers\OvertimeReportController::class, 'downloadLedgerAudit']);

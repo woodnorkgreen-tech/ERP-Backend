@@ -111,7 +111,7 @@ class User extends Authenticatable
      */
     public function getAccessibleDepartments()
     {
-        if ($this->hasRole(['Super Admin', 'HR Admin', 'HR'])) {
+        if ($this->hasRole(['Super Admin', 'HR'])) {
             return \App\Modules\HR\Models\Department::all();
         }
 
@@ -165,7 +165,7 @@ class User extends Authenticatable
     {
         $permissions = [
             'can_access_admin' => $this->hasRole(['Super Admin', 'Admin']),
-            'can_access_hr' => $this->hasRole(['Super Admin', 'Manager', 'Employee', 'HR Admin', 'HR']),
+            'can_access_hr' => $this->hasRole(['Super Admin', 'Manager', 'Employee', 'HR']),
             'can_access_creatives' => $this->hasRole(['Super Admin', 'Designer']) ||
                                       ($this->department && strtolower($this->department->name) === 'creatives'),
             'can_manage_users' => $this->can('user.create') || $this->can('user.update'),

@@ -14,7 +14,8 @@ class PayrollLedger extends Model
         'amount_value',
         'name',
         'description',
-        'is_recurring'
+        'is_recurring',
+        'recurring_end_month'
     ];
 
     protected $casts = [

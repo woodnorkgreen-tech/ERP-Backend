@@ -3,15 +3,22 @@
 namespace App\Modules\Projects\Actions;
 
 use App\Modules\Projects\Models\EnquiryTask;
+use App\Modules\Projects\Services\EnquiryWorkflowService;
 use Illuminate\Support\Facades\Log;
 
 class AutoSyncTaskStateAction
 {
+    public function __construct(
+        private EnquiryWorkflowService $workflowService
+    ) {}
+
     /**
      * Synchronize the state of a task based on its underlying data.
-     * 
-     * @param EnquiryTask $task
-     * @return void
+     *
+     * Detection lives here, but the actual status change is delegated to the
+     * single source of truth ({@see EnquiryWorkflowService::updateTaskStatus})
+     * so gates, enquiry-status sync and notifications stay consistent — no task
+     * status is ever written directly.
      */
     public function execute(EnquiryTask $task): void
     {
@@ -20,7 +27,7 @@ class AutoSyncTaskStateAction
         }
 
         $shouldComplete = false;
-        $reason = "";
+        $reason = '';
 
         // 1. Materials Auto-Completion
         if ($task->type === 'materials') {
@@ -29,7 +36,7 @@ class AutoSyncTaskStateAction
                 $status = $materialsData->project_info['approval_status'] ?? [];
                 if ($status['all_approved'] ?? false) {
                     $shouldComplete = true;
-                    $reason = "All materials approved";
+                    $reason = 'All materials approved';
                 }
             }
         }
@@ -46,16 +53,11 @@ class AutoSyncTaskStateAction
             }
         }
 
-        // 3. Quote Auto-Completion
+        // 3. Quote — move to in_progress once data exists (work has begun).
         if ($task->type === 'quote') {
             $quoteData = \App\Models\TaskQuoteData::where('enquiry_task_id', $task->id)->first();
-            if ($quoteData && $quoteData->budget_imported) {
-                // If it's a simple project or auto-import is done, we could complete it.
-                // For now, let's just mark it as "In Progress" if data exists.
-                if ($task->status === 'pending') {
-                    $task->status = 'in_progress';
-                    $task->save();
-                }
+            if ($quoteData && $quoteData->budget_imported && $task->status === 'pending') {
+                $this->transition($task, 'in_progress', 'Quote data present');
             }
         }
 
@@ -64,15 +66,27 @@ class AutoSyncTaskStateAction
             $approval = \DB::table('quote_approvals')->where('task_id', $task->id)->first();
             if ($approval && $approval->approval_status === 'approved') {
                 $shouldComplete = true;
-                $reason = "Quote formally approved in database";
+                $reason = 'Quote formally approved in database';
             }
         }
 
         if ($shouldComplete) {
-            Log::info("AutoSyncTaskStateAction: Auto-completing task {$task->id} ({$task->type}) - Reason: {$reason}");
-            $task->status = 'completed';
-            $task->completed_at = now();
-            $task->save();
+            $this->transition($task, 'completed', $reason);
+        }
+    }
+
+    /**
+     * Route an auto-state change through the workflow service. Best-effort: a
+     * gate rejection (e.g. prerequisites not yet met) must never break the data
+     * save that triggered this observer — it just means the task isn't advanced.
+     */
+    private function transition(EnquiryTask $task, string $status, string $reason): void
+    {
+        try {
+            Log::info("AutoSyncTaskStateAction: auto-{$status} task {$task->id} ({$task->type}) - {$reason}");
+            $this->workflowService->updateTaskStatus($task->id, $status, $task->assigned_user_id);
+        } catch (\Throwable $e) {
+            Log::warning("AutoSyncTaskStateAction: skipped auto-{$status} for task {$task->id}: {$e->getMessage()}");
         }
     }
 }

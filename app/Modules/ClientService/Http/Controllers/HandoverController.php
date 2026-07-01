@@ -22,7 +22,7 @@ class HandoverController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $filters = $request->only(['client_id']);
+            $filters = $request->only(['client_id', 'search', 'feedback_source', 'rating_class', 'timeliness', 'sort_by', 'page']);
             $handovers = $this->handoverService->getHandovers($filters);
 
             return response()->json($handovers);
@@ -30,6 +30,23 @@ class HandoverController extends Controller
             \Log::error('Error fetching handovers: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve handovers',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get aggregate statistics for submitted handovers.
+     */
+    public function stats(Request $request): JsonResponse
+    {
+        try {
+            $stats = $this->handoverService->getHandoverStats();
+            return response()->json($stats);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching handover stats: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to retrieve handover statistics',
                 'error' => $e->getMessage()
             ], 500);
         }
