@@ -54,19 +54,25 @@ class Employee extends Model
         'performance_rating',
         'last_review_date',
         'profile_photo_path',
+
+        // Termination metadata (set on destroy; cleared on restore)
+        'termination_reason',
+        'termination_type',
+        'termination_date',
     ];
 
     protected $casts = [
-        'hire_date' => 'date',
+        'hire_date'          => 'date',
         'probation_end_date' => 'date',
-        'date_of_birth' => 'date',
-        'is_on_probation' => 'boolean',
-        'contract_end_date' => 'date',
-        'emergency_contact' => 'array',
+        'date_of_birth'      => 'date',
+        'is_on_probation'    => 'boolean',
+        'contract_end_date'  => 'date',
+        'emergency_contact'  => 'array',
         'performance_rating' => 'decimal:1',
-        'last_review_date' => 'date',
-        'salary' => 'float',
+        'last_review_date'   => 'date',
+        'salary'             => 'float',
         'statutory_exemptions' => 'array',
+        'termination_date'   => 'date',
     ];
 
     protected $appends = [
@@ -144,7 +150,11 @@ class Employee extends Model
             return null;
         }
         $timestamp = $this->updated_at ? $this->updated_at->timestamp : time();
-        return "/api/hr/employees/{$this->id}/photo?t={$timestamp}";
+        // Return an ABSOLUTE url (resolved against the request/APP_URL host) rather than a
+        // bare relative path. In dev the SPA proxies /api so a relative path works, but in
+        // production the SPA is a separate origin and a relative <img src="/api/..."> resolves
+        // against the frontend host -> broken image. Matches the project's url('api/...') convention.
+        return url("/api/hr/employees/{$this->id}/photo") . "?t={$timestamp}";
     }
 
     /**
@@ -180,7 +190,7 @@ class Employee extends Model
         }
 
         // Admin / HR / Project Officers can see all employees
-        if ($user->hasRole(['Admin', 'HR', 'HR Admin', 'Project Officer', 'Project Manager'])) {
+        if ($user->hasRole(['Admin', 'HR', 'Project Officer', 'Project Manager'])) {
             return $query;
         }
 
@@ -218,8 +228,10 @@ class Employee extends Model
             return true;
         }
 
-        // Admin has access to all for admin purposes
-        if ($user->hasRole(['Admin', 'HR', 'HR Admin'])) {
+        // Admin / HR / Project Officers can access all employees.
+        // Kept in sync with the scopeAccessibleByUser role list so that a record
+        // visible in the roster (index) is also reachable via show/update/destroy.
+        if ($user->hasRole(['Admin', 'HR', 'Project Officer', 'Project Manager'])) {
             return true;
         }
 

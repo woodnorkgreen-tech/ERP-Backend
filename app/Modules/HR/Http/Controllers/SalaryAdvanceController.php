@@ -19,7 +19,7 @@ class SalaryAdvanceController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = SalaryAdvanceRequest::with(['employee.department']);
+        $query = SalaryAdvanceRequest::with(['employee.department', 'ledger']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -91,24 +91,89 @@ class SalaryAdvanceController extends Controller
             return response()->json(['message' => 'Request is no longer pending'], 422);
         }
 
+        $validator = Validator::make($request->all(), [
+            'split_installments' => 'nullable|boolean',
+            'monthly_installment' => 'nullable|numeric|min:1',
+            'hr_remarks' => 'nullable|string|max:500'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
         DB::beginTransaction();
         try {
-            // Create the Payroll Ledger entry
-            $ledger = PayrollLedger::create([
-                'employee_id' => $advance->employee_id,
-                'name' => 'Salary Advance Recovery',
-                'description' => "Recovery of approved advance requested on " . $advance->created_at->format('Y-m-d'),
-                'type' => 'deduction',
-                'amount_type' => 'fixed',
-                'amount_value' => $advance->amount,
-                'ledger_month' => $advance->target_payroll_month,
-                'is_recurring' => false
-            ]);
+            $splitInstallments = $request->boolean('split_installments', false);
+            $monthlyInstallment = floatval($request->input('monthly_installment', 0));
+
+            $createdLedgers = [];
+            $primaryLedgerId = null;
+
+            if ($splitInstallments && $monthlyInstallment > 0) {
+                $principal = floatval($advance->amount);
+                $times = intval(floor($principal / $monthlyInstallment));
+                $remainder = fmod($principal, $monthlyInstallment);
+
+                if ($times > 0) {
+                    $isEntryRecurring = !($times === 1 && $remainder == 0);
+                    $endMonth = null;
+                    if ($isEntryRecurring) {
+                        $start = \Carbon\Carbon::createFromFormat('Y-m', $advance->target_payroll_month);
+                        $endMonth = $start->copy()->addMonths($times - 1)->format('Y-m');
+                    }
+
+                    $ledger = PayrollLedger::create([
+                        'employee_id' => $advance->employee_id,
+                        'name' => 'Salary Advance Recovery (Split KES ' . number_format($monthlyInstallment) . '/mo)',
+                        'description' => "Recovery of approved advance requested on " . $advance->created_at->format('Y-m-d') . " (Split) | Total Principal: KES " . number_format($principal, 2),
+                        'type' => 'deduction',
+                        'amount_type' => 'fixed',
+                        'amount_value' => $monthlyInstallment,
+                        'ledger_month' => $advance->target_payroll_month,
+                        'is_recurring' => $isEntryRecurring,
+                        'recurring_end_month' => $endMonth
+                    ]);
+                    $createdLedgers[] = $ledger->id;
+                }
+
+                if ($remainder > 0) {
+                    $start = \Carbon\Carbon::createFromFormat('Y-m', $advance->target_payroll_month);
+                    $remainderMonth = $start->copy()->addMonths($times)->format('Y-m');
+
+                    $ledger = PayrollLedger::create([
+                        'employee_id' => $advance->employee_id,
+                        'name' => 'Salary Advance Recovery (Remainder)',
+                        'description' => "Remainder recovery of approved advance requested on " . $advance->created_at->format('Y-m-d') . " | Total Principal: KES " . number_format($principal, 2),
+                        'type' => 'deduction',
+                        'amount_type' => 'fixed',
+                        'amount_value' => $remainder,
+                        'ledger_month' => $remainderMonth,
+                        'is_recurring' => false,
+                        'recurring_end_month' => null
+                    ]);
+                    $createdLedgers[] = $ledger->id;
+                }
+
+                $primaryLedgerId = !empty($createdLedgers) ? $createdLedgers[0] : null;
+            } else {
+                $ledger = PayrollLedger::create([
+                    'employee_id' => $advance->employee_id,
+                    'name' => 'Salary Advance Recovery',
+                    'description' => "Recovery of approved advance requested on " . $advance->created_at->format('Y-m-d') . " | Total Principal: KES " . number_format($advance->amount, 2),
+                    'type' => 'deduction',
+                    'amount_type' => 'fixed',
+                    'amount_value' => $advance->amount,
+                    'ledger_month' => $advance->target_payroll_month,
+                    'is_recurring' => false
+                ]);
+                $primaryLedgerId = $ledger->id;
+                $createdLedgers[] = $ledger->id;
+            }
 
             $advance->update([
                 'status' => 'approved',
                 'hr_remarks' => $request->hr_remarks,
-                'ledger_id' => $ledger->id
+                'ledger_id' => $primaryLedgerId
             ]);
 
             HRAuditLog::create([
@@ -121,8 +186,11 @@ class SalaryAdvanceController extends Controller
                 'context' => [
                     'amount' => $advance->amount,
                     'target_month' => $advance->target_payroll_month,
-                    'ledger_id' => $ledger->id,
-                    'hr_remarks' => $request->hr_remarks
+                    'ledger_id' => $primaryLedgerId,
+                    'created_ledger_ids' => $createdLedgers,
+                    'hr_remarks' => $request->hr_remarks,
+                    'split_installments' => $splitInstallments,
+                    'monthly_installment' => $monthlyInstallment
                 ],
                 'ip_address' => $request->ip()
             ]);
@@ -190,7 +258,7 @@ class SalaryAdvanceController extends Controller
             return response()->json(['message' => 'No employee profile found'], 404);
         }
 
-        $requests = SalaryAdvanceRequest::where('employee_id', $user->employee_id)
+        $requests = SalaryAdvanceRequest::with('ledger')->where('employee_id', $user->employee_id)
             ->latest()
             ->get();
 

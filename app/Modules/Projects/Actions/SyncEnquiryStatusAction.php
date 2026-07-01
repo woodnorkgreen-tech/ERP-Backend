@@ -33,7 +33,7 @@ class SyncEnquiryStatusAction
 
         // Get all completed tasks for this enquiry
         $completedTaskTypes = EnquiryTask::where('project_enquiry_id', $enquiryId)
-            ->whereIn('status', ['completed', 'skipped'])
+            ->where('status', 'completed')
             ->pluck('type')
             ->toArray();
 

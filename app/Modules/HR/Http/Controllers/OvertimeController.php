@@ -37,7 +37,7 @@ class OvertimeController extends Controller
         ]);
 
         // Intelligent Data Isolation: Role & Hierarchy aware
-        if (!$user->can(Permissions::OVERTIME_READ) && !$user->hasRole(['Super Admin', 'HR Admin', 'HR'])) {
+        if (!$user->can(Permissions::OVERTIME_READ) && !$user->hasRole(['Super Admin', 'HR'])) {
             $employeeId = $user->employee_id;
             $accessibleDeptIds = $user->getAccessibleDepartments()->pluck('id')->toArray();
             $isDeptLead = $user->isDeptLead();
@@ -119,7 +119,7 @@ class OvertimeController extends Controller
         }
 
         // Security Validation
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR', 'Project Officer', 'Project Manager', 'Production']);
+        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR', 'Project Officer', 'Project Manager', 'Production']);
         $isOwn = $employeeId && ($employeeId == $user->employee_id);
         
         if (!$isGlobal && !$isOwn) {
@@ -163,7 +163,7 @@ class OvertimeController extends Controller
         $user = auth()->user();
         
         // Permission Check: HR, Admins, Managers, Dept Leads, and Project Officers can do bulk
-        if (!$user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR', 'Project Officer', 'Project Manager', 'Production']) && !$user->isManager() && !$user->isDeptLead()) {
+        if (!$user->hasRole(['Super Admin', 'Admin', 'HR', 'Project Officer', 'Project Manager', 'Production']) && !$user->isManager() && !$user->isDeptLead()) {
             abort(403, 'Unauthorized to perform bulk overtime recording.');
         }
 
@@ -190,7 +190,7 @@ class OvertimeController extends Controller
         if ($hours <= 0) return response()->json(['message' => 'Invalid time range'], 422);
 
         $entries = [];
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR', 'Project Officer', 'Project Manager', 'Production']);
+        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR', 'Project Officer', 'Project Manager', 'Production']);
         $sharedData = array_merge($request->only(['project_id', 'job_title', 'location', 'work_date', 'start_time', 'end_time', 'notes']), [
             'hours'        => $hours,
             'status'       => 'submitted',
@@ -208,7 +208,11 @@ class OvertimeController extends Controller
                         continue;
                     }
                 }
-                $entries[] = OTEntry::create(array_merge($sharedData, ['employee_id' => $empId]));
+                $entry = OTEntry::create(array_merge($sharedData, ['employee_id' => $empId]));
+                // Bulk entries skip submitEntry(), so run the fatigue/overlap checks here too —
+                // otherwise bulk-logged overtime would never raise safety flags.
+                $this->overtimeService->generateIntelligenceFlags($entry);
+                $entries[] = $entry;
             }
         }
 
@@ -216,10 +220,12 @@ class OvertimeController extends Controller
         if (!empty($validated['technical_labour_ids'])) {
             $productionDept = Department::where('name', 'Production')->first();
             $isProductionLead = $productionDept && ($productionDept->manager_id === $user->employee_id);
-            
+
             if ($isGlobal || $isProductionLead) {
                 foreach ($validated['technical_labour_ids'] as $techId) {
-                    $entries[] = OTEntry::create(array_merge($sharedData, ['technical_labour_id' => $techId]));
+                    $entry = OTEntry::create(array_merge($sharedData, ['technical_labour_id' => $techId]));
+                    $this->overtimeService->generateIntelligenceFlags($entry);
+                    $entries[] = $entry;
                 }
             } else {
                 abort(403, 'Unauthorized to record overtime for technical labour.');
@@ -253,54 +259,10 @@ class OvertimeController extends Controller
      */
     public function supervisorApprove(OTEntry $entry)
     {
-        $user = auth()->user();
-        
-        // 1. Super Admin & HR Case: Full autonomy, can self-approve.
-        if ($user->hasRole(['Super Admin', 'HR Admin', 'HR'])) {
-            $this->overtimeService->supervisorApprove($entry);
-            return response()->json($entry);
+        if (Gate::denies('supervisorApprove', $entry)) {
+            abort(403, 'Governance Gate Locked: you are not authorized to approve this overtime entry, or it must be validated by HR.');
         }
 
-        // 2. Prevent Self-Approval for everyone else (Managers/Leads/Staff)
-        if ($entry->employee_id === $user->employee_id) {
-            abort(403, 'Self-approval is restricted. Please request validation from HR or a higher authority.');
-        }
-
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
-
-        // 3. Determine if the Subject is a Manager/Lead (Managers must be validated by HR)
-        $isSubjectManager = false;
-        if ($entry->employee_id) {
-            $isSubjectManager = Employee::where('manager_id', $entry->employee_id)->exists() || 
-                               Department::where('manager_id', $entry->employee_id)->exists();
-        }
-
-        if ($isSubjectManager) {
-            if (!$isGlobal) {
-                abort(403, 'Governance Gate Locked: Manager/Department Lead entries must be validated by HR compliance.');
-            }
-        } else {
-            // Check for Manager/Lead authority over the entry
-            $isManager = $entry->employee && $entry->employee->manager_id === $user->employee_id;
-            $isDeptLead = $entry->employee && $entry->employee->department?->manager_id === $user->employee_id;
-            
-            // For Technical Labour or others without direct hierarchy, we rely on Global Admin or Submitter status
-            $isSubmitter = $entry->submitted_by === $user->id;
-
-            // Technical Labour check: regarded under the Production department
-            $isProductionDeptManager = false;
-            if ($entry->technical_labour_id && $user->employee_id) {
-                $productionDept = Department::where('name', 'Production')->first();
-                if ($productionDept && $productionDept->manager_id === $user->employee_id) {
-                    $isProductionDeptManager = true;
-                }
-            }
-
-            if (!$isGlobal && !$isManager && !$isDeptLead && !$isProductionDeptManager) {
-                abort(403, 'Governance Gate Locked: Unauthorized to approve this specific mission log.');
-            }
-        }
-        
         $this->overtimeService->supervisorApprove($entry);
         return response()->json($entry);
     }
@@ -310,11 +272,12 @@ class OvertimeController extends Controller
      */
     public function hrApprove(OTEntry $entry)
     {
-        // Only Global Admins can perform final balance credits
-        if (!auth()->user()->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR'])) {
-            abort(403, 'Governance Gate Locked: Only HR or System Administrators can perform final overtime approval.');
+        // Authorization (HR-approval permission/role + segregation of duties) lives in
+        // OvertimePolicy::hrApprove.
+        if (Gate::denies('hrApprove', $entry)) {
+            abort(403, 'Governance Gate Locked: only HR may give final approval, and never to their own overtime.');
         }
-        
+
         $this->overtimeService->hrApprove($entry);
         return response()->json($entry);
     }
@@ -325,12 +288,17 @@ class OvertimeController extends Controller
     public function reject(Request $request, OTEntry $entry)
     {
         $user = auth()->user();
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
-        $isManager = $entry->employee && $entry->employee->manager_id === $user->employee_id;
-        $isDeptLead = $entry->employee && $entry->employee->department?->manager_id === $user->employee_id;
 
-        if (!$isGlobal && !$isManager && !$isDeptLead) {
+        if (Gate::denies('reject', $entry)) {
             abort(403, 'Governance Gate Locked: Unauthorized to reject this specific mission log.');
+        }
+
+        // A credited entry is settled on the tamper-evident ledger and can't simply be
+        // rejected — that would leave the credited hours stranded. Reverse it instead.
+        if ($entry->status === 'done') {
+            return response()->json([
+                'message' => 'This entry is already credited to the ledger and cannot be rejected. Post a reversal instead.',
+            ], 422);
         }
 
         $request->validate(['reason' => 'required|string']);
@@ -359,11 +327,8 @@ class OvertimeController extends Controller
         }
 
         $user = auth()->user();
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
-        $isManager = $entry->employee->manager_id === $user->employee_id;
-        $isDeptLead = $entry->employee->department?->manager_id === $user->employee_id;
 
-        if (!$isGlobal && !$isManager && !$isDeptLead) {
+        if (Gate::denies('reopen', $entry)) {
             abort(403, 'Governance Gate Locked: Unauthorized to re-open this specific overtime entry.');
         }
 
@@ -386,13 +351,15 @@ class OvertimeController extends Controller
     public function ledger(Request $request)
     {
         $user = auth()->user();
-        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR Admin', 'HR']);
+        $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR']);
 
         $query = \App\Modules\HR\Models\LedgerEntry::with([
             'employee.department',
             'technicalLabour',
             'otEntry.submitter',
             'compensation',
+            'reversal',   // the compensating entry that cancels this one, if any
+            'reverses',   // the original this row reverses, if this is a reversal
         ]);
         
         if (!$isGlobal) {
@@ -417,7 +384,7 @@ class OvertimeController extends Controller
             } else {
                 $subject = \App\Modules\HR\Models\Employee::findOrFail($id);
             }
-            $ledger = $subject->ledgerEntries()->with(['otEntry', 'compensation'])->latest()->get();
+            $ledger = $subject->ledgerEntries()->with(['otEntry', 'compensation', 'reversal', 'reverses'])->latest()->get();
         } catch (\Exception $e) {
             $ledger = [];
             $subject = null;
@@ -456,14 +423,47 @@ class OvertimeController extends Controller
         return response()->json($projects);
     }
 
-    public function destroy($id)
+    /**
+     * Reverse a settled ledger entry by posting a compensating entry. The original is
+     * preserved — reversal is the only sanctioned way to unwind credited/used hours.
+     */
+    public function reverseLedger(Request $request, \App\Modules\HR\Models\LedgerEntry $ledgerEntry)
     {
         $user = auth()->user();
-        if (!$user->hasRole(['Super Admin'])) {
+
+        if (!$user->hasRole(['Super Admin', 'Admin', 'HR'])) {
+            abort(403, 'Governance Gate Locked: Only HR or System Administrators can reverse ledger transactions.');
+        }
+
+        $validated = $request->validate([
+            'reason' => 'required|string|min:3|max:500',
+        ]);
+
+        $reversal = $this->overtimeService->reverse($ledgerEntry, $validated['reason']);
+
+        return response()->json([
+            'message'  => 'Ledger entry reversed successfully.',
+            'reversal' => $reversal->load(['employee', 'technicalLabour', 'reverses']),
+        ], 201);
+    }
+
+    public function destroy($id)
+    {
+        $entry = \App\Modules\HR\Models\OTEntry::findOrFail($id);
+
+        // Hard delete is reserved for Super Admin (OvertimePolicy::delete).
+        if (Gate::denies('delete', $entry)) {
             abort(403, 'Unauthorized. Only Super Admin can delete transactions.');
         }
 
-        $entry = \App\Modules\HR\Models\OTEntry::findOrFail($id);
+        // Deleting a credited entry would silently desync the running balance from the
+        // ledger chain. Credited hours must be unwound through a reversal, not a delete.
+        if ($entry->status === 'done') {
+            return response()->json([
+                'message' => 'This entry is already credited to the ledger and cannot be deleted. Post a reversal instead.',
+            ], 422);
+        }
+
         $entry->delete(); // Soft delete
 
         return response()->json(['message' => 'Transaction deleted successfully.']);

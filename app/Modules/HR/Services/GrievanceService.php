@@ -202,7 +202,7 @@ class GrievanceService
             return;
         }
 
-        if ($user->hasAnyRole(['Super Admin', 'Admin', 'HR Admin', 'HR'])) {
+        if ($user->hasAnyRole(['Super Admin', 'Admin', 'HR'])) {
             return;
         }
 

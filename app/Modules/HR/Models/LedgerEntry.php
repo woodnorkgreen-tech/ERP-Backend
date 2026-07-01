@@ -5,6 +5,7 @@ namespace App\Modules\HR\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class LedgerEntry extends Model
 {
@@ -20,6 +21,7 @@ class LedgerEntry extends Model
         'balance_after',
         'ot_entry_id',
         'compensation_id',
+        'reverses_ledger_id',
         'source_type',
         'source_snapshot',
         'chain_hash',
@@ -52,6 +54,30 @@ class LedgerEntry extends Model
     public function compensation(): BelongsTo
     {
         return $this->belongsTo(Compensation::class, 'compensation_id');
+    }
+
+    /** The original entry this row reverses (null unless this is a reversal). */
+    public function reverses(): BelongsTo
+    {
+        return $this->belongsTo(LedgerEntry::class, 'reverses_ledger_id');
+    }
+
+    /** The reversal entry that cancels this row, if one exists. */
+    public function reversal(): HasOne
+    {
+        return $this->hasOne(LedgerEntry::class, 'reverses_ledger_id');
+    }
+
+    /** This row is itself a reversal of another entry. */
+    public function isReversal(): bool
+    {
+        return $this->source_type === 'reversal';
+    }
+
+    /** This row has already been reversed by a later compensating entry. */
+    public function isReversed(): bool
+    {
+        return $this->reversal()->exists();
     }
 
     /**

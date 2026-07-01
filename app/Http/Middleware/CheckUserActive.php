@@ -24,7 +24,7 @@ class CheckUserActive
             }
 
             // 2. Invalidate Web Session (for traditional web auth if present)
-            if (auth()->guard('web')->check()) {
+            if ($request->hasSession() && auth()->guard('web')->check()) {
                 auth()->guard('web')->logout();
                 $request->session()->invalidate();
                 $request->session()->regenerateToken();

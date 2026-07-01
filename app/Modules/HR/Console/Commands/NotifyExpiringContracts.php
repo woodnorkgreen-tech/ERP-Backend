@@ -35,7 +35,7 @@ class NotifyExpiringContracts extends Command
         $this->info("Found {$expiring->count()} expiring contract(s). Notifying HR admins…");
 
         // Notify every user who holds an HR or Admin role
-        $hrAdmins = \App\Models\User::role(['HR', 'HR Admin', 'Admin', 'Super Admin'])->get();
+        $hrAdmins = \App\Models\User::role(['HR', 'Admin', 'Super Admin'])->get();
 
         if ($hrAdmins->isEmpty()) {
             $this->warn('No HR admin users found to notify.');

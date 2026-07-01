@@ -76,9 +76,6 @@ Route::prefix('public')->group(function () {
     Route::get('petty-cash/requisitions/project-team-members', [PettyCashRequisitionController::class, 'getPublicProjectTeamMembers']);
 });
 
-// Flash Quote PDF Generation
-Route::post('flash-quote/generate-pdf', [App\Http\Controllers\FlashQuoteController::class, 'generatePdf']);
-
 Route::get('/storage/{path}', function ($path) {
     $file = storage_path('app/public/' . $path);
 
@@ -265,21 +262,22 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Get events by date range
     Route::post('/events/range', 'App\Http\Controllers\EventController@getByDateRange');
-    // User permissions and navigation
-    Route::get('/user/permissions', function () {
-        return response()->json([
-            'permissions' => auth()->user()->getNavigationPermissions(),
-            'user_permissions' => auth()->user()->getAllPermissions()->pluck('name')->toArray(),
-            'roles' => auth()->user()->roles->pluck('name'),
-            'departments' => auth()->user()->getAccessibleDepartments()
-        ]);
-    });
 
     // HR Module Routes
+
     Route::prefix('hr')->group(function () {
         // Employee management — static routes MUST come before apiResource wildcard
         Route::get('employees/profile', [EmployeeController::class, 'profile']);
         Route::get('employees/compact', [EmployeeController::class, 'compact']);
+
+        // Bulk edit-and-reupload: download the prefilled template, dry-run a diff, then commit.
+        Route::get('employees/template', [EmployeeController::class, 'downloadTemplate'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+        Route::post('employees/template/preview', [EmployeeController::class, 'previewImport'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+        Route::post('employees/template/commit', [EmployeeController::class, 'commitImport'])
+            ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+
         Route::apiResource('employees', EmployeeController::class)->middleware([
             'index' => 'permission:' . Permissions::EMPLOYEE_READ,
             'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
@@ -345,9 +343,14 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('clientservice')->group(function () {
         Route::get('dashboard', [App\Modules\ClientService\Http\Controllers\DashboardController::class, 'index']);
         Route::get('handovers', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'index']);
+        Route::get('handovers/stats', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'stats']);
         Route::get('handovers/{id}', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'show']);
         // Client management
         Route::get('clients', [ClientController::class, 'index']);
+        Route::get('clients/export', [ClientController::class, 'export'])
+            ->middleware('permission:' . Permissions::CLIENT_READ);
+        Route::get('clients/lead-sources', [ClientController::class, 'getLeadSources'])
+            ->middleware('permission:' . Permissions::CLIENT_READ);
         Route::get('clients/{client}', [ClientController::class, 'show'])
             ->middleware('permission:' . Permissions::CLIENT_READ);
         Route::post('clients', [ClientController::class, 'store'])
@@ -599,18 +602,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Logistics Log Routes
         Route::apiResource('logistics-log', App\Http\Controllers\LogisticsLogController::class);
 
-        // Dashboard routes
-        Route::get('dashboard/command-center', [DashboardController::class, 'commandCenter']);
+        // Dashboard route (lean: one endpoint → KPIs + ranked signals)
         Route::get('dashboard', [DashboardController::class, 'dashboard']);
-        Route::get('dashboard/enquiry-metrics', [DashboardController::class, 'enquiryMetrics']);
-        Route::get('dashboard/task-metrics', [DashboardController::class, 'taskMetrics']);
-        Route::get('dashboard/project-metrics', [DashboardController::class, 'projectMetrics']);
-        Route::get('dashboard/financial-metrics', [DashboardController::class, 'financialMetrics']);
-        Route::get('dashboard/recent-activities', [DashboardController::class, 'recentActivities']);
-        Route::get('dashboard/alerts', [DashboardController::class, 'alerts']);
-        Route::post('dashboard/filter', [DashboardController::class, 'filterDashboard']);
-        Route::get('dashboard/export/pdf', [DashboardController::class, 'exportToPDF']);
-        Route::get('dashboard/export/excel', [DashboardController::class, 'exportToExcel']);
 
         // Task management routes
         Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
