@@ -3,6 +3,7 @@
 namespace App\Modules\HR\Services;
 
 use App\Modules\HR\Exceptions\AttendanceRecordConflictException;
+use App\Modules\HR\Models\AttendanceDeviceRawEvent;
 use App\Modules\HR\Models\AttendanceDeviceSyncLog;
 use App\Modules\HR\Models\AttendanceHoliday;
 use App\Modules\HR\Models\AttendanceRecord;
@@ -73,6 +74,39 @@ class AttendanceService
         }
 
         return $query->paginate($request->per_page ?? 15);
+    }
+
+    public function getDeviceLogs(Request $request): LengthAwarePaginator
+    {
+        $query = AttendanceDeviceRawEvent::query()->with('syncLog');
+
+        if ($request->filled('search')) {
+            $search = trim((string) $request->search);
+            $query->where(function ($q) use ($search) {
+                $q->where('person_id', 'like', "%{$search}%")
+                    ->orWhere('person_name', 'like', "%{$search}%")
+                    ->orWhere('check_point', 'like', "%{$search}%")
+                    ->orWhere('department', 'like', "%{$search}%");
+            });
+        }
+
+        if ($request->filled('date')) {
+            $query->whereDate('event_datetime', $request->date);
+        } elseif ($request->filled('date_from') && $request->filled('date_to')) {
+            $query->whereBetween('event_datetime', [
+                Carbon::parse($request->date_from)->startOfDay(),
+                Carbon::parse($request->date_to)->endOfDay(),
+            ]);
+        } elseif ($request->filled('date_from')) {
+            $query->where('event_datetime', '>=', Carbon::parse($request->date_from)->startOfDay());
+        } elseif ($request->filled('date_to')) {
+            $query->where('event_datetime', '<=', Carbon::parse($request->date_to)->endOfDay());
+        }
+
+        return $query
+            ->orderBy('event_datetime', $request->sort_dir === 'asc' ? 'asc' : 'desc')
+            ->orderBy('id', 'desc')
+            ->paginate($request->per_page ?? 25);
     }
 
     public function getRecord(int $id): AttendanceRecord

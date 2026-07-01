@@ -2,6 +2,8 @@
 
 namespace App\Modules\Logistics\Providers;
 
+use App\Modules\Logistics\Models\TripRequest;
+use App\Modules\Logistics\Observers\TripRequestObserver;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 
@@ -24,6 +26,8 @@ class LogisticsServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        TripRequest::observe(TripRequestObserver::class);
+
         // Load migrations
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 

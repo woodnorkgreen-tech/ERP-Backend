@@ -26,13 +26,23 @@ class SyncHikvisionAttendanceJob implements ShouldQueue
             'error' => null,
         ]);
 
-        $syncLog = $syncService->sync();
+        try {
+            $syncLog = $syncService->sync();
 
-        $request->update([
-            'status' => AttendanceSyncRequest::STATUS_COMPLETED,
-            'sync_log_id' => $syncLog->id,
-            'completed_at' => now(),
-        ]);
+            $request->update([
+                'status' => AttendanceSyncRequest::STATUS_COMPLETED,
+                'sync_log_id' => $syncLog->id,
+                'completed_at' => now(),
+            ]);
+        } catch (Throwable $exception) {
+            $request->update([
+                'status' => AttendanceSyncRequest::STATUS_FAILED,
+                'completed_at' => now(),
+                'error' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
     }
 
     public function failed(?Throwable $exception): void
@@ -42,7 +52,7 @@ class SyncHikvisionAttendanceJob implements ShouldQueue
             ->update([
                 'status' => AttendanceSyncRequest::STATUS_FAILED,
                 'completed_at' => now(),
-                'error' => 'Attendance sync job failed before completion.',
+                'error' => $exception?->getMessage() ?: 'Attendance sync job failed before completion.',
             ]);
     }
 }

@@ -10,6 +10,8 @@ use App\Modules\Production\Models\WorkOrder;
 use App\Modules\Production\Observers\JobCardObserver;
 use App\Modules\Production\Observers\DailyTaskObserver;
 use App\Modules\Production\Observers\WorkOrderObserver;
+use App\Modules\Production\Models\ProductionNcr;
+use App\Modules\Production\Observers\ProductionNcrObserver;
 
 class ProductionServiceProvider extends ServiceProvider
 {
@@ -40,5 +42,6 @@ class ProductionServiceProvider extends ServiceProvider
         JobCard::observe(JobCardObserver::class);
         DailyTask::observe(DailyTaskObserver::class);
         WorkOrder::observe(WorkOrderObserver::class);
+        ProductionNcr::observe(ProductionNcrObserver::class);
     }
 }

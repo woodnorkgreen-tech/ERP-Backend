@@ -7,6 +7,9 @@ return [
     ),
     'holiday_import_years_ahead' => (int) env('ATTENDANCE_HOLIDAY_YEARS_AHEAD', 1),
     'holiday_import_years_back' => (int) env('ATTENDANCE_HOLIDAY_YEARS_BACK', 1),
+    'manual_sync_connection' => env('ATTENDANCE_MANUAL_SYNC_CONNECTION', 'sync'),
+    'sync_queued_timeout_minutes' => (int) env('ATTENDANCE_SYNC_QUEUED_TIMEOUT_MINUTES', 2),
+    'sync_running_timeout_minutes' => (int) env('ATTENDANCE_SYNC_RUNNING_TIMEOUT_MINUTES', 20),
     'holiday_ca_bundle' => env(
         'ATTENDANCE_HOLIDAY_CA_BUNDLE',
         storage_path('app/certs/cacert.pem')

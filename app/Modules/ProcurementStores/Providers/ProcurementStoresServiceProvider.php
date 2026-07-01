@@ -2,6 +2,10 @@
 
 namespace App\Modules\ProcurementStores\Providers;
 
+use App\Modules\ProcurementStores\Models\PurchaseOrder;
+use App\Modules\ProcurementStores\Models\Requisition;
+use App\Modules\ProcurementStores\Observers\PurchaseOrderObserver;
+use App\Modules\ProcurementStores\Observers\RequisitionObserver;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 
@@ -21,6 +25,9 @@ class ProcurementStoresServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Requisition::observe(RequisitionObserver::class);
+        PurchaseOrder::observe(PurchaseOrderObserver::class);
+
         // Load migrations
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 

@@ -82,26 +82,20 @@ class HikvisionSyncService
         }
 
         try {
-            $events = $this->fetchEventsFromDevice($from, $to);
-            [$imported, $processingResult, $status] = DB::transaction(function () use ($events, $syncLog) {
+            $events = $this->fetchEventsFromDeviceInChunks($from, $to);
+            $imported = DB::transaction(function () use ($events, $syncLog) {
                 $imported = $this->insertRawEvents($events, $syncLog->id);
-                $processingResult = $this->processingService
-                    ->processRawEventsDetailed($this->loadCompleteEventDays($events), $syncLog->id)
-                    ->merge($this->processingService->repairIncompleteHistoricalRecordsDetailed($syncLog->id));
-                $status = $processingResult->isPartial()
-                    ? AttendanceDeviceSyncLog::STATUS_PARTIAL
-                    : AttendanceDeviceSyncLog::STATUS_SUCCESS;
                 $syncLog->update([
                     'records_fetched' => count($events),
                     'records_imported' => $imported,
                     'records_duplicate' => max(0, count($events) - $imported),
-                    'records_processed' => $processingResult->recordsProcessed,
-                    'records_unmapped' => $processingResult->unmappedPersonCount,
-                    'records_failed' => $processingResult->failedPersonDayCount,
-                    'status' => $status,
-                    'error' => $processingResult->summary(),
+                    'records_processed' => 0,
+                    'records_unmapped' => 0,
+                    'records_failed' => 0,
+                    'status' => AttendanceDeviceSyncLog::STATUS_SUCCESS,
+                    'error' => null,
                 ]);
-                return [$imported, $processingResult, $status];
+                return $imported;
             });
 
             Log::info('attendance.sync.completed', [
@@ -109,10 +103,10 @@ class HikvisionSyncService
                 'source' => AttendanceDeviceRawEvent::SOURCE_API_SYNC,
                 'events_fetched' => count($events),
                 'records_imported' => $imported,
-                'records_processed' => $processingResult->recordsProcessed,
-                'unmapped_person_count' => $processingResult->unmappedPersonCount,
-                'failed_person_day_count' => $processingResult->failedPersonDayCount,
-                'status' => $status,
+                'records_processed' => 0,
+                'unmapped_person_count' => 0,
+                'failed_person_day_count' => 0,
+                'status' => AttendanceDeviceSyncLog::STATUS_SUCCESS,
             ]);
         } catch (\Throwable $e) {
             $syncLog->update([
@@ -129,6 +123,45 @@ class HikvisionSyncService
         }
 
         return $syncLog;
+    }
+
+    public function testConnection(): array
+    {
+        $configurationError = $this->configurationError();
+        if ($configurationError) {
+            return [
+                'connected' => false,
+                'message' => $configurationError,
+            ];
+        }
+
+        $baseUrl = "http://{$this->host}:{$this->port}";
+
+        try {
+            $response = Http::withDigestAuth($this->username, $this->password)
+                ->connectTimeout($this->connectTimeoutSeconds())
+                ->timeout(min(10, $this->requestTimeoutSeconds()))
+                ->get($baseUrl . '/ISAPI/System/deviceInfo?format=json');
+
+            if ($response->failed()) {
+                return [
+                    'connected' => false,
+                    'message' => "Device connection failed: HTTP {$response->status()}.",
+                ];
+            }
+
+            return [
+                'connected' => true,
+                'message' => "Connected to {$this->deviceName}. Starting attendance sync...",
+                'device_id' => $this->deviceId,
+                'device_name' => $this->deviceName,
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'connected' => false,
+                'message' => 'Device connection failed: ' . $e->getMessage(),
+            ];
+        }
     }
 
     private function configurationError(): ?string
@@ -173,18 +206,16 @@ class HikvisionSyncService
         $overlapHours = max(0, (int) config('hikvision.sync_overlap_hours', 24));
         $oldestAllowed = $to->copy()->subDays($lookbackDays);
 
-        $lastSuccessfulSync = AttendanceDeviceSyncLog::query()
-            ->where('status', AttendanceDeviceSyncLog::STATUS_SUCCESS)
-            ->where('synced_at', '<=', $to)
-            ->latest('synced_at')
-            ->first();
+        $latestRawEventAt = AttendanceDeviceRawEvent::query()
+            ->where('event_datetime', '<=', $to)
+            ->latest('event_datetime')
+            ->value('event_datetime');
 
-        if (!$lastSuccessfulSync) {
+        if (!$latestRawEventAt) {
             return $oldestAllowed;
         }
 
-        $incrementalStart = $lastSuccessfulSync->synced_at
-            ->copy()
+        $incrementalStart = Carbon::parse($latestRawEventAt)
             ->subHours($overlapHours);
 
         return $incrementalStart->lt($oldestAllowed)
@@ -231,6 +262,35 @@ class HikvisionSyncService
             ->get();
     }
 
+    private function fetchEventsFromDeviceInChunks(Carbon $from, Carbon $to): array
+    {
+        $events = [];
+        $cursor = $from->copy();
+        $chunkMinutes = $this->syncChunkMinutes();
+
+        while ($cursor->lt($to)) {
+            $chunkTo = $cursor->copy()->addMinutes($chunkMinutes)->subSecond();
+            if ($chunkTo->gt($to)) {
+                $chunkTo = $to->copy();
+            }
+
+            try {
+                $events = array_merge($events, $this->fetchEventsFromDevice($cursor, $chunkTo));
+            } catch (\Throwable $e) {
+                throw new \RuntimeException(sprintf(
+                    'Hikvision event fetch failed for %s to %s: %s',
+                    $cursor->copy()->setTimezone($this->deviceTimezone)->format('Y-m-d H:i:s'),
+                    $chunkTo->copy()->setTimezone($this->deviceTimezone)->format('Y-m-d H:i:s'),
+                    $e->getMessage()
+                ), 0, $e);
+            }
+
+            $cursor = $chunkTo->copy()->addSecond();
+        }
+
+        return $events;
+    }
+
     /**
      * Fetch access control events from the Hikvision ISAPI.
      * Paginates automatically — the DS-K1T80x series caps at 10 results per page.
@@ -268,7 +328,8 @@ class HikvisionSyncService
             }
 
             $response = Http::withDigestAuth($this->username, $this->password)
-                ->timeout(max(1, (int) config('hikvision.request_timeout_seconds', 30)))
+                ->connectTimeout($this->connectTimeoutSeconds())
+                ->timeout($this->requestTimeoutSeconds())
                 ->retry(
                     max(1, (int) config('hikvision.retry_times', 3)),
                     max(0, (int) config('hikvision.retry_sleep_ms', 500)),
@@ -290,9 +351,23 @@ class HikvisionSyncService
                 throw new \RuntimeException('Hikvision response is missing AcsEvent.');
             }
             $event = $body['AcsEvent'];
-            $records = $event['InfoList'] ?? null;
+            $records = $event['InfoList'] ?? [];
+            if (is_array($records) && $records !== [] && !array_is_list($records)) {
+                $records = [$records];
+            }
             $status = strtoupper(trim((string) ($event['responseStatusStrg'] ?? '')));
-            if (!is_array($records) || !in_array($status, ['MORE', 'NO MORE'], true)) {
+            $totalMatches = isset($event['totalMatches']) && is_numeric($event['totalMatches'])
+                ? (int) $event['totalMatches']
+                : null;
+            $acceptedStatuses = ['MORE', 'NO MORE', 'OK', 'NO MATCH', 'NO MATCHES', 'NO DATA', ''];
+
+            if (!is_array($records) || !in_array($status, $acceptedStatuses, true)) {
+                Log::warning('attendance.sync.unexpected_hikvision_page_shape', [
+                    'sync_log_id' => null,
+                    'status' => $status,
+                    'acs_event_keys' => array_keys($event),
+                ]);
+
                 throw new \RuntimeException('Hikvision response has an invalid event list or pagination status.');
             }
 
@@ -317,13 +392,37 @@ class HikvisionSyncService
             }
 
             $count = count($records);
-            if ($status === 'MORE' && $count === 0) {
+            $hasMore = $status === 'MORE'
+                || ($totalMatches !== null && ($position + $count) < $totalMatches);
+
+            if ($hasMore && $count === 0) {
                 throw new \RuntimeException('Hikvision pagination stalled on an empty page.');
             }
             $position += $count;
-        } while ($status === 'MORE');
+        } while ($hasMore);
 
         return $all;
+    }
+
+    private function syncChunkMinutes(): int
+    {
+        $configuredMinutes = config('hikvision.sync_chunk_minutes');
+
+        if ($configuredMinutes !== null && $configuredMinutes !== '') {
+            return max(1, (int) $configuredMinutes);
+        }
+
+        return max(1, (int) config('hikvision.sync_chunk_hours', 1)) * 60;
+    }
+
+    private function connectTimeoutSeconds(): int
+    {
+        return max(1, (int) config('hikvision.connect_timeout_seconds', 10));
+    }
+
+    private function requestTimeoutSeconds(): int
+    {
+        return max(1, (int) config('hikvision.request_timeout_seconds', 30));
     }
 
     private function normalizeDeviceTimestamp(string $timestamp): string

@@ -11,10 +11,12 @@ use App\Modules\HR\Services\AttendanceCsvImportService;
 use App\Modules\HR\Services\AttendanceService;
 use App\Modules\HR\Services\AttendanceExceptionService;
 use App\Modules\HR\Services\AttendanceReprocessingService;
+use App\Modules\HR\Services\HikvisionSyncService;
 use App\Modules\HR\Models\Employee;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Validator;
 
 class AttendanceController extends Controller
@@ -47,6 +49,31 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch attendance records: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function deviceLogs(Request $request): JsonResponse
+    {
+        try {
+            $logs = $this->attendanceService->getDeviceLogs($request);
+
+            return response()->json([
+                'success' => true,
+                'data' => $logs->items(),
+                'meta' => [
+                    'current_page' => $logs->currentPage(),
+                    'last_page' => $logs->lastPage(),
+                    'per_page' => $logs->perPage(),
+                    'total' => $logs->total(),
+                    'from' => $logs->firstItem(),
+                    'to' => $logs->lastItem(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch device attendance logs: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -299,6 +326,8 @@ class AttendanceController extends Controller
 
     public function sync(): JsonResponse
     {
+        $this->expireStaleSyncRequests();
+
         $syncRequest = AttendanceSyncRequest::query()
             ->whereIn('status', [
                 AttendanceSyncRequest::STATUS_QUEUED,
@@ -312,22 +341,68 @@ class AttendanceController extends Controller
                 'status' => AttendanceSyncRequest::STATUS_QUEUED,
             ]);
 
-            SyncHikvisionAttendanceJob::dispatch($syncRequest->id);
+            $connection = (string) config('attendance.manual_sync_connection', 'sync');
+            if ($connection === 'sync') {
+                Bus::dispatchSync(new SyncHikvisionAttendanceJob($syncRequest->id));
+            } else {
+                SyncHikvisionAttendanceJob::dispatch($syncRequest->id)->onConnection($connection);
+            }
+
+            $syncRequest->refresh();
         }
 
         return response()->json([
             'success' => true,
-            'message' => 'Attendance sync queued',
+            'message' => $syncRequest->status === AttendanceSyncRequest::STATUS_COMPLETED
+                ? 'Attendance sync completed'
+                : 'Attendance sync queued',
             'data' => $syncRequest,
         ], 202);
     }
 
+    public function testSyncConnection(HikvisionSyncService $syncService): JsonResponse
+    {
+        $result = $syncService->testConnection();
+
+        return response()->json([
+            'success' => (bool) $result['connected'],
+            'message' => $result['message'],
+            'data' => $result,
+        ], $result['connected'] ? 200 : 503);
+    }
+
     public function syncStatus(AttendanceSyncRequest $syncRequest): JsonResponse
     {
+        $this->expireStaleSyncRequests();
+
         return response()->json([
             'success' => true,
-            'data' => $syncRequest->load('syncLog'),
+            'data' => $syncRequest->refresh()->load('syncLog'),
         ]);
+    }
+
+    private function expireStaleSyncRequests(): void
+    {
+        $queuedTimeout = max(1, (int) config('attendance.sync_queued_timeout_minutes', 2));
+        $runningTimeout = max(1, (int) config('attendance.sync_running_timeout_minutes', 20));
+
+        AttendanceSyncRequest::query()
+            ->where('status', AttendanceSyncRequest::STATUS_QUEUED)
+            ->where('created_at', '<', now()->subMinutes($queuedTimeout))
+            ->update([
+                'status' => AttendanceSyncRequest::STATUS_FAILED,
+                'completed_at' => now(),
+                'error' => 'Attendance sync did not start. Make sure the queue worker is running, or keep ATTENDANCE_MANUAL_SYNC_CONNECTION=sync for manual syncs.',
+            ]);
+
+        AttendanceSyncRequest::query()
+            ->where('status', AttendanceSyncRequest::STATUS_RUNNING)
+            ->where('started_at', '<', now()->subMinutes($runningTimeout))
+            ->update([
+                'status' => AttendanceSyncRequest::STATUS_FAILED,
+                'completed_at' => now(),
+                'error' => 'Attendance sync timed out before completion. Check the Hikvision device connection and backend logs.',
+            ]);
     }
 
     public function syncLogs(): JsonResponse

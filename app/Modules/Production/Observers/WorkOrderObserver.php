@@ -4,6 +4,7 @@ namespace App\Modules\Production\Observers;
 
 use App\Modules\Production\Models\WorkOrder;
 use Illuminate\Support\Facades\Log;
+use App\Modules\Notifications\Services\NotificationService;
 
 class WorkOrderObserver
 {
@@ -18,6 +19,17 @@ class WorkOrderObserver
             'title' => $workOrder->title,
             'created_by' => auth()->id()
         ]);
+
+        if ($workOrder->assigned_to) {
+            NotificationService::send(
+                type: 'production_work_order_assigned',
+                title: "Work order {$workOrder->work_order_number} assigned",
+                message: $workOrder->title,
+                module: 'production',
+                data: ['work_order_id' => $workOrder->id, 'url' => "/production/work-orders/{$workOrder->id}"],
+                users: [$workOrder->assigned_to],
+            );
+        }
     }
 
     /**
@@ -45,6 +57,28 @@ class WorkOrderObserver
                     'updated_by' => auth()->id()
                 ]);
             }
+        }
+
+        if ($workOrder->wasChanged('assigned_to') && $workOrder->assigned_to) {
+            NotificationService::send(
+                type: 'production_work_order_assigned',
+                title: "Work order {$workOrder->work_order_number} assigned",
+                message: $workOrder->title,
+                module: 'production',
+                data: ['work_order_id' => $workOrder->id, 'url' => "/production/work-orders/{$workOrder->id}"],
+                users: [$workOrder->assigned_to],
+            );
+        }
+
+        if ($workOrder->wasChanged('status')) {
+            NotificationService::send(
+                type: 'production_work_order_status_changed',
+                title: "Work order {$workOrder->work_order_number} is {$workOrder->status}",
+                message: "Status changed from {$workOrder->getOriginal('status')} to {$workOrder->status}.",
+                module: 'production',
+                data: ['work_order_id' => $workOrder->id, 'status' => $workOrder->status, 'url' => "/production/work-orders/{$workOrder->id}"],
+                users: array_filter([$workOrder->assigned_to, $workOrder->created_by]),
+            );
         }
     }
 

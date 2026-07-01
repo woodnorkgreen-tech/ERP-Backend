@@ -2,8 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\User;
-use App\Notifications\RequisitionPendingNotification;
+use App\Modules\Notifications\Services\NotificationService;
 
 class RequisitionNotificationService
 {
@@ -12,24 +11,18 @@ class RequisitionNotificationService
         string $requestedBy,
         string $urgency = 'normal'
     ): void {
-        // Find all users who can approve (Finance/Accounts/Super Admin roles)
-        $approvers = User::whereHas('roles', function ($query) {
-            $query->whereIn('name', [
-                'Super Admin',
-                'Finance',
-                'Accounts',
-            ]);
-        })
-        ->whereNotNull('onesignal_player_id')
-        ->where('is_active', true)
-        ->get();
-
-        foreach ($approvers as $approver) {
-            $approver->notify(new RequisitionPendingNotification(
-                $requisitionNumber,
-                $requestedBy,
-                $urgency
-            ));
-        }
+        NotificationService::send(
+            type: 'finance_requisition_pending',
+            title: "Requisition {$requisitionNumber} needs approval",
+            message: "{$requestedBy} submitted a {$urgency} requisition for review.",
+            module: 'finance',
+            urgency: $urgency === 'urgent' ? 'critical' : 'warning',
+            data: [
+                'requisition_number' => $requisitionNumber,
+                'requested_by' => $requestedBy,
+                'url' => '/procurement-stores/requisitions',
+            ],
+            role: ['Super Admin', 'Finance', 'Accounts'],
+        );
     }
 }

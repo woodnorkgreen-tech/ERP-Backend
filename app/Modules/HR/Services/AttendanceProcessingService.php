@@ -302,14 +302,28 @@ class AttendanceProcessingService
 
     private function deduplicateScans(Collection $events): Collection
     {
+        $sorted = $events->sortBy('event_datetime')->values();
+        
+        if ($sorted->isEmpty()) {
+            return collect();
+        }
+
+        // Keep only the first entry (clock-in) and last exit (clock-out)
+        // This handles door access devices where people scan multiple times per day
         $result = collect();
-        $lastKept = null;
-        foreach ($events->sortBy('event_datetime') as $event) {
-            if (!$lastKept || $lastKept->event_datetime->diffInSeconds($event->event_datetime) > 30) {
-                $result->push($event);
-                $lastKept = $event;
+        
+        // Always keep the first event (earliest - clock-in)
+        $result->push($sorted->first());
+        
+        // If there are multiple events, keep the last one (latest - clock-out)
+        if ($sorted->count() > 1) {
+            $lastEvent = $sorted->last();
+            // Only add last event if it's different from the first (at least 1 minute apart)
+            if ($sorted->first()->event_datetime->diffInMinutes($lastEvent->event_datetime) >= 1) {
+                $result->push($lastEvent);
             }
         }
+        
         return $result;
     }
 

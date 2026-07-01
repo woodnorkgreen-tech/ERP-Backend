@@ -319,11 +319,13 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->prefix('attendance')
             ->group(function () {
                 Route::get('summary', [AttendanceController::class, 'summary']);
+                Route::get('device-logs', [AttendanceController::class, 'deviceLogs']);
                 Route::post('manual-preview', [AttendanceController::class, 'manualPreview']);
                 Route::get('sync-logs', [AttendanceController::class, 'syncLogs']);
                 Route::get('exceptions/unmapped', [AttendanceController::class, 'unmappedExceptions']);
                 Route::post('exceptions/unmapped/{personId}/map', [AttendanceController::class, 'mapUnmappedPerson']);
                 Route::post('reprocess', [AttendanceController::class, 'reprocess']);
+                Route::post('sync/test-connection', [AttendanceController::class, 'testSyncConnection']);
                 Route::post('sync', [AttendanceController::class, 'sync']);
                 Route::get('sync/{syncRequest}', [AttendanceController::class, 'syncStatus']);
                 Route::post('upload/preview', [AttendanceController::class, 'uploadPreview']);

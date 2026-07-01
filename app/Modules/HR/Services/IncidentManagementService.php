@@ -9,9 +9,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Notification;
-use App\Modules\HR\Notifications\IncidentCreatedNotification;
-use App\Modules\HR\Notifications\IncidentStatusChangedNotification;
+use App\Modules\Notifications\Services\NotificationService as UniversalNotificationService;
 
 class IncidentManagementService
 {
@@ -346,7 +344,15 @@ class IncidentManagementService
         $admins = User::role(['Admin', 'HR'])->get();
         
         if ($admins->isNotEmpty()) {
-            Notification::send($admins, new IncidentCreatedNotification($incident));
+            UniversalNotificationService::send(
+                type: 'incident_reported',
+                title: 'New incident reported',
+                message: "{$incident->title} - severity: {$incident->severity}",
+                module: 'hr',
+                urgency: in_array($incident->severity, ['critical', 'high'], true) ? 'critical' : 'warning',
+                data: ['incident_id' => $incident->id, 'url' => "/hr/incidents/{$incident->id}"],
+                users: $admins->all(),
+            );
         }
     }
     
@@ -356,8 +362,16 @@ class IncidentManagementService
     protected function notifyStatusChange(Incident $incident, string $newStatus): void
     {
         if ($incident->reporter) {
-            Notification::send($incident->reporter, new IncidentStatusChangedNotification($incident, $newStatus));
+            if ($incident->reporter) {
+                UniversalNotificationService::send(
+                    type: 'incident_status_changed',
+                    title: 'Incident status updated',
+                    message: "Your incident '{$incident->title}' is now {$newStatus}.",
+                    module: 'hr',
+                    data: ['incident_id' => $incident->id, 'status' => $newStatus, 'url' => "/hr/incidents/{$incident->id}"],
+                    users: [$incident->reporter],
+                );
+            }
         }
     }
 }
-

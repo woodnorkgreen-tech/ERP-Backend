@@ -241,27 +241,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
     Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
 
-    // Notifications & OneSignal
-    Route::get('/notifications', function () {
-        $user = auth()->user();
-        return response(['data' => $user->unreadNotifications]);
-    });
-    Route::post('/notifications/{id}/read', function ($id) {
-        $user = auth()->user();
-        $user->notifications()->find($id)?->markAsRead();
-        return response(['success' => true]);
-    });
-    Route::post('/notifications/read-all', function () {
-        $user = auth()->user();
-        $user->unreadNotifications->markAsRead();
-        return response(['success' => true]);
-    });
-    Route::post('/user/onesignal-token', function (Request $request) {
-        $user = auth()->user();
-        $user->update(['onesignal_player_id' => $request->player_id]);
-        return response(['success' => true]);
-    });
-
     Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
     Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
     Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
@@ -747,35 +726,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         });
 
 
-        // Notifications
-        Route::get('notifications', function () {
-            $user = auth()->user();
-            return response()->json([
-                'success' => true,
-                'data' => $user->appNotifications()->orderBy('created_at', 'desc')->get()
-            ]);
-        });
-        Route::put('notifications/{id}/read', function ($id) {
-            $user = auth()->user();
-            $notification = $user->appNotifications()->find($id);
-            if ($notification) {
-                $notification->markAsRead();
-            }
-            return response()->json(['success' => true]);
-        });
-        Route::put('notifications/mark-all-read', function () {
-            $user = auth()->user();
-            $user->appNotifications()->where('is_read', false)->update([
-                'is_read' => true,
-                'read_at' => now()
-            ]);
-            return response()->json(['success' => true]);
-        });
-        Route::delete('notifications/{id}', function ($id) {
-            $user = auth()->user();
-            $user->appNotifications()->where('id', $id)->delete();
-            return response()->json(['success' => true]);
-        });
     });
 
 

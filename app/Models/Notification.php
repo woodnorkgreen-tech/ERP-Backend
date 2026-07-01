@@ -2,89 +2,36 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Modules\Notifications\Models\AppNotification;
 
-class Notification extends Model
+/**
+ * Compatibility model for older module services during their caller migration.
+ * All records are persisted in the universal notification table.
+ */
+class Notification extends AppNotification
 {
-    use HasFactory;
+    protected $table = 'app_notifications';
 
-    /**
-     * The data type of the auto-incrementing ID.
-     *
-     * @var string
-     */
-    protected $keyType = 'string';
-
-    /**
-     * Indicates if the IDs are auto-incrementing.
-     *
-     * @var bool
-     */
-    public $incrementing = false;
-
-    /**
-     * The "booted" method of the model.
-     */
-    protected static function booted()
+    protected static function booted(): void
     {
-        static::creating(function ($notification) {
-            if (!$notification->id) {
-                $notification->id = (string) \Illuminate\Support\Str::uuid();
+        parent::booted();
+
+        static::creating(function (Notification $notification): void {
+            if (!$notification->module) {
+                $notification->module = self::moduleForType((string) $notification->type);
             }
+
+            $notification->urgency ??= 'info';
         });
     }
 
-    protected $fillable = [
-        'user_id',
-        'type',
-        'title',
-        'message',
-        'data',
-        'notifiable_type',
-        'notifiable_id',
-        'is_read',
-        'read_at',
-    ];
-
-    protected $casts = [
-        'data' => 'array',
-        'is_read' => 'boolean',
-        'read_at' => 'datetime',
-    ];
-
-    // Relationships
-    public function user(): BelongsTo
+    private static function moduleForType(string $type): string
     {
-        return $this->belongsTo(User::class);
-    }
-
-    /**
-     * Get the notifiable entity (task) that this notification relates to
-     */
-    public function notifiable()
-    {
-        return $this->morphTo();
-    }
-
-    // Scopes
-    public function scopeUnread($query)
-    {
-        return $query->where('is_read', false);
-    }
-
-    public function scopeByType($query, $type)
-    {
-        return $query->where('type', $type);
-    }
-
-    // Helper methods
-    public function markAsRead(): void
-    {
-        $this->update([
-            'is_read' => true,
-            'read_at' => now(),
-        ]);
+        return match (true) {
+            str_starts_with($type, 'requisition_') => 'finance',
+            str_starts_with($type, 'task_'), str_starts_with($type, 'user_mentioned'),
+                str_starts_with($type, 'universal_task_') => 'universal-task',
+            default => 'projects',
+        };
     }
 }
