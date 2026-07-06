@@ -180,10 +180,7 @@ class EmployeeController
 
         $request->validate([
             'termination_reason' => 'nullable|string|max:1000',
-            'termination_type'   => ['nullable', \Illuminate\Validation\Rule::in([
-                'resignation', 'dismissal', 'redundancy', 'contract_expiry',
-                'retirement', 'mutual_agreement', 'other',
-            ])],
+            'termination_type'   => ['nullable', \Illuminate\Validation\Rule::in(Employee::TERMINATION_TYPES)],
             'termination_date'   => 'nullable|date',
         ]);
 

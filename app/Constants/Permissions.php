@@ -205,6 +205,16 @@ class Permissions
     const ONBOARDING_IT      = 'onboarding.it';
     const ONBOARDING_SOPS    = 'onboarding.sops';
 
+    // ==========================================
+    // OFFBOARDING PERMISSIONS
+    // ==========================================
+    const OFFBOARDING_VIEW       = 'offboarding.view';
+    const OFFBOARDING_CREATE     = 'offboarding.create';
+    const OFFBOARDING_MANAGE     = 'offboarding.manage';
+    const OFFBOARDING_APPROVE    = 'offboarding.approve';
+    const OFFBOARDING_CLEARANCE  = 'offboarding.clearance';
+    const OFFBOARDING_SETTLEMENT = 'offboarding.settlement';
+
     // ===========================================
     // RECRUITMENT PERMISSIONS
     // ===========================================
@@ -303,6 +313,10 @@ class Permissions
             self::ONBOARDING_VIEW, self::ONBOARDING_CREATE, self::ONBOARDING_MANAGE,
             self::ONBOARDING_APPROVE, self::ONBOARDING_IT, self::ONBOARDING_SOPS,
 
+            // Offboarding Permissions
+            self::OFFBOARDING_VIEW, self::OFFBOARDING_CREATE, self::OFFBOARDING_MANAGE,
+            self::OFFBOARDING_APPROVE, self::OFFBOARDING_CLEARANCE, self::OFFBOARDING_SETTLEMENT,
+
             // Recruitment Permissions
             self::RECRUITMENT_INTERVIEW_CREATE, self::RECRUITMENT_INTERVIEW_UPDATE, self::RECRUITMENT_INTERVIEW_DELETE,
             self::RECRUITMENT_NOTIFY, self::RECRUITMENT_BACKGROUND_CHECK_UPDATE, self::RECRUITMENT_BACKGROUND_CHECK_COMPLETE,
@@ -395,6 +409,10 @@ class Permissions
             'onboarding' => [
                 self::ONBOARDING_VIEW, self::ONBOARDING_CREATE, self::ONBOARDING_MANAGE,
                 self::ONBOARDING_APPROVE, self::ONBOARDING_IT, self::ONBOARDING_SOPS,
+            ],
+            'offboarding' => [
+                self::OFFBOARDING_VIEW, self::OFFBOARDING_CREATE, self::OFFBOARDING_MANAGE,
+                self::OFFBOARDING_APPROVE, self::OFFBOARDING_CLEARANCE, self::OFFBOARDING_SETTLEMENT,
             ],
             'recruitment' => [
                 self::RECRUITMENT_INTERVIEW_CREATE, self::RECRUITMENT_INTERVIEW_UPDATE, self::RECRUITMENT_INTERVIEW_DELETE,

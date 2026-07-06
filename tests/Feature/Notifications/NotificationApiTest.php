@@ -19,10 +19,9 @@ use App\Modules\ProcurementStores\Models\Requisition;
 use App\Modules\ProcurementStores\Observers\PurchaseOrderObserver;
 use App\Modules\ProcurementStores\Observers\RequisitionObserver;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase;
-use Illuminate\Database\Schema\Blueprint;
 use Laravel\Sanctum\Sanctum;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -33,6 +32,8 @@ use Spatie\Permission\PermissionRegistrar;
 
 class NotificationApiTest extends TestCase
 {
+    use RefreshDatabase;
+
     protected User $user;
 
     public function createApplication()
@@ -48,7 +49,6 @@ class NotificationApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->createMinimalSchema();
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         Role::query()->create(['name' => 'Employee', 'guard_name' => 'web']);
@@ -57,122 +57,6 @@ class NotificationApiTest extends TestCase
         $this->user->assignRole('Employee');
 
         Sanctum::actingAs($this->user);
-    }
-
-    protected function tearDown(): void
-    {
-        Schema::dropIfExists('user_device_tokens');
-        Schema::dropIfExists('app_notification_preferences');
-        Schema::dropIfExists('app_notifications');
-        Schema::dropIfExists('model_has_permissions');
-        Schema::dropIfExists('model_has_roles');
-        Schema::dropIfExists('role_has_permissions');
-        Schema::dropIfExists('permissions');
-        Schema::dropIfExists('roles');
-        Schema::dropIfExists('users');
-
-        parent::tearDown();
-    }
-
-    protected function createMinimalSchema(): void
-    {
-        Schema::dropIfExists('user_device_tokens');
-        Schema::dropIfExists('app_notification_preferences');
-        Schema::dropIfExists('app_notifications');
-        Schema::dropIfExists('model_has_permissions');
-        Schema::dropIfExists('model_has_roles');
-        Schema::dropIfExists('role_has_permissions');
-        Schema::dropIfExists('permissions');
-        Schema::dropIfExists('roles');
-        Schema::dropIfExists('users');
-
-        Schema::create('users', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('email')->unique();
-            $table->timestamp('email_verified_at')->nullable();
-            $table->string('password');
-            $table->foreignId('employee_id')->nullable();
-            $table->foreignId('department_id')->nullable();
-            $table->boolean('is_active')->default(true);
-            $table->timestamp('last_login_at')->nullable();
-            $table->string('onesignal_player_id')->nullable();
-            $table->rememberToken();
-            $table->timestamps();
-        });
-
-        Schema::create('permissions', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-            $table->unique(['name', 'guard_name']);
-        });
-
-        Schema::create('roles', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-            $table->unique(['name', 'guard_name']);
-        });
-
-        Schema::create('model_has_permissions', function (Blueprint $table) {
-            $table->unsignedBigInteger('permission_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-            $table->index(['model_id', 'model_type']);
-            $table->primary(['permission_id', 'model_id', 'model_type']);
-        });
-
-        Schema::create('model_has_roles', function (Blueprint $table) {
-            $table->unsignedBigInteger('role_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-            $table->index(['model_id', 'model_type']);
-            $table->primary(['role_id', 'model_id', 'model_type']);
-        });
-
-        Schema::create('role_has_permissions', function (Blueprint $table) {
-            $table->unsignedBigInteger('permission_id');
-            $table->unsignedBigInteger('role_id');
-            $table->primary(['permission_id', 'role_id']);
-        });
-
-        Schema::create('app_notifications', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->foreignId('user_id');
-            $table->string('module');
-            $table->string('type');
-            $table->string('title');
-            $table->text('message');
-            $table->json('data')->nullable();
-            $table->string('urgency')->default('info');
-            $table->boolean('is_read')->default(false);
-            $table->timestamp('read_at')->nullable();
-            $table->boolean('is_starred')->default(false);
-            $table->timestamp('starred_at')->nullable();
-            $table->timestamps();
-        });
-
-        Schema::create('app_notification_preferences', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id');
-            $table->string('type');
-            $table->string('channel');
-            $table->boolean('enabled')->default(true);
-            $table->timestamps();
-            $table->unique(['user_id', 'type', 'channel']);
-        });
-
-        Schema::create('user_device_tokens', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id');
-            $table->string('player_id');
-            $table->string('platform');
-            $table->timestamps();
-            $table->unique(['user_id', 'player_id']);
-        });
     }
 
     public function test_user_can_list_count_open_read_and_star_notifications(): void
