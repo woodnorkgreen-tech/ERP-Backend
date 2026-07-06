@@ -19,6 +19,15 @@ class Employee extends Model
      */
     public const STATUTORY_EXEMPTIONS = ['paye', 'nssf', 'shif', 'housing_levy'];
 
+    /**
+     * Valid termination_type values — shared by EmployeeController::destroy() and
+     * the Offboarding module so both validate against the same list.
+     */
+    public const TERMINATION_TYPES = [
+        'resignation', 'dismissal', 'redundancy', 'contract_expiry',
+        'retirement', 'mutual_agreement', 'other',
+    ];
+
     protected $fillable = [
         'employee_id',
         'hikvision_id',

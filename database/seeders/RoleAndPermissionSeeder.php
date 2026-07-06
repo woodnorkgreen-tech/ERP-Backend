@@ -52,7 +52,9 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::LEAVE_TYPE_DELETE, Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ,
             Permissions::LEAVE_REQUEST_UPDATE, Permissions::LEAVE_REQUEST_APPROVE, Permissions::LEAVE_REQUEST_DELETE,
             Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::OVERTIME_MANAGE_FLAGS,
-            Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE
+            Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE,
+            Permissions::OFFBOARDING_VIEW, Permissions::OFFBOARDING_CREATE, Permissions::OFFBOARDING_MANAGE,
+            Permissions::OFFBOARDING_APPROVE, Permissions::OFFBOARDING_CLEARANCE, Permissions::OFFBOARDING_SETTLEMENT
         ]);
 
         $clientServiceRole = Role::firstOrCreate(['name' => 'Client Service'], ['description' => 'Client acquisition and enquiry management']);
