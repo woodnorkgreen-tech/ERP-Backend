@@ -68,13 +68,15 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('employees/template/commit', [EmployeeController::class, 'commitImport'])
             ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
 
-        Route::apiResource('employees', EmployeeController::class)->middleware([
-            'index'   => 'permission:' . Permissions::EMPLOYEE_READ,
-            'store'   => 'permission:' . Permissions::EMPLOYEE_CREATE,
-            'show'    => 'permission:' . Permissions::EMPLOYEE_READ,
-            'update'  => 'permission:' . Permissions::EMPLOYEE_UPDATE,
-            'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
-        ]);
+        // middlewareFor, not middleware([...]): an associative array passed to
+        // middleware() is flattened, which stacked ALL five permission checks
+        // onto every route (index effectively required create+update+delete too).
+        Route::apiResource('employees', EmployeeController::class)
+            ->middlewareFor('index',   'permission:' . Permissions::EMPLOYEE_READ)
+            ->middlewareFor('store',   'permission:' . Permissions::EMPLOYEE_CREATE)
+            ->middlewareFor('show',    'permission:' . Permissions::EMPLOYEE_READ)
+            ->middlewareFor('update',  'permission:' . Permissions::EMPLOYEE_UPDATE)
+            ->middlewareFor('destroy', 'permission:' . Permissions::EMPLOYEE_DELETE);
 
         // Reinstatement — restore a soft-deleted (terminated) employee.
         Route::post('employees/{id}/restore', [EmployeeController::class, 'restore'])
