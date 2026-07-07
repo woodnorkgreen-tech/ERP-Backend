@@ -25,8 +25,6 @@ use App\Http\Controllers\API\PublicHandoverController;
 use App\Modules\Production\Http\Controllers\JobCardController;
 use App\Modules\Logistics\Controllers\DriverDeliveryController;
 use App\Http\Controllers\DesignRequirementController;
-use App\Modules\HR\Http\Controllers\EmployeeController;
-use App\Modules\HR\Http\Controllers\DepartmentController;
 use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
@@ -263,46 +261,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     // Get events by date range
     Route::post('/events/range', 'App\Http\Controllers\EventController@getByDateRange');
 
-    // HR Module Routes
-
-    Route::prefix('hr')->group(function () {
-        // Employee management — static routes MUST come before apiResource wildcard
-        Route::get('employees/profile', [EmployeeController::class, 'profile']);
-        Route::get('employees/compact', [EmployeeController::class, 'compact']);
-
-        // Bulk edit-and-reupload: download the prefilled template, dry-run a diff, then commit.
-        Route::get('employees/template', [EmployeeController::class, 'downloadTemplate'])
-            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
-        Route::post('employees/template/preview', [EmployeeController::class, 'previewImport'])
-            ->middleware('permission:' . Permissions::EMPLOYEE_READ);
-        Route::post('employees/template/commit', [EmployeeController::class, 'commitImport'])
-            ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
-
-        Route::apiResource('employees', EmployeeController::class)->middleware([
-            'index' => 'permission:' . Permissions::EMPLOYEE_READ,
-            'store' => 'permission:' . Permissions::EMPLOYEE_CREATE,
-            'show' => 'permission:' . Permissions::EMPLOYEE_READ,
-            'update' => 'permission:' . Permissions::EMPLOYEE_UPDATE,
-            'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
-        ]);
-
-        // Technical Labour management
-        Route::apiResource('technical-labour', App\Modules\HR\Http\Controllers\TechnicalLabourController::class);
-
-        // Department management
-        Route::get('departments', [DepartmentController::class, 'index'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
-        Route::post('departments', [DepartmentController::class, 'store'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_CREATE);
-        Route::get('departments/{department}', [DepartmentController::class, 'show'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_READ);
-        Route::put('departments/{department}', [DepartmentController::class, 'update'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
-        Route::patch('departments/{department}', [DepartmentController::class, 'update'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_UPDATE);
-        Route::delete('departments/{department}', [DepartmentController::class, 'destroy'])
-            ->middleware('permission:' . Permissions::DEPARTMENT_DELETE);
-    });
+    // HR routes live in app/Modules/HR/Routes/api.php. They were once duplicated
+    // here; the duplicate registrations shadowed the module's static routes
+    // (e.g. employees/stats resolved as employees/{employee} → 404), so this
+    // file must not register any hr/* routes the module already owns.
 
     // Admin Module Routes
     Route::prefix('admin')->group(function () {
@@ -310,27 +272,27 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('users/available-employees', [UserController::class, 'availableEmployees'])
             ->middleware('permission:' . Permissions::USER_READ . ',' . Permissions::TASK_ASSIGN);
         Route::get('dashboard/stats', [AdminDashboardController::class, 'index']);
+        // middlewareFor, not middleware([...]): an associative array passed to
+        // middleware() is flattened, which stacked every listed permission check
+        // onto every route (index effectively required create+update+delete too).
         Route::apiResource('users', UserController::class)->parameters([
             'users' => 'user'
-        ])->middleware([
-            'index' => 'permission:' . Permissions::USER_READ,
-            'store' => 'permission:' . Permissions::USER_CREATE,
-            'show' => 'permission:' . Permissions::USER_READ,
-            'update' => 'permission:' . Permissions::USER_UPDATE,
-            'destroy' => 'permission:' . Permissions::USER_DELETE,
-        ]);
+        ])
+            ->middlewareFor('index',   'permission:' . Permissions::USER_READ)
+            ->middlewareFor('store',   'permission:' . Permissions::USER_CREATE)
+            ->middlewareFor('show',    'permission:' . Permissions::USER_READ)
+            ->middlewareFor('update',  'permission:' . Permissions::USER_UPDATE)
+            ->middlewareFor('destroy', 'permission:' . Permissions::USER_DELETE);
 
         // Role and Permission management
-        Route::apiResource('roles', RoleController::class)->middleware([
-            'index' => 'permission:' . Permissions::ROLE_READ,
-            'store' => 'permission:' . Permissions::ROLE_CREATE,
-            'show' => 'permission:' . Permissions::ROLE_READ,
-            'update' => 'permission:' . Permissions::ROLE_UPDATE,
-            'destroy' => 'permission:' . Permissions::ROLE_DELETE,
-        ]);
-        Route::apiResource('permissions', PermissionController::class)->middleware([
-            'index' => 'permission:' . Permissions::ROLE_READ, // Admin can view permissions
-        ]);
+        Route::apiResource('roles', RoleController::class)
+            ->middlewareFor('index',   'permission:' . Permissions::ROLE_READ)
+            ->middlewareFor('store',   'permission:' . Permissions::ROLE_CREATE)
+            ->middlewareFor('show',    'permission:' . Permissions::ROLE_READ)
+            ->middlewareFor('update',  'permission:' . Permissions::ROLE_UPDATE)
+            ->middlewareFor('destroy', 'permission:' . Permissions::ROLE_DELETE);
+        Route::apiResource('permissions', PermissionController::class)
+            ->middlewareFor('index', 'permission:' . Permissions::ROLE_READ); // Admin can view permissions
     });
 
     // Project Officers endpoint (accessible by Client Service for enquiry assignment)

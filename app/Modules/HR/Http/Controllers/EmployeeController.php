@@ -54,6 +54,16 @@ class EmployeeController
             $query->whereNotIn('status', ['inactive', 'terminated']);
         }
 
+        // Terminated employees are soft-deleted, so the SoftDeletes global scope hides
+        // them even from an explicit status=terminated filter — which would make the
+        // roster's "Terminated" view always empty and archived staff unrestorable.
+        // Pull trashed rows back in only when the caller explicitly asks to see
+        // deactivated staff; default lists and dropdowns stay trashed-free.
+        if (in_array($request->status, ['inactive', 'terminated'], true)
+            || $request->boolean('include_inactive', false)) {
+            $query->withTrashed();
+        }
+
         if ($request->has('search') && $request->search) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -70,8 +80,10 @@ class EmployeeController
         if ($request->has('per_page')) {
             $employees = $query->paginate($request->get('per_page', 15));
 
-            // Unfiltered base for global KPI counts (ignores status/search/dept filters)
-            $statsBase = Employee::query()->accessibleByUser();
+            // Unfiltered base for global KPI counts (ignores status/search/dept filters).
+            // withTrashed so archived (soft-deleted, terminated) staff are counted —
+            // they belong in the "inactive" bucket and in the overall total.
+            $statsBase = Employee::withTrashed()->accessibleByUser();
 
             return response()->json([
                 'data' => collect($employees->items())->map(fn ($e) => $this->maskSensitive($e, $canViewSalary, $canViewPii)),
@@ -222,8 +234,18 @@ class EmployeeController
             'termination_date'   => null,
         ]);
 
+        // Termination only *warns* about the linked user account (deactivating it is an
+        // IT/User Management step), but reinstatement restores it in one go: a reinstated
+        // employee needs system access back, and only HR admins can reach this endpoint.
+        $message = 'Employee reinstated successfully.';
+        $account = $employee->user;
+        if ($account && ! $account->is_active) {
+            $account->update(['is_active' => true]);
+            $message = 'Employee reinstated and their user account reactivated.';
+        }
+
         return response()->json([
-            'message' => 'Employee reinstated successfully.',
+            'message' => $message,
             'data'    => $employee->load(['department', 'manager']),
         ]);
     }
@@ -312,7 +334,9 @@ class EmployeeController
     {
         Gate::authorize('viewAny', Employee::class);
 
-        $base = Employee::query()->accessibleByUser();
+        // withTrashed so archived (soft-deleted, terminated) staff are counted —
+        // they belong in the "inactive" bucket and in the overall total.
+        $base = Employee::withTrashed()->accessibleByUser();
 
         return response()->json([
             'total'    => (clone $base)->count(),
