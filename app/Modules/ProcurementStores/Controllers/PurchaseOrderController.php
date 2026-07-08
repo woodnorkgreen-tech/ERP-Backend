@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Controllers\Controller;
+use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class PurchaseOrderController extends Controller
@@ -50,6 +51,18 @@ class PurchaseOrderController extends Controller
         }
         
         return false;
+    }
+
+    private function syncProjectProcurement(PurchaseOrder|int $purchaseOrder): void
+    {
+        try {
+            app(ProcurementOperationalSyncService::class)->syncPurchaseOrder($purchaseOrder);
+        } catch (\Throwable $exception) {
+            \Log::warning('Failed to sync project procurement from purchase order', [
+                'purchase_order' => $purchaseOrder instanceof PurchaseOrder ? $purchaseOrder->id : $purchaseOrder,
+                'error' => $exception->getMessage(),
+            ]);
+        }
     }
 
     public function index(Request $request)
@@ -141,11 +154,13 @@ class PurchaseOrderController extends Controller
 
             // Check if already linked
             if ($requisition->purchaseOrder) {
+                DB::rollBack();
                 return response(['error' => 'Purchase order already exists for this requisition'], 422);
             }
 
             // Check if approved
             if ($requisition->status !== 'approved') {
+                DB::rollBack();
                 return response(['error' => 'Only approved requisitions can be linked'], 422);
             }
 
@@ -173,6 +188,7 @@ class PurchaseOrderController extends Controller
 
                 $purchaseOrder->items()->create([
                     'material_id'        => $item->material_id,
+                    'requisition_item_id' => $item->id,
                     'custom_description' => $item->custom_description,
                     'quantity'           => $item->quantity,
                     'unit_price'         => $unitPrice,
@@ -186,6 +202,8 @@ class PurchaseOrderController extends Controller
             $purchaseOrder->update(['total_amount' => $totalAmount]);
 
             DB::commit();
+
+            $this->syncProjectProcurement($purchaseOrder);
 
             return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'requisition']));
         } catch (\Exception $e) {
@@ -261,6 +279,7 @@ class PurchaseOrderController extends Controller
             'date' => 'date',
             'supplier_id' => 'exists:suppliers,id',
             'due_date' => 'date',
+            'items.*.requisition_item_id' => 'nullable|exists:requisition_items,id',
         ]);
 
         if ($validator->fails()) {
@@ -290,6 +309,8 @@ class PurchaseOrderController extends Controller
 
             DB::commit();
 
+            $this->syncProjectProcurement($purchaseOrder);
+
             return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
         } catch (\Exception $e) {
             DB::rollBack();
@@ -311,7 +332,19 @@ class PurchaseOrderController extends Controller
         //     return response(['error' => 'Only pending purchase orders can be deleted'], 422);
         // }
 
+        $requisitionId = $purchaseOrder->requisition_id;
         $purchaseOrder->delete();
+
+        if ($requisitionId) {
+            try {
+                app(ProcurementOperationalSyncService::class)->syncRequisition((int) $requisitionId);
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to sync project procurement after purchase order deletion', [
+                    'requisition_id' => $requisitionId,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
 
         return response(['message' => 'Purchase order deleted successfully']);
     }
@@ -323,6 +356,7 @@ class PurchaseOrderController extends Controller
         }
 
         $purchaseOrder->submitForApproval();
+        $this->syncProjectProcurement($purchaseOrder);
 
         return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
     }
@@ -341,6 +375,7 @@ class PurchaseOrderController extends Controller
         }
 
         $purchaseOrder->approve(auth()->id());
+        $this->syncProjectProcurement($purchaseOrder);
 
         return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
     }

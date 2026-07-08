@@ -53,10 +53,12 @@ class AutoSyncTaskStateAction
             }
         }
 
-        // 3. Quote — move to in_progress once data exists (work has begun).
+        // 3. Quote — move to in_progress once quote data exists. The quote is
+        // commercial input for the approved scope, not something unlocked by an
+        // internal budget.
         if ($task->type === 'quote') {
             $quoteData = \App\Models\TaskQuoteData::where('enquiry_task_id', $task->id)->first();
-            if ($quoteData && $quoteData->budget_imported && $task->status === 'pending') {
+            if ($quoteData && $task->status === 'pending') {
                 $this->transition($task, 'in_progress', 'Quote data present');
             }
         }

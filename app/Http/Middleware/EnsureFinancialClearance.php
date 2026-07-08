@@ -14,7 +14,7 @@ class EnsureFinancialClearance
     public function handle(Request $request, Closure $next)
     {
         // Intercept task status update requests.
-        $taskRouteParam = $request->route('task');
+        $taskRouteParam = $request->route('task') ?? $request->route('taskId');
         
         if ($taskRouteParam && $request->isMethod('put') && $request->has('status')) {
             $status = $request->input('status');
@@ -32,7 +32,8 @@ class EnsureFinancialClearance
 
                     if (!$result->isAuthorized()) {
                         return response()->json([
-                            'message' => $result->getMessage()
+                            'message' => $result->getMessage(),
+                            'context' => $result->context,
                         ], 403);
                     }
                 }

@@ -32,7 +32,7 @@ class PettyCashRequisitionController extends Controller
                 ->withCount('items');
 
             // If not admin/finance, only show their own
-            if (!$user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Finance Manager'])) {
+            if ($user && !$user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Finance Manager'])) {
                 $query->where('user_id', $user->id);
             }
 
@@ -92,46 +92,55 @@ class PettyCashRequisitionController extends Controller
             $query = PettyCashRequisition::query();
 
             // Scope to user if not admin
-            if (!$user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Finance Manager'])) {
+            if ($user && !$user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Finance Manager'])) {
                 $query->where('user_id', $user->id);
             }
 
+            $statuses = ['pending', 'approved', 'disbursed', 'received', 'rejected'];
+            $stats = collect($statuses)
+                ->mapWithKeys(fn ($status) => [
+                    $status => ['count' => 0, 'amount' => 0.0],
+                ])
+                ->all();
+
+            $statusRows = (clone $query)
+                ->select('status', DB::raw('COUNT(*) as aggregate_count'), DB::raw('COALESCE(SUM(total_amount), 0) as aggregate_amount'))
+                ->whereIn('status', $statuses)
+                ->groupBy('status')
+                ->get();
+
+            foreach ($statusRows as $row) {
+                $stats[$row->status] = [
+                    'count' => (int) $row->aggregate_count,
+                    'amount' => (float) $row->aggregate_amount,
+                ];
+            }
+
+            $monthStart = now()->startOfMonth();
+            $monthEnd = now()->endOfMonth();
+            $todayStart = now()->startOfDay();
+            $todayEnd = now()->endOfDay();
+
+            $monthly = (clone $query)
+                ->whereBetween('created_at', [$monthStart, $monthEnd])
+                ->selectRaw('COUNT(*) as aggregate_count, COALESCE(SUM(total_amount), 0) as aggregate_amount')
+                ->first();
+
+            $disbursedToday = (clone $query)
+                ->where('status', 'disbursed')
+                ->whereBetween('updated_at', [$todayStart, $todayEnd])
+                ->selectRaw('COUNT(*) as aggregate_count, COALESCE(SUM(total_amount), 0) as aggregate_amount')
+                ->first();
+
             $stats = [
-                'pending' => [
-                    'count' => (clone $query)->where('status', 'pending')->count(),
-                    'amount' => (clone $query)->where('status', 'pending')->sum('total_amount'),
-                ],
-                'approved' => [
-                'count' => (clone $query)->where('status', 'approved')->count(),
-                'amount' => (clone $query)->where('status', 'approved')->sum('total_amount'),
-            ],
-            'disbursed' => [
-                'count' => (clone $query)->where('status', 'disbursed')->count(),
-                'amount' => (clone $query)->where('status', 'disbursed')->sum('total_amount'),
-            ],
-            'received' => [
-                'count' => (clone $query)->where('status', 'received')->count(),
-                'amount' => (clone $query)->where('status', 'received')->sum('total_amount'),
-            ],
-            'rejected' => [
-                'count' => (clone $query)->where('status', 'rejected')->count(),
-                'amount' => (clone $query)->where('status', 'rejected')->sum('total_amount'),
-            ],
-            'monthly' => [
-                    'count' => (clone $query)->whereMonth('created_at', now()->month)
-                                           ->whereYear('created_at', now()->year)
-                                           ->count(),
-                    'amount' => (clone $query)->whereMonth('created_at', now()->month)
-                                            ->whereYear('created_at', now()->year)
-                                            ->sum('total_amount'),
+                ...$stats,
+                'monthly' => [
+                    'count' => (int) ($monthly->aggregate_count ?? 0),
+                    'amount' => (float) ($monthly->aggregate_amount ?? 0),
                 ],
                 'disbursed_today' => [
-                    'count' => (clone $query)->where('status', 'disbursed')
-                                           ->whereDate('updated_at', now()->today())
-                                           ->count(),
-                    'amount' => (clone $query)->where('status', 'disbursed')
-                                            ->whereDate('updated_at', now()->today())
-                                            ->sum('total_amount'),
+                    'count' => (int) ($disbursedToday->aggregate_count ?? 0),
+                    'amount' => (float) ($disbursedToday->aggregate_amount ?? 0),
                 ]
             ];
 
@@ -490,7 +499,6 @@ class PettyCashRequisitionController extends Controller
      */
     public function disburse(Request $request, int $id): JsonResponse
     {
-        DB::beginTransaction();
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
             
@@ -506,7 +514,7 @@ class PettyCashRequisitionController extends Controller
             // Prepare disbursement data
             $disbursementData = $request->only([
                 'amount', 'receiver', 'account', 'description', 
-                'classification', 'project_name', 'tax', 
+                'classification', 'project_name', 'project_id', 'project_enquiry_id', 'tax', 
                 'date_disbursed', 'job_number', 'payment_method',
                 'transaction_cost', 'transaction_code'
             ]);
@@ -532,15 +540,12 @@ class PettyCashRequisitionController extends Controller
                 ], 422);
             }
 
-            DB::commit();
-
             return response()->json([
                 'success' => true,
                 'message' => 'Requisition disbursed. QR code link generated.',
                 'data' => $requisition->fresh(['disbursement', 'requester', 'department', 'items'])
             ]);
         } catch (Exception $e) {
-            DB::rollBack();
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to disburse requisition',

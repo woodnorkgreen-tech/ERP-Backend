@@ -49,6 +49,13 @@ class HandoverSurveyController extends Controller
      */
     public function store(Request $request, int $taskId): JsonResponse
     {
+        $existing = HandoverSurvey::where('task_id', $taskId)->first();
+        if ($existing && $existing->submitted) {
+            return response()->json([
+                'message' => 'This survey has already been submitted and cannot be modified.',
+            ], 422);
+        }
+
         try {
             $feedbackSource = $request->input('feedback_source');
             $isAlternativeFeedback = $feedbackSource && $feedbackSource !== 'survey_link';
@@ -234,18 +241,22 @@ class HandoverSurveyController extends Controller
             'submitted' => 'nullable',
         ];
 
-        // Build rules for each question
         foreach ($config['sections'] ?? [] as $section) {
             foreach ($section['questions'] ?? [] as $question) {
                 $fieldPath = "responses.{$question['id']}";
-                
-                // If it's alternative feedback, all questions are optional (nullable)
-                // Otherwise, respect the 'required' flag from config
-                $required = (!$isAlternativeFeedback && ($question['required'] ?? false)) ? 'required' : 'nullable';
+                $required  = (!$isAlternativeFeedback && ($question['required'] ?? false))
+                    ? 'required'
+                    : 'nullable';
 
-                // Note: Deep validation of responses structure is tricky with FormData/JSON string
-                // We rely on the frontend to send correct structure and basic existence check here
-                // For stricter validation, we would need to decode JSON first then validate manually
+                $typeRules = match ($question['type'] ?? 'text') {
+                    'rating'   => "{$required}|numeric|min:1|max:5",
+                    'boolean'  => "{$required}|boolean",
+                    'textarea',
+                    'text'     => "{$required}|string|max:5000",
+                    default    => $required,
+                };
+
+                $rules[$fieldPath] = $typeRules;
             }
         }
 

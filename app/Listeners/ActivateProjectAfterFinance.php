@@ -28,6 +28,11 @@ class ActivateProjectAfterFinance
             $this->activateProjectAction->execute($enquiry, $user);
         } catch (\Exception $e) {
             Log::error("Failed to activate project after finance release: " . $e->getMessage());
+
+            // Rethrow: this listener runs inside ReleaseFinanceGateAction's DB
+            // transaction, so failing loudly rolls the release back instead of
+            // leaving the enquiry marked released but never activated.
+            throw $e;
         }
     }
 }

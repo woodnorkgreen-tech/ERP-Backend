@@ -9,29 +9,43 @@ class BasicPayProcessor implements PayrollProcessorInterface
 {
     public function process(PayrollEmployeeDTO $dto): void
     {
-        $month = Carbon::parse($dto->month . '-01');
+        $month       = Carbon::parse($dto->month . '-01');
         $daysInMonth = $month->daysInMonth;
-        
+        $monthStart  = $month->copy()->startOfDay();
+        $monthEnd    = $month->copy()->endOfMonth()->startOfDay();
+
+        // Clamp to the employee's active window within this month.
+        // hire_date within the month → they weren't here for earlier days.
+        // termination_date within the month → they left before month end.
+        // Denominator always stays $daysInMonth so the daily rate is correct.
+        $effectiveFrom = ($dto->hireDate && $dto->hireDate->gt($monthStart))
+            ? (int) $dto->hireDate->format('j')
+            : 1;
+
+        $effectiveTo = ($dto->terminationDate && $dto->terminationDate->lt($monthEnd))
+            ? (int) $dto->terminationDate->format('j')
+            : $daysInMonth;
+
+        $effectiveDays = max(0, $effectiveTo - $effectiveFrom + 1);
+
         if ($dto->salaryHistory->isEmpty()) {
-            $dto->computedBasic = $dto->baseSalary;
+            $dto->computedBasic = round($dto->baseSalary / $daysInMonth * $effectiveDays, 2);
             return;
         }
 
         $totalComputed = 0;
-        
-        // Split the month into segments based on salary history
-        for ($day = 1; $day <= $daysInMonth; $day++) {
+
+        for ($day = $effectiveFrom; $day <= $effectiveTo; $day++) {
             $currentDate = $month->copy()->day($day);
-            
-            // Find the salary active on this specific day
-            $activeSalary = $dto->salaryHistory->first(function($history) use ($currentDate) {
+
+            $activeSalary = $dto->salaryHistory->first(function ($history) use ($currentDate) {
                 return $currentDate->between(
                     Carbon::parse($history->valid_from),
                     $history->valid_to ? Carbon::parse($history->valid_to) : Carbon::now()->addYears(100)
                 );
             });
 
-            $dailySalary = ($activeSalary ? (float)$activeSalary->salary : $dto->baseSalary) / $daysInMonth;
+            $dailySalary    = ($activeSalary ? (float) $activeSalary->salary : $dto->baseSalary) / $daysInMonth;
             $totalComputed += $dailySalary;
         }
 

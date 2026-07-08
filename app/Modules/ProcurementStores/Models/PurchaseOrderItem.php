@@ -13,6 +13,7 @@ class PurchaseOrderItem extends Model
 
     protected $fillable = [
         'purchase_order_id',
+        'requisition_item_id',
         'material_id',
         'custom_description',
         'quantity',
@@ -29,6 +30,16 @@ class PurchaseOrderItem extends Model
     public function purchaseOrder()
     {
         return $this->belongsTo(PurchaseOrder::class);
+    }
+
+    public function requisitionItem()
+    {
+        return $this->belongsTo(RequisitionItem::class);
+    }
+
+    public function goodsReceiptNoteItems()
+    {
+        return $this->hasMany(GoodsReceiptNoteItem::class);
     }
 
     /**

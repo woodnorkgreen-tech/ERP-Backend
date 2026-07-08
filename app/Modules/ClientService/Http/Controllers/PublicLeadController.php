@@ -23,13 +23,40 @@ class PublicLeadController extends Controller
         $this->enquiryService = $enquiryService;
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $leads = PublicLead::with('department')
-            ->orderBy('created_at', 'desc')
-            ->paginate(15);
-            
+        $query = PublicLead::with('department', 'processedBy')
+            ->orderBy('created_at', 'desc');
+
+        if ($request->filled('stage')) {
+            $query->where('pipeline_stage', $request->stage);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        $leads = $query->paginate(20);
+
         return response()->json($leads);
+    }
+
+    public function pipelineStats(): JsonResponse
+    {
+        $active = PublicLead::where('status', 'new');
+
+        $counts = (clone $active)->selectRaw('pipeline_stage, COUNT(*) as total')
+            ->groupBy('pipeline_stage')
+            ->pluck('total', 'pipeline_stage');
+
+        $stages = collect(PublicLead::PIPELINE_STAGES)->mapWithKeys(fn ($s) => [
+            $s => (int) ($counts[$s] ?? 0)
+        ]);
+
+        return response()->json([
+            'stages'  => $stages,
+            'total_active' => $active->count(),
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -58,15 +85,16 @@ class PublicLeadController extends Controller
 
         try {
             $lead = PublicLead::create([
-                'full_name' => $request->full_name,
-                'email' => $request->email,
-                'phone' => $request->phone,
-                'company_name' => $request->company_name,
+                'full_name'        => $request->full_name,
+                'email'            => $request->email,
+                'phone'            => $request->phone,
+                'company_name'     => $request->company_name,
                 'service_interest' => $request->service_interest,
-                'description' => $request->description,
+                'description'      => $request->description,
                 'how_did_you_hear' => $request->how_did_you_hear,
-                'source' => $request->source ?? 'Public Form',
-                'status' => 'new',
+                'source'           => $request->source ?? 'Public Form',
+                'status'           => 'new',
+                'pipeline_stage'   => 'new_lead',
             ]);
 
             return response()->json([
@@ -88,6 +116,17 @@ class PublicLeadController extends Controller
 
     public function convert(Request $request, PublicLead $lead): JsonResponse
     {
+        if ($lead->status === 'processed') {
+            return response()->json(['message' => 'This lead has already been converted.'], 422);
+        }
+
+        if ($lead->pipeline_stage !== 'business_confirmed') {
+            return response()->json([
+                'message' => 'Lead must reach the "Business Confirmed" stage before conversion.',
+                'current_stage' => $lead->pipeline_stage,
+            ], 422);
+        }
+
         try {
             return DB::transaction(function () use ($request, $lead) {
                 // 1. Create or Find Client
@@ -133,7 +172,8 @@ class PublicLeadController extends Controller
                 ]);
             });
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Conversion failed: ' . $e->getMessage()], 500);
+            \Log::error('Lead conversion failed', ['lead_id' => $lead->id, 'error' => $e->getMessage()]);
+            return response()->json(['message' => 'Lead conversion failed. Please try again or contact support.'], 500);
         }
     }
 
@@ -145,14 +185,23 @@ class PublicLeadController extends Controller
     public function update(Request $request, PublicLead $lead): JsonResponse
     {
         $request->validate([
-            'status' => 'required|string|in:new,processed,archived,ignored',
+            'status'         => 'sometimes|string|in:new,processed,archived,ignored',
+            'pipeline_stage' => 'sometimes|string|in:new_lead,contacted,in_discussion,business_confirmed',
         ]);
 
-        $lead->update($request->only('status'));
+        $changes = $request->only('status');
+
+        if ($request->filled('pipeline_stage')) {
+            $changes['pipeline_stage']    = $request->pipeline_stage;
+            $changes['stage_updated_at']  = now();
+            $changes['stage_updated_by']  = auth()->id();
+        }
+
+        $lead->update($changes);
 
         return response()->json([
             'message' => 'Lead updated successfully',
-            'data' => $lead
+            'data'    => $lead->fresh('processedBy'),
         ]);
     }
 

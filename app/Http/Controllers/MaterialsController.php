@@ -7,10 +7,14 @@ use App\Models\ProjectElement;
 use App\Models\ElementMaterial;
 use App\Models\ElementTemplate;
 use App\Models\ElementTemplateMaterial;
+use App\Models\TaskQuoteData;
+use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 /**
@@ -197,6 +201,158 @@ class MaterialsController extends Controller
             return response()->json([
                 'message' => 'Failed to retrieve materials data',
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Preview the approved quote snapshot that can seed the materials list.
+     */
+    public function previewApprovedQuoteImport(int $taskId): JsonResponse
+    {
+        try {
+            $preview = $this->buildApprovedQuoteImportPreview($taskId);
+
+            return response()->json([
+                'data' => $preview,
+                'message' => 'Approved quote snapshot ready for import'
+            ]);
+        } catch (\RuntimeException $e) {
+            $status = $this->clientErrorStatus($e);
+
+            if ($status) {
+                return response()->json(['message' => $e->getMessage()], $status);
+            }
+
+            throw $e;
+        } catch (\Exception $e) {
+            \Log::error('Failed to preview approved quote import', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to preview approved quote import',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Import materials from the approved quote snapshot into this materials task.
+     */
+    public function importApprovedQuote(Request $request, int $taskId): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'selected_element_ids' => 'sometimes|array',
+            'selected_element_ids.*' => 'nullable',
+            'selectedElementIds' => 'sometimes|array',
+            'selectedElementIds.*' => 'nullable',
+            'force' => 'sometimes|boolean',
+            'editReason' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $selectedElementIds = $request->has('selected_element_ids')
+            ? $request->input('selected_element_ids')
+            : ($request->has('selectedElementIds') ? $request->input('selectedElementIds') : null);
+
+        try {
+            $preview = $this->buildApprovedQuoteImportPreview($taskId, $selectedElementIds);
+            $elements = $preview['materials'];
+
+            if (empty($elements)) {
+                throw $this->clientError('No selected approved quote materials are available to import.', 422);
+            }
+
+            $existingMaterialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)
+                ->withCount('elements')
+                ->first();
+
+            if ($existingMaterialsData && $existingMaterialsData->elements_count > 0 && !$request->boolean('force')) {
+                throw $this->clientError('Materials already exist for this task. Pass force=true to replace them from the approved quote snapshot.', 409);
+            }
+
+            if (
+                $existingMaterialsData
+                && $existingMaterialsData->versions()->where('is_base', true)->exists()
+                && !$request->filled('editReason')
+            ) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => [
+                        'editReason' => ['A reason for modification is required because a base materials list has already been approved.']
+                    ]
+                ], 422);
+            }
+
+            $materialsData = DB::transaction(function () use ($taskId, $existingMaterialsData, $preview, $elements) {
+                $projectInfo = $existingMaterialsData?->project_info
+                    ?: ($this->getDefaultMaterialsStructure($taskId)['projectInfo'] ?? []);
+
+                $projectInfo['quoteImportedFrom'] = array_merge($preview['source'], [
+                    'importedAt' => now()->toISOString(),
+                    'elementCount' => count($elements),
+                ]);
+                $projectInfo['approval_status'] = $this->defaultMaterialsApprovalStatus('System: Reset due to approved quote import');
+
+                $materialsData = TaskMaterialsData::updateOrCreate(
+                    ['enquiry_task_id' => $taskId],
+                    [
+                        'project_info' => $projectInfo,
+                        'updated_at' => now()
+                    ]
+                );
+
+                $this->replaceMaterialElements($materialsData, $elements);
+
+                return $materialsData->fresh(['elements.materials']);
+            });
+
+            try {
+                $this->internalCreateVersion(
+                    $taskId,
+                    'Imported from Approved Quote',
+                    'System: Materials generated from approved quote snapshot.',
+                    false
+                );
+            } catch (\Exception $e) {
+                \Log::warning('Materials import succeeded but version snapshot failed', [
+                    'taskId' => $taskId,
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            return response()->json([
+                'data' => $this->formatMaterialsData($materialsData),
+                'source' => $preview['source'],
+                'message' => 'Materials imported from approved quote snapshot successfully'
+            ]);
+        } catch (\RuntimeException $e) {
+            $status = $this->clientErrorStatus($e);
+
+            if ($status) {
+                return response()->json(['message' => $e->getMessage()], $status);
+            }
+
+            throw $e;
+        } catch (\Exception $e) {
+            \Log::error('Failed to import approved quote materials', [
+                'taskId' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to import approved quote materials',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
@@ -770,6 +926,321 @@ class MaterialsController extends Controller
                 'availableElements' => []
             ];
         }
+    }
+
+    private function buildApprovedQuoteImportPreview(int $taskId, ?array $selectedElementIds = null): array
+    {
+        $materialsTask = EnquiryTask::with('enquiry.client')->find($taskId);
+
+        if (!$materialsTask) {
+            throw $this->clientError('Materials task not found.', 404);
+        }
+
+        if ($materialsTask->type !== 'materials') {
+            throw $this->clientError('This endpoint can only import into a materials task.', 422);
+        }
+
+        [$quoteSnapshot, $source] = $this->resolveApprovedQuoteSnapshot($materialsTask);
+        $materials = $this->normalizeQuoteMaterialsForImport($quoteSnapshot, $selectedElementIds);
+
+        if (empty($materials) && $selectedElementIds === null) {
+            throw $this->clientError('The approved quote snapshot has no material lines available for import.', 422);
+        }
+
+        return [
+            'id' => (string) ($source['quoteId'] ?? $source['approvalId'] ?? $source['quoteVersionId'] ?? $taskId),
+            'materials' => $materials,
+            'source' => $source,
+            'approvalStatus' => 'approved',
+            'approvedBy' => $source['approvedBy'] ?? null,
+            'approvalDate' => $source['approvalDate'] ?? null,
+            'quoteAmount' => $source['quoteAmount'] ?? null,
+        ];
+    }
+
+    private function resolveApprovedQuoteSnapshot(EnquiryTask $materialsTask): array
+    {
+        $quoteTask = EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
+            ->where('type', 'quote')
+            ->first();
+
+        if (!$quoteTask) {
+            throw $this->clientError('No Quote task found for this project.', 404);
+        }
+
+        $approval = DB::table('quote_approvals')
+            ->where('enquiry_id', $materialsTask->project_enquiry_id)
+            ->where('approval_status', 'approved')
+            ->whereNotNull('quote_data')
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($approval) {
+            $quoteData = json_decode((string) $approval->quote_data, true);
+
+            if (!is_array($quoteData)) {
+                throw $this->clientError('The approved quote snapshot is unreadable. Please re-approve the quote to create a valid snapshot.', 409);
+            }
+
+            return [
+                $quoteData,
+                [
+                    'snapshotSource' => 'quote_approvals',
+                    'approvalId' => $approval->id,
+                    'approvalTaskId' => $approval->task_id,
+                    'quoteTaskId' => $quoteTask->id,
+                    'quoteId' => $quoteData['id'] ?? null,
+                    'approvedBy' => $approval->approved_by,
+                    'approvalDate' => $approval->approval_date,
+                    'quoteAmount' => (float) $approval->quote_amount,
+                    'snapshotCreatedAt' => $approval->updated_at,
+                ]
+            ];
+        }
+
+        $taskQuoteData = TaskQuoteData::where('enquiry_task_id', $quoteTask->id)->first();
+        $isApproved = in_array($taskQuoteData?->approval_status ?? $taskQuoteData?->status, ['approved'], true);
+        $approvedVersion = $taskQuoteData
+            ? $taskQuoteData->versions()
+                ->where(function ($query) {
+                    $query->where('label', 'Baseline Approved')
+                        ->orWhere('label', 'like', '%Approved%');
+                })
+                ->orderByDesc('version_number')
+                ->orderByDesc('id')
+                ->first()
+            : null;
+
+        if ($isApproved && $approvedVersion && is_array($approvedVersion->data)) {
+            return [
+                $approvedVersion->data,
+                [
+                    'snapshotSource' => 'quote_versions',
+                    'quoteVersionId' => $approvedVersion->id,
+                    'quoteVersionNumber' => $approvedVersion->version_number,
+                    'quoteTaskId' => $quoteTask->id,
+                    'quoteId' => $taskQuoteData->id,
+                    'approvedBy' => $taskQuoteData->approved_by,
+                    'approvalDate' => optional($taskQuoteData->approval_date)->format('Y-m-d'),
+                    'quoteAmount' => $taskQuoteData->quote_amount !== null ? (float) $taskQuoteData->quote_amount : null,
+                    'snapshotCreatedAt' => optional($approvedVersion->created_at)->toISOString(),
+                ]
+            ];
+        }
+
+        throw $this->clientError('No approved quote snapshot found. Complete the Quote Approval task before generating the materials list.', 409);
+    }
+
+    private function normalizeQuoteMaterialsForImport(array $quoteSnapshot, ?array $selectedElementIds = null): array
+    {
+        $quoteElements = $quoteSnapshot['materials'] ?? [];
+
+        if (!is_array($quoteElements)) {
+            return [];
+        }
+
+        $selected = $selectedElementIds === null
+            ? null
+            : array_map('strval', $selectedElementIds);
+
+        $elements = [];
+
+        foreach ($quoteElements as $index => $quoteElement) {
+            if (!is_array($quoteElement)) {
+                continue;
+            }
+
+            $sourceId = (string) ($quoteElement['id'] ?? $quoteElement['persistent_id'] ?? $quoteElement['scopeId'] ?? $quoteElement['scope_id'] ?? 'quote_element_' . ($index + 1));
+
+            if ($selected !== null && !in_array($sourceId, $selected, true)) {
+                continue;
+            }
+
+            if (!$this->importFlag($quoteElement['isVisible'] ?? $quoteElement['is_visible'] ?? true)) {
+                continue;
+            }
+
+            $materials = $this->normalizeQuoteMaterialLines($quoteElement['materials'] ?? [], $sourceId);
+
+            if (empty($materials)) {
+                continue;
+            }
+
+            $templateId = $quoteElement['templateId'] ?? $quoteElement['template_id'] ?? null;
+            $category = $this->normalizeMaterialCategory($quoteElement['category'] ?? $templateId);
+            $elementType = trim((string) ($quoteElement['elementType'] ?? $quoteElement['element_type'] ?? $templateId ?? $category));
+
+            $elements[] = [
+                'id' => $sourceId,
+                'templateId' => $templateId,
+                'scopeId' => $quoteElement['scopeId'] ?? $quoteElement['scope_id'] ?? null,
+                'elementType' => $elementType !== '' ? $elementType : 'General',
+                'name' => trim((string) ($quoteElement['name'] ?? $quoteElement['description'] ?? 'Quote Element ' . ($index + 1))),
+                'category' => $category,
+                'dimensions' => $quoteElement['dimensions'] ?? ['length' => '', 'width' => '', 'height' => ''],
+                'isIncluded' => $this->importFlag($quoteElement['isIncluded'] ?? $quoteElement['is_included'] ?? true),
+                'notes' => $quoteElement['description'] ?? null,
+                'sortOrder' => $index,
+                'finalTotal' => $this->numberValue($quoteElement['finalTotal'] ?? $quoteElement['final_total'] ?? 0),
+                'materials' => $materials,
+            ];
+        }
+
+        return $elements;
+    }
+
+    private function normalizeQuoteMaterialLines(array $quoteMaterials, string $sourceElementId): array
+    {
+        $materials = [];
+
+        foreach ($quoteMaterials as $index => $quoteMaterial) {
+            if (!is_array($quoteMaterial)) {
+                continue;
+            }
+
+            if (!$this->importFlag($quoteMaterial['isVisible'] ?? $quoteMaterial['is_visible'] ?? true)) {
+                continue;
+            }
+
+            $description = trim((string) ($quoteMaterial['description'] ?? $quoteMaterial['name'] ?? ''));
+
+            if ($description === '') {
+                continue;
+            }
+
+            $unitCost = $this->optionalNumber(
+                $quoteMaterial['unitCost']
+                ?? $quoteMaterial['unit_cost']
+                ?? $quoteMaterial['baseCost']
+                ?? $quoteMaterial['base_cost']
+                ?? null
+            );
+
+            $materials[] = [
+                'id' => (string) ($quoteMaterial['id'] ?? $sourceElementId . '_material_' . ($index + 1)),
+                'libraryMaterialId' => $quoteMaterial['libraryMaterialId'] ?? $quoteMaterial['library_material_id'] ?? null,
+                'description' => $description,
+                'unitOfMeasurement' => trim((string) ($quoteMaterial['unitOfMeasurement'] ?? $quoteMaterial['unit_of_measurement'] ?? $quoteMaterial['unit'] ?? 'Pcs')),
+                'quantity' => max(0, $this->numberValue($quoteMaterial['quantity'] ?? 0)),
+                'unitCost' => $unitCost,
+                'isIncluded' => $this->importFlag($quoteMaterial['isIncluded'] ?? $quoteMaterial['is_included'] ?? true),
+                'isAdditional' => false,
+                'notes' => null,
+                'sortOrder' => $index,
+            ];
+        }
+
+        return $materials;
+    }
+
+    private function replaceMaterialElements(TaskMaterialsData $materialsData, array $elements): void
+    {
+        $materialsData->elements()->delete();
+
+        foreach ($elements as $elementData) {
+            $element = ProjectElement::create([
+                'task_materials_data_id' => $materialsData->id,
+                'template_id' => $elementData['templateId'] ?? null,
+                'scope_id' => $elementData['scopeId'] ?? null,
+                'element_type' => $elementData['elementType'],
+                'name' => $elementData['name'],
+                'persistent_id' => (string) Str::uuid(),
+                'category' => $elementData['category'],
+                'dimensions' => $elementData['dimensions'] ?? [],
+                'is_included' => $elementData['isIncluded'] ?? true,
+                'notes' => $elementData['notes'] ?? null,
+                'sort_order' => $elementData['sortOrder'] ?? 0,
+            ]);
+
+            foreach ($elementData['materials'] as $materialData) {
+                ElementMaterial::create([
+                    'project_element_id' => $element->id,
+                    'library_material_id' => $materialData['libraryMaterialId'] ?? null,
+                    'persistent_id' => (string) Str::uuid(),
+                    'description' => $materialData['description'],
+                    'unit_of_measurement' => $materialData['unitOfMeasurement'],
+                    'quantity' => $materialData['quantity'],
+                    'unit_cost' => $materialData['unitCost'] ?? null,
+                    'is_included' => $materialData['isIncluded'] ?? true,
+                    'is_additional' => $materialData['isAdditional'] ?? false,
+                    'notes' => $materialData['notes'] ?? null,
+                    'sort_order' => $materialData['sortOrder'] ?? 0,
+                ]);
+            }
+        }
+    }
+
+    private function defaultMaterialsApprovalStatus(string $comments = ''): array
+    {
+        return [
+            'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => $comments],
+            'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => $comments],
+            'all_approved' => false,
+            'last_approval_at' => null
+        ];
+    }
+
+    private function normalizeMaterialCategory(mixed $value): string
+    {
+        $category = strtolower((string) ($value ?? 'production'));
+
+        return in_array($category, ['production', 'hire', 'outsourced'], true)
+            ? $category
+            : 'production';
+    }
+
+    private function importFlag(mixed $value, bool $default = true): bool
+    {
+        if ($value === null) {
+            return $default;
+        }
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        $parsed = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+        return $parsed ?? $default;
+    }
+
+    private function optionalNumber(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $this->numberValue($value, 0.0);
+    }
+
+    private function numberValue(mixed $value, float $default = 0.0): float
+    {
+        if (is_numeric($value)) {
+            return (float) $value;
+        }
+
+        if (is_string($value)) {
+            $normalized = preg_replace('/[^0-9.\-]/', '', $value);
+
+            if ($normalized !== '' && is_numeric($normalized)) {
+                return (float) $normalized;
+            }
+        }
+
+        return $default;
+    }
+
+    private function clientError(string $message, int $status): \RuntimeException
+    {
+        return new \RuntimeException($message, $status);
+    }
+
+    private function clientErrorStatus(\RuntimeException $exception): ?int
+    {
+        $status = $exception->getCode();
+
+        return $status >= 400 && $status < 500 ? $status : null;
     }
 
     /**

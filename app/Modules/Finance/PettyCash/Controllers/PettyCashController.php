@@ -33,23 +33,53 @@ class PettyCashController extends Controller
      */
     public function getProjects(): JsonResponse
     {
-        // Re-use the exact same logic from EnquiryController for consistency
-        // Sort by Job Number: Year DESC, Month DESC, Sequence DESC
-        $projects = \App\Models\ProjectEnquiry::where('quote_approved', true)
-            ->whereNotNull('job_number')
-            ->select('id', 'job_number', 'project_id', 'title')
-            ->orderByRaw('
-                CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 3), "-", -1) AS UNSIGNED) DESC,
-                CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(job_number, "-", 2), "-", -1) AS UNSIGNED) DESC,
-                CAST(SUBSTRING_INDEX(job_number, "-", -1) AS UNSIGNED) DESC
-            ')
-            ->take(100)
-            ->get();
+        try {
+            $projects = \App\Models\ProjectEnquiry::query()
+                ->where('quote_approved', true)
+                ->whereNotNull('job_number')
+                ->with('project:id,enquiry_id,project_id')
+                ->select('id', 'job_number', 'title')
+                ->latest('id')
+                ->take(250)
+                ->get()
+                ->sortByDesc(fn ($enquiry) => $this->jobNumberSortKey($enquiry->job_number))
+                ->take(100)
+                ->values()
+                ->map(function ($enquiry) {
+                    return [
+                        'id' => $enquiry->id,
+                        'job_number' => $enquiry->job_number,
+                        'project_id' => $enquiry->project?->project_id,
+                        'project_record_id' => $enquiry->project?->id,
+                        'title' => $enquiry->title,
+                    ];
+                });
 
-        return response()->json([
-            'success' => true,
-            'data' => $projects
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $projects
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve approved projects',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function jobNumberSortKey(?string $jobNumber): string
+    {
+        preg_match_all('/\d+/', (string) $jobNumber, $matches);
+
+        $parts = array_map('intval', $matches[0] ?? []);
+
+        return sprintf(
+            '%04d%02d%06d',
+            $parts[1] ?? 0,
+            $parts[0] ?? 0,
+            $parts[2] ?? 0
+        );
     }
 
     /**
@@ -86,6 +116,88 @@ class PettyCashController extends Controller
     }
 
     /**
+     * Get a compact finance workspace snapshot for dashboard refreshes.
+     */
+    public function workspace(Request $request): JsonResponse
+    {
+        try {
+            $filters = $request->only(['start_date', 'end_date', 'classification', 'project_name']);
+
+            $balance = $this->repository->getCurrentBalance();
+            $summary = $this->service->getTransactionSummary($filters);
+            $budgetResult = $this->repository->getProjectBudgetsSummary($filters, 5);
+            $budgetPaginator = $budgetResult['paginator'];
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'balance' => (new PettyCashBalanceResource($balance))->resolve(),
+                    'summary' => $summary,
+                    'recent_transactions' => $this->service->getRecentTransactions(5),
+                    'budget_snapshot' => [
+                        'data' => $budgetPaginator->items(),
+                        'stats' => $budgetResult['stats'],
+                        'meta' => [
+                            'current_page' => $budgetPaginator->currentPage(),
+                            'last_page' => $budgetPaginator->lastPage(),
+                            'per_page' => $budgetPaginator->perPage(),
+                            'total' => $budgetPaginator->total(),
+                        ],
+                    ],
+                    'requisition_snapshot' => $this->getRequisitionSnapshot(),
+                ],
+                'filters' => $filters,
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve finance workspace',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function getRequisitionSnapshot(): array
+    {
+        $statuses = ['pending', 'approved', 'disbursed', 'received', 'rejected'];
+        $baseQuery = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::query();
+
+        $user = Auth::user();
+        if ($user && !$user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Finance Manager'])) {
+            $baseQuery->where('user_id', $user->id);
+        }
+
+        $statusRows = (clone $baseQuery)
+            ->select('status', \Illuminate\Support\Facades\DB::raw('COUNT(*) as aggregate_count'), \Illuminate\Support\Facades\DB::raw('COALESCE(SUM(total_amount), 0) as aggregate_amount'))
+            ->whereIn('status', $statuses)
+            ->groupBy('status')
+            ->get()
+            ->keyBy('status');
+
+        $stats = collect($statuses)->mapWithKeys(function ($status) use ($statusRows) {
+            $row = $statusRows->get($status);
+
+            return [
+                $status => [
+                    'count' => (int) ($row->aggregate_count ?? 0),
+                    'amount' => (float) ($row->aggregate_amount ?? 0),
+                ],
+            ];
+        })->all();
+
+        $latest = (clone $baseQuery)
+            ->with(['requester:id,name', 'project:id,enquiry_id,project_id', 'project.enquiry:id,title'])
+            ->latest()
+            ->take(5)
+            ->get();
+
+        return [
+            'stats' => $stats,
+            'latest' => $latest,
+        ];
+    }
+
+    /**
      * Get budget items/categories for a specific project
      */
     public function getProjectBudgetItems(string $jobNumber): JsonResponse
@@ -94,6 +206,8 @@ class PettyCashController extends Controller
             $enquiry = \App\Models\ProjectEnquiry::where('job_number', $jobNumber)
                 ->with(['enquiryTasks' => function($q) {
                     $q->where('type', 'budget')
+                      ->where('status', 'completed')
+                      ->whereHas('budgetData')
                       ->with('budgetData');
                 }])
                 ->first();

@@ -7,6 +7,7 @@ use App\Models\TaskAssignmentHistory;
 use App\Models\User;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Modules\HR\Models\Department;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Constants\EnquiryConstants;
 use App\Services\Governance\ProjectGovernanceService;
@@ -179,7 +180,8 @@ class EnquiryWorkflowService
 
         $oldStatus = $task->status;
 
-        // 1. Universal Governance Check (Expenditure/Financial/Technical Gates)
+        // Governance and validation run outside the transaction — they are read-only checks
+        // and throwing here avoids opening a transaction we'd immediately roll back.
         if (in_array($status, ['in_progress', 'completed'])) {
             $gateResult = $this->governanceService->evaluateTask($task);
             if (!$gateResult->isAuthorized()) {
@@ -187,28 +189,27 @@ class EnquiryWorkflowService
             }
         }
 
-        // 2. Specific Hard Gate Validation for Completion (Legacy Checks)
         if ($status === 'completed') {
             $this->validateTaskCompletion($task);
         }
 
-        $task->status = $status;
-        $task->save();
+        return DB::transaction(function () use ($task, $taskId, $status, $oldStatus) {
+            $task->status = $status;
+            $task->save();
 
-        Log::info("Task {$taskId} status changed from {$oldStatus} to {$status}");
+            Log::info("Task {$taskId} status changed from {$oldStatus} to {$status}");
 
-        // Handle enquiry status progression based on task completion
-        if ($status === 'completed') {
-            // Only quote approval triggers automatic status progression
-            if ($task->type === 'quote_approval') {
-                $this->handleEnquiryStatusProgression($task);
+            if ($status === 'completed') {
+                if ($task->type === 'quote_approval') {
+                    $this->handleEnquiryStatusProgression($task);
+                }
+                $this->handleTaskSpecificTransitions($task, $status);
+            } elseif ($status === 'in_progress') {
+                $this->handleTaskSpecificTransitions($task, $status);
             }
-            $this->handleTaskSpecificTransitions($task, $status);
-        } elseif ($status === 'in_progress') {
-            $this->handleTaskSpecificTransitions($task, $status);
-        }
 
-        return $task;
+            return $task;
+        });
     }
 
 
@@ -229,6 +230,7 @@ class EnquiryWorkflowService
         // Update task with assignment data (for backward compatibility and department tracking)
         $updateData = [
             'department_id' => $assignedUser->department_id,
+            'assigned_user_id' => $assignedUserId,
             'assigned_by' => $assignedByUserId,
             'assigned_to' => $assignedUserId, // Keep for backward compatibility
             'assigned_at' => now(),
@@ -337,6 +339,7 @@ class EnquiryWorkflowService
         // Update task assignment (backward compatibility)
         $task->update([
             'department_id' => $newAssignedUser->department_id,
+            'assigned_user_id' => $newAssignedUserId,
             'assigned_by' => $reassignedByUserId,
             'assigned_to' => $newAssignedUserId,
             'assigned_at' => now(),
@@ -379,6 +382,7 @@ class EnquiryWorkflowService
 
         // Clear assignment
         $task->update([
+            'assigned_user_id' => null,
             'assigned_to' => null,
             // We keep department_id so it stays in the correct pool
         ]);
@@ -425,11 +429,22 @@ class EnquiryWorkflowService
         // handled per task in sendOverdueNotifications().
         $overdueTasks = EnquiryTask::where('due_date', '<', now())
             ->whereNotIn('status', ['completed', 'skipped', 'cancelled'])
+            ->with('assignedUsers')
             ->get();
 
+        // Fetch PM users once — avoids an N+1 query per task in sendOverdueNotifications()
+        $projectManagers = \Spatie\Permission\Models\Role::where('name', 'Project Manager')
+            ->first()
+            ?->users()
+            ->get() ?? collect();
+
         foreach ($overdueTasks as $task) {
-            $this->escalateTaskPriority($task);
-            $this->sendOverdueNotifications($task);
+            try {
+                $this->escalateTaskPriority($task);
+                $this->sendOverdueNotifications($task, $projectManagers);
+            } catch (\Exception $e) {
+                Log::error("Failed to escalate/notify for overdue task {$task->id}: " . $e->getMessage());
+            }
         }
 
         Log::info("Checked and escalated {$overdueTasks->count()} overdue tasks");
@@ -462,9 +477,8 @@ class EnquiryWorkflowService
     /**
      * Send overdue notifications
      */
-    private function sendOverdueNotifications(EnquiryTask $task): void
+    private function sendOverdueNotifications(EnquiryTask $task, \Illuminate\Support\Collection $projectManagers): void
     {
-        // Send notification to all assigned users (supports multiple)
         foreach ($task->assignedUsers as $assignedUser) {
             $this->notificationService->sendTaskOverdueNotification($task, $assignedUser);
         }
@@ -477,13 +491,8 @@ class EnquiryWorkflowService
             }
         }
 
-        // Send notification to project manager
-        $projectManagerRole = \Spatie\Permission\Models\Role::where('name', 'Project Manager')->first();
-        if ($projectManagerRole) {
-            $projectManagers = $projectManagerRole->users;
-            foreach ($projectManagers as $pm) {
-                $this->notificationService->sendTaskOverdueNotification($task, $pm);
-            }
+        foreach ($projectManagers as $pm) {
+            $this->notificationService->sendTaskOverdueNotification($task, $pm);
         }
     }
 
@@ -582,19 +591,50 @@ class EnquiryWorkflowService
             }
         }
 
-        // 2. Budget Validation
+        // 2. Budget Validation — requires a PRICED budget. Since the internal
+        // budget approval step was removed (2026-07), task completion is the
+        // finalization signal consumed by procurement and finance summaries,
+        // so an empty budget must not complete the task.
         if ($task->type === 'budget') {
             $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $task->id)->first();
             if (!$budgetData && !$isAdmin) {
                 throw new \Exception("Cannot complete Budget task. Budget data is missing. Please save the budget before completing.");
             }
+
+            $summary = $budgetData?->budget_summary ?? [];
+            $grandTotal = (float) ($summary['grandTotal'] ?? $summary['grand_total'] ?? 0);
+            if ($budgetData && $grandTotal <= 0 && !$isAdmin) {
+                throw new \Exception("Cannot complete Budget task. The budget has no priced totals yet — add materials, labour, expenses, or logistics first.");
+            }
         }
 
-        // 3. Quote Validation
+        // 3. Quote Validation — passes when:
+        //    a) in-system quote data exists (built_in mode), OR
+        //    b) an Excel file + amount has been uploaded (excel_upload mode),
+        //    AND the quote has been APPROVED by Finance. The approval decision
+        //    is recorded via saveApproval (not blocked by task ordering), and
+        //    the TaskQuoteData observer then auto-completes this task.
         if ($task->type === 'quote') {
             $quoteData = \App\Models\TaskQuoteData::where('enquiry_task_id', $task->id)->first();
+            $hasExcelQuote = $quoteData
+                && $quoteData->quote_mode === 'excel_upload'
+                && $quoteData->excel_quote_file
+                && $quoteData->excel_quote_amount !== null;
+
             if (!$quoteData && !$isAdmin) {
-                throw new \Exception("Cannot complete Quote Preparation task. Quote data is missing. Please prepare the quote before completing.");
+                throw new \Exception("Cannot complete Quote Preparation task. Quote data is missing. Either prepare the quote in-system or upload an Excel quote.");
+            }
+
+            if ($quoteData && !$hasExcelQuote && $quoteData->quote_mode === 'excel_upload' && !$isAdmin) {
+                throw new \Exception("Cannot complete Quote Preparation task. Excel quote upload is incomplete — both a file and a quote amount are required.");
+            }
+
+            $isApproved = $quoteData
+                && ($quoteData->approval_status ?? $quoteData->status) === 'approved';
+
+            if ($quoteData && !$isApproved && !$isAdmin) {
+                $currentStatus = $quoteData->approval_status ?? $quoteData->status ?? 'draft';
+                throw new \Exception("Cannot complete Quote Preparation task. The quote must be approved first (current status: {$currentStatus}).");
             }
         }
 

@@ -45,16 +45,17 @@ class PayrollRunController extends Controller
             'payroll_month' => 'required|string|regex:/^\d{4}-\d{2}$/',
         ]);
 
-        // Prevent duplicates in non-draft state
-        $existing = PayrollRun::where('payroll_month', $validated['payroll_month'])
-            ->whereIn('status', ['processing', 'locked', 'paid'])
-            ->first();
+        $existing = PayrollRun::where('payroll_month', $validated['payroll_month'])->first();
 
         if ($existing) {
-            return response()->json([
-                'success' => false,
-                'message' => "A payroll run for {$validated['payroll_month']} already exists with status: {$existing->status}."
-            ], 422);
+            if ($existing->status !== 'draft') {
+                return response()->json([
+                    'success' => false,
+                    'message' => "A payroll run for {$validated['payroll_month']} already exists with status: {$existing->status}."
+                ], 422);
+            }
+            // Return existing draft idempotently
+            return response()->json(['success' => true, 'data' => $existing], 200);
         }
 
         $run = $this->payrollService->initializeRun($validated['payroll_month']);
@@ -107,28 +108,21 @@ class PayrollRunController extends Controller
 
         $payrollRun->update(['status' => 'processing']);
 
+        $processedPayslips = [];
         foreach ($employees as $employee) {
-            $service->processEmployee($employee, $payrollRun);
+            $processedPayslips[] = $service->processEmployee($employee, $payrollRun);
         }
 
-        // Re-calculate totals (including statutory) so they appear in the table immediately
-        $totals = DB::table('payslips')
-            ->where('payroll_run_id', $payrollRun->id)
-            ->selectRaw('
-                SUM(gross_pay) as gross,
-                SUM(net_pay)   as net,
-                SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.paye"))         AS DECIMAL(12,2)))
-                    + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.nssf"))         AS DECIMAL(12,2)))
-                    + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.shif"))         AS DECIMAL(12,2)))
-                    + SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(tax_breakdown, "$.housing_levy")) AS DECIMAL(12,2)))
-                    as total_statutory
-            ')
-            ->first();
+        $payslipsCollection = collect($processedPayslips);
+        $totalStatutory = $payslipsCollection->sum(function ($p) {
+            $b = $p->tax_breakdown ?? [];
+            return ($b['paye'] ?? 0) + ($b['nssf'] ?? 0) + ($b['shif'] ?? 0) + ($b['housing_levy'] ?? 0);
+        });
 
         $payrollRun->update([
-            'total_gross'     => $totals->gross ?? 0,
-            'total_net'       => $totals->net ?? 0,
-            'total_statutory' => $totals->total_statutory ?? 0,
+            'total_gross'     => $payslipsCollection->sum('gross_pay'),
+            'total_net'       => $payslipsCollection->sum('net_pay'),
+            'total_statutory' => $totalStatutory,
             'status'          => 'processing',
         ]);
 

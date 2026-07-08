@@ -110,6 +110,14 @@ Route::post('/system/refresh', [App\Http\Controllers\SystemController::class, 't
     ->middleware(['auth:sanctum', 'active']);
 Route::post('/locations', 'App\Http\Controllers\LocationController@store');
 
+// Excel quote download: outside the auth group so plain <a href> links work,
+// but every link is a short-lived signed URL minted server-side. Signed and
+// validated RELATIVELY (path+query only) so links survive dev-server proxies
+// and host differences between APP_URL and the browser origin.
+Route::get('projects/tasks/{taskId}/quote/excel/download', [App\Http\Controllers\QuoteController::class, 'downloadExcelQuote'])
+    ->name('quote.excel.download')
+    ->middleware('signed:relative');
+
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     // Action Logs
@@ -236,6 +244,27 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
     Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
 
+    // Notifications & OneSignal
+    Route::get('/notifications', function () {
+        $user = auth()->user();
+        return response(['data' => $user->unreadNotifications]);
+    });
+    Route::post('/notifications/{id}/read', function ($id) {
+        $user = auth()->user();
+        $user->notifications()->find($id)?->markAsRead();
+        return response(['success' => true]);
+    });
+    Route::post('/notifications/read-all', function () {
+        $user = auth()->user();
+        $user->unreadNotifications->markAsRead();
+        return response(['success' => true]);
+    });
+    Route::post('/user/onesignal-token', function (Request $request) {
+        $user = auth()->user();
+        $user->update(['onesignal_player_id' => $request->player_id]);
+        return response(['success' => true]);
+    });
+
     Route::get('/announcements', 'App\Http\Controllers\AnnouncementController@index');
     Route::post('/announcements', 'App\Http\Controllers\AnnouncementController@store');
     Route::post('/announcements/read', 'App\Http\Controllers\AnnouncementController@markAsRead');
@@ -271,10 +300,27 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // User management
         Route::get('users/available-employees', [UserController::class, 'availableEmployees'])
             ->middleware('permission:' . Permissions::USER_READ . ',' . Permissions::TASK_ASSIGN);
-        Route::get('dashboard/stats', [AdminDashboardController::class, 'index']);
-        // middlewareFor, not middleware([...]): an associative array passed to
-        // middleware() is flattened, which stacked every listed permission check
-        // onto every route (index effectively required create+update+delete too).
+        Route::get('dashboard/stats', [AdminDashboardController::class, 'index'])
+            ->middleware('permission:' . Permissions::USER_READ);
+        Route::get('audit-logs', [AdminDashboardController::class, 'auditTrail'])
+            ->middleware('permission:' . Permissions::USER_READ);
+
+        // Account state (distinct from delete) + bulk
+        Route::post('users/bulk-status', [UserController::class, 'bulkUpdateStatus'])
+            ->middleware('permission:' . Permissions::USER_UPDATE);
+        Route::post('users/{user}/activate', [UserController::class, 'activate'])
+            ->middleware('permission:' . Permissions::USER_ACTIVATE);
+        Route::post('users/{user}/deactivate', [UserController::class, 'deactivate'])
+            ->middleware('permission:' . Permissions::USER_DEACTIVATE);
+
+        // Session / token management (force-logout)
+        Route::get('users/{user}/tokens', [UserController::class, 'tokens'])
+            ->middleware('permission:' . Permissions::USER_READ);
+        Route::delete('users/{user}/tokens/{tokenId}', [UserController::class, 'revokeToken'])
+            ->middleware('permission:' . Permissions::USER_UPDATE);
+        Route::delete('users/{user}/tokens', [UserController::class, 'revokeAllTokens'])
+            ->middleware('permission:' . Permissions::USER_UPDATE);
+
         Route::apiResource('users', UserController::class)->parameters([
             'users' => 'user'
         ])
@@ -291,27 +337,42 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             ->middlewareFor('show',    'permission:' . Permissions::ROLE_READ)
             ->middlewareFor('update',  'permission:' . Permissions::ROLE_UPDATE)
             ->middlewareFor('destroy', 'permission:' . Permissions::ROLE_DELETE);
+        Route::post('roles/{role}/clone', [RoleController::class, 'clone'])
+            ->middleware('permission:' . Permissions::ROLE_CREATE);
+
+        Route::get('permissions/grouped', [PermissionController::class, 'grouped'])
+            ->middleware('permission:' . Permissions::ROLE_READ);
         Route::apiResource('permissions', PermissionController::class)
             ->middlewareFor('index', 'permission:' . Permissions::ROLE_READ); // Admin can view permissions
     });
 
     // Project Officers endpoint (accessible by Client Service for enquiry assignment)
-    Route::get('project-officers', [UserController::class, 'getProjectOfficers']);
+    Route::get('project-officers', [UserController::class, 'getProjectOfficers'])
+        ->middleware('permission:' . Permissions::USER_READ . ',' . Permissions::ENQUIRY_ASSIGN . ',' . Permissions::TASK_ASSIGN);
 
     // Users endpoint for task assignment (accessible by Project Managers)
-    Route::get('users', [UserController::class, 'index']);
+    Route::get('users', [UserController::class, 'index'])
+        ->middleware('permission:' . Permissions::USER_READ . ',' . Permissions::TASK_ASSIGN);
 
     // ClientService Module Routes
     Route::prefix('clientservice')->group(function () {
         Route::get('dashboard', [App\Modules\ClientService\Http\Controllers\DashboardController::class, 'index']);
         Route::get('handovers', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'index']);
         Route::get('handovers/stats', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'stats']);
-        Route::get('handovers/{id}', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'show']);
+        Route::get('handovers/pending', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'pending']);
+        Route::get('handovers/awaiting-review', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'awaitingReview']);
+        Route::get('handovers/{id}', [\App\Modules\ClientService\Http\Controllers\HandoverController::class, 'show'])->whereNumber('id');
+        Route::post('handovers/{id}/review', [\App\Modules\ClientService\Http\Controllers\HandoverReviewController::class, 'review'])->whereNumber('id');
+        // NCR reports
+        Route::get('ncr', [\App\Modules\ClientService\Http\Controllers\NcrController::class, 'index']);
+        Route::patch('ncr/{id}', [\App\Modules\ClientService\Http\Controllers\NcrController::class, 'update'])->whereNumber('id');
         // Client management
         Route::get('clients', [ClientController::class, 'index']);
         Route::get('clients/export', [ClientController::class, 'export'])
             ->middleware('permission:' . Permissions::CLIENT_READ);
         Route::get('clients/lead-sources', [ClientController::class, 'getLeadSources'])
+            ->middleware('permission:' . Permissions::CLIENT_READ);
+        Route::get('clients/active-delivery-ids', [\App\Modules\ClientService\Http\Controllers\ClientProfileController::class, 'activeDeliveryClients'])
             ->middleware('permission:' . Permissions::CLIENT_READ);
         Route::get('clients/{client}', [ClientController::class, 'show'])
             ->middleware('permission:' . Permissions::CLIENT_READ);
@@ -323,6 +384,18 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             ->middleware('permission:' . Permissions::CLIENT_UPDATE);
         Route::delete('clients/{client}', [ClientController::class, 'destroy'])
             ->middleware('permission:' . Permissions::CLIENT_DELETE);
+
+        // Client 360 profile + interaction timeline
+        Route::get('clients/{client}/profile', [\App\Modules\ClientService\Http\Controllers\ClientProfileController::class, 'show'])
+            ->middleware('permission:' . Permissions::CLIENT_READ);
+        Route::get('clients/{client}/active-delivery', [\App\Modules\ClientService\Http\Controllers\ClientProfileController::class, 'activeDelivery'])
+            ->middleware('permission:' . Permissions::CLIENT_READ);
+        Route::get('clients/{client}/interactions', [\App\Modules\ClientService\Http\Controllers\ClientInteractionController::class, 'index'])
+            ->middleware('permission:' . Permissions::CLIENT_READ);
+        Route::post('clients/{client}/interactions', [\App\Modules\ClientService\Http\Controllers\ClientInteractionController::class, 'store'])
+            ->middleware('permission:' . Permissions::CLIENT_UPDATE);
+        Route::delete('clients/{client}/interactions/{id}', [\App\Modules\ClientService\Http\Controllers\ClientInteractionController::class, 'destroy'])
+            ->middleware('permission:' . Permissions::CLIENT_UPDATE);
 
         // Enquiry management
         Route::get('enquiries', [ClientServiceEnquiryController::class, 'index'])
@@ -338,6 +411,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Lead management
         Route::get('leads', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'index'])
             ->middleware('permission:' . Permissions::ENQUIRY_READ);
+        Route::get('leads-pipeline-stats', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'pipelineStats'])
+            ->middleware('permission:' . Permissions::ENQUIRY_READ);
         Route::get('leads/{lead}', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'show'])
             ->middleware('permission:' . Permissions::ENQUIRY_READ);
         Route::put('leads/{lead}', [App\Modules\ClientService\Http\Controllers\PublicLeadController::class, 'update'])
@@ -352,6 +427,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('projects/tasks/{taskId}/materials')->group(function () {
         Route::get('/', [App\Http\Controllers\MaterialsController::class, 'getMaterialsData']);
         Route::post('/', [App\Http\Controllers\MaterialsController::class, 'saveMaterialsData']);
+        Route::get('/approved-quote-preview', [App\Http\Controllers\MaterialsController::class, 'previewApprovedQuoteImport']);
+        Route::post('/import-approved-quote', [App\Http\Controllers\MaterialsController::class, 'importApprovedQuote']);
 
         // Material versioning routes
         Route::post('/versions', [App\Http\Controllers\MaterialsController::class, 'createMaterialVersion']);
@@ -374,10 +451,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('projects/tasks/{taskId}/budget')->group(function () {
         Route::get('/', [App\Http\Controllers\BudgetController::class, 'getBudgetData']);;
         Route::post('/', [App\Http\Controllers\BudgetController::class, 'saveBudgetData']);
-        Route::post('/submit-approval', [App\Http\Controllers\BudgetController::class, 'submitForApproval']);
         Route::post('/import-materials', [App\Http\Controllers\BudgetController::class, 'importMaterials']);
         Route::get('/check-materials-update', [App\Http\Controllers\BudgetController::class, 'checkMaterialsUpdate']);
-        Route::get('/materials-preview', [App\Http\Controllers\BudgetController::class, 'getMaterialsPreview']);
         Route::get('/pdf', [App\Http\Controllers\BudgetController::class, 'downloadPdf']);
 
         // Budget versioning routes
@@ -407,10 +482,18 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Server-side scope → quote sync (creates/updates/removes material elements to match enquiry scope)
         Route::post('/sync-scope', [App\Http\Controllers\QuoteController::class, 'syncScope']);
 
+        // Excel quote upload (alternative path to the in-system builder)
+        Route::post('/upload-excel', [App\Http\Controllers\QuoteController::class, 'uploadExcelQuote']);
+        // Detect the workbook total without storing (pre-fills the amount field)
+        Route::post('/inspect-excel', [App\Http\Controllers\QuoteController::class, 'inspectExcelQuote']);
+        Route::delete('/excel', [App\Http\Controllers\QuoteController::class, 'removeExcelQuote']);
+
         // Quote versioning routes (standardized to match materials/budget pattern)
         Route::post('/versions', [App\Http\Controllers\QuoteController::class, 'createVersion']);
         Route::get('/versions', [App\Http\Controllers\QuoteController::class, 'getVersions']);
         Route::post('/versions/{versionId}/restore', [App\Http\Controllers\QuoteController::class, 'restoreVersion']);
+        Route::delete('/versions/{versionId}', [App\Http\Controllers\QuoteController::class, 'deleteVersion']);
+        Route::delete('/versions', [App\Http\Controllers\QuoteController::class, 'clearVersions']);
 
         // Legacy routes (keep for backward compatibility)
         Route::post('/version', [App\Http\Controllers\QuoteController::class, 'createVersion']);
@@ -420,6 +503,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Quote approval routes
     Route::prefix('projects/tasks/{taskId}/approval')->group(function () {
+        Route::get('/', [App\Http\Controllers\QuoteController::class, 'getApprovalData']);
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'saveApproval']);
     });
 
@@ -570,7 +654,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Task management routes
         Route::get('tasks', [TaskController::class, 'getDepartmentalTasks']);
         Route::get('tasks/{taskId}', [TaskController::class, 'show']);
-        Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus']);
+        Route::put('tasks/{taskId}/status', [TaskController::class, 'updateTaskStatus'])->middleware(\App\Http\Middleware\EnsureFinancialClearance::class);
         Route::put('tasks/{taskId}/assign', [TaskController::class, 'assignTask']);
         Route::put('tasks/{taskId}', [TaskController::class, 'update']);
         Route::get('enquiries/{enquiryId}/tasks', [TaskController::class, 'getEnquiryTasks']);
@@ -607,6 +691,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::put('enquiries/{enquiry}/deliverables', [EnquiryController::class, 'updateDeliverables']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
+        Route::get('enquiries/{enquiry}/workflow-state', [EnquiryController::class, 'workflowState']);
         Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
         Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
         Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
@@ -615,6 +700,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
         Route::get('enquiries/{enquiry}/completion-readiness', [EnquiryController::class, 'completionReadiness']);
         Route::post('enquiries/{enquiry}/complete', [EnquiryController::class, 'completeProject']);
+        Route::get('enquiries/{enquiry}/closure-readiness', [EnquiryController::class, 'closureReadiness']);
+        Route::post('enquiries/{enquiry}/close', [EnquiryController::class, 'closeProject']);
 
         // Available project officers for enquiry assignment
         Route::get('available-project-officers', function () {
@@ -647,6 +734,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Materials management
             Route::get('tasks/{taskId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsData']);
             Route::post('tasks/{taskId}/materials', [App\Http\Controllers\MaterialsController::class, 'saveMaterialsData']);
+            Route::get('tasks/{taskId}/materials/approved-quote-preview', [App\Http\Controllers\MaterialsController::class, 'previewApprovedQuoteImport']);
+            Route::post('tasks/{taskId}/materials/import-approved-quote', [App\Http\Controllers\MaterialsController::class, 'importApprovedQuote']);
             Route::get('enquiries/{enquiryId}/materials', [App\Http\Controllers\MaterialsController::class, 'getMaterialsByEnquiry']);
             Route::get('element-templates', [App\Http\Controllers\MaterialsController::class, 'getElementTemplates']);
             Route::post('element-templates', [App\Http\Controllers\MaterialsController::class, 'createElementTemplate']);
@@ -714,8 +803,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('top-ups', [PettyCashTopUpController::class, 'index']);
             Route::post('top-ups', [PettyCashTopUpController::class, 'store']);
             Route::put('top-ups/{id}', [PettyCashTopUpController::class, 'update']);
-            Route::get('top-ups/available', [PettyCashTopUpController::class, 'available'])
-                ->withoutMiddleware(['auth:sanctum']);
+            Route::get('top-ups/available', [PettyCashTopUpController::class, 'available']);
             Route::get('top-ups/{id}', [PettyCashTopUpController::class, 'show']);
             Route::get('top-ups/{id}/available-balance', [PettyCashTopUpController::class, 'availableBalance']);
             Route::delete('top-ups/{id}', [PettyCashTopUpController::class, 'destroy']);
@@ -726,6 +814,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('balance/check', [PettyCashTopUpController::class, 'checkBalance']);
             Route::post('balance/recalculate', [PettyCashController::class, 'recalculateBalance']);
 
+            Route::get('workspace', [PettyCashController::class, 'workspace']);
             Route::get('summary', [PettyCashController::class, 'summary']);
             Route::get('transactions', [PettyCashController::class, 'transactions']);
             Route::get('recent', [PettyCashController::class, 'recent']);

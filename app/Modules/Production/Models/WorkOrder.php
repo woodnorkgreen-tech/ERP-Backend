@@ -143,7 +143,7 @@ class WorkOrder extends Model
 
         $enquiry = $this->projectEnquiry;
         
-        if ($enquiry->status === EnquiryConstants::STATUS_COMPLETED) {
+        if (in_array($enquiry->status, [EnquiryConstants::STATUS_COMPLETED, EnquiryConstants::STATUS_CLOSED], true)) {
             return 'completed';
         }
         

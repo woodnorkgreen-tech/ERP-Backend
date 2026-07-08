@@ -39,6 +39,29 @@ class PermissionController
     }
 
     /**
+     * Display permissions grouped by module (the segment before the dot in the
+     * permission name, e.g. "user.create" -> "user"). Drives a grouped permission
+     * picker in the role editor instead of one flat list.
+     */
+    public function grouped(Request $request): JsonResponse
+    {
+        $groups = Permission::orderBy('name')->get()
+            ->groupBy(fn ($permission) => explode('.', $permission->name)[0] ?: 'general')
+            ->map(fn ($permissions, $module) => [
+                'module'      => $module,
+                'label'       => ucwords(str_replace('_', ' ', $module)),
+                'permissions' => $permissions->map(fn ($permission) => [
+                    'id'          => $permission->id,
+                    'name'        => $permission->name,
+                    'description' => \App\Constants\Permissions::getLabel($permission->name),
+                ])->values(),
+            ])
+            ->values();
+
+        return response()->json(['data' => $groups]);
+    }
+
+    /**
      * Display the specified permission.
      */
     public function show(Permission $permission): JsonResponse

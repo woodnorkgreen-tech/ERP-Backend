@@ -5,6 +5,7 @@ namespace App\Modules\ClientService\Services;
 use App\Modules\ClientService\Models\Client;
 use App\Models\ProjectEnquiry;
 use App\Models\PublicLead;
+use App\Constants\EnquiryConstants;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
@@ -44,6 +45,16 @@ class ClientServiceDashboardService
             })->count();
         $conversionRate = $totalEnquiries > 0 ? round(($convertedEnquiries / $totalEnquiries) * 100, 1) : 0;
 
+        // 4b. Active Leads (public leads not yet actioned/converted)
+        $activeLeadsCount = PublicLead::where('status', 'new')->count();
+
+        // 4c. Pending Feedback (completed projects with no submitted handover survey)
+        $pendingFeedbackCount = ProjectEnquiry::where('status', EnquiryConstants::STATUS_COMPLETED)
+            ->whereDoesntHave('enquiryTasks.handoverSurvey', function ($q) {
+                $q->where('submitted', true);
+            })
+            ->count();
+
         // 5. Lead Source Distribution
         $leadSources = Client::select('lead_source', DB::raw('count(*) as count'))
             ->whereNotNull('lead_source')
@@ -56,6 +67,8 @@ class ClientServiceDashboardService
         return [
             'total_clients' => $totalClients,
             'active_projects_count' => $activeProjectsCount,
+            'active_leads_count' => $activeLeadsCount,
+            'pending_feedback_count' => $pendingFeedbackCount,
             'new_enquiries_count' => $newEnquiriesCount,
             'conversion_rate' => $conversionRate,
             'total_enquiries' => $totalEnquiries,

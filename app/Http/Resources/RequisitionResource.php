@@ -71,6 +71,13 @@ class RequisitionResource extends JsonResource
                 return $this->items->map(function ($item) {
                     return [
                         'id' => $item->id,
+                        'project_enquiry_id' => $item->project_enquiry_id,
+                        'procurement_task_id' => $item->procurement_task_id,
+                        'budget_data_id' => $item->budget_data_id,
+                        'budget_element_id' => $item->budget_element_id,
+                        'budget_element_persistent_id' => $item->budget_element_persistent_id,
+                        'budget_item_id' => $item->budget_item_id,
+                        'budget_item_persistent_id' => $item->budget_item_persistent_id,
                         'material_id' => $item->material_id,
                         'custom_description' => $item->custom_description,
                         'material_name' => $item->material ? $item->material->material_name : $item->custom_description,
@@ -81,9 +88,11 @@ class RequisitionResource extends JsonResource
                         ] : null,
                         'quantity' => $item->quantity,
                         'unit_price' => (float) $item->unit_price,
+                        'internal_budget_unit_price' => $item->internal_budget_unit_price !== null ? (float) $item->internal_budget_unit_price : null,
                         'total' => (float) $item->total,
                         'purpose' => $item->purpose,
                         'reason' => $item->reason,
+                        'procurement_item_snapshot' => $item->procurement_item_snapshot,
                     ];
                 });
             }),

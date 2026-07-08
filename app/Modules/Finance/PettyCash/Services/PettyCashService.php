@@ -9,14 +9,18 @@ use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Exception;
+use App\Modules\Finance\PettyCash\Services\TopUpAllocator;
+use App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation;
 
 class PettyCashService
 {
     protected $repository;
+    protected ProjectIdentityResolver $projectIdentityResolver;
 
-    public function __construct(PettyCashRepository $repository)
+    public function __construct(PettyCashRepository $repository, ?ProjectIdentityResolver $projectIdentityResolver = null)
     {
         $this->repository = $repository;
+        $this->projectIdentityResolver = $projectIdentityResolver ?? new ProjectIdentityResolver();
     }
 
     /**
@@ -24,54 +28,36 @@ class PettyCashService
      */
     public function createTopUp(array $data): PettyCashTopUp
     {
-        DB::beginTransaction();
-
         try {
-            // Row-level lock the balance record
-            $balance = PettyCashBalance::where('id', 1)->lockForUpdate()->first();
-            if (!$balance) {
-                $balance = PettyCashBalance::create(['id' => 1, 'current_balance' => 0.00]);
-            }
+            return DB::transaction(function () use ($data) {
+                // Row-level lock the balance record
+                $balance = PettyCashBalance::where('id', 1)->lockForUpdate()->first();
+                if (!$balance) {
+                    $balance = PettyCashBalance::create(['id' => 1, 'current_balance' => 0.00]);
+                }
 
-            $data['previous_balance'] = (float)$balance->current_balance;
-            
-            // Add creator information
-            $data['created_by'] = Auth::id();
+                $data['previous_balance'] = (float)$balance->current_balance;
 
-            // Create the top-up (balance will be updated automatically via model events)
-            $topUp = $this->repository->createTopUp($data);
+                // Add creator information
+                $data['created_by'] = Auth::id();
 
-            // Refresh balance
-            $balance->refresh();
+                $topUp = $this->repository->createTopUp($data);
 
-            // Post Ledger Credit entry
-            DB::table('petty_cash_ledger_entries')->insert([
-                'reference_number' => 'TOP-' . str_pad($topUp->id, 6, '0', STR_PAD_LEFT),
-                'type' => 'credit',
-                'amount' => $topUp->amount,
-                'balance_snapshot' => $balance->current_balance,
-                'metadata' => json_encode([
-                    'payment_method' => $topUp->payment_method ?? 'cash',
-                    'transaction_code' => $topUp->transaction_code ?? null,
-                    'description' => $topUp->description ?? 'Top Up',
-                    'created_by' => $topUp->created_by ?? null,
-                ]),
-                'posted_at' => $topUp->date_topped_up ?? now(),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+                $ledger = new LedgerService();
+                $ledger->post(LedgerEntry::creditForTopUp($topUp));
 
-            // Log activity
-            $this->logActivity('created', 'top_up', $topUp->id, "Top-up of KES " . number_format($topUp->amount, 2) . " created", [
-                'amount' => $topUp->amount,
-                'payment_method' => $topUp->payment_method
-            ]);
+                // Refresh balance
+                $balance->refresh();
 
-            DB::commit();
+                // Log activity
+                $this->logActivity('created', 'top_up', $topUp->id, "Top-up of KES " . number_format($topUp->amount, 2) . " created", [
+                    'amount' => $topUp->amount,
+                    'payment_method' => $topUp->payment_method
+                ]);
 
-            return $topUp;
+                return $topUp;
+            });
         } catch (Exception $e) {
-            DB::rollBack();
             throw new Exception('Failed to create top-up: ' . $e->getMessage());
         }
     }
@@ -89,13 +75,25 @@ class PettyCashService
 
             // Update the top-up
             $this->repository->updateTopUp($topUp, $data);
+            $updatedTopUp = $topUp->fresh();
 
-            // If amount changed, we might need a global balance recalculation 
-            // to ensure all subsequent transaction previous_balance fields are correct.
-            // Model events usually handle the current balance record, but historical sync 
-            // is better served by a full recalculation if amount changes.
             if ($oldAmount !== $newAmount) {
-                $this->recalculateBalance();
+                $difference = $newAmount - $oldAmount;
+                $entry = LedgerEntry::custom(
+                    'TOP-' . str_pad((string)$topUp->id, 6, '0', STR_PAD_LEFT) . '-ADJ-' . now()->timestamp,
+                    $difference > 0 ? 'credit' : 'debit',
+                    number_format(abs($difference), 2, '.', ''),
+                    [
+                        'payment_method' => $updatedTopUp->payment_method,
+                        'description' => $updatedTopUp->description,
+                        'note' => 'Top-up amount adjusted',
+                        'old_amount' => $oldAmount,
+                        'new_amount' => $newAmount,
+                    ]
+                );
+                $entry->sourceType = 'top_up';
+                $entry->sourceId = $topUp->id;
+                (new LedgerService())->post($entry);
             }
 
             // Log activity
@@ -107,7 +105,7 @@ class PettyCashService
 
             DB::commit();
 
-            return $topUp->fresh();
+            return $updatedTopUp;
         } catch (Exception $e) {
             DB::rollBack();
             throw new Exception('Failed to update top-up: ' . $e->getMessage());
@@ -119,126 +117,127 @@ class PettyCashService
      */
     public function createDisbursement(array $data): array
     {
-        DB::beginTransaction();
-
         try {
-            // Row-level lock the balance record
-            $balance = PettyCashBalance::where('id', 1)->lockForUpdate()->first();
-            if (!$balance) {
-                $balance = PettyCashBalance::create(['id' => 1, 'current_balance' => 0.00]);
-            }
+            return DB::transaction(function () use ($data) {
+                $data = $this->projectIdentityResolver->resolve($data);
 
-            $totalToDeduct = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
-
-            // Validate balance before creating disbursement (unless skipped)
-            if (!($data['skip_balance_check'] ?? false)) {
-                if ($balance->current_balance < $totalToDeduct) {
-                    return [
-                        'success' => false,
-                        'errors' => [
-                            'amount' => ["Insufficient balance. Current balance: KES " . number_format($balance->current_balance, 2) . ", Required (Amount + Cost): KES " . number_format($totalToDeduct, 2)]
-                        ]
-                    ];
-                }
-            }
-
-            // Remove internal flag before saving
-            unset($data['skip_balance_check']);
-
-            // Add creator information if not provided
-            if (!isset($data['created_by'])) {
-                $data['created_by'] = Auth::id();
-            }
-            $data['status'] = 'active';
-
-            // Auto-assign top_up_id if not provided
-            if (empty($data['top_up_id'])) {
-                // Try to find a top-up that covers the whole amount first
-                $topUp = $this->repository->getTopUpsWithAvailableBalance()
-                    ->filter(function ($t) use ($data) {
-                        $required = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
-                        return $t->remaining_balance >= $required;
-                    })
-                    ->first();
-
-                // If none covers it fully, pick the most recent one with any balance (anchor)
-                if (!$topUp) {
-                    $topUp = $this->repository->getTopUpsWithAvailableBalance()->first();
+                // Row-level lock the balance record
+                $balance = PettyCashBalance::where('id', 1)->lockForUpdate()->first();
+                if (!$balance) {
+                    $balance = PettyCashBalance::create(['id' => 1, 'current_balance' => 0.00]);
                 }
 
-                // SIMPLIFIED SYNC: As a final fallback, just pick the latest active top-up 
-                if (!$topUp) {
-                    $topUp = \App\Modules\Finance\PettyCash\Models\PettyCashTopUp::notArchived()->latest()->first();
+                $totalToDeduct = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
+
+                // Validate balance before creating disbursement (unless skipped)
+                if (!($data['skip_balance_check'] ?? false)) {
+                    if ($balance->current_balance < $totalToDeduct) {
+                        return [
+                            'success' => false,
+                            'errors' => [
+                                'amount' => ["Insufficient balance. Current balance: KES " . number_format($balance->current_balance, 2) . ", Required (Amount + Cost): KES " . number_format($totalToDeduct, 2)]
+                            ]
+                        ];
+                    }
                 }
 
-                if (!$topUp) {
-                    return [
-                        'success' => false,
-                        'errors' => [
-                            'amount' => ["No available petty cash funds found. Please add a top-up first."]
-                        ]
-                    ];
+                // Remove internal flag before saving
+                unset($data['skip_balance_check']);
+
+                // Add creator information if not provided
+                if (!isset($data['created_by'])) {
+                    $data['created_by'] = Auth::id();
                 }
-                $data['top_up_id'] = $topUp->id;
-            }
+                $data['status'] = 'active';
+                $plannedAllocations = [];
 
-            // Create the disbursement (balance is updated automatically via model events)
-            $disbursement = $this->repository->createDisbursement($data);
+                // Auto-assign top_up_id if not provided using FIFO allocator (may split across top-ups)
+                if (empty($data['top_up_id'])) {
+                    $allocator = new TopUpAllocator($this->repository);
+                    try {
+                        $allocations = $allocator->plan((float)$data['amount'], (float)($data['transaction_cost'] ?? 0));
+                    } catch (Exception $e) {
+                        return [
+                            'success' => false,
+                            'errors' => ['amount' => [$e->getMessage()]]
+                        ];
+                    }
 
-            // Refresh balance
-            $balance->refresh();
+                    // If single allocation, set top_up_id directly, otherwise we'll persist allocations after creating the disbursement
+                    if (count($allocations) === 1) {
+                        $data['top_up_id'] = $allocations[0]['top_up_id'];
+                    } else {
+                        // assign first top-up as primary pointer
+                        $data['top_up_id'] = $allocations[0]['top_up_id'];
+                        // remember planned allocations to persist after creating disbursement
+                        $plannedAllocations = $allocations;
+                    }
+                } else {
+                    $topUp = $this->repository->findTopUp((int) $data['top_up_id']);
+                    if (!$topUp) {
+                        return [
+                            'success' => false,
+                            'errors' => ['top_up_id' => ['Selected top-up does not exist.']]
+                        ];
+                    }
 
-            // Post Ledger Debit entry
-            DB::table('petty_cash_ledger_entries')->insert([
-                'reference_number' => 'PCR-' . str_pad($disbursement->id, 6, '0', STR_PAD_LEFT),
-                'type' => 'debit',
-                'amount' => $totalToDeduct,
-                'balance_snapshot' => $balance->current_balance,
-                'metadata' => json_encode([
-                    'amount' => (float)$disbursement->amount,
+                    $availableBalance = (float) $topUp->remaining_balance;
+                    if ($availableBalance < $totalToDeduct) {
+                        return [
+                            'success' => false,
+                            'errors' => [
+                                'amount' => [
+                                    'Selected top-up has insufficient balance. Available: KES ' .
+                                    number_format($availableBalance, 2) .
+                                    ', Required (Amount + Cost): KES ' .
+                                    number_format($totalToDeduct, 2)
+                                ]
+                            ]
+                        ];
+                    }
+                }
+
+                $disbursement = $this->repository->createDisbursement($data);
+
+                // If we planned a split across multiple top-ups, persist allocation records
+                if (!empty($plannedAllocations) && is_array($plannedAllocations) && count($plannedAllocations) > 1) {
+                    foreach ($plannedAllocations as $alloc) {
+                        PettyCashDisbursementAllocation::create([
+                            'disbursement_id' => $disbursement->id,
+                            'top_up_id' => $alloc['top_up_id'],
+                            'amount' => $alloc['amount'],
+                            'transaction_cost' => $alloc['transaction_cost'] ?? '0.00',
+                        ]);
+                    }
+                }
+
+                $ledger = new LedgerService();
+                $ledger->post(LedgerEntry::debitForDisbursement($disbursement));
+
+                // Refresh balance
+                $balance->refresh();
+
+                // If this disbursement is linked to a requisition, update the requisition status
+                if (!empty($data['requisition_id'])) {
+                    $this->syncRequisitionStatus((int)$data['requisition_id'], 'disbursed');
+
+                    // PHASE 2: Handle Bill Link
+                    $requisition = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::find($data['requisition_id']);
+                    if ($requisition && $requisition->bill_id) {
+                        $this->createBillPaymentFromDisbursement($requisition, $disbursement);
+                    }
+                }
+
+                // Log activity
+                $this->logActivity('created', 'disbursement', $disbursement->id, "Disbursement of KES " . number_format($disbursement->amount, 2) . " to " . $disbursement->receiver, [
+                    'amount' => $disbursement->amount,
                     'receiver' => $disbursement->receiver,
-                    'account' => $disbursement->account,
-                    'description' => $disbursement->description,
-                    'classification' => $disbursement->classification,
-                    'payment_method' => $disbursement->payment_method,
-                    'transaction_code' => $disbursement->transaction_code,
-                    'transaction_cost' => (float)($disbursement->transaction_cost ?? 0),
-                    'budget_category' => $disbursement->budget_category ?? null,
-                    'created_by' => $disbursement->created_by ?? null,
-                    'project_name' => $disbursement->project_name ?? null,
-                    'venue' => $disbursement->venue ?? null,
-                    'job_number' => $disbursement->job_number ?? null,
-                    'requisition_id' => $disbursement->requisition_id ?? null,
-                    'status' => $disbursement->status ?? 'active',
-                ]),
-                'posted_at' => $disbursement->date_disbursed ?? now(),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+                    'top_up_id' => $disbursement->top_up_id
+                ]);
 
-            // If this disbursement is linked to a requisition, update the requisition status
-            if (!empty($data['requisition_id'])) {
-                $this->syncRequisitionStatus((int)$data['requisition_id'], 'disbursed');
-                
-                // PHASE 2: Handle Bill Link
-                $requisition = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::find($data['requisition_id']);
-                if ($requisition && $requisition->bill_id) {
-                    $this->createBillPaymentFromDisbursement($requisition, $disbursement);
-                }
-            }
-
-            // Log activity
-            $this->logActivity('created', 'disbursement', $disbursement->id, "Disbursement of KES " . number_format($disbursement->amount, 2) . " to " . $disbursement->receiver, [
-                'amount' => $disbursement->amount,
-                'receiver' => $disbursement->receiver,
-                'top_up_id' => $disbursement->top_up_id
-            ]);
-
-            DB::commit();
-
-            return ['success' => true, 'data' => $disbursement];
+                return ['success' => true, 'data' => $disbursement];
+            });
         } catch (Exception $e) {
-            DB::rollBack();
             throw new Exception('Failed to create disbursement: ' . $e->getMessage());
         }
     }
@@ -293,33 +292,29 @@ class PettyCashService
 
             // Row-level lock the balance record
             $balance = PettyCashBalance::where('id', 1)->lockForUpdate()->first();
+            if (!$balance) {
+                $balance = PettyCashBalance::create(['id' => 1, 'current_balance' => 0.00]);
+            }
 
-            // Void the disbursement (balance will be updated automatically via model events)
             $result = $this->repository->voidDisbursement($disbursement, Auth::id(), $reason);
+
+            $totalRefunded = bcadd((string)$disbursement->amount, (string)($disbursement->transaction_cost ?? '0'), 2);
+            $ledger = new LedgerService();
+            $entry = LedgerEntry::custom('PCR-' . str_pad((string)$disbursement->id, 6, '0', STR_PAD_LEFT) . '-VOID', 'credit', number_format($totalRefunded, 2, '.', ''), [
+                'amount' => (float)$disbursement->amount,
+                'transaction_cost' => (float)($disbursement->transaction_cost ?? 0),
+                'receiver' => $disbursement->receiver,
+                'account' => $disbursement->account,
+                'description' => $disbursement->description,
+                'note' => 'Disbursement voided',
+                'reason' => $reason,
+            ]);
+            $entry->sourceType = 'disbursement';
+            $entry->sourceId = $disbursement->id;
+            $ledger->post($entry);
 
             // Refresh balance
             $balance->refresh();
-
-            $totalRefunded = (float)$disbursement->amount + (float)($disbursement->transaction_cost ?? 0);
-
-            // Post Ledger Offset Reversal (credit) entry
-            DB::table('petty_cash_ledger_entries')->insert([
-                'reference_number' => 'VOID-' . str_pad($disbursement->id, 6, '0', STR_PAD_LEFT),
-                'type' => 'credit',
-                'amount' => $totalRefunded,
-                'balance_snapshot' => $balance->current_balance,
-                'metadata' => json_encode([
-                    'payment_method' => $disbursement->payment_method ?? 'cash',
-                    'transaction_code' => $disbursement->transaction_code ?? null,
-                    'description' => "Void Reversal: " . $reason,
-                    'disbursement_id' => $disbursement->id,
-                    'voided_by' => Auth::id(),
-                    'reason' => $reason,
-                ]),
-                'posted_at' => now(),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
 
             // Sync requisition status if linked
             if ($disbursement->requisition_id) {
@@ -363,31 +358,33 @@ class PettyCashService
         DB::beginTransaction();
 
         try {
-            // Delete all disbursements first
+            // Delete all dependent allocations first
+            $allocationCount = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation::count();
+            \App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation::query()->delete();
+
+            // Delete all disbursements and top-ups
             $disbursementsCount = PettyCashDisbursement::count();
             PettyCashDisbursement::query()->delete();
 
-            // Delete all top-ups
             $topUpsCount = PettyCashTopUp::count();
             PettyCashTopUp::query()->delete();
 
-            // Reset balance
-            $balance = $this->repository->getCurrentBalance();
-            $balance->current_balance = 0.00;
-            $balance->last_transaction_id = null;
-            $balance->last_transaction_type = null;
-            $balance->save();
+            // Delete ledger history and rebuild balance projection from the remaining ledger (none)
+            DB::table('petty_cash_ledger_entries')->delete();
+            $ledger = new LedgerService();
+            $ledger->rebuildFromLedger();
 
             // Log activity
-            $this->logActivity('cleared', null, null, "All petty cash data cleared. Deleted {$topUpsCount} top-ups and {$disbursementsCount} disbursements.");
+            $this->logActivity('cleared', null, null, "All petty cash data cleared. Deleted {$topUpsCount} top-ups, {$disbursementsCount} disbursements, and {$allocationCount} allocations.");
 
             DB::commit();
 
             return [
                 'success' => true,
+                'allocations_deleted' => $allocationCount,
                 'disbursements_deleted' => $disbursementsCount,
                 'top_ups_deleted' => $topUpsCount,
-                'message' => 'All petty cash data has been cleared and balance reset to zero.'
+                'message' => 'All petty cash data has been cleared and balance reset to zero via ledger rebuild.'
             ];
         } catch (Exception $e) {
             DB::rollBack();
@@ -484,8 +481,9 @@ class PettyCashService
         try {
             $balance = $this->repository->getCurrentBalance();
             $oldBalance = $balance->getCurrentBalance();
-            
-            $balance->recalculateBalance();
+
+            $ledger = new LedgerService();
+            $balance = $ledger->rebuildFromLedger();
             $newBalance = $balance->getCurrentBalance();
             
             // Log activity
@@ -560,8 +558,12 @@ class PettyCashService
                 }
                 
                 if ($availableBalance < $requestedTotal && !$isUpdate) {
-                     // During creation, we are stricter IF they manually selected a top-up
-                     // However, we still check global balance in the service
+                    $errors['amount'] = [
+                        'Selected top-up has insufficient balance. Available: KES ' .
+                        number_format((float) $availableBalance, 2) .
+                        ', Required (Amount + Cost): KES ' .
+                        number_format((float) $requestedTotal, 2)
+                    ];
                 }
             }
         }
@@ -632,11 +634,21 @@ class PettyCashService
      */
     public function archiveDisbursement(\App\Modules\Finance\PettyCash\Models\PettyCashDisbursement $disbursement): bool
     {
-        $result = $this->repository->archiveDisbursement($disbursement, Auth::id());
-        if ($result) {
-            $this->logActivity('archived', 'disbursement', $disbursement->id, "Disbursement archived");
+        DB::beginTransaction();
+
+        try {
+            $result = $this->repository->archiveDisbursement($disbursement, Auth::id());
+
+            if ($result) {
+                $this->logActivity('archived', 'disbursement', $disbursement->id, "Disbursement archived");
+            }
+
+            DB::commit();
+            return $result;
+        } catch (Exception $e) {
+            DB::rollBack();
+            throw new Exception('Failed to archive disbursement: ' . $e->getMessage());
         }
-        return $result;
     }
 
     /**
@@ -656,11 +668,21 @@ class PettyCashService
      */
     public function archiveTopUp(\App\Modules\Finance\PettyCash\Models\PettyCashTopUp $topUp): bool
     {
-        $result = $this->repository->archiveTopUp($topUp, Auth::id());
-        if ($result) {
-            $this->logActivity('archived', 'top_up', $topUp->id, "Top-up archived");
+        DB::beginTransaction();
+
+        try {
+            $result = $this->repository->archiveTopUp($topUp, Auth::id());
+
+            if ($result) {
+                $this->logActivity('archived', 'top_up', $topUp->id, "Top-up archived");
+            }
+
+            DB::commit();
+            return $result;
+        } catch (Exception $e) {
+            DB::rollBack();
+            throw new Exception('Failed to archive top-up: ' . $e->getMessage());
         }
-        return $result;
     }
 
     /**

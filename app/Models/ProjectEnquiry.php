@@ -51,6 +51,8 @@ class ProjectEnquiry extends Model
         'current_phase',
         'assigned_users',
         'client_approved_quote',
+        'finance_released',
+        'finance_released_at',
     ];
 
     protected $casts = [
@@ -70,6 +72,8 @@ class ProjectEnquiry extends Model
         'current_phase' => 'integer',
         'job_number' => 'string',
         'client_approved_quote' => 'decimal:2',
+        'finance_released' => 'boolean',
+        'finance_released_at' => 'datetime',
     ];
 
     public function client(): BelongsTo

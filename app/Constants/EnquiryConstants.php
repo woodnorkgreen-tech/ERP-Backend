@@ -21,6 +21,7 @@ class EnquiryConstants
     const STATUS_PLANNING = 'planning';
     const STATUS_IN_PROGRESS = 'in_progress';
     const STATUS_COMPLETED = 'completed';
+    const STATUS_CLOSED = 'closed';
     const STATUS_CANCELLED = 'cancelled';
 
     // Enquiry Priorities
@@ -51,20 +52,24 @@ class EnquiryConstants
         'Production' => ['materials', 'teams', 'production', 'budget'],
     ];
 
-    // Mapping of enquiry statuses to the tasks required to achieve them
+    // Mapping of enquiry statuses to the tasks required to achieve them.
+    // ORDER IS CRITICAL — SyncEnquiryStatusAction breaks on the first match,
+    // so statuses must be ordered highest milestone first.
     const ENQUIRY_STATUS_REQUISITES = [
-        self::STATUS_QUOTE_APPROVED => ['quote_approval'],
-        self::STATUS_QUOTE_PREPARED => ['quote'],
-        self::STATUS_BUDGET_CREATED => ['budget'],
-        self::STATUS_MATERIALS_SPECIFIED => ['materials'],
-        self::STATUS_DESIGN_COMPLETED => ['design'],
+        self::STATUS_QUOTE_APPROVED        => ['quote_approval'],
+        self::STATUS_QUOTE_PREPARED        => ['quote'],
+        self::STATUS_DESIGN_COMPLETED      => ['design'],
         self::STATUS_SITE_SURVEY_COMPLETED => ['site-survey'],
+        self::STATUS_MATERIALS_SPECIFIED   => ['materials'],
+        self::STATUS_BUDGET_CREATED        => ['budget'],
     ];
 
-    // Closure-phase task types that must be completed (or skipped) before a project
-    // can transition to STATUS_COMPLETED. Only tasks actually selected for the project
-    // are evaluated — unselected closure tasks do not block completion.
-    const PROJECT_COMPLETION_REQUISITES = ['report'];
+    // Closure-phase task types that must be completed before a completed project
+    // can transition to STATUS_CLOSED.
+    const PROJECT_CLOSURE_REQUISITES = ['handover', 'report'];
+
+    // Backwards-compatible alias for older completion-readiness callers.
+    const PROJECT_COMPLETION_REQUISITES = self::PROJECT_CLOSURE_REQUISITES;
 
     // Enquiry number prefix
     const ENQUIRY_PREFIX = 'ENQ';
@@ -90,14 +95,15 @@ class EnquiryConstants
             self::STATUS_SITE_SURVEY_COMPLETED,
             self::STATUS_DESIGN_COMPLETED,
             self::STATUS_DESIGN_APPROVED,
-            self::STATUS_MATERIALS_SPECIFIED,
-            self::STATUS_BUDGET_CREATED,
             self::STATUS_QUOTE_PREPARED,
             self::STATUS_QUOTE_APPROVED,
+            self::STATUS_MATERIALS_SPECIFIED,
+            self::STATUS_BUDGET_CREATED,
             self::STATUS_AWAITING_DEPOSIT,
             self::STATUS_PLANNING,
             self::STATUS_IN_PROGRESS,
             self::STATUS_COMPLETED,
+            self::STATUS_CLOSED,
             self::STATUS_CANCELLED,
         ];
     }
@@ -128,10 +134,10 @@ class EnquiryConstants
             self::STATUS_SITE_SURVEY_COMPLETED,
             self::STATUS_DESIGN_COMPLETED,
             self::STATUS_DESIGN_APPROVED,
-            self::STATUS_MATERIALS_SPECIFIED,
-            self::STATUS_BUDGET_CREATED,
             self::STATUS_QUOTE_PREPARED,
             self::STATUS_QUOTE_APPROVED,
+            self::STATUS_MATERIALS_SPECIFIED,
+            self::STATUS_BUDGET_CREATED,
             self::STATUS_AWAITING_DEPOSIT,
             self::STATUS_PLANNING,
             self::STATUS_IN_PROGRESS,
@@ -148,15 +154,13 @@ class EnquiryConstants
         ];
     }
 
-    /** Pipeline: post-logging, pre-quote-approval */
+    /** Pipeline: post-logging, before the client-approved quote boundary */
     public static function getInProgressEnquiryStatuses(): array
     {
         return [
             self::STATUS_SITE_SURVEY_COMPLETED,
             self::STATUS_DESIGN_COMPLETED,
             self::STATUS_DESIGN_APPROVED,
-            self::STATUS_MATERIALS_SPECIFIED,
-            self::STATUS_BUDGET_CREATED,
             self::STATUS_QUOTE_PREPARED,
         ];
     }
@@ -175,6 +179,11 @@ class EnquiryConstants
         return [self::STATUS_COMPLETED];
     }
 
+    public static function getFormallyClosedStatuses(): array
+    {
+        return [self::STATUS_CLOSED];
+    }
+
     public static function getCancelledStatuses(): array
     {
         return [self::STATUS_CANCELLED];
@@ -182,6 +191,6 @@ class EnquiryConstants
 
     public static function getClosedStatuses(): array
     {
-        return [self::STATUS_COMPLETED, self::STATUS_CANCELLED];
+        return [self::STATUS_CLOSED, self::STATUS_CANCELLED];
     }
 }
