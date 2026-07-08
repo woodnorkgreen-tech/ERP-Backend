@@ -8,6 +8,7 @@ use App\Models\QuoteVersion;
 use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Routing\Controller;
 
@@ -73,8 +74,10 @@ class QuoteController extends Controller
             'vatPercentage'          => 'numeric|min:0|max:100',
             'vatEnabled'             => 'boolean',
             'totals'                 => 'required|array',
-            // status is optional — the frontend does not always include it
-            'status'                 => 'nullable|in:draft,pending,approved,rejected',
+            // status is optional — the frontend does not always include it.
+            // Approval states (approved/rejected) are never client-settable here;
+            // they are only written by the approval endpoints.
+            'status'                 => 'nullable|in:draft,pending',
             'viewerSettings'         => 'nullable|array',
             // Margin governance audit trail
             'justification'          => 'nullable|string|max:2000',
@@ -91,6 +94,11 @@ class QuoteController extends Controller
         try {
             // Preserve existing status unless the caller explicitly sends a new one
             $existing = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+
+            if ($locked = $this->approvedQuoteLockResponse($existing)) {
+                return $locked;
+            }
+
             $status   = $request->status ?? $existing?->status ?? 'draft';
 
             $quoteData = TaskQuoteData::updateOrCreate(
@@ -201,6 +209,11 @@ class QuoteController extends Controller
 
              // Create or update quote with imported data
              $existingQuote = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+
+             if ($locked = $this->approvedQuoteLockResponse($existingQuote)) {
+                 return $locked;
+             }
+
              if ($existingQuote) {
                  \Log::info("Merging new budget into existing quote {$existingQuote->id}");
                  
@@ -222,7 +235,13 @@ class QuoteController extends Controller
                  $tempQuoteData['expenses'] = $mergedExpenses;
                  $tempQuoteData['logistics'] = $mergedLogistics;
 
-                 $totals = $this->recalculateTotals($tempQuoteData, $margins);
+                 $totals = $this->recalculateTotals(
+                     $tempQuoteData,
+                     $margins,
+                     (float) ($existingQuote->discount_amount ?? 0),
+                     $existingQuote->vat_percentage !== null ? (float) $existingQuote->vat_percentage : null,
+                     (bool) ($existingQuote->vat_enabled ?? true)
+                 );
                  
                  $existingQuote->update([
                      'project_info' => $budgetData->project_info,
@@ -427,6 +446,10 @@ class QuoteController extends Controller
                 return response()->json(['message' => 'Quote not found'], 404);
             }
 
+            if ($locked = $this->approvedQuoteLockResponse($quoteData)) {
+                return $locked;
+            }
+
             $task = EnquiryTask::find($taskId);
             $budgetTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)->where('type', 'budget')->first();
             if (!$budgetTask) {
@@ -473,7 +496,13 @@ class QuoteController extends Controller
             $newQuoteData['expenses'] = $mergedExpenses;
             $newQuoteData['logistics'] = $mergedLogistics;
 
-            $totals = $this->recalculateTotals($newQuoteData, $margins);
+            $totals = $this->recalculateTotals(
+                $newQuoteData,
+                $margins,
+                (float) ($quoteData->discount_amount ?? 0),
+                $quoteData->vat_percentage !== null ? (float) $quoteData->vat_percentage : null,
+                (bool) ($quoteData->vat_enabled ?? true)
+            );
 
             $quoteData->update([
                 'materials' => $mergedMaterials,
@@ -662,8 +691,13 @@ class QuoteController extends Controller
     /**
      * Recalculate totals with current margins
      */
-    private function recalculateTotals(array $quoteData, array $margins): array
-    {
+    private function recalculateTotals(
+        array $quoteData,
+        array $margins,
+        float $discountAmount = 0,
+        ?float $vatPercentage = null,
+        bool $vatEnabled = true
+    ): array {
         $materialsBase = array_sum(array_column($quoteData['materials'], 'baseTotal'));
         $materialsMargin = array_sum(array_column($quoteData['materials'], 'marginAmount'));
         $materialsTotal = array_sum(array_column($quoteData['materials'], 'finalTotal'));
@@ -681,8 +715,10 @@ class QuoteController extends Controller
         $logisticsTotal = array_sum(array_column($quoteData['logistics'], 'finalPrice'));
 
         $subtotal = $materialsTotal + $labourTotal + $expensesTotal + $logisticsTotal;
-        $totalAfterDiscount = $subtotal;
-        $vatAmount = $totalAfterDiscount * 0.16;
+        $discount = min(max($discountAmount, 0), $subtotal);
+        $totalAfterDiscount = $subtotal - $discount;
+        $vatPct = $vatEnabled ? ($vatPercentage ?? 16) : 0;
+        $vatAmount = $totalAfterDiscount * ($vatPct / 100);
         $grandTotal = $totalAfterDiscount + $vatAmount;
 
         return [
@@ -699,9 +735,9 @@ class QuoteController extends Controller
             'logisticsMargin' => round($logisticsMargin, 2),
             'logisticsTotal' => round($logisticsTotal, 2),
             'subtotal' => round($subtotal, 2),
-            'discountAmount' => 0,
+            'discountAmount' => round($discount, 2),
             'totalAfterDiscount' => round($totalAfterDiscount, 2),
-            'vatPercentage' => 16,
+            'vatPercentage' => $vatPct,
             'vatAmount' => round($vatAmount, 2),
             'grandTotal' => round($grandTotal, 2),
             'totalMargin' => round($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin, 2),
@@ -734,11 +770,11 @@ class QuoteController extends Controller
             }
         }
 
-        // If not found in main budget, check ALL budget additions (approved and draft)
-        // We check draft too because the user might have updated the price but not approved yet
+        // If not found in main budget, check APPROVED budget additions only.
+        // Draft additions are unapproved cost data and must not price a quote.
         $additions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
             ->where('source_type', 'materials_additional')
-            ->whereIn('status', ['approved', 'draft']) // Include draft to get latest prices
+            ->where('status', 'approved')
             ->orderBy('updated_at', 'desc') // Get most recent first
             ->get();
 
@@ -1168,8 +1204,18 @@ class QuoteController extends Controller
             // Decode quote data
             $quoteData = json_decode($approval->quote_data, true);
 
+            // Fresh financial context for the decision screen: budget baseline,
+            // implied margin, and the 70% mobilization amount — recomputed now,
+            // not at upload time, so a revised budget is reflected.
+            $task->loadMissing('enquiry');
+            $financialContext = ($task->enquiry && $approval->quote_amount)
+                ? app(\App\Modules\Projects\Services\QuoteInsightsService::class)
+                    ->budgetComparison($task->enquiry, (float) $approval->quote_amount)
+                : null;
+
             return response()->json([
                 'data' => [
+                    'financialContext' => $financialContext,
                     'approvalStatus' => $approval->approval_status,
                     'approvedBy' => $approval->approved_by,
                     'approvalDate' => $approval->approval_date,
@@ -1209,11 +1255,17 @@ class QuoteController extends Controller
             'approval_status' => 'required|in:approved,rejected,pending',
             'rejection_reason' => 'nullable|string|max:1000',
             'comments' => 'nullable|string|max:1000',
-            'approval_date' => 'required|date',
-            'approved_by' => 'required|string|max:255',
+            // approved_by / approval_date are server-set from the authenticated
+            // user; client-sent values are accepted for compatibility but ignored.
+            'approval_date' => 'nullable|date',
+            'approved_by' => 'nullable|string|max:255',
             'quote_amount' => 'required|numeric|min:0',
             'quote_data' => 'required|array'
         ]);
+
+        if ($denied = $this->approvalPermissionDeniedResponse($request)) {
+            return $denied;
+        }
 
         if ($validator->fails()) {
             \Log::error("Quote approval validation failed", [
@@ -1240,14 +1292,18 @@ class QuoteController extends Controller
                 'current_status' => $task->status
             ]);
 
-            // Create or update approval record
+            // Create or update approval record. Approver identity and date come
+            // from the authenticated session, never from the request body.
+            $approvedBy   = $request->user()->name;
+            $approvalDate = now();
+
             $approval = \DB::table('quote_approvals')->updateOrInsert(
                 ['task_id' => $taskId],
                 [
                     'enquiry_id' => $task->project_enquiry_id,
                     'approval_status' => $request->approval_status,
-                    'approved_by' => $request->approved_by,
-                    'approval_date' => $request->approval_date,
+                    'approved_by' => $approvedBy,
+                    'approval_date' => $approvalDate,
                     'rejection_reason' => $request->rejection_reason,
                     'comments' => $request->comments,
                     'quote_amount' => $request->quote_amount,
@@ -1280,7 +1336,7 @@ class QuoteController extends Controller
                 'task_id' => $taskId,
                 'enquiry_id' => $task->project_enquiry_id,
                 'status' => $request->approval_status,
-                'approved_by' => $request->approved_by,
+                'approved_by' => $approvedBy,
                 'amount' => $request->quote_amount
             ]);
 
@@ -1289,8 +1345,8 @@ class QuoteController extends Controller
                 'data' => [
                     'approval_status' => $request->approval_status,
                     'task_status' => $task->status,
-                    'approved_by' => $request->approved_by,
-                    'approval_date' => $request->approval_date
+                    'approved_by' => $approvedBy,
+                    'approval_date' => $approvalDate->toISOString()
                 ]
             ]);
 
@@ -1325,6 +1381,10 @@ class QuoteController extends Controller
             $task = EnquiryTask::with('enquiry.deliverables')->find($taskId);
             if (!$task) {
                 return response()->json(['message' => 'Task not found'], 404);
+            }
+
+            if ($locked = $this->approvedQuoteLockResponse(TaskQuoteData::where('enquiry_task_id', $taskId)->first())) {
+                return $locked;
             }
 
             $enquiry   = $task->enquiry;
@@ -1552,13 +1612,19 @@ class QuoteController extends Controller
             ->with('creator')
             ->orderBy('version_number', 'desc')
             ->get()
-            ->map(function ($version) {
+            ->map(function ($version) use ($taskId) {
                 return [
-                    'id' => $version->id,
-                    'version_number' => $version->version_number,
-                    'label' => $version->label,
-                    'created_at' => $version->created_at,
-                    'created_by_name' => $version->creator->name ?? 'Unknown'
+                    'id'              => $version->id,
+                    'version_number'  => $version->version_number,
+                    'label'           => $version->label,
+                    'created_at'      => $version->created_at,
+                    'created_by_name' => $version->creator->name ?? 'Unknown',
+                    'file_url'        => isset($version->data['excel_quote_file'])
+                        ? $this->excelQuoteSignedUrl((int) $taskId, $version->id)
+                        : ($version->data['file_url'] ?? null),
+                    'amount'          => $version->data['excel_quote_amount'] ?? null,
+                    'filename'        => $version->data['excel_quote_filename'] ?? null,
+                    'revision_notes'  => $version->data['revision_notes'] ?? null,
                 ];
             });
 
@@ -1588,11 +1654,21 @@ class QuoteController extends Controller
             return response()->json(['message' => 'Invalid version for this quote'], 400);
         }
 
+        if ($locked = $this->approvedQuoteLockResponse($quoteData)) {
+            return $locked;
+        }
+
         $restoredData = $version->data;
-        
-        // Exclude fields that shouldn't be overwritten
-        $dataToUpdate = collect($restoredData)->except(['id', 'created_at', 'updated_at', 'task_id'])->toArray();
-        
+
+        // Exclude fields that shouldn't be overwritten. Approval fields stay with
+        // the live record: restoring a snapshot must never resurrect (or erase)
+        // an approval decision — only the approval endpoints write those.
+        $dataToUpdate = collect($restoredData)->except([
+            'id', 'created_at', 'updated_at', 'task_id',
+            'status', 'approval_status', 'approved_by', 'approval_date',
+            'approval_comments', 'rejection_reason',
+        ])->toArray();
+
         $quoteData->update($dataToUpdate);
 
         return response()->json([
@@ -1611,12 +1687,18 @@ class QuoteController extends Controller
         $validator = Validator::make($request->all(), [
             'approval_status' => 'required|in:approved,rejected,pending',
             'rejection_reason' => 'required_if:approval_status,rejected',
-            'approved_by' => 'required|string',
-            'approval_date' => 'required|date',
+            // approved_by / approval_date are server-set from the authenticated
+            // user; client-sent values are accepted for compatibility but ignored.
+            'approved_by' => 'nullable|string',
+            'approval_date' => 'nullable|date',
             'quote_amount' => 'required|numeric|min:0',
             'comments' => 'nullable|string',
-            'quote_data' => 'required|array'
+            'quote_data' => 'nullable|array'
         ]);
+
+        if ($denied = $this->approvalPermissionDeniedResponse($request)) {
+            return $denied;
+        }
 
         if ($validator->fails()) {
             \Log::warning("API: saveApproval validation failed for task {$taskId}", $validator->errors()->toArray());
@@ -1685,21 +1767,44 @@ class QuoteController extends Controller
                  \Log::info("Found existing quote data: {$quoteData->id}");
             }
 
-            // Update quote status based on approval
+            $isExcelMode = $quoteData && $quoteData->quote_mode === 'excel_upload';
+
+            // Approver identity and date come from the authenticated session,
+            // never from the request body.
+            $approvedBy   = $request->user()->name;
+            $approvalDate = now();
+
+            // Update quote status based on approval.
+            // For Excel-mode quotes, Finance may override the declared amount here —
+            // that override becomes the financial anchor for all downstream gates.
             $quoteData->update([
-                'status' => $request->approval_status,
-                'approval_status' => $request->approval_status,
-                'approved_by' => $request->approved_by,
-                'approval_date' => $request->approval_date,
+                'status'           => $request->approval_status,
+                'approval_status'  => $request->approval_status,
+                'approved_by'      => $approvedBy,
+                'approval_date'    => $approvalDate,
                 'rejection_reason' => $request->approval_status === 'rejected' ? $request->rejection_reason : null,
-                'approval_comments' => $request->comments,
-                'quote_amount' => $request->quote_amount,
-                'updated_at' => now()
+                'approval_comments'=> $request->comments,
+                'quote_amount'     => $request->quote_amount,
+                'updated_at'       => now()
             ]);
+
+            // For Excel mode: keep excel_quote_amount in sync with the Finance-agreed figure.
+            if ($isExcelMode && $request->approval_status === 'approved') {
+                $quoteData->update(['excel_quote_amount' => $request->quote_amount]);
+            }
+
+            // Anchor client_approved_quote on the enquiry so FinanceService.resolveQuoteBasis
+            // uses the Priority-1 path (client_approved_quote > 0) instead of the fallback.
+            if ($request->approval_status === 'approved' && $approvalTask->enquiry) {
+                $approvalTask->enquiry->update(['client_approved_quote' => $request->quote_amount]);
+            }
 
             // Automatically create a frozen baseline snapshot upon quote approval
             if ($request->approval_status === 'approved') {
-                $this->createFrozenSnapshot($quoteData, 'Baseline Approved');
+                $label = $isExcelMode
+                    ? 'Baseline Approved (Excel: ' . ($quoteData->excel_quote_filename ?? 'file') . ')'
+                    : 'Baseline Approved';
+                $this->createFrozenSnapshot($quoteData, $label);
             }
 
             // Load the original quote task again for the formatter
@@ -1711,8 +1816,8 @@ class QuoteController extends Controller
                 [
                     'enquiry_id' => $approvalTask->project_enquiry_id,
                     'approval_status' => $request->approval_status,
-                    'approved_by' => $request->approved_by,
-                    'approval_date' => $request->approval_date,
+                    'approved_by' => $approvedBy,
+                    'approval_date' => $approvalDate,
                     'rejection_reason' => $request->approval_status === 'rejected' ? $request->rejection_reason : null,
                     'comments' => $request->comments,
                     'quote_amount' => $request->quote_amount,
@@ -1811,6 +1916,14 @@ class QuoteController extends Controller
             'rejectionReason'      => $quoteData->rejection_reason,
             'approvalComments'     => $quoteData->approval_comments,
             'quoteAmount'          => (float) ($quoteData->quote_amount ?? 0),
+            // Excel quote upload (alternative path)
+            'quote_mode'              => $quoteData->quote_mode ?? 'built_in',
+            'excel_quote_file'        => $quoteData->excel_quote_file,
+            'excel_quote_filename'    => $quoteData->excel_quote_filename,
+            'excel_quote_amount'      => $quoteData->excel_quote_amount ? (float) $quoteData->excel_quote_amount : null,
+            'excel_quote_uploaded_at' => $quoteData->excel_quote_uploaded_at,
+            'excel_quote_insights'    => $quoteData->excel_quote_insights,
+            'excel_quote_file_url'    => $quoteData->excel_quote_file ? $this->excelQuoteSignedUrl($quoteData->enquiry_task_id) : null,
             'createdAt'            => $quoteData->created_at,
             'updatedAt'            => $quoteData->updated_at,
         ];
@@ -1841,5 +1954,472 @@ class QuoteController extends Controller
         } catch (\Exception $e) {
             \Log::error("Failed to automatically create frozen quote snapshot: " . $e->getMessage());
         }
+    }
+
+    /**
+     * Upload an Excel quote file as an alternative to the in-system quote builder.
+     * Accepts a .xlsx/.xls/.csv file + the agreed quote amount, stores both
+     * against TaskQuoteData (mode = excel_upload), and triggers auto-completion.
+     */
+    public function uploadExcelQuote(Request $request, int $taskId): JsonResponse
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+
+        $validator = Validator::make($request->all(), [
+            'file'           => 'required|file|max:20480|mimes:xlsx,xls,csv,ods',
+            'quote_amount'   => 'required|numeric|min:0',
+            'revision_notes' => 'nullable|string|max:500',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        // Advisory intelligence (never blocks): detect the workbook's own total,
+        // compare the typed amount against it, and compute the implied margin
+        // against the enquiry's budget baseline.
+        $task->loadMissing('enquiry');
+        $insights = $task->enquiry
+            ? app(\App\Modules\Projects\Services\QuoteInsightsService::class)->forUpload(
+                $task->enquiry,
+                (float) $request->input('quote_amount'),
+                $request->file('file')->getRealPath()
+            )
+            : null;
+
+        try {
+            $file         = $request->file('file');
+            $originalName = $file->getClientOriginalName();
+            // Private disk: quote files carry client pricing and must never be
+            // reachable through unauthenticated public-storage URLs.
+            $path         = $file->store("quote_excel/{$taskId}", 'local');
+
+            // Snapshot the previous Excel revision before overwriting, so every
+            // uploaded version is permanently traceable in the QuoteVersion history.
+            $existing = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+            if ($existing && $existing->excel_quote_file && $existing->quote_mode === 'excel_upload') {
+                $prevVersion = ($existing->versions()->max('version_number') ?? 0) + 1;
+                $existing->versions()->create([
+                    'version_number' => $prevVersion,
+                    'label'          => "Excel Rev {$prevVersion} — {$existing->excel_quote_filename} (replaced " . now()->format('d M Y') . ')',
+                    'data'           => [
+                        'quote_mode'              => 'excel_upload',
+                        'excel_quote_file'        => $existing->excel_quote_file,
+                        'excel_quote_filename'    => $existing->excel_quote_filename,
+                        'excel_quote_amount'      => (float) $existing->excel_quote_amount,
+                        'excel_quote_uploaded_at' => optional($existing->excel_quote_uploaded_at)->toIso8601String(),
+                        'excel_quote_uploaded_by' => $existing->excel_quote_uploaded_by,
+                        'revision_notes'          => $request->input('revision_notes'),
+                    ],
+                    'created_by'     => auth()->id(),
+                ]);
+
+                // If this revision replaces an approved quote, invalidate the approval
+                // so Finance must re-review the new scope before funds are released.
+                if (in_array($existing->approval_status, ['approved'])) {
+                    $existing->update([
+                        'approval_status'   => 'pending',
+                        'status'            => 'pending',
+                        'approved_by'       => null,
+                        'approval_date'     => null,
+                        'approval_comments' => null,
+                    ]);
+                    $task->load('enquiry');
+                    $task->enquiry?->update(['client_approved_quote' => null]);
+
+                    $this->invalidateQuoteApproval($task, $existing, 'Excel quote re-uploaded over an approved quote');
+                }
+            }
+
+            $quoteData = TaskQuoteData::updateOrCreate(
+                ['enquiry_task_id' => $taskId],
+                [
+                    'quote_mode'               => 'excel_upload',
+                    'excel_quote_file'         => $path,
+                    'excel_quote_filename'     => $originalName,
+                    'excel_quote_amount'       => $request->input('quote_amount'),
+                    'excel_quote_uploaded_by'  => auth()->id(),
+                    'excel_quote_uploaded_at'  => now(),
+                    'excel_quote_insights'     => $insights,
+                    // Keep quote_amount in sync so downstream approval logic works
+                    'quote_amount'             => $request->input('quote_amount'),
+                ]
+            );
+
+            return response()->json([
+                'message'   => 'Excel quote uploaded successfully.',
+                'advisories'=> $this->uploadAdvisories($insights),
+                'data'      => [
+                    'id'                      => $quoteData->id,
+                    'quote_mode'              => $quoteData->quote_mode,
+                    'excel_quote_filename'    => $quoteData->excel_quote_filename,
+                    'excel_quote_amount'      => $quoteData->excel_quote_amount,
+                    'excel_quote_uploaded_at' => $quoteData->excel_quote_uploaded_at,
+                    'quote_amount'            => $quoteData->quote_amount,
+                    'insights'                => $insights,
+                    'file_url'                => $this->excelQuoteSignedUrl($taskId),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("Excel quote upload failed for task {$taskId}: " . $e->getMessage());
+            return response()->json(['message' => 'Upload failed. Please try again.'], 500);
+        }
+    }
+
+    /**
+     * Remove a previously uploaded Excel quote and revert the task to built-in mode.
+     */
+    public function removeExcelQuote(int $taskId): JsonResponse
+    {
+        $task      = EnquiryTask::findOrFail($taskId);
+        $quoteData = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+
+        if (!$quoteData || !$quoteData->excel_quote_file) {
+            return response()->json(['message' => 'No Excel quote found for this task.'], 404);
+        }
+
+        // An approved Excel quote is the financial anchor for downstream gates —
+        // it can only be superseded by a new revision, never silently removed.
+        if ($quoteData->approval_status === 'approved') {
+            return response()->json([
+                'message' => 'This Excel quote has been approved and cannot be removed. Upload a new revision instead so Finance can re-review it.'
+            ], 422);
+        }
+
+        try {
+            $path = $quoteData->excel_quote_file;
+
+            // Keep the physical file if any version snapshot still references it,
+            // otherwise the audit trail would point at a deleted file.
+            $referencedByVersion = $quoteData->versions()
+                ->where('data->excel_quote_file', $path)
+                ->exists();
+
+            if (!$referencedByVersion) {
+                foreach (['local', 'public'] as $disk) {
+                    if (\Storage::disk($disk)->exists($path)) {
+                        \Storage::disk($disk)->delete($path);
+                        break;
+                    }
+                }
+            }
+
+            $quoteData->update([
+                'quote_mode'              => 'built_in',
+                'excel_quote_file'        => null,
+                'excel_quote_filename'    => null,
+                'excel_quote_amount'      => null,
+                'excel_quote_uploaded_by' => null,
+                'excel_quote_uploaded_at' => null,
+            ]);
+
+            return response()->json(['message' => 'Excel quote removed. You can now build the quote in-system.']);
+        } catch (\Exception $e) {
+            \Log::error("Excel quote removal failed for task {$taskId}: " . $e->getMessage());
+            return response()->json(['message' => 'Removal failed. Please try again.'], 500);
+        }
+    }
+
+    /**
+     * Inspect an Excel file WITHOUT storing it: detect the workbook's grand
+     * total so the frontend can pre-fill the quote amount field. Advisory
+     * only — the user can always override the value before uploading.
+     */
+    public function inspectExcelQuote(Request $request, int $taskId): JsonResponse
+    {
+        EnquiryTask::findOrFail($taskId);
+
+        $validator = Validator::make($request->all(), [
+            'file' => 'required|file|max:20480|mimes:xlsx,xls,csv,ods',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $detected = app(\App\Modules\Projects\Services\QuoteInsightsService::class)
+            ->detectWorkbookTotal($request->file('file')->getRealPath());
+
+        return response()->json([
+            'data' => ['detected_total' => $detected],
+        ]);
+    }
+
+    /**
+     * Delete a single quote version snapshot. Blocked while the quote is
+     * approved — version history is the audit trail backing the approval.
+     */
+    public function deleteVersion(int $taskId, int $versionId): JsonResponse
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        $quoteData = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+
+        if (!$quoteData) {
+            return response()->json(['message' => 'Quote not found'], 404);
+        }
+
+        if ($locked = $this->approvedQuoteLockResponse($quoteData)) {
+            return $locked;
+        }
+
+        $version = QuoteVersion::where('task_quote_data_id', $quoteData->id)->find($versionId);
+        if (!$version) {
+            return response()->json(['message' => 'Version not found for this quote'], 404);
+        }
+
+        $this->deleteVersionSnapshotFile($quoteData, $version);
+
+        \App\Models\GovernanceAuditLog::create([
+            'project_enquiry_id' => $task->project_enquiry_id,
+            'user_id' => auth()->id(),
+            'gate_type' => 'Quote History Deletion',
+            'action_status' => 'authorized',
+            'model_type' => QuoteVersion::class,
+            'model_id' => $version->id,
+            'message' => "Quote version {$version->version_number} ('{$version->label}') deleted",
+            'context' => ['version_number' => $version->version_number, 'label' => $version->label],
+            'ip_address' => request()->ip(),
+        ]);
+
+        $version->delete();
+
+        return response()->json(['message' => 'Version deleted.']);
+    }
+
+    /**
+     * Clear ALL version snapshots for a quote (the current quote/file is kept).
+     * Blocked while the quote is approved.
+     */
+    public function clearVersions(int $taskId): JsonResponse
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        $quoteData = TaskQuoteData::where('enquiry_task_id', $taskId)->first();
+
+        if (!$quoteData) {
+            return response()->json(['message' => 'Quote not found'], 404);
+        }
+
+        if ($locked = $this->approvedQuoteLockResponse($quoteData)) {
+            return $locked;
+        }
+
+        $versions = $quoteData->versions()->get();
+        foreach ($versions as $version) {
+            $this->deleteVersionSnapshotFile($quoteData, $version);
+            $version->delete();
+        }
+
+        if ($versions->isNotEmpty()) {
+            \App\Models\GovernanceAuditLog::create([
+                'project_enquiry_id' => $task->project_enquiry_id,
+                'user_id' => auth()->id(),
+                'gate_type' => 'Quote History Deletion',
+                'action_status' => 'authorized',
+                'model_type' => TaskQuoteData::class,
+                'model_id' => $quoteData->id,
+                'message' => "All {$versions->count()} quote version(s) cleared",
+                'context' => ['deleted_count' => $versions->count()],
+                'ip_address' => request()->ip(),
+            ]);
+        }
+
+        return response()->json(['message' => "{$versions->count()} version(s) cleared."]);
+    }
+
+    /**
+     * Remove a version's snapshot file, but only when it is neither the
+     * current quote file nor referenced by any other remaining version.
+     */
+    private function deleteVersionSnapshotFile(TaskQuoteData $quoteData, QuoteVersion $version): void
+    {
+        $path = $version->data['excel_quote_file'] ?? null;
+        if (!$path || $quoteData->excel_quote_file === $path) {
+            return;
+        }
+
+        $referencedElsewhere = $quoteData->versions()
+            ->where('id', '!=', $version->id)
+            ->where('data->excel_quote_file', $path)
+            ->exists();
+
+        if ($referencedElsewhere) {
+            return;
+        }
+
+        foreach (['local', 'public'] as $disk) {
+            if (Storage::disk($disk)->exists($path)) {
+                Storage::disk($disk)->delete($path);
+                break;
+            }
+        }
+    }
+
+    /**
+     * Stream an Excel quote file (current or a specific version snapshot).
+     * Route is protected by the 'signed' middleware — links are minted by
+     * excelQuoteSignedUrl() and expire, so files never need a public disk.
+     */
+    public function downloadExcelQuote(Request $request, int $taskId)
+    {
+        $quoteData = TaskQuoteData::where('enquiry_task_id', $taskId)->firstOrFail();
+
+        $path     = $quoteData->excel_quote_file;
+        $filename = $quoteData->excel_quote_filename;
+
+        if ($versionId = $request->query('version')) {
+            $version  = QuoteVersion::where('task_quote_data_id', $quoteData->id)->findOrFail($versionId);
+            $path     = $version->data['excel_quote_file'] ?? null;
+            $filename = $version->data['excel_quote_filename'] ?? null;
+        }
+
+        abort_if(!$path, 404, 'No Excel quote file found.');
+
+        // 'public' fallback covers files uploaded before quotes moved to the private disk.
+        foreach (['local', 'public'] as $disk) {
+            if (Storage::disk($disk)->exists($path)) {
+                return Storage::disk($disk)->download($path, $filename ?: basename($path));
+            }
+        }
+
+        abort(404, 'Excel quote file is missing from storage.');
+    }
+
+    /**
+     * Human-readable, non-blocking advisories derived from upload insights.
+     * These inform the uploader and Finance; they never stop the upload.
+     */
+    private function uploadAdvisories(?array $insights): array
+    {
+        if (!$insights) {
+            return [];
+        }
+
+        $advisories = [];
+
+        if ($insights['amount_match'] === 'mismatch') {
+            $advisories[] = sprintf(
+                'The entered amount (%s) differs from the largest total found in the spreadsheet (%s). Double-check before sending for approval.',
+                number_format($insights['declared_amount'], 2),
+                number_format($insights['detected_workbook_total'], 2)
+            );
+        }
+
+        if ($insights['margin_flag'] === 'loss') {
+            $advisories[] = sprintf(
+                'This amount is below the budget cost baseline (%s excl. VAT vs budget %s) — the project would run at a loss.',
+                number_format($insights['net_amount_excl_vat'], 2),
+                number_format($insights['budget_cost'], 2)
+            );
+        } elseif ($insights['margin_flag'] === 'below_watch_floor') {
+            $advisories[] = sprintf(
+                'Implied margin is %.2f%%, below the %.0f%% watch floor. Finance will see this flag during approval.',
+                $insights['implied_margin_pct'],
+                $insights['margin_watch_floor_pct']
+            );
+        }
+
+        return $advisories;
+    }
+
+    /**
+     * Approval decisions (approve/reject) require the finance quote approval
+     * permission. Saving a 'pending' state remains open to any authenticated user.
+     */
+    private function approvalPermissionDeniedResponse(Request $request): ?JsonResponse
+    {
+        if (!in_array($request->approval_status, ['approved', 'rejected'], true)) {
+            return null;
+        }
+
+        $user = $request->user();
+        try {
+            if ($user && $user->hasPermissionTo(\App\Constants\Permissions::FINANCE_QUOTE_APPROVE)) {
+                return null;
+            }
+        } catch (\Spatie\Permission\Exceptions\PermissionDoesNotExist $e) {
+            // Permission not seeded — treat as not granted rather than a 500.
+        }
+
+        return response()->json([
+            'message' => 'Only users with the finance quote approval permission can approve or reject quotes.'
+        ], 403);
+    }
+
+    /**
+     * An approved quote is the financial anchor for downstream gates and must be
+     * immutable. Edits require either a new Excel revision (which invalidates the
+     * approval) or Finance reopening the approval first.
+     */
+    private function approvedQuoteLockResponse(?TaskQuoteData $quoteData): ?JsonResponse
+    {
+        if ($quoteData && $quoteData->approval_status === 'approved') {
+            return response()->json([
+                'message' => 'This quote has been approved and is locked. Upload a new revision or ask Finance to reopen the approval before editing.'
+            ], 422);
+        }
+
+        return null;
+    }
+
+    private function excelQuoteSignedUrl(int $taskId, ?int $versionId = null): string
+    {
+        $params = ['taskId' => $taskId];
+        if ($versionId !== null) {
+            $params['version'] = $versionId;
+        }
+
+        // Relative signing (absolute: false): the signature covers path+query
+        // only, so the link works from any browser origin (Vite dev proxy,
+        // production host) regardless of APP_URL. Validated by 'signed:relative'.
+        return \Illuminate\Support\Facades\URL::temporarySignedRoute(
+            'quote.excel.download',
+            now()->addMinutes(30),
+            $params,
+            absolute: false
+        );
+    }
+
+    /**
+     * When a new Excel revision replaces an approved quote, the approval record,
+     * the approval task, and Finance's awareness must all be reset together —
+     * otherwise the invalidation is invisible and the stale approval can be reused.
+     */
+    private function invalidateQuoteApproval(EnquiryTask $task, TaskQuoteData $quoteData, string $reason): void
+    {
+        $enquiry = $task->enquiry;
+        if (!$enquiry) {
+            return;
+        }
+
+        // Reset the approval-of-record so the reopened task cannot be completed
+        // against the stale decision (EnquiryWorkflowService checks this table).
+        \DB::table('quote_approvals')
+            ->where('enquiry_id', $enquiry->id)
+            ->update(['approval_status' => 'pending', 'updated_at' => now()]);
+
+        $approvalTask = EnquiryTask::where('project_enquiry_id', $enquiry->id)
+            ->where('type', 'quote_approval')
+            ->first();
+        if ($approvalTask && $approvalTask->status === 'completed') {
+            $approvalTask->update(['status' => 'in_progress']);
+        }
+
+        \App\Models\GovernanceAuditLog::create([
+            'project_enquiry_id' => $enquiry->id,
+            'user_id'            => auth()->id(),
+            'gate_type'          => 'financial',
+            'action_status'      => 'invalidated',
+            'model_type'         => TaskQuoteData::class,
+            'model_id'           => $quoteData->id,
+            'message'            => "{$reason}; quote approval invalidated pending Finance re-review",
+            'context'            => [
+                'previous_amount'        => (float) $quoteData->excel_quote_amount,
+                'reopened_approval_task' => $approvalTask?->id,
+            ],
+            'ip_address'         => request()->ip(),
+        ]);
+
+        app(\App\Modules\Projects\Services\NotificationService::class)
+            ->sendQuoteApprovalInvalidated($enquiry, auth()->user(), $reason);
     }
 }

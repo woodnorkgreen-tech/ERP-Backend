@@ -19,6 +19,7 @@ use App\Modules\Projects\Services\FinanceService;
 use App\Modules\Projects\Actions\ApproveQuoteAction;
 use App\Modules\Projects\Actions\ReleaseFinanceGateAction;
 use App\Modules\Projects\Actions\CompleteProjectAction;
+use App\Modules\Projects\Services\ProjectWorkflowStateService;
 use App\Services\Governance\ProjectGovernanceService;
 
 /**
@@ -148,7 +149,16 @@ class EnquiryController extends Controller
 
     private function runIndex(Request $request): JsonResponse
     {
-        $query = ProjectEnquiry::with('client', 'department', 'projectOfficer', 'enquiryTasks.assignedUsers', 'enquiryTasks.assignedTo', 'deliverables', 'payments');
+        $query = ProjectEnquiry::with(
+            'client',
+            'department',
+            'projectOfficer',
+            'enquiryTasks.assignedUsers',
+            'enquiryTasks.assignedTo',
+            'enquiryTasks.quoteData',
+            'deliverables',
+            'payments'
+        );
 
         $query = app(\Illuminate\Pipeline\Pipeline::class)
             ->send($query)
@@ -169,12 +179,15 @@ class EnquiryController extends Controller
             if ($subStatus === 'new' || $subStatus === 'pipeline') {
                 $query->whereNotIn('status', array_merge(
                     EnquiryConstants::getApprovedProjectStatuses(),
+                    EnquiryConstants::getCompletedStatuses(),
                     EnquiryConstants::getClosedStatuses()
                 ));
             } elseif ($subStatus === 'in_progress_active' || $subStatus === 'active') {
                 $query->whereIn('status', EnquiryConstants::getApprovedProjectStatuses());
             } elseif ($subStatus === 'completed' || $subStatus === 'finished') {
                 $query->whereIn('status', EnquiryConstants::getCompletedStatuses());
+            } elseif ($subStatus === 'closed') {
+                $query->whereIn('status', EnquiryConstants::getFormallyClosedStatuses());
             } elseif ($subStatus === 'cancelled' || $subStatus === 'canceled') {
                 $query->whereIn('status', EnquiryConstants::getCancelledStatuses());
             } elseif ($subStatus === 'internal_job' || $subStatus === 'sponsorship') {
@@ -220,7 +233,13 @@ class EnquiryController extends Controller
         // Enrich with payment progress for receivables/projects view
         $enquiries->getCollection()->transform(function ($enquiry) {
             $progress = $this->financeService->getPaymentProgress($enquiry);
+            $enquiry->finance_summary = $progress;
             $enquiry->payment_progress_percentage = $progress['percentage'];
+            $enquiry->payment_total_quote = $progress['total_quote'];
+            $enquiry->payment_total_paid = $progress['total_paid'];
+            $enquiry->payment_remaining = $progress['remaining'];
+            $enquiry->payment_threshold_amount = $progress['threshold_amount'];
+            $enquiry->payment_amount_required_for_threshold = $progress['amount_required_for_threshold'];
             return $enquiry;
         });
 
@@ -646,8 +665,8 @@ class EnquiryController extends Controller
             $request->merge(['title' => $request->enquiry_title]);
         }
 
-        // Completion is gated — check conditions, push a notification to the acting user,
-        // and return an intelligent error describing exactly what still needs to happen.
+        // Completion and closure are gated lifecycle actions. Keep direct status
+        // updates from bypassing the dedicated audit trails.
         if ($request->input('status') === EnquiryConstants::STATUS_COMPLETED) {
             $readiness = $completionAction->buildReadiness($enquiry);
             $user      = Auth::user();
@@ -657,16 +676,6 @@ class EnquiryController extends Controller
                 $this->notificationService->sendProjectCompletionBlocked($enquiry, $user, $readiness);
 
                 $lines = [];
-                foreach ($readiness['blocking_closure_tasks'] as $task) {
-                    $lines[] = [
-                        'type'     => 'closure_task',
-                        'task_id'  => $task['id'],
-                        'title'    => $task['title'],
-                        'status'   => $task['status'],
-                        'action'   => "Complete or skip \"{$task['title']}\" before closing the project.",
-                        'severity' => 'blocking',
-                    ];
-                }
                 foreach ($readiness['in_progress_tasks'] as $task) {
                     $lines[] = [
                         'type'     => 'in_progress_task',
@@ -680,7 +689,7 @@ class EnquiryController extends Controller
 
                 return response()->json([
                     'message'        => 'This project cannot be marked complete yet. A notification has been added to your notification center with a full checklist.',
-                    'hint'           => 'Resolve all items below, then use POST /enquiries/{id}/complete to finalise.',
+                    'hint'           => 'Resolve all operational items below, then use POST /enquiries/{id}/complete.',
                     'can_complete'   => false,
                     'task_summary'   => $readiness['task_summary'],
                     'blocking_items' => $lines,
@@ -689,11 +698,33 @@ class EnquiryController extends Controller
 
             // All conditions already met — redirect to the dedicated endpoint (no notification needed)
             return response()->json([
-                'message'        => 'All completion conditions are met. Use POST /enquiries/{id}/complete to finalise — the action will be recorded in the governance log.',
+                'message'        => 'All delivery-completion conditions are met. Use POST /enquiries/{id}/complete — the action will be recorded in the governance log.',
                 'can_complete'   => true,
                 'task_summary'   => $readiness['task_summary'],
                 'blocking_items' => [],
-            ], 422);
+            ], 200);
+        }
+
+        if ($request->input('status') === EnquiryConstants::STATUS_CLOSED) {
+            $readiness = $completionAction->buildClosureReadiness($enquiry);
+
+            if (!$readiness['can_close']) {
+                return response()->json([
+                    'message'        => 'This project cannot be closed yet. Complete handover and report first.',
+                    'hint'           => 'Resolve all closure items, then use POST /enquiries/{id}/close.',
+                    'can_close'      => false,
+                    'blocking_items' => [
+                        'missing_closure_tasks'  => $readiness['missing_closure_tasks'],
+                        'blocking_closure_tasks' => $readiness['blocking_closure_tasks'],
+                    ],
+                ], 422);
+            }
+
+            return response()->json([
+                'message'        => 'All closure conditions are met. Use POST /enquiries/{id}/close to finalise closure.',
+                'can_close'      => true,
+                'blocking_items' => [],
+            ], 200);
         }
 
         $validator = Validator::make($request->all(), [
@@ -760,36 +791,45 @@ class EnquiryController extends Controller
         }
     }
 
-    $enquiry->update($request->only([
-            'date_received',
-            'expected_delivery_date',
-            'client_id',
-            'title',
-            'description',
-            'project_scope',
-            'priority',
-            'contact_person',
-            'project_officer_id',
-            'status',
-            'department_id',
-            'assigned_department',
-            'assigned_po',
-            'follow_up_notes',
-            'venue',
-            'site_survey_skipped',
-            'site_survey_skip_reason',
-            'selected_workflow_tasks',
-            'workflow_preset_type',
-            'client_approved_quote',
-        ]));
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $enquiry) {
+            $enquiry->update($request->only([
+                'date_received',
+                'expected_delivery_date',
+                'client_id',
+                'title',
+                'description',
+                'project_scope',
+                'priority',
+                'contact_person',
+                'project_officer_id',
+                'status',
+                'department_id',
+                'assigned_department',
+                'assigned_po',
+                'follow_up_notes',
+                'venue',
+                'site_survey_skipped',
+                'site_survey_skip_reason',
+                'selected_workflow_tasks',
+                'workflow_preset_type',
+                'client_approved_quote',
+            ]));
 
-        // Sync workflow tasks (create any newly selected tasks)
-        app(EnquiryWorkflowService::class)->initializeWorkflow($enquiry);
+            if ($request->has('status')) {
+                $projectStatus = $request->input('status');
+                if (in_array($projectStatus, ['planning', 'in_progress', 'completed', 'closed', 'cancelled'], true)) {
+                    $enquiry->project()->update(['status' => $projectStatus]);
+                }
+            }
 
-        return response()->json([
-            'message' => 'Enquiry updated successfully',
-            'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department', 'projectOfficer', 'deliverables'))
-        ]);
+            // Sync workflow tasks (create any newly selected tasks)
+            app(EnquiryWorkflowService::class)->initializeWorkflow($enquiry);
+
+            return response()->json([
+                'message' => 'Enquiry updated successfully',
+                'data'    => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department', 'projectOfficer', 'deliverables')),
+            ]);
+        });
     }
 
     /**
@@ -954,8 +994,8 @@ class EnquiryController extends Controller
     }
 
     /**
-     * Return a transparency snapshot of whether this project satisfies all
-     * completion conditions, and what is blocking it if not.
+     * Return a transparency snapshot of whether this project satisfies
+     * delivery-completion conditions, and what is blocking it if not.
      *
      * Front-ends use this to render a "Complete Project" button (enabled/disabled)
      * and a checklist of outstanding items.
@@ -973,12 +1013,26 @@ class EnquiryController extends Controller
     }
 
     /**
-     * Mark a project as completed after verifying all conditions are met.
+     * Return whether this completed project can be formally closed.
+     */
+    public function closureReadiness(ProjectEnquiry $enquiry, CompleteProjectAction $action): JsonResponse
+    {
+        return $this->safe(function () use ($enquiry, $action) {
+            $readiness = $action->buildClosureReadiness($enquiry);
+
+            return response()->json([
+                'success' => true,
+                'data'    => $readiness,
+            ]);
+        }, 'Project closure readiness');
+    }
+
+    /**
+     * Mark delivery as completed after verifying operational conditions are met.
      *
      * Conditions (enforced hard-gates — not bypassable via the general update endpoint):
-     *  1. Project must be in_progress.
-     *  2. All selected closure tasks (handover, report) must be completed or skipped.
-     *  3. No tasks may currently be in_progress.
+     *  1. Project must be planning or in_progress.
+     *  2. No non-closure tasks may be pending or in_progress.
      *
      * The action is logged to the governance audit trail with the acting user's identity.
      */
@@ -997,6 +1051,35 @@ class EnquiryController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::warning('completeProject blocked', [
+                'enquiry_id' => $enquiry->id,
+                'user_id'    => Auth::id(),
+                'reason'     => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * Move a completed project into the Closed tab after handover and report are done.
+     */
+    public function closeProject(Request $request, ProjectEnquiry $enquiry, CompleteProjectAction $action): JsonResponse
+    {
+        $validated = $request->validate([
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        try {
+            $closed = $action->close($enquiry, Auth::id(), $validated['notes'] ?? null);
+
+            return response()->json([
+                'message' => 'Project closed successfully.',
+                'data'    => $closed->load('client', 'projectOfficer'),
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('closeProject blocked', [
                 'enquiry_id' => $enquiry->id,
                 'user_id'    => Auth::id(),
                 'reason'     => $e->getMessage(),
@@ -1077,6 +1160,8 @@ class EnquiryController extends Controller
                 'message' => 'Quote approved successfully. Job number generated and subsequent actions triggered.',
                 'data' => $enquiry->fresh(['client', 'department'])
             ]);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
         } catch (\Exception $e) {
             Log::error('Error approving quote', [
                 'enquiry_id' => $enquiry->id,
@@ -1131,8 +1216,9 @@ class EnquiryController extends Controller
      */
     public function updatePayment(Request $request, ProjectEnquiry $enquiry, $paymentId): JsonResponse
     {
-        $payment = \App\Models\EnquiryPayment::findOrFail($paymentId);
-        
+        // Scope to the route enquiry so a payment cannot be edited through another project's URL
+        $payment = $enquiry->payments()->findOrFail($paymentId);
+
         $validated = $request->validate([
             'amount' => 'required|numeric|min:0',
             'payment_date' => 'nullable|date',
@@ -1159,8 +1245,9 @@ class EnquiryController extends Controller
      */
     public function deletePayment(Request $request, ProjectEnquiry $enquiry, $paymentId): JsonResponse
     {
-        $payment = \App\Models\EnquiryPayment::findOrFail($paymentId);
-        
+        // Scope to the route enquiry so a payment cannot be deleted through another project's URL
+        $payment = $enquiry->payments()->findOrFail($paymentId);
+
         $validated = $request->validate([
             'reason' => 'required|string|min:5', // Mandatory reason for deletion
         ]);
@@ -1196,6 +1283,19 @@ class EnquiryController extends Controller
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to fetch finance progress: ' . $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Return the canonical workflow snapshot for the project cockpit UI.
+     */
+    public function workflowState(ProjectEnquiry $enquiry, ProjectWorkflowStateService $workflowStateService): JsonResponse
+    {
+        return $this->safe(function () use ($enquiry, $workflowStateService) {
+            return response()->json([
+                'success' => true,
+                'data' => $workflowStateService->forEnquiry($enquiry),
+            ]);
+        }, 'Project workflow state');
     }
 
     /**

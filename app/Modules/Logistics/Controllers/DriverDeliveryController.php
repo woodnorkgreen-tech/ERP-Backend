@@ -301,6 +301,7 @@ class DriverDeliveryController extends Controller
                             'enquiry_number'  => $project->enquiry_number  ?? null,
                             'title'           => $project->title           ?? null,
                             'venue'           => $project->venue           ?? null,
+                            'client_id'       => $project->client?->id ?? null,
                             'client_name'     => $project->client?->full_name ?? $project->client?->name ?? null,
                         ] : null,
                     ];
@@ -343,6 +344,7 @@ class DriverDeliveryController extends Controller
                     'enquiry_number' => $delivery->stops->first()->tripRequest->project->enquiry_number  ?? null,
                     'title'          => $delivery->stops->first()->tripRequest->project->title           ?? null,
                     'venue'          => $delivery->stops->first()->tripRequest->project->venue           ?? null,
+                    'client_id'      => $delivery->stops->first()->tripRequest->project->client?->id ?? null,
                     'client_name'    => $delivery->stops->first()->tripRequest->project->client?->full_name
                                     ?? $delivery->stops->first()->tripRequest->project->client?->name
                                     ?? null,
@@ -438,6 +440,7 @@ class DriverDeliveryController extends Controller
                     'enquiry_number' => $delivery->stops->first()->tripRequest->project->enquiry_number  ?? null,
                     'title'          => $delivery->stops->first()->tripRequest->project->title           ?? null,
                     'venue'          => $delivery->stops->first()->tripRequest->project->venue           ?? null,
+                    'client_id'      => $delivery->stops->first()->tripRequest->project->client?->id ?? null,
                     'client_name'    => $delivery->stops->first()->tripRequest->project->client?->full_name
                                     ?? $delivery->stops->first()->tripRequest->project->client?->name
                                     ?? null,

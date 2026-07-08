@@ -3,9 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\DesignRequirement;
-use App\Models\DesignAsset;
 use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class DesignRequirementController extends Controller
 {
@@ -16,11 +18,17 @@ class DesignRequirementController extends Controller
     {
         try {
             $requirements = DesignRequirement::where('enquiry_task_id', $task->id)
-                ->with('asset')
+                ->with(['asset.uploader:id,name', 'asset.approver:id,name'])
+                ->orderBy('id')
                 ->get();
                 
             return response()->json($requirements);
         } catch (\Exception $e) {
+            Log::error('Error fetching design requirements', [
+                'task_id' => $task->id,
+                'error' => $e->getMessage(),
+            ]);
+
             return response()->json([
                 'message' => 'Error fetching requirements',
                 'error' => $e->getMessage()
@@ -36,32 +44,67 @@ class DesignRequirementController extends Controller
         try {
             $request->validate([
                 'requirements' => 'required|array',
+                'requirements.*.client_key' => 'nullable|string|max:100',
                 'requirements.*.title' => 'nullable|string|max:255',
                 'requirements.*.category' => 'required|string',
                 'requirements.*.description' => 'nullable|string',
                 'requirements.*.status' => 'required|string|in:pending,fulfilled,approved,rejected',
                 'requirements.*.asset_id' => 'nullable|integer|exists:design_assets,id',
+                'deleted_ids' => 'sometimes|array',
+                'deleted_ids.*' => 'integer',
             ]);
 
             $incomingReqs = $request->requirements;
-            $existingReqIds = [];
+            $deletedIds = collect($request->input('deleted_ids', []))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
 
-            foreach ($incomingReqs as $reqData) {
-                // If we have an ID, update that specific record
-                if (isset($reqData['id']) && is_numeric($reqData['id'])) {
-                    $req = DesignRequirement::updateOrCreate(
-                        ['id' => $reqData['id'], 'enquiry_task_id' => $task->id],
-                        [
-                            'title'       => $reqData['title'] ?? null,
-                            'category'    => $reqData['category'],
-                            'description' => $reqData['description'] ?? null,
-                            'status'      => $reqData['status'],
-                            'asset_id'    => $reqData['asset_id'] ?? null,
-                        ]
-                    );
-                } else {
-                    // New item — temp string ID from frontend
-                    $req = DesignRequirement::create([
+            DB::transaction(function () use ($incomingReqs, $deletedIds, $task) {
+                if (!empty($deletedIds)) {
+                    DesignRequirement::where('enquiry_task_id', $task->id)
+                        ->whereIn('id', $deletedIds)
+                        ->delete();
+                }
+
+                foreach ($incomingReqs as $reqData) {
+                    if (isset($reqData['id']) && is_numeric($reqData['id'])) {
+                        if (in_array((int) $reqData['id'], $deletedIds, true)) {
+                            continue;
+                        }
+
+                        DesignRequirement::updateOrCreate(
+                            ['id' => $reqData['id'], 'enquiry_task_id' => $task->id],
+                            [
+                                'client_key'  => $reqData['client_key'] ?? null,
+                                'title'       => $reqData['title'] ?? null,
+                                'category'    => $reqData['category'],
+                                'description' => $reqData['description'] ?? null,
+                                'status'      => $reqData['status'],
+                                'asset_id'    => $reqData['asset_id'] ?? null,
+                            ]
+                        );
+                        continue;
+                    }
+
+                    $clientKey = $reqData['client_key'] ?? $reqData['id'] ?? null;
+
+                    if ($clientKey) {
+                        DesignRequirement::updateOrCreate(
+                            ['enquiry_task_id' => $task->id, 'client_key' => $clientKey],
+                            [
+                                'title'       => $reqData['title'] ?? null,
+                                'category'    => $reqData['category'],
+                                'description' => $reqData['description'] ?? null,
+                                'status'      => $reqData['status'],
+                                'asset_id'    => $reqData['asset_id'] ?? null,
+                            ]
+                        );
+                        continue;
+                    }
+
+                    DesignRequirement::create([
                         'enquiry_task_id' => $task->id,
                         'title'           => $reqData['title'] ?? null,
                         'category'        => $reqData['category'],
@@ -70,18 +113,26 @@ class DesignRequirementController extends Controller
                         'asset_id'        => $reqData['asset_id'] ?? null,
                     ]);
                 }
-                $existingReqIds[] = $req->id;
-            }
-
-            // Optional: Remove requirements that were not in the sync list
-            DesignRequirement::where('enquiry_task_id', $task->id)
-                ->whereNotIn('id', $existingReqIds)
-                ->delete();
+            });
 
             return response()->json(
-                DesignRequirement::where('enquiry_task_id', $task->id)->with('asset')->get()
+                DesignRequirement::where('enquiry_task_id', $task->id)
+                    ->with(['asset.uploader:id,name', 'asset.approver:id,name'])
+                    ->orderBy('id')
+                    ->get()
             );
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'Invalid design requirements payload',
+                'errors' => $e->errors(),
+            ], 422);
         } catch (\Exception $e) {
+            Log::error('Error synchronizing design requirements', [
+                'task_id' => $task->id,
+                'payload' => $request->all(),
+                'error' => $e->getMessage(),
+            ]);
+
             return response()->json([
                 'message' => 'Error synchronizing requirements',
                 'error' => $e->getMessage()

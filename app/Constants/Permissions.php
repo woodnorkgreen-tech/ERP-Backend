@@ -155,6 +155,7 @@ class Permissions
     const CLIENT_READ = 'client.read';
     const CLIENT_UPDATE = 'client.update';
     const CLIENT_DELETE = 'client.delete';
+    const CLIENT_HANDOVER_REVIEW = 'client.handover.review';
 
     // ===========================================
     // PROCUREMENT PERMISSIONS
@@ -287,6 +288,7 @@ class Permissions
 
             // Client Service Permissions
             self::CLIENT_CREATE, self::CLIENT_READ, self::CLIENT_UPDATE, self::CLIENT_DELETE,
+            self::CLIENT_HANDOVER_REVIEW,
 
             // Procurement Permissions
             self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
@@ -380,6 +382,7 @@ class Permissions
             ],
             'client_service' => [
                 self::CLIENT_CREATE, self::CLIENT_READ, self::CLIENT_UPDATE, self::CLIENT_DELETE,
+                self::CLIENT_HANDOVER_REVIEW,
             ],
             'procurement' => [
                 self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,

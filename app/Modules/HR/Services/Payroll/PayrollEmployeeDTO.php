@@ -3,6 +3,7 @@
 namespace App\Modules\HR\Services\Payroll;
 
 use App\Modules\HR\Models\Employee;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 
 class PayrollEmployeeDTO
@@ -18,6 +19,11 @@ class PayrollEmployeeDTO
         public array $taxBands,
         // Statutory deduction codes this employee is exempt from (paye, nssf, shif, housing_levy)
         public array $statutoryExemptions = [],
+
+        // Employment window — used by BasicPayProcessor to prorate mid-month hires/terminations.
+        // Null means "no boundary this side" (hired before this month / still active).
+        public ?Carbon $hireDate = null,
+        public ?Carbon $terminationDate = null,
 
         // Results (filled by processors)
         public float $computedBasic = 0,
@@ -71,7 +77,9 @@ class PayrollEmployeeDTO
                 })->get(),
             variables: $settings['variables'] ?? [],
             taxBands: $settings['tax_bands'] ?? [],
-            statutoryExemptions: $employee->statutory_exemptions ?? []
+            statutoryExemptions: $employee->statutory_exemptions ?? [],
+            hireDate: $employee->hire_date ? Carbon::instance($employee->hire_date) : null,
+            terminationDate: $employee->termination_date ? Carbon::instance($employee->termination_date) : null,
         );
     }
 }

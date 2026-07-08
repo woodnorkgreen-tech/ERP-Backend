@@ -35,15 +35,12 @@ class PettyCashBalance extends Model
     /**
      * Get the attributes that should be cast.
      *
-     * @return array<string, string>
+     * @var array<string,string>
      */
-    protected function casts(): array
-    {
-        return [
-            'current_balance' => 'decimal:2',
-            'updated_at' => 'datetime',
-        ];
-    }
+    protected $casts = [
+        'current_balance' => 'decimal:2',
+        'updated_at' => 'datetime',
+    ];
 
     /**
      * Get the current balance instance (singleton pattern).
@@ -152,12 +149,14 @@ class PettyCashBalance extends Model
      */
     public function recalculateBalance(): self
     {
-        $totalTopUps = PettyCashTopUp::notArchived()->sum('amount');
-        $totalDisbursements = PettyCashDisbursement::active()
-            ->notArchived()
-            ->sum(\Illuminate\Support\Facades\DB::raw('amount + COALESCE(transaction_cost, 0)'));
-        
-        $this->current_balance = (float)$totalTopUps - (float)$totalDisbursements;
+        $credits = \Illuminate\Support\Facades\DB::table('petty_cash_ledger_entries')
+            ->where('type', 'credit')
+            ->sum('amount');
+        $debits = \Illuminate\Support\Facades\DB::table('petty_cash_ledger_entries')
+            ->where('type', 'debit')
+            ->sum('amount');
+
+        $this->current_balance = bcsub((string)$credits, (string)$debits, 2);
         $this->updated_at = now();
         $this->save();
 

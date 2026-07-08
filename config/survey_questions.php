@@ -192,23 +192,24 @@ return [
             ],
         ],
 
-        // Section 9: Improvements & Additional Comments
+        // Section 9: Final Thoughts
         [
-            'id' => 'feedback',
-            'title' => 'Future Improvements',
+            'id' => 'final_thoughts',
+            'title' => 'Your Final Thoughts',
+            'description' => 'No right or wrong answers — just your honest perspective.',
             'questions' => [
                 [
-                    'id' => 'improvement_suggestions',
+                    'id' => 'project_overview',
                     'type' => 'textarea',
-                    'label' => 'What suggestions do you have for improving our products or services?',
-                    'placeholder' => 'Please share your ideas for how we can improve...',
+                    'label' => 'How was your overall experience with this project?',
+                    'placeholder' => 'Tell us anything that comes to mind — what the experience was like, how the team performed, how the final result felt…',
                     'required' => false,
                 ],
                 [
-                    'id' => 'additional_comments',
+                    'id' => 'improvement_suggestions',
                     'type' => 'textarea',
-                    'label' => 'Additional Comments',
-                    'placeholder' => 'Is there anything else you would like to share about your experience with us?',
+                    'label' => 'Any suggestions for how we can do better next time?',
+                    'placeholder' => 'Any ideas — big or small — on how we can improve our products, process, or service…',
                     'required' => false,
                 ],
             ],

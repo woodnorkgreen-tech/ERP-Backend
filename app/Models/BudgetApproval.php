@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class BudgetApproval extends Model
 {
+    public $timestamps = false;
+
     protected $fillable = [
         'task_budget_data_id', 'approved_by', 'status', 'comments', 'approved_at'
     ];

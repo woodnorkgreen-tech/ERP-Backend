@@ -6,6 +6,7 @@ use App\Models\TaskProcurementData;
 use App\Services\ProcurementService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 /**
  * @OA\Tag(
@@ -133,7 +134,14 @@ class ProcurementController extends Controller
                 'procurementItems.*.availabilityStatus' => 'sometimes|string',
                 'procurementItems.*.vendorName' => 'sometimes|nullable|string',
                 'procurementItems.*.procurementNotes' => 'sometimes|nullable|string',
+                'procurementItems.*.budgetElementPersistentId' => 'sometimes|nullable|string',
+                'procurementItems.*.budgetItemPersistentId' => 'sometimes|nullable|string',
+                'procurementItems.*.budgetDataId' => 'sometimes|nullable|integer',
+                'procurementItems.*.procurementLinks' => 'sometimes|array',
+                'procurementItems.*.operationalSync' => 'sometimes|nullable|array',
+                'procurementItems.*.operationalStage' => 'sometimes|nullable|string',
                 'budgetSummary' => 'sometimes|array',
+                'budgetSummary.operationalSync' => 'sometimes|nullable|array',
                 'lastImportDate' => 'sometimes|date'
             ]);
 
@@ -212,6 +220,21 @@ class ProcurementController extends Controller
                 'data' => $response,
                 'message' => 'Budget data imported successfully'
             ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'message' => 'Procurement task not found',
+                'error' => $e->getMessage()
+            ], 404);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 422);
+        } catch (\DomainException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 409);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to import budget data',

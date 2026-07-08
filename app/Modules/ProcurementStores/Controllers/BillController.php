@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class BillController extends Controller
@@ -52,6 +53,30 @@ class BillController extends Controller
         }
         
         return false;
+    }
+
+    private function syncProjectProcurementFromBill(Bill|int $bill): void
+    {
+        try {
+            app(ProcurementOperationalSyncService::class)->syncBill($bill);
+        } catch (\Throwable $exception) {
+            \Log::warning('Failed to sync project procurement from bill', [
+                'bill' => $bill instanceof Bill ? $bill->id : $bill,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function syncProjectProcurementFromPurchaseOrder(int $purchaseOrderId): void
+    {
+        try {
+            app(ProcurementOperationalSyncService::class)->syncPurchaseOrder($purchaseOrderId);
+        } catch (\Throwable $exception) {
+            \Log::warning('Failed to sync project procurement from bill purchase order', [
+                'purchase_order_id' => $purchaseOrderId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
     }
 
     public function index(Request $request)
@@ -168,6 +193,7 @@ class BillController extends Controller
             $input['status'] = 'pending';
 
             $bill = Bill::create($input);
+            $this->syncProjectProcurementFromBill($bill);
 
             return new BillResource($bill->load(['purchaseOrder', 'supplier', 'createdBy', 'payments']));
         } catch (\Exception $e) {
@@ -214,6 +240,8 @@ class BillController extends Controller
                 'reference_number' => $request->reference_number,
                 'user_id' => auth()->id(),
             ]);
+
+            $this->syncProjectProcurementFromBill($bill->id);
 
             return new BillResource($bill->fresh()->load(['purchaseOrder', 'supplier', 'createdBy', 'payments.paymentMethod', 'payments.createdBy']));
         } catch (\Exception $e) {
@@ -290,6 +318,10 @@ class BillController extends Controller
 
             DB::commit();
 
+            foreach ($billsUpdated as $billUpdate) {
+                $this->syncProjectProcurementFromBill((int) $billUpdate['bill_id']);
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Payment recorded successfully for ' . count($billsUpdated) . ' bill(s)',
@@ -332,7 +364,13 @@ class BillController extends Controller
         }
 
         try {
+            $purchaseOrderId = $bill->purchase_order_id;
             $bill->delete();
+
+            if ($purchaseOrderId) {
+                $this->syncProjectProcurementFromPurchaseOrder((int) $purchaseOrderId);
+            }
+
             return response(['message' => 'Bill deleted successfully']);
         } catch (\Exception $e) {
             return response(['error' => 'Failed to delete bill: ' . $e->getMessage()], 500);
