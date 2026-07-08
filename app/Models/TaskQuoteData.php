@@ -48,6 +48,14 @@ class TaskQuoteData extends Model
         // Margin governance audit trail
         'justification',
         'justification_history',
+        // Excel quote upload (alternative path)
+        'quote_mode',
+        'excel_quote_file',
+        'excel_quote_filename',
+        'excel_quote_amount',
+        'excel_quote_uploaded_by',
+        'excel_quote_uploaded_at',
+        'excel_quote_insights',
         'created_at',
         'updated_at'
     ];
@@ -69,10 +77,13 @@ class TaskQuoteData extends Model
         'totals'               => 'array',
         'approval_date'        => 'date',
         'quote_amount'         => 'decimal:2',
-        'viewer_settings'      => 'array',
-        'justification_history' => 'array',
-        'created_at'           => 'datetime',
-        'updated_at'           => 'datetime',
+        'viewer_settings'          => 'array',
+        'justification_history'    => 'array',
+        'excel_quote_amount'       => 'decimal:2',
+        'excel_quote_uploaded_at'  => 'datetime',
+        'excel_quote_insights'     => 'array',
+        'created_at'               => 'datetime',
+        'updated_at'               => 'datetime',
     ];
 
     public function enquiryTask(): BelongsTo

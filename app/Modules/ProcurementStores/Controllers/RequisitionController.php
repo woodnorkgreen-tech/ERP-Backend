@@ -5,6 +5,7 @@ namespace App\Modules\ProcurementStores\Controllers;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Resources\RequisitionResource;
 use App\Services\RequisitionNotificationService;
+use App\Services\ProcurementOperationalSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -57,6 +58,27 @@ class RequisitionController extends Controller
         }
 
         return false;
+    }
+
+    private function syncProjectProcurement(Requisition|int $requisition): void
+    {
+        try {
+            app(ProcurementOperationalSyncService::class)->syncRequisition($requisition);
+        } catch (\Throwable $exception) {
+            \Log::warning('Failed to sync project procurement from requisition', [
+                'requisition' => $requisition instanceof Requisition ? $requisition->id : $requisition,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function syncProjectProcurementTasks(iterable $taskIds): void
+    {
+        $sync = app(ProcurementOperationalSyncService::class);
+
+        foreach ($taskIds as $taskId) {
+            $sync->safeSyncTask((int) $taskId);
+        }
     }
 
     /**
@@ -245,12 +267,21 @@ class RequisitionController extends Controller
             'urgency'                    => 'required|in:normal,urgent',
             'job_number'                 => 'nullable|string',
             'items'                      => 'required|array|min:1',
+            'items.*.project_enquiry_id' => 'nullable|integer',
+            'items.*.procurement_task_id' => 'nullable|integer',
+            'items.*.budget_data_id'     => 'nullable|integer',
+            'items.*.budget_element_id'  => 'nullable|string',
+            'items.*.budget_element_persistent_id' => 'nullable|string',
+            'items.*.budget_item_id'     => 'nullable|string',
+            'items.*.budget_item_persistent_id' => 'nullable|string',
             'items.*.material_id'        => 'nullable|exists:library_materials,id',
             // Either material_id must be present OR custom_description must be provided
             'items.*.custom_description' => 'nullable|string',
             'items.*.quantity'           => 'required|integer|min:1',
             'items.*.unit_price'         => 'required|numeric|min:0',
+            'items.*.internal_budget_unit_price' => 'nullable|numeric|min:0',
             'items.*.purpose'            => 'required|string',
+            'items.*.procurement_item_snapshot' => 'nullable|array',
         ]);
 
         if ($validator->fails()) {
@@ -290,6 +321,9 @@ class RequisitionController extends Controller
             foreach ($items as $item) {
                 $item['total'] = $item['quantity'] * $item['unit_price'];
                 $item['custom_description'] = $item['custom_description'] ?? null;
+                $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
+                    $input['requested_by_type'] === 'project' ? $input['project_id'] : null
+                );
                 $requisition->items()->create($item);
             }
 
@@ -310,6 +344,8 @@ class RequisitionController extends Controller
             } catch (\Exception $e) {
                 \Log::error('Requisition notification failed: ' . $e->getMessage());
             }
+
+            $this->syncProjectProcurement($requisition);
 
             return new RequisitionResource(
                 $requisition->load(['items.material', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
@@ -343,6 +379,21 @@ class RequisitionController extends Controller
             'requested_by_type'  => 'in:project,office,employee',
             'urgency'            => 'in:normal,urgent',
             'status'             => 'in:pending,approved,rejected,completed',
+            'items'              => 'sometimes|array|min:1',
+            'items.*.project_enquiry_id' => 'nullable|integer',
+            'items.*.procurement_task_id' => 'nullable|integer',
+            'items.*.budget_data_id' => 'nullable|integer',
+            'items.*.budget_element_id' => 'nullable|string',
+            'items.*.budget_element_persistent_id' => 'nullable|string',
+            'items.*.budget_item_id' => 'nullable|string',
+            'items.*.budget_item_persistent_id' => 'nullable|string',
+            'items.*.material_id' => 'nullable|exists:library_materials,id',
+            'items.*.custom_description' => 'nullable|string',
+            'items.*.quantity' => 'required_with:items|integer|min:1',
+            'items.*.unit_price' => 'required_with:items|numeric|min:0',
+            'items.*.internal_budget_unit_price' => 'nullable|numeric|min:0',
+            'items.*.purpose' => 'required_with:items|string',
+            'items.*.procurement_item_snapshot' => 'nullable|array',
         ]);
 
         if ($validator->fails()) {
@@ -375,6 +426,11 @@ class RequisitionController extends Controller
                 foreach ($items as $item) {
                     $item['total'] = $item['quantity'] * $item['unit_price'];
                     $totalAmount  += $item['total'];
+                    $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
+                        ($input['requested_by_type'] ?? $requisition->requested_by_type) === 'project'
+                            ? ($input['project_id'] ?? $requisition->project_id)
+                            : null
+                    );
                     $requisition->items()->create($item);
                 }
 
@@ -384,6 +440,8 @@ class RequisitionController extends Controller
             $requisition->update($input);
 
             DB::commit();
+
+            $this->syncProjectProcurement($requisition);
 
             return new RequisitionResource(
                 $requisition->load(['items.material', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy', 'approvedBy'])
@@ -409,7 +467,10 @@ class RequisitionController extends Controller
             ], 403);
         }
 
+        $taskIds = app(ProcurementOperationalSyncService::class)->taskIdsForRequisition($requisition);
         $requisition->delete();
+        $this->syncProjectProcurementTasks($taskIds);
+
         return response(['message' => 'Requisition deleted successfully']);
     }
 
@@ -420,6 +481,7 @@ class RequisitionController extends Controller
         }
 
         $requisition->submitForApproval();
+        $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
             $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
@@ -439,6 +501,7 @@ class RequisitionController extends Controller
         }
 
         $requisition->approve(auth()->id());
+        $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
             $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
@@ -466,6 +529,7 @@ class RequisitionController extends Controller
         }
 
         $requisition->reject(auth()->id(), $request->reason);
+        $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
             $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])

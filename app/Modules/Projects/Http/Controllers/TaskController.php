@@ -606,8 +606,13 @@ class TaskController extends Controller
     {
         $user = Auth::user();
 
+        if ($request->filled('assigned_user_id') && !$request->filled('new_assigned_user_id')) {
+            $request->merge(['new_assigned_user_id' => $request->input('assigned_user_id')]);
+        }
+
         $validator = Validator::make($request->all(), [
             'new_assigned_user_id' => 'required|integer|exists:users,id',
+            'assigned_user_id' => 'nullable|integer|exists:users,id',
             'reason' => 'nullable|string|max:500',
         ]);
 

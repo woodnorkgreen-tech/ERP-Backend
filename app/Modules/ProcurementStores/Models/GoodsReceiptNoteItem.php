@@ -21,6 +21,7 @@ class GoodsReceiptNoteItem extends Model
 
     protected $casts = [
         'accepted' => 'boolean',
+        'material_id' => 'integer',
     ];
 
     /**

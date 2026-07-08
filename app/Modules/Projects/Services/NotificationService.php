@@ -404,6 +404,47 @@ class NotificationService
     }
 
     /**
+     * Notify Finance and the Project Officer that a previously approved quote
+     * was invalidated (e.g. a new Excel revision replaced the approved file).
+     */
+    public function sendQuoteApprovalInvalidated(ProjectEnquiry $enquiry, ?User $actor, string $reason): void
+    {
+        try {
+            $enquiry->loadMissing(['projectOfficer']);
+
+            $recipients = User::permission(\App\Constants\Permissions::FINANCE_QUOTE_APPROVE)->get();
+            if ($enquiry->projectOfficer) {
+                $recipients->push($enquiry->projectOfficer);
+            }
+
+            foreach ($recipients->unique('id') as $recipient) {
+                Notification::create([
+                    'user_id' => $recipient->id,
+                    'type' => 'quote_approval_invalidated',
+                    'title' => 'Quote Approval Invalidated - Re-review Required',
+                    'message' => "The approved quote for '{$enquiry->title}' was invalidated: {$reason}. Finance must re-review before funds are released.",
+                    'notifiable_type' => ProjectEnquiry::class,
+                    'notifiable_id' => $enquiry->id,
+                    'data' => [
+                        'enquiry_id' => $enquiry->id,
+                        'enquiry_title' => $enquiry->title,
+                        'enquiry_number' => $enquiry->enquiry_number,
+                        'reason' => $reason,
+                        'actor' => $actor?->name,
+                    ],
+                ]);
+            }
+
+            Log::info("Quote approval invalidation notification sent", [
+                'enquiry_id' => $enquiry->id,
+                'recipients' => $recipients->unique('id')->count(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Failed to send quote approval invalidation notification: " . $e->getMessage());
+        }
+    }
+
+    /**
      * Send notification when enquiry status changes to critical milestones
      */
     public function sendEnquiryStatusChanged(
@@ -822,44 +863,44 @@ class NotificationService
         try {
             $enquiry->loadMissing(['client']);
 
-            $blockingClosure  = $readiness['blocking_closure_tasks'] ?? [];
             $inProgressTasks  = $readiness['in_progress_tasks'] ?? [];
+            $pendingTasks     = $readiness['pending_tasks'] ?? [];
             $summary          = $readiness['task_summary'] ?? [];
 
             // Build a concise but specific message for the notification body
             $messageParts = [];
-            if (!empty($blockingClosure)) {
-                $names = implode(', ', array_column($blockingClosure, 'title'));
-                $messageParts[] = "Closure tasks not done: {$names}";
-            }
             if (!empty($inProgressTasks)) {
                 $names = implode(', ', array_column($inProgressTasks, 'title'));
                 $messageParts[] = "Tasks still in progress: {$names}";
             }
+            if (!empty($pendingTasks)) {
+                $names = implode(', ', array_column($pendingTasks, 'title'));
+                $messageParts[] = "Tasks not started: {$names}";
+            }
 
             $message = empty($messageParts)
-                ? "All conditions are met. Use the Complete Project action to finalise."
+                ? "All delivery-completion conditions are met. Use the Complete Project action."
                 : implode(' | ', $messageParts);
 
             // Build per-task action steps for the front-end to render as a checklist
             $actionItems = [];
-            foreach ($blockingClosure as $task) {
-                $actionItems[] = [
-                    'task_id' => $task['id'],
-                    'type'    => $task['type'],
-                    'title'   => $task['title'],
-                    'status'  => $task['status'],
-                    'action'  => "Complete or skip \"{$task['title']}\" to unblock project closure.",
-                    'severity' => 'blocking',
-                ];
-            }
             foreach ($inProgressTasks as $task) {
                 $actionItems[] = [
                     'task_id' => $task['id'],
                     'type'    => $task['type'],
                     'title'   => $task['title'],
                     'status'  => $task['status'],
-                    'action'  => "Finish or skip \"{$task['title']}\" — a project cannot close while work is still in progress.",
+                    'action'  => "Finish \"{$task['title']}\" before marking delivery complete.",
+                    'severity' => 'warning',
+                ];
+            }
+            foreach ($pendingTasks as $task) {
+                $actionItems[] = [
+                    'task_id' => $task['id'],
+                    'type'    => $task['type'],
+                    'title'   => $task['title'],
+                    'status'  => $task['status'],
+                    'action'  => "Start and finish \"{$task['title']}\" before marking delivery complete.",
                     'severity' => 'warning',
                 ];
             }

@@ -52,7 +52,7 @@ class PettyCashRepository
      */
     public function getDisbursements(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition')
+        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry')
             ->orderBy('date_disbursed', 'desc')
             ->orderBy('created_at', 'desc');
 
@@ -104,7 +104,7 @@ class PettyCashRepository
         $query = PettyCashTopUp::with([
             'creator',
             'disbursements' => function ($q) use ($filters) {
-                $q->with('creator', 'voidedBy', 'requisition');
+                $q->with('creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry');
                 
                 // Apply disbursement filters
                 if (!empty($filters['disbursement_status'])) {
@@ -224,14 +224,36 @@ class PettyCashRepository
      */
     public function getTopUpsWithAvailableBalance(): Collection
     {
-        return PettyCashTopUp::with(['creator', 'disbursements' => function($q) {
-                $q->where('status', 'active');
-            }])
-            ->notArchived()
-            ->get()
-            ->filter(function ($topUp) {
-                return $topUp->remaining_balance > 0;
+        $directDisbursements = DB::table('petty_cash_disbursements as d')
+            ->select('d.top_up_id', DB::raw('SUM(d.amount + COALESCE(d.transaction_cost, 0)) as total'))
+            ->where('d.status', 'active')
+            ->whereNotExists(function ($query) {
+                $query->select(DB::raw(1))
+                    ->from('petty_cash_disbursement_allocations as a')
+                    ->whereRaw('a.disbursement_id = d.id');
             })
+            ->groupBy('d.top_up_id');
+
+        $allocations = DB::table('petty_cash_disbursement_allocations')
+            ->select('top_up_id', DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total'))
+            ->groupBy('top_up_id');
+
+        return PettyCashTopUp::with('creator')
+            ->leftJoinSub($directDisbursements, 'direct_disbursements', function ($join) {
+                $join->on('petty_cash_top_ups.id', '=', 'direct_disbursements.top_up_id');
+            })
+            ->leftJoinSub($allocations, 'allocations', function ($join) {
+                $join->on('petty_cash_top_ups.id', '=', 'allocations.top_up_id');
+            })
+            ->select('petty_cash_top_ups.*')
+            ->selectRaw(
+                '(petty_cash_top_ups.amount - COALESCE(direct_disbursements.total, 0) - COALESCE(allocations.total, 0)) as calculated_remaining_balance'
+            )
+            ->notArchived()
+            ->whereRaw('(petty_cash_top_ups.amount - COALESCE(direct_disbursements.total, 0) - COALESCE(allocations.total, 0)) > 0')
+            ->orderBy('date_topped_up')
+            ->orderBy('id')
+            ->get()
             ->values();
     }
 
@@ -587,80 +609,73 @@ class PettyCashRepository
      */
     public function getProjectBudgetsSummary(array $filters = [], int $perPage = 15): array
     {
-        // 1. Get approved project enquiries with their budget tasks (PAGINATED)
+        $perPage = max(1, min($perPage, 100));
+
         $query = \App\Models\ProjectEnquiry::where("quote_approved", true)
             ->whereNotNull("job_number")
-            ->with(["enquiryTasks" => function($q) {
+            // Internal budget approval was removed (2026-07): a COMPLETED budget
+            // task (auto-completed once a priced budget is saved) is the
+            // finalization signal. Legacy 'approved' budgets also have
+            // completed tasks, so they remain included.
+            ->whereHas("enquiryTasks", function ($q) {
                 $q->where("type", "budget")
-                  ->with("budgetData");
-            }])
+                    ->where("status", "completed")
+                    ->whereHas("budgetData");
+            })
+            ->with([
+                'project:id,enquiry_id,project_id',
+                "enquiryTasks" => function($q) {
+                    $q->where("type", "budget")
+                      ->where("status", "completed")
+                      ->whereHas("budgetData")
+                      ->with("budgetData");
+                }
+            ])
             ->orderBy('created_at', 'desc');
 
         $paginator = $query->paginate($perPage);
+        $pageEnquiryIds = $paginator->getCollection()->pluck('id')->filter()->values();
+        $pageJobNumbers = $paginator->getCollection()->pluck('job_number')->filter()->values();
 
-        // 2. Aggregate actual spent from petty cash disbursements by job_number and category
-        $actualSpentRaw = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::active()
-            ->notArchived()
-            ->whereNotNull("job_number")
-            ->select("job_number", "budget_category", \Illuminate\Support\Facades\DB::raw("SUM(amount + COALESCE(transaction_cost, 0)) as total_spent"))
-            ->groupBy("job_number", "budget_category")
+        $totalActualSpentOverall = (float) $this->projectSpendQuery($filters)
+            ->sum(DB::raw('amount + COALESCE(transaction_cost, 0)'));
+
+        $actualSpentRaw = $this->projectSpendQuery($filters)
+            ->where(function ($query) use ($pageEnquiryIds, $pageJobNumbers) {
+                $query->whereIn('project_enquiry_id', $pageEnquiryIds);
+
+                if ($pageJobNumbers->isNotEmpty()) {
+                    $query->orWhere(function ($legacyQuery) use ($pageJobNumbers) {
+                        $legacyQuery->whereNull('project_enquiry_id')
+                            ->whereIn('job_number', $pageJobNumbers);
+                    });
+                }
+            })
+            ->select(
+                'project_enquiry_id',
+                'job_number',
+                'budget_category',
+                DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total_spent')
+            )
+            ->groupBy('project_enquiry_id', 'job_number', 'budget_category')
             ->get();
 
-        $actualSpent = [];
-        $totalActualSpentOverall = 0;
-        foreach ($actualSpentRaw as $row) {
-            if (!isset($actualSpent[$row->job_number])) {
-                $actualSpent[$row->job_number] = [
-                    'total' => 0,
-                    'categories' => ['materials' => 0, 'labour' => 0, 'logistics' => 0, 'expenses' => 0]
-                ];
-            }
-            $actualSpent[$row->job_number]['total'] += (float) $row->total_spent;
-            $totalActualSpentOverall += (float) $row->total_spent;
-            $cat = $row->budget_category ?: 'expenses';
-            if (isset($actualSpent[$row->job_number]['categories'][$cat])) {
-                $actualSpent[$row->job_number]['categories'][$cat] += (float) $row->total_spent;
-            } else {
-                $actualSpent[$row->job_number]['categories']['expenses'] += (float) $row->total_spent;
-            }
-        }
+        $actualSpent = $this->formatProjectSpendRows($actualSpentRaw);
+        $totalBudgetOverall = $this->getApprovedProjectBudgetTotal();
 
-        // 3. Calculate Overall Budget Total (for stats)
-        // This is done across all enquiries, not just the current page
-        $totalBudgetOverall = 0;
-        $allApprovedEnquiries = \App\Models\ProjectEnquiry::where("quote_approved", true)
-            ->whereNotNull("job_number")
-            ->with(["enquiryTasks" => function($q) {
-                $q->where("type", "budget")
-                  ->with("budgetData");
-            }])
-            ->get();
-
-        foreach ($allApprovedEnquiries as $enquiry) {
-            $budgetTask = $enquiry->enquiryTasks->filter(fn($t) => $t->type === "budget")->first();
-            if ($budgetTask && $budgetTask->budgetData) {
-                $totalBudgetOverall += (float) ($budgetTask->budgetData->budget_summary['grandTotal'] ?? 0);
-            }
-        }
-
-        // 4. Transform data using the paginator's collection
         $paginator->getCollection()->transform(function ($enquiry) use ($actualSpent) {
-            $budgetTask = $enquiry->enquiryTasks->filter(function($t) {
-                return $t->type === "budget";
-            })->first();
-            
+            $budgetTask = $enquiry->enquiryTasks->first();
             $budgetData = $budgetTask ? $budgetTask->budgetData : null;
             $summary = $budgetData ? ($budgetData->budget_summary ?? []) : [];
-            
-            $projectSpent = $actualSpent[$enquiry->job_number] ?? [
-                'total' => 0,
-                'categories' => ['materials' => 0, 'labour' => 0, 'logistics' => 0, 'expenses' => 0]
-            ];
-            
+
+            $projectSpent = $actualSpent['enquiry:' . $enquiry->id]
+                ?? $actualSpent['job:' . $enquiry->job_number]
+                ?? $this->emptyProjectSpend();
+
             return [
                 "id" => $enquiry->id,
                 "job_number" => $enquiry->job_number,
-                "project_id" => $enquiry->project_id,
+                "project_id" => $enquiry->project?->project_id,
                 "title" => $enquiry->title,
                 "budget_summary" => $summary,
                 "actual_spent" => (float) $projectSpent['total'],
@@ -682,6 +697,79 @@ class PettyCashRepository
                 'total_spent' => $totalActualSpentOverall,
                 'avg_utilization' => $totalBudgetOverall > 0 ? round(($totalActualSpentOverall / $totalBudgetOverall) * 100) : 0
             ]
+        ];
+    }
+
+    private function projectSpendQuery(array $filters = [])
+    {
+        $query = PettyCashDisbursement::active()
+            ->notArchived()
+            ->where(function ($query) {
+                $query->whereNotNull('project_enquiry_id')
+                    ->orWhereNotNull('job_number');
+            });
+
+        if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
+            $query->whereBetween('date_disbursed', [$filters['start_date'], $filters['end_date']]);
+        }
+
+        return $query;
+    }
+
+    private function formatProjectSpendRows($actualSpentRaw): array
+    {
+        $actualSpent = [];
+
+        foreach ($actualSpentRaw as $row) {
+            $key = $row->project_enquiry_id ? 'enquiry:' . $row->project_enquiry_id : 'job:' . $row->job_number;
+
+            if (!isset($actualSpent[$key])) {
+                $actualSpent[$key] = $this->emptyProjectSpend();
+            }
+
+            $actualSpent[$key]['total'] += (float) $row->total_spent;
+            $cat = $row->budget_category ?: 'expenses';
+
+            if (isset($actualSpent[$key]['categories'][$cat])) {
+                $actualSpent[$key]['categories'][$cat] += (float) $row->total_spent;
+            } else {
+                $actualSpent[$key]['categories']['expenses'] += (float) $row->total_spent;
+            }
+        }
+
+        return $actualSpent;
+    }
+
+    private function getApprovedProjectBudgetTotal(): float
+    {
+        $totalBudgetOverall = 0;
+
+        $budgetRows = \App\Models\TaskBudgetData::query()
+            ->join('enquiry_tasks', 'task_budget_data.enquiry_task_id', '=', 'enquiry_tasks.id')
+            ->join('project_enquiries', 'enquiry_tasks.project_enquiry_id', '=', 'project_enquiries.id')
+            ->where('project_enquiries.quote_approved', true)
+            ->whereNotNull('project_enquiries.job_number')
+            ->where('enquiry_tasks.type', 'budget')
+            ->where('enquiry_tasks.status', 'completed')
+            ->select('task_budget_data.budget_summary')
+            ->get();
+
+        foreach ($budgetRows as $row) {
+            $summary = is_array($row->budget_summary)
+                ? $row->budget_summary
+                : (json_decode((string) $row->budget_summary, true) ?: []);
+
+            $totalBudgetOverall += (float) ($summary['grandTotal'] ?? $summary['grand_total'] ?? 0);
+        }
+
+        return $totalBudgetOverall;
+    }
+
+    private function emptyProjectSpend(): array
+    {
+        return [
+            'total' => 0,
+            'categories' => ['materials' => 0, 'labour' => 0, 'logistics' => 0, 'expenses' => 0]
         ];
     }
 }

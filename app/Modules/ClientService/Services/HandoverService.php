@@ -3,6 +3,8 @@
 namespace App\Modules\ClientService\Services;
 
 use App\Models\HandoverSurvey;
+use App\Models\ProjectEnquiry;
+use App\Constants\EnquiryConstants;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -13,7 +15,7 @@ class HandoverService
      */
     public function getHandovers(array $filters = []): array
     {
-        $query = HandoverSurvey::with(['task.enquiry.client'])
+        $query = HandoverSurvey::with(['task.enquiry.client', 'reviewer'])
             ->where('submitted', true);
 
         // Filter by client
@@ -43,6 +45,11 @@ class HandoverService
         // Filter by feedback source channel
         if (!empty($filters['feedback_source'])) {
             $query->where('feedback_source', $filters['feedback_source']);
+        }
+
+        // Filter by CS review status
+        if (!empty($filters['review_status'])) {
+            $query->where('review_status', $filters['review_status']);
         }
 
         $handovers = $query->get();
@@ -105,12 +112,129 @@ class HandoverService
     }
 
     /**
+     * Get completed projects that have NOT yet returned feedback, so the CS Lead
+     * knows who to follow up with. A project counts as "pending feedback" when it
+     * is completed but has no submitted handover survey on any of its tasks.
+     *
+     * Read-only: this does not mint sign-off tokens. Use the existing
+     * HandoverSurveyController@generateToken(taskId) endpoint to create/copy a link.
+     */
+    public function getPendingFeedback(array $filters = []): array
+    {
+        $query = ProjectEnquiry::with([
+                'client',
+                'enquiryTasks' => fn ($q) => $q->where('type', 'handover')->with('handoverSurvey'),
+            ])
+            ->where('status', EnquiryConstants::STATUS_COMPLETED)
+            ->whereDoesntHave('enquiryTasks.handoverSurvey', function ($q) {
+                $q->where('submitted', true);
+            });
+
+        if (!empty($filters['client_id'])) {
+            $query->where('client_id', $filters['client_id']);
+        }
+
+        if (!empty($filters['search'])) {
+            $search = $filters['search'];
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('job_number', 'like', "%{$search}%")
+                  ->orWhereHas('client', function ($qc) use ($search) {
+                      $qc->where('full_name', 'like', "%{$search}%")
+                         ->orWhere('company_name', 'like', "%{$search}%");
+                  });
+            });
+        }
+
+        $query->orderByDesc('updated_at');
+
+        $page = (int) ($filters['page'] ?? 1);
+        $paginator = $query->paginate(15, ['*'], 'page', $page);
+
+        $data = collect($paginator->items())->map(function ($e) {
+            $handoverTask = $e->enquiryTasks->first();
+            return [
+                'enquiry_id'       => $e->id,
+                'client_id'        => $e->client_id,
+                'client_name'      => $e->client->full_name ?? 'N/A',
+                'project_title'    => $e->title ?? 'N/A',
+                'job_number'       => $e->job_number ?? 'N/A',
+                // updated_at is used as a completion proxy (no dedicated completed_at column)
+                'completed_at'     => $e->updated_at ? $e->updated_at->toISOString() : null,
+                'handover_task_id' => $handoverTask?->id,
+                'access_token'     => $handoverTask?->handoverSurvey?->access_token,
+            ];
+        })->values()->toArray();
+
+        return [
+            'data' => $data,
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'total' => $paginator->total(),
+            ],
+        ];
+    }
+
+    /**
+     * Submitted surveys not yet reviewed by CS Lead (review_status = pending).
+     * Displayed in the "Awaiting CS Review" panel.
+     */
+    public function getAwaitingReview(array $filters = []): array
+    {
+        $query = HandoverSurvey::with(['task.enquiry.client'])
+            ->where('submitted', true)
+            ->where('review_status', 'pending');
+
+        if (!empty($filters['search'])) {
+            $search = $filters['search'];
+            $query->where(function ($q) use ($search) {
+                $q->whereHas('task.enquiry.client', function ($qc) use ($search) {
+                    $qc->where('first_name', 'like', "%{$search}%")
+                       ->orWhere('last_name', 'like', "%{$search}%")
+                       ->orWhere('company_name', 'like', "%{$search}%");
+                })->orWhereHas('task.enquiry', function ($qe) use ($search) {
+                    $qe->where('title', 'like', "%{$search}%")
+                       ->orWhere('job_number', 'like', "%{$search}%");
+                });
+            });
+        }
+
+        $query->orderByDesc('submitted_at');
+        $page      = (int) ($filters['page'] ?? 1);
+        $paginator = $query->paginate(15, ['*'], 'page', $page);
+
+        $data = collect($paginator->items())->map(function (HandoverSurvey $h) {
+            $enquiry = $h->task?->enquiry;
+            $client  = $enquiry?->client;
+            return [
+                'id'             => $h->id,
+                'submitted_at'   => $h->submitted_at?->toISOString(),
+                'average_rating' => $h->calculateAverageRating(),
+                'client_name'    => $client?->full_name ?? 'N/A',
+                'project_title'  => $enquiry?->title ?? 'N/A',
+                'job_number'     => $enquiry?->job_number ?? 'N/A',
+                'respondent'     => $h->respondent_info['name'] ?? 'N/A',
+            ];
+        })->values()->toArray();
+
+        return [
+            'data' => $data,
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page'    => $paginator->lastPage(),
+                'total'        => $paginator->total(),
+            ],
+        ];
+    }
+
+    /**
      * Get detailed handover survey by ID
      */
     public function getHandoverDetails(int $id): ?array
     {
-        $handover = HandoverSurvey::with(['task.enquiry.client'])->find($id);
-        
+        $handover = HandoverSurvey::with(['task.enquiry.client', 'reviewer', 'ncrReport'])->find($id);
+
         if (!$handover) return null;
 
         return $this->formatHandover($handover, true);
@@ -128,22 +252,42 @@ class HandoverService
         $isOnTime = ($onTime === true || $onTime === 'yes' || $onTime === 1 || $onTime === '1' || $onTime === 'true');
 
         $data = [
-            'id' => $h->id,
-            'submitted_at' => $h->submitted_at ? $h->submitted_at->toISOString() : null,
-            'average_rating' => $h->calculateAverageRating(),
-            'client_name' => $client->full_name ?? 'N/A',
-            'project_title' => $enquiry->title ?? 'N/A',
-            'job_number' => $enquiry->job_number ?? 'N/A',
-            'respondent' => $h->respondent_info['name'] ?? 'N/A',
+            'id'              => $h->id,
+            'submitted_at'    => $h->submitted_at ? $h->submitted_at->toISOString() : null,
+            'average_rating'  => $h->calculateAverageRating(),
+            'client_name'     => $client->full_name ?? 'N/A',
+            'project_title'   => $enquiry->title ?? 'N/A',
+            'job_number'      => $enquiry->job_number ?? 'N/A',
+            'respondent'      => $h->respondent_info['name'] ?? 'N/A',
             'feedback_source' => $h->feedback_source ?? 'survey_link',
             'delivered_on_time' => $isOnTime,
+            // CS Lead review state (always included so the list can colour-code)
+            'review_status'   => $h->review_status ?? 'pending',
         ];
 
         if ($detailed) {
-            $data['responses'] = $h->responses;
-            $data['question_config'] = $h->question_config_snapshot ?? config('survey_questions');
-            $data['respondent_info'] = $h->respondent_info;
-            $data['evidence_notes'] = $h->evidence_notes;
+            $data['responses']        = $h->responses;
+            $data['question_config']  = $h->question_config_snapshot ?? config('survey_questions');
+            $data['respondent_info']  = $h->respondent_info;
+            $data['evidence_notes']   = $h->evidence_notes;
+            // PM's internal notes (from the handover EnquiryTask)
+            $data['pm_notes']         = $h->task?->notes;
+            // Review detail
+            $data['review_notes']     = $h->review_notes;
+            $data['reviewed_by_name'] = $h->reviewer?->name;
+            $data['reviewed_at']      = $h->reviewed_at?->toISOString();
+            // Attached NCR if one was raised
+            $data['ncr'] = $h->ncrReport ? [
+                'id'                 => $h->ncrReport->id,
+                'title'              => $h->ncrReport->title,
+                'category'           => $h->ncrReport->category,
+                'status'             => $h->ncrReport->status,
+                'assigned_department'=> $h->ncrReport->assigned_department,
+                'description'        => $h->ncrReport->description,
+                'root_cause'         => $h->ncrReport->root_cause,
+                'corrective_action'  => $h->ncrReport->corrective_action,
+                'resolved_at'        => $h->ncrReport->resolved_at?->toISOString(),
+            ] : null;
         }
 
         return $data;

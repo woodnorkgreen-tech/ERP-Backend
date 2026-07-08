@@ -290,6 +290,129 @@ class PettyCashTopUpController extends Controller
     }
 
     /**
+     * Get monthly balance movement trends.
+     */
+    public function trends(Request $request): JsonResponse
+    {
+        try {
+            $months = max(1, min((int) $request->get('months', 12), 24));
+            $startDate = now()->subMonths($months - 1)->startOfMonth();
+            $driver = \Illuminate\Support\Facades\DB::connection()->getDriverName();
+            $periodExpression = $driver === 'sqlite'
+                ? "strftime('%Y-%m', posted_at)"
+                : "DATE_FORMAT(posted_at, '%Y-%m')";
+
+            $ledgerRows = \Illuminate\Support\Facades\DB::table('petty_cash_ledger_entries')
+                ->selectRaw($periodExpression . ' as period')
+                ->selectRaw("SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) as credits")
+                ->selectRaw("SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END) as debits")
+                ->where('posted_at', '>=', $startDate)
+                ->groupBy('period')
+                ->orderBy('period')
+                ->get()
+                ->keyBy('period');
+
+            $openingCredits = (float) \Illuminate\Support\Facades\DB::table('petty_cash_ledger_entries')
+                ->where('type', 'credit')
+                ->where('posted_at', '<', $startDate)
+                ->sum('amount');
+            $openingDebits = (float) \Illuminate\Support\Facades\DB::table('petty_cash_ledger_entries')
+                ->where('type', 'debit')
+                ->where('posted_at', '<', $startDate)
+                ->sum('amount');
+
+            $runningBalance = $openingCredits - $openingDebits;
+            $data = [];
+            $cursor = $startDate->copy();
+
+            while ($cursor <= now()->endOfMonth()) {
+                $period = $cursor->format('Y-m');
+                $row = $ledgerRows->get($period);
+                $credits = (float) ($row->credits ?? 0);
+                $debits = (float) ($row->debits ?? 0);
+                $runningBalance += $credits - $debits;
+
+                $data[] = [
+                    'period' => $period,
+                    'month' => $cursor->format('M Y'),
+                    'credits' => $credits,
+                    'debits' => $debits,
+                    'net_flow' => $credits - $debits,
+                    'closing_balance' => $runningBalance,
+                ];
+
+                $cursor->addMonth();
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve balance trends',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get petty cash statistics.
+     */
+    public function statistics(Request $request): JsonResponse
+    {
+        try {
+            $filters = $request->only(['start_date', 'end_date', 'classification', 'project_name']);
+            $summary = $this->service->getTransactionSummary($filters);
+            $availableTopUps = $this->repository->getTopUpsWithAvailableBalance();
+
+            return response()->json([
+                'success' => true,
+                'data' => array_merge($summary, [
+                    'available_top_up_count' => $availableTopUps->count(),
+                    'available_top_up_balance' => (float) $availableTopUps->sum(function ($topUp) {
+                        return (float) ($topUp->calculated_remaining_balance ?? $topUp->remaining_balance);
+                    }),
+                ]),
+                'filters' => $filters,
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve statistics',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get supported petty cash payment methods.
+     */
+    public function paymentMethods(): JsonResponse
+    {
+        $methods = [
+            'cash' => 'Cash',
+            'mpesa' => 'M-Pesa',
+            'equity' => 'Equity',
+            'stanbic' => 'Stanbic',
+            'ncba' => 'NCBA',
+            'kcb' => 'KCB',
+            'family' => 'Family Bank',
+            'bank_transfer' => 'Bank Transfer',
+            'other' => 'Other',
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => collect($methods)->map(fn ($label, $value) => [
+                'value' => $value,
+                'label' => $label,
+            ])->values(),
+        ]);
+    }
+
+    /**
      * Remove the specified top-up from storage.
      */
     public function destroy(int $id): JsonResponse

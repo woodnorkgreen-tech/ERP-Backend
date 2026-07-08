@@ -57,6 +57,16 @@ class UpdateDisbursementRequest extends FormRequest
                 'string',
                 'max:255',
             ],
+            'project_id' => [
+                'nullable',
+                'integer',
+                'exists:projects,id',
+            ],
+            'project_enquiry_id' => [
+                'nullable',
+                'integer',
+                'exists:project_enquiries,id',
+            ],
             'classification' => [
                 'sometimes',
                 'string',

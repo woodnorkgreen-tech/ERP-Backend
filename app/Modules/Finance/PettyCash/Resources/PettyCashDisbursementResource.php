@@ -28,6 +28,8 @@ class PettyCashDisbursementResource extends JsonResource
             ],
             'description' => $this->description,
             'project_name' => $this->project_name,
+            'project_id' => $this->project_id,
+            'project_enquiry_id' => $this->project_enquiry_id,
             'classification' => [
                 'value' => $this->classification,
                 'label' => $this->getClassificationLabel(),

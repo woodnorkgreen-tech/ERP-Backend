@@ -22,24 +22,36 @@ class HandoverSurvey extends Model
         'evidence_notes',
         'evidence_files',
         'captured_by',
+        'review_status',
+        'review_notes',
+        'reviewed_by',
+        'reviewed_at',
     ];
 
     protected $casts = [
-        'submitted' => 'boolean',
-        'submitted_at' => 'datetime',
-        'feedback_received_at' => 'datetime',
-        'responses' => 'array',
-        'respondent_info' => 'array',
+        'submitted'           => 'boolean',
+        'submitted_at'        => 'datetime',
+        'feedback_received_at'=> 'datetime',
+        'reviewed_at'         => 'datetime',
+        'responses'           => 'array',
+        'respondent_info'     => 'array',
         'question_config_snapshot' => 'array',
-        'evidence_files' => 'array',
+        'evidence_files'      => 'array',
     ];
 
-    /**
-     * Get the task that owns this survey
-     */
     public function task()
     {
         return $this->belongsTo(\App\Modules\Projects\Models\EnquiryTask::class, 'task_id');
+    }
+
+    public function reviewer()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'reviewed_by');
+    }
+
+    public function ncrReport()
+    {
+        return $this->hasOne(\App\Modules\ClientService\Models\NcrReport::class, 'handover_survey_id');
     }
 
     /**

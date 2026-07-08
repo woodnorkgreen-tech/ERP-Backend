@@ -13,21 +13,40 @@ class RequisitionItem extends Model
 
     protected $fillable = [
         'requisition_id',
+        'project_enquiry_id',
+        'procurement_task_id',
+        'budget_data_id',
+        'budget_element_id',
+        'budget_element_persistent_id',
+        'budget_item_id',
+        'budget_item_persistent_id',
         'material_id',
         'custom_description',
         'quantity',
         'unit_price',
+        'internal_budget_unit_price',
         'total',
         'purpose',
         'reason',
+        'procurement_item_snapshot',
     ];
     protected $casts = [
         'unit_price' => 'decimal:2',
+        'internal_budget_unit_price' => 'decimal:2',
         'total' => 'decimal:2',
+        'project_enquiry_id' => 'integer',
+        'procurement_task_id' => 'integer',
+        'budget_data_id' => 'integer',
+        'procurement_item_snapshot' => 'array',
     ];
     public function requisition()
     {
         return $this->belongsTo(Requisition::class);
+    }
+
+    public function purchaseOrderItems()
+    {
+        return $this->hasMany(PurchaseOrderItem::class);
     }
 
     /**

@@ -2,8 +2,10 @@
 
 namespace App\Modules\ClientService\Models;
 
+use App\Models\ProjectEnquiry;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Client extends Model
 {
@@ -43,5 +45,21 @@ class Client extends Model
     public function getFullNameAttribute(): ?string
     {
         return $this->attributes['full_name'] ?? null;
+    }
+
+    /**
+     * All project enquiries belonging to this client (past and current).
+     */
+    public function enquiries(): HasMany
+    {
+        return $this->hasMany(ProjectEnquiry::class, 'client_id');
+    }
+
+    /**
+     * Logged interactions (calls, emails, notes, meetings) on this client's timeline.
+     */
+    public function interactions(): HasMany
+    {
+        return $this->hasMany(ClientInteraction::class, 'client_id');
     }
 }

@@ -10,10 +10,35 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class GoodsReceiptNoteController extends Controller
 {
+    private function syncProjectProcurement(GoodsReceiptNote|int $goodsReceiptNote): void
+    {
+        try {
+            app(ProcurementOperationalSyncService::class)->syncGoodsReceiptNote($goodsReceiptNote);
+        } catch (\Throwable $exception) {
+            \Log::warning('Failed to sync project procurement from goods receipt note', [
+                'goods_receipt_note' => $goodsReceiptNote instanceof GoodsReceiptNote ? $goodsReceiptNote->id : $goodsReceiptNote,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function syncProjectProcurementFromPurchaseOrder(int $purchaseOrderId): void
+    {
+        try {
+            app(ProcurementOperationalSyncService::class)->syncPurchaseOrder($purchaseOrderId);
+        } catch (\Throwable $exception) {
+            \Log::warning('Failed to sync project procurement from goods receipt purchase order', [
+                'purchase_order_id' => $purchaseOrderId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
     /**
      * Download GRN as PDF
      */
@@ -116,7 +141,7 @@ class GoodsReceiptNoteController extends Controller
             'notes' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.purchase_order_item_id' => 'required|exists:purchase_order_items,id',
-            'items.*.material_id' => 'required|integer',
+            'items.*.material_id' => 'nullable|integer',
             'items.*.ordered_quantity' => 'required|integer|min:1',
             'items.*.received_quantity' => 'required|integer|min:0',
             'items.*.condition' => 'required|in:good,fair,damaged,for_repair',
@@ -133,6 +158,7 @@ class GoodsReceiptNoteController extends Controller
             // Check if this PO already has a GRN
             $existingGrn = GoodsReceiptNote::where('purchase_order_id', $request->purchase_order_id)->first();
             if ($existingGrn) {
+                DB::rollBack();
                 return response()->json([
                     'message' => 'This Purchase Order already has a Goods Receipt Note.'
                 ], 422);
@@ -152,7 +178,7 @@ class GoodsReceiptNoteController extends Controller
             foreach ($request->items as $item) {
                 $grn->items()->create([
                     'purchase_order_item_id' => $item['purchase_order_item_id'],
-                    'material_id' => $item['material_id'],
+                    'material_id' => $item['material_id'] ?? null,
                     'ordered_quantity' => $item['ordered_quantity'],
                     'received_quantity' => $item['received_quantity'],
                     'condition' => $item['condition'],
@@ -161,6 +187,8 @@ class GoodsReceiptNoteController extends Controller
             }
 
             DB::commit();
+
+            $this->syncProjectProcurement($grn);
 
             return new GoodsReceiptNoteResource($grn->load([
                 'items.purchaseOrderItem.material',
@@ -184,7 +212,7 @@ class GoodsReceiptNoteController extends Controller
             'items' => 'required|array|min:1',
             'items.*.id' => 'sometimes|exists:goods_receipt_note_items,id',
             'items.*.purchase_order_item_id' => 'required|exists:purchase_order_items,id',
-            'items.*.material_id' => 'required|integer',  
+            'items.*.material_id' => 'nullable|integer',
             'items.*.ordered_quantity' => 'required|integer|min:1',
             'items.*.received_quantity' => 'required|integer|min:0',
             'items.*.condition' => 'required|in:good,fair,damaged,for_repair',
@@ -210,7 +238,7 @@ class GoodsReceiptNoteController extends Controller
             foreach ($request->items as $item) {
                 $grn->items()->create([
                     'purchase_order_item_id' => $item['purchase_order_item_id'],
-                    'material_id' => $item['material_id'],
+                    'material_id' => $item['material_id'] ?? null,
                     'ordered_quantity' => $item['ordered_quantity'],
                     'received_quantity' => $item['received_quantity'],
                     'condition' => $item['condition'],
@@ -219,6 +247,8 @@ class GoodsReceiptNoteController extends Controller
             }
 
             DB::commit();
+
+            $this->syncProjectProcurement($grn);
 
             return new GoodsReceiptNoteResource($grn->load([
                 'items.purchaseOrderItem.material',
@@ -235,7 +265,12 @@ class GoodsReceiptNoteController extends Controller
     {
         try {
             $grn = GoodsReceiptNote::findOrFail($id);
+            $purchaseOrderId = $grn->purchase_order_id;
             $grn->delete();
+
+            if ($purchaseOrderId) {
+                $this->syncProjectProcurementFromPurchaseOrder((int) $purchaseOrderId);
+            }
 
             return response()->json(['message' => 'GRN deleted successfully']);
         } catch (\Exception $e) {

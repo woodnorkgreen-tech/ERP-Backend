@@ -24,6 +24,9 @@ class BudgetService
     public function saveBudgetData(int $taskId, array $data): TaskBudgetData
     {
         return DB::transaction(function () use ($taskId, $data) {
+            $existingBudgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
+            $status = $this->resolveSaveStatus($existingBudgetData, $data['status'] ?? null);
+
             $budgetData = TaskBudgetData::updateOrCreate(
                 ['enquiry_task_id' => $taskId],
                 [
@@ -33,7 +36,7 @@ class BudgetService
                     'expenses_data' => $data['expenses'] ?? [],
                     'logistics_data' => $data['logistics'] ?? [],
                     'budget_summary' => $this->calculateSummary($data),
-                    'status' => $data['status'] ?? 'draft'
+                    'status' => $status
                 ]
             );
 
@@ -46,7 +49,7 @@ class BudgetService
      */
     public function importMaterials(int $taskId, bool $force = false): array
     {
-        $task = EnquiryTask::findOrFail($taskId);
+        $task = EnquiryTask::with('enquiry.client')->findOrFail($taskId);
         
         // Find the materials task for this project
         $materialsTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
@@ -65,28 +68,7 @@ class BudgetService
             throw new \Exception('Source materials data not found');
         }
 
-        // Check for approval (Strict Gate - BOTH approvals required)
-        $approvalStatus = $materialsData->project_info['approval_status'] ?? null;
-        if (empty($approvalStatus['all_approved'])) {
-            $missingApprovals = [];
-            if (empty($approvalStatus['project_officer']['approved'])) {
-                $missingApprovals[] = 'Project Officer';
-            }
-            if (empty($approvalStatus['production']['approved'])) {
-                $missingApprovals[] = 'Production';
-            }
-            
-            // Build strict error message emphasizing BOTH are required
-            if (count($missingApprovals) === 2) {
-                $errorMsg = "Cannot import materials to budget: BOTH Project Officer AND Production approvals are required. Currently missing both approvals.";
-            } elseif (!empty($missingApprovals)) {
-                $errorMsg = "Cannot import materials to budget: Missing approval from " . $missingApprovals[0] . ". BOTH Project Officer AND Production approvals are mandatory.";
-            } else {
-                $errorMsg = "Cannot import materials to budget: Materials must be approved by BOTH Project Officer AND Production departments.";
-            }
-            
-            throw new \Exception($errorMsg);
-        }
+        $this->ensureMaterialsApproved($materialsData);
 
         $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
         
@@ -95,30 +77,41 @@ class BudgetService
         $existingMaterials = $budgetData ? ($budgetData->materials_data ?? []) : [];
         $newMaterials = $this->transformMaterialsToBudget($materialsData);
 
-        // Preserve logic (only if not forced)
+        // Preserve pricing logic (only if not forced). Stable material identity wins;
+        // description is only a legacy fallback for older imported rows.
         if (!$force) {
             $pricedMap = [];
             foreach ($existingMaterials as $elem) {
                 foreach ($elem['materials'] ?? [] as $mat) {
                     if (($mat['unitPrice'] ?? 0) > 0) {
-                        $pricedMap[$mat['description']] = $mat['unitPrice'];
-                        if (!empty($mat['library_material_id'])) {
-                            $pricedMap[$mat['description'].'_libId'] = $mat['library_material_id'];
-                        }
+                        $key = $this->budgetMaterialKey($elem, $mat);
+                        $pricedMap[$key] = [
+                            'unitPrice' => (float) $mat['unitPrice'],
+                            'library_material_id' => $mat['library_material_id'] ?? null,
+                            'quantity' => (float) ($mat['quantity'] ?? 0),
+                        ];
                     }
                 }
             }
 
             foreach ($newMaterials as &$newElem) {
                 foreach ($newElem['materials'] as &$newMat) {
-                    if (isset($pricedMap[$newMat['description']])) {
-                        $newMat['unitPrice'] = $pricedMap[$newMat['description']];
+                    $key = $this->budgetMaterialKey($newElem, $newMat);
+                    $legacyKey = $this->legacyBudgetMaterialKey($newElem, $newMat);
+                    $match = $pricedMap[$key] ?? $pricedMap[$legacyKey] ?? null;
+
+                    if ($match) {
+                        $newMat['unitPrice'] = $match['unitPrice'];
                         $newMat['totalPrice'] = $newMat['quantity'] * $newMat['unitPrice'];
                         $newMat['_priceStatus'] = 'preserved';
-                        
-                        // Ensure library ID is preserved if it existed in old map (though it should come from newMaterials)
-                        if (empty($newMat['library_material_id']) && isset($pricedMap[$newMat['description'].'_libId'])) {
-                            $newMat['library_material_id'] = $pricedMap[$newMat['description'].'_libId'];
+
+                        if ((float) ($match['quantity'] ?? 0) !== (float) ($newMat['quantity'] ?? 0)) {
+                            $newMat['_quantityChanged'] = true;
+                            $newMat['_oldQuantity'] = $match['quantity'];
+                        }
+
+                        if (empty($newMat['library_material_id']) && !empty($match['library_material_id'])) {
+                            $newMat['library_material_id'] = $match['library_material_id'];
                         }
                     }
                 }
@@ -142,25 +135,26 @@ class BudgetService
             'logistics' => $budgetData->logistics_data ?? []
         ]);
 
-        $budgetData = TaskBudgetData::updateOrCreate(
-            ['enquiry_task_id' => $taskId],
-            [
-                'project_info' => $projectInfo,
-                'materials_data' => $newMaterials,
-                'budget_summary' => $summary,
-                'materials_imported_at' => now(),
-                'materials_imported_from_task' => $materialsTask->id,
-                'materials_import_metadata' => [
-                    'materials_task_title' => $materialsTask->title,
-                    'total_elements' => count($newMaterials),
-                    'total_materials' => array_sum(array_map(fn($e) => count($e['materials']), $newMaterials))
+        $metadata = $this->buildMaterialsImportMetadata($materialsTask, $materialsData, $newMaterials);
+
+        $budgetData = DB::transaction(function () use ($taskId, $projectInfo, $newMaterials, $summary, $materialsTask, $metadata) {
+            return TaskBudgetData::updateOrCreate(
+                ['enquiry_task_id' => $taskId],
+                [
+                    'project_info' => $projectInfo,
+                    'materials_data' => $newMaterials,
+                    'budget_summary' => $summary,
+                    'materials_imported_at' => now(),
+                    'last_import_date' => now(),
+                    'materials_imported_from_task' => $materialsTask->id,
+                    'materials_import_metadata' => $metadata
                 ]
-            ]
-        );
+            );
+        });
 
         return [
             'budget' => $budgetData,
-            'message' => 'Materials successfully imported from project HQ'
+            'message' => 'Approved materials list imported into internal budget'
         ];
     }
 
@@ -171,7 +165,7 @@ class BudgetService
     {
         $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
         if (!$budgetData || !$budgetData->materials_imported_at) {
-            return ['has_updates' => false, 'message' => 'Ready for initial import'];
+            return ['has_updates' => false, 'hasUpdate' => false, 'message' => 'Ready for initial import'];
         }
 
         $task = EnquiryTask::find($taskId);
@@ -179,9 +173,12 @@ class BudgetService
             ->where('type', 'materials')
             ->first();
 
-        if (!$materialsTask) return ['has_updates' => false, 'message' => 'Source not found'];
+        if (!$materialsTask) return ['has_updates' => false, 'hasUpdate' => false, 'message' => 'Source not found'];
 
-        $lastUpdate = $materialsTask->updated_at;
+        $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->first();
+        if (!$materialsData) return ['has_updates' => false, 'hasUpdate' => false, 'message' => 'Approved materials data not found'];
+
+        $lastUpdate = $materialsData->updated_at;
         $importDate = $budgetData->materials_imported_at;
 
         $hasUpdates = $lastUpdate->isAfter($importDate);
@@ -191,11 +188,13 @@ class BudgetService
 
         return [
             'has_updates' => $hasUpdates,
+            'hasUpdate' => $hasUpdates,
             'last_import_at' => $importDate->toDateTimeString(),
             'materials_updated_at' => $lastUpdate->toDateTimeString(),
             'materials_task_title' => $materialsTask->title,
+            'materials_import_metadata' => $budgetData->materials_import_metadata,
             'analysis' => $analysis,
-            'message' => $hasUpdates ? 'Source project specifications have been updated' : 'Budget is in sync with project HQ'
+            'message' => $hasUpdates ? 'Approved materials list has been updated' : 'Budget is in sync with approved materials'
         ];
     }
 
@@ -220,8 +219,15 @@ class BudgetService
             return ['hasUpdate' => false, 'message' => 'Missing data for comparison'];
         }
 
+        try {
+            $this->ensureMaterialsApproved($materialsData);
+        } catch (\Exception $e) {
+            return ['hasUpdate' => false, 'message' => $e->getMessage()];
+        }
+
         $incomingMaterials = $this->transformMaterialsToBudget($materialsData);
         $existingMaterials = $budgetData->materials_data ?? [];
+        $this->applyExistingBudgetPrices($existingMaterials, $incomingMaterials);
 
         $analysisData = $this->analyzeMaterialVariances($existingMaterials, $incomingMaterials);
 
@@ -337,42 +343,118 @@ class BudgetService
     }
 
     /**
-     * Get preview of materials task in budget format
-     */
-    public function getMaterialsPreview(int $taskId): array
-    {
-        $task = EnquiryTask::findOrFail($taskId);
-        $materialsTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
-            ->where('type', 'materials')
-            ->first();
-        
-        if (!$materialsTask) {
-            throw new \Exception('No materials task found for this project');
-        }
-
-        $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->with('elements.materials')->first();
-        
-        if (!$materialsData) {
-            return [];
-        }
-
-        return $this->transformMaterialsToBudget($materialsData);
-    }
-
-    /**
      * Submit budget for approval
      */
-    public function submitForApproval(int $taskId): array
+    private function resolveSaveStatus(?TaskBudgetData $existingBudgetData, ?string $requestedStatus): string
     {
-        $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-        if (!$budgetData) throw new \Exception('Budget data not found');
+        // Internal budget approval was removed (2026-07-07): budgets stay
+        // 'draft' and the budget task auto-completes once a priced summary is
+        // saved. Legacy statuses on existing rows are preserved when no new
+        // status is requested.
+        if ($requestedStatus === 'draft') {
+            return 'draft';
+        }
 
-        $budgetData->update(['status' => 'pending_approval']);
-        
+        return $existingBudgetData?->status ?? 'draft';
+    }
+
+    private function ensureMaterialsApproved(TaskMaterialsData $materialsData): void
+    {
+        $approvalStatus = $materialsData->project_info['approval_status'] ?? null;
+        if (!empty($approvalStatus['all_approved'])) {
+            return;
+        }
+
+        $missingApprovals = [];
+        if (empty($approvalStatus['project_officer']['approved'])) {
+            $missingApprovals[] = 'Project Officer';
+        }
+        if (empty($approvalStatus['production']['approved'])) {
+            $missingApprovals[] = 'Production';
+        }
+
+        if (count($missingApprovals) === 2) {
+            throw new \Exception('Cannot import materials to budget: BOTH Project Officer AND Production approvals are required. Currently missing both approvals.');
+        }
+
+        if (!empty($missingApprovals)) {
+            throw new \Exception('Cannot import materials to budget: Missing approval from ' . $missingApprovals[0] . '. BOTH Project Officer AND Production approvals are mandatory.');
+        }
+
+        throw new \Exception('Cannot import materials to budget: Materials must be approved by BOTH Project Officer AND Production departments.');
+    }
+
+    private function buildMaterialsImportMetadata(EnquiryTask $materialsTask, TaskMaterialsData $materialsData, array $newMaterials): array
+    {
+        $latestVersion = $materialsData->versions()->orderByDesc('version_number')->first();
+        $projectInfo = $materialsData->project_info ?? [];
+
         return [
-            'status' => 'pending_approval',
-            'message' => 'Budget submitted for internal approval'
+            'source' => 'approved_materials_list',
+            'imported_at' => now()->toISOString(),
+            'materials_task_id' => $materialsTask->id,
+            'materials_task_title' => $materialsTask->title,
+            'materials_data_id' => $materialsData->id,
+            'materials_updated_at' => optional($materialsData->updated_at)->toISOString(),
+            'materials_version_id' => $latestVersion?->id,
+            'materials_version_number' => $latestVersion?->version_number,
+            'materials_version_label' => $latestVersion?->label,
+            'quote_imported_from' => $projectInfo['quoteImportedFrom'] ?? null,
+            'total_elements' => count($newMaterials),
+            'total_materials' => array_sum(array_map(fn($element) => count($element['materials'] ?? []), $newMaterials)),
         ];
+    }
+
+    private function budgetMaterialKey(array $element, array $material): string
+    {
+        if (!empty($material['persistent_id'])) {
+            return 'material:' . $material['persistent_id'];
+        }
+
+        return $this->legacyBudgetMaterialKey($element, $material);
+    }
+
+    private function legacyBudgetMaterialKey(array $element, array $material): string
+    {
+        $elementName = strtolower(preg_replace('/\s+/', '', (string) ($element['name'] ?? '')));
+        $materialDescription = strtolower(preg_replace('/\s+/', '', (string) ($material['description'] ?? '')));
+
+        return "legacy_{$elementName}_{$materialDescription}";
+    }
+
+    private function applyExistingBudgetPrices(array $existingMaterials, array &$incomingMaterials): void
+    {
+        $pricingMap = [];
+
+        foreach ($existingMaterials as $element) {
+            foreach ($element['materials'] ?? [] as $material) {
+                $key = $this->budgetMaterialKey($element, $material);
+                $pricingMap[$key] = [
+                    'unitPrice' => (float) ($material['unitPrice'] ?? 0),
+                    'quantity' => (float) ($material['quantity'] ?? 0),
+                ];
+            }
+        }
+
+        foreach ($incomingMaterials as &$element) {
+            foreach ($element['materials'] as &$material) {
+                $key = $this->budgetMaterialKey($element, $material);
+                $legacyKey = $this->legacyBudgetMaterialKey($element, $material);
+                $match = $pricingMap[$key] ?? $pricingMap[$legacyKey] ?? null;
+
+                if (!$match) {
+                    continue;
+                }
+
+                $material['unitPrice'] = $match['unitPrice'];
+                $material['totalPrice'] = (float) ($material['quantity'] ?? 0) * $material['unitPrice'];
+
+                if ((float) ($match['quantity'] ?? 0) !== (float) ($material['quantity'] ?? 0)) {
+                    $material['_quantityChanged'] = true;
+                    $material['_oldQuantity'] = $match['quantity'];
+                }
+            }
+        }
     }
 
     /**
@@ -389,7 +471,7 @@ class BudgetService
                 if (!$material->is_included) continue;
                 
                 $budgetMaterials[] = [
-                    'id' => uniqid('mat_'),
+                    'id' => $material->persistent_id ?: uniqid('mat_'),
                     'persistent_id' => $material->persistent_id,
                     'library_material_id' => $material->library_material_id,
                     'description' => $material->description,
@@ -405,7 +487,7 @@ class BudgetService
 
             if (!empty($budgetMaterials)) {
                 $results[] = [
-                    'id' => uniqid('elem_'),
+                    'id' => $element->persistent_id ?: uniqid('elem_'),
                     'persistent_id' => $element->persistent_id,
                     'name' => $element->name,
                     'category' => $element->category,
@@ -460,183 +542,4 @@ class BudgetService
         ];
     }
 
-    /**
-     * Generate standard variance analysis data for an audit report
-     */
-    public function generateAuditReportData(int $taskId, mixed $baselineId = null): array
-    {
-        $task = EnquiryTask::with('enquiry.client')->findOrFail($taskId);
-        $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-        
-        if (!$budgetData) throw new \Exception('Active budget data not found');
-
-        $baselineData = null;
-        $baselineTitle = 'Initial Budget';
-
-        if ($baselineId === 'materials' || $baselineId === '0' || $baselineId === 0) {
-            $baselineTitle = 'Project Master MQ (Design Spec)';
-            $preview = $this->getMaterialsPreview($taskId);
-            $baselineData = ['materials' => $preview];
-        } elseif ($baselineId) {
-            $version = \App\Models\BudgetVersion::find($baselineId);
-            if ($version) {
-                $baselineData = $version->data;
-                $baselineTitle = "Snapshot #{$version->version_number} (" . ($version->label ?? 'Archived') . ")";
-            }
-        } else {
-            // Default: Latest snapshot
-            $version = \App\Models\BudgetVersion::where('task_budget_data_id', $budgetData->id)
-                ->orderBy('version_number', 'desc')
-                ->first();
-            if ($version) {
-                $baselineData = $version->data;
-                $baselineTitle = "Snapshot #{$version->version_number}";
-            }
-        }
-
-        if (!$baselineData) {
-            $baselineData = ['materials' => [], 'labour' => [], 'expenses' => [], 'logistics' => []];
-        }
-
-        // Logic sync: Calculate totals using the same rules as frontend
-        $currSum = $this->calculateSummary([
-            'materials' => $budgetData->materials_data ?? [],
-            'labour' => $budgetData->labour_data ?? [],
-            'expenses' => $budgetData->expenses_data ?? [],
-            'logistics' => $budgetData->logistics_data ?? []
-        ]);
-
-        $baseMats = $baselineData['materials'] ?? $baselineData['materials_data'] ?? [];
-        $currMats = $budgetData->materials_data ?? [];
-
-        // If auditing against Master MQ, we use pro-forma baseline (Master Qty * Current Budget Price)
-        if ($baselineId === 'materials' || $baselineId === '0' || $baselineId === 0) {
-            $pricingMap = [];
-            foreach ($currMats as $el) {
-                foreach ($el['materials'] ?? [] as $m) {
-                    if ($m['isIncluded'] ?? $m['is_included'] ?? true) {
-                        $eName = strtolower(preg_replace('/\s+/', '', ($el['name'] ?? '')));
-                        $mDesc = strtolower(preg_replace('/\s+/', '', ($m['description'] ?? '')));
-                        $key = ($m['persistent_id'] ?? null) ?: "legacy_{$eName}_{$mDesc}";
-                        $pricingMap[$key] = $m['unitPrice'] ?? 0;
-                    }
-                }
-            }
-
-            // Rewrite base materials to have current prices for audit comparison
-            foreach ($baseMats as &$el) {
-                foreach ($el['materials'] ?? [] as &$m) {
-                    $eName = strtolower(preg_replace('/\s+/', '', ($el['name'] ?? '')));
-                    $mDesc = strtolower(preg_replace('/\s+/', '', ($m['description'] ?? '')));
-                    $key = ($m['persistent_id'] ?? null) ?: "legacy_{$eName}_{$mDesc}";
-                    $m['unitPrice'] = $pricingMap[$key] ?? 0;
-                }
-            }
-        }
-
-        $matAnalysis = $this->analyzeMaterialVariances($baseMats, $currMats);
-        $labAnalysis = $this->analyzeStandardVariances($baselineData['labour'] ?? [], $budgetData->labour_data ?? [], 'LAB');
-        $expAnalysis = $this->analyzeStandardVariances($baselineData['expenses'] ?? [], $budgetData->expenses_data ?? [], 'EXP');
-        $logAnalysis = $this->analyzeStandardVariances($baselineData['logistics'] ?? [], $budgetData->logistics_data ?? [], 'LOG');
-
-        $totalVar = $matAnalysis['summary']['totalVariance'] + $labAnalysis['summary']['totalVariance'] + $expAnalysis['summary']['totalVariance'] + $logAnalysis['summary']['totalVariance'];
-
-        return [
-            'enquiry' => $task->enquiry,
-            'budgetData' => $budgetData,
-            'currentTotal' => $currSum['grandTotal'],
-            'baselineTotal' => $currSum['grandTotal'] - $totalVar,
-            'baselineInfo' => ['title' => $baselineTitle],
-            'auditSummary' => [
-                'totalVariance' => $totalVar,
-                'volumeVariance' => $matAnalysis['summary']['volumeVariance'] + $labAnalysis['summary']['volumeVariance'] + $expAnalysis['summary']['volumeVariance'] + $logAnalysis['summary']['volumeVariance'],
-                'priceVariance' => $matAnalysis['summary']['priceVariance'] + $labAnalysis['summary']['priceVariance'] + $expAnalysis['summary']['priceVariance'] + $logAnalysis['summary']['priceVariance']
-            ],
-            'variances' => array_merge($matAnalysis['variances'], $labAnalysis['variances'], $expAnalysis['variances'], $logAnalysis['variances'])
-        ];
-    }
-
-    /**
-     * Internal helper to generate variance analysis for standard flat lists
-     */
-    protected function analyzeStandardVariances(array $baseList, array $currList, string $suffix): array
-    {
-        $variances = [];
-        $totalVariance = 0;
-        $volVar = 0;
-        $priceVar = 0;
-
-        $getKey = function($item) {
-            return strtolower(preg_replace('/\s+/', '', ($item['description'] ?? $item['type'] ?? 'item')));
-        };
-
-        $baseMap = [];
-        foreach ($baseList as $item) {
-            $baseMap[$getKey($item)] = $item;
-        }
-
-        $handledKeys = [];
-
-        foreach ($currList as $item) {
-            $key = $getKey($item);
-            $handledKeys[] = $key;
-            $matching = $baseMap[$key] ?? null;
-
-            $Qb = $matching ? ($matching['quantity'] ?? $matching['units'] ?? 1) : 0;
-            $Pb = $matching ? ($matching['unitRate'] ?? $matching['rate'] ?? $matching['amount'] ?? 0) : 0;
-            $Qc = $item['quantity'] ?? $item['units'] ?? 1;
-            $Pc = $item['unitRate'] ?? $item['rate'] ?? $item['amount'] ?? 0;
-
-            $variance = ($Qc * $Pc) - ($Qb * $Pb);
-            if (abs($variance) < 0.01) continue;
-
-            $ivolVar = ($Qc - $Qb) * $Pb;
-            $ipriceVar = ($Pc - $Pb) * $Qc;
-
-            $variances[] = [
-                'description' => "[{$suffix}] " . ($item['description'] ?? $item['type'] ?? 'N/A'),
-                'comparisonKey' => $key,
-                'baselineQty' => $Qb,
-                'currentQty' => $Qc,
-                'variance' => $variance,
-                'volumeVariance' => $ivolVar,
-                'priceVariance' => $ipriceVar,
-                'isNew' => !$matching
-            ];
-
-            $totalVariance += $variance;
-            $volVar += $ivolVar;
-            $priceVar += $ipriceVar;
-        }
-
-        foreach ($baseMap as $key => $rem) {
-            if (!in_array($key, $handledKeys)) {
-                $q = ($rem['quantity'] ?? $rem['units'] ?? 1);
-                $p = ($rem['unitRate'] ?? $rem['rate'] ?? $rem['amount'] ?? 0);
-                $var = -($q * $p);
-                
-                $variances[] = [
-                    'description' => "[{$suffix}] " . ($rem['description'] ?? $rem['type'] ?? 'N/A'),
-                    'comparisonKey' => $key,
-                    'baselineQty' => $q,
-                    'currentQty' => 0,
-                    'variance' => $var,
-                    'volumeVariance' => $var,
-                    'priceVariance' => 0,
-                    'isRemoved' => true
-                ];
-                $totalVariance += $var;
-                $volVar += $var;
-            }
-        }
-
-        return [
-            'variances' => $variances,
-            'summary' => [
-                'totalVariance' => $totalVariance,
-                'volumeVariance' => $volVar,
-                'priceVariance' => $priceVar
-            ]
-        ];
-    }
 }

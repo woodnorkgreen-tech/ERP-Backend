@@ -13,6 +13,7 @@ class DesignRequirement extends Model
 
     protected $fillable = [
         'enquiry_task_id',
+        'client_key',
         'title',
         'category',
         'description',

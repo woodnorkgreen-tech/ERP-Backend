@@ -27,7 +27,7 @@ class BudgetController extends Controller
     public function getBudgetData(int $taskId): JsonResponse
     {
         try {
-            $budgetData = TaskBudgetData::with('task')->where('enquiry_task_id', $taskId)->first();
+            $budgetData = TaskBudgetData::with(['task', 'approvals.approver'])->where('enquiry_task_id', $taskId)->first();
 
             if (!$budgetData) {
                 return response()->json([
@@ -92,6 +92,7 @@ class BudgetController extends Controller
                 'expenses' => 'sometimes|array',
                 'logistics' => 'sometimes|array',
                 'budgetSummary' => 'sometimes|array',
+                'status' => 'sometimes|in:draft',
                 'lastImportDate' => 'sometimes|date'
             ]);
 
@@ -109,26 +110,6 @@ class BudgetController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to save budget data',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Submit budget for approval
-     */
-    public function submitForApproval(int $taskId): JsonResponse
-    {
-        try {
-            $result = $this->budgetService->submitForApproval($taskId);
-
-            return response()->json([
-                'data' => $result,
-                'message' => 'Budget submitted for approval successfully'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to submit budget for approval',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -159,7 +140,6 @@ class BudgetController extends Controller
                     'importMetadata' => $budget->materials_import_metadata
                 ]
             ];
-
             return response()->json([
                 'data' => $response,
                 'message' => $result['message']
@@ -170,6 +150,13 @@ class BudgetController extends Controller
                 'error' => $e->getMessage()
             ], 400); // Changed to 400 for client errors like approval needed
         }
+    }
+
+    private function canApproveBudget(Request $request): bool
+    {
+        $user = $request->user();
+
+        return $user && $user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Costing']);
     }
 
     public function checkMaterialsUpdate(int $taskId): JsonResponse
@@ -184,23 +171,6 @@ class BudgetController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to check materials update',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    public function getMaterialsPreview(int $taskId): JsonResponse
-    {
-        try {
-            $result = $this->budgetService->getMaterialsPreview($taskId);
-
-            return response()->json([
-                'data' => $result,
-                'message' => 'Materials preview retrieved'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve materials preview',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -533,16 +503,6 @@ class BudgetController extends Controller
             
             if (!$budgetData) {
                 return response()->json(['message' => 'Budget data not found'], 404);
-            }
-
-            // CHECK FOR AUDIT REPORT TYPE
-            if (request('type') === 'audit') {
-                $baselineId = request('baseline_id');
-                $auditData = $this->budgetService->generateAuditReportData($taskId, $baselineId ? (int)$baselineId : null);
-                
-                $pdf = Pdf::loadView('reports.budget_audit', $auditData);
-                $fileName = 'budget-audit-' . ($task->enquiry->job_number ?? $taskId) . '.pdf';
-                return $pdf->download($fileName);
             }
 
             $comparisonData = null;

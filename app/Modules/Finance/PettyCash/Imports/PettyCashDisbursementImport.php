@@ -190,10 +190,6 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             // Create disbursement (only if we have meaningful data)
             if ($amount > 0 || !empty($mappedRow['receiver'] ?? null)) {
                 $disbursementData = $this->prepareDisbursementData($mappedRow, $date);
-                if (!$disbursementData['top_up_id']) {
-                    $this->addFailedRow($rowNumber, ['No top-up found with sufficient balance. Please ensure you have topped up the petty cash account.']);
-                    return;
-                }
                 
                 $result = $this->service->createDisbursement($disbursementData);
                 
@@ -441,9 +437,6 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             $amount = (float) str_replace([',', ' '], '', is_array($row['amount']) ? json_encode($row['amount']) : $row['amount']);
         }
 
-        // Get a suitable top-up for this disbursement
-        $topUpId = $this->getSuitableTopUp($amount);
-        
         // Normalize classification
         $classification = '';
         if (!empty($row['classification'] ?? null)) {
@@ -506,7 +499,6 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
         if (empty($tax)) $tax = 'no_etr';
 
         return [
-            'top_up_id' => $topUpId,
             'receiver' => $receiver,
             'account' => $account,
             'amount' => $amount > 0 ? $amount : 0.00,
@@ -521,7 +513,6 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'status' => 'active',
             'created_by' => auth()->id() ?? 1, // Default to system user if not authenticated
             'date_disbursed' => $date ? $date->format('Y-m-d') : now()->format('Y-m-d'),
-            'skip_balance_check' => true, // Bypass balance check for imports
             'created_at' => $date ? $date->format('Y-m-d 00:00:00') : now()->format('Y-m-d 00:00:00'),
             'updated_at' => now(),
         ];
@@ -555,34 +546,6 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'timestamp' => now()->toDateTimeString(),
             'field_values' => $this->getCurrentRowData()
         ];
-    }
-
-    /**
-     * Get a suitable top-up for the disbursement amount.
-     *
-     * @param float $amount
-     * @return int|null
-     */
-    private function getSuitableTopUp(float $amount): ?int
-    {
-        // Try to find a top-up with sufficient raw funds available
-        // Note: We can't use the virtual 'remaining_balance' in a where clause
-        $topUp = \App\Modules\Finance\PettyCash\Models\PettyCashTopUp::withSum('activeDisbursements', 'amount')
-            ->get()
-            ->filter(function($tu) use ($amount) {
-                $remaining = $tu->amount - ($tu->active_disbursements_sum_amount ?? 0);
-                return $remaining >= $amount;
-            })
-            ->sortByDesc('created_at')
-            ->first();
-
-        // If no top-up with sufficient balance, use the most recent one
-        if (!$topUp) {
-            $topUp = \App\Modules\Finance\PettyCash\Models\PettyCashTopUp::orderBy('created_at', 'desc')
-                ->first();
-        }
-
-        return $topUp ? $topUp->id : null;
     }
 
     public function getResults(): array

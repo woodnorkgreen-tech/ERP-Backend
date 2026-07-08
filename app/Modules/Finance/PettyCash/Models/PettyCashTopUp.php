@@ -38,22 +38,19 @@ class PettyCashTopUp extends Model
     ];
 
     /**
-     * Get the attributes that should be cast.
+     * The attributes that should be cast.
      *
-     * @return array<string, string>
+     * @var array<string,string>
      */
-    protected function casts(): array
-    {
-        return [
-            'amount' => 'decimal:2',
-            'previous_balance' => 'decimal:2',
-            'date_topped_up' => 'date',
-            'created_at' => 'datetime',
-            'updated_at' => 'datetime',
-            'is_archived' => 'boolean',
-            'archived_at' => 'datetime',
-        ];
-    }
+    protected $casts = [
+        'amount' => 'decimal:2',
+        'previous_balance' => 'decimal:2',
+        'date_topped_up' => 'date',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+        'is_archived' => 'boolean',
+        'archived_at' => 'datetime',
+    ];
 
     /**
      * Get the user who created this top-up.
@@ -89,12 +86,37 @@ class PettyCashTopUp extends Model
     }
 
     /**
+     * Get allocations that reference this top-up.
+     */
+    public function allocations(): HasMany
+    {
+        return $this->hasMany(\App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation::class, 'top_up_id');
+    }
+
+    /**
      * Calculate the remaining balance for this top-up.
      */
     public function getRemainingBalanceAttribute(): float
     {
-        $totalDisbursed = $this->activeDisbursements()->sum(\Illuminate\Support\Facades\DB::raw('amount + COALESCE(transaction_cost, 0)'));
-        return (float) ($this->amount - $totalDisbursed);
+        // Sum disbursements that are directly tied to this top-up and that have no allocations
+        $directDisbursed = (float) \Illuminate\Support\Facades\DB::table('petty_cash_disbursements as d')
+            ->where('d.top_up_id', $this->id)
+            ->where('d.status', 'active')
+            ->whereNotExists(function ($query) {
+                $query->select(\Illuminate\Support\Facades\DB::raw(1))
+                      ->from('petty_cash_disbursement_allocations as a')
+                      ->whereRaw('a.disbursement_id = d.id');
+            })
+            ->sum(\Illuminate\Support\Facades\DB::raw('d.amount + COALESCE(d.transaction_cost, 0)'));
+
+        // Sum allocations that reference this top-up
+        $allocationsSum = (float) \Illuminate\Support\Facades\DB::table('petty_cash_disbursement_allocations')
+            ->where('top_up_id', $this->id)
+            ->sum(\Illuminate\Support\Facades\DB::raw('amount + COALESCE(transaction_cost, 0)'));
+
+        $totalDisbursed = $directDisbursed + $allocationsSum;
+
+        return (float) bcsub((string)$this->amount, number_format($totalDisbursed, 2, '.', ''), 2);
     }
 
     /**
@@ -166,71 +188,4 @@ class PettyCashTopUp extends Model
         return $query->where('is_archived', true);
     }
 
-    /**
-     * Boot the model and set up event listeners.
-     */
-    protected static function boot()
-    {
-        parent::boot();
-
-        // Update balance when top-up is created
-        static::created(function ($topUp) {
-            if (!$topUp->is_archived) {
-                $topUp->updateBalance('add', (float) $topUp->amount);
-            }
-        });
-
-        // Update balance when top-up is updated (amount or archived changes)
-        static::updating(function ($topUp) {
-            $oldAmount = (float) $topUp->getOriginal('amount');
-            $newAmount = (float) $topUp->amount;
-            
-            $oldArchived = (bool) $topUp->getOriginal('is_archived');
-            $newArchived = (bool) $topUp->is_archived;
-
-            $wasEffective = !$oldArchived;
-            $isEffective = !$newArchived;
-
-            if ($wasEffective && $isEffective) {
-                // Both were not archived, just adjust the difference
-                $difference = $newAmount - $oldAmount;
-                if ($difference !== 0.0) {
-                    $topUp->updateBalance('add', $difference);
-                }
-            } elseif ($wasEffective && !$isEffective) {
-                // Was not archived but now it is
-                // Subtract the old amount from balance
-                $topUp->updateBalance('subtract', $oldAmount);
-            } elseif (!$wasEffective && $isEffective) {
-                // Was archived but now it isn't
-                // Add the new amount to balance
-                $topUp->updateBalance('add', $newAmount);
-            }
-        });
-
-        // Update balance when top-up is deleted
-        static::deleted(function ($topUp) {
-            if (!$topUp->is_archived) {
-                $topUp->updateBalance('subtract', (float) $topUp->amount);
-            }
-        });
-    }
-
-    /**
-     * Update the petty cash balance.
-     */
-    private function updateBalance(string $operation, float $amount)
-    {
-        $balance = PettyCashBalance::current();
-        
-        if ($operation === 'add') {
-            $balance->current_balance += $amount;
-        } else {
-            $balance->current_balance -= $amount;
-        }
-        
-        $balance->last_transaction_id = $this->id;
-        $balance->last_transaction_type = 'top_up';
-        $balance->save();
-    }
 }

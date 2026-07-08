@@ -28,6 +28,8 @@ class PettyCashDisbursement extends Model
         'amount',
         'description',
         'project_name',
+        'project_id',
+        'project_enquiry_id',
         'venue',
         'classification',
         'job_number',
@@ -50,23 +52,20 @@ class PettyCashDisbursement extends Model
     ];
 
     /**
-     * Get the attributes that should be cast.
+     * The attributes that should be cast.
      *
-     * @return array<string, string>
+     * @var array<string,string>
      */
-    protected function casts(): array
-    {
-        return [
-            'amount' => 'decimal:2',
-            'voided_at' => 'datetime',
-            'created_at' => 'datetime',
-            'updated_at' => 'datetime',
-            'date_disbursed' => 'date',
-            'is_archived' => 'boolean',
-            'archived_at' => 'datetime',
-            'transaction_cost' => 'decimal:2',
-        ];
-    }
+    protected $casts = [
+        'amount' => 'decimal:2',
+        'voided_at' => 'datetime',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+        'date_disbursed' => 'date',
+        'is_archived' => 'boolean',
+        'archived_at' => 'datetime',
+        'transaction_cost' => 'decimal:2',
+    ];
 
     /**
      * Get the top-up this disbursement belongs to.
@@ -98,6 +97,16 @@ class PettyCashDisbursement extends Model
     public function requisition(): BelongsTo
     {
         return $this->belongsTo(PettyCashRequisition::class, 'requisition_id');
+    }
+
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Project::class, 'project_id');
+    }
+
+    public function enquiry(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\ProjectEnquiry::class, 'project_enquiry_id');
     }
 
     /**
@@ -209,79 +218,6 @@ class PettyCashDisbursement extends Model
     public function getIsVoidedAttribute(): bool
     {
         return $this->status === 'voided';
-    }
-
-    /**
-     * Boot the model and set up event listeners.
-     */
-    protected static function boot()
-    {
-        parent::boot();
-
-        // Update balance when disbursement is created
-        static::created(function ($disbursement) {
-            if ($disbursement->status === 'active' && !$disbursement->is_archived) {
-                $totalCost = (float) $disbursement->amount + (float)($disbursement->transaction_cost ?? 0);
-                $disbursement->updateBalance('subtract', $totalCost);
-            }
-        });
-
-        // Update balance when disbursement is updated (amount, status, or archived changes)
-        static::updating(function ($disbursement) {
-            $oldAmount = (float) $disbursement->getOriginal('amount') + (float)($disbursement->getOriginal('transaction_cost') ?? 0);
-            $newAmount = (float) $disbursement->amount + (float)($disbursement->transaction_cost ?? 0);
-            
-            $oldStatus = $disbursement->getOriginal('status');
-            $newStatus = $disbursement->status;
-            
-            $oldArchived = (bool) $disbursement->getOriginal('is_archived');
-            $newArchived = (bool) $disbursement->is_archived;
-
-            $wasEffective = ($oldStatus === 'active' && !$oldArchived);
-            $isEffective = ($newStatus === 'active' && !$newArchived);
-
-            if ($wasEffective && $isEffective) {
-                // Both were active/not archived, just adjust the difference
-                $difference = $newAmount - $oldAmount;
-                if ($difference !== 0.0) {
-                    $disbursement->updateBalance('subtract', $difference);
-                }
-            } elseif ($wasEffective && !$isEffective) {
-                // Was active/effective but now it isn't (voided or archived)
-                // Restore the old amount to balance
-                $disbursement->updateBalance('add', $oldAmount);
-            } elseif (!$wasEffective && $isEffective) {
-                // Wasn't active/effective but now it is (reactivated or unarchived)
-                // Subtract the new amount from balance
-                $disbursement->updateBalance('subtract', $newAmount);
-            }
-        });
-
-        // Update balance when disbursement is deleted
-        static::deleted(function ($disbursement) {
-            if ($disbursement->status === 'active' && !$disbursement->is_archived) {
-                $totalCost = (float) $disbursement->amount + (float)($disbursement->transaction_cost ?? 0);
-                $disbursement->updateBalance('add', $totalCost);
-            }
-        });
-    }
-
-    /**
-     * Update the petty cash balance.
-     */
-    private function updateBalance(string $operation, float $amount)
-    {
-        $balance = PettyCashBalance::current();
-        
-        if ($operation === 'subtract') {
-            $balance->current_balance -= $amount;
-        } else {
-            $balance->current_balance += $amount;
-        }
-        
-        $balance->last_transaction_id = $this->id;
-        $balance->last_transaction_type = 'disbursement';
-        $balance->save();
     }
 
     /**

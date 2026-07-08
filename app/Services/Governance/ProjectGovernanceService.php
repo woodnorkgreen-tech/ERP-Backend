@@ -38,6 +38,7 @@ class ProjectGovernanceService
         try {
             $policy = app($this->policies[$gateType]);
             $result = $policy->evaluate($enquiry, $context);
+            $result->context = array_merge($context, $result->context);
 
             // Log the decision
             $this->logDecision($enquiry, $gateType, $result, $context);
@@ -96,9 +97,11 @@ class ProjectGovernanceService
      */
     public function evaluateTask(EnquiryTask $task): GateResult
     {
-        $enquiry = $task->projectEnquiry;
+        $task->loadMissing('enquiry');
+        $enquiry = $task->enquiry;
+
         if (!$enquiry) {
-            return GateResult::authorized();
+            return GateResult::blocked('Unable to evaluate governance: this task is not linked to a project enquiry.');
         }
 
         // Map task types or attributes to gates
@@ -113,7 +116,11 @@ class ProjectGovernanceService
         $gateType = $gateMapping[$task->type] ?? null;
 
         if ($gateType) {
-            return $this->checkGate($enquiry, $gateType, ['task' => $task]);
+            return $this->checkGate($enquiry, $gateType, [
+                'task_id' => $task->id,
+                'task_type' => $task->type,
+                'task_title' => $task->title,
+            ]);
         }
 
         return GateResult::authorized();

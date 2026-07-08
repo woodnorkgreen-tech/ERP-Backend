@@ -11,6 +11,8 @@ class PublicLead extends Model
 {
     use HasFactory;
 
+    const PIPELINE_STAGES = ['new_lead', 'contacted', 'in_discussion', 'business_confirmed'];
+
     protected $fillable = [
         'full_name',
         'email',
@@ -22,6 +24,9 @@ class PublicLead extends Model
         'how_did_you_hear',
         'source',
         'status',
+        'pipeline_stage',
+        'stage_updated_at',
+        'stage_updated_by',
         'processed_at',
         'processed_by',
         'converted_client_id',
@@ -29,7 +34,8 @@ class PublicLead extends Model
     ];
 
     protected $casts = [
-        'processed_at' => 'datetime',
+        'processed_at'    => 'datetime',
+        'stage_updated_at' => 'datetime',
     ];
 
     public function department(): BelongsTo

@@ -41,6 +41,8 @@ class ReleaseFinanceGateAction
             
             $enquiry->update([
                 'status' => 'planning',
+                'finance_released' => true,
+                'finance_released_at' => now(),
                 'follow_up_notes' => ($enquiry->follow_up_notes ? $enquiry->follow_up_notes . "\n" : "") . "Manually Released for Production on " . now()->format('d M Y') . ($notes ? ": $notes" : "")
             ]);
 

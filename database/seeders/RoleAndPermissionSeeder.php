@@ -68,6 +68,8 @@ class RoleAndPermissionSeeder extends Seeder
             // Project & Task Access (same as Project Officer)
             Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS,
             Permissions::TASK_READ, Permissions::TASK_UPDATE, Permissions::TASK_ASSIGN,
+            // Handover Review (CS Lead action — approve or trigger NCR)
+            Permissions::CLIENT_HANDOVER_REVIEW,
             // Dashboard
             Permissions::DASHBOARD_VIEW, Permissions::DASHBOARD_PROJECTS
         ]);

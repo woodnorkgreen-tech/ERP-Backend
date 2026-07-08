@@ -17,6 +17,7 @@ class PurchaseOrderItemResource extends JsonResource
         return [
             'id'               => $this->id,
             'purchase_order_id'=> $this->purchase_order_id,
+            'requisition_item_id' => $this->requisition_item_id,
             'material_id'      => $this->material_id,
             'custom_description' => $this->custom_description,
             // Resolved display name: library name OR custom description

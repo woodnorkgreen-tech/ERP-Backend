@@ -39,6 +39,17 @@ class EnquiryResource extends JsonResource
             'quote_approved'          => (bool) ($this->quote_approved ?? false),
             'quote_approved_at'       => $this->quote_approved_at,
             'quote_approved_by'       => $this->quote_approved_by,
+            'finance_released'        => (bool) ($this->finance_released ?? false),
+            'finance_released_at'     => $this->finance_released_at,
+
+            // Finance summary is attached by list endpoints that need billing context.
+            'finance_summary'                  => $this->when(isset($this->finance_summary), $this->finance_summary),
+            'payment_progress_percentage'      => $this->when(isset($this->payment_progress_percentage), (float) $this->payment_progress_percentage),
+            'payment_total_quote'              => $this->when(isset($this->payment_total_quote), (float) $this->payment_total_quote),
+            'payment_total_paid'               => $this->when(isset($this->payment_total_paid), (float) $this->payment_total_paid),
+            'payment_remaining'                => $this->when(isset($this->payment_remaining), (float) $this->payment_remaining),
+            'payment_threshold_amount'         => $this->when(isset($this->payment_threshold_amount), (float) $this->payment_threshold_amount),
+            'payment_amount_required_for_threshold' => $this->when(isset($this->payment_amount_required_for_threshold), (float) $this->payment_amount_required_for_threshold),
 
             // Progress & attention metadata
             'progress_percentage'     => $this->calculateProgressPercentage(),
@@ -69,11 +80,11 @@ class EnquiryResource extends JsonResource
     {
         // Overdue and not finished
         if ($this->expected_delivery_date && $this->expected_delivery_date->isPast()
-            && !in_array($this->status, ['completed', 'cancelled'])) {
+            && !in_array($this->status, ['completed', 'closed', 'cancelled'])) {
             return true;
         }
         // No project officer assigned and not in terminal state
-        if (!$this->project_officer_id && !in_array($this->status, ['completed', 'cancelled'])) {
+        if (!$this->project_officer_id && !in_array($this->status, ['completed', 'closed', 'cancelled'])) {
             return true;
         }
         return false;
@@ -90,10 +101,10 @@ class EnquiryResource extends JsonResource
             \App\Constants\EnquiryConstants::STATUS_ENQUIRY_LOGGED => 10,
             \App\Constants\EnquiryConstants::STATUS_SITE_SURVEY_COMPLETED => 25,
             \App\Constants\EnquiryConstants::STATUS_DESIGN_COMPLETED => 40,
-            \App\Constants\EnquiryConstants::STATUS_MATERIALS_SPECIFIED => 55,
-            \App\Constants\EnquiryConstants::STATUS_BUDGET_CREATED => 70,
-            \App\Constants\EnquiryConstants::STATUS_QUOTE_PREPARED => 85,
-            \App\Constants\EnquiryConstants::STATUS_QUOTE_APPROVED => 95,
+            \App\Constants\EnquiryConstants::STATUS_QUOTE_PREPARED => 55,
+            \App\Constants\EnquiryConstants::STATUS_QUOTE_APPROVED => 65,
+            \App\Constants\EnquiryConstants::STATUS_MATERIALS_SPECIFIED => 75,
+            \App\Constants\EnquiryConstants::STATUS_BUDGET_CREATED => 85,
             'completed' => 100,
         ];
 

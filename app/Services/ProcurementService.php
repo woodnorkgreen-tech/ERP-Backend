@@ -19,7 +19,7 @@ class ProcurementService
     public function importBudgetData(int $taskId): array
     {
         // Find the procurement task
-        $task = EnquiryTask::findOrFail($taskId);
+        $task = EnquiryTask::with('enquiry.client')->findOrFail($taskId);
 
         if ($task->type !== 'procurement') {
             throw new \InvalidArgumentException('Task must be a procurement task');
@@ -31,7 +31,7 @@ class ProcurementService
             ->first();
 
         if (!$budgetTask) {
-            throw new \Exception('Budget task not found for this enquiry');
+            throw new \DomainException('Budget task not found for this enquiry');
         }
 
         \Log::info("Found budget task for procurement import", [
@@ -44,13 +44,15 @@ class ProcurementService
         $budgetData = TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
 
         if (!$budgetData) {
-            throw new \Exception('Budget data not found. Please complete the budget task first.');
+            throw new \DomainException('Budget data not found. Please complete the budget task first.');
         }
 
         // Check if budget has materials
         if (empty($budgetData->materials_data) || !is_array($budgetData->materials_data)) {
-            throw new \Exception('No materials found in budget data. Please import materials into the budget task first.');
+            throw new \DomainException('No materials found in budget data. Please import materials into the budget task first.');
         }
+
+        $this->ensureBudgetReadyForProcurement($budgetTask, $budgetData);
 
         \Log::info("Retrieved budget data", [
             'budget_data_id' => $budgetData->id,
@@ -72,7 +74,7 @@ class ProcurementService
                 'project_info' => $this->extractProjectInfo($task),
                 'budget_imported' => true,
                 'procurement_items' => $procurementItems,
-                'budget_summary' => $this->createBudgetSummary($procurementItems),
+                'budget_summary' => $this->createBudgetSummary($procurementItems, $budgetTask, $budgetData),
                 'last_import_date' => now()
             ]
         );
@@ -125,6 +127,14 @@ class ProcurementService
             ]);
 
             foreach ($elementMaterials as $materialIndex => $material) {
+                $elementIncluded = $element['isIncluded'] ?? $element['is_included'] ?? true;
+                $materialIncluded = $material['isIncluded'] ?? $material['is_included'] ?? true;
+                $quantity = (float) ($material['quantity'] ?? 0);
+
+                if (!$elementIncluded || !$materialIncluded || $quantity <= 0) {
+                    continue;
+                }
+
                 \Log::info("Processing material", [
                     'element_index' => $elementIndex,
                     'material_index' => $materialIndex,
@@ -158,6 +168,9 @@ class ProcurementService
                     // Reference data for traceability
                     'budgetElementId' => $element['id'] ?? '',
                     'budgetItemId' => $material['id'] ?? '',
+                    'budgetElementPersistentId' => $element['persistent_id'] ?? $element['id'] ?? null,
+                    'budgetItemPersistentId' => $material['persistent_id'] ?? $material['id'] ?? null,
+                    'budgetDataId' => $budgetData->id,
                     'libraryMaterialId' => $material['library_material_id'] ?? null
                 ];
             }
@@ -191,14 +204,21 @@ class ProcurementService
     /**
      * Create budget summary from procurement items
      */
-    private function createBudgetSummary(array $procurementItems): array
+    private function createBudgetSummary(array $procurementItems, ?EnquiryTask $budgetTask = null, ?TaskBudgetData $budgetData = null): array
     {
         $totalBudget = collect($procurementItems)->sum('budgetTotalPrice');
 
         return [
             'materialsTotal' => $totalBudget,
             'totalItems' => count($procurementItems),
-            'importedAt' => now()->toISOString()
+            'importedAt' => now()->toISOString(),
+            'source' => 'approved_internal_budget',
+            'budgetTaskId' => $budgetTask?->id,
+            'budgetTaskStatus' => $budgetTask?->status,
+            'budgetDataId' => $budgetData?->id,
+            'budgetStatus' => $budgetData?->status,
+            'budgetUpdatedAt' => optional($budgetData?->updated_at)->toISOString(),
+            'budgetImportMetadata' => $budgetData?->materials_import_metadata,
         ];
     }
 
@@ -216,6 +236,13 @@ class ProcurementService
             'sample_item_id' => $data['procurementItems'][0]['budgetItemId'] ?? 'N/A'
         ]);
 
+        $existingData = TaskProcurementData::where('enquiry_task_id', $taskId)->first();
+        $budgetSummary = $data['budgetSummary'] ?? [];
+
+        if ($existingData && !array_key_exists('source', $budgetSummary)) {
+            $budgetSummary = array_merge($existingData->budget_summary ?? [], $budgetSummary);
+        }
+
         // Update or create procurement data
         $procurementData = TaskProcurementData::updateOrCreate(
             ['enquiry_task_id' => $taskId],
@@ -223,7 +250,7 @@ class ProcurementService
                 'project_info' => $data['projectInfo'] ?? [],
                 'budget_imported' => $data['budgetImported'] ?? false,
                 'procurement_items' => $data['procurementItems'] ?? [],
-                'budget_summary' => $data['budgetSummary'] ?? [],
+                'budget_summary' => $budgetSummary,
                 'last_import_date' => isset($data['lastImportDate']) ? $data['lastImportDate'] : now()
             ]
         );
@@ -238,6 +265,7 @@ class ProcurementService
     {
         // Sync with budget data before returning
         $this->syncWithBudget($taskId);
+        app(ProcurementOperationalSyncService::class)->safeSyncTask($taskId);
         
         return TaskProcurementData::where('enquiry_task_id', $taskId)->first();
     }
@@ -274,10 +302,13 @@ class ProcurementService
 
             // Transform current budget data to fresh procurement items
             $freshItems = $this->transformBudgetToProcurement($budgetData);
+            $this->ensureBudgetReadyForProcurement($budgetTask, $budgetData);
             
             // Index existing items by budgetItemId for easy lookup
             $existingItemsMap = collect($procurementData->procurement_items ?? [])
                 ->keyBy('budgetItemId');
+            $existingItemsByIdentity = collect($procurementData->procurement_items ?? [])
+                ->keyBy(fn ($item) => $item['budgetItemPersistentId'] ?? $item['budgetItemId'] ?? null);
             
             // Also index existing items by a composite key of element name and description
             // Use grouping to handle duplicates (e.g. multiple 'Stage|Legs' items)
@@ -311,10 +342,11 @@ class ProcurementService
             ]);
 
             // Merge existing user-entered data into fresh items
-            $syncedItems = array_map(function ($item) use ($existingItemsMap, $existingItemsByContent, $materialIdMap) {
+            $syncedItems = array_map(function ($item) use ($existingItemsMap, $existingItemsByIdentity, $existingItemsByContent, $materialIdMap) {
                 $existingItem = null;
                 $matchType = 'None';
                 $newId = (string)$item['budgetItemId'];
+                $identity = (string)($item['budgetItemPersistentId'] ?? $newId);
 
                 // 1. Try finding by ID Mapping (New ID -> Old ID -> Existing Item)
                 if (isset($materialIdMap[$newId])) {
@@ -328,8 +360,14 @@ class ProcurementService
                     $existingItem = $existingItemsMap->get($newId);
                     if ($existingItem) $matchType = 'DirectID';
                 }
+
+                // 3. Try stable material identity. This survives label changes.
+                if (!$existingItem && $identity !== '') {
+                    $existingItem = $existingItemsByIdentity->get($identity);
+                    if ($existingItem) $matchType = 'PersistentID';
+                }
                 
-                // 3. Try finding by content (Name + Description)
+                // 4. Try finding by content (Name + Description) for legacy imports.
                 if (!$existingItem) {
                     $elem = strtolower(preg_replace('/[^a-z0-9]/', '', trim($item['elementName'] ?? '')));
                     $desc = strtolower(preg_replace('/[^a-z0-9]/', '', trim($item['description'] ?? '')));
@@ -342,19 +380,7 @@ class ProcurementService
                 }
                 
                 if ($existingItem) {
-                    // CRITICAL: Preserve all user-entered procurement fields
-                    $item['vendorName'] = $existingItem['vendorName'] ?? '';
-                    $item['stockStatus'] = $existingItem['stockStatus'] ?? 'pending_check';
-                    $item['stockQuantity'] = $existingItem['stockQuantity'] ?? 0;
-                    $item['procurementStatus'] = $existingItem['procurementStatus'] ?? 'not_needed';
-                    $item['purchaseQuantity'] = $existingItem['purchaseQuantity'] ?? 0;
-                    $item['purchaseOrderNumber'] = $existingItem['purchaseOrderNumber'] ?? '';
-                    $item['procurementNotes'] = $existingItem['procurementNotes'] ?? '';
-                    
-                    // Also preserve these secondary fields
-                    $item['availabilityStatus'] = $existingItem['availabilityStatus'] ?? 'available';
-                    $item['expectedDeliveryDate'] = $existingItem['expectedDeliveryDate'] ?? null;
-                    $item['lastUpdated'] = $existingItem['lastUpdated'] ?? now()->toISOString();
+                    $item = $this->mergeProcurementState($item, $existingItem);
                 } else {
                     \Log::debug("Procurement Sync: No match found for item", ['element' => $item['elementName'], 'material' => $item['description']]);
                 }
@@ -364,7 +390,7 @@ class ProcurementService
 
             // Update the procurement data
             $procurementData->procurement_items = $syncedItems;
-            $procurementData->budget_summary = $this->createBudgetSummary($syncedItems);
+            $procurementData->budget_summary = $this->createBudgetSummary($syncedItems, $budgetTask, $budgetData);
             $procurementData->save();
 
             \Log::info("Synced procurement data with budget for task {$taskId}");
@@ -373,6 +399,60 @@ class ProcurementService
             \Log::error("Failed to sync procurement data with budget: " . $e->getMessage());
             // We don't throw here to allow getProcurementData to return what it has even if sync fails
         }
+    }
+
+    private function ensureBudgetReadyForProcurement(EnquiryTask $budgetTask, TaskBudgetData $budgetData): void
+    {
+        // Internal budget approval was removed (2026-07): the Budget task
+        // auto-completes once a priced budget is saved, and that completion is
+        // the procurement readiness signal. Legacy 'approved' budgets pass too.
+        if ($budgetTask->status !== 'completed' && $budgetData->status !== 'approved') {
+            throw new \DomainException('Cannot import procurement items until the Budget task is completed.');
+        }
+
+        if (!$budgetData->materials_imported_at) {
+            throw new \DomainException('Cannot import procurement items: budget has not imported the approved materials list.');
+        }
+
+        $metadata = $budgetData->materials_import_metadata ?? [];
+        $source = $metadata['source'] ?? null;
+
+        if ($source !== 'approved_materials_list') {
+            throw new \DomainException('Cannot import procurement items: budget source is not the approved materials list.');
+        }
+    }
+
+    private function mergeProcurementState(array $freshItem, array $existingItem): array
+    {
+        $requiredQuantity = (float) ($freshItem['quantity'] ?? 0);
+        $stockQuantity = min(max(0, (float) ($existingItem['stockQuantity'] ?? 0)), $requiredQuantity);
+        $requiredPurchase = max(0, $requiredQuantity - $stockQuantity);
+        $existingStatus = $existingItem['procurementStatus'] ?? 'not_needed';
+        $existingPurchaseQuantity = (float) ($existingItem['purchaseQuantity'] ?? 0);
+
+        $freshItem['vendorName'] = $existingItem['vendorName'] ?? '';
+        $freshItem['stockStatus'] = $existingItem['stockStatus'] ?? 'pending_check';
+        $freshItem['stockQuantity'] = $stockQuantity;
+        $freshItem['purchaseOrderNumber'] = $existingItem['purchaseOrderNumber'] ?? '';
+        $freshItem['procurementNotes'] = $existingItem['procurementNotes'] ?? '';
+        $freshItem['availabilityStatus'] = $existingItem['availabilityStatus'] ?? 'available';
+        $freshItem['expectedDeliveryDate'] = $existingItem['expectedDeliveryDate'] ?? null;
+        $freshItem['lastUpdated'] = now()->toISOString();
+
+        if (in_array($existingStatus, ['ordered', 'received'], true)) {
+            $freshItem['procurementStatus'] = $existingStatus;
+            $freshItem['purchaseQuantity'] = max($existingPurchaseQuantity, $requiredPurchase);
+            return $freshItem;
+        }
+
+        $freshItem['purchaseQuantity'] = $requiredPurchase;
+        $freshItem['procurementStatus'] = $requiredPurchase > 0 ? 'pending' : 'not_needed';
+
+        if ($requiredPurchase <= 0 && $freshItem['stockStatus'] !== 'in_stock') {
+            $freshItem['stockStatus'] = 'in_stock';
+        }
+
+        return $freshItem;
     }
 
     /**
