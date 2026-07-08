@@ -6,6 +6,7 @@ use App\Modules\HR\Models\Grievance;
 use App\Modules\HR\Models\GrievanceComment;
 use App\Modules\HR\Models\GrievanceActivityLog;
 use App\Models\User;
+use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +15,7 @@ class GrievanceService
 {
     public function createGrievance(array $data): Grievance
     {
-        return DB::transaction(function () use ($data) {
+        $grievance = DB::transaction(function () use ($data) {
             $user = auth()->user();
 
             $grievance = Grievance::create([
@@ -36,6 +37,11 @@ class GrievanceService
 
             return $grievance;
         });
+
+        $this->notifyGrievance($grievance, 'grievance_reported', 'Grievance reported',
+            'A grievance has been submitted and requires review.', notifyHr: true);
+
+        return $grievance;
     }
 
     public function getGrievances(Request $request): LengthAwarePaginator
@@ -95,7 +101,8 @@ class GrievanceService
 
     public function updateGrievance(Grievance $grievance, array $data): Grievance
     {
-        return DB::transaction(function () use ($grievance, $data) {
+        $originalStatus = $grievance->status;
+        $grievance = DB::transaction(function () use ($grievance, $data) {
             $originalStatus = $grievance->status;
 
             $grievance->update($data);
@@ -110,11 +117,18 @@ class GrievanceService
 
             return $grievance;
         });
+
+        if (isset($data['status']) && $data['status'] !== $originalStatus) {
+            $this->notifyGrievance($grievance, 'grievance_status_changed', 'Grievance status updated',
+                "Your grievance status is now {$grievance->status}.");
+        }
+
+        return $grievance;
     }
 
     public function resolveGrievance(Grievance $grievance, string $resolution, ?string $notes = null): Grievance
     {
-        return DB::transaction(function () use ($grievance, $resolution, $notes) {
+        $grievance = DB::transaction(function () use ($grievance, $resolution, $notes) {
             $user = auth()->user();
 
             $updates = [
@@ -138,11 +152,16 @@ class GrievanceService
 
             return $grievance;
         });
+
+        $this->notifyGrievance($grievance, 'grievance_resolved', 'Grievance resolved',
+            'Your grievance has been resolved. Open the record to review the outcome.');
+
+        return $grievance;
     }
 
     public function escalateGrievance(Grievance $grievance, string $to): Grievance
     {
-        return DB::transaction(function () use ($grievance, $to) {
+        $grievance = DB::transaction(function () use ($grievance, $to) {
             $grievance->update([
                 'status' => Grievance::STATUS_ESCALATED,
                 'escalated_to' => $to,
@@ -156,6 +175,11 @@ class GrievanceService
 
             return $grievance;
         });
+
+        $this->notifyGrievance($grievance, 'grievance_escalated', 'Grievance escalated',
+            'A grievance has been escalated and requires attention.', notifyHr: true);
+
+        return $grievance;
     }
 
     public function addComment(Grievance $grievance, string $comment): GrievanceComment
@@ -228,5 +252,31 @@ class GrievanceService
 
         // Regular employees see only what they filed
         $query->where('complainant_id', $user->id);
+    }
+
+    private function notifyGrievance(
+        Grievance $grievance,
+        string $type,
+        string $title,
+        string $message,
+        bool $notifyHr = false,
+    ): void {
+        $grievance->loadMissing('complainant');
+
+        NotificationService::send(
+            type: $type,
+            title: $title,
+            message: $message,
+            module: 'hr',
+            data: [
+                'url' => '/hr/grievance',
+                'record_type' => 'grievance',
+                'record_id' => $grievance->id,
+                'status' => $grievance->status,
+                'actor_id' => auth()->id(),
+            ],
+            users: [$grievance->complainant],
+            role: $notifyHr ? ['Super Admin', 'HR'] : [],
+        );
     }
 }

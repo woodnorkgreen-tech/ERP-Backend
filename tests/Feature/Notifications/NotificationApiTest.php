@@ -5,6 +5,9 @@ use App\Models\Notification as LegacyNotification;
 use App\Modules\Notifications\Models\AppNotification;
 use App\Modules\Notifications\Models\UserDeviceToken;
 use App\Modules\Notifications\Jobs\SendMailNotificationJob;
+use App\Modules\Notifications\Jobs\SendMailToAddressNotificationJob;
+use App\Modules\HR\Models\Employee;
+use App\Modules\HR\Models\Department;
 use App\Modules\Notifications\Jobs\SendPushNotificationJob;
 use App\Modules\Notifications\Mail\AppNotificationMail;
 use App\Modules\Notifications\Services\NotificationService;
@@ -260,6 +263,40 @@ class NotificationApiTest extends TestCase
 
         Mail::assertSent(AppNotificationMail::class, fn (AppNotificationMail $mail) =>
             $mail->hasTo($this->user->email) && $mail->payload['title'] === 'Mail test'
+        );
+    }
+
+    public function test_mail_job_prefers_the_linked_employee_profile_email(): void
+    {
+        Mail::fake();
+        $department = Department::query()->create(['name' => 'Mail Test']);
+        $employee = Employee::query()->create([
+            'employee_id' => 'EMP-MAIL-1',
+            'first_name' => 'Mail',
+            'last_name' => 'Recipient',
+            'email' => 'employee-profile@test.local',
+            'department_id' => $department->id,
+            'position' => 'Tester',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+        ]);
+        $this->user->update(['employee_id' => $employee->id]);
+
+        (new SendMailNotificationJob($this->user->id, ['title' => 'Mail test']))->handle();
+
+        Mail::assertSent(AppNotificationMail::class, fn (AppNotificationMail $mail) =>
+            $mail->hasTo('employee-profile@test.local')
+        );
+    }
+
+    public function test_email_only_notification_job_supports_an_employee_without_a_user_account(): void
+    {
+        Mail::fake();
+
+        (new SendMailToAddressNotificationJob('employee-only@test.local', ['title' => 'Leave approved']))->handle();
+
+        Mail::assertSent(AppNotificationMail::class, fn (AppNotificationMail $mail) =>
+            $mail->hasTo('employee-only@test.local')
         );
     }
 
