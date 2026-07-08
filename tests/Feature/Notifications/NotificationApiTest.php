@@ -5,6 +5,9 @@ use App\Models\Notification as LegacyNotification;
 use App\Modules\Notifications\Models\AppNotification;
 use App\Modules\Notifications\Models\UserDeviceToken;
 use App\Modules\Notifications\Jobs\SendMailNotificationJob;
+use App\Modules\Notifications\Jobs\SendMailToAddressNotificationJob;
+use App\Modules\HR\Models\Employee;
+use App\Modules\HR\Models\Department;
 use App\Modules\Notifications\Jobs\SendPushNotificationJob;
 use App\Modules\Notifications\Mail\AppNotificationMail;
 use App\Modules\Notifications\Services\NotificationService;
@@ -19,10 +22,9 @@ use App\Modules\ProcurementStores\Models\Requisition;
 use App\Modules\ProcurementStores\Observers\PurchaseOrderObserver;
 use App\Modules\ProcurementStores\Observers\RequisitionObserver;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase;
-use Illuminate\Database\Schema\Blueprint;
 use Laravel\Sanctum\Sanctum;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -33,6 +35,8 @@ use Spatie\Permission\PermissionRegistrar;
 
 class NotificationApiTest extends TestCase
 {
+    use RefreshDatabase;
+
     protected User $user;
 
     public function createApplication()
@@ -48,7 +52,6 @@ class NotificationApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->createMinimalSchema();
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         Role::query()->create(['name' => 'Employee', 'guard_name' => 'web']);
@@ -57,122 +60,6 @@ class NotificationApiTest extends TestCase
         $this->user->assignRole('Employee');
 
         Sanctum::actingAs($this->user);
-    }
-
-    protected function tearDown(): void
-    {
-        Schema::dropIfExists('user_device_tokens');
-        Schema::dropIfExists('app_notification_preferences');
-        Schema::dropIfExists('app_notifications');
-        Schema::dropIfExists('model_has_permissions');
-        Schema::dropIfExists('model_has_roles');
-        Schema::dropIfExists('role_has_permissions');
-        Schema::dropIfExists('permissions');
-        Schema::dropIfExists('roles');
-        Schema::dropIfExists('users');
-
-        parent::tearDown();
-    }
-
-    protected function createMinimalSchema(): void
-    {
-        Schema::dropIfExists('user_device_tokens');
-        Schema::dropIfExists('app_notification_preferences');
-        Schema::dropIfExists('app_notifications');
-        Schema::dropIfExists('model_has_permissions');
-        Schema::dropIfExists('model_has_roles');
-        Schema::dropIfExists('role_has_permissions');
-        Schema::dropIfExists('permissions');
-        Schema::dropIfExists('roles');
-        Schema::dropIfExists('users');
-
-        Schema::create('users', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('email')->unique();
-            $table->timestamp('email_verified_at')->nullable();
-            $table->string('password');
-            $table->foreignId('employee_id')->nullable();
-            $table->foreignId('department_id')->nullable();
-            $table->boolean('is_active')->default(true);
-            $table->timestamp('last_login_at')->nullable();
-            $table->string('onesignal_player_id')->nullable();
-            $table->rememberToken();
-            $table->timestamps();
-        });
-
-        Schema::create('permissions', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-            $table->unique(['name', 'guard_name']);
-        });
-
-        Schema::create('roles', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-            $table->unique(['name', 'guard_name']);
-        });
-
-        Schema::create('model_has_permissions', function (Blueprint $table) {
-            $table->unsignedBigInteger('permission_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-            $table->index(['model_id', 'model_type']);
-            $table->primary(['permission_id', 'model_id', 'model_type']);
-        });
-
-        Schema::create('model_has_roles', function (Blueprint $table) {
-            $table->unsignedBigInteger('role_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-            $table->index(['model_id', 'model_type']);
-            $table->primary(['role_id', 'model_id', 'model_type']);
-        });
-
-        Schema::create('role_has_permissions', function (Blueprint $table) {
-            $table->unsignedBigInteger('permission_id');
-            $table->unsignedBigInteger('role_id');
-            $table->primary(['permission_id', 'role_id']);
-        });
-
-        Schema::create('app_notifications', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->foreignId('user_id');
-            $table->string('module');
-            $table->string('type');
-            $table->string('title');
-            $table->text('message');
-            $table->json('data')->nullable();
-            $table->string('urgency')->default('info');
-            $table->boolean('is_read')->default(false);
-            $table->timestamp('read_at')->nullable();
-            $table->boolean('is_starred')->default(false);
-            $table->timestamp('starred_at')->nullable();
-            $table->timestamps();
-        });
-
-        Schema::create('app_notification_preferences', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id');
-            $table->string('type');
-            $table->string('channel');
-            $table->boolean('enabled')->default(true);
-            $table->timestamps();
-            $table->unique(['user_id', 'type', 'channel']);
-        });
-
-        Schema::create('user_device_tokens', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id');
-            $table->string('player_id');
-            $table->string('platform');
-            $table->timestamps();
-            $table->unique(['user_id', 'player_id']);
-        });
     }
 
     public function test_user_can_list_count_open_read_and_star_notifications(): void
@@ -376,6 +263,40 @@ class NotificationApiTest extends TestCase
 
         Mail::assertSent(AppNotificationMail::class, fn (AppNotificationMail $mail) =>
             $mail->hasTo($this->user->email) && $mail->payload['title'] === 'Mail test'
+        );
+    }
+
+    public function test_mail_job_prefers_the_linked_employee_profile_email(): void
+    {
+        Mail::fake();
+        $department = Department::query()->create(['name' => 'Mail Test']);
+        $employee = Employee::query()->create([
+            'employee_id' => 'EMP-MAIL-1',
+            'first_name' => 'Mail',
+            'last_name' => 'Recipient',
+            'email' => 'employee-profile@test.local',
+            'department_id' => $department->id,
+            'position' => 'Tester',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+        ]);
+        $this->user->update(['employee_id' => $employee->id]);
+
+        (new SendMailNotificationJob($this->user->id, ['title' => 'Mail test']))->handle();
+
+        Mail::assertSent(AppNotificationMail::class, fn (AppNotificationMail $mail) =>
+            $mail->hasTo('employee-profile@test.local')
+        );
+    }
+
+    public function test_email_only_notification_job_supports_an_employee_without_a_user_account(): void
+    {
+        Mail::fake();
+
+        (new SendMailToAddressNotificationJob('employee-only@test.local', ['title' => 'Leave approved']))->handle();
+
+        Mail::assertSent(AppNotificationMail::class, fn (AppNotificationMail $mail) =>
+            $mail->hasTo('employee-only@test.local')
         );
     }
 

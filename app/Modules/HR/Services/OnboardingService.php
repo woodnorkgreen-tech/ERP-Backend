@@ -13,6 +13,7 @@ use App\Modules\HR\Models\OnboardingActivityLog;
 use App\Modules\HR\Models\Candidate;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Department;
+use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -90,7 +91,7 @@ class OnboardingService
 
     public function startOnboarding(array $data): OnboardingCase
     {
-        return DB::transaction(function () use ($data) {
+        $case = DB::transaction(function () use ($data) {
             $departmentId = $data['department_id'] ?? null;
 
             // Resolve line manager from the department if not explicitly provided
@@ -119,6 +120,15 @@ class OnboardingService
 
             return $case->load(['candidate.jobPosting', 'cards.tasks', 'documentRequirements', 'welcomeKitItems']);
         });
+
+        $this->notifyOnboarding(
+            $case,
+            'onboarding_started',
+            'Onboarding started',
+            "Onboarding has started for {$this->onboardingSubject($case)}."
+        );
+
+        return $case;
     }
 
     public function linkEmployee(int $caseId, int $employeeId): OnboardingCase
@@ -304,7 +314,16 @@ class OnboardingService
             $this->log($case->id, 'hr_gate_approved', 'HR approval gate passed — IT and SOPs onboarding unlocked');
         });
 
-        return $case->fresh(['cards.tasks', 'documentRequirements', 'welcomeKitItems']);
+        $case = $case->fresh(['candidate', 'employee.user', 'hrOwner', 'departmentLead.user', 'cards.tasks', 'documentRequirements', 'welcomeKitItems']);
+
+        $this->notifyOnboarding(
+            $case,
+            'onboarding_hr_approved',
+            'HR onboarding gate approved',
+            "HR approval for {$this->onboardingSubject($case)} is complete. IT and SOPs onboarding are now unlocked."
+        );
+
+        return $case;
     }
 
     public function recordHandover(int $caseId, array $data): OnboardingHandover
@@ -325,6 +344,13 @@ class OnboardingService
 
         $case->update(['status' => 'post_onboarding_review']);
         $this->log($caseId, 'handover_completed', 'HR formally handed over onboarding to line manager — case moved to post-onboarding review');
+
+        $this->notifyOnboarding(
+            $case->fresh(),
+            'onboarding_handover_recorded',
+            'Onboarding handover recorded',
+            "Onboarding for {$this->onboardingSubject($case)} has been handed over to the line manager."
+        );
 
         return $handover->load(['handedOverByUser', 'departmentLead']);
     }
@@ -358,6 +384,12 @@ class OnboardingService
         if ($completedReviews >= 2) {
             $case->update(['status' => 'completed', 'completed_at' => now()]);
             $this->log($caseId, 'onboarding_completed', 'Onboarding fully completed after post-onboarding reviews');
+            $this->notifyOnboarding(
+                $case->fresh(),
+                'onboarding_completed',
+                'Onboarding completed',
+                "Onboarding for {$this->onboardingSubject($case)} is complete."
+            );
         } else {
             $this->log($caseId, 'review_submitted', "Post-onboarding review submitted: {$data['review_type']}");
         }
@@ -634,5 +666,44 @@ class OnboardingService
             'description'        => $description,
             'metadata'           => !empty($metadata) ? $metadata : null,
         ]);
+    }
+
+    private function notifyOnboarding(OnboardingCase $case, string $type, string $title, string $message): void
+    {
+        $case->loadMissing(['candidate', 'employee.user', 'hrOwner', 'departmentLead.user']);
+
+        NotificationService::send(
+            type: $type,
+            title: $title,
+            message: $message,
+            module: 'hr',
+            data: [
+                'url' => "/hr/onboarding/{$case->id}",
+                'record_type' => 'onboarding_case',
+                'record_id' => $case->id,
+                'candidate_id' => $case->candidate_id,
+                'employee_id' => $case->employee_id,
+                'employee_name' => $this->onboardingSubject($case),
+                'actor_id' => Auth::id(),
+            ],
+            users: collect([
+                $case->hrOwner,
+                $case->departmentLead?->user,
+                $case->employee?->user,
+            ])->filter()->all(),
+        );
+    }
+
+    private function onboardingSubject(OnboardingCase $case): string
+    {
+        if ($case->employee) {
+            return $case->employee->name;
+        }
+
+        if ($case->candidate) {
+            return trim("{$case->candidate->first_name} {$case->candidate->last_name}");
+        }
+
+        return 'the new employee';
     }
 }

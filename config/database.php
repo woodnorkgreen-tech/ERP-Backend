@@ -57,7 +57,10 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
-            'engine' => null,
+            // Explicit InnoDB: servers whose default engine is MyISAM cap index
+            // keys at 1000 bytes, which breaks composite unique indexes on
+            // varchar(255) columns during migrate:fresh (e.g. payroll_runs).
+            'engine' => env('DB_ENGINE', 'InnoDB'),
             'timezone' => env('DB_TIMEZONE', '+03:00'),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),

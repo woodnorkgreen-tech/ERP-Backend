@@ -6,6 +6,7 @@ use App\Modules\HR\Models\DisciplinaryCase;
 use App\Modules\HR\Models\DisciplinaryComment;
 use App\Modules\HR\Models\DisciplinaryActivityLog;
 use App\Models\User;
+use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +15,7 @@ class DisciplineService
 {
     public function createDisciplinaryCase(array $data): DisciplinaryCase
     {
-        return DB::transaction(function () use ($data) {
+        $case = DB::transaction(function () use ($data) {
             $user = auth()->user();
 
             $case = DisciplinaryCase::create([
@@ -36,6 +37,11 @@ class DisciplineService
 
             return $case;
         });
+
+        $this->notifyDiscipline($case, 'discipline_reported', 'Disciplinary case reported',
+            'A disciplinary case has been reported and requires review.', notifyEmployee: false, notifyHr: true);
+
+        return $case;
     }
 
     public function getDisciplinaryCases(Request $request): LengthAwarePaginator
@@ -86,7 +92,7 @@ class DisciplineService
 
     public function issueShowCause(DisciplinaryCase $case, string $letter): DisciplinaryCase
     {
-        return DB::transaction(function () use ($case, $letter) {
+        $case = DB::transaction(function () use ($case, $letter) {
             $case->update([
                 'status' => DisciplinaryCase::STATUS_SHOW_CAUSE_ISSUED,
                 'show_cause_issued' => true,
@@ -101,11 +107,16 @@ class DisciplineService
 
             return $case;
         });
+
+        $this->notifyDiscipline($case, 'discipline_show_cause_issued', 'Show cause notice issued',
+            'A show cause notice has been issued. A response is required within 48 hours.');
+
+        return $case;
     }
 
     public function submitShowCauseResponse(DisciplinaryCase $case, string $response): DisciplinaryCase
     {
-        return DB::transaction(function () use ($case, $response) {
+        $case = DB::transaction(function () use ($case, $response) {
             $case->update([
                 'show_cause_response' => $response,
                 'show_cause_response_date' => now(),
@@ -120,11 +131,16 @@ class DisciplineService
 
             return $case;
         });
+
+        $this->notifyDiscipline($case, 'discipline_response_submitted', 'Show cause response submitted',
+            'A response to the show cause notice has been submitted.', notifyHr: true);
+
+        return $case;
     }
 
     public function scheduleHearing(DisciplinaryCase $case, string $date, array $panel): DisciplinaryCase
     {
-        return DB::transaction(function () use ($case, $date, $panel) {
+        $case = DB::transaction(function () use ($case, $date, $panel) {
             $case->update([
                 'status' => DisciplinaryCase::STATUS_HEARING_SCHEDULED,
                 'hearing_scheduled' => true,
@@ -140,11 +156,17 @@ class DisciplineService
 
             return $case;
         });
+
+        $hearingDate = $case->hearing_date?->format('d M Y, H:i') ?? $date;
+        $this->notifyDiscipline($case, 'discipline_hearing_scheduled', 'Disciplinary hearing scheduled',
+            "A disciplinary hearing has been scheduled for {$hearingDate}.", notifyHr: true);
+
+        return $case;
     }
 
     public function submitHearingMinutes(DisciplinaryCase $case, string $minutes, string $decision): DisciplinaryCase
     {
-        return DB::transaction(function () use ($case, $minutes, $decision) {
+        $case = DB::transaction(function () use ($case, $minutes, $decision) {
             $case->update([
                 'status' => DisciplinaryCase::STATUS_HEARING_HELD,
                 'hearing_minutes' => $minutes,
@@ -159,11 +181,16 @@ class DisciplineService
 
             return $case;
         });
+
+        $this->notifyDiscipline($case, 'discipline_hearing_recorded', 'Disciplinary hearing recorded',
+            'The disciplinary hearing has been recorded and is awaiting the next decision.');
+
+        return $case;
     }
 
     public function issueWarning(DisciplinaryCase $case, string $type, ?string $letter = null): DisciplinaryCase
     {
-        return DB::transaction(function () use ($case, $type, $letter) {
+        $case = DB::transaction(function () use ($case, $type, $letter) {
             $case->update([
                 'status' => DisciplinaryCase::STATUS_DECISION_MADE,
                 'warning_issued' => $type,
@@ -178,11 +205,16 @@ class DisciplineService
 
             return $case;
         });
+
+        $this->notifyDiscipline($case, 'discipline_warning_issued', 'Disciplinary decision issued',
+            'A disciplinary decision has been issued. Open the case to review it.');
+
+        return $case;
     }
 
     public function submitAppeal(DisciplinaryCase $case, string $details): DisciplinaryCase
     {
-        return DB::transaction(function () use ($case, $details) {
+        $case = DB::transaction(function () use ($case, $details) {
             $case->update([
                 'status' => DisciplinaryCase::STATUS_APPEALED,
                 'appeal_submitted' => true,
@@ -197,11 +229,16 @@ class DisciplineService
 
             return $case;
         });
+
+        $this->notifyDiscipline($case, 'discipline_appeal_submitted', 'Disciplinary appeal submitted',
+            'An appeal has been submitted and requires review.', notifyHr: true);
+
+        return $case;
     }
 
     public function finalizeCase(DisciplinaryCase $case, string $decision): DisciplinaryCase
     {
-        return DB::transaction(function () use ($case, $decision) {
+        $case = DB::transaction(function () use ($case, $decision) {
             $case->update([
                 'status' => DisciplinaryCase::STATUS_FINAL,
                 'final_decision' => $decision,
@@ -215,6 +252,11 @@ class DisciplineService
 
             return $case;
         });
+
+        $this->notifyDiscipline($case, 'discipline_finalized', 'Disciplinary case finalized',
+            'The disciplinary case has been finalized. Open the case to review the final decision.');
+
+        return $case;
     }
 
     public function addComment(DisciplinaryCase $case, string $comment): DisciplinaryComment
@@ -270,5 +312,37 @@ class DisciplineService
         // Other authenticated users may only access their own cases
         // (employee_id references the employees table).
         $query->where('employee_id', $user->employee_id);
+    }
+
+    private function notifyDiscipline(
+        DisciplinaryCase $case,
+        string $type,
+        string $title,
+        string $message,
+        bool $notifyEmployee = true,
+        bool $notifyHr = false,
+    ): void {
+        $case->loadMissing(['employee.user', 'reporter']);
+        $employeeUser = $notifyEmployee ? $case->employee?->user : null;
+        $employeeEmail = $notifyEmployee && !$employeeUser ? $case->employee?->email : null;
+
+        NotificationService::send(
+            type: $type,
+            title: $title,
+            message: $message,
+            module: 'hr',
+            data: [
+                'url' => '/hr/discipline',
+                'record_type' => 'disciplinary_case',
+                'record_id' => $case->id,
+                'employee_id' => $case->employee_id,
+                'employee_name' => $case->employee?->name,
+                'status' => $case->status,
+                'actor_id' => auth()->id(),
+            ],
+            users: collect([$employeeUser, $case->reporter])->filter()->all(),
+            role: $notifyHr ? ['Super Admin', 'HR'] : [],
+            emails: $employeeEmail ? [$employeeEmail] : [],
+        );
     }
 }
