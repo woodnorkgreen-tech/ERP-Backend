@@ -26,6 +26,7 @@ use App\Modules\HR\Http\Controllers\CompensatoryLeaveController;
 use App\Modules\HR\Http\Controllers\EmployeeSkillController;
 use App\Modules\HR\Http\Controllers\PerformanceReviewController;
 use App\Modules\HR\Http\Controllers\OnboardingController;
+use App\Modules\HR\Http\Controllers\OffboardingController;
 use App\Constants\Permissions;
 
 // Unprotected HR Routes (public recruitment only)
@@ -67,13 +68,15 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('employees/template/commit', [EmployeeController::class, 'commitImport'])
             ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
 
-        Route::apiResource('employees', EmployeeController::class)->middleware([
-            'index'   => 'permission:' . Permissions::EMPLOYEE_READ,
-            'store'   => 'permission:' . Permissions::EMPLOYEE_CREATE,
-            'show'    => 'permission:' . Permissions::EMPLOYEE_READ,
-            'update'  => 'permission:' . Permissions::EMPLOYEE_UPDATE,
-            'destroy' => 'permission:' . Permissions::EMPLOYEE_DELETE,
-        ]);
+        // middlewareFor, not middleware([...]): an associative array passed to
+        // middleware() is flattened, which stacked ALL five permission checks
+        // onto every route (index effectively required create+update+delete too).
+        Route::apiResource('employees', EmployeeController::class)
+            ->middlewareFor('index',   'permission:' . Permissions::EMPLOYEE_READ)
+            ->middlewareFor('store',   'permission:' . Permissions::EMPLOYEE_CREATE)
+            ->middlewareFor('show',    'permission:' . Permissions::EMPLOYEE_READ)
+            ->middlewareFor('update',  'permission:' . Permissions::EMPLOYEE_UPDATE)
+            ->middlewareFor('destroy', 'permission:' . Permissions::EMPLOYEE_DELETE);
 
         // Reinstatement — restore a soft-deleted (terminated) employee.
         Route::post('employees/{id}/restore', [EmployeeController::class, 'restore'])
@@ -381,6 +384,48 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('cases/{caseId}/welcome-kit', [OnboardingController::class, 'createWelcomeKitItem']);
             Route::post('welcome-kit/{itemId}/toggle', [OnboardingController::class, 'toggleWelcomeKitItem']);
             Route::patch('welcome-kit/{itemId}', [OnboardingController::class, 'updateWelcomeKitItem']);
+        });
+
+        // Offboarding
+        Route::prefix('offboarding')->group(function () {
+            Route::middleware('permission:' . Permissions::OFFBOARDING_VIEW)->group(function () {
+                Route::get('/', [OffboardingController::class, 'index']);
+                Route::get('{id}', [OffboardingController::class, 'show'])->whereNumber('id');
+                Route::get('{id}/activity-log', [OffboardingController::class, 'activityLog']);
+            });
+
+            Route::middleware('permission:' . Permissions::OFFBOARDING_CREATE)->group(function () {
+                Route::get('eligible-employees', [OffboardingController::class, 'eligibleEmployees']);
+                Route::post('/', [OffboardingController::class, 'store']);
+            });
+
+            Route::middleware('permission:' . Permissions::OFFBOARDING_MANAGE)->group(function () {
+                Route::post('{id}/cancel', [OffboardingController::class, 'cancel']);
+                Route::post('{id}/exit-interview', [OffboardingController::class, 'recordExitInterview']);
+                Route::post('cards/{cardId}/tasks', [OffboardingController::class, 'createTask']);
+                Route::post('tasks/{taskId}/complete', [OffboardingController::class, 'completeTask']);
+                Route::post('tasks/{taskId}/reopen', [OffboardingController::class, 'reopenTask']);
+                Route::patch('tasks/{taskId}/toggle-optional', [OffboardingController::class, 'toggleOptionalTask']);
+                Route::patch('tasks/{taskId}', [OffboardingController::class, 'updateTaskFlags']);
+                Route::post('cases/{caseId}/assets', [OffboardingController::class, 'createAssetReturnItem']);
+                Route::post('assets/{itemId}/toggle', [OffboardingController::class, 'toggleAssetReturn']);
+                Route::patch('assets/{itemId}', [OffboardingController::class, 'updateAssetReturn']);
+                Route::post('cases/{caseId}/clearances', [OffboardingController::class, 'createClearance']);
+            });
+
+            Route::middleware('permission:' . Permissions::OFFBOARDING_CLEARANCE)->group(function () {
+                Route::patch('clearances/{clearanceId}/status', [OffboardingController::class, 'updateClearanceStatus']);
+                Route::patch('clearances/{clearanceId}', [OffboardingController::class, 'updateClearanceFlags']);
+            });
+
+            Route::middleware('permission:' . Permissions::OFFBOARDING_SETTLEMENT)->group(function () {
+                Route::patch('{id}/settlement', [OffboardingController::class, 'updateFinalSettlement']);
+                Route::post('{id}/settlement/approve', [OffboardingController::class, 'approveFinalSettlement']);
+                Route::post('{id}/settlement/mark-paid', [OffboardingController::class, 'markSettlementPaid']);
+            });
+
+            Route::post('{id}/approve', [OffboardingController::class, 'approveFinalGate'])
+                ->middleware('permission:' . Permissions::OFFBOARDING_APPROVE);
         });
 
         // Internal Recruitment (ATS)

@@ -4,11 +4,14 @@ namespace App\Modules\Notifications\Services;
 
 use App\Models\User;
 use App\Modules\Notifications\Jobs\SendMailNotificationJob;
+use App\Modules\Notifications\Jobs\SendMailToAddressNotificationJob;
 use App\Modules\Notifications\Jobs\SendPushNotificationJob;
 use App\Modules\Notifications\Models\AppNotification;
 use App\Modules\Notifications\Models\AppNotificationPreference;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
+use Spatie\Permission\Models\Permission as SpatiePermission;
+use Spatie\Permission\Models\Role as SpatieRole;
 
 class NotificationService
 {
@@ -24,6 +27,7 @@ class NotificationService
         string|array $permission = [],
         string $notifyModule = '',
         bool $all = false,
+        array $emails = [],
     ): Collection {
         return app(self::class)->dispatchNotification(
             $type,
@@ -37,6 +41,7 @@ class NotificationService
             $permission,
             $notifyModule,
             $all,
+            $emails,
         );
     }
 
@@ -52,6 +57,7 @@ class NotificationService
         string|array $permission = [],
         string $notifyModule = '',
         bool $all = false,
+        array $emails = [],
     ): Collection {
         $registeredType = $this->registeredType($type);
         $module = $registeredType['module'] ?? $module;
@@ -68,7 +74,7 @@ class NotificationService
 
         $recipients = $explicitRecipients->merge($broadcastRecipients)->unique('id')->values();
 
-        return $recipients->map(function (User $user) use ($type, $title, $message, $module, $urgency, $data, $defaultChannels) {
+        $notifications = $recipients->map(function (User $user) use ($type, $title, $message, $module, $urgency, $data, $defaultChannels) {
             $enabledChannels = $this->enabledChannelsFor($user, $type, $defaultChannels);
             $notification = null;
 
@@ -105,6 +111,27 @@ class NotificationService
 
             return $notification;
         })->filter()->values();
+
+        if (in_array('mail', $defaultChannels, true)) {
+            collect($emails)
+                ->filter(fn ($email) => is_string($email) && filter_var($email, FILTER_VALIDATE_EMAIL))
+                ->map(fn (string $email) => strtolower(trim($email)))
+                ->unique()
+                ->each(function (string $email) use ($type, $title, $message, $module, $urgency, $data): void {
+                    SendMailToAddressNotificationJob::dispatch($email, [
+                        'notification_id' => null,
+                        'user_id' => null,
+                        'module' => $module,
+                        'type' => $type,
+                        'title' => $title,
+                        'message' => $message,
+                        'data' => $data,
+                        'urgency' => $urgency,
+                    ]);
+                });
+        }
+
+        return $notifications;
     }
 
     protected function registeredType(string $type): array
@@ -142,10 +169,24 @@ class NotificationService
         }
 
         foreach ($this->asArray($role) as $roleName) {
+            if (!SpatieRole::query()
+                ->where('name', $roleName)
+                ->where('guard_name', 'web')
+                ->exists()) {
+                continue;
+            }
+
             $resolved = $resolved->merge(User::query()->role($roleName)->active()->get());
         }
 
         foreach ($this->asArray($permission) as $permissionName) {
+            if (!SpatiePermission::query()
+                ->where('name', $permissionName)
+                ->where('guard_name', 'web')
+                ->exists()) {
+                continue;
+            }
+
             $resolved = $resolved->merge(User::query()->permission($permissionName)->active()->get());
         }
 
