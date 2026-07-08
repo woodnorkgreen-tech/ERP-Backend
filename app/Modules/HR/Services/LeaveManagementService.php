@@ -22,11 +22,11 @@ class LeaveManagementService
                 'name' => 'Annual Leave',
                 'code' => 'ANNUAL',
                 'days_per_year' => 21,
-                'monthly_accrual_rate' => 1.75,
-                'allow_advance' => true,
+                'monthly_accrual_rate' => null,
+                'allow_advance' => false,
                 'color' => 'emerald',
                 'icon' => 'mdi-palm-tree',
-                'description' => 'Kenya statutory minimum annual leave: 21 working days, earned at 1.75 days per completed month.',
+                'description' => 'Annual leave entitlement: 21 working days per calendar year.',
                 'is_active' => true,
                 'requires_attachment' => false,
             ],
@@ -271,15 +271,20 @@ class LeaveManagementService
             ->get()
             ->map(function (LeaveType $leaveType) use ($employee, $year) {
                 $usedDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_APPROVED]);
-                $pendingDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_PENDING]);
+                $pendingDays = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [
+                    LeaveRequest::STATUS_PENDING,
+                    LeaveRequest::STATUS_LEAD_APPROVED,
+                ]);
                 $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year);
                 $carryForwardDays = $this->calculateCarryForwardDays($employee, $leaveType, $year);
                 
                 $totalAvailable = $metrics['earned_days'] + $carryForwardDays;
-                $accruedRemaining = max($totalAvailable - ($usedDays + $pendingDays), 0);
+                // Available is the employee's actual balance after approved leave.
+                // Pending requests are shown separately and only reserve requestable days.
+                $accruedRemaining = max($totalAvailable - $usedDays, 0);
                 $requestableDays = $leaveType->allow_advance
                     ? max($metrics['year_entitlement_days'] + $carryForwardDays - ($usedDays + $pendingDays), 0)
-                    : $accruedRemaining;
+                    : max($accruedRemaining - $pendingDays, 0);
                 $advanceAvailableDays = $leaveType->allow_advance
                     ? max($requestableDays - $accruedRemaining, 0)
                     : 0;
@@ -409,7 +414,10 @@ class LeaveManagementService
     ): void
     {
         $approved = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_APPROVED], $ignoreRequestId);
-        $pending = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [LeaveRequest::STATUS_PENDING], $ignoreRequestId);
+        $pending = $this->sumRequestedDays($employee->id, $leaveType->id, $year, [
+            LeaveRequest::STATUS_PENDING,
+            LeaveRequest::STATUS_LEAD_APPROVED,
+        ], $ignoreRequestId);
 
         if ($leaveType->code === 'UNPAID') {
             return;
