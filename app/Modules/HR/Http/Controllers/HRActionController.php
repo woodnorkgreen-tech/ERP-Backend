@@ -6,6 +6,7 @@ use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\HRAction;
 use App\Modules\HR\Models\HRActionType;
 use App\Modules\HR\Models\HRActionAttachment;
+use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -76,7 +77,7 @@ class HRActionController
         // Capture a full snapshot of the employee before the change
         $previousSnapshot = $employee->toArray();
 
-        return DB::transaction(function () use ($employee, $actionType, $validatedData, $previousSnapshot, $newData, $isFutureDated, $request) {
+        $action = DB::transaction(function () use ($employee, $actionType, $validatedData, $previousSnapshot, $newData, $isFutureDated, $request) {
             // 1. Create the HR Action record
             $action = HRAction::create([
                 'employee_id' => $employee->id,
@@ -111,13 +112,24 @@ class HRActionController
                 $employee->update($newData);
             }
 
-            return response()->json([
-                'message' => $isFutureDated 
-                    ? 'HR Action scheduled for ' . $validatedData['effective_date']
-                    : 'HR Action recorded and executed successfully',
-                'data' => $action->load(['employee', 'type', 'attachments'])
-            ], 201);
+            return $action->load(['employee.user', 'type', 'attachments', 'recorder']);
         });
+
+        $type = $isFutureDated
+            ? 'hr_action_scheduled'
+            : ($this->isFormalAction($actionType->code) ? 'hr_action_formal_notice' : 'hr_action_recorded');
+        $this->notifyEmployee($action, $type,
+            $isFutureDated ? 'HR action scheduled' : 'HR action recorded',
+            $isFutureDated
+                ? "An HR action has been scheduled for {$action->effective_date->format('d M Y')}."
+                : 'An HR action has been recorded on your employee profile.');
+
+        return response()->json([
+            'message' => $isFutureDated
+                ? 'HR Action scheduled for ' . $validatedData['effective_date']
+                : 'HR Action recorded and executed successfully',
+            'data' => $action,
+        ], 201);
     }
 
 
@@ -179,7 +191,7 @@ class HRActionController
             return response()->json(['message' => 'Action cannot be approved in its current status'], 422);
         }
 
-        return DB::transaction(function () use ($action) {
+        $action = DB::transaction(function () use ($action) {
             // For future dated actions that are now being forced/approved
             if ($action->status === 'pending_execution') {
                  $action->employee->update($action->new_data);
@@ -191,10 +203,48 @@ class HRActionController
                 'approved_by' => auth()->id()
             ]);
 
-            return response()->json([
-                'message' => 'Action approved and executed successfully',
-                'data' => $action->load('employee')
-            ]);
+            return $action->load(['employee.user', 'type', 'recorder']);
         });
+
+        $type = $this->isFormalAction($action->type?->code ?? $action->action_type)
+            ? 'hr_action_formal_notice'
+            : 'hr_action_executed';
+        $this->notifyEmployee($action, $type, 'HR action executed',
+            'A scheduled HR action has been approved and applied to your employee profile.');
+
+        return response()->json([
+            'message' => 'Action approved and executed successfully',
+            'data' => $action,
+        ]);
+    }
+
+    private function isFormalAction(?string $code): bool
+    {
+        return in_array(strtoupper((string) $code), ['WARNING', 'SUSPENSION', 'TERMINATION'], true);
+    }
+
+    private function notifyEmployee(HRAction $action, string $type, string $title, string $message): void
+    {
+        $action->loadMissing(['employee.user', 'recorder']);
+        $employeeUser = $action->employee?->user;
+
+        NotificationService::send(
+            type: $type,
+            title: $title,
+            message: $message,
+            module: 'hr',
+            data: [
+                'url' => "/hr/employees?profile={$action->employee_id}",
+                'record_type' => 'hr_action',
+                'record_id' => $action->id,
+                'employee_id' => $action->employee_id,
+                'employee_name' => $action->employee?->name,
+                'action_type' => $action->type?->code ?? $action->action_type,
+                'status' => $action->status,
+                'actor_id' => auth()->id(),
+            ],
+            users: collect([$employeeUser, $action->recorder])->filter()->all(),
+            emails: !$employeeUser && $action->employee?->email ? [$action->employee->email] : [],
+        );
     }
 }

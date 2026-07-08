@@ -11,6 +11,8 @@ use App\Modules\HR\Models\OffboardingExitInterview;
 use App\Modules\HR\Models\OffboardingFinalSettlement;
 use App\Modules\HR\Models\OffboardingActivityLog;
 use App\Modules\HR\Models\Employee;
+use App\Constants\Permissions;
+use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -58,7 +60,7 @@ class OffboardingService
 
     public function initiateOffboarding(array $data): OffboardingCase
     {
-        return DB::transaction(function () use ($data) {
+        $case = DB::transaction(function () use ($data) {
             $employee = Employee::findOrFail($data['employee_id']);
 
             $case = OffboardingCase::create([
@@ -81,6 +83,11 @@ class OffboardingService
 
             return $case->load(['employee.department', 'cards.tasks', 'assetReturns', 'clearances']);
         });
+
+        $this->notifyOffboarding($case, 'offboarding_started', 'Offboarding started',
+            "Offboarding has started for {$case->employee->name}.", Permissions::OFFBOARDING_MANAGE);
+
+        return $case;
     }
 
     public function completeTaskById(int $taskId, ?string $notes = null): OffboardingTask
@@ -312,6 +319,16 @@ class OffboardingService
         $this->log($clearance->offboarding_case_id, 'clearance_updated', "Clearance '{$clearance->label}' → {$status}");
         $this->recalculateProgress($clearance->offboarding_case_id);
 
+        $case = $clearance->offboardingCase;
+        $type = $status === 'flagged' ? 'offboarding_clearance_flagged' : 'offboarding_clearance_updated';
+        $title = $status === 'flagged' ? 'Offboarding clearance requires attention' : 'Offboarding clearance updated';
+        $message = "{$clearance->label} for {$case->employee->name} was marked {$status}.";
+        if ($status === 'flagged' && $flagReason) {
+            $message .= " Reason: {$flagReason}";
+        }
+        $this->notifyOffboarding($case, $type, $title, $message,
+            $status === 'flagged' ? Permissions::OFFBOARDING_MANAGE : null);
+
         return $clearance;
     }
 
@@ -360,6 +377,10 @@ class OffboardingService
         $this->recalculateProgress($caseId);
         $this->log($caseId, 'exit_interview_recorded', 'Exit interview ' . ($status === 'declined' ? 'declined by employee' : 'recorded'));
 
+        $case = OffboardingCase::findOrFail($caseId);
+        $this->notifyOffboarding($case, 'offboarding_exit_interview_recorded', 'Exit interview recorded',
+            "The exit interview for {$case->employee->name} was {$status}.");
+
         return $interview;
     }
 
@@ -392,6 +413,11 @@ class OffboardingService
         $this->recalculateProgress($caseId);
         $this->log($caseId, 'settlement_calculated', 'Final settlement calculated: net amount ' . $settlement->net_amount);
 
+        $case = OffboardingCase::findOrFail($caseId);
+        $this->notifyOffboarding($case, 'offboarding_settlement_calculated', 'Final settlement ready for approval',
+            "The final settlement for {$case->employee->name} has been calculated and requires approval.",
+            Permissions::OFFBOARDING_SETTLEMENT);
+
         return $settlement;
     }
 
@@ -412,6 +438,10 @@ class OffboardingService
         $this->recalculateProgress($caseId);
         $this->log($caseId, 'settlement_approved', 'Final settlement approved');
 
+        $case = OffboardingCase::findOrFail($caseId);
+        $this->notifyOffboarding($case, 'offboarding_settlement_approved', 'Final settlement approved',
+            "The final settlement for {$case->employee->name} has been approved.");
+
         return $settlement;
     }
 
@@ -428,12 +458,20 @@ class OffboardingService
         $this->recalculateProgress($caseId);
         $this->log($caseId, 'settlement_paid', 'Final settlement marked as paid');
 
+        $case = OffboardingCase::findOrFail($caseId);
+        $this->notifyOffboarding($case, 'offboarding_settlement_paid', 'Final settlement paid',
+            "The final settlement for {$case->employee->name} has been marked as paid.");
+
         return $settlement;
     }
 
     public function approveFinalGate(int $caseId, ?string $notes = null): array
     {
-        return DB::transaction(function () use ($caseId, $notes) {
+        // Keep the employee relation for the completion notification; the final gate
+        // soft-deletes the employee, so a freshly loaded case no longer resolves it.
+        $notificationCase = OffboardingCase::with(['employee.user', 'initiatedBy'])->findOrFail($caseId);
+
+        $result = DB::transaction(function () use ($caseId, $notes) {
             $case = OffboardingCase::with(['employee.user', 'exitInterview', 'finalSettlement', 'cards'])->findOrFail($caseId);
 
             abort_if($case->status === 'completed', 422, 'This offboarding case is already completed.');
@@ -479,6 +517,11 @@ class OffboardingService
                 'warnings' => $warnings,
             ];
         });
+
+        $this->notifyOffboarding($notificationCase, 'offboarding_completed', 'Offboarding completed',
+            "Offboarding for {$notificationCase->employee->name} is complete.");
+
+        return $result;
     }
 
     public function cancelOffboarding(int $caseId, ?string $reason = null): OffboardingCase
@@ -494,6 +537,9 @@ class OffboardingService
         ]);
 
         $this->log($caseId, 'offboarding_cancelled', 'Offboarding cancelled' . ($reason ? ": {$reason}" : ''));
+
+        $this->notifyOffboarding($case, 'offboarding_cancelled', 'Offboarding cancelled',
+            "Offboarding for {$case->employee->name} was cancelled.");
 
         return $case;
     }
@@ -686,5 +732,32 @@ class OffboardingService
             'description'         => $description,
             'metadata'            => !empty($metadata) ? $metadata : null,
         ]);
+    }
+
+    private function notifyOffboarding(
+        OffboardingCase $case,
+        string $type,
+        string $title,
+        string $message,
+        ?string $permission = null,
+    ): void {
+        $case->loadMissing(['employee.user', 'initiatedBy']);
+
+        NotificationService::send(
+            type: $type,
+            title: $title,
+            message: $message,
+            module: 'hr',
+            data: [
+                'url' => "/hr/offboarding/{$case->id}",
+                'record_type' => 'offboarding_case',
+                'record_id' => $case->id,
+                'employee_id' => $case->employee_id,
+                'employee_name' => $case->employee->name,
+                'actor_id' => Auth::id(),
+            ],
+            users: collect([$case->employee?->user, $case->initiatedBy])->filter()->all(),
+            permission: $permission ?? [],
+        );
     }
 }
