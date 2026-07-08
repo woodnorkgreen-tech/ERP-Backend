@@ -11,5 +11,4 @@ return [
     App\Modules\Logistics\Providers\LogisticsServiceProvider::class,
     App\Modules\Finance\Providers\FinanceServiceProvider::class,
     App\Modules\HR\Providers\HRServiceProvider::class,
-    App\Providers\TelescopeServiceProvider::class,
 ];
