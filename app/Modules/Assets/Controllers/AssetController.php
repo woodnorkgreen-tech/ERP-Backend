@@ -18,7 +18,7 @@ class AssetController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $assets = $this->buildAssetQuery($request)->paginate($request->get('per_page', 50));
+        $paginated = $this->buildAssetQuery($request)->paginate($request->get('per_page', 50));
 
         $stats = [
             'total_assets' => (int) Asset::active()->count(),
@@ -28,10 +28,14 @@ class AssetController extends Controller
             'unavailable_count' => (int) Asset::active()->where('is_available', false)->count(),
         ];
 
-        return response()->json(array_merge(
-            $assets->toArray(),
-            ['stats' => $stats]
-        ));
+        return response()->json([
+            'data' => AssetResource::collection($paginated)->resolve(),
+            'current_page' => $paginated->currentPage(),
+            'last_page' => $paginated->lastPage(),
+            'total' => $paginated->total(),
+            'per_page' => $paginated->perPage(),
+            'stats' => $stats,
+        ]);
     }
 
     /**
@@ -104,6 +108,16 @@ class AssetController extends Controller
         $data['status'] = $data['status'] ?? 'Active';
         $data['qty'] = $data['qty'] ?? 1;
         $data['is_available'] = $request->boolean('is_available', true);
+
+        // If a client_id was sent instead of a raw client_name, resolve the
+        // name from the Client model so both are always kept in sync.
+        if (!empty($data['client_id'])) {
+            $client = \App\Modules\ClientService\Models\Client::find($data['client_id']);
+            if ($client) {
+                $data['client_name'] = $client->company_name ?: $client->full_name;
+            }
+            unset($data['client_id']); // not a real column on assets
+        }
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
         $data = $this->syncCategoryName($data);
@@ -148,6 +162,14 @@ class AssetController extends Controller
         unset($data['image']);
         $data['updated_by'] = auth()->id();
         $data = $this->syncCategoryName($data);
+
+        if (!empty($data['client_id'])) {
+            $client = \App\Modules\ClientService\Models\Client::find($data['client_id']);
+            if ($client) {
+                $data['client_name'] = $client->company_name ?: $client->full_name;
+            }
+            unset($data['client_id']);
+        }
 
         if ($request->boolean('is_available') !== null && $request->has('is_available')) {
             $data['is_available'] = $request->boolean('is_available');
