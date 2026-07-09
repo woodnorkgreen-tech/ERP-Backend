@@ -3,7 +3,6 @@
 namespace App\Modules\HR\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\HR\Models\Department;
 use App\Modules\HR\Models\Employee;
@@ -716,16 +715,7 @@ class LeaveRequestController extends Controller
 
     protected static function sendManagerNotifications(LeaveRequest $leaveRequest): void
     {
-        $leaveRequest->loadMissing(['employee', 'leaveType']);
-
-        // Department leadership is data-driven and may not be represented by a role.
-        $deptLeads = User::query()
-            ->active()
-            ->whereNotNull('employee_id')
-            ->whereHas('employee', function (Builder $query) {
-                $query->whereIn('id', \App\Modules\HR\Models\Department::whereNotNull('manager_id')->pluck('manager_id'));
-            })
-            ->get();
+        $leaveRequest->loadMissing(['employee.department', 'leaveType']);
 
         NotificationService::send(
             type: 'leave_request_submitted',
@@ -733,9 +723,39 @@ class LeaveRequestController extends Controller
             message: sprintf('%s submitted a %s leave request.', $leaveRequest->employee?->name ?? 'An employee', $leaveRequest->leaveType?->name ?? 'new'),
             module: 'hr',
             data: self::leaveNotificationData($leaveRequest),
-            users: $deptLeads->all(),
-            permission: Permissions::LEAVE_REQUEST_APPROVE,
+            users: self::leaveReviewRecipients($leaveRequest),
         );
+    }
+
+    protected static function leaveReviewRecipients(LeaveRequest $leaveRequest): array
+    {
+        $leaveRequest->loadMissing(['employee.department']);
+
+        $employee = $leaveRequest->employee;
+        $localApproverEmployeeIds = collect([
+            $employee?->manager_id,
+            $employee?->department?->manager_id,
+        ])->filter()->unique()->values();
+
+        $localApprovers = $localApproverEmployeeIds->isEmpty()
+            ? collect()
+            : User::query()
+                ->active()
+                ->whereIn('employee_id', $localApproverEmployeeIds)
+                ->get();
+
+        $hrApprovers = User::query()
+            ->active()
+            ->whereHas('roles', function (Builder $query) {
+                $query->whereIn('name', ['Super Admin', 'Admin', 'HR']);
+            })
+            ->get();
+
+        return $localApprovers
+            ->merge($hrApprovers)
+            ->unique('id')
+            ->values()
+            ->all();
     }
 
     protected function notifyHRAfterLeadApprovalResponse(int $leaveRequestId): void
@@ -756,7 +776,6 @@ class LeaveRequestController extends Controller
                     message: sprintf('%s\'s leave request was approved by the lead and needs HR approval.', $leaveRequest->employee?->name ?? 'An employee'),
                     module: 'hr',
                     data: self::leaveNotificationData($leaveRequest),
-                    users: [$leaveRequest->employee?->user],
                     role: ['Super Admin', 'Admin', 'HR'],
                 );
             } catch (\Throwable $exception) {
