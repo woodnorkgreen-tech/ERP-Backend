@@ -26,7 +26,9 @@ class OffboardingCase extends Model
 
     public function employee(): BelongsTo
     {
-        return $this->belongsTo(Employee::class);
+        // withTrashed: the final approval gate soft-deletes the employee (archives them
+        // after termination), but the case must keep showing their name/details afterward.
+        return $this->belongsTo(Employee::class)->withTrashed();
     }
 
     public function initiatedBy(): BelongsTo
@@ -77,5 +79,10 @@ class OffboardingCase extends Model
     public function activityLogs(): HasMany
     {
         return $this->hasMany(OffboardingActivityLog::class, 'offboarding_case_id')->orderByDesc('created_at');
+    }
+
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(OffboardingAttachment::class, 'offboarding_case_id')->orderByDesc('created_at');
     }
 }

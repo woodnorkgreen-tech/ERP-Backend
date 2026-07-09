@@ -10,12 +10,14 @@ use App\Modules\HR\Models\OffboardingClearance;
 use App\Modules\HR\Models\OffboardingExitInterview;
 use App\Modules\HR\Models\OffboardingFinalSettlement;
 use App\Modules\HR\Models\OffboardingActivityLog;
+use App\Modules\HR\Models\OffboardingAttachment;
 use App\Modules\HR\Models\Employee;
 use App\Constants\Permissions;
 use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 
 class OffboardingService
 {
@@ -465,6 +467,43 @@ class OffboardingService
         return $settlement;
     }
 
+    public function uploadAttachments(int $caseId, string $category, ?int $relatedId, array $files): Collection
+    {
+        $this->openCase($caseId);
+        $this->assertAttachmentTarget($caseId, $category, $relatedId);
+
+        $uploaded = new Collection(collect($files)->map(function ($file) use ($caseId, $category, $relatedId) {
+            $path = $file->store("hr/offboarding/{$caseId}/{$category}", 'public');
+
+            return OffboardingAttachment::create([
+                'offboarding_case_id' => $caseId,
+                'category'            => $category,
+                'related_id'          => $relatedId,
+                'file_path'           => $path,
+                'file_name'           => $file->getClientOriginalName(),
+                'file_size'           => $file->getSize(),
+                'mime_type'           => $file->getMimeType(),
+                'uploaded_by'         => Auth::id(),
+            ]);
+        })->all());
+
+        $this->log($caseId, 'attachment_uploaded', ucfirst(str_replace('_', ' ', $category)) . ' attachment(s) added: ' . $uploaded->pluck('file_name')->join(', '));
+
+        $uploaded->load('uploader');
+
+        return $uploaded;
+    }
+
+    public function deleteAttachment(int $attachmentId): void
+    {
+        $attachment = OffboardingAttachment::findOrFail($attachmentId);
+        $this->openCase($attachment->offboarding_case_id);
+
+        Storage::disk('public')->delete($attachment->file_path);
+        $this->log($attachment->offboarding_case_id, 'attachment_deleted', "Attachment removed: {$attachment->file_name}");
+        $attachment->delete();
+    }
+
     public function approveFinalGate(int $caseId, ?string $notes = null): array
     {
         // Keep the employee relation for the completion notification; the final gate
@@ -631,6 +670,20 @@ class OffboardingService
         }
     }
 
+    /**
+     * Lightweight progress data for endpoints that mutate a single item — lets the frontend
+     * refresh the progress bar and card lock states without re-fetching the whole case.
+     */
+    public function progressSnapshot(int $caseId): array
+    {
+        return [
+            'cards' => OffboardingCard::where('offboarding_case_id', $caseId)
+                ->orderBy('sequence_order')
+                ->get(['id', 'card_type', 'progress', 'is_locked', 'status', 'unlocked_at']),
+            'overall_progress' => (float) (OffboardingCase::where('id', $caseId)->value('overall_progress') ?? 0),
+        ];
+    }
+
     private function openCase(int $caseId): OffboardingCase
     {
         $case = OffboardingCase::findOrFail($caseId);
@@ -650,6 +703,24 @@ class OffboardingService
             ->value('is_locked');
 
         abort_if((bool) $isLocked, 422, 'Final Settlement is locked until asset return and department clearance are both complete.');
+    }
+
+    private function assertAttachmentTarget(int $caseId, string $category, ?int $relatedId): void
+    {
+        match ($category) {
+            'asset_return' => abort_unless(
+                $relatedId && OffboardingAssetReturn::where('id', $relatedId)->where('offboarding_case_id', $caseId)->exists(),
+                404,
+                'Asset return item not found for this case.'
+            ),
+            'task' => abort_unless(
+                $relatedId && OffboardingTask::where('id', $relatedId)->where('offboarding_case_id', $caseId)->exists(),
+                404,
+                'Task not found for this case.'
+            ),
+            'clearance', 'settlement', 'exit_interview' => null,
+            default => abort(422, 'Invalid attachment category.'),
+        };
     }
 
     private function resolveCardStatus(bool $isLocked, int $completed, int $total): string

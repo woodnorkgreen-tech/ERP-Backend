@@ -393,6 +393,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
                 Route::get('/', [OffboardingController::class, 'index']);
                 Route::get('{id}', [OffboardingController::class, 'show'])->whereNumber('id');
                 Route::get('{id}/activity-log', [OffboardingController::class, 'activityLog']);
+                Route::get('attachments/{id}/view', [OffboardingController::class, 'viewAttachment']);
+                Route::get('attachments/{id}/download', [OffboardingController::class, 'downloadAttachment']);
             });
 
             Route::middleware('permission:' . Permissions::OFFBOARDING_CREATE)->group(function () {
@@ -403,26 +405,32 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::middleware('permission:' . Permissions::OFFBOARDING_MANAGE)->group(function () {
                 Route::post('{id}/cancel', [OffboardingController::class, 'cancel']);
                 Route::post('{id}/exit-interview', [OffboardingController::class, 'recordExitInterview']);
+                Route::post('{id}/exit-interview-attachments', [OffboardingController::class, 'uploadExitInterviewAttachment'])->whereNumber('id');
                 Route::post('cards/{cardId}/tasks', [OffboardingController::class, 'createTask']);
                 Route::post('tasks/{taskId}/complete', [OffboardingController::class, 'completeTask']);
                 Route::post('tasks/{taskId}/reopen', [OffboardingController::class, 'reopenTask']);
                 Route::patch('tasks/{taskId}/toggle-optional', [OffboardingController::class, 'toggleOptionalTask']);
                 Route::patch('tasks/{taskId}', [OffboardingController::class, 'updateTaskFlags']);
+                Route::post('tasks/{taskId}/attachments', [OffboardingController::class, 'uploadTaskAttachment']);
                 Route::post('cases/{caseId}/assets', [OffboardingController::class, 'createAssetReturnItem']);
                 Route::post('assets/{itemId}/toggle', [OffboardingController::class, 'toggleAssetReturn']);
                 Route::patch('assets/{itemId}', [OffboardingController::class, 'updateAssetReturn']);
+                Route::post('assets/{itemId}/attachments', [OffboardingController::class, 'uploadAssetReturnAttachment']);
                 Route::post('cases/{caseId}/clearances', [OffboardingController::class, 'createClearance']);
+                Route::delete('attachments/{attachmentId}', [OffboardingController::class, 'deleteAttachment']);
             });
 
             Route::middleware('permission:' . Permissions::OFFBOARDING_CLEARANCE)->group(function () {
                 Route::patch('clearances/{clearanceId}/status', [OffboardingController::class, 'updateClearanceStatus']);
                 Route::patch('clearances/{clearanceId}', [OffboardingController::class, 'updateClearanceFlags']);
+                Route::post('{id}/clearance-attachments', [OffboardingController::class, 'uploadClearanceAttachment'])->whereNumber('id');
             });
 
             Route::middleware('permission:' . Permissions::OFFBOARDING_SETTLEMENT)->group(function () {
                 Route::patch('{id}/settlement', [OffboardingController::class, 'updateFinalSettlement']);
                 Route::post('{id}/settlement/approve', [OffboardingController::class, 'approveFinalSettlement']);
                 Route::post('{id}/settlement/mark-paid', [OffboardingController::class, 'markSettlementPaid']);
+                Route::post('{id}/settlement-attachments', [OffboardingController::class, 'uploadSettlementAttachment'])->whereNumber('id');
             });
 
             Route::post('{id}/approve', [OffboardingController::class, 'approveFinalGate'])
