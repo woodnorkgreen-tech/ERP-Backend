@@ -8,6 +8,9 @@ use App\Modules\Notifications\Jobs\SendMailNotificationJob;
 use App\Modules\Notifications\Jobs\SendMailToAddressNotificationJob;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Department;
+use App\Modules\HR\Models\LeaveRequest;
+use App\Modules\HR\Models\LeaveType;
+use App\Modules\HR\Http\Controllers\LeaveRequestController;
 use App\Modules\Notifications\Jobs\SendPushNotificationJob;
 use App\Modules\Notifications\Mail\AppNotificationMail;
 use App\Modules\Notifications\Services\NotificationService;
@@ -476,6 +479,114 @@ class NotificationApiTest extends TestCase
             'type' => 'incident_reported',
         ]);
         Queue::assertPushed(SendMailNotificationJob::class, 1);
+    }
+
+    public function test_leave_submission_notifications_are_scoped_to_local_reviewers_and_hr(): void
+    {
+        Queue::fake();
+
+        Role::query()->firstOrCreate(['name' => 'HR', 'guard_name' => 'web']);
+        Role::query()->firstOrCreate(['name' => 'Admin', 'guard_name' => 'web']);
+        Role::query()->firstOrCreate(['name' => 'Manager', 'guard_name' => 'web']);
+        Role::query()->firstOrCreate(['name' => 'Stores', 'guard_name' => 'web']);
+
+        $people = Department::query()->create(['name' => 'People']);
+        $stores = Department::query()->create(['name' => 'Stores']);
+
+        $peopleLead = Employee::query()->create([
+            'employee_id' => 'EMP-LEAD',
+            'first_name' => 'People',
+            'last_name' => 'Lead',
+            'email' => 'people-lead@test.local',
+            'department_id' => $people->id,
+            'position' => 'Lead',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+        ]);
+        $people->update(['manager_id' => $peopleLead->id]);
+
+        $applicant = Employee::query()->create([
+            'employee_id' => 'EMP-APP',
+            'first_name' => 'Leave',
+            'last_name' => 'Applicant',
+            'email' => 'applicant@test.local',
+            'department_id' => $people->id,
+            'position' => 'Officer',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+            'manager_id' => $peopleLead->id,
+        ]);
+
+        $storesLead = Employee::query()->create([
+            'employee_id' => 'EMP-STORES',
+            'first_name' => 'Stores',
+            'last_name' => 'Lead',
+            'email' => 'stores-lead@test.local',
+            'department_id' => $stores->id,
+            'position' => 'Stores Lead',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+        ]);
+        $stores->update(['manager_id' => $storesLead->id]);
+
+        $hrEmployee = Employee::query()->create([
+            'employee_id' => 'EMP-HR',
+            'first_name' => 'HR',
+            'last_name' => 'Reviewer',
+            'email' => 'hr@test.local',
+            'department_id' => $people->id,
+            'position' => 'HR',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+        ]);
+
+        $peopleLeadUser = User::factory()->create(['is_active' => true, 'employee_id' => $peopleLead->id]);
+        $peopleLeadUser->assignRole('Manager');
+        $storesLeadUser = User::factory()->create(['is_active' => true, 'employee_id' => $storesLead->id]);
+        $storesLeadUser->assignRole(['Manager', 'Stores']);
+        $hrUser = User::factory()->create(['is_active' => true, 'employee_id' => $hrEmployee->id]);
+        $hrUser->assignRole('HR');
+        $applicantUser = User::factory()->create(['is_active' => true, 'employee_id' => $applicant->id]);
+        $applicantUser->assignRole('Employee');
+        $adminUser = User::factory()->create(['is_active' => true]);
+        $adminUser->assignRole('Admin');
+
+        $leaveType = LeaveType::query()->where('code', 'ANNUAL')->firstOrFail();
+        $leaveRequest = LeaveRequest::query()->create([
+            'employee_id' => $applicant->id,
+            'leave_type_id' => $leaveType->id,
+            'created_by' => $applicantUser->id,
+            'start_date' => now()->addWeek()->toDateString(),
+            'end_date' => now()->addWeek()->toDateString(),
+            'days_requested' => 1,
+            'status' => LeaveRequest::STATUS_PENDING,
+            'reason' => 'Annual leave',
+        ]);
+
+        $method = new ReflectionMethod(LeaveRequestController::class, 'sendManagerNotifications');
+        $method->setAccessible(true);
+        $method->invoke(null, $leaveRequest);
+
+        $this->assertDatabaseHas('app_notifications', [
+            'user_id' => $peopleLeadUser->id,
+            'type' => 'leave_request_submitted',
+        ]);
+        $this->assertDatabaseHas('app_notifications', [
+            'user_id' => $hrUser->id,
+            'type' => 'leave_request_submitted',
+        ]);
+        $this->assertDatabaseHas('app_notifications', [
+            'user_id' => $adminUser->id,
+            'type' => 'leave_request_submitted',
+        ]);
+        $this->assertDatabaseMissing('app_notifications', [
+            'user_id' => $storesLeadUser->id,
+            'type' => 'leave_request_submitted',
+        ]);
+        $this->assertDatabaseMissing('app_notifications', [
+            'user_id' => $applicantUser->id,
+            'type' => 'leave_request_submitted',
+        ]);
     }
 
     public function test_branded_mail_template_renders_notification_content(): void
