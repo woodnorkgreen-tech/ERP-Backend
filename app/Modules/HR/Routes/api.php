@@ -201,6 +201,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('requests/preview', [LeaveRequestController::class, 'preview']);
             Route::post('requests', [LeaveRequestController::class, 'store']);
             Route::get('requests/{leaveRequest}', [LeaveRequestController::class, 'show']);
+            Route::get('requests/{leaveRequest}/attachment', [LeaveRequestController::class, 'viewAttachment']);
             Route::put('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
             Route::patch('requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
             Route::post('requests/{leaveRequest}/lead-approve', [LeaveRequestController::class, 'leadApprove']);

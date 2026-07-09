@@ -37,7 +37,14 @@ class LeaveRequestController extends Controller
             ->latest();
 
         if ($request->filled('status')) {
-            $query->where('status', (string) $request->string('status'));
+            $statuses = collect(explode(',', (string) $request->string('status')))
+                ->map(fn (string $status) => trim($status))
+                ->filter()
+                ->values();
+
+            $statuses->count() > 1
+                ? $query->whereIn('status', $statuses->all())
+                : $query->where('status', $statuses->first());
         }
 
         if ($request->filled('leave_type_id')) {
@@ -122,6 +129,27 @@ class LeaveRequestController extends Controller
         ]);
     }
 
+    public function viewAttachment(Request $request, LeaveRequest $leaveRequest): \Illuminate\Http\Response
+    {
+        $this->authorizeAccessToRequest($request->user(), $leaveRequest, allowManage: true);
+
+        if (!$leaveRequest->attachment_path || !Storage::disk('public')->exists($leaveRequest->attachment_path)) {
+            abort(404, 'Attachment not found');
+        }
+
+        $content = Storage::disk('public')->get($leaveRequest->attachment_path);
+        $mimeType = Storage::disk('public')->mimeType($leaveRequest->attachment_path) ?? 'application/octet-stream';
+        $size = Storage::disk('public')->size($leaveRequest->attachment_path);
+        $fileName = basename($leaveRequest->attachment_path);
+
+        return response($content, 200, [
+            'Content-Type' => $mimeType,
+            'Content-Length' => $size,
+            'Content-Disposition' => 'inline; filename="' . $fileName . '"',
+            'Cache-Control' => 'private, no-cache',
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -138,7 +166,7 @@ class LeaveRequestController extends Controller
             'reason' => ['required', 'string'],
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
-            'attachment' => $leaveType && $leaveType->requires_attachment 
+            'attachment' => $leaveType && $this->leaveTypeRequiresAttachment($leaveType)
                 ? ['required', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048']
                 : ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
         ]);
@@ -1018,5 +1046,14 @@ class LeaveRequestController extends Controller
                 'message' => 'Failed to recall employee from leave: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    private function leaveTypeRequiresAttachment(LeaveType $leaveType): bool
+    {
+        if (in_array($leaveType->code, ['MATERNITY', 'PATERNITY'], true)) {
+            return false;
+        }
+
+        return (bool) $leaveType->requires_attachment;
     }
 }

@@ -47,7 +47,7 @@ return new class extends Migration
                 'icon' => 'mdi-baby-carriage',
                 'description' => 'Kenya statutory maternity leave: 3 months with full pay.',
                 'is_active' => true,
-                'requires_attachment' => true,
+                'requires_attachment' => false,
             ],
             [
                 'name' => 'Paternity Leave',
@@ -59,7 +59,7 @@ return new class extends Migration
                 'icon' => 'mdi-human-male-child',
                 'description' => 'Kenya statutory paternity leave: 2 weeks with full pay.',
                 'is_active' => true,
-                'requires_attachment' => true,
+                'requires_attachment' => false,
             ],
             [
                 'name' => 'Unpaid Leave',
