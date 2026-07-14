@@ -8,6 +8,8 @@ use App\Modules\HR\Models\EmployeeSalaryHistory;
 use App\Modules\HR\Models\HRAuditLog;
 use App\Modules\HR\Models\PayrollRun;
 use App\Modules\HR\Services\Payroll\PayrollService;
+use App\Modules\Notifications\Services\NotificationService;
+use App\Constants\Permissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -126,6 +128,15 @@ class PayrollRunController extends Controller
             'status'          => 'processing',
         ]);
 
+        NotificationService::send(
+            type: 'payroll_run_processed',
+            title: 'Payroll Run Processed',
+            message: "Payroll for {$payrollRun->payroll_month} has been processed for {$employees->count()} employees and is ready for review.",
+            module: 'hr',
+            data: ['payroll_run_id' => $payrollRun->id, 'url' => "/hr/payroll/runs/{$payrollRun->id}"],
+            permission: Permissions::HR_MANAGE_PAYROLL,
+        );
+
         return response()->json([
             'success' => true,
             'message' => "Successfully processed payroll for {$employees->count()} employees.",
@@ -158,6 +169,15 @@ class PayrollRunController extends Controller
             'ip_address' => request()->ip()
         ]);
 
+        NotificationService::send(
+            type: 'payroll_run_finalized',
+            title: 'Payroll Run Finalized',
+            message: "Payroll run for {$payrollRun->payroll_month} has been locked. Total net: KES " . number_format($payrollRun->total_net, 2),
+            module: 'hr',
+            data: ['payroll_run_id' => $payrollRun->id, 'url' => "/hr/payroll/runs/{$payrollRun->id}"],
+            permission: Permissions::HR_MANAGE_PAYROLL,
+        );
+
         return response()->json(['success' => true, 'data' => $payrollRun->fresh()]);
     }
 
@@ -185,6 +205,24 @@ class PayrollRunController extends Controller
             ],
             'ip_address' => request()->ip()
         ]);
+
+        // Notify each paid employee individually that their payslip is ready.
+        $payslips = $payrollRun->payslips()->with('employee.user')->get();
+        foreach ($payslips as $payslip) {
+            $recipientUser = $payslip->employee?->user;
+            if (!$recipientUser) {
+                continue;
+            }
+
+            NotificationService::send(
+                type: 'payroll_payslip_ready',
+                title: 'Payslip Ready',
+                message: "Your payslip for {$payrollRun->payroll_month} is ready. Net pay: KES " . number_format($payslip->net_pay, 2),
+                module: 'hr',
+                data: ['payroll_run_id' => $payrollRun->id, 'payslip_id' => $payslip->id, 'url' => "/self-service/payslips/{$payslip->id}"],
+                users: [$recipientUser],
+            );
+        }
 
         return response()->json(['success' => true, 'data' => $payrollRun->fresh()]);
     }

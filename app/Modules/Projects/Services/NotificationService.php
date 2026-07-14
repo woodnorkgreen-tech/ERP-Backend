@@ -2,12 +2,22 @@
 
 namespace App\Modules\Projects\Services;
 
-use App\Models\Notification;
 use App\Models\ProjectEnquiry;
 use App\Models\User;
+use App\Modules\Notifications\Services\NotificationService as CentralNotificationService;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Modules\UniversalTask\Models\Task as UniversalTask;
 use Illuminate\Support\Facades\Log;
+
+/**
+ * Formats and dispatches Projects-module notifications through the
+ * centralized Notifications module (App\Modules\Notifications), which owns
+ * persistence, channel/preference resolution, and delivery (mail/push).
+ *
+ * Public method signatures are unchanged from the pre-migration version so
+ * every existing caller (AssignTaskAction, ApproveQuoteAction, workflow
+ * services, etc.) keeps working without modification.
+ */
 class NotificationService
 {
     /**
@@ -21,22 +31,20 @@ class NotificationService
     ): void {
         try {
             $task->loadMissing('enquiry.client'); // Ensure relationships are loaded
-            
+
             $type = $isReassignment ? 'enquiry_task_reassigned' : 'enquiry_task_assigned';
             $title = $isReassignment ? 'Task Reassigned' : 'New Task Assigned';
-            
+
             $enquiryTitle = $task->enquiry ? $task->enquiry->title : 'Unknown Project';
             $enquiryNumber = $task->enquiry ? $task->enquiry->enquiry_number : 'N/A';
             $clientName = $task->enquiry && $task->enquiry->client ? $task->enquiry->client->name : 'Unknown Client';
 
-            Notification::create([
-                'user_id' => $assignedTo->id,
-                'type' => $type,
-                'title' => $title,
-                'message' => "You have been assigned: {$task->title} for {$enquiryTitle} (#{$enquiryNumber})",
-                'notifiable_type' => EnquiryTask::class,
-                'notifiable_id' => $task->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: $type,
+                title: $title,
+                message: "You have been assigned: {$task->title} for {$enquiryTitle} (#{$enquiryNumber})",
+                module: 'projects',
+                data: [
                     'task_id' => $task->id,
                     'enquiry_id' => $task->project_enquiry_id,
                     'enquiry_title' => $enquiryTitle,
@@ -46,8 +54,10 @@ class NotificationService
                     'assigned_by' => $assignedBy->name,
                     'priority' => $task->priority,
                     'due_date' => $task->due_date?->toISOString(),
+                    'url' => "/projects/enquiries/{$task->project_enquiry_id}/tasks/{$task->id}",
                 ],
-            ]);
+                users: [$assignedTo],
+            );
 
             // If reassignment, notify the old assignee
             if ($isReassignment && $task->getOriginal('assigned_user_id')) {
@@ -55,21 +65,20 @@ class NotificationService
                 if ($oldUserId && $oldUserId !== $assignedTo->id) {
                     $oldUser = User::find($oldUserId);
                     if ($oldUser) {
-                        Notification::create([
-                            'user_id' => $oldUser->id,
-                            'type' => 'enquiry_task_unassigned',
-                            'title' => 'Task Reassigned',
-                            'message' => "Task '{$task->title}' for {$enquiryTitle} has been reassigned to {$assignedTo->name}",
-                            'notifiable_type' => EnquiryTask::class,
-                            'notifiable_id' => $task->id,
-                            'data' => [
+                        CentralNotificationService::send(
+                            type: 'enquiry_task_unassigned',
+                            title: 'Task Reassigned',
+                            message: "Task '{$task->title}' for {$enquiryTitle} has been reassigned to {$assignedTo->name}",
+                            module: 'projects',
+                            data: [
                                 'task_id' => $task->id,
                                 'enquiry_id' => $task->project_enquiry_id,
                                 'enquiry_title' => $enquiryTitle,
                                 'reassigned_to' => $assignedTo->name,
                                 'reassigned_by' => $assignedBy->name,
                             ],
-                        ]);
+                            users: [$oldUser],
+                        );
                     }
                 }
             }
@@ -127,14 +136,12 @@ class NotificationService
                 if ($contextNumber) $message .= " (#{$contextNumber})";
             }
 
-            Notification::create([
-                'user_id' => $assignedTo->id,
-                'type' => 'universal_task_assigned',
-                'title' => 'New Task Assigned',
-                'message' => $message,
-                'notifiable_type' => UniversalTask::class,
-                'notifiable_id' => $task->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: 'universal_task_assigned',
+                title: 'New Task Assigned',
+                message: $message,
+                module: 'universal-task',
+                data: [
                     'task_id' => $task->id,
                     'task_type' => $task->task_type,
                     'assigned_by' => $assignedBy->name,
@@ -143,11 +150,13 @@ class NotificationService
                     'taskable_type' => $task->taskable_type,
                     'taskable_id' => $task->taskable_id,
                     // Unified context fields for frontend
-                    'enquiry_title' => $contextTitle, 
+                    'enquiry_title' => $contextTitle,
                     'enquiry_number' => $contextNumber,
                     'client_name' => $clientName,
+                    'url' => "/universal-tasks/{$task->id}",
                 ],
-            ]);
+                users: [$assignedTo],
+            );
 
             Log::info("Universal task notification sent", [
                 'task_id' => $task->id,
@@ -165,7 +174,7 @@ class NotificationService
     {
         try {
             $isEnquiry = $taskType === 'enquiry';
-            
+
             if ($isEnquiry) {
                 $task->loadMissing('enquiry');
                 $enquiryTitle = $task->enquiry ? $task->enquiry->title : 'Project';
@@ -177,20 +186,20 @@ class NotificationService
             $type = $isEnquiry ? 'enquiry_task_due_soon' : 'universal_task_due_soon';
             $daysRemaining = now()->diffInDays($task->due_date, false);
 
-            Notification::create([
-                'user_id' => $user->id,
-                'type' => $type,
-                'title' => 'Task Due Soon',
-                'message' => $message,
-                'notifiable_type' => $isEnquiry ? EnquiryTask::class : UniversalTask::class,
-                'notifiable_id' => $task->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: $type,
+                title: 'Task Due Soon',
+                message: $message,
+                module: $isEnquiry ? 'projects' : 'universal-task',
+                urgency: 'warning',
+                data: [
                     'task_id' => $task->id,
                     'due_date' => $task->due_date?->toISOString(),
                     'days_remaining' => $daysRemaining,
                     'priority' => $task->priority,
                 ] + ($isEnquiry && $task->enquiry ? ['enquiry_id' => $task->project_enquiry_id, 'enquiry_title' => $task->enquiry->title] : []),
-            ]);
+                users: [$user],
+            );
 
             Log::info("{$taskType} task due soon notification sent", [
                 'task_id' => $task->id,
@@ -208,7 +217,7 @@ class NotificationService
     {
         try {
             $isEnquiry = $taskType === 'enquiry';
-            
+
             if ($isEnquiry) {
                 $task->loadMissing('enquiry');
                 $enquiryTitle = $task->enquiry ? $task->enquiry->title : 'Project';
@@ -220,20 +229,20 @@ class NotificationService
             $type = $isEnquiry ? 'enquiry_task_overdue' : 'universal_task_overdue';
             $daysOverdue = $task->due_date->diffInDays(now());
 
-            Notification::create([
-                'user_id' => $user->id,
-                'type' => $type,
-                'title' => 'Task Overdue',
-                'message' => "Task '{$task->title}' is now {$daysOverdue} day(s) overdue", // Keeping original main message concise, title handles urgency
-                'notifiable_type' => $isEnquiry ? EnquiryTask::class : UniversalTask::class,
-                'notifiable_id' => $task->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: $type,
+                title: 'Task Overdue',
+                message: "Task '{$task->title}' is now {$daysOverdue} day(s) overdue",
+                module: $isEnquiry ? 'projects' : 'universal-task',
+                urgency: 'warning',
+                data: [
                     'task_id' => $task->id,
                     'due_date' => $task->due_date->toISOString(),
                     'days_overdue' => $daysOverdue,
                     'priority' => $task->priority,
                 ] + ($isEnquiry && $task->enquiry ? ['enquiry_id' => $task->project_enquiry_id, 'enquiry_title' => $task->enquiry->title] : []),
-            ]);
+                users: [$user],
+            );
 
             Log::info("{$taskType} task overdue notification sent", [
                 'task_id' => $task->id,
@@ -259,14 +268,12 @@ class NotificationService
                 $message .= " - Type: {$enquiry->workflow_preset_type}";
             }
 
-            Notification::create([
-                'user_id' => $recipient->id,
-                'type' => 'enquiry_created',
-                'title' => 'New Project Enquiry',
-                'message' => $message,
-                'notifiable_type' => ProjectEnquiry::class,
-                'notifiable_id' => $enquiry->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: 'enquiry_created',
+                title: 'New Project Enquiry',
+                message: $message,
+                module: 'projects',
+                data: [
                     'enquiry_id' => $enquiry->id,
                     'enquiry_title' => $enquiry->title,
                     'enquiry_number' => $enquiry->enquiry_number,
@@ -279,8 +286,10 @@ class NotificationService
                     'priority' => $enquiry->priority,
                     'date_received' => $enquiry->date_received?->toISOString(),
                     'expected_delivery_date' => $enquiry->expected_delivery_date?->toISOString(),
+                    'url' => "/projects/enquiries/{$enquiry->id}",
                 ],
-            ]);
+                users: [$recipient],
+            );
 
             Log::info("Enquiry created notification sent", [
                 'enquiry_id' => $enquiry->id,
@@ -303,14 +312,12 @@ class NotificationService
         try {
             $enquiry->loadMissing(['client', 'creator']);
 
-            Notification::create([
-                'user_id' => $projectOfficer->id,
-                'type' => 'project_officer_assigned',
-                'title' => 'Project Officer Assignment',
-                'message' => "You have been assigned as Project Officer for '{$enquiry->title}' (#{$enquiry->enquiry_number})",
-                'notifiable_type' => ProjectEnquiry::class,
-                'notifiable_id' => $enquiry->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: 'project_officer_assigned',
+                title: 'Project Officer Assignment',
+                message: "You have been assigned as Project Officer for '{$enquiry->title}' (#{$enquiry->enquiry_number})",
+                module: 'projects',
+                data: [
                     'enquiry_id' => $enquiry->id,
                     'enquiry_title' => $enquiry->title,
                     'enquiry_number' => $enquiry->enquiry_number,
@@ -320,8 +327,10 @@ class NotificationService
                     'priority' => $enquiry->priority,
                     'expected_delivery_date' => $enquiry->expected_delivery_date?->toISOString(),
                     'venue' => $enquiry->venue,
+                    'url' => "/projects/enquiries/{$enquiry->id}",
                 ],
-            ]);
+                users: [$projectOfficer],
+            );
 
             Log::info("Project Officer assignment notification sent", [
                 'enquiry_id' => $enquiry->id,
@@ -351,16 +360,21 @@ class NotificationService
                 $quoteAmount = $quoteTask->quoteData->grand_total ?? null;
             }
 
-            // Notify Project Officer
-            if ($enquiry->projectOfficer) {
-                Notification::create([
-                    'user_id' => $enquiry->projectOfficer->id,
-                    'type' => 'quote_approved',
-                    'title' => 'Quote Approved - Project Active!',
-                    'message' => "Quote for '{$enquiry->title}' has been approved. Job Number: {$jobNumber}",
-                    'notifiable_type' => ProjectEnquiry::class,
-                    'notifiable_id' => $enquiry->id,
-                    'data' => [
+            $recipients = collect([$enquiry->projectOfficer, $enquiry->creator])
+                ->filter()
+                ->unique('id');
+
+            foreach ($recipients as $recipient) {
+                $isOfficer = $enquiry->projectOfficer && $recipient->id === $enquiry->projectOfficer->id;
+
+                CentralNotificationService::send(
+                    type: 'quote_approved',
+                    title: $isOfficer ? 'Quote Approved - Project Active!' : 'Quote Approved',
+                    message: $isOfficer
+                        ? "Quote for '{$enquiry->title}' has been approved. Job Number: {$jobNumber}"
+                        : "Your enquiry '{$enquiry->title}' quote has been approved! Job Number: {$jobNumber}",
+                    module: 'projects',
+                    data: [
                         'enquiry_id' => $enquiry->id,
                         'enquiry_title' => $enquiry->title,
                         'enquiry_number' => $enquiry->enquiry_number,
@@ -370,28 +384,10 @@ class NotificationService
                         'approved_by' => $approvedBy->name,
                         'priority' => $enquiry->priority,
                         'expected_delivery_date' => $enquiry->expected_delivery_date?->toISOString(),
+                        'url' => "/projects/enquiries/{$enquiry->id}",
                     ],
-                ]);
-            }
-
-            // Notify Creator (if different from PO)
-            if ($enquiry->creator && (!$enquiry->projectOfficer || $enquiry->creator->id !== $enquiry->projectOfficer->id)) {
-                Notification::create([
-                    'user_id' => $enquiry->creator->id,
-                    'type' => 'quote_approved',
-                    'title' => 'Quote Approved',
-                    'message' => "Your enquiry '{$enquiry->title}' quote has been approved! Job Number: {$jobNumber}",
-                    'notifiable_type' => ProjectEnquiry::class,
-                    'notifiable_id' => $enquiry->id,
-                    'data' => [
-                        'enquiry_id' => $enquiry->id,
-                        'enquiry_title' => $enquiry->title,
-                        'job_number' => $jobNumber,
-                        'client_name' => $enquiry->client ? $enquiry->client->full_name : 'Unknown Client',
-                        'quote_amount' => $quoteAmount,
-                        'approved_by' => $approvedBy->name,
-                    ],
-                ]);
+                    users: [$recipient],
+                );
             }
 
             Log::info("Quote approval notification sent", [
@@ -412,32 +408,37 @@ class NotificationService
         try {
             $enquiry->loadMissing(['projectOfficer']);
 
+            // Resolve permission-holders explicitly rather than broadcasting by
+            // permission: broadcast recipients are additionally filtered by
+            // userCanSeeModule() for the given module, which for 'projects' only
+            // recognizes project-specific roles — a Finance/Costing approver
+            // would be silently dropped even though the permission check itself
+            // is the real authorization here.
             $recipients = User::permission(\App\Constants\Permissions::FINANCE_QUOTE_APPROVE)->get();
             if ($enquiry->projectOfficer) {
                 $recipients->push($enquiry->projectOfficer);
             }
+            $recipients = $recipients->unique('id');
 
-            foreach ($recipients->unique('id') as $recipient) {
-                Notification::create([
-                    'user_id' => $recipient->id,
-                    'type' => 'quote_approval_invalidated',
-                    'title' => 'Quote Approval Invalidated - Re-review Required',
-                    'message' => "The approved quote for '{$enquiry->title}' was invalidated: {$reason}. Finance must re-review before funds are released.",
-                    'notifiable_type' => ProjectEnquiry::class,
-                    'notifiable_id' => $enquiry->id,
-                    'data' => [
-                        'enquiry_id' => $enquiry->id,
-                        'enquiry_title' => $enquiry->title,
-                        'enquiry_number' => $enquiry->enquiry_number,
-                        'reason' => $reason,
-                        'actor' => $actor?->name,
-                    ],
-                ]);
-            }
+            CentralNotificationService::send(
+                type: 'quote_approval_invalidated',
+                title: 'Quote Approval Invalidated - Re-review Required',
+                message: "The approved quote for '{$enquiry->title}' was invalidated: {$reason}. Finance must re-review before funds are released.",
+                module: 'projects',
+                data: [
+                    'enquiry_id' => $enquiry->id,
+                    'enquiry_title' => $enquiry->title,
+                    'enquiry_number' => $enquiry->enquiry_number,
+                    'reason' => $reason,
+                    'actor' => $actor?->name,
+                    'url' => "/projects/enquiries/{$enquiry->id}",
+                ],
+                users: $recipients->all(),
+            );
 
             Log::info("Quote approval invalidation notification sent", [
                 'enquiry_id' => $enquiry->id,
-                'recipients' => $recipients->unique('id')->count(),
+                'recipients_count' => $recipients->count(),
             ]);
         } catch (\Exception $e) {
             Log::error("Failed to send quote approval invalidation notification: " . $e->getMessage());
@@ -470,27 +471,28 @@ class NotificationService
             $enquiry->loadMissing(['client', 'projectOfficer']);
             $statusLabel = $criticalStatuses[$newStatus];
 
-            //Notify Project Officer if assigned
-            if ($enquiry->projectOfficer) {
-                Notification::create([
-                    'user_id' => $enquiry->projectOfficer->id,
-                    'type' => 'enquiry_status_changed',
-                    'title' => 'Enquiry Status Update',
-                    'message' => "'{$enquiry->title}' status updated to: {$statusLabel}",
-                    'notifiable_type' => ProjectEnquiry::class,
-                    'notifiable_id' => $enquiry->id,
-                    'data' => [
-                        'enquiry_id' => $enquiry->id,
-                        'enquiry_title' => $enquiry->title,
-                        'enquiry_number' => $enquiry->enquiry_number,
-                        'old_status' => $oldStatus,
-                        'new_status' => $newStatus,
-                        'status_label' => $statusLabel,
-                        'changed_by' => $changedBy->name,
-                        'client_name' => $enquiry->client ? $enquiry->client->full_name : 'Unknown Client',
-                    ],
-                ]);
+            if (!$enquiry->projectOfficer) {
+                return;
             }
+
+            CentralNotificationService::send(
+                type: 'enquiry_status_changed',
+                title: 'Enquiry Status Update',
+                message: "'{$enquiry->title}' status updated to: {$statusLabel}",
+                module: 'projects',
+                data: [
+                    'enquiry_id' => $enquiry->id,
+                    'enquiry_title' => $enquiry->title,
+                    'enquiry_number' => $enquiry->enquiry_number,
+                    'old_status' => $oldStatus,
+                    'new_status' => $newStatus,
+                    'status_label' => $statusLabel,
+                    'changed_by' => $changedBy->name,
+                    'client_name' => $enquiry->client ? $enquiry->client->full_name : 'Unknown Client',
+                    'url' => "/projects/enquiries/{$enquiry->id}",
+                ],
+                users: [$enquiry->projectOfficer],
+            );
 
             Log::info("Enquiry status change notification sent", [
                 'enquiry_id' => $enquiry->id,
@@ -514,7 +516,8 @@ class NotificationService
      * Send notification when Enquiry Task is completed
      */
     public function sendEnquiryTaskCompleted(EnquiryTask $task, User $completedBy): void
-    {        try {
+    {
+        try {
             // Notify task creator
             if ($task->created_by && $task->created_by !== $completedBy->id) {
                 $creator = User::find($task->created_by);
@@ -552,14 +555,12 @@ class NotificationService
             $enquiryTitle = $task->enquiry ? $task->enquiry->title : 'Unknown Project';
             $enquiryNumber = $task->enquiry ? $task->enquiry->enquiry_number : 'N/A';
 
-            Notification::create([
-                'user_id' => $user->id,
-                'type' => 'enquiry_task_ready',
-                'title' => 'Task Ready to Start',
-                'message' => "\"{$task->title}\" is ready to start for {$enquiryTitle} (#{$enquiryNumber}) — its prerequisites are complete.",
-                'notifiable_type' => EnquiryTask::class,
-                'notifiable_id' => $task->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: 'enquiry_task_ready',
+                title: 'Task Ready to Start',
+                message: "\"{$task->title}\" is ready to start for {$enquiryTitle} (#{$enquiryNumber}) — its prerequisites are complete.",
+                module: 'projects',
+                data: [
                     'task_id' => $task->id,
                     'enquiry_id' => $task->project_enquiry_id,
                     'enquiry_title' => $enquiryTitle,
@@ -568,8 +569,10 @@ class NotificationService
                     'department_id' => $task->department_id,
                     'priority' => $task->priority,
                     'due_date' => $task->due_date?->toISOString(),
+                    'url' => "/projects/enquiries/{$task->project_enquiry_id}/tasks/{$task->id}",
                 ],
-            ]);
+                users: [$user],
+            );
         } catch (\Exception $e) {
             Log::error("Failed to send task-ready notification: " . $e->getMessage());
         }
@@ -609,93 +612,18 @@ class NotificationService
     ): void {
         $isEnquiry = $taskType === 'enquiry';
 
-        Notification::create([
-            'user_id' => $recipient->id,
-            'type' => $isEnquiry ? 'enquiry_task_completed' : 'universal_task_completed',
-            'title' => 'Task Completed',
-            'message' => "Task '{$task->title}' has been completed by {$completedBy->name}",
-            'notifiable_type' => $isEnquiry ? EnquiryTask::class : UniversalTask::class,
-            'notifiable_id' => $task->id,
-            'data' => [
+        CentralNotificationService::send(
+            type: $isEnquiry ? 'enquiry_task_completed' : 'universal_task_completed',
+            title: 'Task Completed',
+            message: "Task '{$task->title}' has been completed by {$completedBy->name}",
+            module: $isEnquiry ? 'projects' : 'universal-task',
+            data: [
                 'task_id' => $task->id,
                 'completed_by' => $completedBy->name,
                 'completed_at' => now()->toISOString(),
             ] + ($isEnquiry ? ['enquiry_id' => $task->project_enquiry_id] : []),
-        ]);
-    }
-
-    /**
-     * Get notifications for a user
-     * SECURITY: Only returns notifications for the specified user
-     */
-    public function getUserNotifications(
-        int $userId,
-        bool $unreadOnly = false,
-        ?string $type = null,
-        int $limit = 50
-    ) {
-        $query = Notification::where('user_id', $userId)
-            ->orderBy('created_at', 'desc')
-            ->limit($limit);
-
-        if ($unreadOnly) {
-            $query->unread();
-        }
-
-        if ($type) {
-            $query->byType($type);
-        }
-
-        return $query->get();
-    }
-
-    /**
-     * Mark notification as read
-     * SECURITY: Verifies the notification belongs to the user
-     */
-    public function markAsRead(int $notificationId, int $userId): bool
-    {
-        $notification = Notification::where('id', $notificationId)
-            ->where('user_id', $userId)
-            ->first();
-
-        if ($notification) {
-            $notification->markAsRead();
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Mark all notifications as read for a user
-     * SECURITY: Only affects the specified user's notifications
-     */
-    public function markAllAsRead(int $userId): int
-    {
-        return Notification::where('user_id', $userId)
-            ->unread()
-            ->update([
-                'is_read' => true,
-                'read_at' => now(),
-            ]);
-    }
-
-    /**
-     * Delete a notification
-     * SECURITY: Verifies the notification belongs to the user
-     */
-    public function deleteNotification(int $notificationId, int $userId): bool
-    {
-        $notification = Notification::where('id', $notificationId)
-            ->where('user_id', $userId)
-            ->first();
-
-        if ($notification) {
-           return $notification->delete();
-        }
-
-        return false;
+            users: [$recipient],
+        );
     }
 
     /**
@@ -710,14 +638,12 @@ class NotificationService
     public function sendRequisitionSubmitted($requisition, User $submittedBy, User $approver): void
     {
         try {
-            Notification::create([
-                'user_id' => $approver->id,
-                'type' => 'requisition_submitted',
-                'title' => 'New Requisition for Approval',
-                'message' => "Requisition #{$requisition->requisition_number} submitted by {$submittedBy->name} - Amount: ₦" . number_format($requisition->total_amount, 2),
-                'notifiable_type' => get_class($requisition),
-                'notifiable_id' => $requisition->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: 'pettycash_requisition_submitted',
+                title: 'New Requisition for Approval',
+                message: "Requisition #{$requisition->requisition_number} submitted by {$submittedBy->name} - Amount: KES " . number_format($requisition->total_amount, 2),
+                module: 'finance',
+                data: [
                     'requisition_id' => $requisition->id,
                     'requisition_number' => $requisition->requisition_number,
                     'total_amount' => $requisition->total_amount,
@@ -726,7 +652,8 @@ class NotificationService
                     'submitter_id' => $submittedBy->id,
                     'department' => $requisition->department->name ?? 'Unknown',
                 ],
-            ]);
+                users: [$approver],
+            );
 
             Log::info("Requisition submitted notification sent", [
                 'requisition_id' => $requisition->id,
@@ -746,21 +673,20 @@ class NotificationService
             // Notify the requester
             $requester = $requisition->requester ?? $requisition->creator;
             if ($requester) {
-                Notification::create([
-                    'user_id' => $requester->id,
-                    'type' => 'requisition_approved',
-                    'title' => 'Requisition Approved',
-                    'message' => "Your requisition #{$requisition->requisition_number} has been approved by {$approvedBy->name}",
-                    'notifiable_type' => get_class($requisition),
-                    'notifiable_id' => $requisition->id,
-                    'data' => [
+                CentralNotificationService::send(
+                    type: 'pettycash_requisition_approved',
+                    title: 'Requisition Approved',
+                    message: "Your requisition #{$requisition->requisition_number} has been approved by {$approvedBy->name}",
+                    module: 'finance',
+                    data: [
                         'requisition_id' => $requisition->id,
                         'requisition_number' => $requisition->requisition_number,
                         'total_amount' => $requisition->total_amount,
                         'approved_by' => $approvedBy->name,
                         'approved_at' => now()->toISOString(),
                     ],
-                ]);
+                    users: [$requester],
+                );
             }
 
             Log::info("Requisition approved notification sent", [
@@ -786,14 +712,12 @@ class NotificationService
                     $message .= " - Reason: {$reason}";
                 }
 
-                Notification::create([
-                    'user_id' => $requester->id,
-                    'type' => 'requisition_rejected',
-                    'title' => 'Requisition Rejected',
-                    'message' => $message,
-                    'notifiable_type' => get_class($requisition),
-                    'notifiable_id' => $requisition->id,
-                    'data' => [
+                CentralNotificationService::send(
+                    type: 'pettycash_requisition_rejected',
+                    title: 'Requisition Rejected',
+                    message: $message,
+                    module: 'finance',
+                    data: [
                         'requisition_id' => $requisition->id,
                         'requisition_number' => $requisition->requisition_number,
                         'total_amount' => $requisition->total_amount,
@@ -801,7 +725,8 @@ class NotificationService
                         'rejection_reason' => $reason,
                         'rejected_at' => now()->toISOString(),
                     ],
-                ]);
+                    users: [$requester],
+                );
             }
 
             Log::info("Requisition rejected notification sent", [
@@ -822,21 +747,20 @@ class NotificationService
             // Notify the requester
             $requester = $requisition->requester ?? $requisition->creator;
             if ($requester) {
-                Notification::create([
-                    'user_id' => $requester->id,
-                    'type' => 'requisition_disbursed',
-                    'title' => 'Cash Disbursed',
-                    'message' => "₦" . number_format($requisition->total_amount, 2) . " has been disbursed for requisition #{$requisition->requisition_number}",
-                    'notifiable_type' => get_class($requisition),
-                    'notifiable_id' => $requisition->id,
-                    'data' => [
+                CentralNotificationService::send(
+                    type: 'pettycash_requisition_disbursed',
+                    title: 'Cash Disbursed',
+                    message: "KES " . number_format($requisition->total_amount, 2) . " has been disbursed for requisition #{$requisition->requisition_number}",
+                    module: 'finance',
+                    data: [
                         'requisition_id' => $requisition->id,
                         'requisition_number' => $requisition->requisition_number,
                         'total_amount' => $requisition->total_amount,
                         'disbursed_by' => $disbursedBy->name,
                         'disbursed_at' => now()->toISOString(),
                     ],
-                ]);
+                    users: [$requester],
+                );
             }
 
             Log::info("Requisition disbursed notification sent", [
@@ -905,14 +829,13 @@ class NotificationService
                 ];
             }
 
-            Notification::create([
-                'user_id'         => $attemptedBy->id,
-                'type'            => 'project_completion_blocked',
-                'title'           => 'Project Cannot Be Completed Yet',
-                'message'         => "'{$enquiry->title}' — {$message}",
-                'notifiable_type' => ProjectEnquiry::class,
-                'notifiable_id'   => $enquiry->id,
-                'data' => [
+            CentralNotificationService::send(
+                type: 'project_completion_blocked',
+                title: 'Project Cannot Be Completed Yet',
+                message: "'{$enquiry->title}' — {$message}",
+                module: 'projects',
+                urgency: 'warning',
+                data: [
                     'enquiry_id'     => $enquiry->id,
                     'enquiry_title'  => $enquiry->title,
                     'enquiry_number' => $enquiry->enquiry_number,
@@ -922,13 +845,14 @@ class NotificationService
                     'task_summary'   => $summary,
                     'action_items'   => $actionItems,
                     'attempted_at'   => now()->toISOString(),
+                    'url' => "/projects/enquiries/{$enquiry->id}",
                 ],
-            ]);
+                users: [$attemptedBy],
+            );
 
             Log::info("Project completion blocked notification sent", [
                 'enquiry_id'    => $enquiry->id,
                 'user_id'       => $attemptedBy->id,
-                'blocking_count' => count($blockingClosure) + count($inProgressTasks),
             ]);
         } catch (\Exception $e) {
             Log::error("Failed to send project completion blocked notification: " . $e->getMessage());
@@ -944,38 +868,39 @@ class NotificationService
         array $newDeliverables
     ): void {
         try {
-            // Find Finance/Costing users (Users with 'Accountant', 'Finance', or 'Costing' roles)
+            // Resolve explicitly (rather than broadcasting by role) so the person
+            // who made the change is never notified about their own edit.
             $financeUsers = User::whereHas('roles', function ($query) {
                 $query->whereIn('name', ['Super Admin', 'Accountant', 'Finance', 'Costing', 'Finance Officer']);
-            })->get();
+            })->where('id', '!=', $updatedBy->id)->get();
 
-            foreach ($financeUsers as $recipient) {
-                // Don't notify the person who made the change
-                if ($recipient->id === $updatedBy->id) continue;
-
-                Notification::create([
-                    'user_id' => $recipient->id,
-                    'type' => 'deliverables_updated',
-                    'title' => 'Project Scope Updated',
-                    'message' => "The deliverables for '{$enquiry->title}' (#{$enquiry->enquiry_number}) have been updated by {$updatedBy->name}. A quote revision may be required.",
-                    'notifiable_type' => ProjectEnquiry::class,
-                    'notifiable_id' => $enquiry->id,
-                    'data' => [
-                        'enquiry_id' => $enquiry->id,
-                        'enquiry_title' => $enquiry->title,
-                        'enquiry_number' => $enquiry->enquiry_number,
-                        'job_number' => $enquiry->job_number,
-                        'updated_by' => $updatedBy->name,
-                        'deliverables_count' => count($newDeliverables),
-                        'timestamp' => now()->toISOString(),
-                    ],
-                ]);
+            if ($financeUsers->isEmpty()) {
+                return;
             }
+
+            CentralNotificationService::send(
+                type: 'deliverables_updated',
+                title: 'Project Scope Updated',
+                message: "The deliverables for '{$enquiry->title}' (#{$enquiry->enquiry_number}) have been updated by {$updatedBy->name}. A quote revision may be required.",
+                module: 'projects',
+                urgency: 'warning',
+                data: [
+                    'enquiry_id' => $enquiry->id,
+                    'enquiry_title' => $enquiry->title,
+                    'enquiry_number' => $enquiry->enquiry_number,
+                    'job_number' => $enquiry->job_number,
+                    'updated_by' => $updatedBy->name,
+                    'deliverables_count' => count($newDeliverables),
+                    'timestamp' => now()->toISOString(),
+                    'url' => "/projects/enquiries/{$enquiry->id}",
+                ],
+                users: $financeUsers->all(),
+            );
 
             Log::info("Deliverables update notification sent to Finance", [
                 'enquiry_id' => $enquiry->id,
                 'updated_by' => $updatedBy->id,
-                'recipients_count' => $financeUsers->count()
+                'recipients_count' => $financeUsers->count(),
             ]);
         } catch (\Exception $e) {
             Log::error("Failed to send deliverables update notification: " . $e->getMessage());

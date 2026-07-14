@@ -5,7 +5,6 @@ namespace Tests\Feature\Projects;
 use App\Constants\EnquiryConstants;
 use App\Constants\Permissions;
 use App\Models\GovernanceAuditLog;
-use App\Models\Notification;
 use App\Models\ProjectEnquiry;
 use App\Models\TaskQuoteData;
 use App\Models\User;
@@ -179,7 +178,7 @@ class ExcelQuoteLifecycleTest extends TestCase
                 ->exists()
         );
         $this->assertTrue(
-            Notification::where('user_id', $financeUser->id)
+            \App\Modules\Notifications\Models\AppNotification::where('user_id', $financeUser->id)
                 ->where('type', 'quote_approval_invalidated')
                 ->exists()
         );

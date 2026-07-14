@@ -7,6 +7,7 @@ use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\HRAuditLog;
 use App\Modules\HR\Models\PayrollLedger;
 use App\Modules\HR\Models\SalaryAdvanceRequest;
+use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -72,6 +73,15 @@ class SalaryAdvanceController extends Controller
             'target_payroll_month' => $request->target_payroll_month,
             'status' => 'pending'
         ]);
+
+        NotificationService::send(
+            type: 'salary_advance_requested',
+            title: 'Salary Advance Requested',
+            message: "{$employee->name} requested a salary advance of KES " . number_format($advance->amount, 2),
+            module: 'hr',
+            data: ['advance_id' => $advance->id, 'url' => "/hr/advances/{$advance->id}"],
+            role: ['Super Admin', 'HR'],
+        );
 
         return response()->json([
             'success' => true,
@@ -197,6 +207,18 @@ class SalaryAdvanceController extends Controller
 
             DB::commit();
 
+            $recipientUser = $advance->employee?->user;
+            if ($recipientUser) {
+                NotificationService::send(
+                    type: 'salary_advance_approved',
+                    title: 'Salary Advance Approved',
+                    message: "Your salary advance of KES " . number_format($advance->amount, 2) . " has been approved.",
+                    module: 'hr',
+                    data: ['advance_id' => $advance->id, 'url' => "/hr/advances/{$advance->id}"],
+                    users: [$recipientUser],
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Advance approved and ledger entry created',
@@ -240,6 +262,18 @@ class SalaryAdvanceController extends Controller
             ],
             'ip_address' => $request->ip()
         ]);
+
+        $recipientUser = $advance->employee?->user;
+        if ($recipientUser) {
+            NotificationService::send(
+                type: 'salary_advance_rejected',
+                title: 'Salary Advance Rejected',
+                message: "Your salary advance request was rejected: {$request->hr_remarks}",
+                module: 'hr',
+                data: ['advance_id' => $advance->id, 'reason' => $request->hr_remarks, 'url' => "/hr/advances/{$advance->id}"],
+                users: [$recipientUser],
+            );
+        }
 
         return response()->json([
             'success' => true,
