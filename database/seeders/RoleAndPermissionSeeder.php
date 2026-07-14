@@ -102,6 +102,7 @@ class RoleAndPermissionSeeder extends Seeder
         $accountsRole = Role::firstOrCreate(['name' => 'Accounts'], ['description' => 'Financial accounting and invoicing']);
         $accountsRole->givePermissionTo([
             Permissions::FINANCE_VIEW, Permissions::FINANCE_BUDGET_READ,
+            Permissions::FINANCE_QUOTE_APPROVE,
             Permissions::PROJECT_READ, Permissions::USER_READ,
             Permissions::DASHBOARD_FINANCE,
             Permissions::FINANCE_PETTY_CASH_VIEW,
@@ -116,6 +117,7 @@ class RoleAndPermissionSeeder extends Seeder
         $costingRole = Role::firstOrCreate(['name' => 'Costing'], ['description' => 'Cost analysis and budget management']);
         $costingRole->givePermissionTo([
             Permissions::FINANCE_VIEW, Permissions::FINANCE_BUDGET_READ, Permissions::FINANCE_BUDGET_UPDATE,
+            Permissions::FINANCE_QUOTE_APPROVE,
             Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE,
             Permissions::USER_READ, Permissions::DASHBOARD_FINANCE
         ]);
