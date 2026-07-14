@@ -7,6 +7,7 @@ use App\Modules\HR\Models\OTEntry;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\Department;
 use App\Modules\HR\Services\OvertimeService;
+use App\Modules\Notifications\Services\NotificationService;
 use App\Constants\Permissions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -313,6 +314,18 @@ class OvertimeController extends Controller
             'reason' => $request->reason,
             'actor' => $user->name
         ]);
+
+        $recipientUser = $entry->employee?->user;
+        if ($recipientUser) {
+            NotificationService::send(
+                type: 'overtime_rejected',
+                title: 'Overtime Rejected',
+                message: "Your overtime entry was rejected: {$request->reason}",
+                module: 'hr',
+                data: ['ot_entry_id' => $entry->id, 'reason' => $request->reason, 'url' => "/hr/overtime/{$entry->id}"],
+                users: [$recipientUser],
+            );
+        }
 
         return response()->json($entry);
     }

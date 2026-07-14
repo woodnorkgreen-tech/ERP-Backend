@@ -2,6 +2,7 @@
 
 namespace App\Modules\HR\Services;
 
+use App\Constants\Permissions;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\OTEntry;
 use App\Modules\HR\Models\LedgerEntry;
@@ -9,6 +10,7 @@ use App\Modules\HR\Models\Compensation;
 use App\Modules\HR\Models\OTFlag;
 use App\Modules\HR\Models\SystemEvent;
 use App\Modules\HR\Exceptions\OvertimeStateException;
+use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
@@ -39,7 +41,25 @@ class OvertimeService
 
         $this->generateIntelligenceFlags($entry);
 
+        NotificationService::send(
+            type: 'overtime_submitted',
+            title: 'Overtime Submitted for Approval',
+            message: "An overtime entry for {$this->subjectName($entry)} needs supervisor approval.",
+            module: 'hr',
+            data: ['ot_entry_id' => $entry->id, 'url' => "/hr/overtime/{$entry->id}"],
+            permission: Permissions::OVERTIME_APPROVE_SUPERVISOR,
+        );
+
         return $entry;
+    }
+
+    /**
+     * Resolve a human-readable name for the entry's subject (employee or
+     * technical labour), used in notification copy.
+     */
+    private function subjectName(OTEntry $entry): string
+    {
+        return ($entry->employee ?? $entry->technicalLabour)?->name ?? 'an employee';
     }
 
     public function syncAttendanceStatus(OTEntry $entry, string $status): void
@@ -68,6 +88,15 @@ class OvertimeService
         SystemEvent::log('supervisor_approved', 'ot_entry', $entry->id, [
             'approver' => auth()->user()->name
         ]);
+
+        NotificationService::send(
+            type: 'overtime_submitted',
+            title: 'Overtime Awaiting HR Approval',
+            message: "An overtime entry for {$this->subjectName($entry)} has cleared supervisor review and needs final HR approval.",
+            module: 'hr',
+            data: ['ot_entry_id' => $entry->id, 'url' => "/hr/overtime/{$entry->id}"],
+            permission: Permissions::OVERTIME_APPROVE_HR,
+        );
 
         return $entry;
     }
@@ -100,6 +129,18 @@ class OvertimeService
             SystemEvent::log('hr_approved', 'ot_entry', $entry->id, [
                 'approver' => auth()->user()->name
             ]);
+
+            $recipientUser = $entry->employee?->user;
+            if ($recipientUser) {
+                NotificationService::send(
+                    type: 'overtime_approved',
+                    title: 'Overtime Approved',
+                    message: 'Your overtime entry has been approved and credited to your ledger.',
+                    module: 'hr',
+                    data: ['ot_entry_id' => $entry->id, 'url' => "/hr/overtime/{$entry->id}"],
+                    users: [$recipientUser],
+                );
+            }
 
             return $entry;
         });

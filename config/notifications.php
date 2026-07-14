@@ -237,5 +237,151 @@ return [
             'module' => 'finance', 'label' => 'Finance Requisition Pending',
             'default_channels' => ['database', 'push'], 'urgency' => 'warning',
         ],
+
+        // Projects - Enquiry & task lifecycle
+        'enquiry_task_assigned' => [
+            'module' => 'projects', 'label' => 'Task Assigned',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'enquiry_task_reassigned' => [
+            'module' => 'projects', 'label' => 'Task Reassigned',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'enquiry_task_unassigned' => [
+            'module' => 'projects', 'label' => 'Task Unassigned',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'enquiry_task_due_soon' => [
+            'module' => 'projects', 'label' => 'Task Due Soon',
+            'default_channels' => ['database'], 'urgency' => 'warning',
+        ],
+        'enquiry_task_overdue' => [
+            'module' => 'projects', 'label' => 'Task Overdue',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'warning',
+        ],
+        'enquiry_task_ready' => [
+            'module' => 'projects', 'label' => 'Task Ready to Start',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'enquiry_task_completed' => [
+            'module' => 'projects', 'label' => 'Task Completed',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'enquiry_created' => [
+            'module' => 'projects', 'label' => 'New Project Enquiry',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'project_officer_assigned' => [
+            'module' => 'projects', 'label' => 'Project Officer Assigned',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'quote_approved' => [
+            'module' => 'projects', 'label' => 'Quote Approved',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'success',
+        ],
+        'quote_approval_invalidated' => [
+            'module' => 'projects', 'label' => 'Quote Approval Invalidated',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'critical',
+        ],
+        'enquiry_status_changed' => [
+            'module' => 'projects', 'label' => 'Enquiry Status Update',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'project_completion_blocked' => [
+            'module' => 'projects', 'label' => 'Project Completion Blocked',
+            'default_channels' => ['database'], 'urgency' => 'warning',
+        ],
+        'deliverables_updated' => [
+            'module' => 'projects', 'label' => 'Project Scope Updated',
+            'default_channels' => ['database'], 'urgency' => 'warning',
+        ],
+        'pettycash_requisition_submitted' => [
+            'module' => 'finance', 'label' => 'Petty Cash Requisition Submitted',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
+        'pettycash_requisition_approved' => [
+            'module' => 'finance', 'label' => 'Petty Cash Requisition Approved',
+            'default_channels' => ['database'], 'urgency' => 'success',
+        ],
+        'pettycash_requisition_rejected' => [
+            'module' => 'finance', 'label' => 'Petty Cash Requisition Rejected',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'warning',
+        ],
+        'pettycash_requisition_disbursed' => [
+            'module' => 'finance', 'label' => 'Petty Cash Disbursed',
+            'default_channels' => ['database'], 'urgency' => 'success',
+        ],
+
+        // Universal Task lifecycle
+        'universal_task_assigned' => [
+            'module' => 'universal-task', 'label' => 'Task Assigned',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'universal_task_status_changed' => [
+            'module' => 'universal-task', 'label' => 'Task Status Updated',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'universal_task_due_soon' => [
+            'module' => 'universal-task', 'label' => 'Task Due Soon',
+            'default_channels' => ['database'], 'urgency' => 'warning',
+        ],
+        'universal_task_overdue' => [
+            'module' => 'universal-task', 'label' => 'Task Overdue',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'warning',
+        ],
+        'universal_task_completed' => [
+            'module' => 'universal-task', 'label' => 'Task Completed',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'universal_task_user_mentioned' => [
+            'module' => 'universal-task', 'label' => 'You Were Mentioned',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'info',
+        ],
+        'universal_task_issue' => [
+            'module' => 'universal-task', 'label' => 'Task Issue Update',
+            'default_channels' => ['database'], 'urgency' => 'warning',
+        ],
+
+        // HR - Payroll
+        'payroll_run_processed' => [
+            'module' => 'hr', 'label' => 'Payroll Run Processed',
+            'default_channels' => ['database'], 'urgency' => 'success',
+        ],
+        'payroll_run_finalized' => [
+            'module' => 'hr', 'label' => 'Payroll Run Finalized',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'success',
+        ],
+        'payroll_payslip_ready' => [
+            'module' => 'hr', 'label' => 'Payslip Ready',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'info',
+        ],
+
+        // HR - Overtime
+        'overtime_submitted' => [
+            'module' => 'hr', 'label' => 'Overtime Submitted for Approval',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
+        'overtime_approved' => [
+            'module' => 'hr', 'label' => 'Overtime Approved',
+            'default_channels' => ['database'], 'urgency' => 'success',
+        ],
+        'overtime_rejected' => [
+            'module' => 'hr', 'label' => 'Overtime Rejected',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'warning',
+        ],
+
+        // HR - Salary Advance
+        'salary_advance_requested' => [
+            'module' => 'hr', 'label' => 'Salary Advance Requested',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
+        'salary_advance_approved' => [
+            'module' => 'hr', 'label' => 'Salary Advance Approved',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'success',
+        ],
+        'salary_advance_rejected' => [
+            'module' => 'hr', 'label' => 'Salary Advance Rejected',
+            'default_channels' => ['database', 'mail'], 'urgency' => 'warning',
+        ],
     ],
 ];

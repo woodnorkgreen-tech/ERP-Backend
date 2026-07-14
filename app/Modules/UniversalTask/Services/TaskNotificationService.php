@@ -2,13 +2,21 @@
 
 namespace App\Modules\UniversalTask\Services;
 
-use App\Models\Notification;
 use App\Models\User;
+use App\Modules\Notifications\Services\NotificationService as CentralNotificationService;
 use App\Modules\UniversalTask\Models\Task;
-use App\Modules\UniversalTask\Models\TaskAssignment;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 
+/**
+ * Formats and dispatches UniversalTask notifications through the
+ * centralized Notifications module, which owns persistence, channel/
+ * preference resolution, and delivery (mail/push) — replacing the old
+ * direct App\Models\Notification writes and no-op email/preference stubs.
+ *
+ * Public method signatures are unchanged so existing listeners
+ * (SendTaskNotification, SendReminderNotification, SendEscalationNotification)
+ * keep working without modification.
+ */
 class TaskNotificationService
 {
     /**
@@ -25,28 +33,20 @@ class TaskNotificationService
         foreach ($assignments as $assignment) {
             $user = $assignment->user;
 
-            // Create in-app notification
-            Notification::create([
-                'user_id' => $user->id,
-                'type' => 'task_assigned',
-                'title' => 'Task Assigned',
-                'message' => "You have been assigned to task: {$task->title}",
-                'data' => [
+            CentralNotificationService::send(
+                type: 'universal_task_assigned',
+                title: 'Task Assigned',
+                message: "You have been assigned to task: {$task->title}",
+                module: 'universal-task',
+                data: [
                     'task_id' => $task->id,
                     'task_title' => $task->title,
                     'assigned_by' => $assigner?->name,
                     'assignment_role' => $assignment->role,
+                    'url' => "/universal-tasks/{$task->id}",
                 ],
-            ]);
-
-            // Send email notification if user has email preferences
-            if ($this->shouldSendEmailNotification($user, 'task_assigned')) {
-                $this->sendEmailNotification($user, 'task_assigned', [
-                    'task' => $task,
-                    'assigner' => $assigner,
-                    'assignment' => $assignment,
-                ]);
-            }
+                users: [$user],
+            );
 
             Log::info('Task assignment notification sent', [
                 'task_id' => $task->id,
@@ -69,36 +69,24 @@ class TaskNotificationService
         $user = User::find($userId);
         $assignees = $this->getTaskAssignees($task);
 
-        foreach ($assignees as $assignee) {
-            // Skip if the user who changed status is the assignee (avoid self-notification)
-            if ($assignee->id === $userId) {
-                continue;
-            }
+        $recipients = $assignees->reject(fn ($assignee) => $assignee->id === $userId);
 
-            Notification::create([
-                'user_id' => $assignee->id,
-                'type' => 'task_status_changed',
-                'title' => 'Task Status Updated',
-                'message' => "Task '{$task->title}' status changed from {$oldStatus} to {$newStatus}",
-                'data' => [
+        foreach ($recipients as $assignee) {
+            CentralNotificationService::send(
+                type: 'universal_task_status_changed',
+                title: 'Task Status Updated',
+                message: "Task '{$task->title}' status changed from {$oldStatus} to {$newStatus}",
+                module: 'universal-task',
+                data: [
                     'task_id' => $task->id,
                     'task_title' => $task->title,
                     'old_status' => $oldStatus,
                     'new_status' => $newStatus,
                     'changed_by' => $user?->name,
+                    'url' => "/universal-tasks/{$task->id}",
                 ],
-            ]);
-
-            // Send email for important status changes
-            if ($this->shouldSendEmailForStatusChange($newStatus) &&
-                $this->shouldSendEmailNotification($assignee, 'task_status_changed')) {
-                $this->sendEmailNotification($assignee, 'task_status_changed', [
-                    'task' => $task,
-                    'old_status' => $oldStatus,
-                    'new_status' => $newStatus,
-                    'changed_by' => $user,
-                ]);
-            }
+                users: [$assignee],
+            );
         }
 
         Log::info('Task status change notifications sent', [
@@ -106,7 +94,7 @@ class TaskNotificationService
             'old_status' => $oldStatus,
             'new_status' => $newStatus,
             'changed_by' => $userId,
-            'assignees_notified' => count($assignees),
+            'assignees_notified' => $recipients->count(),
         ]);
     }
 
@@ -121,26 +109,21 @@ class TaskNotificationService
         $assignees = $this->getTaskAssignees($task);
 
         foreach ($assignees as $assignee) {
-            Notification::create([
-                'user_id' => $assignee->id,
-                'type' => 'task_due_soon',
-                'title' => 'Task Due Soon',
-                'message' => "Task '{$task->title}' is due in {$hoursUntilDue} hours",
-                'data' => [
+            CentralNotificationService::send(
+                type: 'universal_task_due_soon',
+                title: 'Task Due Soon',
+                message: "Task '{$task->title}' is due in {$hoursUntilDue} hours",
+                module: 'universal-task',
+                urgency: 'warning',
+                data: [
                     'task_id' => $task->id,
                     'task_title' => $task->title,
                     'due_date' => $task->due_date?->toISOString(),
                     'hours_until_due' => $hoursUntilDue,
+                    'url' => "/universal-tasks/{$task->id}",
                 ],
-            ]);
-
-            // Send email notification
-            if ($this->shouldSendEmailNotification($assignee, 'task_due_soon')) {
-                $this->sendEmailNotification($assignee, 'task_due_soon', [
-                    'task' => $task,
-                    'hours_until_due' => $hoursUntilDue,
-                ]);
-            }
+                users: [$assignee],
+            );
         }
 
         Log::info('Task due soon notifications sent', [
@@ -160,28 +143,24 @@ class TaskNotificationService
         $assignees = $this->getTaskAssignees($task);
         $manager = $this->getUserManager($task->assignedUser);
 
-        $recipients = array_merge($assignees, $manager ? [$manager] : []);
+        $recipients = $manager ? $assignees->push($manager)->unique('id') : $assignees;
 
         foreach ($recipients as $recipient) {
-            Notification::create([
-                'user_id' => $recipient->id,
-                'type' => 'task_overdue',
-                'title' => 'Task Overdue',
-                'message' => "Task '{$task->title}' is now overdue",
-                'data' => [
+            CentralNotificationService::send(
+                type: 'universal_task_overdue',
+                title: 'Task Overdue',
+                message: "Task '{$task->title}' is now overdue",
+                module: 'universal-task',
+                urgency: 'warning',
+                data: [
                     'task_id' => $task->id,
                     'task_title' => $task->title,
                     'due_date' => $task->due_date?->toISOString(),
                     'overdue_days' => $task->due_date ? now()->diffInDays($task->due_date) : null,
+                    'url' => "/universal-tasks/{$task->id}",
                 ],
-            ]);
-
-            // Always send email for overdue notifications
-            if ($this->shouldSendEmailNotification($recipient, 'task_overdue')) {
-                $this->sendEmailNotification($recipient, 'task_overdue', [
-                    'task' => $task,
-                ]);
-            }
+                users: [$recipient],
+            );
         }
 
         Log::info('Task overdue notifications sent', [
@@ -201,27 +180,20 @@ class TaskNotificationService
      */
     public function notifyUserMentioned(Task $task, User $mentionedUser, User $mentioner, string $comment): void
     {
-        Notification::create([
-            'user_id' => $mentionedUser->id,
-            'type' => 'user_mentioned',
-            'title' => 'You were mentioned',
-            'message' => "{$mentioner->name} mentioned you in task: {$task->title}",
-            'data' => [
+        CentralNotificationService::send(
+            type: 'universal_task_user_mentioned',
+            title: 'You were mentioned',
+            message: "{$mentioner->name} mentioned you in task: {$task->title}",
+            module: 'universal-task',
+            data: [
                 'task_id' => $task->id,
                 'task_title' => $task->title,
                 'mentioned_by' => $mentioner->name,
                 'comment_preview' => substr($comment, 0, 100),
+                'url' => "/universal-tasks/{$task->id}",
             ],
-        ]);
-
-        // Send email notification
-        if ($this->shouldSendEmailNotification($mentionedUser, 'user_mentioned')) {
-            $this->sendEmailNotification($mentionedUser, 'user_mentioned', [
-                'task' => $task,
-                'mentioner' => $mentioner,
-                'comment' => $comment,
-            ]);
-        }
+            users: [$mentionedUser],
+        );
 
         Log::info('User mention notification sent', [
             'task_id' => $task->id,
@@ -242,7 +214,7 @@ class TaskNotificationService
         $assignees = $this->getTaskAssignees($task);
         $supervisors = $this->getTaskSupervisors($task);
 
-        $recipients = array_merge($assignees, $supervisors);
+        $recipients = $assignees->merge($supervisors)->unique('id');
 
         $notificationData = [
             'task_id' => $task->id,
@@ -250,6 +222,7 @@ class TaskNotificationService
             'issue_type' => $issueType,
             'issue_title' => $issueData['title'] ?? null,
             'issue_severity' => $issueData['severity'] ?? null,
+            'url' => "/universal-tasks/{$task->id}",
         ];
 
         $title = match ($issueType) {
@@ -266,30 +239,24 @@ class TaskNotificationService
             default => "Task issue update for: {$task->title}",
         };
 
-        foreach ($recipients as $recipient) {
-            Notification::create([
-                'user_id' => $recipient->id,
-                'type' => 'task_issue',
-                'title' => $title,
-                'message' => $message,
-                'data' => $notificationData,
-            ]);
+        $urgency = ($issueData['severity'] ?? null) === 'critical' ? 'critical' : 'warning';
 
-            // Send email for critical issues
-            if (($issueData['severity'] ?? null) === 'critical' &&
-                $this->shouldSendEmailNotification($recipient, 'task_issue')) {
-                $this->sendEmailNotification($recipient, 'task_issue', [
-                    'task' => $task,
-                    'issue_type' => $issueType,
-                    'issue_data' => $issueData,
-                ]);
-            }
+        foreach ($recipients as $recipient) {
+            CentralNotificationService::send(
+                type: 'universal_task_issue',
+                title: $title,
+                message: $message,
+                module: 'universal-task',
+                urgency: $urgency,
+                data: $notificationData,
+                users: [$recipient],
+            );
         }
 
         Log::info('Task issue notifications sent', [
             'task_id' => $task->id,
             'issue_type' => $issueType,
-            'recipients_count' => count($recipients),
+            'recipients_count' => $recipients->count(),
         ]);
     }
 
@@ -338,49 +305,5 @@ class TaskNotificationService
         // TODO: Implement logic to get user's manager
         // This would depend on the employee/department structure
         return null;
-    }
-
-    /**
-     * Check if email notification should be sent for a user and notification type.
-     *
-     * @param User $user
-     * @param string $notificationType
-     * @return bool
-     */
-    protected function shouldSendEmailNotification(User $user, string $notificationType): bool
-    {
-        // TODO: Implement user notification preferences
-        // For now, assume email notifications are enabled
-        return true;
-    }
-
-    /**
-     * Check if email should be sent for status changes.
-     *
-     * @param string $newStatus
-     * @return bool
-     */
-    protected function shouldSendEmailForStatusChange(string $newStatus): bool
-    {
-        return in_array($newStatus, ['completed', 'blocked', 'overdue']);
-    }
-
-    /**
-     * Send email notification.
-     *
-     * @param User $user
-     * @param string $type
-     * @param array $data
-     */
-    protected function sendEmailNotification(User $user, string $type, array $data): void
-    {
-        // TODO: Implement email sending using Laravel Mail
-        // This would require creating Mailable classes for each notification type
-
-        Log::info('Email notification would be sent', [
-            'user_id' => $user->id,
-            'notification_type' => $type,
-            'data_keys' => array_keys($data),
-        ]);
     }
 }
