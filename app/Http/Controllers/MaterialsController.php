@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\TaskMaterialsData;
+use App\Models\MaterialVersion;
 use App\Models\ProjectElement;
 use App\Models\ElementMaterial;
 use App\Models\ElementTemplate;
@@ -280,19 +281,8 @@ class MaterialsController extends Controller
                 throw $this->clientError('Materials already exist for this task. Pass force=true to replace them from the approved quote snapshot.', 409);
             }
 
-            if (
-                $existingMaterialsData
-                && $existingMaterialsData->versions()->where('is_base', true)->exists()
-                && !$request->filled('editReason')
-            ) {
-                return response()->json([
-                    'message' => 'Validation failed',
-                    'errors' => [
-                        'editReason' => ['A reason for modification is required because a base materials list has already been approved.']
-                    ]
-                ], 422);
-            }
-
+            // NOTE: Re-importing over an approved base no longer requires a reason here —
+            // the gate now lives on the Project Officer's re-approval instead.
             $materialsData = DB::transaction(function () use ($taskId, $existingMaterialsData, $preview, $elements) {
                 $projectInfo = $existingMaterialsData?->project_info
                     ?: ($this->getDefaultMaterialsStructure($taskId)['projectInfo'] ?? []);
@@ -435,19 +425,10 @@ class MaterialsController extends Controller
             ], 422);
         }
 
-        // Check if base version exists - if so, editReason is MANDATORY
+        // NOTE: Saving no longer requires a reason, even after a base version exists.
+        // The reason-for-edit gate now lives on the Project Officer's re-approval
+        // instead (see approveMaterials()) — see materialsChangedSinceVersion().
         $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
-        if ($materialsData) {
-            $baseExists = $materialsData->versions()->where('is_base', true)->exists();
-            if ($baseExists && empty($request->editReason)) {
-                return response()->json([
-                    'message' => 'Validation failed',
-                    'errors' => [
-                        'editReason' => ['A reason for modification is required because a base materials list has already been approved.']
-                    ]
-                ], 422);
-            }
-        }
 
         try {
             // Use database transactions for data integrity
@@ -590,10 +571,9 @@ class MaterialsController extends Controller
 
             \DB::commit();
 
-            // Handle Versioning/Snapshots after successful save - ONLY if something actually changed
-            if ($materialsChanged) {
-                $this->handlePostSaveVersioning($taskId, $request->input('editReason'), $changeSummary);
-            }
+            // Versioning is no longer created on every save — a reasoned, tracked
+            // revision is now only created when the Project Officer re-approves
+            // edited materials (see approveMaterials()).
 
             // Check for additional materials and create budget additions automatically
             $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
@@ -1739,6 +1719,26 @@ class MaterialsController extends Controller
                 ], 404);
             }
 
+            // Project Officer re-approval gate: if a base snapshot exists and the
+            // materials have actually changed since it was captured, the PO must
+            // explain why before their approval is recorded. This is the only
+            // point in the materials workflow that requires a reason — plain
+            // saves are always free.
+            $baseVersion = $materialsData->versions()->where('is_base', true)->latest('version_number')->first();
+            if (
+                $department === 'project_officer'
+                && $baseVersion
+                && $this->materialsChangedSinceVersion($materialsData, $baseVersion)
+                && !$request->filled('editReason')
+            ) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => [
+                        'editReason' => ['Materials have changed since they were first approved. Please explain why before approving again.']
+                    ]
+                ], 422);
+            }
+
             // Get current approval status from project_info
             $projectInfo = $materialsData->project_info ?? [];
             $approvalStatus = $projectInfo['approval_status'] ?? [
@@ -1755,7 +1755,8 @@ class MaterialsController extends Controller
                 'approved_by' => $user->id,
                 'approved_by_name' => $user->name,
                 'approved_at' => now()->toISOString(),
-                'comments' => $request->input('comments', '')
+                'comments' => $request->input('comments', ''),
+                'edit_reason' => $request->input('editReason'),
             ];
 
             // STRICT GATE: BOTH departments must approve for all_approved to be true
@@ -2077,26 +2078,40 @@ class MaterialsController extends Controller
     }
 
     /**
-     * Handle versioning after a save operation
+     * Compare the materials data currently on a task against a specific stored
+     * version's snapshot. Used to decide whether the Project Officer's
+     * re-approval needs a reason (i.e. whether anything actually changed since
+     * that version was captured).
      */
-    private function handlePostSaveVersioning(int $taskId, ?string $reason, $changeLog = null): void
+    private function materialsChangedSinceVersion(TaskMaterialsData $materialsData, MaterialVersion $version): bool
     {
-        $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
-        if (!$materialsData) return;
+        $materialsData->loadMissing('elements.materials');
 
-        // If a base version exists, any subsequent edit should create a new tracked version
-        $baseExists = $materialsData->versions()->where('is_base', true)->exists();
+        $normalize = function (string $elementType, ?string $name, $materials) {
+            $key = $elementType . ' : ' . ($name ?? '');
+            $materialsMap = [];
+            foreach ($materials as $material) {
+                $description = is_array($material) ? ($material['description'] ?? '') : $material->description;
+                $quantity = is_array($material) ? ($material['quantity'] ?? 0) : $material->quantity;
+                $materialsMap[$description] = round((float) $quantity, 4);
+            }
+            ksort($materialsMap);
+            return [$key => $materialsMap];
+        };
 
-        if ($baseExists) {
-            \Log::info("Edits made after base snapshot. Creating tracking version.", ['taskId' => $taskId]);
-            $this->internalCreateVersion(
-                $taskId, 
-                'Revision - ' . now()->format('M d, Y H:i'), 
-                $reason ?? 'Materials modified after initial approval snapshot.',
-                false,
-                $changeLog
-            );
+        $current = [];
+        foreach ($materialsData->elements as $element) {
+            $current += $normalize($element->element_type, $element->name, $element->materials);
         }
+        ksort($current);
+
+        $base = [];
+        foreach (($version->data['elements'] ?? []) as $element) {
+            $base += $normalize($element['element_type'] ?? '', $element['name'] ?? null, $element['materials'] ?? []);
+        }
+        ksort($base);
+
+        return $current !== $base;
     }
 
     /**
