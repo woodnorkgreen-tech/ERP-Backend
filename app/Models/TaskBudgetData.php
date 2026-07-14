@@ -10,14 +10,13 @@ class TaskBudgetData extends Model
 {
     use \App\Traits\LogsActions;
 
-    protected static function booted()
-    {
-        static::saved(function ($model) {
-            if ($model->task) {
-                app(\App\Modules\Projects\Services\EnquiryWorkflowService::class)->tryAutoCompleteTask($model->task);
-            }
-        });
-    }
+    // No saved()-hook auto-completion here (unlike TaskMaterialsData/TaskQuoteData):
+    // budget "readiness" is just grandTotal > 0, which can go true from
+    // background writes that aren't a real submission — the materials-approval
+    // sync in MaterialsController::syncMaterialsToBudget(), or the 2s debounced
+    // autosave while the user is still typing. Completion only happens through
+    // the explicit "Complete Task" button (PUT tasks/{id}/status), which is
+    // already fully gated by EnquiryWorkflowService::validateTaskCompletion().
 
     protected $fillable = [
         'enquiry_task_id', 'project_info', 'materials_data',
