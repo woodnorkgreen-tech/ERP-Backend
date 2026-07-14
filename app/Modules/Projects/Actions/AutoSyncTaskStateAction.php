@@ -41,17 +41,12 @@ class AutoSyncTaskStateAction
             }
         }
 
-        // 2. Budget Auto-Completion
-        if ($task->type === 'budget') {
-            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $task->id)->first();
-            if ($budgetData && !empty($budgetData->budget_summary)) {
-                $total = (float)($budgetData->budget_summary['grandTotal'] ?? 0);
-                if ($total > 0) {
-                    $shouldComplete = true;
-                    $reason = "Budget finalized with total: {$total}";
-                }
-            }
-        }
+        // 2. Budget: deliberately NOT auto-completed. "grandTotal > 0" isn't a
+        // real submission signal — it also goes true from the background
+        // materials-approval sync (MaterialsController::syncMaterialsToBudget)
+        // and from the 2s debounced autosave while the user is still editing.
+        // Completion only happens via the explicit "Complete Task" button,
+        // which is already gated by EnquiryWorkflowService::validateTaskCompletion.
 
         // 3. Quote — move to in_progress once quote data exists. The quote is
         // commercial input for the approved scope, not something unlocked by an

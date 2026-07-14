@@ -581,12 +581,18 @@ class EnquiryWorkflowService
         $this->validateTaskDependencies($task, (bool) $isAdmin);
 
         // 1. Materials Validation (Approvals)
+        // Uses ROLES_SYSTEM_ADMIN rather than the general $isAdmin: Project
+        // Officer is in ROLES_ADMIN but is also one of the two required
+        // approvers here, so it must not be able to self-bypass this gate.
         if ($task->type === 'materials') {
-            $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
-            if ($materialsData && !$isAdmin) {
-                $status = $materialsData->project_info['approval_status'] ?? [];
-                if (!($status['all_approved'] ?? false)) {
-                    throw new \Exception("Cannot complete Materials task. Project Approval is required.");
+            $isSystemAdmin = $user && $user->hasRole(\App\Constants\EnquiryConstants::ROLES_SYSTEM_ADMIN);
+            if (!$isSystemAdmin) {
+                $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
+                if ($materialsData) {
+                    $status = $materialsData->project_info['approval_status'] ?? [];
+                    if (!($status['all_approved'] ?? false)) {
+                        throw new \Exception("Cannot complete Materials task. Both Project Officer and Production approval are required.");
+                    }
                 }
             }
         }

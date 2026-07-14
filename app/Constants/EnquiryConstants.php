@@ -33,6 +33,11 @@ class EnquiryConstants
     // Roles with full administrative access to projects
     const ROLES_ADMIN = ['Super Admin', 'Admin', 'Project Manager', 'Project Officer', 'HR'];
 
+    // True system administrators only. Narrower than ROLES_ADMIN — used for
+    // gates where a role in ROLES_ADMIN (e.g. Project Officer) is itself one
+    // of the parties required to satisfy the gate, so it must not self-bypass.
+    const ROLES_SYSTEM_ADMIN = ['Super Admin', 'Admin'];
+
     // All roles that participate in the project workflow
     const ROLES_WORKFLOW = [
         'Super Admin', 'Admin', 'Project Manager', 'Project Officer', 'HR',
