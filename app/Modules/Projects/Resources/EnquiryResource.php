@@ -105,7 +105,8 @@ class EnquiryResource extends JsonResource
             \App\Constants\EnquiryConstants::STATUS_QUOTE_APPROVED => 65,
             \App\Constants\EnquiryConstants::STATUS_MATERIALS_SPECIFIED => 75,
             \App\Constants\EnquiryConstants::STATUS_BUDGET_CREATED => 85,
-            'completed' => 100,
+            \App\Constants\EnquiryConstants::STATUS_COMPLETED => 100,
+            \App\Constants\EnquiryConstants::STATUS_CLOSED => 100,
         ];
 
         return $statusMap[$this->status] ?? 0;

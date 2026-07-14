@@ -140,6 +140,67 @@ class ProjectWorkflowContractsTest extends TestCase
         $this->assertSame(EnquiryConstants::STATUS_COMPLETED, $project->fresh()->status);
     }
 
+    public function test_closed_project_returns_full_progress_in_enquiry_list_resource(): void
+    {
+        $manager = $this->user('Project Manager');
+        $enquiry = $this->enquiry([
+            'status' => EnquiryConstants::STATUS_CLOSED,
+            'created_by' => $manager->id,
+            'project_officer_id' => $manager->id,
+        ]);
+
+        Sanctum::actingAs($manager);
+
+        $this->getJson('/api/projects/enquiries?view=closed')
+            ->assertOk()
+            ->assertJsonPath('data.data.0.id', $enquiry->id)
+            ->assertJsonPath('data.data.0.status', EnquiryConstants::STATUS_CLOSED)
+            ->assertJsonPath('data.data.0.progress_percentage', 100);
+    }
+
+    public function test_completed_project_closure_requires_handover_and_report_then_moves_to_closed(): void
+    {
+        $manager = $this->user('Project Manager');
+        $enquiry = $this->enquiry([
+            'status' => EnquiryConstants::STATUS_COMPLETED,
+            'created_by' => $manager->id,
+            'project_officer_id' => $manager->id,
+            'selected_workflow_tasks' => ['handover', 'report'],
+        ]);
+        $handover = $this->task($enquiry, 'handover', ['title' => 'Client Handover', 'status' => 'completed']);
+        $report = $this->task($enquiry, 'report', ['title' => 'Archival Report', 'status' => 'pending']);
+        $project = Project::create([
+            'enquiry_id' => $enquiry->id,
+            'project_id' => 'WNG-CLOSE-' . uniqid(),
+            'status' => 'completed',
+        ]);
+
+        Sanctum::actingAs($manager);
+
+        $this->getJson("/api/projects/enquiries/{$enquiry->id}/closure-readiness")
+            ->assertOk()
+            ->assertJsonPath('data.can_close', false)
+            ->assertJsonPath('data.blocking_closure_tasks.0.id', $report->id)
+            ->assertJsonPath('data.blocking_closure_tasks.0.status', 'pending');
+
+        $this->postJson("/api/projects/enquiries/{$enquiry->id}/close")
+            ->assertStatus(422)
+            ->assertJsonFragment(['message' => 'Cannot close project. Incomplete closure tasks: Archival Report (report).']);
+
+        $report->update(['status' => 'completed']);
+
+        $this->getJson("/api/projects/enquiries/{$enquiry->id}/closure-readiness")
+            ->assertOk()
+            ->assertJsonPath('data.can_close', true);
+
+        $this->postJson("/api/projects/enquiries/{$enquiry->id}/close")
+            ->assertOk()
+            ->assertJsonPath('data.status', EnquiryConstants::STATUS_CLOSED);
+
+        $this->assertSame(EnquiryConstants::STATUS_CLOSED, $enquiry->fresh()->status);
+        $this->assertSame(EnquiryConstants::STATUS_CLOSED, $project->fresh()->status);
+    }
+
     public function test_reassign_endpoint_accepts_legacy_payload_and_syncs_assignment_columns(): void
     {
         $manager = $this->user('Project Manager');
