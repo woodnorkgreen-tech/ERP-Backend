@@ -248,12 +248,19 @@ class HandoverSurveyController extends Controller
                     ? 'required'
                     : 'nullable';
 
+                if (($question['type'] ?? 'text') === 'rating' && ($question['has_remarks'] ?? false)) {
+                    $rules["{$fieldPath}.rating"] = "{$required}|numeric|min:1|max:5";
+                    $rules["{$fieldPath}.remarks"] = 'nullable|string|max:1000';
+                    continue;
+                }
+
                 $typeRules = match ($question['type'] ?? 'text') {
-                    'rating'   => "{$required}|numeric|min:1|max:5",
-                    'boolean'  => "{$required}|boolean",
+                    'rating'          => "{$required}|numeric|min:1|max:5",
+                    'yes_no',
+                    'boolean'         => "{$required}|boolean",
                     'textarea',
-                    'text'     => "{$required}|string|max:5000",
-                    default    => $required,
+                    'text'            => "{$required}|string|max:5000",
+                    default           => $required,
                 };
 
                 $rules[$fieldPath] = $typeRules;
