@@ -433,6 +433,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Delete element
         Route::delete('/elements/{elementId}', [App\Http\Controllers\MaterialsController::class, 'deleteElement']);
 
+        // Push selected elements to the enquiry's Logistics loading sheet
+        Route::post('/push-to-logistics', [App\Http\Controllers\MaterialsController::class, 'pushElementsToLogistics']);
+
         // PDF Generation
         Route::get('/pdf', [App\Http\Controllers\MaterialsController::class, 'downloadPdf']);
     });
