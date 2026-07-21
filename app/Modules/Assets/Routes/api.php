@@ -8,6 +8,7 @@ use App\Modules\Assets\Controllers\AssetExportController;
 use App\Modules\Assets\Controllers\AssetHireRequestController;
 use App\Modules\Assets\Controllers\AssetMovementLogController;
 use App\Modules\Assets\Controllers\AssetClientPortalController;
+use App\Modules\Assets\Controllers\AssetServiceLogController;
 
 /*
 |--------------------------------------------------------------------------
@@ -39,6 +40,9 @@ Route::post('/hire-requests/{id}/mark-returned', [AssetHireRequestController::cl
 
 Route::get('/movement-log', [AssetMovementLogController::class, 'index']);
 Route::get('/{id}/hire-history', [AssetHireRequestController::class, 'history']);
+Route::get('/{id}/service-logs', [AssetServiceLogController::class, 'index']);
+Route::post('/{id}/service-logs', [AssetServiceLogController::class, 'store']);
+Route::delete('/{id}/service-logs/{logId}', [AssetServiceLogController::class, 'destroy']);
 Route::get('/client-portal/clients', [AssetClientPortalController::class, 'clients']);
 Route::get('/client-portal/assets', [AssetClientPortalController::class, 'clientAssets']);
 

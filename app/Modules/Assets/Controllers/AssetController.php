@@ -71,6 +71,19 @@ class AssetController extends Controller
             $query->where('is_available', $request->boolean('is_available'));
         }
 
+        // Service filters
+        if ($request->filled('service_filter')) {
+            $today = now()->toDateString();
+            $soon  = now()->addDays(7)->toDateString();
+            if ($request->service_filter === 'overdue') {
+                $query->whereNotNull('next_service_date')->where('next_service_date', '<', $today);
+            } elseif ($request->service_filter === 'due_soon') {
+                $query->whereNotNull('next_service_date')
+                    ->where('next_service_date', '>=', $today)
+                    ->where('next_service_date', '<=', $soon);
+            }
+        }
+
         if ($request->filled('department_id')) {
             $query->byDepartment($request->department_id);
         }

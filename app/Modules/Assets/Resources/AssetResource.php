@@ -52,7 +52,8 @@ class AssetResource extends JsonResource
             'purchase_cost_usd' => $this->purchase_cost_usd !== null ? (float) $this->purchase_cost_usd : null,
             'current_value' => $this->current_value !== null ? (float) $this->current_value : null,
             'supplier' => $this->supplier,
-            'warranty_expiry' => $this->warranty_expiry?->format('Y-m-d'),
+            'warranty_expiry'    => $this->warranty_expiry?->format('Y-m-d'),
+            'next_service_date'  => $this->next_service_date?->format('Y-m-d'),
             'notes' => $this->notes,
             'is_active' => $this->is_active,
 
