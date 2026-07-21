@@ -49,6 +49,7 @@ class Asset extends Model
         'current_value',
         'supplier',
         'warranty_expiry',
+        'next_service_date',
         'notes',
         'is_active',
         'created_by',
@@ -60,7 +61,8 @@ class Asset extends Model
      */
     protected $casts = [
         'purchase_date' => 'date',
-        'warranty_expiry' => 'date',
+        'warranty_expiry'    => 'date',
+        'next_service_date'  => 'date',
         'purchase_cost_kes' => 'decimal:2',
         'purchase_cost_usd' => 'decimal:2',
         'current_value' => 'decimal:2',
@@ -105,8 +107,12 @@ class Asset extends Model
         return $this->belongsTo(AssetCategory::class, 'category_id');
     }
 
-    public function hireRequests(): HasMany
+    public function serviceLogs(): HasMany
     {
+        return $this->hasMany(AssetServiceLog::class)->orderByDesc('service_date');
+    }
+
+    public function hireRequests(): HasMany    {
         return $this->hasMany(AssetHireRequest::class);
     }
 
