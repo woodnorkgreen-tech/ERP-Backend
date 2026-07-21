@@ -655,6 +655,99 @@ class EnquiryWorkflowService
                 }
             }
         }
+
+        // 5. Handover Validation — the client handover survey is the record that
+        // the client actually received and acknowledged the delivery. Completing
+        // this task (and, downstream, closing the project) must not be possible
+        // without it, since it was previously enforced only in the Vue layer.
+        if ($task->type === 'handover' && !$isAdmin) {
+            $survey = $task->handoverSurvey;
+            if (!$survey || !$survey->submitted) {
+                throw new WorkflowValidationException("Cannot complete Client Handover task. The handover survey has not been submitted yet.");
+            }
+        }
+
+        // 6. Report/Archival Validation — mirrors ReportTask.vue's own
+        // completion gate (project_officer_signature + sign date) so the
+        // frontend and backend agree on what "done" means for this type.
+        if ($task->type === 'report' && !$isAdmin) {
+            $report = \App\Modules\ArchivalTask\Models\ArchivalReport::where('enquiry_task_id', $task->id)->first();
+            if (!$report || !$report->project_officer_signature || !$report->project_officer_sign_date) {
+                throw new WorkflowValidationException("Cannot complete Archival & Reporting task. The report must be signed off by the Project Officer first.");
+            }
+        }
+
+        // 7. Setup Validation — mirrors SetupTask.vue's own gate: no unresolved
+        // on-site issues.
+        if ($task->type === 'setup' && !$isAdmin) {
+            $setupTask = \App\Modules\setupTask\Models\SetupTask::where('task_id', $task->id)->first();
+            if (!$setupTask) {
+                throw new WorkflowValidationException("Cannot complete Event Setup & Execution task. Setup documentation has not been started yet.");
+            }
+            $openIssues = $setupTask->issues()->where('status', '!=', 'resolved')->count();
+            if ($openIssues > 0) {
+                throw new WorkflowValidationException("Cannot complete Event Setup & Execution task. {$openIssues} open issue(s) must be resolved first.");
+            }
+        }
+
+        // 8. Setdown Validation — mirrors SetdownTask.vue's own gate.
+        if ($task->type === 'setdown' && !$isAdmin) {
+            $setdownTask = \App\Modules\setdownTask\Models\SetdownTask::where('task_id', $task->id)->first();
+            if (!$setdownTask) {
+                throw new WorkflowValidationException("Cannot complete Set Down & Return task. Setdown documentation has not been started yet.");
+            }
+            $openIssues = $setdownTask->setdownIssues()->where('status', '!=', 'resolved')->count();
+            if ($openIssues > 0) {
+                throw new WorkflowValidationException("Cannot complete Set Down & Return task. {$openIssues} open issue(s) must be resolved first.");
+            }
+        }
+
+        // 9. Production Validation — mirrors ProductionTask.vue's
+        // allElementsComplete gate: every work-order task must be completed.
+        if ($task->type === 'production' && !$isAdmin) {
+            $workOrder = $task->workOrder;
+            $woTasks = $workOrder?->tasks;
+            if (!$workOrder || !$woTasks || $woTasks->isEmpty()) {
+                throw new WorkflowValidationException("Cannot complete Production task. No work-order tasks have been created yet.");
+            }
+            $incomplete = $woTasks->where('status', '!=', 'completed')->count();
+            if ($incomplete > 0) {
+                throw new WorkflowValidationException("Cannot complete Production task. {$incomplete} work-order task(s) are not yet completed.");
+            }
+        }
+
+        // 10. Logistics Validation — mirrors LogisticsTask.vue's checklistComplete
+        // gate: every checklist item must be marked present.
+        if ($task->type === 'logistics' && !$isAdmin) {
+            $logisticsTask = \App\Modules\logisticsTask\Models\LogisticsTask::where('task_id', $task->id)->first();
+            $checklist = $logisticsTask
+                ? \App\Modules\logisticsTask\Models\LogisticsChecklist::where('logistics_task_id', $logisticsTask->id)->first()
+                : null;
+            $items = $checklist->checklist_data['items'] ?? [];
+            if (empty($items)) {
+                throw new WorkflowValidationException("Cannot complete Logistics task. The dispatch checklist is empty.");
+            }
+            $notPresent = collect($items)->filter(fn($item) => ($item['status'] ?? 'missing') !== 'present')->count();
+            if ($notPresent > 0) {
+                throw new WorkflowValidationException("Cannot complete Logistics task. {$notPresent} checklist item(s) are not marked present.");
+            }
+        }
+
+        // 11. Teams Validation — a team task with a defined member requirement
+        // must have that many active members assigned; one with no requirement
+        // set must still have at least one, mirroring
+        // TeamsTask::getCompletionPercentageAttribute()'s own definition of done.
+        if ($task->type === 'teams' && !$isAdmin) {
+            $teamsTask = \App\Modules\Teams\Models\TeamsTask::where('task_id', $task->id)->first();
+            if (!$teamsTask) {
+                throw new WorkflowValidationException("Cannot complete Teams task. No team has been set up for this task yet.");
+            }
+            $activeMembers = $teamsTask->activeMembers()->count();
+            $required = max((int) $teamsTask->required_members, 1);
+            if ($activeMembers < $required) {
+                throw new WorkflowValidationException("Cannot complete Teams task. {$activeMembers} of {$required} required member(s) are assigned.");
+            }
+        }
     }
 
     /**
