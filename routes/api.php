@@ -244,21 +244,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
     Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
 
-    // Notifications & OneSignal
-    Route::get('/notifications', function () {
-        $user = auth()->user();
-        return response(['data' => $user->unreadNotifications]);
-    });
-    Route::post('/notifications/{id}/read', function ($id) {
-        $user = auth()->user();
-        $user->notifications()->find($id)?->markAsRead();
-        return response(['success' => true]);
-    });
-    Route::post('/notifications/read-all', function () {
-        $user = auth()->user();
-        $user->unreadNotifications->markAsRead();
-        return response(['success' => true]);
-    });
+    // Notifications routes live in app/Modules/Notifications/Routes/api.php. They were
+    // once duplicated here as inline closures against Laravel's native Notifiable
+    // table, which the 2026_06_30 legacy-migration dropped in favor of
+    // app_notifications — so this file must not register any notifications/* routes
+    // the module already owns.
+
     Route::post('/user/onesignal-token', function (Request $request) {
         $user = auth()->user();
         $user->update(['onesignal_player_id' => $request->player_id]);
