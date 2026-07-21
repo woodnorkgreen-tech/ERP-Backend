@@ -3,6 +3,7 @@
 namespace Tests\Feature\Projects;
 
 use App\Constants\EnquiryConstants;
+use App\Models\ElementMaterial;
 use App\Models\ProjectElement;
 use App\Models\ProjectEnquiry;
 use App\Models\TaskMaterialsData;
@@ -16,10 +17,11 @@ use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
- * Covers the "push selected materials elements to the Logistics loading
- * sheet" action added 2026-07-21, triggered from the Materials task's own
- * element list rather than the existing bulk "import all" pulled from the
- * Logistics side.
+ * Covers "push selected material particulars to the Logistics loading
+ * sheet" — one transport item per material line-item (not per element),
+ * each carrying its own real quantity and unit. Triggered from the
+ * Materials task's own element list, distinct from the existing bulk
+ * "import all elements" pulled from the Logistics side.
  */
 class MaterialsPushToLogisticsTest extends TestCase
 {
@@ -31,63 +33,85 @@ class MaterialsPushToLogisticsTest extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 
-    public function test_pushes_only_the_selected_elements(): void
+    public function test_pushes_only_the_selected_materials_with_real_quantity_and_unit(): void
     {
-        $enquiry = $this->enquiry(['selected_workflow_tasks' => ['materials', 'logistics']]);
-        $materialsTask = $this->task($enquiry, 'materials');
-        $this->task($enquiry, 'logistics');
-        $data = TaskMaterialsData::create(['enquiry_task_id' => $materialsTask->id, 'project_info' => []]);
-
-        $keep = $this->element($data, 'Backdrop Panel');
-        $skip = $this->element($data, 'Arch Frame');
+        [$materialsTask, $element] = $this->materialsSetup();
+        $keep = $this->material($element, 'Plywood 4x8', ['quantity' => 3, 'unit_of_measurement' => 'sheets']);
+        $skip = $this->material($element, 'Wood Screws', ['quantity' => 50, 'unit_of_measurement' => 'pcs']);
 
         $response = $this->pushAs($materialsTask, $this->user(), [$keep->id]);
 
         $response->assertOk();
-        $this->assertDatabaseHas('transport_items', ['name' => 'Backdrop Panel']);
-        $this->assertDatabaseMissing('transport_items', ['name' => 'Arch Frame']);
+        $this->assertDatabaseHas('transport_items', [
+            'name' => 'Plywood 4x8',
+            'quantity' => 3,
+            'unit' => 'sheets',
+        ]);
+        $this->assertDatabaseMissing('transport_items', ['name' => 'Wood Screws']);
+    }
+
+    public function test_fractional_quantity_rounds_up_not_down(): void
+    {
+        [$materialsTask, $element] = $this->materialsSetup();
+        $material = $this->material($element, 'Fabric', ['quantity' => 2.1, 'unit_of_measurement' => 'metres']);
+
+        $this->pushAs($materialsTask, $this->user(), [$material->id])->assertOk();
+
+        $this->assertDatabaseHas('transport_items', ['name' => 'Fabric', 'quantity' => 3]);
     }
 
     public function test_auto_creates_the_logistics_task_data_row_if_missing(): void
     {
-        $enquiry = $this->enquiry(['selected_workflow_tasks' => ['materials', 'logistics']]);
-        $materialsTask = $this->task($enquiry, 'materials');
-        $this->task($enquiry, 'logistics');
-        $data = TaskMaterialsData::create(['enquiry_task_id' => $materialsTask->id, 'project_info' => []]);
-        $element = $this->element($data, 'Backdrop Panel');
+        [$materialsTask, $element] = $this->materialsSetup();
+        $material = $this->material($element, 'Plywood 4x8');
 
-        $this->pushAs($materialsTask, $this->user(), [$element->id])->assertOk();
+        $this->pushAs($materialsTask, $this->user(), [$material->id])->assertOk();
 
-        $this->assertDatabaseHas('logistics_tasks', ['task_id' => EnquiryTask::where('type', 'logistics')->first()->id]);
+        $this->assertDatabaseHas('logistics_tasks', [
+            'task_id' => EnquiryTask::where('type', 'logistics')->first()->id,
+        ]);
     }
 
-    public function test_pushing_the_same_element_twice_updates_rather_than_duplicates(): void
+    public function test_pushing_the_same_material_twice_updates_rather_than_duplicates(): void
     {
-        $enquiry = $this->enquiry(['selected_workflow_tasks' => ['materials', 'logistics']]);
-        $materialsTask = $this->task($enquiry, 'materials');
-        $this->task($enquiry, 'logistics');
-        $data = TaskMaterialsData::create(['enquiry_task_id' => $materialsTask->id, 'project_info' => []]);
-        $element = $this->element($data, 'Backdrop Panel');
+        [$materialsTask, $element] = $this->materialsSetup();
+        $material = $this->material($element, 'Plywood 4x8', ['quantity' => 3]);
         $user = $this->user();
 
-        $this->pushAs($materialsTask, $user, [$element->id])->assertOk();
-        $this->pushAs($materialsTask, $user, [$element->id])->assertOk();
+        $this->pushAs($materialsTask, $user, [$material->id])->assertOk();
+        $this->pushAs($materialsTask, $user, [$material->id])->assertOk();
 
-        $this->assertSame(1, TransportItem::where('name', 'Backdrop Panel')->count());
+        $this->assertSame(1, TransportItem::where('name', 'Plywood 4x8')->count());
     }
 
-    public function test_excluded_elements_are_not_pushed_even_if_selected(): void
+    public function test_excluded_materials_are_not_pushed_even_if_selected(): void
     {
-        $enquiry = $this->enquiry(['selected_workflow_tasks' => ['materials', 'logistics']]);
-        $materialsTask = $this->task($enquiry, 'materials');
-        $this->task($enquiry, 'logistics');
-        $data = TaskMaterialsData::create(['enquiry_task_id' => $materialsTask->id, 'project_info' => []]);
-        $excluded = $this->element($data, 'Unused Prop', ['is_included' => false]);
+        [$materialsTask, $element] = $this->materialsSetup();
+        $excluded = $this->material($element, 'Spare Bolts', ['is_included' => false]);
 
         $response = $this->pushAs($materialsTask, $this->user(), [$excluded->id]);
 
         $response->assertStatus(422);
-        $this->assertDatabaseMissing('transport_items', ['name' => 'Unused Prop']);
+        $this->assertDatabaseMissing('transport_items', ['name' => 'Spare Bolts']);
+    }
+
+    public function test_materials_of_an_excluded_element_are_not_pushed_even_if_selected(): void
+    {
+        [$materialsTask, , $data] = $this->materialsSetup();
+        $excludedElement = ProjectElement::create([
+            'task_materials_data_id' => $data->id,
+            'element_type' => 'prop',
+            'name' => 'Unused Prop',
+            'category' => 'production',
+            'is_included' => false,
+            'sort_order' => 1,
+        ]);
+        $material = $this->material($excludedElement, 'Trim');
+
+        $response = $this->pushAs($materialsTask, $this->user(), [$material->id]);
+
+        $response->assertStatus(422);
+        $this->assertDatabaseMissing('transport_items', ['name' => 'Trim']);
     }
 
     public function test_returns_a_clear_error_when_workflow_has_no_logistics_task(): void
@@ -96,14 +120,15 @@ class MaterialsPushToLogisticsTest extends TestCase
         $materialsTask = $this->task($enquiry, 'materials');
         $data = TaskMaterialsData::create(['enquiry_task_id' => $materialsTask->id, 'project_info' => []]);
         $element = $this->element($data, 'Backdrop Panel');
+        $material = $this->material($element, 'Plywood 4x8');
 
-        $response = $this->pushAs($materialsTask, $this->user(), [$element->id]);
+        $response = $this->pushAs($materialsTask, $this->user(), [$material->id]);
 
         $response->assertStatus(422);
         $response->assertJsonPath('error', "This project's workflow does not include a Logistics task.");
     }
 
-    public function test_requires_at_least_one_element_id(): void
+    public function test_requires_at_least_one_material_id(): void
     {
         $enquiry = $this->enquiry(['selected_workflow_tasks' => ['materials', 'logistics']]);
         $materialsTask = $this->task($enquiry, 'materials');
@@ -112,15 +137,27 @@ class MaterialsPushToLogisticsTest extends TestCase
         $response = $this->postJson("/api/projects/tasks/{$materialsTask->id}/materials/push-to-logistics", []);
 
         $response->assertStatus(422);
-        $response->assertJsonStructure(['errors' => ['element_ids']]);
+        $response->assertJsonStructure(['errors' => ['material_ids']]);
     }
 
-    private function pushAs(EnquiryTask $task, User $actor, array $elementIds)
+    /** @return array{0: EnquiryTask, 1: ProjectElement, 2: TaskMaterialsData} */
+    private function materialsSetup(): array
+    {
+        $enquiry = $this->enquiry(['selected_workflow_tasks' => ['materials', 'logistics']]);
+        $materialsTask = $this->task($enquiry, 'materials');
+        $this->task($enquiry, 'logistics');
+        $data = TaskMaterialsData::create(['enquiry_task_id' => $materialsTask->id, 'project_info' => []]);
+        $element = $this->element($data, 'Backdrop Panel');
+
+        return [$materialsTask, $element, $data];
+    }
+
+    private function pushAs(EnquiryTask $task, User $actor, array $materialIds)
     {
         Sanctum::actingAs($actor);
 
         return $this->postJson("/api/projects/tasks/{$task->id}/materials/push-to-logistics", [
-            'element_ids' => $elementIds,
+            'material_ids' => $materialIds,
         ]);
     }
 
@@ -131,6 +168,18 @@ class MaterialsPushToLogisticsTest extends TestCase
             'element_type' => 'prop',
             'name' => $name,
             'category' => 'production',
+            'is_included' => true,
+            'sort_order' => 0,
+        ], $overrides));
+    }
+
+    private function material(ProjectElement $element, string $description, array $overrides = []): ElementMaterial
+    {
+        return ElementMaterial::create(array_merge([
+            'project_element_id' => $element->id,
+            'description' => $description,
+            'unit_of_measurement' => 'pcs',
+            'quantity' => 1,
             'is_included' => true,
             'sort_order' => 0,
         ], $overrides));
