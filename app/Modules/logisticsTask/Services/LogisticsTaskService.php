@@ -459,17 +459,43 @@ class LogisticsTaskService
     }
 
     /**
-     * Push specific materials elements onto this enquiry's Logistics task's
-     * loading sheet (transport items), triggered from the Materials task's
-     * own element list rather than pulled from the Logistics side. Reuses
+     * Push whole materials elements onto this enquiry's Logistics task's
+     * loading sheet, triggered from the Materials task's own element list
+     * rather than pulled from the Logistics side. Reuses
      * importProductionElements()'s field mapping and dedup-by-source logic
      * so both entry points stay consistent.
      */
     public function pushMaterialsElementsToLogistics(int $materialsTaskId, array $elementIds): array
     {
-        $materialsTask = EnquiryTask::findOrFail($materialsTaskId);
+        return $this->importProductionElements(
+            $this->resolveLogisticsTaskId($materialsTaskId),
+            $elementIds
+        );
+    }
 
-        $logisticsTask = EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
+    /**
+     * Push individual material line-items ("particulars") onto this
+     * enquiry's Logistics task loading sheet — one transport item per
+     * material, each with its own real quantity and unit, rather than one
+     * item per element with materials summarized into a description.
+     */
+    public function pushMaterialParticularsToLogistics(int $materialsTaskId, array $materialIds): array
+    {
+        return $this->importMaterialParticulars(
+            $this->resolveLogisticsTaskId($materialsTaskId),
+            $materialIds
+        );
+    }
+
+    /**
+     * Resolve the enquiry's Logistics task id from any of its sibling
+     * task ids (e.g. the Materials task).
+     */
+    private function resolveLogisticsTaskId(int $siblingTaskId): int
+    {
+        $siblingTask = EnquiryTask::findOrFail($siblingTaskId);
+
+        $logisticsTask = EnquiryTask::where('project_enquiry_id', $siblingTask->project_enquiry_id)
             ->where('type', 'logistics')
             ->first();
 
@@ -477,7 +503,137 @@ class LogisticsTaskService
             throw new \Exception("This project's workflow does not include a Logistics task.");
         }
 
-        return $this->importProductionElements($logisticsTask->id, $elementIds);
+        return $logisticsTask->id;
+    }
+
+    /**
+     * Import specific material line-items (App\Models\ElementMaterial) from
+     * this enquiry's Materials task onto the given Logistics task's loading
+     * sheet — one transport item per material. Scoped strictly to the
+     * enquiry's own materials data, so a material id from another enquiry is
+     * simply excluded, never imported.
+     */
+    public function importMaterialParticulars(int $taskId, array $materialIds): array
+    {
+        return DB::transaction(function () use ($taskId, $materialIds) {
+            try {
+                $task = EnquiryTask::findOrFail($taskId);
+                $enquiryId = $task->project_enquiry_id;
+
+                $materialsTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                    ->where('type', 'materials')
+                    ->first();
+
+                if (!$materialsTask) {
+                    throw new \Exception('Materials task not found for this enquiry.');
+                }
+
+                $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->first();
+
+                if (!$materialsData) {
+                    throw new \Exception('No materials data found. Please complete the Materials Task first.');
+                }
+
+                $materials = \App\Models\ElementMaterial::whereIn('id', $materialIds)
+                    ->whereHas('element', function ($q) use ($materialsData) {
+                        $q->where('task_materials_data_id', $materialsData->id);
+                    })
+                    ->with(['element', 'libraryMaterial'])
+                    ->get();
+
+                if ($materials->isEmpty()) {
+                    throw new \Exception('None of the selected materials could be found on this Materials task.');
+                }
+
+                $includedMaterials = $materials->filter(
+                    fn($material) => $material->is_included && $material->element->is_included
+                );
+
+                if ($includedMaterials->isEmpty()) {
+                    throw new \Exception('The selected material(s) are excluded from this materials list and cannot be pushed. Include them first.');
+                }
+
+                $logisticsTask = LogisticsTask::firstOrCreate(
+                    ['task_id' => $taskId],
+                    [
+                        'project_id' => $this->getProjectIdFromTask($taskId),
+                        'created_by' => auth()->id(),
+                    ]
+                );
+
+                $importedItems = [];
+
+                foreach ($includedMaterials as $material) {
+                    $element = $material->element;
+                    $name = $material->description ?: ($material->libraryMaterial->name ?? 'Unnamed Material');
+
+                    $mainCategory = $element->category === 'hire' ? 'STORES' : 'PRODUCTION';
+                    $sourceKey = 'element_material_' . $material->id;
+
+                    // Loading sheets deal in whole units; a fractional quantity
+                    // rounds up rather than down or to nearest, since under-
+                    // counting what to load is worse than over-counting.
+                    $quantity = max(1, (int) ceil((float) $material->quantity));
+
+                    $payload = [
+                        'name' => $name,
+                        'description' => 'From: ' . $element->name . ($material->notes ? ' — ' . $material->notes : ''),
+                        'quantity' => $quantity,
+                        'unit' => $material->unit_of_measurement ?: 'item',
+                        'category' => 'production',
+                        'main_category' => $mainCategory,
+                        'is_returnable' => true,
+                        'sub_type' => $element->category === 'hire' ? 'hire' : null,
+                        'element_category' => $element->category,
+                        'source' => $sourceKey,
+                    ];
+
+                    try {
+                        $existingItem = $logisticsTask->transportItems()
+                            ->where('source', $sourceKey)
+                            ->first();
+
+                        if ($existingItem) {
+                            $existingItem->update($payload);
+                            $transportItem = $existingItem;
+                        } else {
+                            $transportItem = $logisticsTask->transportItems()->create([
+                                ...$payload,
+                                'created_by' => auth()->id(),
+                            ]);
+                        }
+
+                        $importedItems[] = [
+                            'id' => $transportItem->id,
+                            'name' => $transportItem->name,
+                            'description' => $transportItem->description,
+                            'quantity' => $transportItem->quantity,
+                            'unit' => $transportItem->unit,
+                            'category' => $transportItem->category,
+                            'main_category' => $transportItem->main_category,
+                            'is_returnable' => $transportItem->is_returnable,
+                            'sub_type' => $transportItem->sub_type,
+                            'element_category' => $transportItem->element_category,
+                            'source' => $transportItem->source,
+                        ];
+                    } catch (\Exception $e) {
+                        \Log::error('Failed to create transport item for element material', [
+                            'materialId' => $material->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                        throw $e;
+                    }
+                }
+
+                return $importedItems;
+            } catch (\Exception $e) {
+                \Log::error('Failed to import material particulars to Logistics', [
+                    'taskId' => $taskId,
+                    'error' => $e->getMessage(),
+                ]);
+                throw $e;
+            }
+        });
     }
 
     /**

@@ -41,11 +41,11 @@ class MaterialsController extends Controller
      * Push selected materials elements onto this enquiry's Logistics task
      * loading sheet (transport items).
      */
-    public function pushElementsToLogistics(Request $request, int $taskId): JsonResponse
+    public function pushParticularsToLogistics(Request $request, int $taskId): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'element_ids' => 'required|array|min:1',
-            'element_ids.*' => 'integer',
+            'material_ids' => 'required|array|min:1',
+            'material_ids.*' => 'integer',
         ]);
 
         if ($validator->fails()) {
@@ -56,9 +56,9 @@ class MaterialsController extends Controller
         }
 
         try {
-            $items = $this->logisticsService->pushMaterialsElementsToLogistics(
+            $items = $this->logisticsService->pushMaterialParticularsToLogistics(
                 $taskId,
-                $request->input('element_ids')
+                $request->input('material_ids')
             );
 
             return response()->json([
@@ -67,7 +67,7 @@ class MaterialsController extends Controller
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Failed to push elements to Logistics.',
+                'message' => 'Failed to push materials to Logistics.',
                 'error' => $e->getMessage(),
             ], 422);
         }
