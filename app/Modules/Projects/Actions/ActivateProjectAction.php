@@ -6,12 +6,19 @@ use App\Models\ProjectEnquiry;
 use App\Models\Project;
 use App\Models\User;
 use App\Events\ProjectActivated;
-use App\Models\Notification;
 use App\Constants\EnquiryConstants;
+use App\Modules\Projects\Services\NotificationService;
 use Illuminate\Support\Facades\Log;
 
 class ActivateProjectAction
 {
+    protected NotificationService $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
+
     /**
      * Converts an enquiry into an active Project and handles notifications.
      * This happens either immediately after quote approval (for internal jobs)
@@ -38,10 +45,11 @@ class ActivateProjectAction
         $enquiry->refresh();
         $enquiry->load(['client', 'projectOfficer']);
 
-        // 3. Notify system-wide that a new project is active 
-        // (Wrapped in try-catch to prevent 500 on non-critical messaging)
+        // 3. Notify system-wide that a new project is active.
+        // Global Broadcast Signal — wrapped separately so a broadcast failure
+        // can't also take down the persistent notification below.
         try {
-            $notifPayload = [
+            event(new ProjectActivated([
                 'id' => $enquiry->id,
                 'title' => $enquiry->title,
                 'job_number' => $enquiry->job_number,
@@ -49,31 +57,20 @@ class ActivateProjectAction
                 'venue' => $enquiry->venue ?? 'Venue TBC',
                 'deadline' => $enquiry->expected_delivery_date?->format('d M Y') ?? 'TBC',
                 'project_officer' => $enquiry->projectOfficer?->name ?? 'Unassigned',
-                'activated_by' => $activatedByUser->name
-            ];
-
-            // Global Broadcast Signal
-            event(new ProjectActivated($notifPayload));
-
-            // Record persistent notifications for all users
-            $allUserIds = User::pluck('id');
-            $notifData = [
-                'type' => 'project_activated',
-                'title' => 'New Project Active',
-                'message' => "Project {$enquiry->title} (#{$enquiry->job_number}) is officially live!",
-                'data' => $notifPayload,
-                'notifiable_type' => ProjectEnquiry::class,
-                'notifiable_id' => $enquiry->id,
-            ];
-
-            foreach ($allUserIds as $uId) {
-                Notification::create(array_merge($notifData, ['user_id' => $uId]));
-            }
+                'activated_by' => $activatedByUser->name,
+            ]));
         } catch (\Exception $e) {
-            Log::error('Failed to dispatch project activation notifications', [
+            Log::error('Failed to broadcast project activation event', [
                 'enquiry_id' => $enquiry->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
         }
+
+        // Routes through the central notification engine so channel routing
+        // and per-user preferences (mail/push) are honoured — a direct
+        // Notification::create() loop here would only ever write the
+        // database row, silently skipping mail/push regardless of what the
+        // recipient's preferences say.
+        $this->notificationService->sendProjectActivated($enquiry, $activatedByUser);
     }
 }

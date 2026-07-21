@@ -342,6 +342,42 @@ class NotificationService
     }
 
     /**
+     * Broadcast to every user that an enquiry has converted into an active
+     * project (job number assigned, officially live).
+     */
+    public function sendProjectActivated(ProjectEnquiry $enquiry, User $activatedBy): void
+    {
+        try {
+            $enquiry->loadMissing(['client', 'projectOfficer']);
+
+            CentralNotificationService::send(
+                type: 'project_activated',
+                title: 'New Project Active',
+                message: "Project {$enquiry->title} (#{$enquiry->job_number}) is officially live!",
+                module: 'projects',
+                data: [
+                    'id' => $enquiry->id,
+                    'title' => $enquiry->title,
+                    'job_number' => $enquiry->job_number,
+                    'client_name' => $enquiry->client?->full_name ?? $enquiry->client?->name ?? 'Client TBC',
+                    'venue' => $enquiry->venue ?? 'Venue TBC',
+                    'deadline' => $enquiry->expected_delivery_date?->format('d M Y') ?? 'TBC',
+                    'project_officer' => $enquiry->projectOfficer?->name ?? 'Unassigned',
+                    'activated_by' => $activatedBy->name,
+                ],
+                all: true,
+            );
+
+            Log::info('Project activation notification broadcast', ['enquiry_id' => $enquiry->id]);
+        } catch (\Exception $e) {
+            Log::error('Failed to dispatch project activation notifications', [
+                'enquiry_id' => $enquiry->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Send notification when quote is approved
      * HIGH PRIORITY - Notifies before project conversion
      */

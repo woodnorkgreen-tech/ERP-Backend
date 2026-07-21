@@ -229,6 +229,10 @@ return [
             'module' => 'projects', 'label' => 'Project Activity',
             'default_channels' => ['database'], 'urgency' => 'info',
         ],
+        'project_activated' => [
+            'module' => 'projects', 'label' => 'Project Activated',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
         'task_activity' => [
             'module' => 'universal-task', 'label' => 'Task Activity',
             'default_channels' => ['database'], 'urgency' => 'info',
