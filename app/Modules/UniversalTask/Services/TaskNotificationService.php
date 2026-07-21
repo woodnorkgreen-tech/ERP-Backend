@@ -219,6 +219,7 @@ class TaskNotificationService
         $notificationData = [
             'task_id' => $task->id,
             'task_title' => $task->title,
+            'issue_id' => $issueData['issue_id'] ?? null,
             'issue_type' => $issueType,
             'issue_title' => $issueData['title'] ?? null,
             'issue_severity' => $issueData['severity'] ?? null,
@@ -289,8 +290,16 @@ class TaskNotificationService
      */
     protected function getTaskSupervisors(Task $task): array
     {
-        // TODO: Implement logic to get department managers or supervisors
-        // For now, return empty array
+        if (!$task->department_id) {
+            return [];
+        }
+
+        $department = $task->department()->with('manager.user')->first();
+
+        if ($department && $department->manager && $department->manager->user) {
+            return [$department->manager->user];
+        }
+
         return [];
     }
 
