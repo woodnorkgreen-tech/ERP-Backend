@@ -9,8 +9,8 @@ Artisan::command('inspire', function () {
 
 // Project workflow coordination: escalate overdue task priorities AND send
 // due-soon / overdue notifications. `tasks:check-escalations` is the single
-// source of truth here; it supersedes `tasks:notify-deadlines` (notify-only),
-// which is left runnable on demand but unscheduled to avoid duplicate alerts.
+// source of truth here; it superseded `tasks:notify-deadlines` (notify-only),
+// which was removed 2026-07-21 as a confirmed-dead duplicate.
 \Illuminate\Support\Facades\Schedule::command('tasks:check-escalations')
     ->dailyAt('07:00')
     ->withoutOverlapping();
