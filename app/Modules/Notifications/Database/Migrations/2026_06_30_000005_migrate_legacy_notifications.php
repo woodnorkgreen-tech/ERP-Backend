@@ -12,9 +12,19 @@ return new class extends Migration
             return;
         }
 
-        DB::table('notifications')->orderBy('id')->chunk(200, function ($notifications): void {
+        // Some legacy rows reference a user_id that no longer exists in
+        // `users` (hard-deleted before soft-deletes existed) — inserting
+        // those would violate app_notifications' FK constraint. Skip them;
+        // there's no recipient left to show the notification to anyway, and
+        // the source table is dropped at the end of this migration regardless.
+        $validUserIds = DB::table('users')->pluck('id')->flip();
+
+        DB::table('notifications')->orderBy('id')->chunk(200, function ($notifications) use ($validUserIds): void {
             foreach ($notifications as $notification) {
-                if (!$notification->user_id || DB::table('app_notifications')->where('id', $notification->id)->exists()) {
+                if (!$notification->user_id
+                    || !$validUserIds->has($notification->user_id)
+                    || DB::table('app_notifications')->where('id', $notification->id)->exists()
+                ) {
                     continue;
                 }
 
