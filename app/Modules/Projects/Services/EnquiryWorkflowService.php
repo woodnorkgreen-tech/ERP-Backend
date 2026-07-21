@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\Log;
 use App\Constants\EnquiryConstants;
 use App\Services\Governance\ProjectGovernanceService;
 use App\Modules\Projects\Actions\SyncEnquiryStatusAction;
+use App\Exceptions\GovernanceException;
+use App\Exceptions\WorkflowValidationException;
 
 class EnquiryWorkflowService
 {
@@ -185,7 +187,7 @@ class EnquiryWorkflowService
         if (in_array($status, ['in_progress', 'completed'])) {
             $gateResult = $this->governanceService->evaluateTask($task);
             if (!$gateResult->isAuthorized()) {
-                throw new \Exception($gateResult->getMessage());
+                throw new GovernanceException($gateResult->getMessage(), $gateResult->context);
             }
         }
 
@@ -304,7 +306,7 @@ class EnquiryWorkflowService
             $dueDate = \Carbon\Carbon::parse($assignmentData['due_date']);
             // Allow today and future dates, block only dates before today
             if ($dueDate->isBefore(now()->startOfDay())) {
-                throw new \Exception("Due date cannot be in the past");
+                throw new WorkflowValidationException("Due date cannot be in the past");
             }
         }
     }
@@ -320,11 +322,11 @@ class EnquiryWorkflowService
 
         // Validate reassignment
         if (!$task->assigned_by) {
-            throw new \Exception("Cannot reassign unassigned task");
+            throw new WorkflowValidationException("Cannot reassign unassigned task");
         }
 
         if ($task->assigned_to === $newAssignedUserId) {
-            throw new \Exception("Cannot reassign to the same user");
+            throw new WorkflowValidationException("Cannot reassign to the same user");
         }
 
         // Create reassignment history entry
@@ -366,7 +368,7 @@ class EnquiryWorkflowService
         $task = EnquiryTask::findOrFail($taskId);
         
         if (!$task->assigned_to) {
-            throw new \Exception("Task is already unassigned");
+            throw new WorkflowValidationException("Task is already unassigned");
         }
 
         $previousAssigneeId = $task->assigned_to;
@@ -591,7 +593,7 @@ class EnquiryWorkflowService
                 if ($materialsData) {
                     $status = $materialsData->project_info['approval_status'] ?? [];
                     if (!($status['all_approved'] ?? false)) {
-                        throw new \Exception("Cannot complete Materials task. Both Project Officer and Production approval are required.");
+                        throw new WorkflowValidationException("Cannot complete Materials task. Both Project Officer and Production approval are required.");
                     }
                 }
             }
@@ -604,13 +606,13 @@ class EnquiryWorkflowService
         if ($task->type === 'budget') {
             $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $task->id)->first();
             if (!$budgetData && !$isAdmin) {
-                throw new \Exception("Cannot complete Budget task. Budget data is missing. Please save the budget before completing.");
+                throw new WorkflowValidationException("Cannot complete Budget task. Budget data is missing. Please save the budget before completing.");
             }
 
             $summary = $budgetData?->budget_summary ?? [];
             $grandTotal = (float) ($summary['grandTotal'] ?? $summary['grand_total'] ?? 0);
             if ($budgetData && $grandTotal <= 0 && !$isAdmin) {
-                throw new \Exception("Cannot complete Budget task. The budget has no priced totals yet — add materials, labour, expenses, or logistics first.");
+                throw new WorkflowValidationException("Cannot complete Budget task. The budget has no priced totals yet — add materials, labour, expenses, or logistics first.");
             }
         }
 
@@ -628,11 +630,11 @@ class EnquiryWorkflowService
                 && $quoteData->excel_quote_amount !== null;
 
             if (!$quoteData && !$isAdmin) {
-                throw new \Exception("Cannot complete Quote Preparation task. Quote data is missing. Either prepare the quote in-system or upload an Excel quote.");
+                throw new WorkflowValidationException("Cannot complete Quote Preparation task. Quote data is missing. Either prepare the quote in-system or upload an Excel quote.");
             }
 
             if ($quoteData && !$hasExcelQuote && $quoteData->quote_mode === 'excel_upload' && !$isAdmin) {
-                throw new \Exception("Cannot complete Quote Preparation task. Excel quote upload is incomplete — both a file and a quote amount are required.");
+                throw new WorkflowValidationException("Cannot complete Quote Preparation task. Excel quote upload is incomplete — both a file and a quote amount are required.");
             }
 
             $isApproved = $quoteData
@@ -640,7 +642,7 @@ class EnquiryWorkflowService
 
             if ($quoteData && !$isApproved && !$isAdmin) {
                 $currentStatus = $quoteData->approval_status ?? $quoteData->status ?? 'draft';
-                throw new \Exception("Cannot complete Quote Preparation task. The quote must be approved first (current status: {$currentStatus}).");
+                throw new WorkflowValidationException("Cannot complete Quote Preparation task. The quote must be approved first (current status: {$currentStatus}).");
             }
         }
 
@@ -649,7 +651,7 @@ class EnquiryWorkflowService
             $approval = \DB::table('quote_approvals')->where('task_id', $task->id)->first();
             if (!$approval || $approval->approval_status === 'pending') {
                 if (!$isAdmin) {
-                    throw new \Exception("Cannot complete Quote Approval task. A final decision (Approved/Rejected) is required.");
+                    throw new WorkflowValidationException("Cannot complete Quote Approval task. A final decision (Approved/Rejected) is required.");
                 }
             }
         }
@@ -675,7 +677,7 @@ class EnquiryWorkflowService
             return;
         }
 
-        throw new \Exception(
+        throw new WorkflowValidationException(
             "Cannot complete \"{$task->title}\" yet. Finish the prerequisite task(s) first: {$blockingList}."
         );
     }
