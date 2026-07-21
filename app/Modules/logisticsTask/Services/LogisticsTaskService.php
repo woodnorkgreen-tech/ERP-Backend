@@ -195,9 +195,9 @@ class LogisticsTaskService
     /**
      * Import production elements as transport items (Sourced from Materials Task)
      */
-    public function importProductionElements(int $taskId): array
+    public function importProductionElements(int $taskId, ?array $elementIds = null): array
     {
-        return DB::transaction(function () use ($taskId) {
+        return DB::transaction(function () use ($taskId, $elementIds) {
             try {
                 // Get the enquiry task to find project
                 $task = EnquiryTask::findOrFail($taskId);
@@ -237,8 +237,29 @@ class LogisticsTaskService
                 }
 
                 $elements = $materialsData->elements; // ProjectElements
+
+                // A caller-supplied selection restricts import to those specific
+                // elements (used by the "push to logistics" action from the
+                // Materials task) instead of the default "import everything
+                // included" behaviour. Filtering against $materialsData->elements
+                // — already scoped to this enquiry's own materials data — means
+                // an id belonging to another enquiry is simply excluded here,
+                // never imported.
+                if ($elementIds !== null) {
+                    $elements = $elements->whereIn('id', $elementIds);
+                    if ($elements->isEmpty()) {
+                        throw new \Exception('None of the selected elements could be found on this Materials task.');
+                    }
+                    // The loop below silently skips excluded elements — fail loudly
+                    // here instead, since a user who explicitly selected an element
+                    // and got nothing pushed needs to know why, not a quiet no-op.
+                    if ($elements->where('is_included', true)->isEmpty()) {
+                        throw new \Exception('The selected element(s) are excluded from this materials list and cannot be pushed. Include them first.');
+                    }
+                }
+
                 $elementCount = $elements->count();
-                
+
                 \Log::info('Found materials data', [
                     'materialsDataId' => $materialsData->id,
                     'elementCount' => $elementCount
@@ -385,7 +406,9 @@ class LogisticsTaskService
                 ]);
 
                 // --- Part 2: Import from Project Enquiry Deliverables ---
-                $scopeItems = $task->enquiry ? ($task->enquiry->project_scope ?? []) : [];
+                // Skipped for an explicit selection: the caller asked for specific
+                // materials elements, not the enquiry's whole deliverables list.
+                $scopeItems = ($elementIds === null && $task->enquiry) ? ($task->enquiry->project_scope ?? []) : [];
                 foreach ($scopeItems as $deliverable) {
                     $name = $deliverable['name'] ?? null;
                     if (!$name) continue;
@@ -433,6 +456,28 @@ class LogisticsTaskService
                 throw $e;
             }
         });
+    }
+
+    /**
+     * Push specific materials elements onto this enquiry's Logistics task's
+     * loading sheet (transport items), triggered from the Materials task's
+     * own element list rather than pulled from the Logistics side. Reuses
+     * importProductionElements()'s field mapping and dedup-by-source logic
+     * so both entry points stay consistent.
+     */
+    public function pushMaterialsElementsToLogistics(int $materialsTaskId, array $elementIds): array
+    {
+        $materialsTask = EnquiryTask::findOrFail($materialsTaskId);
+
+        $logisticsTask = EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
+            ->where('type', 'logistics')
+            ->first();
+
+        if (!$logisticsTask) {
+            throw new \Exception("This project's workflow does not include a Logistics task.");
+        }
+
+        return $this->importProductionElements($logisticsTask->id, $elementIds);
     }
 
     /**

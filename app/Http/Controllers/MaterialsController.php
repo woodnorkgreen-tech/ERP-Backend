@@ -27,10 +27,50 @@ use Barryvdh\DomPDF\Facade\Pdf;
 class MaterialsController extends Controller
 {
     protected $procurementService;
+    protected \App\Modules\logisticsTask\Services\LogisticsTaskService $logisticsService;
 
-    public function __construct(\App\Services\ProcurementService $procurementService)
-    {
+    public function __construct(
+        \App\Services\ProcurementService $procurementService,
+        \App\Modules\logisticsTask\Services\LogisticsTaskService $logisticsService
+    ) {
         $this->procurementService = $procurementService;
+        $this->logisticsService = $logisticsService;
+    }
+
+    /**
+     * Push selected materials elements onto this enquiry's Logistics task
+     * loading sheet (transport items).
+     */
+    public function pushElementsToLogistics(Request $request, int $taskId): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'element_ids' => 'required|array|min:1',
+            'element_ids.*' => 'integer',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $items = $this->logisticsService->pushMaterialsElementsToLogistics(
+                $taskId,
+                $request->input('element_ids')
+            );
+
+            return response()->json([
+                'message' => count($items) . ' item(s) pushed to the Logistics loading sheet.',
+                'data' => $items,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to push elements to Logistics.',
+                'error' => $e->getMessage(),
+            ], 422);
+        }
     }
 
     /**
