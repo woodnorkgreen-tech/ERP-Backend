@@ -174,14 +174,27 @@ class TaskController extends Controller
 
             $tasks = $query->orderBy('task_order', 'asc')->get(); // Order by sequence for clear workflow
 
+            // Design-gate status only depends on the enquiry's single design task, not on
+            // which materials task is being enriched below — compute it once per request
+            // instead of re-querying it inside the per-task loop.
+            $designTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
+                ->where('type', 'design')
+                ->first();
+            $isDesignGated = $designTask
+                ? !DesignAsset::where('enquiry_task_id', $designTask->id)->where('status', 'approved')->exists()
+                : false;
+            $designGateMessage = $isDesignGated
+                ? 'Materials approval is locked until the Design Task has approved assets.'
+                : '';
+
             // Enrich material tasks with approval status
-            $tasks->each(function ($task) {
+            $tasks->each(function ($task) use ($isDesignGated, $designGateMessage) {
                 if ($task->type === 'materials') {
                     $materialsData = $task->materialsData;
-                    
+
                     if ($materialsData) {
                         $approvalStatus = $materialsData->project_info['approval_status'] ?? [];
-                        
+
                         // Count approvals
                         $totalApprovals = 0;
                         $departments = ['design', 'production', 'finance'];
@@ -190,33 +203,13 @@ class TaskController extends Controller
                                 $totalApprovals++;
                             }
                         }
-                        
+
                         // Get counts
                         $elementCount = $materialsData->elements()->count();
-                        $materialCount = \App\Models\ElementMaterial::whereIn(
-                            'project_element_id', 
-                            $materialsData->elements()->pluck('id')
-                        )->count();
+                        $materialCount = \App\Models\ElementMaterial::whereHas('element', function ($q) use ($materialsData) {
+                            $q->where('task_materials_data_id', $materialsData->id);
+                        })->count();
 
-                        // Check Design Gate
-                        $isGated = false;
-                        $gateMessage = '';
-                        
-                        $designTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
-                            ->where('type', 'design')
-                            ->first();
-
-                        if ($designTask) {
-                            $hasApprovedAssets = DesignAsset::where('enquiry_task_id', $designTask->id)
-                                ->where('status', 'approved')
-                                ->exists();
-                            
-                            if (!$hasApprovedAssets) {
-                                $isGated = true;
-                                $gateMessage = 'Materials approval is locked until the Design Task has approved assets.';
-                            }
-                        }
-                        
                         $task->material_approval = [
                             'needs_approval' => !($approvalStatus['all_approved'] ?? false),
                             'approved_count' => $totalApprovals,
@@ -224,8 +217,8 @@ class TaskController extends Controller
                             'all_approved' => $approvalStatus['all_approved'] ?? false,
                             'element_count' => $elementCount,
                             'material_count' => $materialCount,
-                            'is_gated' => $isGated,
-                            'gate_message' => $gateMessage,
+                            'is_gated' => $isDesignGated,
+                            'gate_message' => $designGateMessage,
                             'departments' => [
                                 'design' => $approvalStatus['design']['approved'] ?? false,
                                 'production' => $approvalStatus['production']['approved'] ?? false,
