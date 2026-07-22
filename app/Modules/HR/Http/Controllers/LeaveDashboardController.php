@@ -37,4 +37,14 @@ class LeaveDashboardController extends Controller
             ),
         ]);
     }
+
+    public function holidays(Request $request): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->leaveService->getHolidaysForYear(
+                $request->integer('year') ?: now()->year,
+            ),
+        ]);
+    }
 }
