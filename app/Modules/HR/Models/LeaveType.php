@@ -34,4 +34,9 @@ class LeaveType extends Model
     {
         return $this->hasMany(LeaveRequest::class);
     }
+
+    public function balanceAdjustments(): HasMany
+    {
+        return $this->hasMany(LeaveBalanceAdjustment::class);
+    }
 }

@@ -946,33 +946,58 @@ class LeaveRequestController extends Controller
         $validated = $request->validate([
             'employee_id' => ['required', 'integer', 'exists:employees,id'],
             'leave_type_id' => ['required', 'integer', 'exists:leave_types,id'],
-            'adjustment_days' => ['required', 'numeric', 'min:-365', 'max:365'],
+            'days' => ['required', 'numeric', 'min:-365', 'max:365', 'not_in:0'],
+            'year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'reason' => ['required', 'string', 'max:500'],
         ]);
 
         $employee = Employee::findOrFail($validated['employee_id']);
         $leaveType = LeaveType::findOrFail($validated['leave_type_id']);
-        $year = now()->year;
 
-        // Create a special leave request for adjustment
-        $adjustment = LeaveRequest::create([
-            'employee_id' => $employee->id,
-            'leave_type_id' => $leaveType->id,
-            'created_by' => $user->id,
-            'start_date' => now()->toDateString(),
-            'end_date' => now()->toDateString(),
-            'days_requested' => abs($validated['adjustment_days']),
-            'session' => 'full_day',
-            'status' => LeaveRequest::STATUS_APPROVED,
-            'reason' => 'Balance adjustment: ' . $validated['reason'],
-            'approved_by' => $user->id,
-            'approved_at' => now(),
-        ]);
+        $adjustment = $this->leaveService->adjustBalance(
+            $employee,
+            $leaveType,
+            (float) $validated['days'],
+            $validated['reason'],
+            $user,
+            (int) $validated['year']
+        );
 
         return response()->json([
             'success' => true,
             'message' => 'Leave balance adjusted successfully.',
-            'data' => $adjustment->load(['employee.department', 'leaveType']),
+            'data' => $adjustment->load(['employee.department', 'leaveType', 'creator']),
+        ], 201);
+    }
+
+    public function balanceAdjustments(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'employee_id' => ['required', 'integer', 'exists:employees,id'],
+            'leave_type_id' => ['nullable', 'integer', 'exists:leave_types,id'],
+            'year' => ['nullable', 'integer'],
+        ]);
+
+        $employee = Employee::findOrFail($validated['employee_id']);
+
+        if (!$this->leaveService->canManage($user) && (int) $user->employee_id !== $employee->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Forbidden.',
+            ], 403);
+        }
+
+        $adjustments = $this->leaveService->getBalanceAdjustments(
+            $employee,
+            $validated['leave_type_id'] ?? null,
+            $validated['year'] ?? null
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $adjustments,
         ]);
     }
 

@@ -212,6 +212,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('statistics', [LeaveRequestController::class, 'statistics']);
             Route::post('adjust-balance', [LeaveRequestController::class, 'adjustBalance'])
                 ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
+            Route::get('balance-adjustments', [LeaveRequestController::class, 'balanceAdjustments']);
 
             // Leave handovers
             Route::get('handovers', [LeaveHandoverController::class, 'index']);
