@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\HR\Models\Employee;
+use App\Modules\HR\Models\LeaveBalanceAdjustment;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Models\LeaveType;
 use Carbon\Carbon;
@@ -277,13 +278,14 @@ class LeaveManagementService
                 ]);
                 $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year);
                 $carryForwardDays = $this->calculateCarryForwardDays($employee, $leaveType, $year);
-                
+                $adjustmentDays = $this->sumAdjustmentDays($employee->id, $leaveType->id, $year);
+
                 $totalAvailable = $metrics['earned_days'] + $carryForwardDays;
-                // Available is the employee's actual balance after approved leave.
+                // Available is the employee's actual balance after approved leave and manual adjustments.
                 // Pending requests are shown separately and only reserve requestable days.
-                $accruedRemaining = max($totalAvailable - $usedDays, 0);
+                $accruedRemaining = max($totalAvailable - $usedDays - $adjustmentDays, 0);
                 $requestableDays = $leaveType->allow_advance
-                    ? max($metrics['year_entitlement_days'] + $carryForwardDays - ($usedDays + $pendingDays), 0)
+                    ? max($metrics['year_entitlement_days'] + $carryForwardDays - ($usedDays + $adjustmentDays + $pendingDays), 0)
                     : max($accruedRemaining - $pendingDays, 0);
                 $advanceAvailableDays = $leaveType->allow_advance
                     ? max($requestableDays - $accruedRemaining, 0)
@@ -300,6 +302,7 @@ class LeaveManagementService
                     'carry_forward_days' => $carryForwardDays,
                     'used_days' => $usedDays,
                     'pending_days' => $pendingDays,
+                    'adjustment_days' => $adjustmentDays,
                     'available_days' => $accruedRemaining,
                     'requestable_days' => $requestableDays,
                     'advance_available_days' => $advanceAvailableDays,
@@ -425,9 +428,10 @@ class LeaveManagementService
 
         $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year, $asOfDate);
         $carryForwardDays = $this->calculateCarryForwardDays($employee, $leaveType, $year);
+        $adjustmentDays = $this->sumAdjustmentDays($employee->id, $leaveType->id, $year);
         $remaining = $leaveType->allow_advance
-            ? ($metrics['year_entitlement_days'] + $carryForwardDays) - ($approved + $pending)
-            : ($metrics['earned_days'] + $carryForwardDays) - ($approved + $pending);
+            ? ($metrics['year_entitlement_days'] + $carryForwardDays) - ($approved + $pending + $adjustmentDays)
+            : ($metrics['earned_days'] + $carryForwardDays) - ($approved + $pending + $adjustmentDays);
 
         if ($daysRequested > $remaining) {
             throw new \InvalidArgumentException(sprintf(
@@ -585,6 +589,15 @@ class LeaveManagementService
         return (float) $query->sum('days_requested');
     }
 
+    protected function sumAdjustmentDays(int $employeeId, int $leaveTypeId, int $year): float
+    {
+        return (float) LeaveBalanceAdjustment::query()
+            ->where('employee_id', $employeeId)
+            ->where('leave_type_id', $leaveTypeId)
+            ->where('year', $year)
+            ->sum('days');
+    }
+
     public function calculateCarryForwardDays(Employee $employee, LeaveType $leaveType, int $year): float
     {
         // Only calculate carry-forward for leave types with monthly accrual
@@ -596,8 +609,9 @@ class LeaveManagementService
         
         // Get metrics for the previous year
         $previousYearMetrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $previousYear);
-        $previousYearUsed = $this->sumRequestedDays($employee->id, $leaveType->id, $previousYear, [LeaveRequest::STATUS_APPROVED, LeaveRequest::STATUS_RECALLED]);
-        
+        $previousYearUsed = $this->sumRequestedDays($employee->id, $leaveType->id, $previousYear, [LeaveRequest::STATUS_APPROVED, LeaveRequest::STATUS_RECALLED])
+            + $this->sumAdjustmentDays($employee->id, $leaveType->id, $previousYear);
+
         $unusedPreviousYear = $previousYearMetrics['earned_days'] - $previousYearUsed;
         
         // Maximum carry-forward allowed (typically cannot carry more than annual entitlement)
@@ -643,6 +657,39 @@ class LeaveManagementService
             'previous_available_days' => $currentAvailableDays,
             'new_available_days' => $newAvailableDays,
         ]);
+    }
+
+    /**
+     * Record a manual leave balance correction. Positive $days debits the balance
+     * (e.g. leave already taken outside the system); negative $days credits it back.
+     */
+    public function adjustBalance(
+        Employee $employee,
+        LeaveType $leaveType,
+        float $days,
+        string $reason,
+        User $actor,
+        int $year
+    ): LeaveBalanceAdjustment {
+        return LeaveBalanceAdjustment::create([
+            'employee_id' => $employee->id,
+            'leave_type_id' => $leaveType->id,
+            'year' => $year,
+            'days' => $days,
+            'reason' => $reason,
+            'created_by' => $actor->id,
+        ]);
+    }
+
+    public function getBalanceAdjustments(Employee $employee, ?int $leaveTypeId = null, ?int $year = null): Collection
+    {
+        return LeaveBalanceAdjustment::query()
+            ->where('employee_id', $employee->id)
+            ->when($leaveTypeId, fn (Builder $query) => $query->where('leave_type_id', $leaveTypeId))
+            ->when($year, fn (Builder $query) => $query->where('year', $year))
+            ->with(['leaveType:id,name,code,color', 'creator:id,name'])
+            ->latest()
+            ->get();
     }
 
     /**

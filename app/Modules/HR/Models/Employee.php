@@ -135,6 +135,14 @@ class Employee extends Model
     }
 
     /**
+     * Get manual leave balance adjustments recorded for this employee.
+     */
+    public function leaveBalanceAdjustments(): HasMany
+    {
+        return $this->hasMany(LeaveBalanceAdjustment::class);
+    }
+
+    /**
      * Get the full name of the employee.
      */
     public function getNameAttribute(): string
