@@ -6,13 +6,14 @@ use App\Models\Project;
 use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\HR\Models\Employee;
-use App\Modules\HR\Models\LeaveBalanceAdjustment;
+use App\Modules\HR\Models\AttendanceHoliday;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Models\LeaveType;
 use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 class LeaveManagementService
 {
@@ -185,7 +186,7 @@ class LeaveManagementService
         return null;
     }
 
-    public function calculateBusinessDays(string|Carbon $startDate, string|Carbon $endDate, string $session = 'full_day'): float
+    public function calculateBusinessDays(string|Carbon $startDate, string|Carbon $endDate, string $session = 'full_day', ?LeaveType $leaveType = null): float
     {
         $start = $startDate instanceof Carbon ? $startDate->copy()->startOfDay() : Carbon::parse($startDate)->startOfDay();
         $end = $endDate instanceof Carbon ? $endDate->copy()->startOfDay() : Carbon::parse($endDate)->startOfDay();
@@ -198,11 +199,18 @@ class LeaveManagementService
             throw new \InvalidArgumentException('Half-day leave can only be requested for a single date.');
         }
 
+        if ($this->usesCalendarDays($leaveType)) {
+            $days = $start->diffInDays($end) + 1;
+
+            return $session !== 'full_day' ? 0.5 : (float) $days;
+        }
+
+        $holidays = $this->holidayDateLookup($start, $end);
         $days = 0;
         $cursor = $start->copy();
 
         while ($cursor->lte($end)) {
-            if (!$cursor->isSunday()) {
+            if (!$cursor->isSunday() && !$holidays->has($cursor->toDateString())) {
                 $days++;
             }
 
@@ -224,9 +232,58 @@ class LeaveManagementService
 
         do {
             $resumptionDate->addDay();
-        } while ($resumptionDate->isSunday());
+        } while ($resumptionDate->isSunday() || $this->isHoliday($resumptionDate));
 
         return $resumptionDate;
+    }
+
+    public function usesCalendarDays(?LeaveType $leaveType): bool
+    {
+        return in_array($leaveType?->code, ['MATERNITY', 'PATERNITY'], true);
+    }
+
+    public function getHolidaysForYear(int $year): Collection
+    {
+        if (!Schema::hasTable('attendance_holidays')) {
+            return collect();
+        }
+
+        return AttendanceHoliday::query()
+            ->whereYear('date', $year)
+            ->where('is_active', true)
+            ->orderBy('date')
+            ->get(['id', 'date', 'name'])
+            ->map(fn (AttendanceHoliday $holiday) => [
+                'id' => $holiday->id,
+                'date' => $holiday->date->toDateString(),
+                'name' => $holiday->name,
+            ])
+            ->values();
+    }
+
+    protected function holidayDateLookup(Carbon $start, Carbon $end): Collection
+    {
+        if (!Schema::hasTable('attendance_holidays')) {
+            return collect();
+        }
+
+        return AttendanceHoliday::query()
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->where('is_active', true)
+            ->get(['date', 'name'])
+            ->mapWithKeys(fn (AttendanceHoliday $holiday) => [$holiday->date->toDateString() => $holiday->name]);
+    }
+
+    protected function isHoliday(Carbon $date): bool
+    {
+        if (!Schema::hasTable('attendance_holidays')) {
+            return false;
+        }
+
+        return AttendanceHoliday::query()
+            ->whereDate('date', $date->toDateString())
+            ->where('is_active', true)
+            ->exists();
     }
 
     public function validateDateRange(string $startDate, string $endDate): void
@@ -335,6 +392,7 @@ class LeaveManagementService
             'pending_requests_count' => LeaveRequest::query()->where('status', LeaveRequest::STATUS_PENDING)->count(),
             'leave_types' => $this->getRequestableLeaveTypes(),
             'contact_employees' => $this->getContactEmployees($user),
+            'holidays' => $this->getHolidaysForYear($year),
         ];
     }
 

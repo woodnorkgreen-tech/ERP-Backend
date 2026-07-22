@@ -165,6 +165,7 @@ class LeaveRequestController extends Controller
             'reason' => ['required', 'string'],
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
+            'has_handover' => ['nullable', 'boolean'],
             'attachment' => $leaveType && $this->leaveTypeRequiresAttachment($leaveType)
                 ? ['required', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048']
                 : ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
@@ -173,6 +174,7 @@ class LeaveRequestController extends Controller
         $employee = $this->resolveTargetEmployee($user, $validated['employee_id'] ?? null);
         $leaveType = LeaveType::query()->whereKey($validated['leave_type_id'])->firstOrFail();
         $this->ensureContactEmployeeIsDifferent($employee->id, $validated['contact_employee_id'] ?? null);
+        $this->ensureNoHandoverReasonIsPresent($validated);
 
         try {
             $this->leaveService->validateDateRange($validated['start_date'], $validated['end_date']);
@@ -190,7 +192,8 @@ class LeaveRequestController extends Controller
         $daysRequested = $this->leaveService->calculateBusinessDays(
             $validated['start_date'],
             $validated['end_date'],
-            $validated['session']
+            $validated['session'],
+            $leaveType
         );
         
         try {
@@ -274,7 +277,8 @@ class LeaveRequestController extends Controller
             $daysRequested = $this->leaveService->calculateBusinessDays(
                 $validated['start_date'],
                 $validated['end_date'],
-                $validated['session']
+                $validated['session'],
+                $leaveType
             );
         } catch (\InvalidArgumentException $exception) {
             return response()->json([
@@ -324,9 +328,11 @@ class LeaveRequestController extends Controller
                     'requestable_days' => max($requestableBefore - $daysRequested, 0),
                 ],
                 'working_days_policy' => [
-                    'saturday_is_working_day' => true,
-                    'sunday_is_working_day' => false,
-                    'excluded_weekdays' => ['sunday'],
+                    'leave_day_basis' => $this->leaveService->usesCalendarDays($leaveType) ? 'calendar_days' : 'working_days',
+                    'saturday_is_working_day' => !$this->leaveService->usesCalendarDays($leaveType),
+                    'sunday_is_working_day' => $this->leaveService->usesCalendarDays($leaveType),
+                    'excluded_weekdays' => $this->leaveService->usesCalendarDays($leaveType) ? [] : ['sunday'],
+                    'excludes_public_holidays' => !$this->leaveService->usesCalendarDays($leaveType),
                 ],
             ],
         ]);
@@ -354,6 +360,7 @@ class LeaveRequestController extends Controller
             'reason' => ['sometimes', 'required', 'string'],
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
+            'has_handover' => ['nullable', 'boolean'],
             'attachment' => ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
             'review_notes' => ['nullable', 'string'],
             'status' => ['sometimes', Rule::in([
@@ -393,11 +400,12 @@ class LeaveRequestController extends Controller
             ? LeaveType::findOrFail($validated['leave_type_id'])
             : $leaveRequest->leaveType;
         $this->ensureContactEmployeeIsDifferent($leaveRequest->employee_id, $validated['contact_employee_id'] ?? $leaveRequest->contact_employee_id);
+        $this->ensureNoHandoverReasonIsPresent($validated);
 
         $this->leaveService->validateDateRange($startDate, $endDate);
         $this->leaveService->ensureNoOverlap($leaveRequest->employee, $startDate, $endDate, $leaveRequest->id);
 
-        $daysRequested = $this->leaveService->calculateBusinessDays($startDate, $endDate, $session);
+        $daysRequested = $this->leaveService->calculateBusinessDays($startDate, $endDate, $session, $leaveType);
         $this->leaveService->ensureBalanceAvailable(
             $leaveRequest->employee,
             $leaveType,
@@ -418,7 +426,7 @@ class LeaveRequestController extends Controller
         }
 
         // Handle file upload
-        $updateData = array_merge($validated, $statusAttributes, [
+        $updateData = array_merge(Arr::except($validated, ['attachment', 'has_handover']), $statusAttributes, [
             'days_requested' => $daysRequested,
             'start_date' => $startDate,
             'end_date' => $endDate,
@@ -688,6 +696,13 @@ class LeaveRequestController extends Controller
     {
         if ($contactEmployeeId !== null && $employeeId === $contactEmployeeId) {
             abort(422, 'Contact during leave must be a different employee.');
+        }
+    }
+
+    protected function ensureNoHandoverReasonIsPresent(array $validated): void
+    {
+        if (array_key_exists('has_handover', $validated) && !((bool) $validated['has_handover']) && blank($validated['handover_notes'] ?? null)) {
+            abort(422, 'Please explain why no handover is needed for this leave request.');
         }
     }
 

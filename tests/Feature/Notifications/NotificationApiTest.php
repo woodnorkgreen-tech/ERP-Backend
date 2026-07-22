@@ -505,6 +505,17 @@ class NotificationApiTest extends TestCase
         ]);
         $people->update(['manager_id' => $peopleLead->id]);
 
+        $directManager = Employee::query()->create([
+            'employee_id' => 'EMP-DIRECT-MGR',
+            'first_name' => 'Direct',
+            'last_name' => 'Manager',
+            'email' => 'direct-manager@test.local',
+            'department_id' => $people->id,
+            'position' => 'Line Manager',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+        ]);
+
         $applicant = Employee::query()->create([
             'employee_id' => 'EMP-APP',
             'first_name' => 'Leave',
@@ -514,7 +525,7 @@ class NotificationApiTest extends TestCase
             'position' => 'Officer',
             'hire_date' => now()->toDateString(),
             'status' => 'active',
-            'manager_id' => $peopleLead->id,
+            'manager_id' => $directManager->id,
         ]);
 
         $storesLead = Employee::query()->create([
@@ -542,6 +553,8 @@ class NotificationApiTest extends TestCase
 
         $peopleLeadUser = User::factory()->create(['is_active' => true, 'employee_id' => $peopleLead->id]);
         $peopleLeadUser->assignRole('Manager');
+        $directManagerUser = User::factory()->create(['is_active' => true, 'employee_id' => $directManager->id]);
+        $directManagerUser->assignRole('Manager');
         $storesLeadUser = User::factory()->create(['is_active' => true, 'employee_id' => $storesLead->id]);
         $storesLeadUser->assignRole(['Manager', 'Stores']);
         $hrUser = User::factory()->create(['is_active' => true, 'employee_id' => $hrEmployee->id]);
@@ -569,6 +582,10 @@ class NotificationApiTest extends TestCase
 
         $this->assertDatabaseHas('app_notifications', [
             'user_id' => $peopleLeadUser->id,
+            'type' => 'leave_request_submitted',
+        ]);
+        $this->assertDatabaseHas('app_notifications', [
+            'user_id' => $directManagerUser->id,
             'type' => 'leave_request_submitted',
         ]);
         $this->assertDatabaseHas('app_notifications', [

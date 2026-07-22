@@ -17,6 +17,18 @@ return [
 
     // Moon-sighting holidays may be gazetted after general calendars publish.
     'kenya_holiday_overrides' => [
+        2025 => [
+            [
+                'date' => '2025-03-31',
+                'name' => 'Idd-ul-Fitr',
+                'source_reference' => 'Kenya Gazette Special Issue, 28 March 2025',
+            ],
+            [
+                'date' => '2025-06-06',
+                'name' => 'Idd-ul-Azha',
+                'source_reference' => 'Kenya Gazette Special Issue, 4 June 2025',
+            ],
+        ],
         2026 => [
             [
                 'date' => '2026-03-20',
@@ -27,6 +39,18 @@ return [
                 'date' => '2026-05-27',
                 'name' => 'Idd-ul-Azha',
                 'source_reference' => 'Kenya Gazette Special Issue, 26 May 2026',
+            ],
+        ],
+        2027 => [
+            [
+                'date' => '2027-03-10',
+                'name' => 'Idd-ul-Fitr',
+                'source_reference' => 'Tentative Muslim calendar date pending Kenya Gazette declaration',
+            ],
+            [
+                'date' => '2027-05-17',
+                'name' => 'Idd-ul-Azha',
+                'source_reference' => 'Tentative Muslim calendar date pending Kenya Gazette declaration',
             ],
         ],
     ],

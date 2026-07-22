@@ -184,6 +184,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             // Dashboard
             Route::get('dashboard', [LeaveDashboardController::class, 'show']);
             Route::get('projects', [LeaveDashboardController::class, 'projects']);
+            Route::get('holidays', [LeaveDashboardController::class, 'holidays']);
 
             // Leave types
             Route::get('types', [LeaveTypeController::class, 'index']);
