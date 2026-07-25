@@ -466,7 +466,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     });
 
     // Quote management routes
-    Route::prefix('projects/tasks/{taskId}/quote')->group(function () {
+    Route::prefix('projects/tasks/{taskId}/quote')->middleware('quote.access:quote')->group(function () {
         Route::get('/', [App\Http\Controllers\QuoteController::class, 'getQuoteData']);
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'saveQuoteData']);
         Route::post('/import-budget', [App\Http\Controllers\QuoteController::class, 'importBudgetData']);
@@ -496,7 +496,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     });
 
     // Quote approval routes
-    Route::prefix('projects/tasks/{taskId}/approval')->group(function () {
+    Route::prefix('projects/tasks/{taskId}/approval')->middleware('quote.access:quote_approval')->group(function () {
         Route::get('/', [App\Http\Controllers\QuoteController::class, 'getApprovalData']);
         Route::post('/', [App\Http\Controllers\QuoteController::class, 'saveApproval']);
     });
@@ -684,14 +684,17 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::put('enquiries/{enquiry}/deliverables', [EnquiryController::class, 'updateDeliverables']);
-        Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote']);
+        Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote'])
+            ->middleware('quote.access');
         Route::get('enquiries/{enquiry}/workflow-state', [EnquiryController::class, 'workflowState']);
-        Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
-        Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
-        Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
-        Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
-        Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);
-        Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
+        Route::middleware('quote.access')->group(function () {
+            Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
+            Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
+            Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
+            Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
+            Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);
+            Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
+        });
         Route::get('enquiries/{enquiry}/completion-readiness', [EnquiryController::class, 'completionReadiness']);
         Route::post('enquiries/{enquiry}/complete', [EnquiryController::class, 'completeProject']);
         Route::get('enquiries/{enquiry}/closure-readiness', [EnquiryController::class, 'closureReadiness']);

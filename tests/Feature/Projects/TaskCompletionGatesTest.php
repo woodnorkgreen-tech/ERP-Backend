@@ -321,6 +321,30 @@ class TaskCompletionGatesTest extends TestCase
         $this->completeAs($task, $this->user('Super Admin'))->assertOk();
     }
 
+    public function test_quote_tasks_are_restricted_to_finance_costing_and_project_manager_roles(): void
+    {
+        $enquiry = $this->enquiry();
+        $quote = $this->task($enquiry, 'quote');
+        $approval = $this->task($enquiry, 'quote_approval');
+
+        foreach (['Super Admin', 'Project Manager', 'Costing', 'Accounts', 'Finance'] as $role) {
+            $actor = $this->user($role);
+            $this->assertTrue($quote->isUserAuthorized($actor), $role.' should access quote preparation.');
+            $this->assertTrue($approval->isUserAuthorized($actor), $role.' should access quote approval.');
+        }
+
+        foreach (['Admin', 'Project Officer', 'Designer'] as $role) {
+            $actor = $this->user($role);
+            $this->assertFalse($quote->isUserAuthorized($actor), $role.' must not access quote preparation.');
+            $this->assertFalse($approval->isUserAuthorized($actor), $role.' must not access quote approval.');
+        }
+
+        $designer = $this->user('Designer');
+        Sanctum::actingAs($designer);
+        $this->getJson("/api/projects/tasks/{$quote->id}/quote")->assertForbidden();
+        $this->getJson("/api/projects/tasks/{$approval->id}/approval")->assertForbidden();
+    }
+
     private function completeAs(EnquiryTask $task, User $actor)
     {
         Sanctum::actingAs($actor);

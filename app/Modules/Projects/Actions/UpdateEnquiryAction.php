@@ -119,7 +119,6 @@ class UpdateEnquiryAction
             'site_survey_skip_reason' => 'nullable|string|required_if:site_survey_skipped,true',
             'selected_workflow_tasks' => 'nullable|array',
             'workflow_preset_type' => 'nullable|string',
-            'client_approved_quote' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -183,7 +182,6 @@ class UpdateEnquiryAction
                 'site_survey_skip_reason',
                 'selected_workflow_tasks',
                 'workflow_preset_type',
-                'client_approved_quote',
             ]));
 
             if ($request->has('status')) {

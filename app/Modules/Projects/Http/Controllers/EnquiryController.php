@@ -15,6 +15,7 @@ use App\Constants\EnquiryConstants;
 use App\Modules\Projects\Services\NotificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use App\Modules\Projects\Services\FinanceService;
 use App\Modules\Projects\Actions\ApproveQuoteAction;
 use App\Modules\Projects\Actions\ReleaseFinanceGateAction;
@@ -158,7 +159,8 @@ class EnquiryController extends Controller
             'enquiryTasks.assignedTo',
             'enquiryTasks.quoteData',
             'deliverables',
-            'payments'
+            'payments',
+            'quoteApprovals'
         );
 
         $query = app(\Illuminate\Pipeline\Pipeline::class)
@@ -1020,52 +1022,98 @@ class EnquiryController extends Controller
     /**
      * Log a new payment against an enquiry
      */
-    public function logPayment(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    public function logPayment(
+        Request $request,
+        ProjectEnquiry $enquiry,
+        ReleaseFinanceGateAction $releaseAction
+    ): JsonResponse
     {
         $validated = $request->validate([
-            'amount' => 'required|numeric|min:0',
+            'amount' => 'required|numeric|gt:0',
             'payment_date' => 'nullable|date',
-            'payment_method' => 'nullable|string',
-            'transaction_reference' => 'nullable|string',
-            'notes' => 'nullable|string',
+            'payment_method' => 'required|in:bank_transfer,mpesa,cash,cheque',
+            'transaction_reference' => [
+                'nullable',
+                'string',
+                'max:100',
+                Rule::unique('enquiry_payments', 'transaction_reference')
+                    ->where(fn ($query) => $query->where('project_enquiry_id', $enquiry->id)),
+            ],
+            'notes' => 'nullable|string|max:1000',
         ]);
 
         try {
             $payment = $this->financeService->logPayment($enquiry, $validated);
+            $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
+            $autoReleased = false;
+
+            if ($progress['is_threshold_met'] && !$enquiry->finance_released) {
+                $releaseAction->execute($enquiry->fresh(), Auth::id());
+                $autoReleased = true;
+                $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
+            }
 
             return response()->json([
-                'message' => 'Payment logged successfully',
+                'message' => $autoReleased
+                    ? 'Payment recorded and project released automatically.'
+                    : 'Payment recorded successfully.',
                 'data' => $payment->load('recorder'),
-                'progress' => $this->financeService->getPaymentProgress($enquiry)
+                'progress' => $progress,
+                'auto_released' => $autoReleased,
             ]);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Failed to log payment: ' . $e->getMessage()], 500);
+            return response()->json(['message' => 'Failed to log payment.'], 500);
         }
     }
 
     /**
      * Update an existing payment
      */
-    public function updatePayment(Request $request, ProjectEnquiry $enquiry, $paymentId): JsonResponse
+    public function updatePayment(
+        Request $request,
+        ProjectEnquiry $enquiry,
+        $paymentId,
+        ReleaseFinanceGateAction $releaseAction
+    ): JsonResponse
     {
         // Scope to the route enquiry so a payment cannot be edited through another project's URL
         $payment = $enquiry->payments()->findOrFail($paymentId);
 
         $validated = $request->validate([
-            'amount' => 'required|numeric|min:0',
+            'amount' => 'required|numeric|gt:0',
             'payment_date' => 'nullable|date',
-            'payment_method' => 'nullable|string',
-            'transaction_reference' => 'nullable|string',
+            'payment_method' => 'required|in:bank_transfer,mpesa,cash,cheque',
+            'transaction_reference' => [
+                'nullable',
+                'string',
+                'max:100',
+                Rule::unique('enquiry_payments', 'transaction_reference')
+                    ->where(fn ($query) => $query->where('project_enquiry_id', $enquiry->id))
+                    ->ignore($payment->id),
+            ],
             'reason' => 'required|string|min:5', // Mandatory reason for correction
         ]);
 
         try {
             $updatedPayment = $this->financeService->updatePayment($payment, $validated, $validated['reason']);
+            $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
+            $autoReleased = false;
+
+            if ($progress['is_threshold_met'] && !$enquiry->finance_released) {
+                $releaseAction->execute($enquiry->fresh(), Auth::id());
+                $autoReleased = true;
+                $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
+            }
 
             return response()->json([
-                'message' => 'Payment updated successfully',
+                'message' => $autoReleased
+                    ? 'Payment corrected and project released automatically.'
+                    : 'Payment updated successfully',
                 'data' => $updatedPayment->load('recorder'),
-                'progress' => $this->financeService->getPaymentProgress($enquiry)
+                'progress' => $progress,
+                'auto_released' => $autoReleased,
             ]);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to update payment: ' . $e->getMessage()], 500);
@@ -1147,7 +1195,7 @@ class EnquiryController extends Controller
                 'data' => $enquiry->fresh(['client', 'projectOfficer'])
             ]);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Failed to release project: ' . $e->getMessage()], 500);
+            return response()->json(['message' => $e->getMessage()], 422);
         }
     }
 

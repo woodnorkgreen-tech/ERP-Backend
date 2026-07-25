@@ -38,9 +38,14 @@ class EnquiryConstants
     // of the parties required to satisfy the gate, so it must not self-bypass.
     const ROLES_SYSTEM_ADMIN = ['Super Admin', 'Admin'];
 
+    // Financial quote tasks contain pricing and approval data. Assignment or
+    // department membership must never widen this role boundary.
+    const FINANCIAL_QUOTE_TASK_TYPES = ['quote', 'quote_approval'];
+    const FINANCIAL_QUOTE_ROLES = ['Super Admin', 'Project Manager', 'Costing', 'Accounts', 'Finance'];
+
     // All roles that participate in the project workflow
     const ROLES_WORKFLOW = [
-        'Super Admin', 'Admin', 'Project Manager', 'Project Officer', 'HR',
+        'Super Admin', 'Admin', 'Project Manager', 'Project Officer', 'HR', 'Finance',
         'Designer', 'Procurement', 'Production', 'Logistics', 'Stores', 'Accounts', 'Client Service', 'Costing'
     ];
 
@@ -49,6 +54,7 @@ class EnquiryConstants
         'Designer' => ['design', 'site-survey', 'materials'],
         'Costing' => ['materials', 'budget', 'quote', 'quote_approval'],
         'Accounts' => ['materials', 'budget', 'quote', 'quote_approval'],
+        'Finance' => ['budget', 'quote', 'quote_approval'],
         'Stores' => ['materials', 'stores', 'budget', 'procurement'],
         'Store Keeper' => ['materials', 'stores', 'budget', 'procurement'],
         'Storekeeper' => ['materials', 'stores', 'budget', 'procurement'],

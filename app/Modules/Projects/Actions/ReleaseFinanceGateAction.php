@@ -30,7 +30,15 @@ class ReleaseFinanceGateAction
      */
     public function execute(ProjectEnquiry $enquiry, int $userId, ?string $notes = null): ProjectEnquiry
     {
+        if ($enquiry->finance_released) {
+            return $enquiry->fresh();
+        }
+
         $progress = $this->financeService->getPaymentProgress($enquiry);
+
+        if (!$progress['has_approved_quote']) {
+            throw new Exception('Finance release is blocked until the quote is approved.');
+        }
         
         // Enforce justification if threshold not met
         if (!$progress['is_70_percent_met'] && empty(trim($notes ?? ''))) {

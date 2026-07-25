@@ -34,6 +34,10 @@ trait AuthorizedVisibility
             return false;
         }
 
+        if (in_array($this->type, EnquiryConstants::FINANCIAL_QUOTE_TASK_TYPES, true)) {
+            return $user->hasRole(EnquiryConstants::FINANCIAL_QUOTE_ROLES);
+        }
+
         // 1. Administrators see and interact with everything
         if ($user->hasRole(EnquiryConstants::ROLES_ADMIN)) {
             return true;
