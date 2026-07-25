@@ -11,6 +11,7 @@ use App\Modules\ArchivalTask\Models\ArchivalReport as ArchivalReportModel;
 use App\Modules\ClientService\Models\Client;
 use App\Modules\logisticsTask\Models\LogisticsChecklist;
 use App\Modules\logisticsTask\Models\LogisticsTask;
+use App\Modules\logisticsTask\Models\TransportItem;
 use App\Modules\Production\Models\WorkOrder;
 use App\Modules\Production\Models\WorkOrderTask;
 use App\Modules\Projects\Models\EnquiryTask;
@@ -225,7 +226,18 @@ class TaskCompletionGatesTest extends TestCase
         $enquiry = $this->enquiry();
         $project = Project::create(['enquiry_id' => $enquiry->id, 'project_id' => 'PRJ-' . uniqid(), 'status' => 'planning']);
         $task = $this->task($enquiry, 'logistics');
-        $logisticsTask = LogisticsTask::create(['task_id' => $task->id, 'project_id' => $project->id]);
+        $logisticsTask = LogisticsTask::create([
+            'task_id' => $task->id,
+            'project_id' => $project->id,
+            'logistics_planning' => $this->validLogisticsPlanning(),
+        ]);
+        TransportItem::create([
+            'logistics_task_id' => $logisticsTask->id,
+            'name' => 'Tent',
+            'quantity' => 1,
+            'unit' => 'pcs',
+            'category' => 'custom',
+        ]);
         LogisticsChecklist::create([
             'logistics_task_id' => $logisticsTask->id,
             'checklist_data' => ['items' => [['id' => 'item_1', 'item_name' => 'Tent', 'status' => 'missing']]],
@@ -239,7 +251,18 @@ class TaskCompletionGatesTest extends TestCase
         $enquiry = $this->enquiry();
         $project = Project::create(['enquiry_id' => $enquiry->id, 'project_id' => 'PRJ-' . uniqid(), 'status' => 'planning']);
         $task = $this->task($enquiry, 'logistics');
-        $logisticsTask = LogisticsTask::create(['task_id' => $task->id, 'project_id' => $project->id]);
+        $logisticsTask = LogisticsTask::create([
+            'task_id' => $task->id,
+            'project_id' => $project->id,
+            'logistics_planning' => $this->validLogisticsPlanning(),
+        ]);
+        TransportItem::create([
+            'logistics_task_id' => $logisticsTask->id,
+            'name' => 'Tent',
+            'quantity' => 1,
+            'unit' => 'pcs',
+            'category' => 'custom',
+        ]);
         LogisticsChecklist::create([
             'logistics_task_id' => $logisticsTask->id,
             'checklist_data' => ['items' => [['id' => 'item_1', 'item_name' => 'Tent', 'status' => 'present']]],
@@ -303,6 +326,21 @@ class TaskCompletionGatesTest extends TestCase
         Sanctum::actingAs($actor);
 
         return $this->putJson("/api/projects/enquiry-tasks/{$task->id}", ['status' => 'completed']);
+    }
+
+    private function validLogisticsPlanning(): array
+    {
+        return [
+            'vehicle_identification' => 'KCA 001B',
+            'driver_name' => 'Alex Kioko',
+            'route' => ['destination' => 'Project Site'],
+            'timeline' => [
+                'loading_time' => '07:00',
+                'departure_time' => '08:00',
+                'setup_start_time' => now()->addDay()->toDateString(),
+                'setup_start_hour' => '09:00',
+            ],
+        ];
     }
 
     private function user(?string $role = null): User

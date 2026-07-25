@@ -5,6 +5,7 @@ namespace App\Modules\Teams\Services;
 use App\Modules\Teams\Models\TeamsMember;
 use App\Modules\Teams\Models\TeamsTask;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class TeamMemberService
 {
@@ -24,9 +25,11 @@ class TeamMemberService
         return DB::transaction(function () use ($teamTaskId, $data) {
             $teamTask = TeamsTask::findOrFail($teamTaskId);
             
-            // Check if team has reached maximum members
-            if ($teamTask->max_members && $teamTask->assigned_members_count >= $teamTask->max_members) {
-                throw new \InvalidArgumentException('Team has reached maximum member capacity');
+            $activeCount = $teamTask->activeMembers()->count();
+            if ($activeCount >= max((int) $teamTask->required_members, 1)) {
+                throw ValidationException::withMessages([
+                    'member_name' => 'This crew is already fully staffed.',
+                ]);
             }
 
             // Check for duplicate active member names
@@ -36,7 +39,29 @@ class TeamMemberService
                                         ->first();
 
             if ($existingMember) {
-                throw new \InvalidArgumentException('A team member with this name already exists');
+                throw ValidationException::withMessages([
+                    'member_name' => 'This person is already assigned to the crew.',
+                ]);
+            }
+
+            $alreadyAssignedToPlan = TeamsMember::whereHas(
+                'teamsTask',
+                fn ($query) => $query->where('task_id', $teamTask->task_id)
+            )
+                ->where('is_active', true)
+                ->where(function ($query) use ($data) {
+                    if (!empty($data['technical_labour_id'])) {
+                        $query->where('technical_labour_id', $data['technical_labour_id']);
+                    } else {
+                        $query->whereRaw('LOWER(member_name) = ?', [mb_strtolower($data['member_name'])]);
+                    }
+                })
+                ->exists();
+
+            if ($alreadyAssignedToPlan) {
+                throw ValidationException::withMessages([
+                    'member_name' => 'This person is already assigned elsewhere in this team plan.',
+                ]);
             }
 
             $member = TeamsMember::create([
@@ -52,7 +77,7 @@ class TeamMemberService
             ]);
 
             // Update team's assigned members count
-            $teamTask->increment('assigned_members_count');
+            $teamTask->update(['assigned_members_count' => $activeCount + 1]);
 
             // Log activity
             app(TeamsActivityLogService::class)->log([

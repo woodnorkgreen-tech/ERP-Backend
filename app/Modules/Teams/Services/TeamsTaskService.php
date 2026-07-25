@@ -8,6 +8,7 @@ use App\Modules\Teams\Models\TeamType;
 use App\Models\Task;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use Illuminate\Validation\ValidationException;
 
 class TeamsTaskService
 {
@@ -54,54 +55,46 @@ class TeamsTaskService
 
     public function createTeamTask(int $taskId, array $data): TeamsTask
     {
-        try {
-            \Log::info('Creating team task', ['taskId' => $taskId, 'data' => $data]);
+        return DB::transaction(function () use ($taskId, $data) {
+            \App\Modules\Projects\Models\EnquiryTask::findOrFail($taskId);
+            $combination = $this->validateCategoryTeamTypeCombination(
+                $data['category_id'],
+                $data['team_type_id'],
+                $data['required_members']
+            );
 
-            return DB::transaction(function () use ($taskId, $data) {
-                $task = \App\Modules\Projects\Models\EnquiryTask::findOrFail($taskId);
-                \Log::info('Found task', ['task' => $task->toArray()]);
+            if (TeamsTask::where('task_id', $taskId)
+                ->where('category_id', $data['category_id'])
+                ->where('team_type_id', $data['team_type_id'])
+                ->exists()) {
+                throw ValidationException::withMessages([
+                    'team_type_id' => 'This crew already exists for the selected stage.',
+                ]);
+            }
 
-                // Temporarily disable validation to debug
-                // $this->validateCategoryTeamTypeCombination($data['category_id'], $data['team_type_id']);
+            $createData = [
+                'task_id' => $taskId,
+                'category_id' => $data['category_id'],
+                'team_type_id' => $data['team_type_id'],
+                'status' => 'pending',
+                'required_members' => $data['required_members'],
+                'assigned_members_count' => 0,
+                'max_members' => $combination->max_members,
+                'start_date' => $data['start_date'] ?? null,
+                'end_date' => $data['end_date'] ?? null,
+                'estimated_hours' => $data['estimated_hours'] ?? null,
+                'notes' => $data['notes'] ?? null,
+                'special_requirements' => $data['special_requirements'] ?? null,
+                'priority' => $data['priority'] ?? 'medium',
+                'created_by' => auth()->id()
+            ];
 
-                $createData = [
-                    'task_id' => $taskId,
-                    // Removed 'project_id' as it causes FK constraint violation
-                    // Task ID already provides project context through enquiry_tasks table
-                    'category_id' => $data['category_id'],
-                    'team_type_id' => $data['team_type_id'],
-                    'status' => 'pending',
-                    'required_members' => $data['required_members'],
-                    'assigned_members_count' => 0, // Start with 0, members added separately
-                    'max_members' => 50, // Allow up to 50 members per team
-                    'start_date' => $data['start_date'] ?? null,
-                    'end_date' => $data['end_date'] ?? null,
-                    'estimated_hours' => $data['estimated_hours'] ?? null,
-                    'notes' => $data['notes'] ?? null,
-                    'special_requirements' => $data['special_requirements'] ?? null,
-                    'priority' => $data['priority'] ?? 'medium',
-                    'created_by' => auth()->id()
-                ];
+            $teamTask = TeamsTask::create($createData);
 
-                \Log::info('Creating team task with data', $createData);
+            $this->logActivity($teamTask, 'created', null, $teamTask->toArray());
 
-                $teamTask = TeamsTask::create($createData);
-                \Log::info('Team task created', ['teamTask' => $teamTask->toArray()]);
-
-                // Log activity
-                $this->logActivity($teamTask, 'created', null, $teamTask->toArray());
-
-                return $teamTask->load(['category', 'teamType']);
-            });
-        } catch (\Exception $e) {
-            \Log::error('Error creating team task', [
-                'taskId' => $taskId,
-                'data' => $data,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw $e;
-        }
+            return $teamTask->load(['category', 'teamType']);
+        });
     }
 
     public function updateTeamTask(int $teamTaskId, array $data): TeamsTask
@@ -180,17 +173,27 @@ class TeamsTaskService
         return $results;
     }
 
-    private function validateCategoryTeamTypeCombination(int $categoryId, int $teamTypeId): void
+    private function validateCategoryTeamTypeCombination(int $categoryId, int $teamTypeId, int $requiredMembers): object
     {
-        $exists = DB::table('team_category_types')
+        $combination = DB::table('team_category_types')
                    ->where('category_id', $categoryId)
                    ->where('team_type_id', $teamTypeId)
                    ->where('is_available', true)
-                   ->exists();
+                   ->first();
 
-        if (!$exists) {
-            throw new \InvalidArgumentException('The selected team type is not available for this category');
+        if (!$combination) {
+            throw ValidationException::withMessages([
+                'team_type_id' => 'The selected crew type is not available for this stage.',
+            ]);
         }
+
+        if ($requiredMembers < $combination->min_members || $requiredMembers > $combination->max_members) {
+            throw ValidationException::withMessages([
+                'required_members' => "Crew size must be between {$combination->min_members} and {$combination->max_members}.",
+            ]);
+        }
+
+        return $combination;
     }
 
     private function logActivity(TeamsTask $teamTask, string $action, ?array $oldValues, ?array $newValues): void
