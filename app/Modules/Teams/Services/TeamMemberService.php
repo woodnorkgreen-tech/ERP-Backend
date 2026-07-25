@@ -92,6 +92,10 @@ class TeamMemberService
     public function removeMember(int $memberId): bool
     {
         $member = TeamsMember::findOrFail($memberId);
+
+        if (!$member->is_active) {
+            return true;
+        }
         
         return DB::transaction(function () use ($member) {
             // Mark member as inactive instead of deleting
@@ -102,7 +106,10 @@ class TeamMemberService
             ]);
 
             // Update team's assigned members count
-            $member->teamsTask->decrement('assigned_members_count');
+            $teamTask = $member->teamsTask;
+            $teamTask->update([
+                'assigned_members_count' => max(0, $teamTask->activeMembers()->count()),
+            ]);
 
             // Log activity
             app(TeamsActivityLogService::class)->log([

@@ -5,7 +5,6 @@ namespace App\Modules\Projects\Services;
 use App\Models\Project;
 use App\Models\ProjectEnquiry;
 use App\Modules\Projects\Models\EnquiryTask;
-use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 /**
@@ -90,9 +89,6 @@ class ProjectsDashboardService
             'conversion_rate' => $totalEnquiries > 0
                 ? round(($convertedEnquiries / $totalEnquiries) * 100, 1)
                 : 0.0,
-            'approved_revenue' => (float) $this->withinRange(
-                DB::table('task_quote_data')->where('status', 'approved'), 'approval_date', $start, $end
-            )->sum('quote_amount'),
             'completed_projects' => $this->withinRange(
                 Project::where('status', 'completed'), 'updated_at', $start, $end
             )->count(),
@@ -127,7 +123,11 @@ class ProjectsDashboardService
     /** Active projects whose deadline (within the period) has already passed. */
     private function overdueProjectSignals(?Carbon $start, ?Carbon $end)
     {
-        $query = Project::with('enquiry.client')
+        $query = Project::with(['enquiry.client', 'enquiry.projectOfficer'])
+            ->withCount([
+                'projectTasks as tasks_total_count',
+                'projectTasks as tasks_completed_count' => fn ($q) => $q->completed(),
+            ])
             ->whereIn('status', self::ACTIVE_PROJECT_STATUSES)
             ->whereNotNull('end_date')
             ->whereDate('end_date', '<', Carbon::today());
@@ -141,6 +141,12 @@ class ProjectsDashboardService
             'message' => $this->projectLabel($project) . " was due {$project->end_date->diffForHumans()} and is still open",
             'action_url' => $this->projectUrl($project),
             'age_label' => $project->end_date->diffForHumans(),
+            'owner' => $this->projectOwner($project),
+            'metrics' => [
+                ...$this->taskProgress($project),
+                'days_overdue' => (int) abs(Carbon::today()->diffInDays($project->end_date)),
+                'deadline_date' => $project->end_date->toDateString(),
+            ],
             '_age' => abs(Carbon::now()->diffInSeconds($project->end_date)),
         ]);
     }
@@ -160,7 +166,11 @@ class ProjectsDashboardService
             return collect();
         }
 
-        return Project::with('enquiry.client')
+        return Project::with(['enquiry.client', 'enquiry.projectOfficer'])
+            ->withCount([
+                'projectTasks as tasks_total_count',
+                'projectTasks as tasks_completed_count' => fn ($q) => $q->completed(),
+            ])
             ->whereIn('status', self::ACTIVE_PROJECT_STATUSES)
             ->whereNotNull('end_date')
             ->whereDate('end_date', '>=', $from)
@@ -176,6 +186,12 @@ class ProjectsDashboardService
                     'message' => $this->projectLabel($project) . " is due {$project->end_date->diffForHumans()}",
                     'action_url' => $this->projectUrl($project),
                     'age_label' => $project->end_date->diffForHumans(),
+                    'owner' => $this->projectOwner($project),
+                    'metrics' => [
+                        ...$this->taskProgress($project),
+                        'days_remaining' => (int) abs(Carbon::today()->diffInDays($project->end_date)),
+                        'deadline_date' => $project->end_date->toDateString(),
+                    ],
                     // Sooner deadline = larger key, so it floats to the top of its tier.
                     '_age' => (self::DEADLINE_SOON_DAYS * 86400) - $secondsUntil,
                 ];
@@ -185,7 +201,11 @@ class ProjectsDashboardService
     /** Active projects (due in the period) with no movement for STALLED_PROJECT_DAYS. */
     private function stalledProjectSignals(?Carbon $start, ?Carbon $end)
     {
-        $query = Project::with('enquiry.client')
+        $query = Project::with(['enquiry.client', 'enquiry.projectOfficer'])
+            ->withCount([
+                'projectTasks as tasks_total_count',
+                'projectTasks as tasks_completed_count' => fn ($q) => $q->completed(),
+            ])
             ->whereIn('status', self::ACTIVE_PROJECT_STATUSES)
             ->where('updated_at', '<', Carbon::now()->subDays(self::STALLED_PROJECT_DAYS));
         $this->withinRange($query, 'end_date', $start, $end);
@@ -198,6 +218,12 @@ class ProjectsDashboardService
             'message' => $this->projectLabel($project) . " hasn't moved in {$project->updated_at->diffForHumans(null, true)}",
             'action_url' => $this->projectUrl($project),
             'age_label' => $project->updated_at->diffForHumans(),
+            'owner' => $this->projectOwner($project),
+            'metrics' => [
+                ...$this->taskProgress($project),
+                'days_idle' => (int) abs(Carbon::now()->diffInDays($project->updated_at)),
+                'last_activity_date' => $project->updated_at->toDateString(),
+            ],
             '_age' => abs(Carbon::now()->diffInSeconds($project->updated_at)),
         ]);
     }
@@ -214,7 +240,11 @@ class ProjectsDashboardService
             return collect();
         }
 
-        return Project::with('enquiry.client')
+        return Project::with(['enquiry.client', 'enquiry.projectOfficer'])
+            ->withCount([
+                'projectTasks as tasks_total_count',
+                'projectTasks as tasks_completed_count' => fn ($q) => $q->completed(),
+            ])
             ->whereIn('status', self::ACTIVE_PROJECT_STATUSES)
             ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
             ->get()
@@ -232,6 +262,13 @@ class ProjectsDashboardService
                     'message' => $this->projectLabel($project) . " is active but has {$missing} — delivery can't be tracked",
                     'action_url' => $this->projectUrl($project),
                     'age_label' => $project->created_at?->diffForHumans() ?? '',
+                    'owner' => $this->projectOwner($project),
+                    'metrics' => [
+                        ...$this->taskProgress($project),
+                        'days_active' => $project->created_at ? (int) abs(Carbon::now()->diffInDays($project->created_at)) : 0,
+                        'missing_start' => !$project->start_date,
+                        'missing_end' => !$project->end_date,
+                    ],
                     '_age' => $project->created_at ? abs(Carbon::now()->diffInSeconds($project->created_at)) : 0,
                 ];
             });
@@ -247,9 +284,28 @@ class ProjectsDashboardService
         return "{$ref} ({$client})";
     }
 
-    /** Projects surface through the enquiry that backs them. */
+    /**
+     * Projects surface through the enquiry that backs them. There's no
+     * /projects/enquiries/{id} route — the enquiries list opens a specific
+     * record's detail view via an `id` query param instead.
+     */
     private function projectUrl(Project $project): string
     {
-        return "/projects/enquiries/{$project->enquiry_id}";
+        return "/projects/enquiries?id={$project->enquiry_id}";
+    }
+
+    /** Who to chase for this signal — the enquiry's assigned project officer, if any. */
+    private function projectOwner(Project $project): ?string
+    {
+        return $project->enquiry?->projectOfficer?->name;
+    }
+
+    /** Task completion, from the withCount() aliases each signal query already loads. */
+    private function taskProgress(Project $project): array
+    {
+        return [
+            'tasks_completed' => (int) ($project->tasks_completed_count ?? 0),
+            'tasks_total' => (int) ($project->tasks_total_count ?? 0),
+        ];
     }
 }

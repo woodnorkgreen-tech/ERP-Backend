@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\TaskProcurementData;
 use App\Services\ProcurementService;
+use App\Modules\Projects\Actions\AutoSyncTaskStateAction;
+use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -18,8 +20,10 @@ class ProcurementController extends Controller
 {
     private ProcurementService $procurementService;
 
-    public function __construct(ProcurementService $procurementService)
-    {
+    public function __construct(
+        ProcurementService $procurementService,
+        private readonly AutoSyncTaskStateAction $autoSyncTaskState
+    ) {
         $this->procurementService = $procurementService;
     }
 
@@ -153,6 +157,10 @@ class ProcurementController extends Controller
             // We still only allow authorized roles to hit the save logic at the top.
             
             $procurementData = $this->procurementService->saveProcurementData($taskId, $data);
+
+            if ($task = EnquiryTask::find($taskId)) {
+                $this->autoSyncTaskState->execute($task);
+            }
 
             // Transform to match frontend expectations (camelCase)
             $response = [

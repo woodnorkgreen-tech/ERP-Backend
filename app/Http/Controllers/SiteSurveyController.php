@@ -3,12 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Models\SiteSurvey;
+use App\Modules\Projects\Actions\AutoSyncTaskStateAction;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\Rule;
 
 class SiteSurveyController extends Controller
 {
+    public function __construct(
+        private readonly AutoSyncTaskStateAction $autoSyncTaskState
+    ) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -135,6 +140,10 @@ class SiteSurveyController extends Controller
             $validated
         );
 
+        if ($siteSurvey->enquiryTask) {
+            $this->autoSyncTaskState->execute($siteSurvey->enquiryTask);
+        }
+
         return response()->json($siteSurvey->load('enquiry.client', 'enquiryTask'), 201);
     }
 
@@ -237,6 +246,10 @@ class SiteSurveyController extends Controller
         }
 
         $siteSurvey->update($validated);
+
+        if ($siteSurvey->enquiryTask) {
+            $this->autoSyncTaskState->execute($siteSurvey->enquiryTask);
+        }
 
         return response()->json($siteSurvey->load('enquiry.client', 'enquiryTask'));
     }

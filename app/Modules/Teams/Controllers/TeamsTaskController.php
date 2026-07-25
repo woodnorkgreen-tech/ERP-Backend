@@ -11,6 +11,7 @@ use App\Modules\Teams\Models\TeamMember;
 use App\Modules\Teams\Services\TeamsTaskService;
 use App\Modules\Teams\Requests\StoreTeamsTaskRequest;
 use App\Modules\Teams\Requests\UpdateTeamsTaskRequest;
+use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -22,6 +23,8 @@ class TeamsTaskController extends Controller
 
     public function index(int $taskId): JsonResponse
     {
+        $this->authorizeTask($taskId);
+
         try {
             $teams = $this->teamsService->getTeamsForTask($taskId);
 
@@ -40,6 +43,8 @@ class TeamsTaskController extends Controller
 
     public function store(StoreTeamsTaskRequest $request, int $taskId): JsonResponse
     {
+        $this->authorizeTask($taskId);
+
         try {
             $team = $this->teamsService->createTeamTask($taskId, $request->validated());
 
@@ -58,6 +63,9 @@ class TeamsTaskController extends Controller
 
     public function update(UpdateTeamsTaskRequest $request, int $taskId, int $teamTaskId): JsonResponse
     {
+        $this->authorizeTask($taskId);
+        TeamsTask::where('task_id', $taskId)->findOrFail($teamTaskId);
+
         try {
             $team = $this->teamsService->updateTeamTask($teamTaskId, $request->validated());
 
@@ -76,6 +84,9 @@ class TeamsTaskController extends Controller
 
     public function destroy(int $taskId, int $teamTaskId): JsonResponse
     {
+        $this->authorizeTask($taskId);
+        TeamsTask::where('task_id', $taskId)->findOrFail($teamTaskId);
+
         try {
             $this->teamsService->deleteTeamTask($teamTaskId);
 
@@ -93,6 +104,8 @@ class TeamsTaskController extends Controller
 
     public function bulkAssign(Request $request, int $taskId): JsonResponse
     {
+        $this->authorizeTask($taskId);
+
         try {
             $assignments = $request->input('assignments', []);
             $teams = $this->teamsService->bulkAssignTeams($taskId, $assignments);
@@ -113,7 +126,7 @@ class TeamsTaskController extends Controller
     public function getTeamTypes(): JsonResponse
     {
         try {
-            $teamTypes = TeamType::all();
+            $teamTypes = TeamType::active()->orderBy('sort_order')->get();
 
             return response()->json([
                 'message' => 'Team types retrieved successfully',
@@ -131,7 +144,10 @@ class TeamsTaskController extends Controller
     public function getTeamCategories(): JsonResponse
     {
         try {
-            $categories = TeamCategory::with('types')->get();
+            $categories = TeamCategory::active()
+                ->with('availableTypes.teamType')
+                ->orderBy('sort_order')
+                ->get();
 
             return response()->json([
                 'message' => 'Team categories retrieved successfully',
@@ -144,5 +160,13 @@ class TeamsTaskController extends Controller
                 'data' => []
             ], 500);
         }
+    }
+
+    private function authorizeTask(int $taskId): EnquiryTask
+    {
+        $task = EnquiryTask::where('type', 'teams')->findOrFail($taskId);
+        abort_unless(auth()->check() && $task->isUserAuthorized(auth()->user()), 403);
+
+        return $task;
     }
 }

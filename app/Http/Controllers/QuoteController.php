@@ -6,6 +6,7 @@ use App\Models\TaskQuoteData;
 use App\Models\TaskBudgetData;
 use App\Models\QuoteVersion;
 use App\Modules\Projects\Models\EnquiryTask;
+use App\Modules\Projects\Services\EnquiryWorkflowService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -14,10 +15,9 @@ use Illuminate\Routing\Controller;
 
 class QuoteController extends Controller
 {
-    public function __construct()
-    {
-        // No permission restrictions for quote operations
-    }
+    public function __construct(
+        private readonly EnquiryWorkflowService $workflowService
+    ) {}
 
     /**
      * Get quote data for a task
@@ -1319,17 +1319,14 @@ class QuoteController extends Controller
                 'status' => $request->approval_status
             ]);
 
-            // Update task status based on approval
-            if ($request->approval_status === 'approved') {
-                $task->update(['status' => 'completed']);
-                \Log::info("Quote task marked as completed (approved)", ['task_id' => $taskId]);
-            } elseif ($request->approval_status === 'rejected') {
-                $task->update(['status' => 'completed']); // Still complete the task
-                \Log::info("Quote task marked as completed (rejected)", ['task_id' => $taskId]);
-            } else {
-                $task->update(['status' => 'in_progress']); // Keep in progress for pending
-                \Log::info("Quote task kept in progress (pending)", ['task_id' => $taskId]);
-            }
+            $targetStatus = $request->approval_status === 'approved' ? 'completed' : 'in_progress';
+            $this->workflowService->updateTaskStatus(
+                $task->id,
+                $targetStatus,
+                $request->user()->id,
+                "Quote approval decision: {$request->approval_status}"
+            );
+            $task->refresh();
 
             // Log the approval action
             \Log::info("Quote approval submitted successfully", [
@@ -1826,6 +1823,35 @@ class QuoteController extends Controller
                     'updated_at' => now()
                 ]
             );
+
+            // The approval decision itself is the final business action. Do not
+            // ask the user to click a second "Complete Task" button. A rejection
+            // leaves approval open and returns Quote Preparation for revision so
+            // downstream execution tasks remain blocked.
+            if ($request->approval_status === 'approved') {
+                $this->workflowService->updateTaskStatus(
+                    $approvalTask->id,
+                    'completed',
+                    $request->user()->id,
+                    'Quote approved'
+                );
+            } else {
+                $this->workflowService->updateTaskStatus(
+                    $approvalTask->id,
+                    'in_progress',
+                    $request->user()->id,
+                    "Quote decision: {$request->approval_status}"
+                );
+
+                if ($request->approval_status === 'rejected') {
+                    $this->workflowService->updateTaskStatus(
+                        $originalQuoteTask->id,
+                        'in_progress',
+                        $request->user()->id,
+                        'Quote rejected and returned for revision'
+                    );
+                }
+            }
 
             \Log::info("Successfully updated quote data {$quoteData->id} with status {$request->approval_status} and created quote_approvals record");
 

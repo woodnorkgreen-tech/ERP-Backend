@@ -8,6 +8,8 @@ use App\Modules\Production\Models\WorkOrderTask;
 use App\Modules\Production\Models\WorkOrderTaskAssignee;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\TechnicalLabour;
+use App\Modules\Projects\Actions\AutoSyncTaskStateAction;
+use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -120,6 +122,15 @@ class WorkOrderTaskController extends Controller
         }
 
         $task->update($validated);
+
+        // Completing the final work-order item is the real production finish
+        // action; synchronize the parent lifecycle task immediately.
+        if (array_key_exists('status', $validated) && $validated['status'] === 'completed') {
+            $lifecycleTask = EnquiryTask::find($workOrder->enquiry_task_id);
+            if ($lifecycleTask) {
+                app(AutoSyncTaskStateAction::class)->execute($lifecycleTask);
+            }
+        }
 
         if (array_key_exists('assignees', $validated)) {
             $this->syncAssignees($task, $validated['assignees'] ?? []);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\HandoverSurvey;
+use App\Modules\Projects\Actions\AutoSyncTaskStateAction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -106,6 +107,10 @@ class PublicHandoverController extends Controller
                 'submitted_at' => now(),
                 'question_config_snapshot' => config('survey_questions'), // Save version used
             ]);
+
+            if ($survey->task) {
+                app(AutoSyncTaskStateAction::class)->execute($survey->task);
+            }
 
             return response()->json([
                 'success' => true,

@@ -123,6 +123,7 @@ class HandoverService
     {
         $query = ProjectEnquiry::with([
                 'client',
+                'projectOfficer',
                 'enquiryTasks' => fn ($q) => $q->where('type', 'handover')->with('handoverSurvey'),
             ])
             ->where('status', EnquiryConstants::STATUS_COMPLETED)
@@ -159,6 +160,7 @@ class HandoverService
                 'client_name'      => $e->client->full_name ?? 'N/A',
                 'project_title'    => $e->title ?? 'N/A',
                 'job_number'       => $e->job_number ?? 'N/A',
+                'project_officer'  => $e->projectOfficer?->name,
                 // updated_at is used as a completion proxy (no dedicated completed_at column)
                 'completed_at'     => $e->updated_at ? $e->updated_at->toISOString() : null,
                 'handover_task_id' => $handoverTask?->id,
@@ -182,7 +184,7 @@ class HandoverService
      */
     public function getAwaitingReview(array $filters = []): array
     {
-        $query = HandoverSurvey::with(['task.enquiry.client'])
+        $query = HandoverSurvey::with(['task.enquiry.client', 'task.enquiry.projectOfficer'])
             ->where('submitted', true)
             ->where('review_status', 'pending');
 
@@ -214,6 +216,7 @@ class HandoverService
                 'client_name'    => $client?->full_name ?? 'N/A',
                 'project_title'  => $enquiry?->title ?? 'N/A',
                 'job_number'     => $enquiry?->job_number ?? 'N/A',
+                'project_officer' => $enquiry?->projectOfficer?->name,
                 'respondent'     => $h->respondent_info['name'] ?? 'N/A',
             ];
         })->values()->toArray();

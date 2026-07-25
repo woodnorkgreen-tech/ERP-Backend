@@ -29,6 +29,15 @@ class AutoSyncTaskStateAction
         $shouldComplete = false;
         $reason = '';
 
+        // A final survey submission is already the user's completion action.
+        if ($task->type === 'site-survey') {
+            $survey = \App\Models\SiteSurvey::where('enquiry_task_id', $task->id)->first();
+            if ($survey && in_array($survey->status, ['completed', 'approved'], true)) {
+                $shouldComplete = true;
+                $reason = 'Final site survey submitted';
+            }
+        }
+
         // 1. Materials Auto-Completion
         if ($task->type === 'materials') {
             $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
@@ -67,6 +76,39 @@ class AutoSyncTaskStateAction
             }
         }
 
+        // Procurement is complete when every line that needs purchasing has
+        // been received. In-stock/no-purchase lines are already resolved.
+        if ($task->type === 'procurement') {
+            $procurement = \App\Models\TaskProcurementData::where('enquiry_task_id', $task->id)->first();
+            $items = $procurement?->procurement_items ?? [];
+            $openItems = collect($items)->filter(function (array $item): bool {
+                return (float) ($item['purchaseQuantity'] ?? 0) > 0
+                    && ($item['procurementStatus'] ?? null) !== 'received'
+                    && ($item['availabilityStatus'] ?? null) !== 'received';
+            });
+            if (!empty($items) && $openItems->isEmpty()) {
+                $shouldComplete = true;
+                $reason = 'All procurement items resolved or received';
+            }
+        }
+
+        if ($task->type === 'production') {
+            $workOrder = $task->workOrder()->with('tasks')->first();
+            if ($workOrder && $workOrder->tasks->isNotEmpty()
+                && $workOrder->tasks->every(fn ($item) => $item->status === 'completed')) {
+                $shouldComplete = true;
+                $reason = 'All production work-order tasks completed';
+            }
+        }
+
+        if ($task->type === 'handover') {
+            $survey = $task->handoverSurvey;
+            if ($survey && $survey->submitted) {
+                $shouldComplete = true;
+                $reason = 'Client handover acknowledgement submitted';
+            }
+        }
+
         if ($shouldComplete) {
             $this->transition($task, 'completed', $reason);
         }
@@ -81,7 +123,10 @@ class AutoSyncTaskStateAction
     {
         try {
             Log::info("AutoSyncTaskStateAction: auto-{$status} task {$task->id} ({$task->type}) - {$reason}");
-            $this->workflowService->updateTaskStatus($task->id, $status, $task->assigned_user_id);
+            // The transition is performed by the system because objective task
+            // evidence changed. The assignee remains visible on the task but is
+            // not falsely recorded as the person who clicked completion.
+            $this->workflowService->updateTaskStatus($task->id, $status, null, $reason);
         } catch (\Throwable $e) {
             Log::warning("AutoSyncTaskStateAction: skipped auto-{$status} for task {$task->id}: {$e->getMessage()}");
         }

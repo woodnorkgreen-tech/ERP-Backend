@@ -176,11 +176,23 @@ class EnquiryWorkflowService
     /**
      * Update task status and handle workflow progression
      */
-    public function updateTaskStatus(int $taskId, string $status, ?int $userId = null): EnquiryTask
+    public function updateTaskStatus(
+        int $taskId,
+        string $status,
+        ?int $userId = null,
+        ?string $reason = null
+    ): EnquiryTask
     {
         $task = EnquiryTask::findOrFail($taskId);
 
         $oldStatus = $task->status;
+
+        // Status updates are deliberately idempotent. Several legacy task
+        // components can submit the same transition twice; repeating it must
+        // not generate duplicate notifications or audit events.
+        if ($oldStatus === $status) {
+            return $task;
+        }
 
         // Governance and validation run outside the transaction — they are read-only checks
         // and throwing here avoids opening a transaction we'd immediately roll back.
@@ -195,9 +207,30 @@ class EnquiryWorkflowService
             $this->validateTaskCompletion($task);
         }
 
-        return DB::transaction(function () use ($task, $taskId, $status, $oldStatus) {
+        return DB::transaction(function () use ($task, $taskId, $status, $oldStatus, $userId, $reason) {
             $task->status = $status;
+
+            if ($status === 'in_progress' && !$task->started_at) {
+                $task->started_at = now();
+            }
+
+            if ($status === 'completed') {
+                $task->completed_at = now();
+            } elseif ($oldStatus === 'completed') {
+                // A reopened/cancelled task is no longer complete. Preserve the
+                // previous value in ActionLog before clearing the live field.
+                $task->completed_at = null;
+            }
+
             $task->save();
+
+            $task->recordCustomAction('status_transition', [
+                'from' => $oldStatus,
+                'to' => $status,
+                'actor_type' => $userId ? 'user' : 'system',
+                'actor_id' => $userId,
+                'reason' => $reason,
+            ]);
 
             Log::info("Task {$taskId} status changed from {$oldStatus} to {$status}");
 
@@ -582,6 +615,23 @@ class EnquiryWorkflowService
         // Workflow ordering: prerequisite task types must be satisfied first.
         $this->validateTaskDependencies($task, (bool) $isAdmin);
 
+        // Site Survey — a final survey save is the evidence of completion. Draft
+        // records must never unlock Design.
+        if ($task->type === 'site-survey' && !$isAdmin) {
+            $survey = \App\Models\SiteSurvey::where('enquiry_task_id', $task->id)->first();
+            if (!$survey || !in_array($survey->status, ['completed', 'approved'], true)) {
+                throw new WorkflowValidationException('Cannot complete Site Survey. Submit the final survey first.');
+            }
+        }
+
+        // Design — at least one approved deliverable is required. Rejected and
+        // draft uploads may remain as revision history without blocking closure.
+        if ($task->type === 'design' && !$isAdmin) {
+            if (!$task->designAssets()->where('status', 'approved')->exists()) {
+                throw new WorkflowValidationException('Cannot complete Design task. At least one design asset must be approved first.');
+            }
+        }
+
         // 1. Materials Validation (Approvals)
         // Uses ROLES_SYSTEM_ADMIN rather than the general $isAdmin: Project
         // Officer is in ROLES_ADMIN but is also one of the two required
@@ -590,11 +640,13 @@ class EnquiryWorkflowService
             $isSystemAdmin = $user && $user->hasRole(\App\Constants\EnquiryConstants::ROLES_SYSTEM_ADMIN);
             if (!$isSystemAdmin) {
                 $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $task->id)->first();
-                if ($materialsData) {
-                    $status = $materialsData->project_info['approval_status'] ?? [];
-                    if (!($status['all_approved'] ?? false)) {
-                        throw new WorkflowValidationException("Cannot complete Materials task. Both Project Officer and Production approval are required.");
-                    }
+                if (!$materialsData) {
+                    throw new WorkflowValidationException('Cannot complete Materials task. Materials data is missing.');
+                }
+
+                $status = $materialsData->project_info['approval_status'] ?? [];
+                if (!($status['all_approved'] ?? false)) {
+                    throw new WorkflowValidationException("Cannot complete Materials task. Both Project Officer and Production approval are required.");
                 }
             }
         }
@@ -649,10 +701,31 @@ class EnquiryWorkflowService
         // 4. Quote Approval Validation
         if ($task->type === 'quote_approval') {
             $approval = \DB::table('quote_approvals')->where('task_id', $task->id)->first();
-            if (!$approval || $approval->approval_status === 'pending') {
+            if (!$approval || $approval->approval_status !== 'approved') {
                 if (!$isAdmin) {
-                    throw new WorkflowValidationException("Cannot complete Quote Approval task. A final decision (Approved/Rejected) is required.");
+                    throw new WorkflowValidationException('Cannot complete Quote Approval task. The quote must be approved; rejected quotes require revision.');
                 }
+            }
+        }
+
+        // Procurement — mirrors the current screen's "Open procurement" count.
+        // In-stock/no-purchase lines are already resolved; only positive purchase
+        // quantities still awaiting receipt block completion.
+        if ($task->type === 'procurement' && !$isAdmin) {
+            $procurement = \App\Models\TaskProcurementData::where('enquiry_task_id', $task->id)->first();
+            $items = $procurement?->procurement_items ?? [];
+            if (empty($items)) {
+                throw new WorkflowValidationException('Cannot complete Procurement task. No procurement items have been prepared.');
+            }
+
+            $openItems = collect($items)->filter(function (array $item): bool {
+                return (float) ($item['purchaseQuantity'] ?? 0) > 0
+                    && ($item['procurementStatus'] ?? null) !== 'received'
+                    && ($item['availabilityStatus'] ?? null) !== 'received';
+            })->count();
+
+            if ($openItems > 0) {
+                throw new WorkflowValidationException("Cannot complete Procurement task. {$openItems} purchased item(s) are still awaiting receipt.");
             }
         }
 
@@ -738,14 +811,23 @@ class EnquiryWorkflowService
         // set must still have at least one, mirroring
         // TeamsTask::getCompletionPercentageAttribute()'s own definition of done.
         if ($task->type === 'teams' && !$isAdmin) {
-            $teamsTask = \App\Modules\Teams\Models\TeamsTask::where('task_id', $task->id)->first();
-            if (!$teamsTask) {
+            $teamsTasks = \App\Modules\Teams\Models\TeamsTask::where('task_id', $task->id)
+                ->withCount('activeMembers')
+                ->get();
+            if ($teamsTasks->isEmpty()) {
                 throw new WorkflowValidationException("Cannot complete Teams task. No team has been set up for this task yet.");
             }
-            $activeMembers = $teamsTask->activeMembers()->count();
-            $required = max((int) $teamsTask->required_members, 1);
-            if ($activeMembers < $required) {
-                throw new WorkflowValidationException("Cannot complete Teams task. {$activeMembers} of {$required} required member(s) are assigned.");
+
+            $understaffed = $teamsTasks->filter(
+                fn ($team) => $team->active_members_count < max((int) $team->required_members, 1)
+            );
+            if ($understaffed->isNotEmpty()) {
+                $missing = $understaffed->sum(
+                    fn ($team) => max((int) $team->required_members, 1) - $team->active_members_count
+                );
+                throw new WorkflowValidationException(
+                    "Cannot complete Teams task. {$understaffed->count()} team(s) still need {$missing} member assignment(s)."
+                );
             }
         }
     }
