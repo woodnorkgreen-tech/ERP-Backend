@@ -154,7 +154,7 @@ class CompensatoryLeaveController extends Controller
 
         if ($isSubjectManager) {
             if (!$isGlobal) {
-                abort(403, 'Governance Gate Locked: Manager/Department Lead entries must be validated by HR compliance.');
+                abort(403, 'Manager/Department Lead entries must be validated by HR compliance.');
             }
         } else {
             $isManager = $employee && $employee->manager_id === $user->employee_id;
@@ -169,7 +169,7 @@ class CompensatoryLeaveController extends Controller
             }
             
             if (!$isGlobal && !$isManager && !$isDeptLead && !$isProductionDeptManager) {
-                abort(403, 'Governance Gate Locked: Unauthorized to approve this request.');
+                abort(403, 'Unauthorized to approve this request.');
             }
         }
 
@@ -187,7 +187,7 @@ class CompensatoryLeaveController extends Controller
         
         // Authorization check: Only Global Admins can finalize deductions
         if (!$isGlobal) {
-            abort(403, 'Governance Gate Locked: Only HR or System Administrators can authorize ledger deductions.');
+            abort(403, 'Only HR or System Administrators can authorize ledger deductions.');
         }
 
         try {
@@ -220,7 +220,7 @@ class CompensatoryLeaveController extends Controller
         }
 
         if (!$isGlobal && !$isManager && !$isDeptLead && !$isProductionDeptManager) {
-            abort(403, 'Governance Gate Locked: Unauthorized to reject this request.');
+            abort(403, 'Unauthorized to reject this request.');
         }
 
         $reason = $request->input('reason');

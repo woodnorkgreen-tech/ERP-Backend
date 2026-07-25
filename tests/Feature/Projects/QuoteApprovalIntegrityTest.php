@@ -98,6 +98,41 @@ class QuoteApprovalIntegrityTest extends TestCase
         );
     }
 
+    public function test_rejected_quote_returns_both_quote_tasks_to_work_in_progress(): void
+    {
+        [$quoteTask, $approvalTask] = $this->quoteAndApprovalTasks();
+        $quoteTask->update(['status' => 'completed', 'completed_at' => now()]);
+        $approvalTask->update(['status' => 'completed', 'completed_at' => now()]);
+
+        TaskQuoteData::create([
+            'enquiry_task_id' => $quoteTask->id,
+            'quote_mode' => 'built_in',
+            'quote_amount' => 500000,
+            'approval_status' => 'approved',
+            'status' => 'approved',
+        ]);
+
+        $financeUser = $this->user();
+        Permission::findOrCreate(Permissions::FINANCE_QUOTE_APPROVE, 'web');
+        $financeUser->givePermissionTo(Permissions::FINANCE_QUOTE_APPROVE);
+        Sanctum::actingAs($financeUser);
+
+        $this->postJson("/api/projects/tasks/{$approvalTask->id}/approval", [
+            'approval_status' => 'rejected',
+            'rejection_reason' => 'Margin requires revision',
+            'quote_amount' => 500000,
+        ])->assertOk();
+
+        $this->assertSame('in_progress', $quoteTask->fresh()->status);
+        $this->assertNull($quoteTask->fresh()->completed_at);
+        $this->assertSame('in_progress', $approvalTask->fresh()->status);
+        $this->assertNull($approvalTask->fresh()->completed_at);
+        $this->assertSame(
+            'rejected',
+            \DB::table('quote_approvals')->where('task_id', $approvalTask->id)->value('approval_status')
+        );
+    }
+
     public function test_payment_update_is_scoped_to_the_route_enquiry(): void
     {
         $enquiryA = $this->enquiry();

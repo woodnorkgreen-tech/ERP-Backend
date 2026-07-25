@@ -109,7 +109,7 @@ class TeamsTaskService
         $teamTask = TeamsTask::findOrFail($teamTaskId);
         $oldData = $teamTask->toArray();
 
-        return DB::transaction(function () use ($teamTask, $data) {
+        return DB::transaction(function () use ($teamTask, $data, $oldData) {
             // If status is being changed to completed, set completed_at
             if (isset($data['status']) && $data['status'] === 'completed' && $teamTask->status !== 'completed') {
                 $data['completed_at'] = Carbon::now();

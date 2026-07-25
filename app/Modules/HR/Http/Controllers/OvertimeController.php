@@ -261,7 +261,7 @@ class OvertimeController extends Controller
     public function supervisorApprove(OTEntry $entry)
     {
         if (Gate::denies('supervisorApprove', $entry)) {
-            abort(403, 'Governance Gate Locked: you are not authorized to approve this overtime entry, or it must be validated by HR.');
+            abort(403, 'You are not authorized to approve this overtime entry, or it must be validated by HR.');
         }
 
         $this->overtimeService->supervisorApprove($entry);
@@ -276,7 +276,7 @@ class OvertimeController extends Controller
         // Authorization (HR-approval permission/role + segregation of duties) lives in
         // OvertimePolicy::hrApprove.
         if (Gate::denies('hrApprove', $entry)) {
-            abort(403, 'Governance Gate Locked: only HR may give final approval, and never to their own overtime.');
+            abort(403, 'Only HR may give final approval, and never to their own overtime.');
         }
 
         $this->overtimeService->hrApprove($entry);
@@ -291,7 +291,7 @@ class OvertimeController extends Controller
         $user = auth()->user();
 
         if (Gate::denies('reject', $entry)) {
-            abort(403, 'Governance Gate Locked: Unauthorized to reject this specific mission log.');
+            abort(403, 'Unauthorized to reject this overtime entry.');
         }
 
         // A credited entry is settled on the tamper-evident ledger and can't simply be
@@ -342,7 +342,7 @@ class OvertimeController extends Controller
         $user = auth()->user();
 
         if (Gate::denies('reopen', $entry)) {
-            abort(403, 'Governance Gate Locked: Unauthorized to re-open this specific overtime entry.');
+            abort(403, 'Unauthorized to re-open this overtime entry.');
         }
 
         $entry->update([
@@ -445,7 +445,7 @@ class OvertimeController extends Controller
         $user = auth()->user();
 
         if (!$user->hasRole(['Super Admin', 'Admin', 'HR'])) {
-            abort(403, 'Governance Gate Locked: Only HR or System Administrators can reverse ledger transactions.');
+            abort(403, 'Only HR or System Administrators can reverse ledger transactions.');
         }
 
         $validated = $request->validate([
