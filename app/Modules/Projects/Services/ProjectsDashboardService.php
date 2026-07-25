@@ -13,22 +13,22 @@ use Carbon\Carbon;
  * One screen, one payload: a handful of KPIs that actually drive a decision,
  * plus a single ranked feed of project-level signals that need a human now.
  *
- * Everything is scoped to a time period. The default is the current month;
- * the caller can ask for a specific month or for all-time (a null range).
+ * Portfolio health is always live. The selected period only scopes throughput
+ * metrics such as enquiries, conversion, and completed projects.
  */
 class ProjectsDashboardService
 {
     /** Projects still in motion — the universe every project-level signal draws from. */
     private const ACTIVE_PROJECT_STATUSES = ['planning', 'in_progress'];
 
-    /** Tasks not yet finished. */
-    private const OPEN_TASK_STATUSES = ['pending', 'in_progress'];
-
     /** For all-time view: a project due within this many days is "approaching". */
     private const DEADLINE_SOON_DAYS = 7;
 
     /** No update in this many days = the project has stalled. */
     private const STALLED_PROJECT_DAYS = 7;
+
+    /** Keep the dashboard actionable; full counts still cover every signal. */
+    private const SIGNAL_LIMIT_PER_TYPE = 15;
 
     /**
      * The entire dashboard in one shot, scoped to a period.
@@ -39,6 +39,14 @@ class ProjectsDashboardService
     {
         $start = $period['start'] ?? null;
         $end = $period['end'] ?? null;
+        $signals = $this->signals();
+        $rankById = array_flip(array_column($signals, 'id'));
+        $prioritySignals = collect($signals)
+            ->groupBy('type')
+            ->flatMap(fn ($group) => $group->take(self::SIGNAL_LIMIT_PER_TYPE))
+            ->sortBy(fn ($signal) => $rankById[$signal['id']] ?? PHP_INT_MAX)
+            ->values()
+            ->all();
 
         return [
             'period' => [
@@ -48,7 +56,9 @@ class ProjectsDashboardService
                 'end' => $end?->toDateString(),
             ],
             'kpis' => $this->kpis($start, $end),
-            'signals' => $this->signals($start, $end),
+            'signals' => $prioritySignals,
+            'signal_counts' => collect($signals)->countBy('type')->all(),
+            'total_signals' => count($signals),
             'generated_at' => now()->toISOString(),
         ];
     }
@@ -67,9 +77,8 @@ class ProjectsDashboardService
     }
 
     /**
-     * KPIs for the period. Each metric is anchored on its natural timestamp:
-     * projects by created/completed date, enquiries by created date, revenue
-     * by approval date.
+     * Live portfolio counts plus period throughput metrics. Completed projects
+     * use updated_at because the projects table has no completed_at column.
      */
     private function kpis(?Carbon $start, ?Carbon $end): array
     {
@@ -79,12 +88,10 @@ class ProjectsDashboardService
         $overdueProjects = Project::whereIn('status', self::ACTIVE_PROJECT_STATUSES)
             ->whereNotNull('end_date')
             ->whereDate('end_date', '<', Carbon::today());
-        $this->withinRange($overdueProjects, 'end_date', $start, $end);
 
         return [
-            'active_projects' => $this->withinRange(
-                Project::whereIn('status', self::ACTIVE_PROJECT_STATUSES), 'created_at', $start, $end
-            )->count(),
+            // Snapshot metrics must never hide older work that is still active.
+            'active_projects' => Project::whereIn('status', self::ACTIVE_PROJECT_STATUSES)->count(),
             'overdue_projects' => $overdueProjects->count(),
             'conversion_rate' => $totalEnquiries > 0
                 ? round(($convertedEnquiries / $totalEnquiries) * 100, 1)
@@ -99,16 +106,15 @@ class ProjectsDashboardService
     }
 
     /**
-     * One ranked feed of project-level health signals — timeline slippage and
-     * stalls across whole projects, scoped to the period. Highest severity first.
+     * One ranked feed of current project health signals. Highest severity first.
      */
-    private function signals(?Carbon $start, ?Carbon $end): array
+    private function signals(): array
     {
         $signals = collect()
-            ->merge($this->overdueProjectSignals($start, $end))
-            ->merge($this->deadlineApproachingProjectSignals($start, $end))
-            ->merge($this->stalledProjectSignals($start, $end))
-            ->merge($this->missingTimelineProjectSignals($start, $end));
+            ->merge($this->overdueProjectSignals())
+            ->merge($this->deadlineApproachingProjectSignals())
+            ->merge($this->stalledProjectSignals())
+            ->merge($this->missingTimelineProjectSignals());
 
         $severityRank = ['high' => 3, 'medium' => 2, 'low' => 1];
 
@@ -120,8 +126,8 @@ class ProjectsDashboardService
             ->all();
     }
 
-    /** Active projects whose deadline (within the period) has already passed. */
-    private function overdueProjectSignals(?Carbon $start, ?Carbon $end)
+    /** Active projects whose deadline has already passed. */
+    private function overdueProjectSignals()
     {
         $query = Project::with(['enquiry.client', 'enquiry.projectOfficer'])
             ->withCount([
@@ -131,8 +137,6 @@ class ProjectsDashboardService
             ->whereIn('status', self::ACTIVE_PROJECT_STATUSES)
             ->whereNotNull('end_date')
             ->whereDate('end_date', '<', Carbon::today());
-        $this->withinRange($query, 'end_date', $start, $end);
-
         return $query->get()->map(fn ($project) => [
             'id' => "overdue_project_{$project->id}",
             'type' => 'overdue_project',
@@ -151,20 +155,11 @@ class ProjectsDashboardService
         ]);
     }
 
-    /** Active projects whose deadline falls in the upcoming part of the period. */
-    private function deadlineApproachingProjectSignals(?Carbon $start, ?Carbon $end)
+    /** Active projects due in the next seven days. */
+    private function deadlineApproachingProjectSignals()
     {
-        // Lower bound is never in the past; upper bound is the period end, or a
-        // rolling 7-day window when looking at all-time.
         $from = Carbon::today();
-        if ($start && $start->gt($from)) {
-            $from = $start->copy();
-        }
-        $to = $end ?? Carbon::today()->addDays(self::DEADLINE_SOON_DAYS);
-
-        if ($from->gt($to)) {
-            return collect();
-        }
+        $to = Carbon::today()->addDays(self::DEADLINE_SOON_DAYS);
 
         return Project::with(['enquiry.client', 'enquiry.projectOfficer'])
             ->withCount([
@@ -198,48 +193,53 @@ class ProjectsDashboardService
             });
     }
 
-    /** Active projects (due in the period) with no movement for STALLED_PROJECT_DAYS. */
-    private function stalledProjectSignals(?Carbon $start, ?Carbon $end)
+    /** Active projects with no project or task activity for seven days. */
+    private function stalledProjectSignals()
     {
         $query = Project::with(['enquiry.client', 'enquiry.projectOfficer'])
+            ->withMax('projectTasks as last_task_activity_at', 'updated_at')
             ->withCount([
                 'projectTasks as tasks_total_count',
                 'projectTasks as tasks_completed_count' => fn ($q) => $q->completed(),
             ])
-            ->whereIn('status', self::ACTIVE_PROJECT_STATUSES)
-            ->where('updated_at', '<', Carbon::now()->subDays(self::STALLED_PROJECT_DAYS));
-        $this->withinRange($query, 'end_date', $start, $end);
+            ->whereIn('status', self::ACTIVE_PROJECT_STATUSES);
 
-        return $query->get()->map(fn ($project) => [
-            'id' => "stalled_project_{$project->id}",
-            'type' => 'stalled_project',
-            'severity' => 'medium',
-            'title' => 'Project stalled',
-            'message' => $this->projectLabel($project) . " hasn't moved in {$project->updated_at->diffForHumans(null, true)}",
-            'action_url' => $this->projectUrl($project),
-            'age_label' => $project->updated_at->diffForHumans(),
-            'owner' => $this->projectOwner($project),
-            'metrics' => [
-                ...$this->taskProgress($project),
-                'days_idle' => (int) abs(Carbon::now()->diffInDays($project->updated_at)),
-                'last_activity_date' => $project->updated_at->toDateString(),
-            ],
-            '_age' => abs(Carbon::now()->diffInSeconds($project->updated_at)),
-        ]);
+        return $query->get()
+            ->map(function ($project) {
+                $taskActivity = $project->last_task_activity_at
+                    ? Carbon::parse($project->last_task_activity_at)
+                    : null;
+                $lastActivity = $taskActivity && $taskActivity->gt($project->updated_at)
+                    ? $taskActivity
+                    : $project->updated_at;
+
+                return [$project, $lastActivity];
+            })
+            ->filter(fn ($entry) => $entry[1]->lt(Carbon::now()->subDays(self::STALLED_PROJECT_DAYS)))
+            ->map(fn ($entry) => [
+                'id' => "stalled_project_{$entry[0]->id}",
+                'type' => 'stalled_project',
+                'severity' => 'medium',
+                'title' => 'Project stalled',
+                'message' => $this->projectLabel($entry[0]) . " hasn't moved in {$entry[1]->diffForHumans(null, true)}",
+                'action_url' => $this->projectUrl($entry[0]),
+                'age_label' => $entry[1]->diffForHumans(),
+                'owner' => $this->projectOwner($entry[0]),
+                'metrics' => [
+                    ...$this->taskProgress($entry[0]),
+                    'days_idle' => (int) abs(Carbon::now()->diffInDays($entry[1])),
+                    'last_activity_date' => $entry[1]->toDateString(),
+                ],
+                '_age' => abs(Carbon::now()->diffInSeconds($entry[1])),
+            ]);
     }
 
     /**
      * Active projects you can't track because a start or end date is missing.
-     * These have no deadline to place in a month, so they only surface when the
-     * period includes today (current month / all-time) — a present-tense concern.
+     * These always surface because they prevent live portfolio tracking.
      */
-    private function missingTimelineProjectSignals(?Carbon $start, ?Carbon $end)
+    private function missingTimelineProjectSignals()
     {
-        $includesToday = !$start || Carbon::today()->between($start, $end);
-        if (!$includesToday) {
-            return collect();
-        }
-
         return Project::with(['enquiry.client', 'enquiry.projectOfficer'])
             ->withCount([
                 'projectTasks as tasks_total_count',

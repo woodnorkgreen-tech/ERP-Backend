@@ -31,6 +31,15 @@ class ApproveQuoteAction
                 );
             }
 
+            $approval = DB::table('quote_approvals')
+                ->where('enquiry_id', $enquiry->id)
+                ->latest('updated_at')
+                ->first();
+
+            if (!$approval || $approval->approval_status !== 'approved' || (float) $approval->quote_amount <= 0) {
+                throw new Exception('An approved quote snapshot with a valid amount is required before project activation.');
+            }
+
             $jobNumber = $enquiry->generateJobNumber();
 
             $enquiry->update([

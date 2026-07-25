@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => \App\Http\Middleware\CheckPermission::class,
             'project.access' => \App\Http\Middleware\CheckProjectAccess::class,
             'active' => \App\Http\Middleware\CheckUserActive::class, // Registering 'active' middleware for status checks
+            'quote.access' => \App\Http\Middleware\EnsureFinancialQuoteTaskAccess::class,
         ]);
 
         $middleware->api(prepend: [

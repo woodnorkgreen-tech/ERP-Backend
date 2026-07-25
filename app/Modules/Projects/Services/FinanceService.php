@@ -17,6 +17,11 @@ class FinanceService
      */
     public function logPayment(ProjectEnquiry $enquiry, array $data): EnquiryPayment
     {
+        $quote = $this->resolveQuoteBasis($enquiry);
+        if ($quote['amount'] <= 0) {
+            throw new \DomainException('A quote must be approved before payments can be recorded.');
+        }
+
         return DB::transaction(function () use ($enquiry, $data) {
             $payment = EnquiryPayment::create([
                 'project_enquiry_id' => $enquiry->id,
@@ -93,7 +98,9 @@ class FinanceService
      */
     public function getPaymentProgress(ProjectEnquiry $enquiry): array
     {
-        [$totalQuoteAmount, $quoteBasis] = $this->resolveQuoteBasis($enquiry);
+        $quote = $this->resolveQuoteBasis($enquiry);
+        $totalQuoteAmount = $quote['amount'];
+        $quoteBasis = $quote['basis'];
 
         // Use loaded collection when available to avoid N+1 on paginated lists
         $payments = $enquiry->relationLoaded('payments') ? $enquiry->payments : null;
@@ -119,8 +126,11 @@ class FinanceService
             'amount_required_for_threshold' => (float) max(0, $thresholdAmount - $totalPaid),
             'is_70_percent_met' => $percentage >= self::MOBILIZATION_THRESHOLD_PERCENTAGE,
             'is_threshold_met' => $percentage >= self::MOBILIZATION_THRESHOLD_PERCENTAGE,
-            'is_client_approved_basis' => $quoteBasis === 'client_approved_quote',
+            'is_client_approved_basis' => in_array($quoteBasis, ['approved_snapshot', 'client_approved_quote'], true),
+            'has_approved_quote' => $totalQuoteAmount > 0,
             'quote_basis' => $quoteBasis,
+            'quote_source_label' => $quote['source_label'],
+            'quote_approval' => $quote['approval'],
             'client_approved_amount' => (float)$enquiry->client_approved_quote,
             'payment_count' => $paymentCount,
             'latest_payment_date' => $latestPaymentDate,
@@ -133,10 +143,62 @@ class FinanceService
 
     private function resolveQuoteBasis(ProjectEnquiry $enquiry): array
     {
+        // The approval row is the immutable decision snapshot and therefore the
+        // first choice for billing. The enquiry amount is only a denormalized
+        // compatibility field and must not outrank an approval-of-record.
+        $approval = $enquiry->relationLoaded('quoteApprovals')
+            ? $enquiry->quoteApprovals->sortByDesc('updated_at')->first()
+            : DB::table('quote_approvals')
+                ->where('enquiry_id', $enquiry->id)
+                ->latest('updated_at')
+                ->first();
+
+        if ($approval) {
+            if ($approval->approval_status !== 'approved') {
+                return [
+                    'amount' => 0.0,
+                    'basis' => 'none',
+                    'source_label' => 'Quote approval pending',
+                    'approval' => null,
+                ];
+            }
+
+            if ((float) $approval->quote_amount <= 0) {
+                return [
+                    'amount' => 0.0,
+                    'basis' => 'none',
+                    'source_label' => 'Approved quote has no value',
+                    'approval' => null,
+                ];
+            }
+
+            return [
+                'amount' => (float) $approval->quote_amount,
+                'basis' => 'approved_snapshot',
+                'source_label' => 'Approved quote',
+                'approval' => [
+                    'id' => (int) $approval->id,
+                    'task_id' => (int) $approval->task_id,
+                    'approved_by' => $approval->approved_by,
+                    'approved_at' => $approval->approval_date instanceof \DateTimeInterface
+                        ? $approval->approval_date->format('Y-m-d')
+                        : $approval->approval_date,
+                    'recorded_at' => $approval->updated_at instanceof \DateTimeInterface
+                        ? $approval->updated_at->format(DATE_ATOM)
+                        : $approval->updated_at,
+                ],
+            ];
+        }
+
         $clientApprovedQuote = (float) ($enquiry->client_approved_quote ?? 0);
 
         if ($clientApprovedQuote > 0) {
-            return [$clientApprovedQuote, 'client_approved_quote'];
+            return [
+                'amount' => $clientApprovedQuote,
+                'basis' => 'client_approved_quote',
+                'source_label' => 'Approved quote (legacy)',
+                'approval' => null,
+            ];
         }
 
         // Fall back to APPROVED quote data only. Payment progress and the 70%
@@ -144,10 +206,26 @@ class FinanceService
         $quoteData = $this->loadedApprovedQuoteData($enquiry) ?? $this->latestApprovedQuoteData($enquiry);
 
         if ($quoteData && (float) $quoteData->quote_amount > 0) {
-            return [(float) $quoteData->quote_amount, 'system_quote'];
+            return [
+                'amount' => (float) $quoteData->quote_amount,
+                'basis' => 'system_quote',
+                'source_label' => 'Approved quote',
+                'approval' => [
+                    'id' => null,
+                    'task_id' => null,
+                    'approved_by' => $quoteData->approved_by,
+                    'approved_at' => optional($quoteData->approval_date)->toDateString(),
+                    'recorded_at' => optional($quoteData->updated_at)->toISOString(),
+                ],
+            ];
         }
 
-        return [0.0, 'none'];
+        return [
+            'amount' => 0.0,
+            'basis' => 'none',
+            'source_label' => 'No approved quote',
+            'approval' => null,
+        ];
     }
 
     private function loadedApprovedQuoteData(ProjectEnquiry $enquiry): ?TaskQuoteData

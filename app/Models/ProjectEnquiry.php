@@ -101,6 +101,11 @@ class ProjectEnquiry extends Model
         return $this->hasOne(Project::class, 'enquiry_id');
     }
 
+    public function quoteApprovals(): HasMany
+    {
+        return $this->hasMany(QuoteApproval::class, 'enquiry_id');
+    }
+
     /**
      * Overtime entries logged against this enquiry. OTEntry.project_id references
      * project_enquiries (see OTEntry::project()), so labour-allocation reporting

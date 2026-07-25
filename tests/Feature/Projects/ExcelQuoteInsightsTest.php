@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 class ExcelQuoteInsightsTest extends TestCase
@@ -149,6 +150,40 @@ class ExcelQuoteInsightsTest extends TestCase
         $this->assertSame(500000.0, $progress['total_quote']);
     }
 
+    public function test_billing_uses_the_latest_approval_snapshot_and_blocks_stale_amounts(): void
+    {
+        $enquiry = $this->enquiry();
+        $enquiry->update(['client_approved_quote' => 125000]);
+        $approvalTask = $this->task($enquiry, 'quote_approval', ['task_order' => 2]);
+
+        \DB::table('quote_approvals')->insert([
+            'task_id' => $approvalTask->id,
+            'enquiry_id' => $enquiry->id,
+            'approval_status' => 'approved',
+            'approved_by' => 'Finance Tester',
+            'approval_date' => now(),
+            'quote_amount' => 150000,
+            'quote_data' => json_encode(['revision' => 2]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $progress = app(FinanceService::class)->getPaymentProgress($enquiry->fresh());
+        $this->assertSame('approved_snapshot', $progress['quote_basis']);
+        $this->assertSame(150000.0, $progress['total_quote']);
+        $this->assertSame('Finance Tester', $progress['quote_approval']['approved_by']);
+
+        \DB::table('quote_approvals')->where('task_id', $approvalTask->id)->update([
+            'approval_status' => 'pending',
+            'updated_at' => now()->addSecond(),
+        ]);
+
+        $progress = app(FinanceService::class)->getPaymentProgress($enquiry->fresh());
+        $this->assertSame('none', $progress['quote_basis']);
+        $this->assertSame(0.0, $progress['total_quote']);
+        $this->assertFalse($progress['has_approved_quote']);
+    }
+
     /** @param list<array{0: string, 1: float}> $rows */
     private function workbook(array $rows): UploadedFile
     {
@@ -224,12 +259,15 @@ class ExcelQuoteInsightsTest extends TestCase
 
     private function user(): User
     {
-        return User::create([
+        $user = User::create([
             'name' => uniqid('user_'),
             'email' => uniqid('user_') . '@test.local',
             'password' => bcrypt('secret'),
             'is_active' => true,
-        ])->fresh();
+        ]);
+        $user->assignRole(Role::findOrCreate('Accounts', 'web'));
+
+        return $user->fresh();
     }
 
     private function client(): Client

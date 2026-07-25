@@ -329,6 +329,35 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('data.finance_gate.progress.finance_released', true);
     }
 
+    public function test_threshold_payment_automatically_releases_project(): void
+    {
+        $accounts = $this->user('Accounts');
+        $enquiry = $this->enquiry([
+            'status' => EnquiryConstants::STATUS_AWAITING_DEPOSIT,
+            'workflow_preset_type' => 'external_project',
+            'quote_approved' => true,
+            'job_number' => 'WNG-07-2026-003',
+            'client_approved_quote' => 1000,
+            'created_by' => $accounts->id,
+            'project_officer_id' => $accounts->id,
+            'selected_workflow_tasks' => ['procurement'],
+        ]);
+        $this->task($enquiry, 'procurement', ['created_by' => $accounts->id]);
+
+        Sanctum::actingAs($accounts);
+
+        $this->postJson("/api/projects/enquiries/{$enquiry->id}/payments", [
+            'amount' => 700,
+            'payment_date' => now()->toDateString(),
+            'payment_method' => 'bank_transfer',
+            'transaction_reference' => 'AUTO-RELEASE-700',
+        ])->assertOk()
+            ->assertJsonPath('auto_released', true)
+            ->assertJsonPath('progress.finance_released', true);
+
+        $this->assertTrue((bool) $enquiry->fresh()->finance_released);
+    }
+
     public function test_finance_project_budgets_summary_only_uses_completed_budget_tasks(): void
     {
         $accounts = $this->user('Accounts');
