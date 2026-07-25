@@ -789,20 +789,45 @@ class EnquiryWorkflowService
             }
         }
 
-        // 10. Logistics Validation — mirrors LogisticsTask.vue's checklistComplete
-        // gate: every checklist item must be marked present.
+        // 10. Logistics validation: a usable trip plan, manifest, and verified load.
         if ($task->type === 'logistics' && !$isAdmin) {
-            $logisticsTask = \App\Modules\logisticsTask\Models\LogisticsTask::where('task_id', $task->id)->first();
+            $logisticsTask = \App\Modules\logisticsTask\Models\LogisticsTask::where('task_id', $task->id)
+                ->withCount('transportItems')
+                ->first();
+            if (!$logisticsTask) {
+                throw new WorkflowValidationException('Complete the logistics trip plan before dispatch.');
+            }
+
+            $planning = $logisticsTask->logistics_planning ?? [];
+            $requiredPlanning = [
+                'vehicle registration' => data_get($planning, 'vehicle_identification'),
+                'driver' => data_get($planning, 'driver_name'),
+                'destination' => data_get($planning, 'route.destination'),
+                'load time' => data_get($planning, 'timeline.loading_time'),
+                'departure time' => data_get($planning, 'timeline.departure_time'),
+                'delivery date' => data_get($planning, 'timeline.setup_start_time'),
+                'delivery time' => data_get($planning, 'timeline.setup_start_hour'),
+            ];
+            $missingPlanning = collect($requiredPlanning)->filter(fn ($value) => blank($value))->keys();
+            if ($missingPlanning->isNotEmpty()) {
+                throw new WorkflowValidationException(
+                    'Complete the trip plan: '.$missingPlanning->join(', ', ' and ').'.'
+                );
+            }
+            if ($logisticsTask->transport_items_count < 1) {
+                throw new WorkflowValidationException('Add at least one item to the load manifest before dispatch.');
+            }
+
             $checklist = $logisticsTask
                 ? \App\Modules\logisticsTask\Models\LogisticsChecklist::where('logistics_task_id', $logisticsTask->id)->first()
                 : null;
-            $items = $checklist->checklist_data['items'] ?? [];
+            $items = $checklist?->checklist_data['items'] ?? [];
             if (empty($items)) {
-                throw new WorkflowValidationException("Cannot complete Logistics task. The dispatch checklist is empty.");
+                throw new WorkflowValidationException('Generate and verify the load checklist before dispatch.');
             }
             $notPresent = collect($items)->filter(fn($item) => ($item['status'] ?? 'missing') !== 'present')->count();
             if ($notPresent > 0) {
-                throw new WorkflowValidationException("Cannot complete Logistics task. {$notPresent} checklist item(s) are not marked present.");
+                throw new WorkflowValidationException("Verify the remaining {$notPresent} load item(s) before dispatch.");
             }
         }
 

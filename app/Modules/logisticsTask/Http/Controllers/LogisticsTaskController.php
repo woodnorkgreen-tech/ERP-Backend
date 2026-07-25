@@ -102,33 +102,23 @@ class LogisticsTaskController extends Controller
     {
         try {
             $validated = $request->validate([
-                'vehicle_type' => 'nullable|string|max:100',
                 'vehicle_identification' => 'nullable|string|max:100',
-                'crew_vehicle' => 'nullable|string|max:100',
                 'driver_name' => 'nullable|string|max:100',
-                'driver_contact' => 'nullable|string|max:20',
-                'team_captain' => 'nullable|string|max:100',
-                'prepared_by' => 'nullable|string|max:100',
-                'route.origin' => 'nullable|string|max:255',
                 'route.destination' => 'nullable|string|max:255',
-                'route.distance' => 'nullable|numeric|min:0',
-                'route.travel_time' => 'nullable|string|max:50',
                 'timeline.loading_time' => 'nullable|string|max:20',
                 'timeline.departure_time' => 'nullable|string|max:20',
-                'timeline.arrival_time' => 'nullable|string|max:20',
                 'timeline.setup_start_time' => 'nullable|string|max:20',
                 'timeline.setup_start_hour' => 'nullable|string|max:20',
-                'timeline.setup_duration' => 'nullable|string|max:100',
-                'timeline.setdown_date' => 'nullable|string|max:20',
-                'timeline.setdown_time' => 'nullable|string|max:20',
             ]);
 
             $logisticsTask = $this->logisticsService->saveLogisticsPlanning($taskId, $validated);
 
             return response()->json([
-                'message' => 'Logistics planning saved successfully',
+                'message' => 'Trip plan saved',
                 'data' => $logisticsTask
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to save logistics planning',
@@ -233,12 +223,16 @@ class LogisticsTaskController extends Controller
                 }
             }
 
-            $item = $this->logisticsService->updateTransportItem($itemId, $validated);
+            $item = $this->logisticsService->updateTransportItem($taskId, $itemId, $validated);
 
             return response()->json([
                 'message' => 'Transport item updated successfully',
                 'data' => $item
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['message' => 'Manifest item not found for this task'], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to update transport item',
@@ -253,11 +247,13 @@ class LogisticsTaskController extends Controller
     public function deleteTransportItem(int $taskId, int $itemId): JsonResponse
     {
         try {
-            $this->logisticsService->removeTransportItem($itemId);
+            $this->logisticsService->removeTransportItem($taskId, $itemId);
 
             return response()->json([
                 'message' => 'Transport item deleted successfully'
             ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['message' => 'Manifest item not found for this task'], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to delete transport item',

@@ -49,9 +49,11 @@ class TeamsTaskController extends Controller
             $team = $this->teamsService->createTeamTask($taskId, $request->validated());
 
             return response()->json([
-                'message' => 'Team task created successfully',
+                'message' => 'Crew added',
                 'data' => $team
             ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             \Log::error('Error creating team task: ' . $e->getMessage());
             return response()->json([

@@ -29,42 +29,31 @@ class LogisticsTaskService
         $planning = $logisticsTask->logistics_planning ?? [];
         if (empty($planning)) {
             $planning = [
-                'vehicle_type' => '',
                 'vehicle_identification' => '',
-                'crew_vehicle' => '',
                 'driver_name' => '',
-                'driver_contact' => '',
-                'team_captain' => '',
                 'route' => [
-                    'origin' => 'Workshop',
                     'destination' => $logisticsTask->task->enquiry->venue ?? 'TBC',
-                    'distance' => null,
                 ],
                 'timeline' => [
                     'loading_time' => null,
                     'departure_time' => null,
-                    'arrival_time' => null,
                     'setup_start_time' => null,
                     'setup_start_hour' => null,
-                    'setup_duration' => null,
-                    'setdown_date' => null,
-                    'setdown_time' => null,
                 ]
             ];
         } else {
             // Ensure nested objects exist
             if (!isset($planning['route'])) {
                 $planning['route'] = [
-                    'origin' => 'Workshop',
                     'destination' => $logisticsTask->task->enquiry->venue ?? 'TBC',
-                    'distance' => null,
                 ];
             }
             if (!isset($planning['timeline'])) {
                 $planning['timeline'] = [
+                    'loading_time' => null,
                     'departure_time' => null,
-                    'arrival_time' => null,
                     'setup_start_time' => null,
+                    'setup_start_hour' => null,
                 ];
             }
         }
@@ -176,9 +165,11 @@ class LogisticsTaskService
     /**
      * Update a transport item
      */
-    public function updateTransportItem(int $itemId, array $data): TransportItem
+    public function updateTransportItem(int $taskId, int $itemId, array $data): TransportItem
     {
-        $item = TransportItem::findOrFail($itemId);
+        $item = TransportItem::where('id', $itemId)
+            ->whereHas('logisticsTask', fn ($query) => $query->where('task_id', $taskId))
+            ->firstOrFail();
         $item->update($data);
         return $item->fresh();
     }
@@ -186,9 +177,11 @@ class LogisticsTaskService
     /**
      * Remove a transport item
      */
-    public function removeTransportItem(int $itemId): bool
+    public function removeTransportItem(int $taskId, int $itemId): bool
     {
-        $item = TransportItem::findOrFail($itemId);
+        $item = TransportItem::where('id', $itemId)
+            ->whereHas('logisticsTask', fn ($query) => $query->where('task_id', $taskId))
+            ->firstOrFail();
         return $item->delete();
     }
 
