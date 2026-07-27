@@ -154,7 +154,8 @@ class LeaveRequestController extends Controller
         $user = $request->user();
         $leaveTypeId = $request->input('leave_type_id');
         $leaveType = LeaveType::find($leaveTypeId);
-        
+        $recordAsApproved = $request->boolean('record_as_approved') && $this->leaveService->isHRLevel($user);
+
         $validated = $request->validate([
             'employee_id' => ['nullable', 'integer', 'exists:employees,id'],
             'contact_employee_id' => ['nullable', 'integer', 'different:employee_id', 'exists:employees,id'],
@@ -166,7 +167,7 @@ class LeaveRequestController extends Controller
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
             'has_handover' => ['nullable', 'boolean'],
-            'attachment' => $leaveType && $this->leaveTypeRequiresAttachment($leaveType)
+            'attachment' => $leaveType && !$recordAsApproved && $this->leaveTypeRequiresAttachment($leaveType)
                 ? ['required', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048']
                 : ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
         ]);
@@ -174,7 +175,10 @@ class LeaveRequestController extends Controller
         $employee = $this->resolveTargetEmployee($user, $validated['employee_id'] ?? null);
         $leaveType = LeaveType::query()->whereKey($validated['leave_type_id'])->firstOrFail();
         $this->ensureContactEmployeeIsDifferent($employee->id, $validated['contact_employee_id'] ?? null);
-        $this->ensureNoHandoverReasonIsPresent($validated);
+
+        if (!$recordAsApproved) {
+            $this->ensureNoHandoverReasonIsPresent($validated);
+        }
 
         try {
             $this->leaveService->validateDateRange($validated['start_date'], $validated['end_date']);
@@ -221,7 +225,7 @@ class LeaveRequestController extends Controller
             $attachmentPath = $request->file('attachment')->store('leave-attachments', 'public');
         }
 
-        $leaveRequest = LeaveRequest::create([
+        $leaveRequest = LeaveRequest::create(array_merge([
             'employee_id' => $employee->id,
             'contact_employee_id' => $validated['contact_employee_id'] ?? null,
             'leave_type_id' => $leaveType->id,
@@ -230,19 +234,29 @@ class LeaveRequestController extends Controller
             'end_date' => $validated['end_date'],
             'days_requested' => $daysRequested,
             'session' => $validated['session'],
-            'status' => LeaveRequest::STATUS_PENDING,
             'reason' => $validated['reason'],
             'explanation' => $validated['explanation'] ?? null,
             'handover_notes' => $validated['handover_notes'] ?? null,
             'attachment_path' => $attachmentPath,
-        ]);
+        ], $recordAsApproved ? [
+            'status' => LeaveRequest::STATUS_APPROVED,
+            'approved_by' => $user->id,
+            'approved_at' => now(),
+        ] : [
+            'status' => LeaveRequest::STATUS_PENDING,
+        ]));
 
-        // Return the response immediately; notify managers after the request finishes.
-        $this->notifyManagersAfterResponse($leaveRequest->id);
+        if ($recordAsApproved) {
+            $message = 'Leave recorded and approved.';
+        } else {
+            // Return the response immediately; notify managers after the request finishes.
+            $this->notifyManagersAfterResponse($leaveRequest->id);
+            $message = 'Leave request submitted successfully.';
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Leave request submitted successfully.',
+            'message' => $message,
             'data' => $leaveRequest->load(['employee.department', 'leaveType', 'creator', 'approver', 'leadApprover', 'contactEmployee.department']),
         ], 201);
     }
