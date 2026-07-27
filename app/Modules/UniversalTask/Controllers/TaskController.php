@@ -43,18 +43,6 @@ class TaskController
     {
         $user = Auth::user();
 
-        // TODO: Temporarily bypass permission check for development
-        // Check basic read permission
-        // if (!$this->permissionService->canView($user)) {
-        //     return response()->json([
-        //         'success' => false,
-        //         'error' => [
-        //             'code' => 'INSUFFICIENT_PERMISSIONS',
-        //         'message' => 'You do not have permission to view tasks.',
-        //         ]
-        //     ], 403);
-        // }
-
         // Validate request parameters
         $validator = Validator::make($request->all(), [
             'page' => 'nullable|integer|min:1',
@@ -90,23 +78,9 @@ class TaskController
             // Get parameters for repository
             $params = $request->all();
 
-            // Use repository for advanced search and filtering
+            // Repository applies the visibility scope (own/department/all)
+            // for this user before search, filters, and pagination.
             $tasks = $this->taskRepository->getTasks($params, $user);
-
-            // TODO: Temporarily bypass permission filtering for development
-            // Apply permission filters to the results
-            // $filteredTasks = collect($tasks->items())->filter(function ($task) use ($user) {
-            //     return $this->permissionService->canView($user, $task);
-            // });
-
-            // Create new paginator with filtered results
-            // $filteredPaginator = new \Illuminate\Pagination\LengthAwarePaginator(
-            //     $filteredTasks,
-            //     $tasks->total(),
-            //     $tasks->perPage(),
-            //     $tasks->currentPage(),
-            //     ['path' => $request->url(), 'pageName' => 'page']
-            // );
 
             return response()->json([
                 'success' => true,
@@ -135,7 +109,7 @@ class TaskController
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'task_type' => 'required|string|max:50',
+            'task_type' => 'nullable|string|max:50',
             'status' => ['nullable', Rule::in(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled'])],
             'priority' => ['nullable', Rule::in(['low', 'medium', 'high', 'urgent'])],
             'parent_task_id' => 'nullable|exists:tasks,id',
@@ -161,31 +135,30 @@ class TaskController
             ], 422);
         }
 
-        // TODO: Temporarily bypass permission check for development
-        // Check create permission
-        // if (!$this->permissionService->canCreate($user, $request->all())) {
-        //     $this->permissionService->logPermissionDenial($user, 'create_task', null, $request->all());
-        //     return response()->json([
-        //         'success' => false,
-        //         'error' => [
-        //             'code' => 'INSUFFICIENT_PERMISSIONS',
-        //             'message' => 'You do not have permission to create tasks.',
-        //         ]
-        //     ], 403);
-        // }
+        if (!$this->permissionService->canCreate($user, $request->all())) {
+            $this->permissionService->logPermissionDenial($user, 'create_task', null, $request->all());
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'INSUFFICIENT_PERMISSIONS',
+                    'message' => 'You do not have permission to create tasks.',
+                ]
+            ], 403);
+        }
 
         try {
-            Log::info('Task creation attempt', [
-                'user_id' => $user->id,
-                'request_data' => $request->all(),
-            ]);
+            // TEMP disabled 2026-07-27 for perf testing - revert (uncomment) later
+            // Log::info('Task creation attempt', [
+            //     'user_id' => $user->id,
+            //     'request_data' => $request->all(),
+            // ]);
 
             $task = $this->taskService->createTask($request->all(), $user);
 
-            Log::info('Task created successfully', [
-                'task_id' => $task->id,
-                'task_data' => $task->toArray(),
-            ]);
+            // Log::info('Task created successfully', [
+            //     'task_id' => $task->id,
+            //     'task_data' => $task->toArray(),
+            // ]);
 
             return response()->json([
                 'success' => true,
@@ -295,19 +268,6 @@ class TaskController
     {
         $user = Auth::user();
 
-        // TODO: Temporarily bypass permission check for development
-        // Check edit permission
-        // if (!$this->permissionService->canEdit($user, $task)) {
-        //     $this->permissionService->logPermissionDenial($user, 'edit_task', $task);
-        //     return response()->json([
-        //         'success' => false,
-        //         'error' => [
-        //             'code' => 'INSUFFICIENT_PERMISSIONS',
-        //             'message' => 'You do not have permission to edit this task.',
-        //         ]
-        //     ], 403);
-        // }
-
         // Validate request data
         $validator = Validator::make($request->all(), [
             'title' => 'sometimes|required|string|max:255',
@@ -338,6 +298,19 @@ class TaskController
 
         try {
             $task = Task::findOrFail($taskId);
+
+            // Check edit permission AFTER loading the task
+            if (!$this->permissionService->canEdit($user, $task)) {
+                $this->permissionService->logPermissionDenial($user, 'edit_task', $task);
+                return response()->json([
+                    'success' => false,
+                    'error' => [
+                        'code' => 'INSUFFICIENT_PERMISSIONS',
+                        'message' => 'You do not have permission to edit this task.',
+                    ]
+                ], 403);
+            }
+
             $task = $this->taskService->updateTask($task, $request->all(), $user->id);
 
             return response()->json([

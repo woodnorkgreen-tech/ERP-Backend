@@ -4,6 +4,7 @@ namespace App\Modules\UniversalTask\Repositories;
 
 use App\Models\User;
 use App\Modules\UniversalTask\Models\Task;
+use App\Modules\UniversalTask\Services\TaskPermissionService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +12,10 @@ use Illuminate\Support\Facades\Cache;
 
 class TaskRepository
 {
+    public function __construct(protected TaskPermissionService $permissionService)
+    {
+    }
+
     /**
      * Search tasks with full-text search across title, description, and notes.
      *
@@ -150,6 +155,12 @@ class TaskRepository
     {
         $query = Task::with(['department', 'assignedUser.employee', 'creator', 'parentTask'])
                     ->withCount('subtasks');
+
+        // Scope results to what this user is allowed to see (own tasks,
+        // department tasks for dept leads, everything for HR/Admin).
+        if ($user) {
+            $query = $this->permissionService->applyVisibilityScope($query, $user);
+        }
 
         // By default, exclude subtasks from main list (show only top-level tasks)
         // Include subtasks only when explicitly requested

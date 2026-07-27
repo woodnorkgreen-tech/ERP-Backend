@@ -11,6 +11,91 @@ use Illuminate\Support\Facades\Log;
 class TaskPermissionService
 {
     /**
+     * Check if a user has full, unscoped access (sees/manages every task).
+     *
+     * @param User $user
+     * @return bool
+     */
+    public function hasFullAccess(User $user): bool
+    {
+        return $user->hasRole(['Super Admin', 'Admin', 'HR']);
+    }
+
+    /**
+     * Check if a user is directly involved with a task (creator, assignee,
+     * or a member of its multi-assignee list).
+     *
+     * @param User $user
+     * @param Task $task
+     * @return bool
+     */
+    public function isOwnTask(User $user, Task $task): bool
+    {
+        if ($task->created_by === $user->id) {
+            return true;
+        }
+
+        if ($task->assigned_user_id === $user->id) {
+            return true;
+        }
+
+        return $task->assignments()->where('user_id', $user->id)->exists();
+    }
+
+    /**
+     * Check if a task's department falls under a user's lead access.
+     *
+     * @param User $user
+     * @param Task $task
+     * @return bool
+     */
+    public function isLeadOfTaskDepartment(User $user, Task $task): bool
+    {
+        if (!$task->department_id || !$user->isDeptLead()) {
+            return false;
+        }
+
+        return $user->getAccessibleDepartments()->pluck('id')->contains($task->department_id);
+    }
+
+    /**
+     * Apply the three-tier visibility scope to a task query:
+     * HR/Admin/Super Admin see everything, dept leads see their
+     * department(s), everyone else sees only tasks they're involved in.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param User $user
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function applyVisibilityScope($query, User $user)
+    {
+        if ($this->hasFullAccess($user)) {
+            return $query;
+        }
+
+        if ($user->isDeptLead()) {
+            $departmentIds = $user->getAccessibleDepartments()->pluck('id');
+
+            return $query->where(function ($q) use ($user, $departmentIds) {
+                $q->whereIn('department_id', $departmentIds)
+                    ->orWhere('created_by', $user->id)
+                    ->orWhere('assigned_user_id', $user->id)
+                    ->orWhereHas('assignments', function ($assignmentQuery) use ($user) {
+                        $assignmentQuery->where('user_id', $user->id);
+                    });
+            });
+        }
+
+        return $query->where(function ($q) use ($user) {
+            $q->where('created_by', $user->id)
+                ->orWhere('assigned_user_id', $user->id)
+                ->orWhereHas('assignments', function ($assignmentQuery) use ($user) {
+                    $assignmentQuery->where('user_id', $user->id);
+                });
+        });
+    }
+
+    /**
      * Check if user can view a task.
      *
      * @param User $user
@@ -19,29 +104,26 @@ class TaskPermissionService
      */
     public function canView(User $user, ?Task $task = null): bool
     {
-        // Basic task read permission
-        if (!$user->can(Permissions::TASK_READ)) {
-            return false;
-        }
-
-        // If no specific task, user can view tasks in general
+        // If no specific task, any authenticated user can view the task list
+        // (results are scoped by applyVisibilityScope()).
         if (!$task) {
             return true;
         }
 
-        // Department-based access control
-        if (!$this->hasDepartmentAccess($user, $task)) {
-            return false;
+        if ($this->hasFullAccess($user)) {
+            return true;
         }
 
-        // Task-level permissions (future enhancement)
-        // Check if user has explicit permission to view this specific task
+        if ($this->isLeadOfTaskDepartment($user, $task)) {
+            return true;
+        }
 
-        return true;
+        return $this->isOwnTask($user, $task);
     }
 
     /**
-     * Check if user can create tasks.
+     * Check if user can create tasks. Creation is open to any
+     * authenticated user - that's the point of a universal tracker.
      *
      * @param User $user
      * @param array $taskData
@@ -49,17 +131,6 @@ class TaskPermissionService
      */
     public function canCreate(User $user, array $taskData = []): bool
     {
-        if (!$user->can(Permissions::TASK_CREATE)) {
-            return false;
-        }
-
-        // Check department access if department is specified
-        if (isset($taskData['department_id'])) {
-            if (!$this->hasDepartmentAccessById($user, $taskData['department_id'])) {
-                return false;
-            }
-        }
-
         return true;
     }
 
@@ -72,33 +143,16 @@ class TaskPermissionService
      */
     public function canEdit(User $user, Task $task): bool
     {
-        if (!$user->can(Permissions::TASK_UPDATE)) {
-            return false;
-        }
-
-        // Must be able to view the task first
-        if (!$this->canView($user, $task)) {
-            return false;
-        }
-
-        // Creator can always edit their own tasks
-        if ($task->created_by === $user->id) {
+        if ($this->hasFullAccess($user)) {
             return true;
         }
 
-        // Department managers can edit tasks in their department
-        if ($this->isDepartmentManager($user, $task->department_id)) {
+        if ($this->isLeadOfTaskDepartment($user, $task)) {
             return true;
         }
 
-        // Assigned user can edit tasks assigned to them
-        if ($task->assigned_user_id === $user->id) {
-            return true;
-        }
-
-        // Task-level permissions (future enhancement)
-
-        return false;
+        // Creator or assignee can edit their own task
+        return $this->isOwnTask($user, $task);
     }
 
     /**
@@ -110,20 +164,16 @@ class TaskPermissionService
      */
     public function canDelete(User $user, Task $task): bool
     {
-        // Only Super Admin and Admin users can delete tasks
-        // TEMPORARY: Allow deletion for testing - remove this condition in production
-        if (!$user->hasRole(['Super Admin', 'Admin'])) {
-            // For testing: allow the current user to delete tasks
-            // TODO: Remove this and only allow Admin/Super Admin roles
-            // return false;
+        if ($this->hasFullAccess($user)) {
+            return true;
         }
 
-        // Must be able to view the task first
-        if (!$this->canView($user, $task)) {
-            return false;
+        if ($this->isLeadOfTaskDepartment($user, $task)) {
+            return true;
         }
 
-        return true;
+        // Regular users may only delete tasks they created themselves
+        return $task->created_by === $user->id;
     }
 
     /**
@@ -136,32 +186,16 @@ class TaskPermissionService
      */
     public function canAssign(User $user, Task $task, User $assignee): bool
     {
-        if (!$user->can(Permissions::TASK_ASSIGN)) {
-            return false;
-        }
-
-        // Must be able to view the task
-        if (!$this->canView($user, $task)) {
-            return false;
-        }
-
-        // Creator can assign their own tasks
-        if ($task->created_by === $user->id) {
+        if ($this->hasFullAccess($user)) {
             return true;
         }
 
-        // Department managers can assign tasks in their department
-        if ($this->isDepartmentManager($user, $task->department_id)) {
+        if ($this->isLeadOfTaskDepartment($user, $task)) {
             return true;
         }
 
-        // Current assignee can reassign (with restrictions)
-        if ($task->assigned_user_id === $user->id) {
-            // Can only reassign within same department
-            return $assignee->department_id === $task->department_id;
-        }
-
-        return false;
+        // Creator or current assignee can (re)assign their own task
+        return $this->isOwnTask($user, $task);
     }
 
     /**
@@ -174,33 +208,16 @@ class TaskPermissionService
      */
     public function canChangeStatus(User $user, Task $task, string $newStatus): bool
     {
-        // Must be able to view the task
-        if (!$this->canView($user, $task)) {
-            return false;
-        }
-
-        // Creator can change status of their tasks
-        if ($task->created_by === $user->id) {
+        if ($this->hasFullAccess($user)) {
             return true;
         }
 
-        // Department managers can change status of tasks in their department
-        if ($this->isDepartmentManager($user, $task->department_id)) {
+        if ($this->isLeadOfTaskDepartment($user, $task)) {
             return true;
         }
 
-        // Assigned user can change status of tasks assigned to them
-        if ($task->assigned_user_id === $user->id) {
-            // Can only change to certain statuses
-            return in_array($newStatus, ['in_progress', 'completed', 'blocked']);
-        }
-
-        // Special permissions for completion
-        if ($newStatus === 'completed' && $user->can(Permissions::TASK_COMPLETE)) {
-            return true;
-        }
-
-        return false;
+        // Creator or assignee can move their own task between any status
+        return $this->isOwnTask($user, $task);
     }
 
     /**
