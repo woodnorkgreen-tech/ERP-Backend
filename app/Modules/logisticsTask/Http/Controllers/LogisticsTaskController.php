@@ -102,6 +102,7 @@ class LogisticsTaskController extends Controller
     {
         try {
             $validated = $request->validate([
+                'transport_arrangement' => 'sometimes|in:company,client',
                 'vehicle_identification' => 'nullable|string|max:100',
                 'driver_name' => 'nullable|string|max:100',
                 'route.destination' => 'nullable|string|max:255',
@@ -114,7 +115,7 @@ class LogisticsTaskController extends Controller
             $logisticsTask = $this->logisticsService->saveLogisticsPlanning($taskId, $validated);
 
             return response()->json([
-                'message' => 'Trip plan saved',
+                'message' => 'Transport plan saved',
                 'data' => $logisticsTask
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {

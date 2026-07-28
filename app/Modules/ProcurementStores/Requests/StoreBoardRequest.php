@@ -73,8 +73,8 @@ class StoreBoardRequest extends FormRequest
         return [
             'library_material_id.required' => 'A material must be selected to register boards.',
             'library_material_id.exists'   => 'The selected material does not exist or is inactive.',
-            'quantity.required'            => 'Quantity of boards to ingest is required.',
-            'quantity.max'                 => 'Cannot ingest more than 500 boards in a single batch.',
+            'quantity.required'            => 'Enter the number of boards received.',
+            'quantity.max'                 => 'You can receive up to 500 boards in one batch.',
         ];
     }
 }

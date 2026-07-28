@@ -29,6 +29,7 @@ class LogisticsTaskService
         $planning = $logisticsTask->logistics_planning ?? [];
         if (empty($planning)) {
             $planning = [
+                'transport_arrangement' => 'company',
                 'vehicle_identification' => '',
                 'driver_name' => '',
                 'route' => [
@@ -42,6 +43,8 @@ class LogisticsTaskService
                 ]
             ];
         } else {
+            // Existing plans predate this choice and remain company-arranged.
+            $planning['transport_arrangement'] = $planning['transport_arrangement'] ?? 'company';
             // Ensure nested objects exist
             if (!isset($planning['route'])) {
                 $planning['route'] = [

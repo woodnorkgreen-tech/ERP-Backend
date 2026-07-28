@@ -151,17 +151,24 @@ class EnquiryController extends Controller
 
     private function runIndex(Request $request): JsonResponse
     {
-        $query = ProjectEnquiry::with(
-            'client',
-            'department',
-            'projectOfficer',
-            'enquiryTasks.assignedUsers',
-            'enquiryTasks.assignedTo',
-            'enquiryTasks.quoteData',
-            'deliverables',
-            'payments',
-            'quoteApprovals'
-        );
+        $view = $request->input('view', 'enquiries');
+
+        // Billing needs only identity and finance-basis relationships. Loading the
+        // full project graph here previously serialized every task, assignee and
+        // deliverable for as many as 500 rows.
+        $query = $view === 'receivables'
+            ? ProjectEnquiry::with('client', 'payments', 'quoteApprovals', 'enquiryTasks.quoteData')
+            : ProjectEnquiry::with(
+                'client',
+                'department',
+                'projectOfficer',
+                'enquiryTasks.assignedUsers',
+                'enquiryTasks.assignedTo',
+                'enquiryTasks.quoteData',
+                'deliverables',
+                'payments',
+                'quoteApprovals'
+            );
 
         $query = app(\Illuminate\Pipeline\Pipeline::class)
             ->send($query)
@@ -202,7 +209,6 @@ class EnquiryController extends Controller
             }
         }
 
-        $view = $request->input('view', 'enquiries');
         $sortBy = $request->input('sort_by', 'created_at');
         $sortOrder = $request->input('sort_order', 'desc');
         $allowedSorts = ['created_at', 'expected_delivery_date', 'estimated_budget', 'title', 'priority', 'job_number'];
@@ -246,8 +252,12 @@ class EnquiryController extends Controller
             return $enquiry;
         });
 
+        $resource = $view === 'receivables'
+            ? \App\Modules\Projects\Resources\ReceivablesEnquiryResource::class
+            : \App\Modules\Projects\Resources\EnquiryResource::class;
+
         return response()->json([
-            'data' => \App\Modules\Projects\Resources\EnquiryResource::collection($enquiries)->response()->getData(true),
+            'data' => $resource::collection($enquiries)->response()->getData(true),
             'message' => 'Enquiries retrieved successfully'
         ]);
     }
@@ -1165,6 +1175,47 @@ class EnquiryController extends Controller
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to fetch finance progress: ' . $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Record the controlled exception used when a project legitimately has no quote.
+     */
+    public function waiveQuoteRequirement(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    {
+        $validated = $request->validate([
+            'billing_amount' => 'required|numeric|gt:0',
+        ]);
+
+        if ($this->financeService->getPaymentProgress($enquiry)['has_approved_quote']) {
+            return response()->json(['message' => 'This project already has an approved quote.'], 422);
+        }
+
+        DB::transaction(function () use ($enquiry, $validated, $request) {
+            $enquiry->update([
+                'quote_requirement_waived' => true,
+                'quote_waiver_billing_amount' => $validated['billing_amount'] ?? null,
+                'quote_waiver_reason' => 'Quote amount entered directly in Project Billing.',
+                'quote_waived_by' => Auth::id(),
+                'quote_waived_at' => now(),
+            ]);
+
+            \App\Models\GovernanceAuditLog::create([
+                'project_enquiry_id' => $enquiry->id,
+                'user_id' => Auth::id(),
+                'gate_type' => 'financial',
+                'action_status' => 'authorized',
+                'message' => 'Quote amount recorded directly in Project Billing',
+                'context' => [
+                    'billing_amount' => $validated['billing_amount'],
+                ],
+                'ip_address' => $request->ip(),
+            ]);
+        });
+
+        return response()->json([
+            'message' => 'Quote amount saved in Project Billing.',
+            'data' => ['progress' => $this->financeService->getPaymentProgress($enquiry->fresh())],
+        ]);
     }
 
     /**

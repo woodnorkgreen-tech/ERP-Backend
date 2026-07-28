@@ -36,8 +36,8 @@ class ReleaseFinanceGateAction
 
         $progress = $this->financeService->getPaymentProgress($enquiry);
 
-        if (!$progress['has_approved_quote']) {
-            throw new Exception('Finance release is blocked until the quote is approved.');
+        if (!$progress['has_approved_quote'] && !$progress['quote_requirement_waived']) {
+            throw new Exception('Finance release requires an approved quote or a formally recorded no-quote exception.');
         }
         
         // Enforce justification if threshold not met
@@ -70,7 +70,8 @@ class ReleaseFinanceGateAction
                     'current_percentage' => $progress['percentage'],
                     'threshold_met' => $progress['is_70_percent_met'],
                     'total_quote' => $progress['total_quote'],
-                    'total_paid' => $progress['total_paid']
+                    'total_paid' => $progress['total_paid'],
+                    'quote_requirement_waived' => $progress['quote_requirement_waived'],
                 ],
                 'ip_address' => request()->ip()
             ]);

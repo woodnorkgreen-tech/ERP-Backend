@@ -179,12 +179,12 @@
     </tr>
     <tr>
         <td>
-            <span class="lbl">Driver</span>
-            <span class="val">{{ $planning['driver_name'] ?? '—' }}</span>
+            <span class="lbl">Transport</span>
+            <span class="val">{{ ($planning['transport_arrangement'] ?? 'company') === 'client' ? 'Client provided' : 'Company provided' }}</span>
         </td>
         <td>
             <span class="lbl">Vehicle Reg.</span>
-            <span class="val">{{ $planning['vehicle_identification'] ?? '—' }}</span>
+            <span class="val">{{ ($planning['transport_arrangement'] ?? 'company') === 'client' ? 'Provided by client' : ($planning['vehicle_identification'] ?? '—') }}</span>
         </td>
         <td>
             <span class="lbl">Team Captain</span>
@@ -332,7 +332,7 @@
             <div style="text-align: center; margin-top: 3px; font-size: 8px; color: #475569;">Signature / Date: ___________</div>
         </td>
         <td style="width: 33%; padding-right: 10px;">
-            <div style="font-size: 9px; color: #475569; text-transform: uppercase; font-weight: bold; text-align: center; margin-bottom: 3px;">Driver — {{ $planning['driver_name'] ?? '______' }}</div>
+            <div style="font-size: 9px; color: #475569; text-transform: uppercase; font-weight: bold; text-align: center; margin-bottom: 3px;">{{ ($planning['transport_arrangement'] ?? 'company') === 'client' ? 'Client Driver' : 'Driver — '.($planning['driver_name'] ?? '______') }}</div>
             <div class="sig-box"></div>
             <div style="text-align: center; margin-top: 3px; font-size: 8px; color: #475569;">Signature / Date: ___________</div>
         </td>

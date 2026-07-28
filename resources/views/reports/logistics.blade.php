@@ -176,6 +176,13 @@
     <!-- Logistics & Dispatch Planning -->
     <div class="mb-4">
         <div class="section-header">DISPATCH & ROUTE PLANNING</div>
+        @if(($data['logistics_planning']['transport_arrangement'] ?? 'company') === 'client')
+        <div class="summary-card">
+            <div class="text-gray-600 uppercase font-small mb-2">TRANSPORT ARRANGEMENT</div>
+            <div class="font-bold">Client-provided transport</div>
+            <div class="mt-1">Vehicle, driver and trip timing are arranged by the client. This document confirms the items released.</div>
+        </div>
+        @else
         <table style="width: 100%;">
             <tr>
                 <td style="width: 33%; padding-right: 1%;">
@@ -208,6 +215,7 @@
                 </td>
             </tr>
         </table>
+        @endif
     </div>
 
     <!-- Project Teams -->
@@ -348,9 +356,9 @@
         <table style="width: 100%;">
             <tr>
                 <td style="width: 33%; padding-right: 2%;">
-                     <div class="font-bold text-center mb-1 text-gray-600">DRIVER</div>
+                     <div class="font-bold text-center mb-1 text-gray-600">{{ ($data['logistics_planning']['transport_arrangement'] ?? 'company') === 'client' ? 'CLIENT DRIVER' : 'DRIVER' }}</div>
                      <div class="signature-box"></div>
-                     <div class="text-center mt-1 font-bold">{{ $data['logistics_planning']['driver_name'] ?? 'Driver Name' }}</div>
+                     <div class="text-center mt-1 font-bold">{{ ($data['logistics_planning']['transport_arrangement'] ?? 'company') === 'client' ? 'Client representative' : ($data['logistics_planning']['driver_name'] ?? 'Driver Name') }}</div>
                      <div class="text-center text-gray-600" style="font-size: 8px;">Date: _______</div>
                 </td>
                 <td style="width: 33%; padding-right: 2%;">
