@@ -135,7 +135,7 @@
                 <div class="font-bold text-gray-900 tracking-wide uppercase" style="font-size: 14px;">Woodnork Green</div>
             </td>
             <td style="width: 50%; text-align: right;">
-                <h2 class="text-blue-600 mb-2 uppercase tracking-wide text-2xl" style="margin: 0 0 10px 0;">LOGISTICS MANIFEST</h2>
+                <h2 class="text-blue-600 mb-2 uppercase tracking-wide text-2xl" style="margin: 0 0 10px 0;">LOGISTICS LOADING SHEET</h2>
                 <div style="display: inline-block; border: 1px solid #d1d5db;">
                     <table>
                         <tr>
@@ -250,8 +250,8 @@
     </div>
     @endif
 
-    <!-- Cargo Manifest -->
-    <div class="category-title">LOADING SHEET & CARGO MANIFEST</div>
+    <!-- Loading Sheet -->
+    <div class="category-title">LOADING SHEET</div>
     <table class="data-table">
         <thead>
             <tr>
@@ -311,7 +311,7 @@
                     </div>
                 </td>
                 <td style="width: 48%; padding-left: 2%;">
-                     <div class="section-header">MANIFEST VERIFICATION</div>
+                     <div class="section-header">LOADING VERIFICATION</div>
                      @if(isset($data['checklist']['items']) && count($data['checklist']['items']) > 0)
                      <table class="data-table">
                          <thead>

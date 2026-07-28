@@ -996,6 +996,8 @@ class EnquiryController extends Controller
             ]);
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
             return response()->json(['message' => $e->getMessage()], 403);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             Log::error('Error approving quote', [
                 'enquiry_id' => $enquiry->id,

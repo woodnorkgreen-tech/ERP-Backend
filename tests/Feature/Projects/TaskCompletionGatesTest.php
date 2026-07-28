@@ -82,13 +82,24 @@ class TaskCompletionGatesTest extends TestCase
         $this->completeAs($task, $this->user())->assertStatus(422);
     }
 
-    public function test_report_completes_once_officer_signature_present(): void
+    public function test_report_completes_once_closure_is_fully_approved(): void
     {
         $task = $this->task($this->enquiry(), 'report');
         ArchivalReportModel::create([
             'enquiry_task_id' => $task->id,
             'project_officer_signature' => 'J. Doe',
             'project_officer_sign_date' => now()->toDateString(),
+            'reviewed_by' => 'A. Manager',
+            'reviewer_sign_date' => now()->toDateString(),
+            'archive_reference' => 'ARC-TEST',
+            'archive_location' => 'ERP / Projects / TEST',
+            'status' => 'approved',
+            'checklist_site_survey_form' => true,
+            'checklist_project_budget_file' => true,
+            'checklist_material_list' => true,
+            'checklist_qc_checklist' => true,
+            'checklist_setup_setdown' => true,
+            'checklist_client_feedback' => true,
         ]);
 
         $this->completeAs($task, $this->user())->assertOk();

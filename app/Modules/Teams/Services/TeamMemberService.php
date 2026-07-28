@@ -24,11 +24,16 @@ class TeamMemberService
     {
         return DB::transaction(function () use ($teamTaskId, $data) {
             $teamTask = TeamsTask::findOrFail($teamTaskId);
-            
+
+            // required_members is a staffing TARGET, not a hard cap — reaching
+            // it must not block adding one more person if the crew genuinely
+            // needs it. Only the combination's real physical max_members (set
+            // from team_category_types at creation) is an actual ceiling.
             $activeCount = $teamTask->activeMembers()->count();
-            if ($activeCount >= max((int) $teamTask->required_members, 1)) {
+            $ceiling = $teamTask->max_members ? (int) $teamTask->max_members : null;
+            if ($ceiling !== null && $activeCount >= $ceiling) {
                 throw ValidationException::withMessages([
-                    'member_name' => 'This crew is already fully staffed.',
+                    'member_name' => "This crew is already at its maximum of {$ceiling} people.",
                 ]);
             }
 
@@ -76,8 +81,15 @@ class TeamMemberService
                 'assigned_by' => auth()->id()
             ]);
 
-            // Update team's assigned members count
-            $teamTask->update(['assigned_members_count' => $activeCount + 1]);
+            // Update team's assigned members count. Growing past the current
+            // target raises the target to match — the person was just added
+            // because the crew needs them, not because the plan was wrong.
+            $newActiveCount = $activeCount + 1;
+            $updates = ['assigned_members_count' => $newActiveCount];
+            if ($newActiveCount > (int) $teamTask->required_members) {
+                $updates['required_members'] = $newActiveCount;
+            }
+            $teamTask->update($updates);
 
             // Log activity
             app(TeamsActivityLogService::class)->log([

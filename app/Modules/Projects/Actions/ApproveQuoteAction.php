@@ -7,7 +7,7 @@ use App\Models\User;
 use App\Events\QuoteApproved;
 use Illuminate\Support\Facades\DB;
 use App\Constants\Permissions;
-use Exception;
+use DomainException;
 
 class ApproveQuoteAction
 {
@@ -17,7 +17,7 @@ class ApproveQuoteAction
      * @param ProjectEnquiry $enquiry
      * @param int $userId
      * @return ProjectEnquiry
-     * @throws Exception
+     * @throws DomainException
      */
     public function execute(ProjectEnquiry $enquiry, int $userId): ProjectEnquiry
     {
@@ -37,7 +37,7 @@ class ApproveQuoteAction
                 ->first();
 
             if (!$approval || $approval->approval_status !== 'approved' || (float) $approval->quote_amount <= 0) {
-                throw new Exception('An approved quote snapshot with a valid amount is required before project activation.');
+                throw new DomainException('Save an approved quote decision with a valid amount before activating the project.');
             }
 
             $jobNumber = $enquiry->generateJobNumber();

@@ -120,6 +120,17 @@ Route::get('projects/tasks/{taskId}/quote/excel/download', [App\Http\Controllers
 
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
+    Route::prefix('support')->group(function () {
+        Route::get('tickets/assignees', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'assignees']);
+        Route::get('tickets', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'index']);
+        Route::post('tickets', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'store'])->middleware('throttle:10,1');
+        Route::get('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'show']);
+        Route::patch('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'update']);
+        Route::post('tickets/{ticket}/replies', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'reply']);
+        Route::post('tickets/{ticket}/attachments', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'uploadAttachment']);
+        Route::get('tickets/{ticket}/attachments/{attachment}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'downloadAttachment']);
+    });
+
     // Action Logs
     Route::get('/logs/{type}/{id}', [App\Http\Controllers\ActionLogController::class, 'index']);
 
@@ -607,7 +618,26 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('/return-checklist/generate',            [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateReturnChecklist']);
             Route::post('/return-checklist/authorize',           [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'authorizeReturn']);
             Route::get('/return-checklist/pdf',                  [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'downloadReturnChecklistPdf']);
+            Route::get('/manifest-submissions', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'index']);
+            Route::post('/manifest-submission-links', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'store']);
+            Route::delete('/manifest-submission-links/{link}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'revoke']);
+            Route::patch('/manifest-submissions/{submission}/review', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'review']);
+            Route::get('/loading-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'index']);
+            Route::post('/loading-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'store']);
+            Route::delete('/loading-confirmation-links/{link}', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'revoke']);
+            Route::get('/return-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'index']);
+            Route::post('/return-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'store']);
+            Route::delete('/return-confirmation-links/{link}', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'revoke']);
         });
+
+        Route::get('/manifest-submit/{token}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'show']);
+        Route::post('/manifest-submit/{token}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'submit']);
+        Route::get('/loading-confirm/{token}', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'show']);
+        Route::patch('/loading-confirm/{token}/items', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'updateItems']);
+        Route::post('/loading-confirm/{token}/confirm', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'confirm']);
+        Route::get('/return-confirm/{token}', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'show']);
+        Route::patch('/return-confirm/{token}/items', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'updateItems']);
+        Route::post('/return-confirm/{token}/confirm', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'confirm']);
 
 
 

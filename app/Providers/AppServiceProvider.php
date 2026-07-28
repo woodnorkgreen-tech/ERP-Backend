@@ -66,6 +66,11 @@ class AppServiceProvider extends ServiceProvider
             \App\Modules\HR\Policies\EmployeePolicy::class,
         );
 
+        \Illuminate\Support\Facades\Gate::policy(
+            \App\Modules\Support\Models\SupportTicket::class,
+            \App\Modules\Support\Policies\SupportTicketPolicy::class,
+        );
+
         // Route model binding
         Route::bind('enquiry', function ($value) {
             return \App\Models\ProjectEnquiry::findOrFail($value);

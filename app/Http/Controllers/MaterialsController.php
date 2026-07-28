@@ -1843,9 +1843,17 @@ class MaterialsController extends Controller
             // NEW: Handle Base Snapshot on First Approval
             $this->handleBaseSnapshotOnApproval($taskId);
 
+            // Complete only after both approvals and all final synchronization
+            // work have succeeded. A single approval must never close the task.
+            if ($allApproved) {
+                $materialsTask = $materialsData->task()->firstOrFail();
+                app(\App\Modules\Projects\Actions\AutoSyncTaskStateAction::class)->execute($materialsTask);
+            }
+
             return response()->json([
                 'message' => ucfirst($department) . ' approval recorded successfully',
-                'approval_status' => $approvalStatus
+                'approval_status' => $approvalStatus,
+                'task_status' => $materialsData->task()->value('status'),
             ]);
 
         } catch (\Exception $e) {
@@ -1893,7 +1901,7 @@ class MaterialsController extends Controller
 
             // Calculate pending departments
             $pending = [];
-            foreach (['project_officer'] as $dept) {
+            foreach (['project_officer', 'production'] as $dept) {
                 if (!($approvalStatus[$dept]['approved'] ?? false)) {
                     $pending[] = $dept;
                 }
