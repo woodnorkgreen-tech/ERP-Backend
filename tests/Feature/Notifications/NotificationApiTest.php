@@ -596,6 +596,39 @@ class NotificationApiTest extends TestCase
             'user_id' => $adminUser->id,
             'type' => 'leave_request_submitted',
         ]);
+
+        $expectedLeadUrl = "/self-service/team-management?request={$leaveRequest->id}";
+        $expectedHrUrl = "/hr/leave?request={$leaveRequest->id}";
+
+        $this->assertSame(
+            $expectedLeadUrl,
+            AppNotification::query()
+                ->where('user_id', $peopleLeadUser->id)
+                ->where('type', 'leave_request_submitted')
+                ->value('data')['url'] ?? null
+        );
+        $this->assertSame(
+            $expectedLeadUrl,
+            AppNotification::query()
+                ->where('user_id', $directManagerUser->id)
+                ->where('type', 'leave_request_submitted')
+                ->value('data')['url'] ?? null
+        );
+        $this->assertSame(
+            $expectedHrUrl,
+            AppNotification::query()
+                ->where('user_id', $hrUser->id)
+                ->where('type', 'leave_request_submitted')
+                ->value('data')['url'] ?? null
+        );
+        $this->assertSame(
+            $expectedHrUrl,
+            AppNotification::query()
+                ->where('user_id', $adminUser->id)
+                ->where('type', 'leave_request_submitted')
+                ->value('data')['url'] ?? null
+        );
+
         $this->assertDatabaseMissing('app_notifications', [
             'user_id' => $storesLeadUser->id,
             'type' => 'leave_request_submitted',
@@ -604,6 +637,99 @@ class NotificationApiTest extends TestCase
             'user_id' => $applicantUser->id,
             'type' => 'leave_request_submitted',
         ]);
+    }
+
+    public function test_employee_is_notified_when_lead_approves_leave_for_hr_review(): void
+    {
+        Queue::fake();
+
+        $department = Department::query()->create(['name' => 'People']);
+        $employee = Employee::query()->create([
+            'employee_id' => 'EMP-LEAD-APPROVED',
+            'first_name' => 'Leave',
+            'last_name' => 'Applicant',
+            'email' => 'lead-approved-applicant@test.local',
+            'department_id' => $department->id,
+            'position' => 'Officer',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+        ]);
+        $employeeUser = User::factory()->create(['is_active' => true, 'employee_id' => $employee->id]);
+        $employeeUser->assignRole('Employee');
+
+        $leaveType = LeaveType::query()->where('code', 'ANNUAL')->firstOrFail();
+        $leaveRequest = LeaveRequest::query()->create([
+            'employee_id' => $employee->id,
+            'leave_type_id' => $leaveType->id,
+            'created_by' => $employeeUser->id,
+            'start_date' => now()->addWeek()->toDateString(),
+            'end_date' => now()->addWeek()->toDateString(),
+            'days_requested' => 1,
+            'status' => LeaveRequest::STATUS_LEAD_APPROVED,
+            'reason' => 'Annual leave',
+        ]);
+
+        $method = new ReflectionMethod(LeaveRequestController::class, 'sendEmployeeLeadApprovalNotification');
+        $method->setAccessible(true);
+        $method->invoke(null, $leaveRequest);
+
+        $notification = AppNotification::query()
+            ->where('user_id', $employeeUser->id)
+            ->where('type', 'leave_request_lead_approved')
+            ->first();
+
+        $this->assertNotNull($notification);
+        $this->assertSame('Leave request awaiting HR approval', $notification->title);
+        $this->assertSame("/self-service/leave?request={$leaveRequest->id}", $notification->data['url'] ?? null);
+    }
+
+    public function test_hr_is_notified_when_lead_rejects_leave(): void
+    {
+        Queue::fake();
+
+        Role::query()->firstOrCreate(['name' => 'HR', 'guard_name' => 'web']);
+
+        $department = Department::query()->create(['name' => 'People']);
+        $employee = Employee::query()->create([
+            'employee_id' => 'EMP-LEAD-REJECTED',
+            'first_name' => 'Leave',
+            'last_name' => 'Applicant',
+            'email' => 'lead-rejected-applicant@test.local',
+            'department_id' => $department->id,
+            'position' => 'Officer',
+            'hire_date' => now()->toDateString(),
+            'status' => 'active',
+        ]);
+        $employeeUser = User::factory()->create(['is_active' => true, 'employee_id' => $employee->id]);
+        $employeeUser->assignRole('Employee');
+        $hrUser = User::factory()->create(['is_active' => true]);
+        $hrUser->assignRole('HR');
+
+        $leaveType = LeaveType::query()->where('code', 'ANNUAL')->firstOrFail();
+        $leaveRequest = LeaveRequest::query()->create([
+            'employee_id' => $employee->id,
+            'leave_type_id' => $leaveType->id,
+            'created_by' => $employeeUser->id,
+            'start_date' => now()->addWeek()->toDateString(),
+            'end_date' => now()->addWeek()->toDateString(),
+            'days_requested' => 1,
+            'status' => LeaveRequest::STATUS_REJECTED,
+            'reason' => 'Annual leave',
+            'review_notes' => 'Not enough coverage.',
+        ]);
+
+        $method = new ReflectionMethod(LeaveRequestController::class, 'sendHRLeadRejectionNotification');
+        $method->setAccessible(true);
+        $method->invoke(null, $leaveRequest);
+
+        $notification = AppNotification::query()
+            ->where('user_id', $hrUser->id)
+            ->where('type', 'leave_request_lead_rejected')
+            ->first();
+
+        $this->assertNotNull($notification);
+        $this->assertSame('Leave request rejected by lead', $notification->title);
+        $this->assertSame("/hr/leave?request={$leaveRequest->id}", $notification->data['url'] ?? null);
     }
 
     public function test_branded_mail_template_renders_notification_content(): void

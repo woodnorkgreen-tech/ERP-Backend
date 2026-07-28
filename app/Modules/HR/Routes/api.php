@@ -23,6 +23,7 @@ use App\Modules\HR\Http\Controllers\InterviewController;
 use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
 use App\Modules\HR\Http\Controllers\OvertimeController;
 use App\Modules\HR\Http\Controllers\CompensatoryLeaveController;
+use App\Modules\HR\Http\Controllers\TeamManagementController;
 use App\Modules\HR\Http\Controllers\EmployeeSkillController;
 use App\Modules\HR\Http\Controllers\PerformanceReviewController;
 use App\Modules\HR\Http\Controllers\OnboardingController;
@@ -269,6 +270,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         // Employee Self-Service
         Route::get('self-service/activity', [\App\Modules\HR\Http\Controllers\SelfServiceController::class, 'activity']);
+        Route::get('self-service/team-management', [TeamManagementController::class, 'index']);
 
         // Profile Updates (Employee Self-Service)
         Route::post('profile-updates', [\App\Modules\HR\Http\Controllers\SelfServiceController::class, 'updateProfile']);
