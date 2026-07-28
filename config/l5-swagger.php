@@ -158,7 +158,13 @@ return [
              * @note This option overwrites `paths.excludes`
              * @see \OpenApi\scan
              */
-            'exclude' => [],
+            // Factories are not API documentation sources. Some module factories
+            // intentionally live outside Composer's factory autoload path, so
+            // scanning them produces "Skipping unknown ...Factory" warnings and
+            // prevents the OpenAPI document from being generated.
+            'exclude' => [
+                base_path('app/Modules/UniversalTask/Database/Factories'),
+            ],
 
             /*
              * Allows to generate specs either for OpenAPI 3.0.0 or OpenAPI 3.1.0.

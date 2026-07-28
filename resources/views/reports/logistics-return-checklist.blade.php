@@ -277,7 +277,7 @@
 
 @else
 <div style="padding: 18px; text-align: center; color: #94a3b8; font-size: 9px; border: 1px solid #e2e8f0; margin-bottom: 14px;">
-    No return items loaded. Generate the return checklist from the manifest first.
+    No return items loaded. Generate the return checklist from the loading sheet first.
 </div>
 @endif
 

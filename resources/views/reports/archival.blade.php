@@ -1,495 +1,135 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-    <title>Archival Report - {{ $report->project_code ?? 'Draft' }}</title>
+    <meta charset="utf-8">
+    <title>Project Closure - {{ $report->project_code ?: $report->id }}</title>
     <style>
-        body {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 10px;
-            color: #111827;
-            margin: 0;
-            padding: 0;
-            line-height: 1.4;
-        }
-        @page {
-            margin: 0.5in;
-        }
-        
-        /* Typography & Colors */
-        .text-cyan-500 { color: #06b6d4; }
-        .text-red-600 { color: #dc2626; }
-        .text-gray-600 { color: #4b5563; }
-        .text-gray-700 { color: #374151; }
-        .text-gray-900 { color: #111827; }
-        
-        .bg-cyan-500 { background-color: #06b6d4; color: white; }
-        .bg-gray-200 { background-color: #e5e7eb; }
-        .bg-gray-100 { background-color: #f3f4f6; }
-        .bg-white { background-color: #ffffff; }
-        
-        .font-bold { font-weight: bold; }
-        .uppercase { text-transform: uppercase; }
-        .font-small { font-size: 9px; }
-        
-        /* Layout Utilities */
-        .mb-2 { margin-bottom: 5px; }
-        .mb-4 { margin-bottom: 15px; }
-        
-        .section-header {
-            background-color: #06b6d4;
-            color: white;
-            padding: 4px 8px;
-            font-weight: bold;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 5px;
-            display: inline-block;
-            width: 100%;
-        }
-
-        .info-box {
-            background-color: #f3f4f6;
-            padding: 8px;
-            border: 1px solid #d1d5db;
-            font-size: 10px;
-            border-radius: 2px;
-        }
-
-        /* Tables */
+        @page { margin: 34px 38px 46px; }
+        * { box-sizing: border-box; }
+        body { margin: 0; color: #172033; font-family: DejaVu Sans, sans-serif; font-size: 9px; line-height: 1.45; }
+        .footer { position: fixed; right: 0; bottom: -28px; left: 0; border-top: 1px solid #dbe2ea; padding-top: 7px; color: #718096; font-size: 7px; }
+        .page:after { content: counter(page); }
+        .header { border-bottom: 2px solid #172033; padding-bottom: 12px; margin-bottom: 14px; }
+        .brand { font-size: 15px; font-weight: bold; letter-spacing: .4px; }
+        .document-title { text-align: right; font-size: 17px; font-weight: bold; letter-spacing: .5px; }
+        .muted { color: #718096; }
+        .small { font-size: 7px; }
+        .status { display: inline-block; padding: 4px 9px; border-radius: 10px; font-size: 7px; font-weight: bold; text-transform: uppercase; }
+        .approved { color: #126b49; background: #def7ec; }
+        .submitted { color: #8a4b08; background: #fff3cd; }
+        .draft { color: #4a5568; background: #edf2f7; }
+        .section { margin-top: 13px; page-break-inside: avoid; }
+        .section-title { border-bottom: 1px solid #cbd5e0; padding-bottom: 4px; margin-bottom: 7px; color: #334155; font-size: 8px; font-weight: bold; letter-spacing: .8px; text-transform: uppercase; }
         table { width: 100%; border-collapse: collapse; }
-        td { vertical-align: top; }
-        
-        .data-table { width: 100%; border-collapse: collapse; font-size: 10px; }
-        .data-table th {
-            background-color: #06b6d4;
-            color: white;
-            font-weight: bold;
-            text-align: left;
-            padding: 5px;
-            border: 1px solid white;
-        }
-        .data-table td {
-            border: 1px solid #d1d5db;
-            padding: 5px;
-        }
-        
-        /* Grid Layout for PDF */
-        .grid-row { width: 100%; margin-bottom: 15px; }
-        .grid-col-2 { width: 48%; display: inline-block; vertical-align: top; }
-        .gap { width: 2%; display: inline-block; }
-
-        /* Checklist & Signature */
-        .checklist-item { margin-bottom: 4px; }
-        .checkbox { 
-            display: inline-block; width: 10px; height: 10px; border: 1px solid #6b7280; 
-            margin-right: 5px; vertical-align: middle; position: relative;
-        }
-        .checkbox.checked { background-color: #06b6d4; border-color: #06b6d4; }
-        .checkbox.checked:after { content: '✓'; color: white; font-size: 8px; position: absolute; top: -2px; left: 1px; }
-
-        .signature-box {
-            border: 1px solid #d1d5db; background-color: #f9fafb; height: 60px;
-            text-align: center; margin-top: 5px;
-        }
-        
-        .footer {
-            margin-top: 30px; padding-top: 10px; border-top: 1px solid #e5e7eb;
-            text-align: center; color: #4b5563; font-size: 9px;
-        }
+        td, th { vertical-align: top; }
+        .identity td { width: 25%; padding: 5px 8px 5px 0; }
+        .label { color: #718096; font-size: 7px; font-weight: bold; letter-spacing: .4px; text-transform: uppercase; }
+        .value { margin-top: 2px; font-weight: bold; }
+        .scope { border-left: 3px solid #2563eb; background: #f7fafc; padding: 8px 10px; }
+        .metrics td { width: 33.333%; border: 1px solid #dbe2ea; padding: 9px; }
+        .amount { margin-top: 3px; font-size: 13px; font-weight: bold; }
+        .positive { color: #087f5b; }
+        .warning { color: #b45309; }
+        .note { margin-top: 6px; border: 1px solid #f6d58d; background: #fffaf0; padding: 6px 8px; color: #8a4b08; }
+        .data th { background: #eef2f7; padding: 5px 7px; color: #4a5568; font-size: 7px; text-align: left; text-transform: uppercase; }
+        .data td { border-bottom: 1px solid #e5eaf0; padding: 5px 7px; }
+        .check { color: #087f5b; font-weight: bold; }
+        .missing { color: #c53030; font-weight: bold; }
+        .text-box { min-height: 34px; border: 1px solid #dbe2ea; background: #f8fafc; padding: 7px 8px; white-space: pre-wrap; }
+        .approval td { width: 50%; border: 1px solid #dbe2ea; padding: 9px; }
+        .approval-name { margin-top: 5px; font-size: 11px; font-weight: bold; }
+        .record { border: 1px solid #cbd5e0; background: #f8fafc; padding: 8px; }
     </style>
 </head>
 <body>
+@php
+    $checks = [
+        'Site survey filed' => $report->checklist_site_survey_form,
+        'Approved budget filed' => $report->checklist_project_budget_file,
+        'Material list filed' => $report->checklist_material_list,
+        'Quality checks complete' => $report->checklist_qc_checklist,
+        'Setup and return closed' => $report->checklist_setup_setdown,
+        'Client handover / feedback filed' => $report->checklist_client_feedback,
+    ];
+    $verified = collect($checks)->filter()->count();
+    $finance = $financialSummary ?? [];
+    $docs = $systemDocuments ?? [];
+    $status = $report->status ?: 'draft';
+@endphp
 
-    <!-- Header -->
-    <table style="margin-bottom: 20px;">
-        <tr>
-            <td style="width: 50%;">
-                <img src="{{ public_path('logo-outline.png') }}" style="height: 65px; width: auto; margin-bottom: 5px; display: block;" alt="Logo"/>
-                <div class="font-bold text-gray-900 tracking-wide uppercase" style="font-size: 14px;">Woodnork Green</div>
-            </td>
-            <td style="width: 50%; text-align: right;">
-                <h2 class="text-cyan-500 mb-2 uppercase tracking-wide text-2xl" style="margin: 0 0 10px 0;">ARCHIVAL REPORT</h2>
-                <div style="display: inline-block; border: 1px solid #d1d5db;">
-                    <table>
-                        <tr>
-                            <td class="bg-white text-gray-700 font-bold border-r border-gray-300 text-center uppercase" style="padding: 4px 10px;">Date</td>
-                            <td class="bg-white text-red-600 font-bold text-center" style="padding: 4px 10px; width: 100px;">{{ now()->format('d/m/Y') }}</td>
-                        </tr>
-                        <tr>
-                            <td class="bg-white text-gray-700 font-bold border-r border-gray-300 text-center uppercase" style="border-top: 1px solid #d1d5db; padding: 4px 10px;">ID</td>
-                            <td class="bg-white text-red-600 font-bold text-center" style="border-top: 1px solid #d1d5db; padding: 4px 10px;">#{{ $report->id }}</td>
-                        </tr>
-                    </table>
-                </div>
-            </td>
-        </tr>
-    </table>
+<div class="footer">
+    <table><tr><td>Woodnork Green · Project closure record · {{ $report->archive_reference ?: 'Reference pending' }}</td><td style="text-align:right">Generated {{ now()->format('d M Y H:i') }} · Page <span class="page"></span></td></tr></table>
+</div>
 
-    <!-- Project Details -->
-    <div class="mb-4">
-        <div class="section-header" style="width: 40%;">PROJECT DETAILS</div>
-        <div class="info-box">
-            <table>
-                <tr>
-                    <td style="width: 60%;">
-                        <div class="mb-2"><span class="font-bold">Client:</span> {{ $report->client_name ?? 'N/A' }}</div>
-                        <div class="mb-2"><span class="font-bold">Project Name:</span> {{ $report->project_scope ?? 'N/A' }}</div>
-                        <div class="mb-2"><span class="font-bold">Project Code:</span> <span class="text-red-600 font-bold">{{ $report->project_code ?? 'N/A' }}</span></div>
-                    </td>
-                    <td style="width: 40%;">
-                         <div class="mb-2"><span class="font-bold">Location:</span> {{ $report->site_location ?? 'TBC' }}</div>
-                         <div class="mb-2"><span class="font-bold">Period:</span> 
-                            {{ $report->start_date ? \Carbon\Carbon::parse($report->start_date)->format('d/m/Y') : 'TBC' }} - 
-                            {{ $report->end_date ? \Carbon\Carbon::parse($report->end_date)->format('d/m/Y') : 'TBC' }}
-                        </div>
-                        <div class="mb-2"><span class="font-bold">Officer:</span> {{ $report->project_officer ?? 'N/A' }}</div>
-                    </td>
-                </tr>
-            </table>
-        </div>
-    </div>
+<table class="header"><tr>
+    <td style="width:45%"><div class="brand">WOODNORK GREEN</div><div class="muted small">Project delivery and archival control</div></td>
+    <td style="width:55%"><div class="document-title">PROJECT CLOSURE REPORT</div><div style="text-align:right;margin-top:4px"><span class="status {{ $status }}">{{ $status }}</span></div></td>
+</tr></table>
 
-    <!-- Scope, Procurement & Fabrication -->
-    <div class="mb-4">
-        <table>
-            <tr>
-                <td style="width: 32%; padding-right: 1.3%;">
-                    <div class="section-header">SCOPE SUMMARY</div>
-                    <div class="info-box" style="height: 80px;">
-                        {{ \Illuminate\Support\Str::limit($report->project_scope, 150) ?? 'No scope defined.' }}
-                    </div>
-                </td>
-                <td style="width: 32%; padding-right: 1.3%;">
-                    <div class="section-header">PROCUREMENT</div>
-                    <div class="info-box" style="height: 80px;">
-                         <div class="mb-2"><span class="font-bold">Externally Sourced:</span> {{ $report->items_sourced_externally ?? 'None' }}</div>
-                         <div class="mb-2"><span class="font-bold">Challenges:</span> {{ $report->procurement_challenges ?? 'None' }}</div>
-                         <div class="mb-2"><span class="font-bold">MRF Attached:</span> {{ $report->materials_mrf_attached ? 'Yes' : 'No' }}</div>
-                    </div>
-                </td>
-                <td style="width: 32%;">
-                    <div class="section-header">FABRICATION</div>
-                    <div class="info-box" style="height: 80px;">
-                         <div class="mb-2"><span class="font-bold">Prod. Start:</span> {{ $report->production_start_date ? \Carbon\Carbon::parse($report->production_start_date)->format('d/m/Y') : 'N/A' }}</div>
-                         <div class="mb-2"><span class="font-bold">Packaging:</span> {{ $report->packaging_labeling_status ?? 'N/A' }}</div>
-                         <div class="mb-2"><span class="font-bold">Materials:</span> {{ \Illuminate\Support\Str::limit($report->materials_used_in_production, 50) ?? 'N/A' }}</div>
-                    </div>
-                </td>
-            </tr>
-        </table>
-    </div>
+<table class="identity"><tr>
+    <td><div class="label">Project code</div><div class="value">{{ $report->project_code ?: 'Not assigned' }}</div></td>
+    <td><div class="label">Client</div><div class="value">{{ $report->client_name ?: 'Not linked' }}</div></td>
+    <td><div class="label">Project officer</div><div class="value">{{ $report->project_officer ?: 'Not assigned' }}</div></td>
+    <td><div class="label">Site</div><div class="value">{{ $report->site_location ?: 'Not recorded' }}</div></td>
+</tr><tr>
+    <td><div class="label">Project period</div><div class="value">{{ $report->start_date?->format('d M Y') ?: '—' }} to {{ $report->end_date?->format('d M Y') ?: '—' }}</div></td>
+    <td><div class="label">Archive reference</div><div class="value">{{ $report->archive_reference ?: 'Pending' }}</div></td>
+    <td colspan="2"><div class="label">Archive location</div><div class="value">{{ $report->archive_location ?: 'Pending' }}</div></td>
+</tr></table>
 
-    <!-- Design Assets (If any) -->
-    @if(isset($designAssets) && count($designAssets) > 0)
-    <div class="mb-4">
-        <div class="section-header">DESIGN ASSETS</div>
-        <div class="info-box">
-            @foreach($designAssets as $asset)
-                <div style="display: inline-block; width: 31%; margin-right: 2%; margin-bottom: 10px; vertical-align: top; border: 1px solid #e5e7eb; padding: 5px; background: white;">
-                    @if($asset->isImage())
-                        <img src="{{ storage_path('app/public/' . $asset->file_path) }}" style="width: 100%; height: 60px; object-fit: cover; margin-bottom: 5px;">
-                    @else
-                        <div style="height: 60px; background: #f3f4f6; text-align: center; line-height: 60px; color: #9ca3af; font-weight: bold; font-size: 16px;">
-                            {{ strtoupper(pathinfo($asset->original_name, PATHINFO_EXTENSION)) }}
-                        </div>
-                    @endif
-                    <div style="font-size: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;" class="font-bold">{{ $asset->original_name }}</div>
-                    <div style="font-size: 8px; color: #6b7280;">{{ $asset->category }} | {{ $asset->status }}</div>
-                </div>
-            @endforeach
-        </div>
-    </div>
-    @endif
+<div class="section">
+    <div class="section-title">Delivered scope</div>
+    <div class="scope">{!! nl2br(e($report->project_scope ?: 'No project scope was recorded.')) !!}</div>
+</div>
 
-    <!-- Setup & Team -->
-    <div class="mb-4">
-        <div class="section-header">ON-SITE SETUP & FINDINGS</div>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th width="20%">Team Captain</th>
-                    <th width="25%">Setup Team</th>
-                    <th width="25%">Branding Team</th>
-                    <th width="15%">Organization</th>
-                    <th width="15%">Deliverables</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>{{ $report->team_captain ?? 'N/A' }}</td>
-                    <td>{{ $report->setup_team_assigned ?? 'N/A' }}</td>
-                    <td>{{ $report->branding_team_assigned ?? 'N/A' }}</td>
-                    <td class="uppercase">{{ $report->site_organization ?? 'N/A' }}</td>
-                    <td>
-                        {{ $report->all_deliverables_available ? 'All Available' : 'Missing Items' }}<br>
-                        {{ $report->deliverables_checked ? 'Checked' : 'Not Checked' }}
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-        @if($report->general_findings || $report->delays_occurred)
-        <div class="info-box" style="margin-top: 5px;">
-            <span class="font-bold">Findings/Notes:</span> {{ $report->general_findings ?? 'N/A' }} 
-            @if($report->delays_occurred) <br><span class="font-bold text-red-600">Delays Reported:</span> {{ $report->delay_reasons }} @endif
-        </div>
-        @endif
-    </div>
+<div class="section">
+    <div class="section-title">Finance reconciliation</div>
+    <table class="metrics"><tr>
+        <td><div class="label">Approved quote</div><div class="amount">KES {{ number_format($finance['approved_quote'] ?? 0, 2) }}</div></td>
+        <td><div class="label">Payments received</div><div class="amount positive">KES {{ number_format($finance['payments_received'] ?? 0, 2) }}</div></td>
+        <td><div class="label">Outstanding balance</div><div class="amount {{ ($finance['outstanding_balance'] ?? 0) > 0 ? 'warning' : 'positive' }}">KES {{ number_format($finance['outstanding_balance'] ?? 0, 2) }}</div></td>
+    </tr></table>
+    @if(!empty($finance['note']))<div class="note">{{ $finance['note'] }}</div>@endif
+</div>
 
-    <!-- Setup Items (If any) -->
-    @if($report->setupItems && count($report->setupItems) > 0)
-    <div class="mb-4">
-         <div class="section-header">SETUP ITEMS & TECHNICIANS</div>
-         <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Item</th>
-                    <th>Assigned Tech</th>
-                    <th>Site Section</th>
-                    <th>Status</th>
-                    <th>Accuracy</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach($report->setupItems as $item)
-                <tr>
-                    <td>{{ $item['deliverable_item'] ?? '-' }}</td>
-                    <td>{{ $item['assigned_technician'] ?? '-' }}</td>
-                    <td>{{ $item['site_section'] ?? '-' }}</td>
-                    <td class="uppercase">{{ $item['status'] ?? '-' }}</td>
-                    <td class="uppercase">{{ $item['placement_accuracy'] ?? '-' }}</td>
-                </tr>
-                @endforeach
-            </tbody>
-         </table>
-    </div>
-    @endif
+<div class="section">
+    <div class="section-title">Closure controls · {{ $verified }}/{{ count($checks) }} verified</div>
+    <table class="data"><thead><tr><th style="width:68%">Required control</th><th>Status</th></tr></thead><tbody>
+    @foreach($checks as $label => $done)
+        <tr><td>{{ $label }}</td><td class="{{ $done ? 'check' : 'missing' }}">{{ $done ? 'VERIFIED' : 'MISSING' }}</td></tr>
+    @endforeach
+    </tbody></table>
+</div>
 
-    <!-- Materials Specification (If available) -->
-    @if(isset($materialsData) && $materialsData->elements->count() > 0)
-    <div class="mb-4">
-        <div class="section-header">MATERIALS SPECIFICATION</div>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th width="30%">Item / Element</th>
-                    <th width="15%">Category</th>
-                    <th width="20%">Dimensions</th>
-                    <th width="35%">Notes / Specifications</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach($materialsData->elements as $element)
-                <tr>
-                    <td class="font-bold">{{ $element->name }}</td>
-                    <td class="uppercase">{{ $element->category }}</td>
-                    <td>{{ is_array($element->dimensions) ? implode(' x ', $element->dimensions) : $element->dimensions }}</td>
-                    <td>{{ $element->notes ?? '-' }}</td>
-                </tr>
-                @endforeach
-            </tbody>
-        </table>
-    </div>
-    @endif
+<div class="section">
+    <div class="section-title">Evidence index · {{ count($docs) }} source files</div>
+    <table class="data"><thead><tr><th>Document</th><th style="width:22%">Category</th><th style="width:18%">Source status</th></tr></thead><tbody>
+    @forelse($docs as $document)
+        <tr><td>{{ $document['name'] ?? 'Document' }}</td><td>{{ $document['category'] ?? 'Other' }}</td><td>{{ strtoupper(str_replace('_', ' ', $document['task_status'] ?? 'available')) }}</td></tr>
+    @empty
+        <tr><td colspan="3" class="missing">No system evidence was available when this report was generated.</td></tr>
+    @endforelse
+    @foreach(($report->attachments ?? []) as $attachment)
+        <tr><td>{{ $attachment['name'] ?? 'Uploaded attachment' }}</td><td>{{ $attachment['category'] ?? 'Manual upload' }}</td><td>UPLOADED</td></tr>
+    @endforeach
+    </tbody></table>
+</div>
 
-    <!-- Project Budget Summary (If available) -->
-    @if(isset($budgetData) && isset($budgetData->budget_summary))
-    <div class="mb-4">
-        <div class="section-header">PROJECT BUDGET SUMMARY</div>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Description</th>
-                    <th style="text-align: right;">Total Amount</th>
-                </tr>
-            </thead>
-            <tbody>
-                @if(isset($budgetData->budget_summary['materials']))
-                <tr>
-                    <td>Materials Cost</td>
-                    <td style="text-align: right;">{{ number_format($budgetData->budget_summary['materials']['total'] ?? 0, 2) }}</td>
-                </tr>
-                @endif
-                @if(isset($budgetData->budget_summary['labour']))
-                <tr>
-                    <td>Labour & Skilled Manpower</td>
-                    <td style="text-align: right;">{{ number_format($budgetData->budget_summary['labour']['total'] ?? 0, 2) }}</td>
-                </tr>
-                @endif
-                @if(isset($budgetData->budget_summary['expenses']))
-                <tr>
-                    <td>Operational Expenses</td>
-                    <td style="text-align: right;">{{ number_format($budgetData->budget_summary['expenses']['total'] ?? 0, 2) }}</td>
-                </tr>
-                @endif
-                <tr>
-                    <td class="bg-gray-100 font-bold">TOTAL ESTIMATED BUDGET</td>
-                    <td class="bg-gray-100 font-bold" style="text-align: right;">{{ number_format($budgetData->budget_summary['grand_total'] ?? 0, 2) }}</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-    @endif
+<table class="section"><tr>
+    <td style="width:49%;padding-right:1%"><div class="section-title">Outstanding obligations</div><div class="text-box">{{ $report->outstanding_items ?: 'None recorded.' }}</div></td>
+    <td style="width:49%;padding-left:1%"><div class="section-title">Lessons and follow-up</div><div class="text-box">{{ $report->recommendations_action_points ?: 'None recorded.' }}</div></td>
+</tr></table>
 
-    <!-- Performance & Quality Metrics (Combined Table) -->
-    <div class="mb-4">
-        <div class="section-header">PERFORMANCE & QUALITY METRICS</div>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Category</th>
-                    <th>Rating</th>
-                    <th>Comments / Feedback</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td class="font-bold">Print Clarity & Accuracy</td>
-                    <td class="uppercase">{{ $report->print_clarity_rating ?? '-' }} / {{ $report->printworks_accuracy_rating ?? '-' }}</td>
-                    <td>{{ $report->installation_precision_comments ?? '-' }}</td>
-                </tr>
-                <tr>
-                    <td class="font-bold">Setup Speed & Coordination</td>
-                    <td class="uppercase">{{ $report->setup_speed_flow ?? '-' }} / {{ $report->team_coordination ?? '-' }}</td>
-                    <td>{{ $report->efficiency_remarks ?? '-' }}</td>
-                </tr>
-                <tr>
-                    <td class="font-bold">Delivery (Schedule & Condition)</td>
-                    <td class="uppercase">
-                        {{ $report->delivered_on_schedule ? 'On Time' : 'Delayed' }} / {{ $report->delivery_condition ?? '-' }}
-                    </td>
-                    <td>{{ $report->delivery_notes ?? ($report->delivery_issues ? 'Issues Reported' : 'No Issues') }}</td>
-                </tr>
-                <tr>
-                    <td class="font-bold">Team Professionalism</td>
-                    <td class="uppercase">{{ $report->team_professionalism ?? '-' }}</td>
-                    <td>{{ $report->professionalism_feedback ?? '-' }}</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
+<div class="section">
+    <div class="section-title">Authenticated approvals</div>
+    <table class="approval"><tr>
+        <td><div class="label">Submitted by</div><div class="approval-name">{{ $report->project_officer_signature ?: 'Pending' }}</div><div class="muted">{{ $report->submitted_at?->format('d M Y, H:i') ?: ($report->project_officer_sign_date?->format('d M Y') ?: 'Not submitted') }}</div></td>
+        <td><div class="label">Approved by</div><div class="approval-name">{{ $report->reviewed_by ?: 'Pending' }}</div><div class="muted">{{ $report->approved_at?->format('d M Y, H:i') ?: ($report->reviewer_sign_date?->format('d M Y') ?: 'Not approved') }}</div></td>
+    </tr></table>
+</div>
 
-    <!-- Client Handover -->
-    <div class="mb-4">
-        <div class="section-header">CLIENT HANDOVER & SATISFACTION</div>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Handover Date</th>
-                    <th>Client Rating</th>
-                    <th>Satisfaction</th>
-                    <th>Confidence</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>{{ $report->handover_date ? \Carbon\Carbon::parse($report->handover_date)->format('d/m/Y') : 'N/A' }}</td>
-                    <td class="font-bold">{{ $report->client_rating ?? 'N/A' }}</td>
-                    <td class="uppercase font-bold text-cyan-500">{{ $report->client_satisfaction ?? 'N/A' }}</td>
-                    <td>{{ $report->client_confidence ? 'Yes' : 'No' }}</td>
-                </tr>
-                <tr>
-                    <td colspan="4" class="bg-gray-100">
-                        <span class="font-bold">Client Remarks:</span> {{ $report->client_remarks ?? 'None' }}
-                    </td>
-                </tr>
-                 <tr>
-                    <td colspan="4">
-                        <span class="font-bold">Actions/Recommendations:</span> {{ $report->recommendations_action_points ?? 'None' }}
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-
-    <!-- Set-Down & Checklist -->
-    <div class="mb-4">
-        <table>
-            <tr>
-                <td style="width: 48%; padding-right: 2%;">
-                    <div class="section-header">SET-DOWN & DEBRIEF</div>
-                     <table class="data-table">
-                        <tr><td class="font-bold">Date</td><td>{{ $report->setdown_date ? \Carbon\Carbon::parse($report->setdown_date)->format('d/m/Y') : 'N/A' }}</td></tr>
-                        <tr><td class="font-bold">Clearance</td><td>{{ $report->site_clearance_status ?? 'N/A' }}</td></tr>
-                        <tr><td class="font-bold">Returns Condition</td><td>{{ $report->items_condition_returned ?? 'N/A' }}</td></tr>
-                        @if($report->outstanding_items)
-                        <tr><td class="font-bold text-red-600">Outstanding</td><td>{{ $report->outstanding_items }}</td></tr>
-                        @endif
-                    </table>
-                </td>
-                <td style="width: 48%; padding-left: 2%;">
-                    <div class="section-header">ARCHIVAL CHECKLIST</div>
-                    <div class="info-box">
-                        <div class="checklist-item"><span class="checkbox {{ $report->checklist_ppt ? 'checked' : '' }}"></span> Presentation (PPT)</div>
-                        <div class="checklist-item"><span class="checkbox {{ $report->checklist_cutlist ? 'checked' : '' }}"></span> Cutlist & Tech Specs</div>
-                        <div class="checklist-item"><span class="checkbox {{ $report->checklist_site_survey_form ? 'checked' : '' }}"></span> Site Survey Form</div>
-                        <div class="checklist-item"><span class="checkbox {{ $report->checklist_project_budget_file ? 'checked' : '' }}"></span> Budget File</div>
-                        <div class="checklist-item"><span class="checkbox {{ $report->checklist_material_list ? 'checked' : '' }}"></span> Material List</div>
-                        <div class="checklist-item"><span class="checkbox {{ $report->checklist_qc_checklist ? 'checked' : '' }}"></span> QC Checklist</div>
-                        <div class="checklist-item"><span class="checkbox {{ $report->checklist_setup_setdown ? 'checked' : '' }}"></span> Setup/Setdown</div>
-                        <div class="checklist-item"><span class="checkbox {{ $report->checklist_client_feedback ? 'checked' : '' }}"></span> Client Feedback</div>
-                    </div>
-                </td>
-            </tr>
-        </table>
-    </div>
-    
-    <!-- Records & Attachments -->
-    <div class="mb-4">
-         <div class="section-header">RECORDS & ATTACHMENTS</div>
-         <div class="info-box">
-            <div style="margin-bottom: 5px;">
-                <span class="font-bold">Reference:</span> {{ $report->archive_reference ?? 'N/A' }} | 
-                <span class="font-bold">Location:</span> {{ $report->archive_location ?? 'N/A' }} | 
-                <span class="font-bold">Retention:</span> {{ $report->retention_period ?? 'N/A' }}
-            </div>
-            @if($report->attachments && count($report->attachments) > 0)
-            <div style="border-top: 1px solid #d1d5db; padding-top: 5px; margin-top: 5px;">
-                <span class="font-bold">Attached Files:</span>
-                @foreach($report->attachments as $att)
-                    <span class="bg-white border px-1" style="font-size: 9px; margin-right: 5px;">{{ $att['name'] ?? 'File' }}</span>
-                @endforeach
-            </div>
-            @endif
-         </div>
-    </div>
-
-    <!-- Signatures -->
-    <div style="page-break-inside: avoid;">
-        <div class="section-header">APPROVALS</div>
-        <table>
-            <tr>
-                <td style="width: 40%; padding-right: 5%;">
-                     <div class="font-bold text-center mb-1 text-gray-600">PROJECT OFFICER</div>
-                     <div class="signature-box">
-                         @if($report->project_officer_signature)
-                           <div style="font-family: 'Brush Script MT', cursive; font-size: 18px; padding-top: 20px;">{{ $report->project_officer_signature }}</div>
-                         @endif
-                     </div>
-                     <div class="text-center mt-1 font-bold">{{ $report->project_officer ?? 'N/A' }}</div>
-                     <div class="text-center text-gray-600 font-small">{{ $report->project_officer_sign_date ? \Carbon\Carbon::parse($report->project_officer_sign_date)->format('d/m/Y') : 'Date: _______' }}</div>
-                </td>
-                <td style="width: 40%; padding-left: 5%;">
-                     <div class="font-bold text-center mb-1 text-gray-600">REVIEWED BY</div>
-                     <div class="signature-box">
-                          @if($report->reviewed_by)
-                           <div style="font-family: 'Brush Script MT', cursive; font-size: 18px; padding-top: 20px;">{{ $report->reviewed_by }}</div>
-                         @endif
-                     </div>
-                     <div class="text-center mt-1 font-bold">{{ $report->reviewed_by ?? 'N/A' }}</div>
-                     <div class="text-center text-gray-600 font-small">{{ $report->reviewer_sign_date ? \Carbon\Carbon::parse($report->reviewer_sign_date)->format('d/m/Y') : 'Date: _______' }}</div>
-                </td>
-            </tr>
-        </table>
-    </div>
-
-    <!-- Footer -->
-    <div class="footer">
-        <p class="font-bold text-gray-900">Woodnork Green Ltd</p>
-        <p>Tel: +254 780 397 798 | Email: admin@woodnorkgreen.co.ke</p>
-        <p>Physical Address: Karen Village, Ngong Road, Nairobi, Kenya | Website: www.woodnorkgreen.co.ke</p>
-    </div>
-
+<div class="section record">
+    <strong>Record purpose:</strong> This document certifies operational closure and indexes the supporting records retained in the ERP. Any outstanding client balance remains controlled by Finance until settled.
+</div>
 </body>
 </html>

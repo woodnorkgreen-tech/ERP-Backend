@@ -93,6 +93,10 @@ class ArchivalReport extends Model
         'reviewer_sign_date',
         // Status
         'status',
+        'submitted_by',
+        'submitted_at',
+        'approved_by',
+        'approved_at',
         'created_by',
     ];
 
@@ -104,6 +108,8 @@ class ArchivalReport extends Model
         'setdown_date' => 'date',
         'project_officer_sign_date' => 'date',
         'reviewer_sign_date' => 'date',
+        'submitted_at' => 'datetime',
+        'approved_at' => 'datetime',
         'materials_mrf_attached' => 'boolean',
         'all_deliverables_available' => 'boolean',
         'setup_aligned_to_schedule' => 'boolean',
@@ -112,7 +118,6 @@ class ArchivalReport extends Model
         'client_kept_informed' => 'boolean',
         'delivered_on_schedule' => 'boolean',
         'delivery_issues' => 'boolean',
-        'client_confidence' => 'boolean',
         'client_confidence' => 'boolean',
         'checklist_ppt' => 'boolean',
         'checklist_cutlist' => 'boolean',

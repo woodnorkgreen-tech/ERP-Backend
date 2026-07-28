@@ -50,6 +50,21 @@ class LogisticsTask extends Model
         return $this->hasMany(LogisticsChecklist::class);
     }
 
+    public function manifestLinks(): HasMany
+    {
+        return $this->hasMany(ManifestSubmissionLink::class);
+    }
+
+    public function loadingConfirmationLinks(): HasMany
+    {
+        return $this->hasMany(LoadingConfirmationLink::class);
+    }
+
+    public function returnConfirmationLinks(): HasMany
+    {
+        return $this->hasMany(ReturnConfirmationLink::class);
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(\App\Models\User::class, 'created_by');

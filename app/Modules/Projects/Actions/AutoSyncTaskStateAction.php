@@ -50,6 +50,13 @@ class AutoSyncTaskStateAction
             }
         }
 
+        // An approved design deliverable is the objective completion evidence.
+        // Draft/rejected files remain as revision history and do not block it.
+        if ($task->type === 'design' && $task->designAssets()->where('status', 'approved')->exists()) {
+            $shouldComplete = true;
+            $reason = 'Design asset approved';
+        }
+
         // 2. Budget: deliberately NOT auto-completed. "grandTotal > 0" isn't a
         // real submission signal — it also goes true from the background
         // materials-approval sync (MaterialsController::syncMaterialsToBudget)

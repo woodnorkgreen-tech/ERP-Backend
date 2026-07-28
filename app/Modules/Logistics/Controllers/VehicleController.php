@@ -36,7 +36,7 @@ class VehicleController extends Controller
    public function store(Request $request): VehicleResource|JsonResponse
 {
     if (!$this->canManageVehicles()) {
-        return response()->json(['message' => 'Only Super Admin or Admin can add vehicles.'], 403);
+        return response()->json(['message' => 'You do not have permission to add vehicles.'], 403);
     }
 
     $validated = $request->validate([
@@ -87,7 +87,7 @@ class VehicleController extends Controller
     public function update(Request $request, Vehicle $vehicle): VehicleResource|JsonResponse
 {
     if (!$this->canManageVehicles()) {
-        return response()->json(['message' => 'Only Super Admin or Admin can edit vehicles.'], 403);
+        return response()->json(['message' => 'You do not have permission to edit vehicles.'], 403);
     }
 
     $validated = $request->validate([
@@ -154,7 +154,7 @@ class VehicleController extends Controller
     public function destroy(Vehicle $vehicle): JsonResponse
     {
         if (!$this->canManageVehicles()) {
-            return response()->json(['message' => 'Only Super Admin or Admin can remove vehicles.'], 403);
+        return response()->json(['message' => 'You do not have permission to remove vehicles.'], 403);
         }
 
         $vehicle->delete();
@@ -163,8 +163,7 @@ class VehicleController extends Controller
     }
 
     /**
-     * Only Super Admin and Admin can create, edit, or delete vehicles.
-     * Logistics role is view-only.
+     * Fleet changes belong to users granted the logistics fleet capability.
      */
     private function canManageVehicles(): bool
     {
@@ -173,6 +172,13 @@ class VehicleController extends Controller
             ? $user->roles
             : ($user?->roles?->pluck('name')->toArray() ?? []);
 
-        return array_intersect(['Super Admin', 'Admin'], $roles) !== [];
+        return $user?->can('logistics.fleet.manage')
+            || array_intersect([
+                'Logistics',
+                'Logistics Officer',
+                'Logistics Manager',
+                'Super Admin',
+                'Admin',
+            ], $roles) !== [];
     }
 }

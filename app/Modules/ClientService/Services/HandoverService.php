@@ -73,12 +73,9 @@ class HandoverService
         // Apply timeliness filter (on_time vs delayed)
         if (!empty($filters['timeliness'])) {
             $formatted = $formatted->filter(function ($h) use ($filters) {
-                // Find actual survey responses
-                $survey = HandoverSurvey::find($h['id']);
-                if (!$survey) return false;
-                $onTime = data_get($survey->responses, 'delivered_on_time');
-                $isOnTime = ($onTime === true || $onTime === 'yes' || $onTime === 1 || $onTime === '1' || $onTime === 'true');
-                return $filters['timeliness'] === 'on_time' ? $isOnTime : !$isOnTime;
+                return $filters['timeliness'] === 'on_time'
+                    ? $h['delivered_on_time']
+                    : !$h['delivered_on_time'];
             });
         }
 

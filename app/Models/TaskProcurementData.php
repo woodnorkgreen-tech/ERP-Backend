@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *     @OA\Property(property="enquiry_task_id", type="integer", description="Related enquiry task ID"),
  *     @OA\Property(property="project_info", type="object", description="Project information"),
  *     @OA\Property(property="budget_imported", type="boolean", description="Whether budget has been imported"),
- *     @OA\Property(property="procurement_items", type="array", description="List of procurement items", @OA\Items(ref="#/components/schemas/ProcurementItem")),
+ *     @OA\Property(property="procurement_items", type="array", description="List of procurement items", @OA\Items(type="object")),
  *     @OA\Property(property="budget_summary", type="object", description="Budget summary information"),
  *     @OA\Property(property="last_import_date", type="string", format="date-time", description="Last budget import date"),
  *     @OA\Property(property="created_at", type="string", format="date-time"),

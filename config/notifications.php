@@ -242,6 +242,28 @@ return [
             'default_channels' => ['database', 'push'], 'urgency' => 'warning',
         ],
 
+        // ICT support
+        'support_ticket_received' => [
+            'module' => 'support', 'label' => 'Support Ticket Received',
+            'default_channels' => ['database'], 'urgency' => 'success',
+        ],
+        'support_ticket_created' => [
+            'module' => 'support', 'label' => 'New Support Ticket',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'support_ticket_assigned' => [
+            'module' => 'support', 'label' => 'Support Ticket Assigned',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'support_ticket_updated' => [
+            'module' => 'support', 'label' => 'Support Ticket Updated',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'support_ticket_reply' => [
+            'module' => 'support', 'label' => 'Support Ticket Reply',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+
         // Projects - Enquiry & task lifecycle
         'enquiry_task_assigned' => [
             'module' => 'projects', 'label' => 'Task Assigned',
