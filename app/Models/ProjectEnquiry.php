@@ -51,6 +51,11 @@ class ProjectEnquiry extends Model
         'current_phase',
         'assigned_users',
         'client_approved_quote',
+        'quote_requirement_waived',
+        'quote_waiver_billing_amount',
+        'quote_waiver_reason',
+        'quote_waived_by',
+        'quote_waived_at',
         'finance_released',
         'finance_released_at',
     ];
@@ -72,6 +77,9 @@ class ProjectEnquiry extends Model
         'current_phase' => 'integer',
         'job_number' => 'string',
         'client_approved_quote' => 'decimal:2',
+        'quote_requirement_waived' => 'boolean',
+        'quote_waiver_billing_amount' => 'decimal:2',
+        'quote_waived_at' => 'datetime',
         'finance_released' => 'boolean',
         'finance_released_at' => 'datetime',
     ];

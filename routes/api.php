@@ -720,6 +720,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::middleware('quote.access')->group(function () {
             Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
             Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
+            Route::post('enquiries/{enquiry}/quote-waiver', [EnquiryController::class, 'waiveQuoteRequirement']);
             Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
             Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
             Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);
