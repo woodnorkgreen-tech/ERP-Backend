@@ -1715,6 +1715,10 @@ class QuoteController extends Controller
                 return response()->json(['message' => 'Approval task not found'], 404);
             }
 
+            // Zero-value approvals are allowed for projects proceeding without
+            // a priced quote. Finance must still enter a positive billing amount
+            // later before payments and percentage-based release can be tracked.
+
             \Log::info("Found approval task, enquiry ID: {$approvalTask->project_enquiry_id}");
 
             // Find the ORIGINAL Quote Task for this enquiry

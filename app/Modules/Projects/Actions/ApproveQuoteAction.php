@@ -36,8 +36,8 @@ class ApproveQuoteAction
                 ->latest('updated_at')
                 ->first();
 
-            if (!$approval || $approval->approval_status !== 'approved' || (float) $approval->quote_amount <= 0) {
-                throw new DomainException('Save an approved quote decision with a valid amount before activating the project.');
+            if (!$approval || $approval->approval_status !== 'approved') {
+                throw new DomainException('Save an approved quote decision before activating the project.');
             }
 
             $jobNumber = $enquiry->generateJobNumber();

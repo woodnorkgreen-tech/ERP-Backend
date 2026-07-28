@@ -90,7 +90,7 @@ class ClientController
             'lead_source' => 'required|string|max:255',
             'preferred_contact' => 'required|in:email,phone,sms',
             'industry' => 'nullable|string|max:255',
-            'company_name' => 'nullable|string|max:255',
+            'company_name' => 'required_unless:customer_type,individual|nullable|string|max:255',
             'registration_date' => 'required|date',
             'status' => 'sometimes|in:active,inactive',
         ]);
@@ -102,7 +102,14 @@ class ClientController
             ], 422);
         }
 
-        $client = Client::create($request->all());
+        $data = $validator->validated();
+        if (($data['customer_type'] ?? 'individual') !== 'individual') {
+            $data['full_name'] = $data['company_name'];
+        } else {
+            $data['company_name'] = null;
+        }
+
+        $client = Client::create($data);
 
         return response()->json([
             'message' => 'Client created successfully',
@@ -171,7 +178,7 @@ class ClientController
             'lead_source' => 'required|string|max:255',
             'preferred_contact' => 'required|in:email,phone,sms',
             'industry' => 'nullable|string|max:255',
-            'company_name' => 'nullable|string|max:255',
+            'company_name' => 'required_unless:customer_type,individual|nullable|string|max:255',
             'registration_date' => 'required|date',
             'status' => 'sometimes|in:active,inactive',
         ]);
@@ -184,7 +191,13 @@ class ClientController
         }
 
         $client = Client::findOrFail($id);
-        $client->update($request->all());
+        $data = $validator->validated();
+        if (($data['customer_type'] ?? 'individual') !== 'individual') {
+            $data['full_name'] = $data['company_name'];
+        } else {
+            $data['company_name'] = null;
+        }
+        $client->update($data);
 
         return response()->json([
             'message' => 'Client updated successfully',
