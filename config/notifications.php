@@ -20,6 +20,12 @@ return [
             'default_channels' => ['database', 'mail'],
             'urgency' => 'success',
         ],
+        'leave_request_lead_rejected' => [
+            'module' => 'hr',
+            'label' => 'Leave Request Lead Rejected',
+            'default_channels' => ['database', 'mail'],
+            'urgency' => 'warning',
+        ],
         'leave_request_approved' => [
             'module' => 'hr',
             'label' => 'Leave Request Approved',

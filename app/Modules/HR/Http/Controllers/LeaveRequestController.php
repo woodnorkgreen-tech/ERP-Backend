@@ -152,8 +152,6 @@ class LeaveRequestController extends Controller
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
-        $leaveTypeId = $request->input('leave_type_id');
-        $leaveType = LeaveType::find($leaveTypeId);
         $recordAsApproved = $request->boolean('record_as_approved') && $this->leaveService->isHRLevel($user);
 
         $validated = $request->validate([
@@ -167,9 +165,7 @@ class LeaveRequestController extends Controller
             'explanation' => ['nullable', 'string'],
             'handover_notes' => ['nullable', 'string'],
             'has_handover' => ['nullable', 'boolean'],
-            'attachment' => $leaveType && !$recordAsApproved && $this->leaveTypeRequiresAttachment($leaveType)
-                ? ['required', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048']
-                : ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:2048'],
         ]);
 
         $employee = $this->resolveTargetEmployee($user, $validated['employee_id'] ?? null);
@@ -502,6 +498,7 @@ class LeaveRequestController extends Controller
         ]);
 
         $this->notifyHRAfterLeadApprovalResponse($leaveRequest->id);
+        $this->notifyEmployeeAfterLeadApprovalResponse($leaveRequest->id);
 
         return response()->json([
             'success' => true,
@@ -549,6 +546,7 @@ class LeaveRequestController extends Controller
     public function reject(Request $request, LeaveRequest $leaveRequest): JsonResponse
     {
         $user = $request->user();
+        $notifyHrAboutLeadRejection = !$this->leaveService->isHRLevel($user);
 
         if (!$this->leaveService->canManage($user)) {
             abort(403, 'You are not authorised to reject leave requests.');
@@ -581,6 +579,9 @@ class LeaveRequestController extends Controller
         ]);
 
         $this->notifyEmployeeAfterResponse($leaveRequest->id, LeaveRequest::STATUS_REJECTED);
+        if ($notifyHrAboutLeadRejection) {
+            $this->notifyHRAfterLeadRejectionResponse($leaveRequest->id);
+        }
 
         return response()->json([
             'success' => true,
@@ -746,17 +747,37 @@ class LeaveRequestController extends Controller
     {
         $leaveRequest->loadMissing(['employee.department', 'leaveType']);
 
-        NotificationService::send(
-            type: 'leave_request_submitted',
-            title: 'Leave request submitted',
-            message: sprintf('%s submitted a %s leave request.', $leaveRequest->employee?->name ?? 'An employee', $leaveRequest->leaveType?->name ?? 'new'),
-            module: 'hr',
-            data: self::leaveNotificationData($leaveRequest),
-            users: self::leaveReviewRecipients($leaveRequest),
-        );
+        $localApprovers = self::localLeaveReviewRecipients($leaveRequest);
+        $localApproverIds = collect($localApprovers)->pluck('id');
+        $hrApprovers = self::hrLeaveReviewRecipients()
+            ->reject(fn (User $user) => $localApproverIds->contains($user->id))
+            ->values()
+            ->all();
+
+        if ($localApprovers !== []) {
+            NotificationService::send(
+                type: 'leave_request_submitted',
+                title: 'Leave request submitted',
+                message: sprintf('%s submitted a %s leave request.', $leaveRequest->employee?->name ?? 'An employee', $leaveRequest->leaveType?->name ?? 'new'),
+                module: 'hr',
+                data: self::leaveNotificationData($leaveRequest, self::teamManagementLeaveUrl($leaveRequest)),
+                users: $localApprovers,
+            );
+        }
+
+        if ($hrApprovers !== []) {
+            NotificationService::send(
+                type: 'leave_request_submitted',
+                title: 'Leave request submitted',
+                message: sprintf('%s submitted a %s leave request.', $leaveRequest->employee?->name ?? 'An employee', $leaveRequest->leaveType?->name ?? 'new'),
+                module: 'hr',
+                data: self::leaveNotificationData($leaveRequest, self::hrLeaveUrl($leaveRequest)),
+                users: $hrApprovers,
+            );
+        }
     }
 
-    protected static function leaveReviewRecipients(LeaveRequest $leaveRequest): array
+    protected static function localLeaveReviewRecipients(LeaveRequest $leaveRequest): array
     {
         $leaveRequest->loadMissing(['employee.department']);
 
@@ -766,25 +787,51 @@ class LeaveRequestController extends Controller
             $employee?->department?->manager_id,
         ])->filter()->unique()->values();
 
-        $localApprovers = $localApproverEmployeeIds->isEmpty()
-            ? collect()
-            : User::query()
-                ->active()
-                ->whereIn('employee_id', $localApproverEmployeeIds)
-                ->get();
+        if ($localApproverEmployeeIds->isEmpty()) {
+            return [];
+        }
 
-        $hrApprovers = User::query()
+        return User::query()
+            ->active()
+            ->whereIn('employee_id', $localApproverEmployeeIds)
+            ->get()
+            ->all();
+    }
+
+    protected static function hrLeaveReviewRecipients()
+    {
+        return User::query()
             ->active()
             ->whereHas('roles', function (Builder $query) {
                 $query->whereIn('name', ['Super Admin', 'Admin', 'HR']);
             })
             ->get();
+    }
+
+    protected static function leaveReviewRecipients(LeaveRequest $leaveRequest): array
+    {
+        $localApprovers = collect(self::localLeaveReviewRecipients($leaveRequest));
 
         return $localApprovers
-            ->merge($hrApprovers)
+            ->merge(self::hrLeaveReviewRecipients())
             ->unique('id')
             ->values()
             ->all();
+    }
+
+    protected static function hrLeaveUrl(LeaveRequest $leaveRequest): string
+    {
+        return '/hr/leave?request=' . $leaveRequest->id;
+    }
+
+    protected static function teamManagementLeaveUrl(LeaveRequest $leaveRequest): string
+    {
+        return '/self-service/team-management?request=' . $leaveRequest->id;
+    }
+
+    protected static function selfServiceLeaveUrl(LeaveRequest $leaveRequest): string
+    {
+        return '/self-service/leave?request=' . $leaveRequest->id;
     }
 
     protected function notifyHRAfterLeadApprovalResponse(int $leaveRequestId): void
@@ -804,7 +851,7 @@ class LeaveRequestController extends Controller
                     title: 'Leave request awaiting HR approval',
                     message: sprintf('%s\'s leave request was approved by the lead and needs HR approval.', $leaveRequest->employee?->name ?? 'An employee'),
                     module: 'hr',
-                    data: self::leaveNotificationData($leaveRequest),
+                    data: self::leaveNotificationData($leaveRequest, self::hrLeaveUrl($leaveRequest)),
                     role: ['Super Admin', 'Admin', 'HR'],
                 );
             } catch (\Throwable $exception) {
@@ -814,6 +861,86 @@ class LeaveRequestController extends Controller
                 ]);
             }
         })->afterResponse();
+    }
+
+    protected function notifyEmployeeAfterLeadApprovalResponse(int $leaveRequestId): void
+    {
+        dispatch(static function () use ($leaveRequestId): void {
+            try {
+                $leaveRequest = LeaveRequest::query()
+                    ->with(['employee.user', 'leaveType', 'leadApprover'])
+                    ->find($leaveRequestId);
+
+                if (!$leaveRequest) {
+                    return;
+                }
+
+                self::sendEmployeeLeadApprovalNotification($leaveRequest);
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to send leave lead-approved employee notification.', [
+                    'leave_request_id' => $leaveRequestId,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        })->afterResponse();
+    }
+
+    protected static function sendEmployeeLeadApprovalNotification(LeaveRequest $leaveRequest): void
+    {
+        $leaveRequest->loadMissing(['employee.user', 'leaveType', 'leadApprover']);
+
+        $employee = $leaveRequest->employee;
+        $user = $employee?->user;
+
+        if (!$employee) {
+            return;
+        }
+
+        NotificationService::send(
+            type: 'leave_request_lead_approved',
+            title: 'Leave request awaiting HR approval',
+            message: sprintf('Your %s leave request was approved by your lead and is awaiting final HR approval.', $leaveRequest->leaveType?->name ?? 'leave'),
+            module: 'hr',
+            data: self::leaveNotificationData($leaveRequest, self::selfServiceLeaveUrl($leaveRequest)),
+            users: $user ? [$user] : [],
+            emails: $user ? [] : [$employee->email],
+        );
+    }
+
+    protected function notifyHRAfterLeadRejectionResponse(int $leaveRequestId): void
+    {
+        dispatch(static function () use ($leaveRequestId): void {
+            try {
+                $leaveRequest = LeaveRequest::query()
+                    ->with(['employee.user', 'leaveType', 'approver'])
+                    ->find($leaveRequestId);
+
+                if (!$leaveRequest) {
+                    return;
+                }
+
+                self::sendHRLeadRejectionNotification($leaveRequest);
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to send leave lead-rejected HR notification.', [
+                    'leave_request_id' => $leaveRequestId,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        })->afterResponse();
+    }
+
+    protected static function sendHRLeadRejectionNotification(LeaveRequest $leaveRequest): void
+    {
+        $leaveRequest->loadMissing(['employee', 'leaveType', 'approver']);
+
+        NotificationService::send(
+            type: 'leave_request_lead_rejected',
+            title: 'Leave request rejected by lead',
+            message: sprintf('%s\'s leave request was rejected by the lead.', $leaveRequest->employee?->name ?? 'An employee'),
+            module: 'hr',
+            data: self::leaveNotificationData($leaveRequest, self::hrLeaveUrl($leaveRequest)),
+            role: ['Super Admin', 'Admin', 'HR'],
+        );
     }
 
     protected function notifyEmployeeAfterResponse(int $leaveRequestId, string $status): void
@@ -852,7 +979,7 @@ class LeaveRequestController extends Controller
                 title: 'Leave request approved',
                 message: sprintf('Your %s leave request has been approved.', $leaveRequest->leaveType?->name ?? 'leave'),
                 module: 'hr',
-                data: self::leaveNotificationData($leaveRequest),
+                data: self::leaveNotificationData($leaveRequest, self::selfServiceLeaveUrl($leaveRequest)),
                 users: $user ? [$user] : [],
                 emails: $user ? [] : [$employee->email],
             );
@@ -862,7 +989,7 @@ class LeaveRequestController extends Controller
                 title: 'Leave request rejected',
                 message: sprintf('Your %s leave request was rejected.', $leaveRequest->leaveType?->name ?? 'leave'),
                 module: 'hr',
-                data: self::leaveNotificationData($leaveRequest),
+                data: self::leaveNotificationData($leaveRequest, self::selfServiceLeaveUrl($leaveRequest)),
                 users: $user ? [$user] : [],
                 emails: $user ? [] : [$employee->email],
             );
@@ -872,7 +999,7 @@ class LeaveRequestController extends Controller
                 title: 'Leave request cancelled',
                 message: sprintf('Your %s leave request was cancelled.', $leaveRequest->leaveType?->name ?? 'leave'),
                 module: 'hr',
-                data: self::leaveNotificationData($leaveRequest),
+                data: self::leaveNotificationData($leaveRequest, self::selfServiceLeaveUrl($leaveRequest)),
                 users: $user ? [$user] : [],
                 emails: $user ? [] : [$employee->email],
             );
@@ -882,17 +1009,17 @@ class LeaveRequestController extends Controller
                 title: 'Leave request recalled',
                 message: sprintf('Your %s leave request was recalled.', $leaveRequest->leaveType?->name ?? 'leave'),
                 module: 'hr',
-                data: self::leaveNotificationData($leaveRequest),
+                data: self::leaveNotificationData($leaveRequest, self::selfServiceLeaveUrl($leaveRequest)),
                 users: $user ? [$user] : [],
                 emails: $user ? [] : [$employee->email],
             );
         }
     }
 
-    protected static function leaveNotificationData(LeaveRequest $leaveRequest): array
+    protected static function leaveNotificationData(LeaveRequest $leaveRequest, ?string $url = null): array
     {
         return [
-            'url' => '/hr/leave?request=' . $leaveRequest->id,
+            'url' => $url ?? self::hrLeaveUrl($leaveRequest),
             'leave_request_id' => $leaveRequest->id,
             'employee' => $leaveRequest->employee?->name,
             'leave_type' => $leaveRequest->leaveType?->name,
@@ -1121,12 +1248,4 @@ class LeaveRequestController extends Controller
         }
     }
 
-    private function leaveTypeRequiresAttachment(LeaveType $leaveType): bool
-    {
-        if (in_array($leaveType->code, ['MATERNITY', 'PATERNITY'], true)) {
-            return false;
-        }
-
-        return (bool) $leaveType->requires_attachment;
-    }
 }
