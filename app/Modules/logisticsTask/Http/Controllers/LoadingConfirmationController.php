@@ -74,14 +74,17 @@ class LoadingConfirmationController extends Controller
             'token' => $link->token,
             'expires_at' => $link->expires_at,
             'confirmed_at' => $link->confirmed_at,
-            'confirmed_by' => $link->confirmer?->name,
+            'confirmed_by' => $link->confirmed_by_name ?? $link->confirmer?->name,
             'project' => [
                 'title' => $task->enquiry?->title ?: $task->title,
                 'reference' => $task->enquiry?->job_number ?: $task->enquiry?->enquiry_number,
                 'venue' => $task->enquiry?->venue,
                 'delivery_date' => $task->enquiry?->expected_delivery_date,
             ],
-            'officer' => ['name' => auth()->user()->name, 'email' => auth()->user()->email],
+            // This link is opened without a login (QR code, no ERP session) —
+            // "officer" is whoever generated the link, shown as a point of
+            // contact, not the (nonexistent) current session user.
+            'officer' => $link->creator ? ['name' => $link->creator->name, 'email' => $link->creator->email] : null,
             'items' => $checklist['items'] ?? [],
         ]]);
     }
@@ -92,6 +95,7 @@ class LoadingConfirmationController extends Controller
         abort_if($link->confirmed_at, 422, 'Loading has already been confirmed.');
         abort_if($link->logisticsTask->task?->status === 'completed', 422, 'This dispatch is already complete.');
         $validated = $request->validate([
+            'checked_by' => 'required|string|max:255',
             'items' => 'required|array|min:1',
             'items.*.id' => 'required|string',
             'items.*.status' => 'required|in:present,missing,coming_later',
@@ -104,31 +108,32 @@ class LoadingConfirmationController extends Controller
             $updates = collect($validated['items'])->keyBy('id');
             $knownIds = collect($data['items'] ?? [])->pluck('id');
             abort_if($updates->keys()->diff($knownIds)->isNotEmpty(), 422, 'The loading sheet has changed. Refresh this page.');
-            $data['items'] = collect($data['items'] ?? [])->map(function ($item) use ($updates) {
+            $data['items'] = collect($data['items'] ?? [])->map(function ($item) use ($updates, $validated) {
                 $update = $updates->get($item['id']);
                 if (!$update) return $item;
                 return array_merge($item, [
                     'status' => $update['status'], 'notes' => $update['notes'] ?? null,
-                    'checkedBy' => auth()->user()->name, 'checkedAt' => now()->toIso8601String(),
+                    'checkedBy' => $validated['checked_by'], 'checkedAt' => now()->toIso8601String(),
                 ]);
             })->values()->all();
-            $checklist->update(['checklist_data' => $data, 'updated_by' => auth()->id()]);
+            $checklist->update(['checklist_data' => $data]);
             return $data['items'];
         });
 
         return response()->json(['message' => 'Loading progress saved.', 'data' => $items]);
     }
 
-    public function confirm(string $token): JsonResponse
+    public function confirm(Request $request, string $token): JsonResponse
     {
         $link = $this->availableLink($token);
         abort_if($link->confirmed_at, 422, 'Loading has already been confirmed.');
+        $validated = $request->validate(['confirmed_by_name' => 'required|string|max:255']);
         $items = $this->logisticsService->getChecklistForTask($link->logisticsTask->task_id)['items'] ?? [];
         abort_if(empty($items), 422, 'The loading sheet has no items.');
         abort_if(collect($items)->contains(fn ($item) => ($item['status'] ?? null) !== 'present'), 422, 'Every item must be marked Loaded before final confirmation.');
-        $link->update(['confirmed_by' => auth()->id(), 'confirmed_at' => now()]);
+        $link->update(['confirmed_by_name' => $validated['confirmed_by_name'], 'confirmed_at' => now()]);
 
-        return response()->json(['message' => 'Loading confirmed successfully.', 'data' => $link->fresh('confirmer:id,name')]);
+        return response()->json(['message' => 'Loading confirmed successfully.', 'data' => $link->fresh()]);
     }
 
     private function managedTask(int $taskId): EnquiryTask
@@ -141,7 +146,7 @@ class LoadingConfirmationController extends Controller
 
     private function availableLink(string $token): LoadingConfirmationLink
     {
-        $link = LoadingConfirmationLink::with(['logisticsTask.task', 'confirmer:id,name'])->where('token', $token)->firstOrFail();
+        $link = LoadingConfirmationLink::with(['logisticsTask.task', 'confirmer:id,name', 'creator:id,name,email'])->where('token', $token)->firstOrFail();
         abort_unless($link->isAvailable(), 410, 'This loading confirmation link is no longer available.');
         return $link;
     }

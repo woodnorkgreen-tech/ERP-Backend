@@ -118,6 +118,22 @@ Route::get('projects/tasks/{taskId}/quote/excel/download', [App\Http\Controllers
     ->name('quote.excel.download')
     ->middleware('signed:relative');
 
+// QR-code driven logistics confirmations: the token in the URL IS the
+// credential (random UUID, validated + expiry/revocation checked inside each
+// controller's availableLink()). These are meant to be opened by a driver or
+// site contact who has no ERP account, so they must live outside auth:sanctum
+// — moved here 2026-07-28 after they were found gated behind login.
+Route::prefix('projects')->group(function () {
+    Route::get('/manifest-submit/{token}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'show']);
+    Route::post('/manifest-submit/{token}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'submit']);
+    Route::get('/loading-confirm/{token}', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'show']);
+    Route::patch('/loading-confirm/{token}/items', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'updateItems']);
+    Route::post('/loading-confirm/{token}/confirm', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'confirm']);
+    Route::get('/return-confirm/{token}', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'show']);
+    Route::patch('/return-confirm/{token}/items', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'updateItems']);
+    Route::post('/return-confirm/{token}/confirm', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'confirm']);
+});
+
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('support')->group(function () {
@@ -629,18 +645,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('/return-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'store']);
             Route::delete('/return-confirmation-links/{link}', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'revoke']);
         });
-
-        Route::get('/manifest-submit/{token}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'show']);
-        Route::post('/manifest-submit/{token}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'submit']);
-        Route::get('/loading-confirm/{token}', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'show']);
-        Route::patch('/loading-confirm/{token}/items', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'updateItems']);
-        Route::post('/loading-confirm/{token}/confirm', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'confirm']);
-        Route::get('/return-confirm/{token}', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'show']);
-        Route::patch('/return-confirm/{token}/items', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'updateItems']);
-        Route::post('/return-confirm/{token}/confirm', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'confirm']);
-
-
-
 
         // Archival Task Routes (Project Memorial Report)
         Route::prefix('tasks/{taskId}/archival')->group(function () {

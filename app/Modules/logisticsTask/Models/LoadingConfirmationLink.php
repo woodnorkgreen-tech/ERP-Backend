@@ -11,7 +11,7 @@ class LoadingConfirmationLink extends Model
 
     protected $fillable = [
         'logistics_task_id', 'token', 'expires_at', 'revoked_at',
-        'confirmed_by', 'confirmed_at', 'created_by',
+        'confirmed_by', 'confirmed_by_name', 'confirmed_at', 'created_by',
     ];
 
     protected $casts = [
@@ -28,6 +28,11 @@ class LoadingConfirmationLink extends Model
     public function confirmer(): BelongsTo
     {
         return $this->belongsTo(\App\Models\User::class, 'confirmed_by');
+    }
+
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class, 'created_by');
     }
 
     public function isAvailable(): bool
