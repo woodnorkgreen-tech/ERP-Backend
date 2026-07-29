@@ -231,6 +231,10 @@ return [
             'module' => 'procurement-stores', 'label' => 'Purchase Order Status Changed',
             'default_channels' => ['database'], 'urgency' => 'info',
         ],
+        'logistics_manifest_submission_received' => [
+            'module' => 'projects', 'label' => 'Loading Sheet Items Submitted for Review',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
         'project_activity' => [
             'module' => 'projects', 'label' => 'Project Activity',
             'default_channels' => ['database'], 'urgency' => 'info',
