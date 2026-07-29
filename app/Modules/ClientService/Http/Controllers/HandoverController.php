@@ -30,7 +30,54 @@ class HandoverController extends Controller
             \Log::error('Error fetching handovers: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve handovers',
-                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Submitted surveys awaiting CS Lead review (review_status = pending).
+     */
+    public function awaitingReview(Request $request): JsonResponse
+    {
+        try {
+            $filters = $request->only(['search', 'page']);
+            return response()->json($this->handoverService->getAwaitingReview($filters));
+        } catch (\Exception $e) {
+            \Log::error('Error fetching awaiting-review handovers: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to retrieve awaiting review list'], 500);
+        }
+    }
+
+    /**
+     * List completed projects still awaiting feedback (follow-up list).
+     */
+    public function pending(Request $request): JsonResponse
+    {
+        try {
+            $filters = $request->only(['client_id', 'search', 'page']);
+            $pending = $this->handoverService->getPendingFeedback($filters);
+
+            return response()->json($pending);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching pending feedback: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to retrieve pending feedback',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get aggregate statistics for submitted handovers.
+     */
+    public function stats(Request $request): JsonResponse
+    {
+        try {
+            $stats = $this->handoverService->getHandoverStats();
+            return response()->json($stats);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching handover stats: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to retrieve handover statistics',
             ], 500);
         }
     }
@@ -104,7 +151,6 @@ class HandoverController extends Controller
             \Log::error('Error fetching handover detail: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve handover detail',
-                'error' => $e->getMessage()
             ], 500);
         }
     }

@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Spatie\Permission\Models\Permission;
 
 class HandoverReviewController extends Controller
 {
@@ -32,7 +33,17 @@ class HandoverReviewController extends Controller
      */
     public function review(Request $request, int $id): JsonResponse
     {
-        if (!Auth::user()->hasPermissionTo(Permissions::CLIENT_HANDOVER_REVIEW)) {
+        $user = Auth::user();
+        $permissionExists = Permission::query()
+            ->where('name', Permissions::CLIENT_HANDOVER_REVIEW)
+            ->where('guard_name', 'web')
+            ->exists();
+        $canReview = $user->hasRole(['Super Admin', 'Admin'])
+            || ($permissionExists
+                ? $user->hasPermissionTo(Permissions::CLIENT_HANDOVER_REVIEW)
+                : $user->hasRole('Client Service'));
+
+        if (!$canReview) {
             return response()->json(['message' => 'Unauthorized: CS Lead permission required to review handover surveys.'], 403);
         }
 
@@ -42,8 +53,8 @@ class HandoverReviewController extends Controller
             return response()->json(['message' => 'Handover survey not found or not yet submitted.'], 404);
         }
 
-        if ($survey->review_status === 'approved_positive') {
-            return response()->json(['message' => 'This survey has already been reviewed and approved.'], 422);
+        if (($survey->review_status ?? 'pending') !== 'pending') {
+            return response()->json(['message' => 'This survey has already received a final CS review decision.'], 422);
         }
 
         $validated = $request->validate([

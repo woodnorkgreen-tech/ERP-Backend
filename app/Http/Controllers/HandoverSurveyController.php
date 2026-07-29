@@ -57,11 +57,8 @@ class HandoverSurveyController extends Controller
         }
 
         try {
-            $feedbackSource = $request->input('feedback_source');
-            $isAlternativeFeedback = $feedbackSource && $feedbackSource !== 'survey_link';
-
             // Build validation rules dynamically from config
-            $validationRules = $this->buildValidationRules($isAlternativeFeedback);
+            $validationRules = $this->buildValidationRules();
             
             // Add rules for new fields
             $validationRules['feedback_source'] = 'nullable|string|in:survey_link,email,whatsapp,phone_call,in_person,social_media,other';
@@ -230,40 +227,38 @@ class HandoverSurveyController extends Controller
     }
 
     /**
-     * Build validation rules dynamically from question configuration
+     * Build validation rules dynamically from question configuration.
+     * Nothing is marked required: the handover survey must submit
+     * successfully with whatever fields are actually available. Any value
+     * that IS provided is still checked for the right shape/type.
      */
-    private function buildValidationRules(bool $isAlternativeFeedback = false): array
+    private function buildValidationRules(): array
     {
         $config = config('survey_questions');
         $rules = [
-            'respondent_info' => 'nullable', // Relaxed validation for JSON string/array flexibility
-            'responses' => 'required',       // Relaxed validation for JSON string/array flexibility
+            'respondent_info' => 'nullable',
+            'responses' => 'nullable',
             'submitted' => 'nullable',
         ];
 
         foreach ($config['sections'] ?? [] as $section) {
             foreach ($section['questions'] ?? [] as $question) {
                 $fieldPath = "responses.{$question['id']}";
-                $required  = (!$isAlternativeFeedback && ($question['required'] ?? false))
-                    ? 'required'
-                    : 'nullable';
 
                 if (($question['type'] ?? 'text') === 'rating' && ($question['has_remarks'] ?? false)) {
-                    $rules["{$fieldPath}.rating"] = "{$required}|numeric|min:1|max:5";
+                    $rules["{$fieldPath}.rating"] = 'nullable|numeric|min:1|max:5';
                     $rules["{$fieldPath}.remarks"] = 'nullable|string|max:1000';
                     continue;
                 }
 
-                $typeRules = match ($question['type'] ?? 'text') {
-                    'rating'          => "{$required}|numeric|min:1|max:5",
+                $rules[$fieldPath] = match ($question['type'] ?? 'text') {
+                    'rating'          => 'nullable|numeric|min:1|max:5',
                     'yes_no',
-                    'boolean'         => "{$required}|boolean",
+                    'boolean'         => 'nullable|boolean',
                     'textarea',
-                    'text'            => "{$required}|string|max:5000",
-                    default           => $required,
+                    'text'            => 'nullable|string|max:5000',
+                    default           => 'nullable',
                 };
-
-                $rules[$fieldPath] = $typeRules;
             }
         }
 

@@ -91,24 +91,32 @@ class EnquiryResource extends JsonResource
     }
 
     /**
-     * Calculate a rough progress percentage based on the current status.
-     * 
+     * Progress is the share of this enquiry's tasks that are completed —
+     * mirrors ProjectWorkflowStateService::summary() so the list view and the
+     * per-enquiry workflow-state endpoint never disagree. A status-keyed map
+     * was tried before this; it went stale the moment an enquiry moved past
+     * quote approval into planning/in_progress/awaiting_deposit, since those
+     * statuses cover the entire rest of the project lifecycle and were never
+     * in the map — every active project sat pinned at 0%.
+     *
      * @return int
      */
     private function calculateProgressPercentage(): int
     {
-        $statusMap = [
-            \App\Constants\EnquiryConstants::STATUS_ENQUIRY_LOGGED => 10,
-            \App\Constants\EnquiryConstants::STATUS_SITE_SURVEY_COMPLETED => 25,
-            \App\Constants\EnquiryConstants::STATUS_DESIGN_COMPLETED => 40,
-            \App\Constants\EnquiryConstants::STATUS_QUOTE_PREPARED => 55,
-            \App\Constants\EnquiryConstants::STATUS_QUOTE_APPROVED => 65,
-            \App\Constants\EnquiryConstants::STATUS_MATERIALS_SPECIFIED => 75,
-            \App\Constants\EnquiryConstants::STATUS_BUDGET_CREATED => 85,
-            \App\Constants\EnquiryConstants::STATUS_COMPLETED => 100,
-            \App\Constants\EnquiryConstants::STATUS_CLOSED => 100,
-        ];
+        if (in_array($this->status, [
+            \App\Constants\EnquiryConstants::STATUS_COMPLETED,
+            \App\Constants\EnquiryConstants::STATUS_CLOSED,
+        ], true)) {
+            return 100;
+        }
 
-        return $statusMap[$this->status] ?? 0;
+        $tasks = $this->enquiryTasks;
+        if (!$tasks || $tasks->isEmpty()) {
+            return 0;
+        }
+
+        $completed = $tasks->where('status', 'completed')->count();
+
+        return (int) round(($completed / $tasks->count()) * 100);
     }
 }

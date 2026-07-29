@@ -1715,16 +1715,10 @@ class QuoteController extends Controller
                 return response()->json(['message' => 'Approval task not found'], 404);
             }
 
-            // Enforce that quote cannot be approved until a Job Number has been generated
-            if ($request->approval_status === 'approved') {
-                $enquiry = $approvalTask->enquiry;
-                if (!$enquiry || !$enquiry->job_number) {
-                    return response()->json([
-                        'message' => 'Cannot approve quote. Please activate the project first to generate a Job Number.'
-                    ], 422);
-                }
-            }
-            
+            // Zero-value approvals are allowed for projects proceeding without
+            // a priced quote. Finance must still enter a positive billing amount
+            // later before payments and percentage-based release can be tracked.
+
             \Log::info("Found approval task, enquiry ID: {$approvalTask->project_enquiry_id}");
 
             // Find the ORIGINAL Quote Task for this enquiry

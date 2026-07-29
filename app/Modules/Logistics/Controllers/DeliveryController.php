@@ -9,6 +9,7 @@ use App\Modules\Logistics\Models\Vehicle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 class DeliveryController extends Controller
 {
@@ -22,7 +23,15 @@ class DeliveryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $isClientService = Auth::user()?->hasRole('Client Service') ?? false;
+
         $deliveries = Delivery::with($this->with)
+            // Client Service needs the client-facing delivery register, not
+            // unrelated internal transport movements.
+            ->when($isClientService, fn ($q) => $q->whereHas(
+                'stops.tripRequest.project',
+                fn ($project) => $project->whereNotNull('client_id')
+            ))
             ->when($request->date,   fn($q) => $q->whereDate('delivery_date', $request->date))
             ->when($request->status, fn($q) => $q->where('status', $request->status))
             ->latest()

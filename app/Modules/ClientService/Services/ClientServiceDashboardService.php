@@ -19,21 +19,13 @@ class ClientServiceDashboardService
         // 1. Total Clients
         $totalClients = Client::count();
 
-        // 2. Active Projects (from ProjectEnquiry)
-        // Aligned with ProjectsDashboardService.php logic
-        $activeStatuses = [
-            'planning',
-            'in_progress',
-            'materials_specified',
-            'budget_created',
-            'quote_approved'
-        ];
-        $activeProjectsCount = ProjectEnquiry::whereIn('status', $activeStatuses)->count();
+        // 2. Live projects begin at the approved-quote boundary. Pre-approval
+        // materials and budget work remains part of the enquiry pipeline.
+        $activeProjectsCount = ProjectEnquiry::whereIn('status', EnquiryConstants::getApprovedProjectStatuses())->count();
 
-        // 3. New Enquiries (Logged in the current month)
-        $newEnquiriesCount = ProjectEnquiry::where('status', 'enquiry_logged')
-            ->whereMonth('created_at', Carbon::now()->month)
-            ->whereYear('created_at', Carbon::now()->year)
+        // 3. Monthly intake must continue counting an enquiry after it moves
+        // beyond enquiry_logged during the same month.
+        $newEnquiriesCount = ProjectEnquiry::whereBetween('created_at', [Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth()])
             ->count();
 
         // 4. Conversion Rate

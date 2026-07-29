@@ -237,6 +237,7 @@ class NotificationService
             'procurement-stores' => ['Procurement', 'Stores', 'Accounts', 'Manager'],
             'projects' => ['Project Officer', 'Project Manager', 'Manager'],
             'universal-task' => ['Employee', 'Manager'],
+            'support' => ['Employee', 'Manager', 'HR', 'Finance', 'Accounts', 'Costing', 'Designer', 'Project Officer', 'Project Manager', 'Production', 'Logistics', 'Stores', 'Procurement'],
         ];
 
         if (isset($moduleRoles[strtolower($module)]) && $user->hasRole($moduleRoles[strtolower($module)])) {

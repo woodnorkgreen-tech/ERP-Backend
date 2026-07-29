@@ -40,7 +40,6 @@ class DashboardController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve dashboard data',
-                'error' => $e->getMessage()
             ], 500);
         }
     }

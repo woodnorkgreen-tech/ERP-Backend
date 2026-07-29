@@ -28,8 +28,53 @@ class ArchivalReportService
         $reportData = $report->toArray();
         $reportData['attachment_urls'] = $report->attachment_urls;
         $reportData['system_documents'] = $this->getSystemDocuments($taskId);
+        $reportData['financial_summary'] = $this->getFinancialSummary($taskId);
+        $reportData['capabilities'] = [
+            'can_edit' => $report->status === 'draft',
+            'can_approve' => auth()->user()?->hasRole(['Super Admin', 'Admin', 'Project Manager']) ?? false,
+        ];
 
         return $reportData;
+    }
+
+    /**
+     * Read-only reconciliation from the existing quote and payment records.
+     * An unpaid balance stays owned by Finance and is disclosed at closure; it
+     * does not duplicate or replace the receivables workflow.
+     */
+    public function getFinancialSummary(int $taskId): array
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        $enquiry = $task->enquiry;
+
+        if (!$enquiry) {
+            return [];
+        }
+
+        $quoteTaskIds = EnquiryTask::where('project_enquiry_id', $enquiry->id)
+            ->whereIn('type', ['quote', 'quote_approval'])
+            ->pluck('id');
+        $quote = \App\Models\TaskQuoteData::whereIn('enquiry_task_id', $quoteTaskIds)
+            ->orderByDesc('approval_date')
+            ->orderByDesc('id')
+            ->first();
+
+        $quotedAmount = (float) ($enquiry->client_approved_quote
+            ?? $quote?->quote_amount
+            ?? $quote?->excel_quote_amount
+            ?? data_get($quote?->totals, 'grand_total', 0));
+        $paidAmount = (float) \App\Models\EnquiryPayment::where('project_enquiry_id', $enquiry->id)->sum('amount');
+        $balance = max($quotedAmount - $paidAmount, 0);
+
+        return [
+            'currency' => 'KES',
+            'approved_quote' => round($quotedAmount, 2),
+            'payments_received' => round($paidAmount, 2),
+            'outstanding_balance' => round($balance, 2),
+            'payment_status' => $quotedAmount <= 0 ? 'not_available' : ($balance <= 0 ? 'settled' : ($paidAmount > 0 ? 'part_paid' : 'unpaid')),
+            'finance_released' => (bool) $enquiry->finance_released,
+            'note' => $balance > 0 ? 'Outstanding collection remains active in Finance after operational closure.' : null,
+        ];
     }
 
     /**
@@ -57,13 +102,13 @@ class ArchivalReportService
             try {
                 if (isset($allTasks['materials'])) {
                     $materialsTask = $allTasks['materials'];
-                    $documents[] = [
-                        'name' => 'Material List',
-                        'type' => 'PDF',
-                        'category' => 'Materials',
-                        'url' => "/api/projects/tasks/{$materialsTask->id}/materials/pdf",
-                        'task_id' => $materialsTask->id
-                    ];
+                    if (\App\Models\TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->exists()) {
+                        $documents[] = [
+                            'name' => 'Material List', 'type' => 'PDF', 'category' => 'Materials',
+                            'url' => "/api/projects/tasks/{$materialsTask->id}/materials/pdf",
+                            'task_id' => $materialsTask->id, 'task_status' => $materialsTask->status,
+                        ];
+                    }
                 }
             } catch (\Exception $e) {}
 
@@ -71,13 +116,13 @@ class ArchivalReportService
             try {
                if (isset($allTasks['budget'])) {
                     $budgetTask = $allTasks['budget'];
-                    $documents[] = [
-                        'name' => 'Project Budget',
-                        'type' => 'PDF',
-                        'category' => 'Financials',
-                        'url' => "/api/projects/tasks/{$budgetTask->id}/budget/pdf",
-                        'task_id' => $budgetTask->id
-                    ];
+                    if (\App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->exists()) {
+                        $documents[] = [
+                            'name' => 'Project Budget', 'type' => 'PDF', 'category' => 'Financials',
+                            'url' => "/api/projects/tasks/{$budgetTask->id}/budget/pdf",
+                            'task_id' => $budgetTask->id, 'task_status' => $budgetTask->status,
+                        ];
+                    }
                 }
             } catch (\Exception $e) {}
 
@@ -85,13 +130,13 @@ class ArchivalReportService
             try {
                 if (isset($allTasks['logistics'])) {
                     $logisticsTask = $allTasks['logistics'];
-                    $documents[] = [
-                        'name' => 'Logistics Manifest',
-                        'type' => 'PDF',
-                        'category' => 'Logistics',
-                        'url' => "/api/projects/tasks/{$logisticsTask->id}/logistics/pdf",
-                        'task_id' => $logisticsTask->id
-                    ];
+                    if (\App\Modules\logisticsTask\Models\LogisticsTask::where('task_id', $logisticsTask->id)->exists()) {
+                        $documents[] = [
+                            'name' => 'Logistics Manifest', 'type' => 'PDF', 'category' => 'Logistics',
+                            'url' => "/api/projects/tasks/{$logisticsTask->id}/logistics/pdf",
+                            'task_id' => $logisticsTask->id, 'task_status' => $logisticsTask->status,
+                        ];
+                    }
                 }
             } catch (\Exception $e) {}
 
@@ -106,7 +151,8 @@ class ArchivalReportService
                             'type' => strtoupper(pathinfo($asset->file_path, PATHINFO_EXTENSION)),
                             'category' => 'Design',
                             'url' => storage_url($asset->file_path),
-                            'asset_id' => $asset->id
+                            'asset_id' => $asset->id,
+                            'task_status' => $designTask->status,
                         ];
                     }
                 }
@@ -121,7 +167,8 @@ class ArchivalReportService
                         'type' => 'PDF',
                         'category' => 'Field Work',
                         'url' => "/api/projects/site-surveys/{$survey->id}/pdf",
-                        'survey_id' => $survey->id
+                        'survey_id' => $survey->id,
+                        'task_status' => $survey->status,
                     ];
                 }
             } catch (\Exception $e) {}
@@ -137,7 +184,8 @@ class ArchivalReportService
                         'type' => 'PDF',
                         'category' => 'Handover',
                         'url' => "/api/projects/tasks/{$handover->task_id}/handover/survey",
-                        'handover_id' => $handover->id
+                        'handover_id' => $handover->id,
+                        'task_status' => $handover->submitted ? 'completed' : 'pending',
                     ];
                 }
             } catch (\Exception $e) {}
@@ -377,7 +425,14 @@ class ArchivalReportService
                 $data['end_date'] = $endDate->format('Y-m-d');
             }
             
-            $data['project_scope'] = $task->enquiry->project_scope ?? $task->enquiry->description;
+            $projectScope = $task->enquiry->project_scope ?? $task->enquiry->description;
+            if (is_array($projectScope)) {
+                $projectScope = collect($projectScope)
+                    ->map(fn ($item) => is_array($item) ? ($item['name'] ?? null) : $item)
+                    ->filter()
+                    ->implode("\n");
+            }
+            $data['project_scope'] = $projectScope;
             
             // --- From Materials Task ---
             try {
@@ -443,12 +498,32 @@ class ArchivalReportService
     /**
      * Change report status
      */
-    public function changeStatus(int $reportId, string $status): ArchivalReport
+    public function changeStatus(int $reportId, string $status, $actor): ArchivalReport
     {
         $report = ArchivalReport::findOrFail($reportId);
-        $report->update(['status' => $status]);
+        $changes = ['status' => $status];
+
+        if ($status === 'submitted') {
+            $changes += [
+                'submitted_by' => $actor->id,
+                'submitted_at' => now(),
+                'project_officer_signature' => $actor->name,
+                'project_officer_sign_date' => now()->toDateString(),
+            ];
+        }
+
+        if ($status === 'approved') {
+            $changes += [
+                'approved_by' => $actor->id,
+                'approved_at' => now(),
+                'reviewed_by' => $actor->name,
+                'reviewer_sign_date' => now()->toDateString(),
+            ];
+        }
+
+        $report->update($changes);
         
-        return $report;
+        return $report->fresh();
     }
 
     /**

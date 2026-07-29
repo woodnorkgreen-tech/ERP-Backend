@@ -31,7 +31,7 @@ class BoardController extends Controller
     public function ingest(StoreBoardRequest $request): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
-            return response()->json(['message' => 'Only Stores team members can ingest boards.'], 403);
+            return response()->json(['message' => 'Only Stores team members can receive boards.'], 403);
         }
 
         try {
@@ -46,7 +46,7 @@ class BoardController extends Controller
             );
 
             return response()->json([
-                'message' => count($boards) . ' board(s) ingested successfully.',
+                'message' => count($boards) . ' board(s) received successfully.',
                 'boards'  => $this->formatBoards($boards),
                 'count'   => count($boards),
             ], 201);
@@ -258,7 +258,7 @@ class BoardController extends Controller
         }
 
         return response()->json([
-            'message' => "Board [{$board->tracking_code}] allocated to job [{$request->job_ref}].",
+            'message' => "Board [{$board->tracking_code}] reserved for job [{$request->job_ref}].",
             'board'   => $this->formatBoardDetail($board->fresh(['movements', 'libraryMaterial'])),
         ]);
     }
@@ -284,7 +284,7 @@ class BoardController extends Controller
 
         if (!$next) {
             return response()->json([
-                'message' => "Board is in [{$board->status}] — no further processing step available.",
+                'message' => "This board has no next action from its current step.",
             ], 422);
         }
 
@@ -300,7 +300,7 @@ class BoardController extends Controller
         }
 
         return response()->json([
-            'message' => "Board [{$board->tracking_code}] advanced to [{$next}].",
+            'message' => "Board [{$board->tracking_code}] moved to the next step.",
             'board'   => $this->formatBoardDetail($board->fresh(['movements', 'libraryMaterial'])),
         ]);
     }
@@ -313,7 +313,7 @@ class BoardController extends Controller
     public function dispatchToStation(Request $request, string $jobRef): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
-            return response()->json(['message' => 'Only Production, Stores or Managers can dispatch boards to station.'], 403);
+            return response()->json(['message' => 'Only Production, Stores or Managers can send boards to Production.'], 403);
         }
 
         $request->validate([
@@ -330,7 +330,7 @@ class BoardController extends Controller
         $boards = $query->get();
 
         if ($boards->isEmpty()) {
-            return response()->json(['message' => "No Allocated boards found for job [{$jobRef}]."], 422);
+            return response()->json(['message' => "No reserved boards were found for job [{$jobRef}]."], 422);
         }
 
         try {
@@ -340,7 +340,7 @@ class BoardController extends Controller
         }
 
         return response()->json([
-            'message'        => "{$boards->count()} board(s) delivered to station for job [{$jobRef}].",
+            'message'        => "{$boards->count()} board(s) sent to Production for job [{$jobRef}].",
             'boards_at_station' => $boards->pluck('tracking_code'),
         ]);
     }
@@ -399,7 +399,7 @@ class BoardController extends Controller
     public function startWip(Request $request, string $jobRef): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
-            return response()->json(['message' => 'Only Production, Stores or Managers can start WIP.'], 403);
+            return response()->json(['message' => 'Only Production, Stores or Managers can start board work.'], 403);
         }
 
         $boards = Board::where('assigned_job_ref', $jobRef)
@@ -407,13 +407,13 @@ class BoardController extends Controller
             ->get();
 
         if ($boards->isEmpty()) {
-            return response()->json(['message' => "No boards at station found for job [{$jobRef}]."], 422);
+            return response()->json(['message' => "No boards at Production were found for job [{$jobRef}]."], 422);
         }
 
         $this->workflow->startWip($jobRef, $boards, auth()->user());
 
         return response()->json([
-            'message'   => "{$boards->count()} board(s) moved to WIP for job [{$jobRef}].",
+            'message'   => "Work started on {$boards->count()} board(s) for job [{$jobRef}].",
             'board_ids' => $boards->pluck('id'),
         ]);
     }
@@ -447,7 +447,7 @@ class BoardController extends Controller
     public function consume(Request $request, int $id): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
-            return response()->json(['message' => 'You are not permitted to consume boards.'], 403);
+            return response()->json(['message' => 'You are not permitted to record board use.'], 403);
         }
 
         $request->validate([
@@ -516,7 +516,7 @@ class BoardController extends Controller
         }
 
         return response()->json([
-            'message' => "Board [{$board->tracking_code}] consumed." . ($offcut ? " Offcut [{$offcut->tracking_code}] created." : ''),
+            'message' => "Board [{$board->tracking_code}] recorded as used." . ($offcut ? " Remaining piece [{$offcut->tracking_code}] created." : ''),
             'board'   => $this->formatBoardDetail($board->fresh(['movements', 'libraryMaterial'])),
             'offcut'  => $offcut ? $this->formatBoardDetail($offcut->load(['movements', 'libraryMaterial'])) : null,
         ]);
@@ -794,7 +794,7 @@ class BoardController extends Controller
         ]);
 
         return response()->json([
-            'message' => 'Reconciliation saved.',
+            'message' => 'Stock count saved.',
             'id'      => $record,
         ], 201);
     }
@@ -1001,7 +1001,7 @@ class BoardController extends Controller
 
         if ($boards->isEmpty()) {
             return response()->json([
-                'message' => "No Quarantine boards found for batch [{$batchNumber}].",
+                'message' => "No boards awaiting labels were found for batch [{$batchNumber}].",
             ], 404);
         }
 
@@ -1160,7 +1160,7 @@ class BoardController extends Controller
         }
 
         return response()->json([
-            'message' => "Board [{$board->tracking_code}] transitioned to [{$request->status}].",
+            'message' => "Board [{$board->tracking_code}] updated successfully.",
             'board'   => $this->formatBoardDetail($board->fresh(['movements', 'libraryMaterial'])),
         ]);
     }

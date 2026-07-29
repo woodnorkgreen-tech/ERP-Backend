@@ -29,6 +29,7 @@ class LogisticsTaskService
         $planning = $logisticsTask->logistics_planning ?? [];
         if (empty($planning)) {
             $planning = [
+                'transport_arrangement' => 'company',
                 'vehicle_identification' => '',
                 'driver_name' => '',
                 'route' => [
@@ -42,6 +43,8 @@ class LogisticsTaskService
                 ]
             ];
         } else {
+            // Existing plans predate this choice and remain company-arranged.
+            $planning['transport_arrangement'] = $planning['transport_arrangement'] ?? 'company';
             // Ensure nested objects exist
             if (!isset($planning['route'])) {
                 $planning['route'] = [
@@ -330,7 +333,7 @@ class LogisticsTaskService
                                 'name' => $element->name, // Update name in case it changed
                                 'description' => $description ?: null,
                                 'element_category' => $element->category,
-                                'is_returnable' => true, // Imported elements are generally returnable
+                                'is_returnable' => $element->category === 'hire',
                                 'sub_type' => $element->category === 'hire' ? 'hire' : null,
                             ]);
                             $transportItem = $existingItem;
@@ -348,7 +351,7 @@ class LogisticsTaskService
                                 'unit' => 'item',
                                 'category' => 'production', 
                                 'main_category' => $mainCategory,
-                                'is_returnable' => true,
+                                'is_returnable' => $element->category === 'hire',
                                 'sub_type' => $element->category === 'hire' ? 'hire' : null,
                                 'element_category' => $element->category,
                                 'source' => 'project_element_' . $element->id,
@@ -419,7 +422,7 @@ class LogisticsTaskService
                             'unit'          => 'item',
                             'category'      => 'production',
                             'main_category' => 'PRODUCTION',
-                            'is_returnable' => true,
+                            'is_returnable' => false,
                             'source'        => $sourceKey,
                             'created_by'    => auth()->id(),
                         ]);
@@ -575,7 +578,7 @@ class LogisticsTaskService
                         'unit' => $material->unit_of_measurement ?: 'item',
                         'category' => 'production',
                         'main_category' => $mainCategory,
-                        'is_returnable' => true,
+                        'is_returnable' => $element->category === 'hire',
                         'sub_type' => $element->category === 'hire' ? 'hire' : null,
                         'element_category' => $element->category,
                         'source' => $sourceKey,
@@ -686,15 +689,6 @@ class LogisticsTaskService
             return $this->getEmptyChecklistStructure();
         }
 
-        $items = $logisticsTask->transportItems->map(function ($item) {
-            return [
-                'id' => 'item_' . $item->id,
-                'item_name' => $item->name,
-                'status' => 'missing',
-                'notes' => null,
-            ];
-        })->toArray();
-
         // Get or create checklist record and merge — preserves any existing
         // return_items / gate states already saved from a previous generate.
         $checklist = LogisticsChecklist::firstOrNew(
@@ -703,6 +697,29 @@ class LogisticsTaskService
         );
 
         $existing = is_array($checklist->checklist_data) ? $checklist->checklist_data : [];
+
+        // Preserve already-checked status/notes for items still on the
+        // manifest, keyed by id. Regenerating (the only way to pick up a
+        // newly-added manifest item) must not wipe progress already checked
+        // off for every other item.
+        $priorItems = collect($existing['items'] ?? [])->keyBy('id');
+
+        $items = $logisticsTask->transportItems->map(function ($item) use ($priorItems) {
+            $id = 'item_' . $item->id;
+            $prior = $priorItems->get($id);
+
+            return [
+                'id' => $id,
+                'item_name' => $item->name,
+                'quantity' => $item->quantity,
+                'unit' => $item->unit,
+                'main_category' => $item->main_category,
+                'status' => $prior['status'] ?? 'missing',
+                'notes' => $prior['notes'] ?? null,
+                'checkedBy' => $prior['checkedBy'] ?? null,
+                'checkedAt' => $prior['checkedAt'] ?? null,
+            ];
+        })->toArray();
 
         $checklistData = array_merge($existing, [
             'items'     => $items,

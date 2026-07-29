@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use App\Modules\Projects\Models\EnquiryTask;
+use App\Modules\Projects\Actions\AutoSyncTaskStateAction;
 
 class ProductionController extends Controller
 {
@@ -25,13 +27,17 @@ class ProductionController extends Controller
     public function getProductionData(int $taskId): JsonResponse
     {
         try {
+            $task = $this->authorizedTask($taskId);
             $productionData = $this->alignmentService->getAlignmentData($taskId);
+            $productionData['taskStatus'] = $task->status;
 
             return response()->json([
                 'success' => true,
                 'data' => $productionData
             ]);
 
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException|\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::error('Failed to get production data: ' . $e->getMessage());
             return response()->json([
@@ -51,6 +57,8 @@ class ProductionController extends Controller
     public function importMaterialsData(int $taskId): JsonResponse
     {
         try {
+            $task = $this->authorizedTask($taskId);
+            abort_if($task->status === 'completed', 422, 'Reopen the Production task before importing materials again.');
             $success = $this->alignmentService->syncMaterials($taskId);
 
             if (!$success) {
@@ -68,6 +76,8 @@ class ProductionController extends Controller
                 'data' => $productionData
             ]);
 
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException|\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::error('Failed to import materials: ' . $e->getMessage());
             return response()->json([
@@ -88,7 +98,12 @@ class ProductionController extends Controller
     public function saveProductionData(Request $request, int $taskId): JsonResponse
     {
         try {
-            $data = $request->all();
+            $task = $this->authorizedTask($taskId);
+            abort_if($task->status === 'completed', 422, 'Reopen the Production task before changing build items.');
+            $data = $request->validate([
+                'elementStatuses' => 'required|array|min:1',
+                'elementStatuses.*' => 'required|in:pending,in_progress,completed',
+            ]);
             
             $success = $this->alignmentService->saveAlignmentData($taskId, $data);
 
@@ -99,12 +114,18 @@ class ProductionController extends Controller
                 ], 500);
             }
 
+            app(AutoSyncTaskStateAction::class)->execute($task->fresh());
+            $responseData = $this->alignmentService->getAlignmentData($taskId);
+            $responseData['taskStatus'] = $task->fresh()->status;
+
             return response()->json([
                 'success' => true,
-                'message' => 'Production alignment data saved successfully',
-                'data' => $this->alignmentService->getAlignmentData($taskId)
+                'message' => 'Build status saved.',
+                'data' => $responseData,
             ]);
 
+        } catch (\Illuminate\Validation\ValidationException|\Illuminate\Database\Eloquent\ModelNotFoundException|\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::error('Failed to save production data: ' . $e->getMessage());
             return response()->json([
@@ -168,5 +189,13 @@ class ProductionController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function authorizedTask(int $taskId): EnquiryTask
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        abort_unless($task->type === 'production', 404);
+        abort_unless($task->isUserAuthorized(auth()->user()), 403, 'You are not authorized to manage this Production task.');
+        return $task;
     }
 }
