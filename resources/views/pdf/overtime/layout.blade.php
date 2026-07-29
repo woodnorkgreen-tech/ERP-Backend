@@ -165,8 +165,7 @@
     <table style="margin-bottom: 20px; width: 100%;">
         <tr>
             <td style="width: 50%; vertical-align: top;">
-                <img src="{{ public_path('logo-outline.png') }}" style="height: 65px; width: auto; margin-bottom: 5px; display: block;" alt="Logo"/>
-                <div class="font-bold text-gray-900 tracking-wide uppercase" style="font-size: 14px;">Woodnork Green</div>
+                <img src="{{ public_path('woodnork-green-logo.png') }}" style="width: 125px; height: auto; margin-bottom: 5px; display: block;" alt="Woodnork Green logo"/>
             </td>
             <td style="width: 50%; text-align: right; vertical-align: top;">
                 <h2 class="text-green-600 mb-2 uppercase tracking-wide text-2xl" style="margin: 0 0 10px 0;">@yield('title')</h2>

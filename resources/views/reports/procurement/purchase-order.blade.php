@@ -125,8 +125,7 @@
 <body>
     <div class="header clearfix">
         <div style="float: left;">
-            <img src="{{ public_path('logo-outline.png') }}" style="height: 60px; width: auto; margin-bottom: 5px; display: block;" alt="Logo"/>
-            <div class="company-name">WOODNORK GREEN LTD</div>
+            <img src="{{ public_path('woodnork-green-logo.png') }}" style="width: 120px; height: auto; margin-bottom: 5px; display: block;" alt="Woodnork Green logo"/>
             <div style="font-size: 12px; color: #555;">Designers & Manufacturers of Custom Furniture</div>
         </div>
         <div class="document-title">
