@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
  * direct App\Models\Notification writes and no-op email/preference stubs.
  *
  * Public method signatures are unchanged so existing listeners
- * (SendTaskNotification, SendReminderNotification, SendEscalationNotification)
+ * (SendTaskNotification, SendReminderNotification)
  * keep working without modification.
  */
 class TaskNotificationService

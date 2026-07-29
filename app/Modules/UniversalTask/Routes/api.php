@@ -8,9 +8,9 @@ use App\Modules\UniversalTask\Controllers\TaskExperienceController;
 use App\Modules\UniversalTask\Controllers\TaskCommentController;
 use App\Modules\UniversalTask\Controllers\TaskAttachmentController;
 use App\Modules\UniversalTask\Controllers\TaskTemplateController;
-use App\Modules\UniversalTask\Controllers\TaskAnalyticsController;
 use App\Modules\UniversalTask\Controllers\TaskTimeEntryController;
 use App\Modules\UniversalTask\Controllers\TaskSavedViewController;
+use App\Modules\UniversalTask\Controllers\TaskAdminSettingsController;
 
 /*
 |--------------------------------------------------------------------------
@@ -28,11 +28,13 @@ use App\Modules\UniversalTask\Controllers\TaskSavedViewController;
 Route::prefix('api/universal-tasks')->middleware(['api', 'auth:sanctum', 'throttle:60,1'])->group(function () {
 
     // ==================== Task Routes ====================
-    Route::apiResource('tasks', TaskController::class);
+    Route::post('tasks/archive', [TaskController::class, 'archive']);
+    Route::patch('tasks/{task}/restore-archive', [TaskController::class, 'restoreArchive']);
     Route::patch('tasks/{task}/status', [TaskController::class, 'updateStatus']);
     Route::post('tasks/{task}/assign', [TaskController::class, 'assign']);
     Route::get('tasks/{task}/history', [TaskController::class, 'getHistory']);
     Route::get('tasks/{task}/activity', [TaskController::class, 'getActivity']);
+    Route::apiResource('tasks', TaskController::class);
 
     // ==================== Subtask Routes ====================
     Route::get('tasks/{task}/subtasks', [SubtaskController::class, 'index']);
@@ -47,7 +49,6 @@ Route::prefix('api/universal-tasks')->middleware(['api', 'auth:sanctum', 'thrott
     // Route::get('tasks/{task}/dependency-chain', [TaskController::class, 'getDependencyChain']);
 
     // ==================== Task Assignments ====================
-    Route::post('tasks/{task}/assign', [TaskController::class, 'assign']);
     Route::get('tasks/{task}/assignees', [TaskController::class, 'getAssignees']);
     Route::delete('tasks/{task}/assignees/{assignment}', [TaskController::class, 'removeAssignee']);
 
@@ -57,8 +58,12 @@ Route::prefix('api/universal-tasks')->middleware(['api', 'auth:sanctum', 'thrott
     Route::get('issues/search', [TaskIssueController::class, 'search']);
 
     // ==================== Task Experience Logs ====================
-    Route::apiResource('experience-logs', TaskExperienceController::class)->parameters(['experience-logs' => 'log']);
     Route::get('experience-logs/search', [TaskExperienceController::class, 'search']);
+    Route::get('tasks/{task}/experience-logs', [TaskExperienceController::class, 'index']);
+    Route::post('tasks/{task}/experience-logs', [TaskExperienceController::class, 'store']);
+    Route::get('tasks/{task}/experience-logs/{log}', [TaskExperienceController::class, 'show']);
+    Route::put('tasks/{task}/experience-logs/{log}', [TaskExperienceController::class, 'update']);
+    Route::delete('tasks/{task}/experience-logs/{log}', [TaskExperienceController::class, 'destroy']);
 
     // ==================== Task Comments ====================
     Route::get('tasks/{task}/comments', [TaskCommentController::class, 'index']);
@@ -89,16 +94,20 @@ Route::prefix('api/universal-tasks')->middleware(['api', 'auth:sanctum', 'thrott
     Route::post('templates/{template}/instantiate', [TaskTemplateController::class, 'instantiate']);
     Route::get('templates/{template}/versions', [TaskTemplateController::class, 'getVersions']);
 
-    // ==================== Analytics Routes ====================
-    Route::prefix('analytics')->group(function () {
-        Route::get('dashboard', [TaskAnalyticsController::class, 'getDashboard']);
-        Route::get('metrics', [TaskAnalyticsController::class, 'getMetrics']);
-        Route::get('time-series', [TaskAnalyticsController::class, 'getTimeSeries']);
-        Route::get('departments', [TaskAnalyticsController::class, 'getDepartmentAnalytics']);
-        Route::get('export', [TaskAnalyticsController::class, 'export']);
-    });
-
     // ==================== Saved Views Routes ====================
     Route::apiResource('saved-views', TaskSavedViewController::class)->parameters(['saved-views' => 'view']);
     Route::post('saved-views/{view}/apply', [TaskSavedViewController::class, 'apply']);
+
+    // ==================== Admin Settings Routes ====================
+    Route::prefix('admin')->group(function () {
+        Route::get('labels', [TaskAdminSettingsController::class, 'labels']);
+        Route::post('labels', [TaskAdminSettingsController::class, 'storeLabel']);
+        Route::put('labels/{label}', [TaskAdminSettingsController::class, 'updateLabel']);
+        Route::delete('labels/{label}', [TaskAdminSettingsController::class, 'deleteLabel']);
+
+        Route::get('department-prefixes', [TaskAdminSettingsController::class, 'departmentPrefixes']);
+        Route::post('department-prefixes', [TaskAdminSettingsController::class, 'storeDepartmentPrefix']);
+        Route::put('department-prefixes/{prefix}', [TaskAdminSettingsController::class, 'updateDepartmentPrefix']);
+        Route::delete('department-prefixes/{prefix}', [TaskAdminSettingsController::class, 'deleteDepartmentPrefix']);
+    });
 });

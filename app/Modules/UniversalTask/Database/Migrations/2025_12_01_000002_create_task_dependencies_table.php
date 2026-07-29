@@ -21,7 +21,6 @@ return new class extends Migration
                 ->onDelete('cascade');
             $table->enum('dependency_type', [
                 'blocks',
-                'blocked_by',
                 'relates_to',
                 'duplicates'
             ])->default('blocks');

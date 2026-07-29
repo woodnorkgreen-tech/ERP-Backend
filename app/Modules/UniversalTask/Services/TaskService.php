@@ -5,6 +5,7 @@ namespace App\Modules\UniversalTask\Services;
 use App\Models\User;
 use App\Modules\UniversalTask\Models\Task;
 use App\Modules\UniversalTask\Models\TaskAssignment;
+use App\Modules\UniversalTask\Models\TaskDepartmentPrefix;
 use App\Modules\UniversalTask\Models\TaskHistory;
 use App\Modules\UniversalTask\Models\Contexts\LogisticsTaskContext;
 use App\Modules\UniversalTask\Models\Contexts\DesignTaskContext;
@@ -40,6 +41,8 @@ class TaskService
     {
         // Validate task data
         $validatedData = $this->validateTaskData($data, 'create');
+        $labelIds = $validatedData['label_ids'] ?? [];
+        unset($validatedData['label_ids']);
 
         // Add creator
         $validatedData['created_by'] = $user->id;
@@ -67,6 +70,10 @@ class TaskService
         try {
             // Create the task
             $task = Task::create($validatedData);
+            $task->forceFill([
+                'task_code' => $this->generateTaskCode($task),
+            ])->save();
+            $task->labels()->sync($labelIds);
 
             // Handle context data if provided
             if (isset($data['context'])) {
@@ -119,6 +126,9 @@ class TaskService
     {
         // Validate task data
         $validatedData = $this->validateTaskData($data, 'update', $task->id);
+        $hasLabelIds = array_key_exists('label_ids', $validatedData);
+        $labelIds = $validatedData['label_ids'] ?? [];
+        unset($validatedData['label_ids']);
 
         DB::beginTransaction();
 
@@ -132,6 +142,9 @@ class TaskService
 
             // Update the task
             $task->update($validatedData);
+            if ($hasLabelIds) {
+                $task->labels()->sync($labelIds);
+            }
 
             // Handle context data if provided
             if (isset($data['context'])) {
@@ -321,7 +334,7 @@ class TaskService
     }
 
     /**
-     * Update task status with dependency checking and automatic overdue marking.
+     * Update task status with dependency checking.
      *
      * @param Task $task The task to update
      * @param string $newStatus The new status
@@ -360,11 +373,6 @@ class TaskService
                 'status' => ['old' => $oldStatus, 'new' => $newStatus],
                 'notes' => $notes,
             ], $userId, 'status_changed');
-
-            // Handle automatic overdue marking
-            if ($newStatus === 'overdue') {
-                $this->markTaskOverdue($task);
-            }
 
             // Update parent completion percentage if this is a subtask
             if ($task->parent_task_id) {
@@ -423,7 +431,7 @@ class TaskService
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'task_type' => 'nullable|string|max:50',
-            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled', 'overdue'])],
+            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'review', 'completed', 'cancelled'])],
             'priority' => ['nullable', Rule::in(['low', 'medium', 'high', 'urgent'])],
             'parent_task_id' => 'nullable|exists:tasks,id',
             'taskable_type' => 'nullable|string|max:255',
@@ -433,8 +441,8 @@ class TaskService
             'estimated_hours' => 'nullable|numeric|min:0',
             'actual_hours' => 'nullable|numeric|min:0',
             'due_date' => 'required|date|after_or_equal:today', // Make due_date required
-            'blocked_reason' => 'nullable|string',
-            'tags' => 'nullable|array',
+            'label_ids' => 'nullable|array',
+            'label_ids.*' => 'integer|exists:task_labels,id',
             'metadata' => 'nullable|array',
         ];
 
@@ -451,6 +459,23 @@ class TaskService
         }
 
         return Validator::make($data, $rules)->validate();
+    }
+
+    protected function generateTaskCode(Task $task): string
+    {
+        $prefix = TaskDepartmentPrefix::query()
+            ->where('department_id', $task->department_id)
+            ->where('is_active', true)
+            ->value('prefix') ?: 'TASK';
+
+        $sequence = max(1, (int) $task->id);
+
+        do {
+            $code = sprintf('%s-%04d', strtoupper($prefix), $sequence);
+            $sequence++;
+        } while (Task::where('task_code', $code)->whereKeyNot($task->id)->exists());
+
+        return $code;
     }
 
     /**
@@ -556,17 +581,6 @@ class TaskService
             'action' => $action,
             'metadata' => $changes,
         ]);
-    }
-
-    /**
-     * Mark a task as overdue.
-     *
-     * @param Task $task
-     */
-    protected function markTaskOverdue(Task $task): void
-    {
-        // This is handled by the status update, but we can add additional logic here
-        // like sending overdue notifications
     }
 
     /**

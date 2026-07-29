@@ -85,8 +85,6 @@ class TaskExperienceController
             'title' => 'required|string|max:255',
             'content' => 'required|string',
             'log_type' => ['required', Rule::in(['observation', 'learning', 'best_practice', 'recommendation', 'issue', 'success'])],
-            'tags' => 'nullable|array',
-            'tags.*' => 'string|max:50',
             'is_public' => 'nullable|boolean',
         ]);
 
@@ -108,7 +106,6 @@ class TaskExperienceController
                 'title' => $request->title,
                 'content' => $request->content,
                 'log_type' => $request->log_type,
-                'tags' => $request->tags ?? [],
                 'is_public' => $request->is_public ?? false,
                 'logged_at' => now(),
             ]);
@@ -239,8 +236,6 @@ class TaskExperienceController
             'title' => 'sometimes|required|string|max:255',
             'content' => 'sometimes|required|string',
             'log_type' => ['sometimes', 'required', Rule::in(['observation', 'learning', 'best_practice', 'recommendation', 'issue', 'success'])],
-            'tags' => 'nullable|array',
-            'tags.*' => 'string|max:50',
             'is_public' => 'nullable|boolean',
         ]);
 
@@ -257,7 +252,7 @@ class TaskExperienceController
 
         try {
             $log->update($request->only([
-                'title', 'content', 'log_type', 'tags', 'is_public'
+                'title', 'content', 'log_type', 'is_public'
             ]));
 
             $log->load(['task', 'user']);
@@ -363,8 +358,6 @@ class TaskExperienceController
             'per_page' => 'nullable|integer|min:1|max:100',
             'search' => 'nullable|string|max:255',
             'log_type' => ['nullable', Rule::in(['observation', 'learning', 'best_practice', 'recommendation', 'issue', 'success'])],
-            'tags' => 'nullable|array',
-            'tags.*' => 'string|max:50',
             'is_public' => 'nullable|boolean',
             'task_id' => 'nullable|exists:tasks,id',
             'user_id' => 'nullable|exists:users,id',
@@ -406,7 +399,6 @@ class TaskExperienceController
             // Apply filters
             $filters = [
                 'type' => $request->log_type,
-                'tags' => $request->tags,
                 'is_public' => $request->is_public,
                 'start_date' => $request->date_from,
                 'end_date' => $request->date_to,

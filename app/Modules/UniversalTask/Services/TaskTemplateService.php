@@ -151,7 +151,6 @@ class TaskTemplateService
             'status' => $templateTask['status'] ?? 'pending',
             'priority' => $templateTask['priority'] ?? 'medium',
             'estimated_hours' => $templateTask['estimated_hours'] ?? null,
-            'tags' => $templateTask['tags'] ?? null,
             'metadata' => array_merge(
                 $templateTask['metadata'] ?? [],
                 [
@@ -255,7 +254,6 @@ class TaskTemplateService
             'category' => $data['category'] ?? null,
             'template_data' => $data['template_data'],
             'variables' => $data['variables'] ?? null,
-            'tags' => $data['tags'] ?? null,
             'created_by' => $userId,
             'updated_by' => $userId,
             'is_active' => true,

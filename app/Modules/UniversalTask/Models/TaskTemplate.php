@@ -27,13 +27,11 @@ class TaskTemplate extends Model
         'variables',
         'created_by',
         'updated_by',
-        'tags',
     ];
 
     protected $casts = [
         'template_data' => 'array',
         'variables' => 'array',
-        'tags' => 'array',
         'is_active' => 'boolean',
         'version' => 'integer',
     ];
@@ -129,7 +127,6 @@ class TaskTemplate extends Model
             'variables' => $data['variables'] ?? $this->variables,
             'created_by' => $userId,
             'updated_by' => $userId,
-            'tags' => $data['tags'] ?? $this->tags,
         ]);
 
         return $newVersion;

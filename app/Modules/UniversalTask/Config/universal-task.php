@@ -24,11 +24,9 @@ return [
     'statuses' => [
         'pending',
         'in_progress',
-        'blocked',
         'review',
         'completed',
         'cancelled',
-        'overdue',
     ],
 
     /*
@@ -87,7 +85,6 @@ return [
     */
     'dependency_types' => [
         'blocks',
-        'blocked_by',
         'relates_to',
         'duplicates',
     ],
@@ -165,7 +162,7 @@ return [
     */
     'archiving' => [
         'enabled' => true,
-        'archive_after_days' => 365, // Archive completed tasks after 1 year
+        'archive_after_months' => 6,
     ],
 
     /*
@@ -193,7 +190,6 @@ return [
     */
     'rate_limiting' => [
         'standard' => 60, // requests per minute
-        'analytics' => 30, // requests per minute
         'file_upload' => 10, // requests per minute
     ],
 

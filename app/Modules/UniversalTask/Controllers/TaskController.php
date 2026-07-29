@@ -48,19 +48,34 @@ class TaskController
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:100',
             'search' => 'nullable|string|max:255',
-            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled', 'overdue'])],
+            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'review', 'completed', 'cancelled'])],
             'priority' => ['nullable', Rule::in(['low', 'medium', 'high', 'urgent'])],
             'task_type' => 'nullable|string|max:50',
             'department_id' => 'nullable|exists:departments,id',
-            'assigned_user_id' => 'nullable|exists:users,id',
+            'assigned_user_id' => [
+                'nullable',
+                function ($attribute, $value, $fail) {
+                    $values = is_array($value) ? $value : [$value];
+
+                    foreach (array_filter($values) as $id) {
+                        if (!filter_var($id, FILTER_VALIDATE_INT) || !\App\Models\User::whereKey((int) $id)->exists()) {
+                            $fail('The selected assignee is invalid.');
+                            return;
+                        }
+                    }
+                },
+            ],
+            'assigned_user_id.*' => 'integer|exists:users,id',
             'created_by' => 'nullable|exists:users,id',
             'due_date_from' => 'nullable|date',
             'due_date_to' => 'nullable|date',
             'sort_by' => ['nullable', Rule::in(['created_at', 'updated_at', 'due_date', 'priority', 'status', 'title', 'estimated_hours', 'actual_hours', 'completion_percentage'])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
-            'tags' => 'nullable|array',
+            'label_ids' => 'nullable|array',
+            'label_ids.*' => 'integer|exists:task_labels,id',
             'overdue' => 'nullable|boolean',
             'include_subtasks' => 'nullable|boolean',
+            'archived' => ['nullable', Rule::in(['without', 'only', 'with'])],
         ]);
 
         if ($validator->fails()) {
@@ -110,7 +125,7 @@ class TaskController
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'task_type' => 'nullable|string|max:50',
-            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled'])],
+            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'review', 'completed', 'cancelled'])],
             'priority' => ['nullable', Rule::in(['low', 'medium', 'high', 'urgent'])],
             'parent_task_id' => 'nullable|exists:tasks,id',
             'taskable_type' => 'nullable|string|max:255',
@@ -119,7 +134,8 @@ class TaskController
             'assigned_user_id' => 'nullable|exists:users,id',
             'estimated_hours' => 'nullable|numeric|min:0',
             'due_date' => 'required|date|after_or_equal:today',
-            'tags' => 'nullable|array',
+            'label_ids' => 'nullable|array',
+            'label_ids.*' => 'integer|exists:task_labels,id',
             'metadata' => 'nullable|array',
             'context' => 'nullable|array', // For type-specific data
         ]);
@@ -163,7 +179,7 @@ class TaskController
             return response()->json([
                 'success' => true,
                 'message' => 'Task created successfully.',
-                'data' => $task->load(['department', 'assignedUser.employee', 'creator']),
+                'data' => $task->load(['department', 'assignedUser.employee', 'creator', 'labels']),
             ], 201);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -238,6 +254,7 @@ class TaskController
                 'logisticsContext',
                 'designContext',
                 'financeContext',
+                'labels',
             ]);
             return response()->json([
                 'success' => true,
@@ -273,14 +290,15 @@ class TaskController
             'title' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'task_type' => 'nullable|string|max:50',
-            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled', 'overdue'])],
+            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'review', 'completed', 'cancelled'])],
             'priority' => ['nullable', Rule::in(['low', 'medium', 'high', 'urgent'])],
             'parent_task_id' => 'nullable|exists:tasks,id',
             'department_id' => 'nullable|exists:departments,id',
             'assigned_user_id' => 'nullable|exists:users,id',
             'estimated_hours' => 'nullable|numeric|min:0',
             'due_date' => 'nullable|date',
-            'tags' => 'nullable|array',
+            'label_ids' => 'nullable|array',
+            'label_ids.*' => 'integer|exists:task_labels,id',
             'metadata' => 'nullable|array',
             'context' => 'nullable|array',
         ]);
@@ -316,7 +334,7 @@ class TaskController
             return response()->json([
                 'success' => true,
                 'message' => 'Task updated successfully.',
-                'data' => $task->load(['department', 'assignedUser', 'creator']),
+                'data' => $task->load(['department', 'assignedUser', 'creator', 'labels']),
             ]);
 
         } catch (\Exception $e) {
@@ -379,7 +397,7 @@ class TaskController
 
         // Validate request
         $validator = Validator::make($request->all(), [
-            'status' => ['required', Rule::in(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled'])],
+            'status' => ['required', Rule::in(['pending', 'in_progress', 'review', 'completed', 'cancelled'])],
             'notes' => 'nullable|string|max:1000',
         ]);
 
@@ -438,6 +456,118 @@ class TaskController
                 ]
             ], 500);
         }
+    }
+
+    public function archive(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+
+        $validator = Validator::make($request->all(), [
+            'task_ids' => 'nullable|array',
+            'task_ids.*' => 'integer|exists:tasks,id',
+            'months' => 'nullable|integer|min:0|max:60',
+            'force' => 'nullable|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'VALIDATION_ERROR',
+                    'message' => 'Invalid archive request.',
+                    'details' => $validator->errors(),
+                ]
+            ], 422);
+        }
+
+        $taskIds = $request->input('task_ids', []);
+        $months = (int) $request->input('months', config('universal-task.archiving.archive_after_months', 6));
+        $force = $request->boolean('force');
+
+        if ($force && !$this->permissionService->hasFullAccess($user)) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'INSUFFICIENT_PERMISSIONS',
+                    'message' => 'Only admins can force archive recent tasks.',
+                ]
+            ], 403);
+        }
+
+        $query = Task::query()->notArchived();
+
+        if (!empty($taskIds)) {
+            $query->whereIn('id', $taskIds);
+        } else {
+            $cutoff = now()->subMonths($months);
+            $query->whereIn('status', ['completed', 'cancelled'])
+                ->where(function ($dateQuery) use ($cutoff, $force) {
+                    $dateQuery->where('completed_at', $force ? '>=' : '<=', $cutoff)
+                        ->orWhere(function ($fallbackQuery) use ($cutoff, $force) {
+                            $fallbackQuery->whereNull('completed_at')
+                                ->where('updated_at', $force ? '>=' : '<=', $cutoff);
+                        });
+                });
+        }
+
+        $tasks = $query->get();
+        $archived = 0;
+        $skipped = 0;
+
+        foreach ($tasks as $task) {
+            if (!$this->permissionService->canArchive($user, $task)) {
+                $skipped++;
+                continue;
+            }
+
+            if (!in_array($task->status, ['completed', 'cancelled'], true)) {
+                $skipped++;
+                continue;
+            }
+
+            $task->forceFill([
+                'archived_at' => now(),
+                'archived_by' => $user->id,
+            ])->save();
+
+            $archived++;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => "{$archived} task" . ($archived === 1 ? '' : 's') . ' archived.',
+            'data' => [
+                'archived' => $archived,
+                'skipped' => $skipped,
+            ],
+        ]);
+    }
+
+    public function restoreArchive($taskId): JsonResponse
+    {
+        $user = Auth::user();
+        $task = Task::with(['assignments'])->findOrFail($taskId);
+
+        if (!$this->permissionService->canArchive($user, $task)) {
+            return response()->json([
+                'success' => false,
+                'error' => [
+                    'code' => 'INSUFFICIENT_PERMISSIONS',
+                    'message' => 'You do not have permission to restore this task.',
+                ]
+            ], 403);
+        }
+
+        $task->forceFill([
+            'archived_at' => null,
+            'archived_by' => null,
+        ])->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Task restored from archive.',
+            'data' => $task->fresh(['department', 'assignedUser.employee', 'creator', 'labels']),
+        ]);
     }
 
     /**

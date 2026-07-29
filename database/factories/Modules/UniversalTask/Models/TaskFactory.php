@@ -42,7 +42,7 @@ class TaskFactory extends Factory
             'title' => $this->faker->sentence,
             'description' => $this->faker->paragraph,
             'task_type' => $this->faker->randomElement(['development', 'design', 'testing', 'deployment']),
-            'status' => $this->faker->randomElement(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled']),
+            'status' => $this->faker->randomElement(['pending', 'in_progress', 'review', 'completed', 'cancelled']),
             'priority' => $this->faker->randomElement(['low', 'medium', 'high', 'urgent']),
             'department_id' => $department->id,
             'created_by' => $user->id,
@@ -50,7 +50,6 @@ class TaskFactory extends Factory
             'estimated_hours' => $this->faker->randomFloat(2, 1, 100),
             'actual_hours' => $this->faker->randomFloat(2, 0, 100),
             'due_date' => $this->faker->dateTimeBetween('+1 week', '+1 month'),
-            'tags' => [],
             'metadata' => [],
         ];
     }

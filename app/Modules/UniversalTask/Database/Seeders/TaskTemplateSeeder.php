@@ -26,7 +26,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'setup',
                             'priority' => 'high',
                             'estimated_hours' => 8,
-                            'tags' => ['setup', 'documentation']
                         ],
                         [
                             'id' => 'stakeholder_identification',
@@ -35,7 +34,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'planning',
                             'priority' => 'high',
                             'estimated_hours' => 4,
-                            'tags' => ['stakeholders', 'planning']
                         ],
                         [
                             'id' => 'kickoff_meeting',
@@ -45,7 +43,6 @@ class TaskTemplateSeeder extends Seeder
                             'priority' => 'urgent',
                             'estimated_hours' => 2,
                             'due_date_offset_days' => 7,
-                            'tags' => ['meeting', 'kickoff']
                         ],
                         [
                             'id' => 'requirements_gathering',
@@ -55,7 +52,6 @@ class TaskTemplateSeeder extends Seeder
                             'priority' => 'high',
                             'estimated_hours' => 16,
                             'due_date_offset_days' => 14,
-                            'tags' => ['requirements', 'analysis']
                         ],
                         [
                             'id' => 'timeline_planning',
@@ -65,7 +61,6 @@ class TaskTemplateSeeder extends Seeder
                             'priority' => 'high',
                             'estimated_hours' => 6,
                             'due_date_offset_days' => 10,
-                            'tags' => ['planning', 'timeline']
                         ]
                     ],
                     'dependencies' => [
@@ -105,7 +100,6 @@ class TaskTemplateSeeder extends Seeder
                         'description' => 'Name of the client (if applicable)'
                     ]
                 ],
-                'tags' => ['project', 'onboarding', 'workflow']
             ],
             [
                 'name' => 'Bug Fix Process',
@@ -120,7 +114,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'high',
                             'estimated_hours' => 2,
-                            'tags' => ['bug', 'reproduction']
                         ],
                         [
                             'id' => 'root_cause_analysis',
@@ -129,7 +122,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'analysis',
                             'priority' => 'high',
                             'estimated_hours' => 4,
-                            'tags' => ['analysis', 'debugging']
                         ],
                         [
                             'id' => 'fix_implementation',
@@ -138,7 +130,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'development',
                             'priority' => 'high',
                             'estimated_hours' => 6,
-                            'tags' => ['development', 'fix']
                         ],
                         [
                             'id' => 'unit_tests',
@@ -147,7 +138,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'medium',
                             'estimated_hours' => 3,
-                            'tags' => ['testing', 'unit-tests']
                         ],
                         [
                             'id' => 'code_review',
@@ -156,7 +146,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'review',
                             'priority' => 'high',
                             'estimated_hours' => 2,
-                            'tags' => ['review', 'quality']
                         ],
                         [
                             'id' => 'testing_verification',
@@ -165,7 +154,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'high',
                             'estimated_hours' => 4,
-                            'tags' => ['testing', 'verification']
                         ]
                     ],
                     'dependencies' => [
@@ -210,7 +198,6 @@ class TaskTemplateSeeder extends Seeder
                         'description' => 'Component or module affected by the bug'
                     ]
                 ],
-                'tags' => ['bug', 'fix', 'development']
             ],
             [
                 'name' => 'Feature Development Cycle',
@@ -225,7 +212,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'planning',
                             'priority' => 'high',
                             'estimated_hours' => 8,
-                            'tags' => ['specification', 'planning']
                         ],
                         [
                             'id' => 'technical_design',
@@ -234,7 +220,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'design',
                             'priority' => 'high',
                             'estimated_hours' => 12,
-                            'tags' => ['design', 'architecture']
                         ],
                         [
                             'id' => 'backend_development',
@@ -243,7 +228,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'development',
                             'priority' => 'high',
                             'estimated_hours' => 32,
-                            'tags' => ['backend', 'development']
                         ],
                         [
                             'id' => 'frontend_development',
@@ -252,7 +236,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'development',
                             'priority' => 'high',
                             'estimated_hours' => 40,
-                            'tags' => ['frontend', 'development']
                         ],
                         [
                             'id' => 'integration_testing',
@@ -261,7 +244,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'high',
                             'estimated_hours' => 8,
-                            'tags' => ['testing', 'integration']
                         ],
                         [
                             'id' => 'user_acceptance_testing',
@@ -270,7 +252,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'medium',
                             'estimated_hours' => 6,
-                            'tags' => ['testing', 'uat']
                         ]
                     ],
                     'dependencies' => [
@@ -320,7 +301,6 @@ class TaskTemplateSeeder extends Seeder
                         'description' => 'Business value or impact of the feature'
                     ]
                 ],
-                'tags' => ['feature', 'development', 'cycle']
             ],
             [
                 'name' => 'Client Meeting Preparation',
@@ -335,7 +315,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'planning',
                             'priority' => 'high',
                             'estimated_hours' => 2,
-                            'tags' => ['planning', 'objectives']
                         ],
                         [
                             'id' => 'agenda_preparation',
@@ -344,7 +323,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'planning',
                             'priority' => 'high',
                             'estimated_hours' => 3,
-                            'tags' => ['agenda', 'planning']
                         ],
                         [
                             'id' => 'materials_preparation',
@@ -353,7 +331,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'content',
                             'priority' => 'high',
                             'estimated_hours' => 8,
-                            'tags' => ['materials', 'presentation']
                         ],
                         [
                             'id' => 'stakeholder_coordination',
@@ -362,7 +339,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'coordination',
                             'priority' => 'medium',
                             'estimated_hours' => 2,
-                            'tags' => ['coordination', 'stakeholders']
                         ],
                         [
                             'id' => 'meeting_facilitation',
@@ -371,7 +347,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'meeting',
                             'priority' => 'high',
                             'estimated_hours' => 2,
-                            'tags' => ['meeting', 'facilitation']
                         ],
                         [
                             'id' => 'follow_up_actions',
@@ -380,7 +355,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'documentation',
                             'priority' => 'medium',
                             'estimated_hours' => 3,
-                            'tags' => ['follow-up', 'documentation']
                         ]
                     ],
                     'dependencies' => [
@@ -430,7 +404,6 @@ class TaskTemplateSeeder extends Seeder
                         'description' => 'Scheduled date and time of the meeting'
                     ]
                 ],
-                'tags' => ['client', 'meeting', 'preparation']
             ],
             [
                 'name' => 'Quality Assurance Checklist',
@@ -445,7 +418,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'high',
                             'estimated_hours' => 4,
-                            'tags' => ['testing', 'unit']
                         ],
                         [
                             'id' => 'integration_testing',
@@ -454,7 +426,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'high',
                             'estimated_hours' => 6,
-                            'tags' => ['testing', 'integration']
                         ],
                         [
                             'id' => 'performance_testing',
@@ -463,7 +434,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'medium',
                             'estimated_hours' => 8,
-                            'tags' => ['testing', 'performance']
                         ],
                         [
                             'id' => 'security_testing',
@@ -472,7 +442,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'high',
                             'estimated_hours' => 6,
-                            'tags' => ['testing', 'security']
                         ],
                         [
                             'id' => 'user_acceptance_testing',
@@ -481,7 +450,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'testing',
                             'priority' => 'high',
                             'estimated_hours' => 12,
-                            'tags' => ['testing', 'uat']
                         ],
                         [
                             'id' => 'documentation_review',
@@ -490,7 +458,6 @@ class TaskTemplateSeeder extends Seeder
                             'task_type' => 'documentation',
                             'priority' => 'medium',
                             'estimated_hours' => 4,
-                            'tags' => ['documentation', 'review']
                         ]
                     ],
                     'dependencies' => [
@@ -535,7 +502,6 @@ class TaskTemplateSeeder extends Seeder
                         'description' => 'QA team lead for this release'
                     ]
                 ],
-                'tags' => ['qa', 'testing', 'quality']
             ]
         ];
 
@@ -546,7 +512,6 @@ class TaskTemplateSeeder extends Seeder
                 'category' => $templateData['category'],
                 'template_data' => $templateData['template_data'],
                 'variables' => $templateData['variables'] ?? null,
-                'tags' => $templateData['tags'] ?? null,
                 'created_by' => 1, // Assuming admin user exists
                 'updated_by' => 1,
                 'is_active' => true,

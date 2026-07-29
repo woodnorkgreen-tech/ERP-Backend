@@ -20,13 +20,11 @@ class TaskExperienceLog extends Model
         'title',
         'content',
         'log_type',
-        'tags',
         'is_public',
         'logged_at',
     ];
 
     protected $casts = [
-        'tags' => 'array',
         'is_public' => 'boolean',
         'logged_at' => 'datetime',
     ];
@@ -64,14 +62,6 @@ class TaskExperienceLog extends Model
     }
 
     /**
-     * Scope a query to filter by tag.
-     */
-    public function scopeByTag(Builder $query, string $tag): Builder
-    {
-        return $query->whereJsonContains('tags', $tag);
-    }
-
-    /**
      * Scope a query to filter by date range.
      */
     public function scopeByDateRange(Builder $query, $startDate, $endDate): Builder
@@ -83,19 +73,13 @@ class TaskExperienceLog extends Model
      * Scope a query to filter by multiple criteria.
      * 
      * @param Builder $query
-     * @param array $filters Array of filters: ['type' => 'observation', 'tags' => ['tag1'], 'start_date' => '2025-01-01', 'end_date' => '2025-12-31']
+     * @param array $filters Array of filters: ['type' => 'observation', 'start_date' => '2025-01-01', 'end_date' => '2025-12-31']
      * @return Builder
      */
     public function scopeFilter(Builder $query, array $filters): Builder
     {
         if (isset($filters['type'])) {
             $query->byType($filters['type']);
-        }
-
-        if (isset($filters['tags'])) {
-            foreach ((array) $filters['tags'] as $tag) {
-                $query->byTag($tag);
-            }
         }
 
         if (isset($filters['start_date']) && isset($filters['end_date'])) {

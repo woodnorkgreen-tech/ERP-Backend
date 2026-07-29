@@ -59,9 +59,10 @@ class TaskPermissionService
     }
 
     /**
-     * Apply the three-tier visibility scope to a task query:
-     * HR/Admin/Super Admin see everything, dept leads see their
-     * department(s), everyone else sees only tasks they're involved in.
+     * Apply visibility scope to a task query:
+     * HR/Admin/Super Admin see everything; department members see tasks in
+     * their accessible departments; everyone also keeps access to tasks they
+     * created or are assigned to.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query
      * @param User $user
@@ -73,21 +74,14 @@ class TaskPermissionService
             return $query;
         }
 
-        if ($user->isDeptLead()) {
-            $departmentIds = $user->getAccessibleDepartments()->pluck('id');
+        $departmentIds = $user->getAccessibleDepartments()->pluck('id');
 
-            return $query->where(function ($q) use ($user, $departmentIds) {
-                $q->whereIn('department_id', $departmentIds)
-                    ->orWhere('created_by', $user->id)
-                    ->orWhere('assigned_user_id', $user->id)
-                    ->orWhereHas('assignments', function ($assignmentQuery) use ($user) {
-                        $assignmentQuery->where('user_id', $user->id);
-                    });
-            });
-        }
+        return $query->where(function ($q) use ($user, $departmentIds) {
+            if ($departmentIds->isNotEmpty()) {
+                $q->whereIn('department_id', $departmentIds);
+            }
 
-        return $query->where(function ($q) use ($user) {
-            $q->where('created_by', $user->id)
+            $q->orWhere('created_by', $user->id)
                 ->orWhere('assigned_user_id', $user->id)
                 ->orWhereHas('assignments', function ($assignmentQuery) use ($user) {
                     $assignmentQuery->where('user_id', $user->id);
@@ -115,6 +109,36 @@ class TaskPermissionService
         }
 
         if ($this->isLeadOfTaskDepartment($user, $task)) {
+            return true;
+        }
+
+        if ($this->hasDepartmentAccess($user, $task)) {
+            return true;
+        }
+
+        return $this->isOwnTask($user, $task);
+    }
+
+    /**
+     * Check if user can archive or restore a task. Archive visibility follows
+     * department access, while active-task/status safeguards live in the
+     * controller.
+     *
+     * @param User $user
+     * @param Task $task
+     * @return bool
+     */
+    public function canArchive(User $user, Task $task): bool
+    {
+        if ($this->hasFullAccess($user)) {
+            return true;
+        }
+
+        if ($this->isLeadOfTaskDepartment($user, $task)) {
+            return true;
+        }
+
+        if ($this->hasDepartmentAccess($user, $task)) {
             return true;
         }
 
@@ -218,30 +242,6 @@ class TaskPermissionService
 
         // Creator or assignee can move their own task between any status
         return $this->isOwnTask($user, $task);
-    }
-
-    /**
-     * Check if user can view analytics.
-     *
-     * @param User $user
-     * @param array $filters
-     * @return bool
-     */
-    public function canViewAnalytics(User $user, array $filters = []): bool
-    {
-        // Basic analytics permission
-        if (!$user->can('task.analytics.view')) {
-            return false;
-        }
-
-        // Department-based filtering
-        if (isset($filters['department_id'])) {
-            if (!$this->hasDepartmentAccessById($user, $filters['department_id'])) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /**

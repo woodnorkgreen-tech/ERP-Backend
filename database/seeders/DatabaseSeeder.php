@@ -18,6 +18,9 @@ class DatabaseSeeder extends Seeder
         // Seed departments first
         $this->call(DepartmentSeeder::class);
 
+        // Seed Task Tracker prefixes for every department, including ICT
+        $this->call(TaskDepartmentPrefixSeeder::class);
+
         // Then seed employees
         $this->call(EmployeeSeeder::class);
 

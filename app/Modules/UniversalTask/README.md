@@ -1,8 +1,8 @@
-# Universal Task System API Documentation
+# Task Tracker API Documentation
 
 ## Overview
 
-The Universal Task System provides a comprehensive task management solution that can be integrated across different departments and projects within the ERP system. It supports hierarchical tasks, dependencies, assignments, issues, experience logging, attachments, and analytics.
+Task Tracker provides a comprehensive task management solution that can be integrated across different departments and projects within the ERP system. The backend module is still named `UniversalTask` internally, while the user-facing product name is Task Tracker. It supports hierarchical tasks, dependencies, assignments, labels, issues, experience logging, archiving, and attachments.
 
 ## Base URL
 
@@ -18,18 +18,21 @@ All endpoints require authentication via Sanctum token.
 
 #### List Tasks
 ```http
-GET /api/universal-tasks
+GET /api/universal-tasks/tasks
 ```
 
 **Query Parameters:**
 - `page` (integer): Page number for pagination
 - `per_page` (integer): Items per page (max 100)
 - `search` (string): Search in title and description
-- `status` (string): Filter by status (pending, in_progress, blocked, review, completed, cancelled, overdue)
+- `status` (string): Filter by status (pending, in_progress, review, completed, cancelled)
+- `overdue` (boolean): Filter open tasks whose due date has passed. Overdue is computed from `due_date`; it is not a task status.
 - `priority` (string): Filter by priority (low, medium, high, urgent)
 - `task_type` (string): Filter by task type
 - `department_id` (integer): Filter by department
-- `assigned_user_id` (integer): Filter by assigned user
+- `assigned_user_id` (integer|array): Filter by one or more assigned users
+- `label_ids` (array): Filter by labels
+- `archived` (string): Archive mode (without, only, with)
 - `due_date_from` (date): Filter tasks due after this date
 - `due_date_to` (date): Filter tasks due before this date
 - `sort_by` (string): Sort field (created_at, updated_at, due_date, priority, status)
@@ -50,7 +53,7 @@ GET /api/universal-tasks
 
 #### Create Task
 ```http
-POST /api/universal-tasks
+POST /api/universal-tasks/tasks
 ```
 
 **Request Body:**
@@ -68,7 +71,7 @@ POST /api/universal-tasks
   "assigned_user_id": 2,
   "estimated_hours": 16,
   "due_date": "2024-02-15",
-  "tags": ["authentication", "security"],
+  "label_ids": [1, 2],
   "metadata": {},
   "context": {}
 }
@@ -76,22 +79,22 @@ POST /api/universal-tasks
 
 #### Get Task Details
 ```http
-GET /api/universal-tasks/{task}
+GET /api/universal-tasks/tasks/{task}
 ```
 
 #### Update Task
 ```http
-PUT /api/universal-tasks/{task}
+PUT /api/universal-tasks/tasks/{task}
 ```
 
 #### Delete Task
 ```http
-DELETE /api/universal-tasks/{task}
+DELETE /api/universal-tasks/tasks/{task}
 ```
 
 #### Update Task Status
 ```http
-PUT /api/universal-tasks/{task}/status
+PATCH /api/universal-tasks/tasks/{task}/status
 ```
 
 **Request Body:**
@@ -104,7 +107,7 @@ PUT /api/universal-tasks/{task}/status
 
 #### Assign Task
 ```http
-POST /api/universal-tasks/{task}/assign
+POST /api/universal-tasks/tasks/{task}/assign
 ```
 
 **Request Body:**
@@ -116,33 +119,45 @@ POST /api/universal-tasks/{task}/assign
 }
 ```
 
+#### Archive Tasks
+```http
+POST /api/universal-tasks/tasks/archive
+```
+
+Archives completed or cancelled tasks. `force` ignores the age threshold only; active tasks are never archived.
+
+#### Restore Archived Task
+```http
+PATCH /api/universal-tasks/tasks/{task}/restore-archive
+```
+
 ### Subtasks
 
 #### List Subtasks
 ```http
-GET /api/universal-tasks/{task}/subtasks
+GET /api/universal-tasks/tasks/{task}/subtasks
 ```
 
 #### Create Subtask
 ```http
-POST /api/universal-tasks/{task}/subtasks
+POST /api/universal-tasks/tasks/{task}/subtasks
 ```
 
 #### Get Subtask Hierarchy
 ```http
-GET /api/universal-tasks/{task}/subtasks/hierarchy
+GET /api/universal-tasks/tasks/{task}/hierarchy
 ```
 
 ### Comments
 
 #### List Comments
 ```http
-GET /api/universal-tasks/{task}/comments
+GET /api/universal-tasks/tasks/{task}/comments
 ```
 
 #### Add Comment
 ```http
-POST /api/universal-tasks/{task}/comments
+POST /api/universal-tasks/tasks/{task}/comments
 ```
 
 **Request Body:**
@@ -155,19 +170,19 @@ POST /api/universal-tasks/{task}/comments
 
 #### Reply to Comment
 ```http
-POST /api/universal-tasks/{task}/comments/{comment}/reply
+POST /api/universal-tasks/tasks/{task}/comments/{comment}/reply
 ```
 
 ### Attachments
 
 #### List Attachments
 ```http
-GET /api/universal-tasks/{task}/attachments
+GET /api/universal-tasks/tasks/{task}/attachments
 ```
 
 #### Upload Attachment
 ```http
-POST /api/universal-tasks/{task}/attachments
+POST /api/universal-tasks/tasks/{task}/attachments
 ```
 
 **Content-Type:** `multipart/form-data`
@@ -178,24 +193,24 @@ POST /api/universal-tasks/{task}/attachments
 
 #### Download Attachment
 ```http
-GET /api/universal-tasks/{task}/attachments/{attachment}/download
+GET /api/universal-tasks/attachments/{attachment}/download
 ```
 
 #### Get Attachment Versions
 ```http
-GET /api/universal-tasks/{task}/attachments/{filename}/versions
+GET /api/universal-tasks/attachments/file/{filename}/versions
 ```
 
 ### Issues
 
 #### List Issues
 ```http
-GET /api/universal-tasks/{task}/issues
+GET /api/universal-tasks/issues?task_id={task}
 ```
 
 #### Report Issue
 ```http
-POST /api/universal-tasks/{task}/issues
+POST /api/universal-tasks/issues
 ```
 
 **Request Body:**
@@ -211,19 +226,19 @@ POST /api/universal-tasks/{task}/issues
 
 #### Resolve Issue
 ```http
-POST /api/universal-tasks/{task}/issues/{issue}/resolve
+PATCH /api/universal-tasks/issues/{issue}/resolve
 ```
 
 ### Experience Logs
 
 #### List Experience Logs
 ```http
-GET /api/universal-tasks/{task}/experience-logs
+GET /api/universal-tasks/experience-logs?task_id={task}
 ```
 
 #### Add Experience Log
 ```http
-POST /api/universal-tasks/{task}/experience-logs
+POST /api/universal-tasks/experience-logs
 ```
 
 **Request Body:**
@@ -232,7 +247,6 @@ POST /api/universal-tasks/{task}/experience-logs
   "title": "JWT Implementation Lessons",
   "content": "Key takeaways: Always validate tokens on both client and server, implement proper refresh logic, store tokens securely.",
   "log_type": "lesson_learned",
-  "tags": ["authentication", "jwt", "security"],
   "is_public": true
 }
 ```
@@ -293,7 +307,6 @@ POST /api/universal-tasks/templates
       "required": false
     }
   },
-  "tags": ["development", "workflow"]
 }
 ```
 
@@ -316,47 +329,16 @@ POST /api/universal-tasks/templates/{template}/instantiate
 }
 ```
 
-### Analytics
-
-#### Get Dashboard Data
-```http
-GET /api/universal-tasks/analytics/dashboard
-```
-
-**Query Parameters:**
-- `department_id` (integer): Filter by department
-- `date_from` (date): Start date for filtering
-- `date_to` (date): End date for filtering
-
-#### Get Key Metrics
-```http
-GET /api/universal-tasks/analytics/metrics
-```
-
-#### Get Time Series Data
-```http
-GET /api/universal-tasks/analytics/time-series
-```
-
-**Query Parameters:**
-- `period` (string): day, week, month (default: day)
-- `days` (integer): Number of days to look back (default: 30)
-
-#### Get Department Analytics
-```http
-GET /api/universal-tasks/analytics/department
-```
-
 ### History and Activity
 
 #### Get Task History
 ```http
-GET /api/universal-tasks/{task}/history
+GET /api/universal-tasks/tasks/{task}/history
 ```
 
 #### Get Task Activity Feed
 ```http
-GET /api/universal-tasks/{task}/activity
+GET /api/universal-tasks/tasks/{task}/activity
 ```
 
 ## Integration Endpoints

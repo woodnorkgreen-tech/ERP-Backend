@@ -130,7 +130,6 @@ class TaskTemplateController
             'template_data.tasks.*.task_type' => 'nullable|string|max:50',
             'template_data.tasks.*.priority' => 'nullable|in:low,medium,high,urgent',
             'template_data.tasks.*.estimated_hours' => 'nullable|numeric|min:0',
-            'template_data.tasks.*.tags' => 'nullable|array',
             'template_data.tasks.*.metadata' => 'nullable|array',
             'template_data.tasks.*.parent_id' => 'nullable|string',
             'template_data.tasks.*.due_date_offset_days' => 'nullable|integer|min:0',
@@ -140,7 +139,6 @@ class TaskTemplateController
             'template_data.dependencies.*.dependency_type' => 'nullable|in:blocks,relates_to',
             'variables' => 'nullable|array',
             'variables.*.required' => 'nullable|boolean',
-            'tags' => 'nullable|array',
         ]);
 
         if ($validator->fails()) {
@@ -241,7 +239,6 @@ class TaskTemplateController
             'template_data.tasks.*.task_type' => 'nullable|string|max:50',
             'template_data.tasks.*.priority' => 'nullable|in:low,medium,high,urgent',
             'template_data.tasks.*.estimated_hours' => 'nullable|numeric|min:0',
-            'template_data.tasks.*.tags' => 'nullable|array',
             'template_data.tasks.*.metadata' => 'nullable|array',
             'template_data.tasks.*.parent_id' => 'nullable|string',
             'template_data.tasks.*.due_date_offset_days' => 'nullable|integer|min:0',
@@ -251,7 +248,6 @@ class TaskTemplateController
             'template_data.dependencies.*.dependency_type' => 'nullable|in:blocks,relates_to',
             'variables' => 'nullable|array',
             'variables.*.required' => 'nullable|boolean',
-            'tags' => 'nullable|array',
         ]);
 
         if ($validator->fails()) {

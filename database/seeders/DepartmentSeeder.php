@@ -72,11 +72,20 @@ class DepartmentSeeder extends Seeder
                 'description' => 'Team coordination and management',
                 'budget' => 0.00,
                 'location' => ''
+            ],
+            [
+                'name' => 'ICT',
+                'description' => 'Information and communications technology support and systems',
+                'budget' => 0.00,
+                'location' => ''
             ]
         ];
 
         foreach ($departments as $department) {
-            Department::create($department);
+            Department::updateOrCreate(
+                ['name' => $department['name']],
+                $department
+            );
         }
     }
 }

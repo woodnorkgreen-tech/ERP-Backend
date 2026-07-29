@@ -17,7 +17,6 @@ use App\Modules\UniversalTask\Events\UserMentioned;
 use App\Modules\UniversalTask\Listeners\SendTaskIssueNotification;
 use App\Modules\UniversalTask\Listeners\SendTaskNotification;
 use App\Modules\UniversalTask\Listeners\SendReminderNotification;
-use App\Modules\UniversalTask\Listeners\SendEscalationNotification;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
@@ -106,10 +105,5 @@ class UniversalTaskServiceProvider extends ServiceProvider
             SendReminderNotification::class
         );
 
-        // Escalation notifications
-        Event::listen(
-            TaskStatusChanged::class,
-            SendEscalationNotification::class
-        );
     }
 }

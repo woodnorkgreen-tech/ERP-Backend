@@ -21,11 +21,9 @@ return new class extends Migration
             $table->enum('status', [
                 'pending', 
                 'in_progress', 
-                'blocked', 
                 'review', 
                 'completed', 
-                'cancelled', 
-                'overdue'
+                'cancelled'
             ])->default('pending');
             $table->enum('priority', ['low', 'medium', 'high', 'critical', 'urgent'])->default('medium');
             
@@ -50,11 +48,7 @@ return new class extends Migration
             $table->timestamp('started_at')->nullable();
             $table->timestamp('completed_at')->nullable();
             
-            // Blocking information
-            $table->text('blocked_reason')->nullable();
-            
             // Flexible data storage
-            $table->json('tags')->nullable();
             $table->json('metadata')->nullable();
             
             // Completion tracking

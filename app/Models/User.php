@@ -116,7 +116,9 @@ class User extends Authenticatable
             return \App\Modules\HR\Models\Department::all();
         }
 
-        $managedDepartmentIds = \App\Modules\HR\Models\Department::where('manager_id', $this->employee_id)->pluck('id');
+        $managedDepartmentIds = $this->employee_id
+            ? \App\Modules\HR\Models\Department::where('manager_id', $this->employee_id)->pluck('id')
+            : collect();
         
         if ($managedDepartmentIds->isNotEmpty()) {
             return \App\Modules\HR\Models\Department::whereIn('id', $managedDepartmentIds->merge([$this->department_id])->unique())->get();

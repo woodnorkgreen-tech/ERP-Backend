@@ -55,8 +55,7 @@ class SampleTaskSeeder extends Seeder
                 'assigned_user_id' => $users->first()->id,
                 'created_by' => $users->first()->id,
                 'estimated_hours' => 40,
-                'due_date' => Carbon::now()->addDays(14),
-                'tags' => ['authentication', 'security', 'backend']
+                'due_date' => Carbon::now()->addDays(14)
             ],
             [
                 'title' => 'Design New Dashboard UI',
@@ -68,8 +67,7 @@ class SampleTaskSeeder extends Seeder
                 'assigned_user_id' => $users->skip(1)->first()->id,
                 'created_by' => $users->skip(1)->first()->id,
                 'estimated_hours' => 24,
-                'due_date' => Carbon::now()->addDays(10),
-                'tags' => ['ui', 'dashboard', 'frontend']
+                'due_date' => Carbon::now()->addDays(10)
             ],
             [
                 'title' => 'Fix Mobile Responsiveness Issues',
@@ -84,8 +82,7 @@ class SampleTaskSeeder extends Seeder
                 'actual_hours' => 6,
                 'due_date' => Carbon::now()->addDays(3),
                 'started_at' => Carbon::now()->subDays(2),
-                'completed_at' => Carbon::now()->subDay(),
-                'tags' => ['mobile', 'responsive', 'bug']
+                'completed_at' => Carbon::now()->subDay()
             ],
             [
                 'title' => 'Prepare Q4 Marketing Campaign',
@@ -97,8 +94,7 @@ class SampleTaskSeeder extends Seeder
                 'assigned_user_id' => $users->last()->id,
                 'created_by' => $users->last()->id,
                 'estimated_hours' => 32,
-                'due_date' => Carbon::now()->addDays(21),
-                'tags' => ['marketing', 'campaign', 'q4']
+                'due_date' => Carbon::now()->addDays(21)
             ],
             [
                 'title' => 'Database Performance Optimization',
@@ -110,8 +106,7 @@ class SampleTaskSeeder extends Seeder
                 'assigned_user_id' => $users->first()->id,
                 'created_by' => $users->first()->id,
                 'estimated_hours' => 16,
-                'due_date' => Carbon::now()->addDays(7),
-                'tags' => ['database', 'performance', 'optimization']
+                'due_date' => Carbon::now()->addDays(7)
             ],
             [
                 'title' => 'User Training Documentation',
@@ -123,22 +118,19 @@ class SampleTaskSeeder extends Seeder
                 'assigned_user_id' => $users->skip(1)->first()->id,
                 'created_by' => $users->skip(1)->first()->id,
                 'estimated_hours' => 20,
-                'due_date' => Carbon::now()->addDays(30),
-                'tags' => ['documentation', 'training', 'user-guide']
+                'due_date' => Carbon::now()->addDays(30)
             ],
             [
                 'title' => 'Security Audit and Penetration Testing',
                 'description' => 'Conduct comprehensive security audit and penetration testing for the application.',
                 'task_type' => 'security',
-                'status' => 'blocked',
+                'status' => 'cancelled',
                 'priority' => 'urgent',
                 'department_id' => 1, // Engineering
                 'assigned_user_id' => $users->first()->id,
                 'created_by' => $users->first()->id,
                 'estimated_hours' => 24,
-                'blocked_reason' => 'Waiting for external security consultant availability',
-                'due_date' => Carbon::now()->addDays(5),
-                'tags' => ['security', 'audit', 'penetration-testing']
+                'due_date' => Carbon::now()->addDays(5)
             ],
             [
                 'title' => 'Client Feedback Integration',
@@ -150,8 +142,7 @@ class SampleTaskSeeder extends Seeder
                 'assigned_user_id' => $users->last()->id,
                 'created_by' => $users->last()->id,
                 'estimated_hours' => 12,
-                'due_date' => Carbon::now()->addDays(12),
-                'tags' => ['feedback', 'client', 'roadmap']
+                'due_date' => Carbon::now()->addDays(12)
             ]
         ];
 
@@ -215,8 +206,7 @@ class SampleTaskSeeder extends Seeder
                 'department_id' => $parentTask->department_id,
                 'assigned_user_id' => $parentTask->assigned_user_id,
                 'created_by' => $parentTask->created_by,
-                'due_date' => $parentTask->due_date,
-                'tags' => ['subtask', 'authentication']
+                'due_date' => $parentTask->due_date
             ]));
         }
 

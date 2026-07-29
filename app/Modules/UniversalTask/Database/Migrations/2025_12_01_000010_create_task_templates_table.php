@@ -31,8 +31,6 @@ return new class extends Migration
             // Metadata
             $table->foreignId('created_by')->constrained('users')->onDelete('cascade');
             $table->foreignId('updated_by')->nullable()->constrained('users')->onDelete('set null');
-            $table->json('tags')->nullable();
-            
             $table->timestamps();
             $table->softDeletes();
             

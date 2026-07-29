@@ -18,7 +18,6 @@ return new class extends Migration
             $table->string('title');
             $table->text('content');
             $table->string('log_type'); // observation, learning, best_practice, recommendation, etc.
-            $table->json('tags')->nullable();
             $table->boolean('is_public')->default(true);
             $table->timestamp('logged_at');
             $table->timestamps();

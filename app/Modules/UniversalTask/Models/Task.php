@@ -9,6 +9,7 @@ use App\Modules\UniversalTask\Models\Contexts\FinanceTaskContext;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -23,6 +24,7 @@ class Task extends Model
     protected $table = 'tasks';
 
     protected $fillable = [
+        'task_code',
         'title',
         'description',
         'task_type',
@@ -39,8 +41,8 @@ class Task extends Model
         'due_date',
         'started_at',
         'completed_at',
-        'blocked_reason',
-        'tags',
+        'archived_at',
+        'archived_by',
         'metadata',
         'completion_percentage',
     ];
@@ -49,7 +51,7 @@ class Task extends Model
         'due_date' => 'datetime',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
-        'tags' => 'array',
+        'archived_at' => 'datetime',
         'metadata' => 'array',
         'estimated_hours' => 'decimal:2',
         'actual_hours' => 'decimal:2',
@@ -67,7 +69,6 @@ class Task extends Model
         'estimated_hours' => 0,
         'actual_hours' => 0,
         'completion_percentage' => 0,
-        'tags' => '[]',
         'metadata' => '{}',
     ];
 
@@ -104,6 +105,11 @@ class Task extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function archivedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'archived_by');
+    }
+
     /**
      * Get the parent task.
      */
@@ -126,6 +132,12 @@ class Task extends Model
     public function dependencies(): HasMany
     {
         return $this->hasMany(TaskDependency::class, 'task_id');
+    }
+
+    public function labels(): BelongsToMany
+    {
+        return $this->belongsToMany(TaskLabel::class, 'task_label', 'task_id', 'task_label_id')
+            ->withTimestamps();
     }
 
     /**
@@ -247,19 +259,33 @@ class Task extends Model
      */
     public function scopeOverdue(Builder $query): Builder
     {
-        return $query->where('status', 'overdue')
-            ->orWhere(function ($q) {
-                $q->where('due_date', '<', now())
-                  ->whereNotIn('status', ['completed', 'cancelled']);
-            });
+        return $query->where('due_date', '<', now())
+            ->whereNotIn('status', ['completed', 'cancelled']);
     }
 
-    /**
-     * Scope a query to only include blocked tasks.
-     */
-    public function scopeBlocked(Builder $query): Builder
+    public function scopeArchived(Builder $query): Builder
     {
-        return $query->where('status', 'blocked');
+        return $query->whereNotNull('archived_at');
+    }
+
+    public function scopeNotArchived(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at');
+    }
+
+    public function scopeArchiveEligible(Builder $query, int $months = 6): Builder
+    {
+        $cutoff = now()->subMonths($months);
+
+        return $query->notArchived()
+            ->whereIn('status', ['completed', 'cancelled'])
+            ->where(function (Builder $dateQuery) use ($cutoff) {
+                $dateQuery->where('completed_at', '<=', $cutoff)
+                    ->orWhere(function (Builder $fallbackQuery) use ($cutoff) {
+                        $fallbackQuery->whereNull('completed_at')
+                            ->where('updated_at', '<=', $cutoff);
+                    });
+            });
     }
 
     /**
@@ -403,25 +429,19 @@ class Task extends Model
             }
         }
 
-        // If transitioning to blocked, require a blocked_reason
-        if ($newStatus === 'blocked' && empty($this->blocked_reason)) {
-            return false;
-        }
-
         return true;
     }
 
     /**
      * Check if the task has incomplete dependencies.
-     * Only checks 'blocks' and 'blocked_by' dependency types.
+     * Only checks sequencing dependencies.
      * 
      * @return bool True if there are incomplete dependencies, false otherwise
      */
     public function hasIncompleteDependencies(): bool
     {
-        // Check for tasks that this task depends on (blocks/blocked_by types)
         return $this->dependencies()
-            ->whereIn('dependency_type', ['blocks', 'blocked_by'])
+            ->where('dependency_type', 'blocks')
             ->whereHas('dependsOnTask', function ($query) {
                 $query->whereNotIn('status', ['completed', 'cancelled']);
             })
@@ -629,7 +649,6 @@ class Task extends Model
                 'title' => $log->title,
                 'content' => $log->content,
                 'log_type' => $log->log_type,
-                'tags' => $log->tags,
                 'is_public' => $log->is_public,
                 'user_id' => $log->user_id,
                 'timestamp' => $log->logged_at,

@@ -194,7 +194,7 @@ class SubtaskService
         if ($newStatus === 'completed') {
             $dependentTasks = Task::whereHas('dependencies', function ($query) use ($task) {
                 $query->where('depends_on_task_id', $task->id)
-                      ->whereIn('dependency_type', ['blocks', 'blocked_by']);
+                      ->where('dependency_type', 'blocks');
             })->get();
 
             $affected['dependent_tasks'] = $dependentTasks;

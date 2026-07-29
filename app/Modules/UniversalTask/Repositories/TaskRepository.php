@@ -67,7 +67,20 @@ class TaskRepository
 
         // Assignee filter
         if (isset($filters['assigned_user_id'])) {
-            $query->where('assigned_user_id', $filters['assigned_user_id']);
+            $query->where(function (Builder $assigneeQuery) use ($filters) {
+                $assigneeIds = is_array($filters['assigned_user_id'])
+                    ? array_filter($filters['assigned_user_id'])
+                    : [$filters['assigned_user_id']];
+
+                $assigneeQuery->whereIn('assigned_user_id', $assigneeIds)
+                    ->orWhereHas('assignments', function (Builder $assignmentQuery) use ($filters) {
+                        $assigneeIds = is_array($filters['assigned_user_id'])
+                            ? array_filter($filters['assigned_user_id'])
+                            : [$filters['assigned_user_id']];
+
+                        $assignmentQuery->whereIn('user_id', $assigneeIds);
+                    });
+            });
         }
 
         // Creator filter
@@ -92,10 +105,12 @@ class TaskRepository
             $query->where('due_date', '<=', $filters['due_date_to']);
         }
 
-        // Tags filter (assuming tags are stored as JSON)
-        if (isset($filters['tags']) && is_array($filters['tags'])) {
-            foreach ($filters['tags'] as $tag) {
-                $query->whereJsonContains('tags', $tag);
+        if (isset($filters['label_ids']) && is_array($filters['label_ids'])) {
+            $labelIds = array_filter($filters['label_ids']);
+            if (!empty($labelIds)) {
+                $query->whereHas('labels', function ($labelQuery) use ($labelIds) {
+                    $labelQuery->whereIn('task_labels.id', $labelIds);
+                });
             }
         }
 
@@ -119,7 +134,7 @@ class TaskRepository
     {
         $allowedSortFields = [
             'created_at', 'updated_at', 'due_date', 'priority', 'status', 'title',
-            'estimated_hours', 'actual_hours', 'completion_percentage'
+            'archived_at', 'estimated_hours', 'actual_hours', 'completion_percentage'
         ];
 
         if (!in_array($sortBy, $allowedSortFields)) {
@@ -135,8 +150,7 @@ class TaskRepository
             $query->orderByRaw("FIELD(priority, 'urgent', 'high', 'medium', 'low') {$sortDirection}");
         } elseif ($sortBy === 'status') {
             // Custom status sorting: pending > in_progress > review > completed > cancelled
-            $statusOrder = ['pending' => 5, 'in_progress' => 4, 'review' => 3, 'completed' => 2, 'skipped' => 2, 'cancelled' => 1, 'blocked' => 0, 'overdue' => -1];
-            $query->orderByRaw("FIELD(status, 'pending', 'in_progress', 'review', 'completed', 'skipped', 'cancelled', 'blocked', 'overdue') {$sortDirection}");
+            $query->orderByRaw("FIELD(status, 'pending', 'in_progress', 'review', 'completed', 'cancelled') {$sortDirection}");
         } else {
             $query->orderBy($sortBy, $sortDirection);
         }
@@ -153,7 +167,7 @@ class TaskRepository
      */
     public function getTasks(array $params = [], ?User $user = null): LengthAwarePaginator
     {
-        $query = Task::with(['department', 'assignedUser.employee', 'creator', 'parentTask'])
+        $query = Task::with(['department', 'assignedUser.employee', 'creator', 'parentTask', 'labels', 'archivedBy'])
                     ->withCount('subtasks');
 
         // Scope results to what this user is allowed to see (own tasks,
@@ -175,6 +189,13 @@ class TaskRepository
             $query->whereNull('parent_task_id');
         }
 
+        $archiveMode = $params['archived'] ?? 'without';
+        if ($archiveMode === 'only') {
+            $query->archived();
+        } elseif ($archiveMode !== 'with') {
+            $query->notArchived();
+        }
+
         // Apply search
         if (isset($params['search']) && !empty($params['search'])) {
             $query = $this->applySearch($query, $params['search']);
@@ -192,7 +213,7 @@ class TaskRepository
             'created_to' => $params['created_to'] ?? null,
             'due_date_from' => $params['due_date_from'] ?? null,
             'due_date_to' => $params['due_date_to'] ?? null,
-            'tags' => $params['tags'] ?? null,
+            'label_ids' => $params['label_ids'] ?? null,
             'overdue' => $params['overdue'] ?? null,
         ]);
 
@@ -277,8 +298,7 @@ class TaskRepository
             SUM(CASE WHEN status = "completed" OR status = "skipped" THEN 1 ELSE 0 END) as completed_tasks,
             SUM(CASE WHEN status = "in_progress" THEN 1 ELSE 0 END) as in_progress_tasks,
             SUM(CASE WHEN status = "pending" THEN 1 ELSE 0 END) as pending_tasks,
-            SUM(CASE WHEN status = "blocked" THEN 1 ELSE 0 END) as blocked_tasks,
-            SUM(CASE WHEN status = "overdue" THEN 1 ELSE 0 END) as overdue_tasks,
+            SUM(CASE WHEN due_date < NOW() AND status NOT IN ("completed", "cancelled") THEN 1 ELSE 0 END) as overdue_tasks,
             AVG(CASE WHEN completed_at IS NOT NULL AND started_at IS NOT NULL THEN TIMESTAMPDIFF(HOUR, started_at, completed_at) ELSE NULL END) as avg_completion_time,
             AVG(estimated_hours) as avg_estimated_hours
         ')->first();
@@ -288,7 +308,6 @@ class TaskRepository
             'completed_tasks' => (int) $stats->completed_tasks,
             'in_progress_tasks' => (int) $stats->in_progress_tasks,
             'pending_tasks' => (int) $stats->pending_tasks,
-            'blocked_tasks' => (int) $stats->blocked_tasks,
             'overdue_tasks' => (int) $stats->overdue_tasks,
             'completion_rate' => $stats->total_tasks > 0 ? round(($stats->completed_tasks / $stats->total_tasks) * 100, 2) : 0,
             'average_completion_time_hours' => round((float) $stats->avg_completion_time, 2),
@@ -313,9 +332,11 @@ class TaskRepository
                 $q->where('title', 'LIKE', "%{$searchTerm}%")
                   ->orWhere('description', 'LIKE', "%{$searchTerm}%")
                   ->orWhere('task_type', 'LIKE', "%{$searchTerm}%")
-                  ->orWhere('blocked_reason', 'LIKE', "%{$searchTerm}%")
                   ->orWhereJsonContains('metadata', $searchTerm)
-                  ->orWhereJsonContains('tags', $searchTerm);
+                  ->orWhereHas('labels', function ($labelQuery) use ($searchTerm) {
+                      $labelQuery->where('task_labels.name', 'LIKE', "%{$searchTerm}%")
+                          ->orWhere('task_labels.slug', 'LIKE', "%{$searchTerm}%");
+                  });
             });
         }
 

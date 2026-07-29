@@ -88,12 +88,13 @@ class SubtaskController
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'task_type' => 'nullable|string|max:50',
-            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled'])],
+            'status' => ['nullable', Rule::in(['pending', 'in_progress', 'review', 'completed', 'cancelled'])],
             'priority' => ['nullable', Rule::in(['low', 'medium', 'high', 'urgent'])],
             'assigned_user_id' => 'nullable|exists:users,id',
             'estimated_hours' => 'nullable|numeric|min:0',
             'due_date' => 'nullable|date',
-            'tags' => 'nullable|array',
+            'label_ids' => 'nullable|array',
+            'label_ids.*' => 'integer|exists:task_labels,id',
             'metadata' => 'nullable|array',
         ]);
 
