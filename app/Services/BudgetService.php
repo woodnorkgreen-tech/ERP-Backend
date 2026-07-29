@@ -70,6 +70,22 @@ class BudgetService
 
         $this->ensureMaterialsApproved($materialsData);
 
+        // A manual Sync deliberately rewrites the budget's numbers, but if the
+        // task was already marked complete that rewrite must not happen
+        // silently under a "done" status — reopen it so it's visibly back
+        // under review.
+        $wasCompleted = $task->status === 'completed';
+        if ($wasCompleted) {
+            $task->update(['status' => 'in_progress', 'completed_at' => null]);
+            $task->recordCustomAction('status_transition', [
+                'from' => 'completed',
+                'to' => 'in_progress',
+                'actor_type' => auth()->id() ? 'user' : 'system',
+                'actor_id' => auth()->id(),
+                'reason' => 'Reopened: materials list was manually re-synced into an already-completed budget.',
+            ]);
+        }
+
         $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
         
         // If already imported and not forced, we might want to merge or skip
@@ -154,7 +170,10 @@ class BudgetService
 
         return [
             'budget' => $budgetData,
-            'message' => 'Approved materials list imported into internal budget'
+            'message' => $wasCompleted
+                ? 'Approved materials list imported into internal budget. This budget was reopened for review.'
+                : 'Approved materials list imported into internal budget',
+            'reopened' => $wasCompleted,
         ];
     }
 
