@@ -14,6 +14,12 @@ use Illuminate\Validation\ValidationException;
 
 class SupportTicketService
 {
+    private const SLA_HOURS = [
+        'urgent' => ['response' => 1, 'resolution' => 4],
+        'high' => ['response' => 4, 'resolution' => 12],
+        'normal' => ['response' => 8, 'resolution' => 24],
+        'low' => ['response' => 16, 'resolution' => 48],
+    ];
     private const TRANSITIONS = [
         'open' => ['assigned', 'in_progress', 'resolved', 'closed'],
         'assigned' => ['open', 'in_progress', 'waiting_on_user', 'resolved', 'closed'],
@@ -34,6 +40,8 @@ class SupportTicketService
                     'priority' => $data['priority'] ?? 'normal',
                     'status' => 'open',
                     'last_activity_at' => now(),
+                    'response_due_at' => now()->addHours(self::SLA_HOURS[$data['priority'] ?? 'normal']['response']),
+                    'resolution_due_at' => now()->addHours(self::SLA_HOURS[$data['priority'] ?? 'normal']['resolution']),
                 ]);
                 $ticketId = $ticket->id;
                 $ticket->update(['ticket_number' => sprintf('ICT-%s-%06d', now()->format('Y'), $ticket->id)]);
@@ -100,6 +108,12 @@ class SupportTicketService
             $before = $ticket->only(['assigned_to', 'status', 'priority', 'category', 'resolution']);
             $targetStatus = $data['status'] ?? $ticket->status;
 
+            if (isset($data['priority']) && $data['priority'] !== $ticket->priority) {
+                $targets = self::SLA_HOURS[$data['priority']];
+                if (!$ticket->first_response_at) $data['response_due_at'] = $ticket->created_at->copy()->addHours($targets['response']);
+                $data['resolution_due_at'] = $ticket->created_at->copy()->addHours($targets['resolution']);
+            }
+
             if ($targetStatus !== $ticket->status && !in_array($targetStatus, self::TRANSITIONS[$ticket->status] ?? [], true)) {
                 throw ValidationException::withMessages(['status' => ["A ticket cannot move from {$ticket->status} to {$targetStatus}."]]);
             }
@@ -120,7 +134,7 @@ class SupportTicketService
                 $data['resolution'] = null;
             }
 
-            $ticket->fill(Arr::only($data, ['assigned_to', 'status', 'priority', 'category', 'resolution', 'resolved_at', 'resolved_by']));
+            $ticket->fill(Arr::only($data, ['assigned_to', 'status', 'priority', 'category', 'resolution', 'resolved_at', 'resolved_by', 'response_due_at', 'resolution_due_at']));
             $ticket->last_activity_at = now();
             $ticket->save();
 
@@ -175,6 +189,12 @@ class SupportTicketService
         try {
             return DB::transaction(function () use ($ticket, $author, $message, $internal, $action, $files, &$storedPaths) {
                 $reply = $ticket->messages()->create(['author_id' => $author->id, 'message' => $message, 'is_internal' => $internal]);
+
+                $isStaffReply = !$internal && $author->id !== $ticket->reporter_id
+                    && ($author->can('support.manage') || $author->hasRole(['Super Admin', 'Admin']));
+                if ($isStaffReply && !$ticket->first_response_at) {
+                    $ticket->first_response_at = now();
+                }
 
                 foreach ($files as $file) {
                     $attachment = $this->storeAttachment($ticket, $author, $file, $reply->id);
@@ -238,6 +258,18 @@ class SupportTicketService
             foreach ($storedPaths as $path) Storage::disk('local')->delete($path);
             throw $exception;
         }
+    }
+
+    public function confirmResolution(SupportTicket $ticket, User $reporter): SupportTicket
+    {
+        if ($ticket->reporter_id !== $reporter->id || $ticket->status !== 'resolved') {
+            throw ValidationException::withMessages(['status' => ['Only the requester can confirm a resolved ticket.']]);
+        }
+
+        $ticket->update(['status' => 'closed', 'last_activity_at' => now()]);
+        $ticket->activities()->create(['actor_id' => $reporter->id, 'action' => 'resolution_confirmed']);
+
+        return $ticket;
     }
 
     public function addAttachment(SupportTicket $ticket, User $user, UploadedFile $file): SupportTicketAttachment

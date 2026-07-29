@@ -143,6 +143,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'show']);
         Route::patch('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'update']);
         Route::post('tickets/{ticket}/replies', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'reply']);
+        Route::post('tickets/{ticket}/confirm-resolution', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'confirmResolution']);
         Route::post('tickets/{ticket}/attachments', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'uploadAttachment']);
         Route::get('tickets/{ticket}/attachments/{attachment}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'downloadAttachment']);
     });

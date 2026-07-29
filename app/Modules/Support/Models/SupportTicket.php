@@ -18,11 +18,15 @@ class SupportTicket extends Model
     protected $fillable = [
         'ticket_number', 'reporter_id', 'assigned_to', 'subject', 'description', 'type', 'category',
         'priority', 'status', 'resolution', 'resolved_at', 'resolved_by', 'last_activity_at',
+        'first_response_at', 'response_due_at', 'resolution_due_at',
     ];
 
     protected $casts = [
         'resolved_at' => 'datetime',
         'last_activity_at' => 'datetime',
+        'first_response_at' => 'datetime',
+        'response_due_at' => 'datetime',
+        'resolution_due_at' => 'datetime',
     ];
 
     public function reporter(): BelongsTo { return $this->belongsTo(User::class, 'reporter_id'); }
