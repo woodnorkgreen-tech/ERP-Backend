@@ -63,7 +63,7 @@ class BoardController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Board::with(['libraryMaterial.workstation', 'movements' => fn($q) => $q->latest('ts')->limit(1)])
+        $query = Board::with(['libraryMaterial.workstation', 'parent:id,tracking_code', 'movements' => fn($q) => $q->latest('ts')->limit(1)])
             ->latest();
 
         if ($request->filled('status')) {
@@ -106,6 +106,8 @@ class BoardController extends Controller
                 'area_m2'          => $board->area_m2,
                 'current_value'    => $board->current_value,
                 'is_offcut'        => $board->is_offcut,
+                'parent_board_id'  => $board->parent_board_id,
+                'parent_tracking_code' => $board->parent?->tracking_code,
                 'assigned_job_ref' => $board->assigned_job_ref,
                 'condition_grade'  => $board->condition_grade,
                 'label_printed'    => $board->label_printed,
@@ -333,11 +335,7 @@ class BoardController extends Controller
             return response()->json(['message' => "No reserved boards were found for job [{$jobRef}]."], 422);
         }
 
-        try {
-            $this->workflow->onBoardsDispatched($jobRef, $boards, auth()->user());
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
-            return response()->json(['message' => 'No pending dispatch task found for this job. Has the request been fulfilled yet?'], 422);
-        }
+        $this->workflow->onBoardsDispatched($jobRef, $boards, auth()->user());
 
         return response()->json([
             'message'        => "{$boards->count()} board(s) sent to Production for job [{$jobRef}].",
