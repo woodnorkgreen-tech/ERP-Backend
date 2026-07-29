@@ -759,13 +759,8 @@ class EnquiryWorkflowService
                 throw new WorkflowValidationException("Cannot complete Archival & Reporting task. Submit and approve the report first.");
             }
 
-            $requiredChecklist = [
-                'checklist_site_survey_form',
-                'checklist_project_budget_file', 'checklist_material_list',
-                'checklist_qc_checklist', 'checklist_setup_setdown',
-                'checklist_client_feedback',
-            ];
-            $missingChecks = collect($requiredChecklist)->filter(fn (string $field) => !$report->{$field})->count();
+            $missingChecks = count(app(\App\Modules\ArchivalTask\Services\ArchivalReportService::class)
+                ->getMissingRequiredChecks($task->id, $report));
             if ($missingChecks > 0) {
                 throw new WorkflowValidationException("Cannot complete Archival & Reporting task. {$missingChecks} required archive checklist item(s) remain incomplete.");
             }

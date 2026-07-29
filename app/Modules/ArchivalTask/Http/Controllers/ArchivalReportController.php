@@ -204,14 +204,15 @@ class ArchivalReportController extends Controller
     public function changeStatus(Request $request, int $taskId, int $reportId): JsonResponse
     {
         $report = $this->reportForTask($taskId, $reportId);
-        try {
-            $request->validate([
-                'status' => 'required|in:draft,submitted,approved',
-            ]);
+        $request->validate([
+            'status' => 'required|in:submitted,approved,returned',
+            'correction_notes' => 'required_if:status,returned|nullable|string|max:2000',
+        ]);
 
+        try {
             $targetStatus = $request->input('status');
             $allowedTransition = ($report->status === 'draft' && $targetStatus === 'submitted')
-                || ($report->status === 'submitted' && $targetStatus === 'approved');
+                || ($report->status === 'submitted' && in_array($targetStatus, ['approved', 'returned'], true));
             if (!$allowedTransition) {
                 return response()->json([
                     'message' => "Invalid closure transition from {$report->status} to {$targetStatus}.",
@@ -219,21 +220,13 @@ class ArchivalReportController extends Controller
             }
 
             $user = $request->user();
-            if ($targetStatus === 'approved') {
+            if (in_array($targetStatus, ['approved', 'returned'], true)) {
                 if (!$user->hasRole(['Super Admin', 'Admin', 'Project Manager'])) {
-                    return response()->json(['message' => 'Only a Project Manager or administrator may approve project closure.'], 403);
-                }
-                if ((int) $report->submitted_by === (int) $user->id && !$user->hasRole('Super Admin')) {
-                    return response()->json(['message' => 'The person who submitted the closure report cannot approve it.'], 422);
+                    return response()->json(['message' => 'Only a Project Manager or administrator may review project closure.'], 403);
                 }
             }
             if (in_array($targetStatus, ['submitted', 'approved'], true)) {
-                $requiredChecks = [
-                    'checklist_site_survey_form', 'checklist_project_budget_file',
-                    'checklist_material_list', 'checklist_qc_checklist',
-                    'checklist_setup_setdown', 'checklist_client_feedback',
-                ];
-                $missingChecks = collect($requiredChecks)->filter(fn (string $field) => !$report->{$field})->count();
+                $missingChecks = count($this->service->getMissingRequiredChecks($taskId, $report));
 
                 if ($missingChecks || !$report->archive_reference || !$report->archive_location
                 ) {
@@ -243,11 +236,19 @@ class ArchivalReportController extends Controller
                 }
             }
 
-            $report = $this->service->changeStatus($reportId, $targetStatus, $user);
+            $report = $this->service->changeStatus(
+                $reportId,
+                $targetStatus,
+                $user,
+                $request->input('correction_notes')
+            );
+            $reportData = $this->service->getReportByTask($taskId);
             
             return response()->json([
-                'data' => $report,
-                'message' => 'Status updated successfully'
+                'data' => $reportData,
+                'message' => $targetStatus === 'returned'
+                    ? 'Closure report returned for correction.'
+                    : 'Status updated successfully'
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -274,9 +275,12 @@ class ArchivalReportController extends Controller
                 'report' => $report,
                 'financialSummary' => $this->service->getFinancialSummary($taskId),
                 'systemDocuments' => $this->service->getSystemDocuments($taskId),
+                'closureContext' => $this->service->getClosureContext($taskId),
+                'handoverSummary' => $this->service->getHandoverSummary($taskId),
             ]);
             
-            return $pdf->download('archival-report-' . $reportId . '.pdf');
+            $reference = preg_replace('/[^A-Za-z0-9_-]+/', '-', $report->project_code ?: (string) $reportId);
+            return $pdf->download('project-closure-' . trim($reference, '-') . '.pdf');
         } catch (\Exception $e) {
              return response()->json([
                 'message' => 'Failed to generate PDF',
