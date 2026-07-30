@@ -68,11 +68,22 @@ return [
     |
     */
     'issue_types' => [
+        'bug',
         'blocker',
-        'technical',
-        'resource',
-        'dependency',
-        'general',
+        'feature_request',
+        'improvement',
+        'question',
+        'security',
+        'performance',
+        'documentation',
+        'enhancement',
+        'support',
+        'incident',
+        'change_request',
+        'maintenance',
+        'training',
+        'compliance',
+        'other',
     ],
 
     /*

@@ -67,6 +67,7 @@ Route::prefix('api/universal-tasks')->middleware(['api', 'auth:sanctum', 'thrott
 
     // ==================== Task Comments ====================
     Route::get('tasks/{task}/comments', [TaskCommentController::class, 'index']);
+    Route::get('tasks/{task}/mentionable-users', [TaskCommentController::class, 'mentionableUsers']);
     Route::post('tasks/{task}/comments', [TaskCommentController::class, 'store']);
     Route::get('comments/{comment}', [TaskCommentController::class, 'show']);
     Route::put('comments/{comment}', [TaskCommentController::class, 'update']);

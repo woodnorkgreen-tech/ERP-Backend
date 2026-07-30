@@ -4,6 +4,7 @@ namespace App\Modules\UniversalTask\Observers;
 
 use App\Modules\UniversalTask\Models\TaskIssue;
 use App\Modules\UniversalTask\Events\TaskIssueLogged;
+use Illuminate\Support\Facades\Log;
 
 class TaskIssueObserver
 {
@@ -12,8 +13,15 @@ class TaskIssueObserver
      */
     public function created(TaskIssue $taskIssue): void
     {
-        // Dispatch the TaskIssueLogged event
-        event(new TaskIssueLogged($taskIssue));
+        try {
+            event(new TaskIssueLogged($taskIssue));
+        } catch (\Throwable $e) {
+            Log::warning('Task issue notification dispatch failed', [
+                'issue_id' => $taskIssue->id,
+                'task_id' => $taskIssue->task_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

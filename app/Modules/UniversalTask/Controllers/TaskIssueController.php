@@ -8,6 +8,7 @@ use App\Modules\UniversalTask\Services\TaskPermissionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
@@ -39,7 +40,7 @@ class TaskIssueController
         }
 
         try {
-            $query = TaskIssue::with(['task', 'reporter', 'assignee', 'resolver']);
+            $query = TaskIssue::with(['task', 'reporter', 'resolver']);
 
             // Apply permission filters - only show issues for tasks user can access
             $accessibleDepartments = $this->permissionService->getAccessibleDepartments($user);
@@ -96,10 +97,9 @@ class TaskIssueController
         $validator = Validator::make($request->all(), [
             'task_id' => 'required|exists:tasks,id',
             'title' => 'required|string|max:255',
-            'description' => 'required|string',
-            'issue_type' => ['required', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'other'])],
+            'description' => 'nullable|string',
+            'issue_type' => ['required', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'blocker', 'other'])],
             'severity' => ['required', Rule::in(['critical', 'high', 'medium', 'low'])],
-            'assigned_to' => 'nullable|exists:users,id',
         ]);
 
         if ($validator->fails()) {
@@ -146,12 +146,11 @@ class TaskIssueController
                 'severity' => $request->severity,
                 'status' => 'open',
                 'reported_by' => $user->id,
-                'assigned_to' => $request->assigned_to,
                 'reported_at' => now(),
             ]);
 
             // Load relationships for response
-            $issue->load(['reporter', 'assignee']);
+            $issue->load(['reporter']);
 
             return response()->json([
                 'success' => true,
@@ -160,6 +159,13 @@ class TaskIssueController
             ], 201);
 
         } catch (\Exception $e) {
+            Log::error('Task issue creation failed', [
+                'task_id' => $request->task_id,
+                'user_id' => $user?->id,
+                'request_data' => $request->except(['_token']),
+                'error' => $e->getMessage(),
+            ]);
+
             return response()->json([
                 'success' => false,
                 'error' => [
@@ -190,7 +196,7 @@ class TaskIssueController
         }
 
         try {
-            $issue->load(['task', 'reporter', 'assignee', 'resolver']);
+            $issue->load(['task', 'reporter', 'resolver']);
 
             return response()->json([
                 'success' => true,
@@ -231,10 +237,9 @@ class TaskIssueController
         $validator = Validator::make($request->all(), [
             'title' => 'sometimes|required|string|max:255',
             'description' => 'sometimes|required|string',
-            'issue_type' => ['sometimes', 'required', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'other'])],
+            'issue_type' => ['sometimes', 'required', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'blocker', 'other'])],
             'severity' => ['sometimes', 'required', Rule::in(['critical', 'high', 'medium', 'low'])],
             'status' => ['sometimes', 'required', Rule::in(['open', 'in_progress', 'resolved', 'closed'])],
-            'assigned_to' => 'nullable|exists:users,id',
         ]);
 
         if ($validator->fails()) {
@@ -250,10 +255,10 @@ class TaskIssueController
 
         try {
             $issue->update($request->only([
-                'title', 'description', 'issue_type', 'severity', 'status', 'assigned_to'
+                'title', 'description', 'issue_type', 'severity', 'status'
             ]));
 
-            $issue->load(['reporter', 'assignee', 'resolver']);
+            $issue->load(['reporter', 'resolver']);
 
             return response()->json([
                 'success' => true,
@@ -310,7 +315,7 @@ class TaskIssueController
         try {
             $issue->markAsResolved($user->id, $request->resolution_notes);
 
-            $issue->load(['reporter', 'assignee', 'resolver']);
+            $issue->load(['reporter', 'resolver']);
 
             return response()->json([
                 'success' => true,
@@ -353,11 +358,10 @@ class TaskIssueController
             'per_page' => 'nullable|integer|min:1|max:100',
             'search' => 'nullable|string|max:255',
             'severity' => ['nullable', Rule::in(['critical', 'high', 'medium', 'low'])],
-            'issue_type' => ['nullable', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'other'])],
+            'issue_type' => ['nullable', Rule::in(['bug', 'feature_request', 'improvement', 'question', 'security', 'performance', 'documentation', 'enhancement', 'support', 'incident', 'change_request', 'maintenance', 'training', 'compliance', 'blocker', 'other'])],
             'status' => ['nullable', Rule::in(['open', 'in_progress', 'resolved', 'closed'])],
             'task_id' => 'nullable|exists:tasks,id',
             'reported_by' => 'nullable|exists:users,id',
-            'assigned_to' => 'nullable|exists:users,id',
             'date_from' => 'nullable|date',
             'date_to' => 'nullable|date',
         ]);
@@ -374,7 +378,7 @@ class TaskIssueController
         }
 
         try {
-            $query = TaskIssue::with(['task', 'reporter', 'assignee', 'resolver']);
+            $query = TaskIssue::with(['task', 'reporter', 'resolver']);
 
             // Apply permission filters - only show issues for tasks user can access
             $accessibleDepartments = $this->permissionService->getAccessibleDepartments($user);
@@ -395,7 +399,7 @@ class TaskIssueController
 
             // Apply filters
             $filters = $request->only([
-                'severity', 'issue_type', 'status', 'task_id', 'reported_by', 'assigned_to'
+                'severity', 'issue_type', 'status', 'task_id', 'reported_by'
             ]);
 
             foreach ($filters as $field => $value) {

@@ -243,19 +243,16 @@ class TaskController
                 'assignedUser.employee',
                 'creator',
                 'parentTask',
-                'subtasks',
-                'dependencies',
                 'assignments.user',
                 'assignments.assignedBy',
-                'issues',
-                'comments',
-                'attachments',
                 'taskable',
                 'logisticsContext',
                 'designContext',
                 'financeContext',
                 'labels',
             ]);
+            $task->loadCount(['subtasks', 'issues', 'comments', 'attachments']);
+
             return response()->json([
                 'success' => true,
                 'data' => $task,

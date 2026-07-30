@@ -170,8 +170,7 @@ class TaskAttachmentController
      */
     public function show(Request $request, TaskAttachment $attachment): JsonResponse
     {
-        $taskId = $request->route('task');
-        $task = Task::find($taskId);
+        $task = $attachment->task;
 
         if (!$task) {
             return response()->json([
@@ -231,8 +230,7 @@ class TaskAttachmentController
      */
     public function download(Request $request, TaskAttachment $attachment): StreamedResponse
     {
-        $taskId = $request->route('task');
-        $task = Task::find($taskId);
+        $task = $attachment->task;
 
         if (!$task) {
             abort(404, 'Task not found.');
@@ -266,8 +264,7 @@ class TaskAttachmentController
      */
     public function destroy(Request $request, TaskAttachment $attachment): JsonResponse
     {
-        $taskId = $request->route('task');
-        $task = Task::find($taskId);
+        $task = $attachment->task;
 
         if (!$task) {
             return response()->json([

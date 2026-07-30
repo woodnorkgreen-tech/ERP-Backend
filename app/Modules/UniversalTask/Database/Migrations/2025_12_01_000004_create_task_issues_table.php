@@ -20,7 +20,6 @@ return new class extends Migration
             $table->enum('severity', ['critical', 'high', 'medium', 'low'])->default('medium');
             $table->enum('status', ['open', 'in_progress', 'resolved', 'closed'])->default('open');
             $table->foreignId('reported_by')->constrained('users')->onDelete('cascade');
-            $table->foreignId('assigned_to')->nullable()->constrained('users')->onDelete('set null');
             $table->timestamp('reported_at')->useCurrent();
             $table->timestamp('resolved_at')->nullable();
             $table->foreignId('resolved_by')->nullable()->constrained('users')->onDelete('set null');
@@ -33,7 +32,6 @@ return new class extends Migration
             $table->index('severity');
             $table->index('status');
             $table->index('reported_by');
-            $table->index('assigned_to');
             $table->index('reported_at');
             $table->index(['task_id', 'status']);
             $table->index(['severity', 'status']);

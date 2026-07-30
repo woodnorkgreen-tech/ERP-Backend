@@ -25,7 +25,7 @@ class TaskObserver
     public function updated(Task $task): void
     {
         // Log all changed attributes
-        $changes = $task->getDirty();
+        $changes = $task->getChanges();
         
         foreach ($changes as $field => $newValue) {
             // Skip timestamps and internal fields

@@ -22,7 +22,6 @@ class TaskIssue extends Model
         'severity',
         'status',
         'reported_by',
-        'assigned_to',
         'reported_at',
         'resolved_at',
         'resolved_by',
@@ -50,14 +49,6 @@ class TaskIssue extends Model
     public function reporter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reported_by');
-    }
-
-    /**
-     * Get the user assigned to resolve the issue.
-     */
-    public function assignee(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'assigned_to');
     }
 
     /**
