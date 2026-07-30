@@ -57,7 +57,13 @@ class BoardRequestController extends Controller
             'notes'       => 'nullable|string|max:500',
         ]);
 
-        $material = LibraryMaterial::findOrFail($request->material_id);
+        $material = LibraryMaterial::with('materialCategory.parent')->findOrFail($request->material_id);
+        if (!$material->isBoardTrackable()) {
+            return response()->json([
+                'message' => "'{$material->material_name}' is not a board/sheet item. Issue it through the normal Stores workflow.",
+            ], 422);
+        }
+
         $available = Board::where('library_material_id', $material->id)
             ->where('status', 'Available')
             ->count();

@@ -31,7 +31,7 @@ class ProcurementStoresController extends Controller
      */
     public function inventory(Request $request): JsonResponse
     {
-        $query = LibraryMaterial::with(['workstation', 'stock']);
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent']);
 
         // Filter by Search Query
         if ($request->filled('search')) {
@@ -97,6 +97,10 @@ class ProcurementStoresController extends Controller
                 'is_active'         => $material->is_active,
                 'notes'             => $material->notes,
                 'material_type'     => $material->material_type ?? 'consumable',
+                'board_trackable'   => $material->isBoardTrackable(),
+                'stock_handling'    => $material->isBoardTrackable()
+                    ? 'individual_board'
+                    : ($material->material_type === 'reusable' ? 'reusable_item' : 'quantity'),
                 'quantity_on_hand'  => $onHand,
                 'quantity_reserved' => $reserved,
                 'available'         => $available,
@@ -134,6 +138,12 @@ class ProcurementStoresController extends Controller
 
         $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->findOrFail($request->material_id);
 
+        if ($material->isBoardTrackable() && (float) $request->quantity !== (float) (int) $request->quantity) {
+            return response()->json([
+                'message' => 'Board sheets must be received as a whole number because each sheet receives its own tracking code.',
+            ], 422);
+        }
+
         $log    = null;
         $boards = [];
 
@@ -149,23 +159,18 @@ class ProcurementStoresController extends Controller
                 $request->all()
             );
 
-            if ($material->material_type === 'reusable') {
+            if ($material->isBoardTrackable()) {
                 $registration = new BoardRegistrationService();
-                try {
-                    $registration->validateMaterial($material);
-                    $boards = $registration->createBoardRecords(
-                        material:    $material,
-                        quantity:    (int) $request->quantity,
-                        batchNumber: $log->batch_number,
-                        length:      $request->length    ?? null,
-                        width:       $request->width     ?? null,
-                        thickness:   $request->thickness ?? null,
-                        userId:      auth()->id(),
-                    );
-                    $log->update(['usage_type' => 'reusable']);
-                } catch (\InvalidArgumentException) {
-                    // Reusable but not board-eligible (e.g. Timber) — skip
-                }
+                $boards = $registration->createBoardRecords(
+                    material:    $material,
+                    quantity:    (int) $request->quantity,
+                    batchNumber: $log->batch_number,
+                    length:      $request->length    ?? null,
+                    width:       $request->width     ?? null,
+                    thickness:   $request->thickness ?? null,
+                    userId:      auth()->id(),
+                );
+                $log->update(['usage_type' => 'reusable']);
             }
         });
 
@@ -190,9 +195,8 @@ class ProcurementStoresController extends Controller
     /**
      * Process a stock check-out (Deduct from inventory)
      *
-     * Board materials (material_type = reusable) must NOT be checked out through
-     * this generic endpoint — they require an explicit board request so individual
-     * boards are tracked. Redirect the caller to use the board request flow.
+     * Individually tracked board/sheet materials must NOT be checked out through
+     * this generic endpoint. Reusable tools still use this normal quantity flow.
      */
     public function checkOut(Request $request): JsonResponse
     {
@@ -208,8 +212,8 @@ class ProcurementStoresController extends Controller
             'logged_at' => 'nullable|date'
         ]);
 
-        $material = LibraryMaterial::find($request->material_id);
-        if ($material && $material->material_type === 'reusable') {
+        $material = LibraryMaterial::with('materialCategory.parent')->find($request->material_id);
+        if ($material?->isBoardTrackable()) {
             return response()->json([
                 'message' => "'{$material->material_name}' is a tracked board material. "
                     . 'Issue it via a Board Request so individual boards are assigned to the job.',
@@ -303,8 +307,8 @@ class ProcurementStoresController extends Controller
 
         // Board materials must be returned through the Board Lifecycle endpoint so that
         // individual Board records transition back to Available and stock stays in sync.
-        $material = LibraryMaterial::find($request->material_id);
-        if ($material && $material->material_type === 'reusable') {
+        $material = LibraryMaterial::with('materialCategory.parent')->find($request->material_id);
+        if ($material?->isBoardTrackable()) {
             return response()->json([
                 'message'  => "'{$material->material_name}' is a tracked board material. "
                     . 'Return individual boards via POST /boards/{id}/transition with status=Available.',
@@ -345,8 +349,8 @@ class ProcurementStoresController extends Controller
 
         // Board materials must be scrapped through the Board Lifecycle endpoint so that
         // individual Board records transition to Scrapped and stock stays in sync.
-        $material = LibraryMaterial::find($request->material_id);
-        if ($material && $material->material_type === 'reusable') {
+        $material = LibraryMaterial::with('materialCategory.parent')->find($request->material_id);
+        if ($material?->isBoardTrackable()) {
             return response()->json([
                 'message'  => "'{$material->material_name}' is a tracked board material. "
                     . 'Scrap individual boards via POST /boards/{id}/transition with status=Scrapped.',
@@ -404,9 +408,23 @@ class ProcurementStoresController extends Controller
         $allBoards  = [];
         $batchNumber = null;
 
+        $batchMaterials = LibraryMaterial::with(['materialCategory.parent', 'workstation'])
+            ->whereIn('id', collect($request->items)->pluck('material_id'))
+            ->get()
+            ->keyBy('id');
+
+        foreach ($request->items as $item) {
+            $material = $batchMaterials->get($item['material_id']);
+            if ($material?->isBoardTrackable() && (float) $item['quantity'] !== (float) (int) $item['quantity']) {
+                return response()->json([
+                    'message' => "Board sheets for '{$material->material_name}' must be received as a whole number.",
+                ], 422);
+            }
+        }
+
         // Single outer transaction: if any item's board creation fails the
         // entire batch rolls back — no partial stock increments without records.
-        DB::transaction(function () use ($request, $service, &$logs, &$allBoards, &$batchNumber) {
+        DB::transaction(function () use ($request, $service, $batchMaterials, &$logs, &$allBoards, &$batchNumber) {
             $batchNumber = $service->generateBatchNumber();
 
             foreach ($request->items as $item) {
@@ -419,26 +437,21 @@ class ProcurementStoresController extends Controller
                 $log    = $service->adjustStock($item['material_id'], $item['quantity'], 'check_in', $meta);
                 $logs[] = $log;
 
-                $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->find($item['material_id']);
+                $material = $batchMaterials->get($item['material_id']);
 
-                if ($material && $material->material_type === 'reusable') {
+                if ($material?->isBoardTrackable()) {
                     $registration = new BoardRegistrationService();
-                    try {
-                        $registration->validateMaterial($material);
-                        $boards = $registration->createBoardRecords(
-                            material:    $material,
-                            quantity:    (int) $item['quantity'],
-                            batchNumber: $batchNumber,
-                            length:      $item['length']    ?? null,
-                            width:       $item['width']     ?? null,
-                            thickness:   $item['thickness'] ?? null,
-                            userId:      auth()->id(),
-                        );
-                        $log->update(['usage_type' => 'reusable']);
-                        $allBoards = array_merge($allBoards, $boards);
-                    } catch (\InvalidArgumentException) {
-                        // Reusable but not board-eligible — skip
-                    }
+                    $boards = $registration->createBoardRecords(
+                        material:    $material,
+                        quantity:    (int) $item['quantity'],
+                        batchNumber: $batchNumber,
+                        length:      $item['length']    ?? null,
+                        width:       $item['width']     ?? null,
+                        thickness:   $item['thickness'] ?? null,
+                        userId:      auth()->id(),
+                    );
+                    $log->update(['usage_type' => 'reusable']);
+                    $allBoards = array_merge($allBoards, $boards);
                 }
             }
         });
@@ -478,11 +491,11 @@ class ProcurementStoresController extends Controller
         
         // Validate all items before processing any — board guard first, then stock
         foreach ($request->items as $item) {
-            $material = LibraryMaterial::find($item['material_id']);
+            $material = LibraryMaterial::with('materialCategory.parent')->find($item['material_id']);
 
             // Board materials must go through the board request flow so individual
             // Board records are allocated and stock stays in sync.
-            if ($material && $material->material_type === 'reusable') {
+            if ($material?->isBoardTrackable()) {
                 return response()->json([
                     'message'  => "'{$material->material_name}' is a tracked board material. "
                         . 'Issue it via a Board Request so individual boards are assigned to the job.',
