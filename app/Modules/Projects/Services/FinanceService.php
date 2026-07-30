@@ -19,7 +19,9 @@ class FinanceService
     {
         $quote = $this->resolveQuoteBasis($enquiry);
         if ($quote['amount'] <= 0) {
-            throw new \DomainException('A quote must be approved before payments can be recorded.');
+            throw new \DomainException($quote['waived']
+                ? 'Enter the quote amount in Project Billing before recording payments.'
+                : 'A quote must be approved or formally waived before payments can be recorded.');
         }
 
         return DB::transaction(function () use ($enquiry, $data) {
@@ -127,7 +129,10 @@ class FinanceService
             'is_70_percent_met' => $percentage >= self::MOBILIZATION_THRESHOLD_PERCENTAGE,
             'is_threshold_met' => $percentage >= self::MOBILIZATION_THRESHOLD_PERCENTAGE,
             'is_client_approved_basis' => in_array($quoteBasis, ['approved_snapshot', 'client_approved_quote'], true),
-            'has_approved_quote' => $totalQuoteAmount > 0,
+            'has_approved_quote' => $totalQuoteAmount > 0 && !$quote['waived'],
+            'quote_requirement_waived' => (bool) $quote['waived'],
+            'can_process_finance' => $totalQuoteAmount > 0 || (bool) $quote['waived'],
+            'can_record_payments' => $totalQuoteAmount > 0,
             'quote_basis' => $quoteBasis,
             'quote_source_label' => $quote['source_label'],
             'quote_approval' => $quote['approval'],
@@ -138,6 +143,8 @@ class FinanceService
             'overpaid_amount' => (float) max(0, $totalPaid - $totalQuoteAmount),
             'finance_released' => (bool) ($enquiry->finance_released ?? false),
             'finance_released_at' => optional($enquiry->finance_released_at)->toISOString(),
+            'quote_waiver_reason' => $enquiry->quote_waiver_reason,
+            'quote_waived_at' => optional($enquiry->quote_waived_at)->toISOString(),
         ];
     }
 
@@ -153,25 +160,11 @@ class FinanceService
                 ->latest('updated_at')
                 ->first();
 
-        if ($approval) {
-            if ($approval->approval_status !== 'approved') {
-                return [
-                    'amount' => 0.0,
-                    'basis' => 'none',
-                    'source_label' => 'Quote approval pending',
-                    'approval' => null,
-                ];
-            }
+        $unapprovedSourceLabel = $approval?->approval_status === 'approved'
+            ? 'Approved quote has no value'
+            : ($approval ? 'Quote approval pending' : 'No approved quote');
 
-            if ((float) $approval->quote_amount <= 0) {
-                return [
-                    'amount' => 0.0,
-                    'basis' => 'none',
-                    'source_label' => 'Approved quote has no value',
-                    'approval' => null,
-                ];
-            }
-
+        if ($approval && $approval->approval_status === 'approved' && (float) $approval->quote_amount > 0) {
             return [
                 'amount' => (float) $approval->quote_amount,
                 'basis' => 'approved_snapshot',
@@ -187,6 +180,7 @@ class FinanceService
                         ? $approval->updated_at->format(DATE_ATOM)
                         : $approval->updated_at,
                 ],
+                'waived' => false,
             ];
         }
 
@@ -198,6 +192,7 @@ class FinanceService
                 'basis' => 'client_approved_quote',
                 'source_label' => 'Approved quote (legacy)',
                 'approval' => null,
+                'waived' => false,
             ];
         }
 
@@ -217,14 +212,28 @@ class FinanceService
                     'approved_at' => optional($quoteData->approval_date)->toDateString(),
                     'recorded_at' => optional($quoteData->updated_at)->toISOString(),
                 ],
+                'waived' => false,
+            ];
+        }
+
+        if ($enquiry->quote_requirement_waived) {
+            return [
+                'amount' => (float) ($enquiry->quote_waiver_billing_amount ?? 0),
+                'basis' => 'quote_waiver',
+                'source_label' => $enquiry->quote_waiver_billing_amount
+                    ? 'Quote amount entered in billing'
+                    : 'Quote formally waived',
+                'approval' => null,
+                'waived' => true,
             ];
         }
 
         return [
             'amount' => 0.0,
             'basis' => 'none',
-            'source_label' => 'No approved quote',
+            'source_label' => $unapprovedSourceLabel,
             'approval' => null,
+            'waived' => false,
         ];
     }
 

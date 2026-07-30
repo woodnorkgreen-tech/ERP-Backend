@@ -17,16 +17,14 @@
         }
         
         /* Typography & Colors */
-        .text-cyan-500 { color: #06b6d4; }
-        .text-blue-600 { color: #2563eb; }
+        .text-cyan-500, .text-blue-600 { color: #07ADD4; }
         .text-emerald-600 { color: #059669; }
         .text-red-600 { color: #dc2626; }
         .text-gray-600 { color: #4b5563; }
         .text-gray-700 { color: #374151; }
         .text-gray-900 { color: #111827; }
         
-        .bg-cyan-500 { background-color: #06b6d4; color: white; }
-        .bg-blue-600 { background-color: #2563eb; color: white; }
+        .bg-cyan-500, .bg-blue-600 { background-color: #07ADD4; color: white; }
         .bg-gray-200 { background-color: #e5e7eb; }
         .bg-gray-100 { background-color: #f3f4f6; }
         .bg-white { background-color: #ffffff; }
@@ -41,7 +39,7 @@
         .mb-4 { margin-bottom: 15px; }
         
         .section-header {
-            background-color: #2563eb;
+            background-color: #07ADD4;
             color: white;
             padding: 4px 8px;
             font-weight: bold;
@@ -102,7 +100,7 @@
             font-size: 11px;
             font-weight: bold;
             color: #1e40af;
-            border-left: 3px solid #3b82f6;
+            border-left: 3px solid #07ADD4;
             padding-left: 8px;
             margin: 15px 0 10px 0;
             background-color: #eff6ff;
@@ -116,7 +114,7 @@
             display: inline-block; width: 10px; height: 10px; border: 1px solid #6b7280; 
             margin-right: 5px; vertical-align: middle; position: relative;
         }
-        .checkbox.checked { background-color: #2563eb; border-color: #2563eb; }
+        .checkbox.checked { background-color: #07ADD4; border-color: #07ADD4; }
         .checkbox.checked:after { content: '✓'; color: white; font-size: 8px; position: absolute; top: -2px; left: 1px; }
 
         .signature-box {
@@ -131,8 +129,7 @@
     <table style="margin-bottom: 20px;">
         <tr>
             <td style="width: 50%;">
-                <img src="{{ public_path('logo-outline.png') }}" style="height: 65px; width: auto; margin-bottom: 5px; display: block;" alt="Logo"/>
-                <div class="font-bold text-gray-900 tracking-wide uppercase" style="font-size: 14px;">Woodnork Green</div>
+                <img src="{{ public_path('woodnork-green-logo.png') }}" style="width: 125px; height: auto; margin-bottom: 5px; display: block;" alt="Woodnork Green logo"/>
             </td>
             <td style="width: 50%; text-align: right;">
                 <h2 class="text-blue-600 mb-2 uppercase tracking-wide text-2xl" style="margin: 0 0 10px 0;">LOGISTICS LOADING SHEET</h2>
@@ -176,6 +173,13 @@
     <!-- Logistics & Dispatch Planning -->
     <div class="mb-4">
         <div class="section-header">DISPATCH & ROUTE PLANNING</div>
+        @if(($data['logistics_planning']['transport_arrangement'] ?? 'company') === 'client')
+        <div class="summary-card">
+            <div class="text-gray-600 uppercase font-small mb-2">TRANSPORT ARRANGEMENT</div>
+            <div class="font-bold">Client-provided transport</div>
+            <div class="mt-1">Vehicle, driver and trip timing are arranged by the client. This document confirms the items released.</div>
+        </div>
+        @else
         <table style="width: 100%;">
             <tr>
                 <td style="width: 33%; padding-right: 1%;">
@@ -208,6 +212,7 @@
                 </td>
             </tr>
         </table>
+        @endif
     </div>
 
     <!-- Project Teams -->
@@ -348,9 +353,9 @@
         <table style="width: 100%;">
             <tr>
                 <td style="width: 33%; padding-right: 2%;">
-                     <div class="font-bold text-center mb-1 text-gray-600">DRIVER</div>
+                     <div class="font-bold text-center mb-1 text-gray-600">{{ ($data['logistics_planning']['transport_arrangement'] ?? 'company') === 'client' ? 'CLIENT DRIVER' : 'DRIVER' }}</div>
                      <div class="signature-box"></div>
-                     <div class="text-center mt-1 font-bold">{{ $data['logistics_planning']['driver_name'] ?? 'Driver Name' }}</div>
+                     <div class="text-center mt-1 font-bold">{{ ($data['logistics_planning']['transport_arrangement'] ?? 'company') === 'client' ? 'Client representative' : ($data['logistics_planning']['driver_name'] ?? 'Driver Name') }}</div>
                      <div class="text-center text-gray-600" style="font-size: 8px;">Date: _______</div>
                 </td>
                 <td style="width: 33%; padding-right: 2%;">

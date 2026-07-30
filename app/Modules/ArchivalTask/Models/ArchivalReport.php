@@ -97,6 +97,11 @@ class ArchivalReport extends Model
         'submitted_at',
         'approved_by',
         'approved_at',
+        'correction_requested_by',
+        'correction_requested_at',
+        'correction_notes',
+        'correction_resolved_at',
+        'revision_number',
         'created_by',
     ];
 
@@ -110,6 +115,9 @@ class ArchivalReport extends Model
         'reviewer_sign_date' => 'date',
         'submitted_at' => 'datetime',
         'approved_at' => 'datetime',
+        'correction_requested_at' => 'datetime',
+        'correction_resolved_at' => 'datetime',
+        'revision_number' => 'integer',
         'materials_mrf_attached' => 'boolean',
         'all_deliverables_available' => 'boolean',
         'setup_aligned_to_schedule' => 'boolean',
@@ -155,6 +163,11 @@ class ArchivalReport extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function correctionRequester(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'correction_requested_by');
     }
 
     /**

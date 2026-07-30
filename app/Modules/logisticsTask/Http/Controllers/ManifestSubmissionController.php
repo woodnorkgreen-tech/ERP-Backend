@@ -85,7 +85,10 @@ class ManifestSubmissionController extends Controller
                 'venue' => $task->enquiry?->venue,
                 'delivery_date' => $task->enquiry?->expected_delivery_date,
             ],
-            'submitted_by' => ['name' => auth()->user()->name, 'email' => auth()->user()->email],
+            // Opened without a login (QR code) — this is the link creator,
+            // shown as a point of contact, not the (nonexistent) current
+            // session user.
+            'contact' => $link->creator ? ['name' => $link->creator->name, 'email' => $link->creator->email] : null,
         ]]);
     }
 
@@ -95,6 +98,7 @@ class ManifestSubmissionController extends Controller
         abort_if($link->logisticsTask->task?->status === 'completed', 422, 'This dispatch is already complete.');
 
         $validated = $request->validate([
+            'submitted_by_name' => 'required|string|max:255',
             'items' => 'required|array|min:1|max:50',
             'items.*.name' => 'required|string|max:255',
             'items.*.quantity' => 'required|integer|min:1|max:100000',
@@ -105,17 +109,20 @@ class ManifestSubmissionController extends Controller
         ]);
 
         $created = DB::transaction(function () use ($validated, $link) {
-            return collect($validated['items'])->map(function (array $item) use ($link) {
+            return collect($validated['items'])->map(function (array $item) use ($link, $validated) {
                 $isHire = $item['main_category'] === 'STORES' && ($item['sub_type'] ?? null) === 'hire';
                 return $link->submissions()->create([
                     ...$item,
                     'sub_type' => $item['main_category'] === 'STORES' ? ($item['sub_type'] ?? 'consumable') : null,
                     'is_returnable' => in_array($item['main_category'], ['TOOLS_EQUIPMENTS', 'ELECTRICALS'], true) || $isHire,
-                    'submitted_by' => auth()->id(),
+                    'submitted_by_name' => $validated['submitted_by_name'],
                     'status' => 'pending',
                 ]);
             });
         });
+
+        app(\App\Modules\Projects\Services\NotificationService::class)
+            ->sendManifestSubmissionReceived($link->logisticsTask->task, $created->count(), $validated['submitted_by_name']);
 
         return response()->json(['message' => $created->count().' item(s) sent to Logistics for review.', 'data' => $created], 201);
     }
@@ -175,7 +182,7 @@ class ManifestSubmissionController extends Controller
 
     private function availableLink(string $token): ManifestSubmissionLink
     {
-        $link = ManifestSubmissionLink::with('logisticsTask.task')->where('token', $token)->firstOrFail();
+        $link = ManifestSubmissionLink::with(['logisticsTask.task', 'creator:id,name,email'])->where('token', $token)->firstOrFail();
         abort_unless($link->isAvailable(), 410, 'This loading sheet submission link is no longer available.');
         return $link;
     }

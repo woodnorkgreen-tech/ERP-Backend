@@ -74,28 +74,16 @@ class SetdownTaskController extends Controller
     public function uploadPhoto(Request $request, int $taskId): JsonResponse
     {
         try {
-            \Log::info('===== SETDOWN PHOTO UPLOAD START =====');
-            \Log::info('Task ID:', ['taskId' => $taskId]);
-            \Log::info('User:', ['user_id' => auth()->id(), 'user_name' => auth()->user()?->name]);
-            \Log::info('Has File:', ['hasFile' => $request->hasFile('photo')]);
-            \Log::info('All Files:', ['files' => $request->allFiles()]);
-            \Log::info('Request Data:', ['data' => $request->except('photo')]);
-
             $validated = $request->validate([
                 'photo' => 'required|image|max:10240', // 10MB max
                 'description' => 'nullable|string',
             ]);
 
-            \Log::info('Validation passed', ['validated' => $validated]);
-
-            \Log::info('Calling service uploadPhoto...');
             $photo = $this->setdownService->uploadPhoto(
                 $taskId,
                 $request->file('photo'),
                 $validated['description'] ?? null
             );
-
-            \Log::info('Upload successful!', ['photo' => $photo]);
 
             return response()->json([
                 'message' => 'Photo uploaded successfully',
@@ -121,10 +109,6 @@ class SetdownTaskController extends Controller
             return response()->json([
                 'message' => 'Failed to upload photo',
                 'error' => $e->getMessage(),
-                'debug' => [
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                ]
             ], 500);
         }
     }

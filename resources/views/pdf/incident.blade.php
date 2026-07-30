@@ -20,9 +20,14 @@
         }
         .header {
             text-align: center;
-            border-bottom: 2px solid #333;
+            border-bottom: 2px solid #07ADD4;
             padding-bottom: 10px;
             margin-bottom: 20px;
+        }
+        .brand-logo {
+            width: 145px;
+            height: auto;
+            margin-bottom: 8px;
         }
         .header h1 {
             margin: 0;
@@ -104,6 +109,7 @@
 <body>
     <!-- Header -->
     <div class="header">
+        <img class="brand-logo" src="{{ public_path(config('brand.logo')) }}" alt="Woodnork Green logo">
         <h1>Incident Management System</h1>
         <p>Incident Report #{{ $incident->id }}</p>
         <p>Generated on {{ date('F j, Y \a\t g:i A') }}</p>
@@ -338,4 +344,3 @@
     @endif
 </body>
 </html>
-

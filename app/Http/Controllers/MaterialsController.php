@@ -1296,6 +1296,28 @@ class MaterialsController extends Controller
                 return;
             }
 
+            // The budget was already signed off. Silently rewriting its totals
+            // behind a "completed" status would hide the change from whoever
+            // relies on that status (Finance/procurement gates, etc). Reopen
+            // it and stop here — materials_imported_at is deliberately left
+            // stale so the existing "approved materials list has changed"
+            // sync banner (BudgetController::checkMaterialsUpdate) picks it
+            // up and the numbers only change via a deliberate manual Sync.
+            if ($budgetTask->status === 'completed') {
+                $budgetTask->update(['status' => 'in_progress', 'completed_at' => null]);
+                $budgetTask->recordCustomAction('status_transition', [
+                    'from' => 'completed',
+                    'to' => 'in_progress',
+                    'actor_type' => 'system',
+                    'reason' => 'Materials list was updated and re-approved after this budget was marked complete. Reopened for review — sync the updated materials list when ready.',
+                ]);
+                \Log::info('Budget task reopened: materials re-approved after budget completion', [
+                    'budgetTaskId' => $budgetTask->id,
+                    'materialsTaskId' => $materialsTaskId,
+                ]);
+                return;
+            }
+
             // Get materials data to sync
             $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)
                 ->with(['elements.materials.libraryMaterial'])

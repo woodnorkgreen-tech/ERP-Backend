@@ -113,6 +113,39 @@ class SupportTicketWorkflowTest extends TestCase
         $this->assertNull($ticket->fresh()->resolved_at);
     }
 
+    public function test_ticket_has_sla_targets_and_requester_can_confirm_resolution(): void
+    {
+        $owner = $this->user('Employee');
+        $admin = $this->user('Admin');
+        Sanctum::actingAs($owner);
+
+        $response = $this->postJson('/api/support/tickets', [
+            'subject' => 'Production approval is blocked',
+            'description' => 'The approval action remains disabled after all required information is entered.',
+            'type' => 'bug', 'category' => 'erp', 'priority' => 'high',
+        ])->assertCreated()->assertJsonPath('data.is_overdue', false);
+
+        $ticket = SupportTicket::findOrFail($response->json('data.id'));
+        $this->assertNotNull($ticket->response_due_at);
+        $this->assertNotNull($ticket->resolution_due_at);
+
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/support/tickets/{$ticket->id}/replies", [
+            'message' => 'The approval rule has been corrected and verified.',
+            'action' => 'resolved',
+        ])->assertOk()->assertJsonPath('data.status', 'resolved');
+        $this->assertNotNull($ticket->fresh()->first_response_at);
+
+        Sanctum::actingAs($owner);
+        $this->postJson("/api/support/tickets/{$ticket->id}/confirm-resolution")
+            ->assertOk()->assertJsonPath('data.status', 'closed');
+        $this->assertDatabaseHas('support_ticket_activities', [
+            'support_ticket_id' => $ticket->id,
+            'actor_id' => $owner->id,
+            'action' => 'resolution_confirmed',
+        ]);
+    }
+
     public function test_attachment_download_is_scoped_to_ticket_viewers(): void
     {
         $owner = $this->user('Employee');
