@@ -26,15 +26,19 @@ class LibraryMaterialResource extends JsonResource
             'subcategory'          => $this->subcategory,
             'material_category_id' => $this->material_category_id,
             'material_type'        => $this->material_type ?? 'consumable',
+            'board_trackable'      => $this->resource->isBoardTrackable(),
+            'stock_handling'       => $this->resource->isBoardTrackable()
+                ? 'individual_board'
+                : ($this->material_type === 'reusable' ? 'reusable_item' : 'quantity'),
             'unit_of_measure' => $this->unit_of_measure,
             'unit_cost' => (float) $this->unit_cost,
             'attributes' => ($this->attributes && isset($this->attributes['attributes'])) ? $this->attributes['attributes'] : [],
             'is_active' => $this->is_active,
             'notes' => $this->notes,
             // whenLoaded guard prevents N+1 when stock is not eager-loaded
-            'quantity_on_hand'  => $this->whenLoaded('stock', fn() => (float) $this->stock->quantity_on_hand, 0),
-            'quantity_reserved' => $this->whenLoaded('stock', fn() => (float) $this->stock->quantity_reserved, 0),
-            'available'         => $this->whenLoaded('stock', fn() => (float) ($this->stock->quantity_on_hand - $this->stock->quantity_reserved), 0),
+            'quantity_on_hand'  => $this->whenLoaded('stock', fn() => (float) ($this->stock?->quantity_on_hand ?? 0), 0),
+            'quantity_reserved' => $this->whenLoaded('stock', fn() => (float) ($this->stock?->quantity_reserved ?? 0), 0),
+            'available'         => $this->whenLoaded('stock', fn() => (float) (($this->stock?->quantity_on_hand ?? 0) - ($this->stock?->quantity_reserved ?? 0)), 0),
             'created_by' => $this->created_by,
             'updated_by' => $this->updated_by,
             'created_at' => $this->created_at,

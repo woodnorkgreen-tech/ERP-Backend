@@ -140,4 +140,31 @@ class LibraryMaterial extends Model
     {
         return $this->hasOne(\App\Modules\ProcurementStores\Models\Stock::class, 'material_id');
     }
+
+    /**
+     * Whether this catalogue item must use the individual board lifecycle.
+     *
+     * `material_type = reusable` only describes whether an item is expected back;
+     * it also applies to tools and equipment. Board tracking is narrower: the item
+     * must be reusable AND belong to an approved board/sheet category.
+     */
+    public function isBoardTrackable(): bool
+    {
+        if ($this->material_type !== 'reusable') {
+            return false;
+        }
+
+        $this->loadMissing('materialCategory.parent');
+
+        $rootCategory = $this->materialCategory?->parent?->name
+            ?? $this->materialCategory?->name
+            ?? $this->category
+            ?? '';
+
+        return in_array(
+            $rootCategory,
+            config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']),
+            true
+        );
+    }
 }

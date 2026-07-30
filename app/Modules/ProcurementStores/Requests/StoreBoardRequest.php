@@ -45,26 +45,8 @@ class StoreBoardRequest extends FormRequest
             return; // 'exists' rule already handles this
         }
 
-        // Enforce material_type = reusable
-        if ($material->material_type !== 'reusable') {
-            $fail("Only materials of type 'Reusable' can be tracked as physical boards. '{$material->material_name}' is marked as '{$material->material_type}'.");
-            return;
-        }
-
-        // Enforce board-eligible parent categories
-        $boardParentNames = config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']);
-
-        // Prefer FK-based parent; fall back to legacy category string
-        $parentCategoryName = $material->materialCategory?->parent?->name
-            ?? $material->materialCategory?->name
-            ?? $material->category
-            ?? '';
-
-        if (!in_array($parentCategoryName, $boardParentNames, true)) {
-            $fail(
-                "Material '{$material->material_name}' belongs to category '{$parentCategoryName}', which is not eligible for board tracking. " .
-                "Only materials under: " . implode(', ', $boardParentNames) . " can be registered as boards."
-            );
+        if (!$material->isBoardTrackable()) {
+            $fail("'{$material->material_name}' is not configured as a board/sheet material in the Material Library.");
         }
     }
 

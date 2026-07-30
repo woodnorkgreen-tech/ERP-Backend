@@ -20,6 +20,10 @@ class MaterialController extends Controller
     public function index(Request $request): JsonResponse
     {
         $materials = $this->buildMaterialQuery($request)->paginate($request->get('per_page', 50));
+        $materials->setCollection(
+            $materials->getCollection()
+                ->map(fn (LibraryMaterial $material) => (new LibraryMaterialResource($material))->resolve($request))
+        );
         
         $stats = [
             'total_value' => (float) LibraryMaterial::active()
@@ -51,6 +55,10 @@ class MaterialController extends Controller
     {
         $materials = $this->buildMaterialQuery($request, $workstationId)
             ->paginate($request->get('per_page', 50));
+        $materials->setCollection(
+            $materials->getCollection()
+                ->map(fn (LibraryMaterial $material) => (new LibraryMaterialResource($material))->resolve($request))
+        );
 
         return response()->json($materials);
     }
@@ -60,7 +68,7 @@ class MaterialController extends Controller
      */
     private function buildMaterialQuery(Request $request, ?int $workstationId = null)
     {
-        $query = LibraryMaterial::with(['workstation', 'stock']);
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent']);
 
         if ($request->boolean('with_trashed')) {
             $query->withTrashed();
@@ -93,6 +101,18 @@ class MaterialController extends Controller
 
         if ($request->filled('material_type')) {
             $query->where('material_type', $request->material_type);
+        }
+
+        if ($request->boolean('board_trackable')) {
+            $eligible = config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']);
+            $query->where('material_type', 'reusable')
+                ->where(function ($q) use ($eligible) {
+                    $q->whereIn('category', $eligible)
+                        ->orWhereHas('materialCategory', function ($categoryQuery) use ($eligible) {
+                            $categoryQuery->whereIn('name', $eligible)
+                                ->orWhereHas('parent', fn ($parentQuery) => $parentQuery->whereIn('name', $eligible));
+                        });
+                });
         }
 
         if ($request->filled('search')) {
