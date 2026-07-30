@@ -383,6 +383,7 @@ class LeaveManagementService
                 'id' => $employee->id,
                 'employee_id' => $employee->employee_id,
                 'name' => $employee->name,
+                'gender' => $employee->gender,
                 'department' => $employee->department?->name,
                 'position' => $employee->position,
             ] : null,
@@ -570,12 +571,13 @@ class LeaveManagementService
             ->orderBy('first_name')
             ->orderBy('last_name');
 
-        return $query->get(['id', 'employee_id', 'first_name', 'last_name', 'position', 'department_id'])
+        return $query->get(['id', 'employee_id', 'first_name', 'last_name', 'position', 'department_id', 'gender'])
             ->map(function (Employee $employee) {
                 return [
                     'id' => $employee->id,
                     'employee_id' => $employee->employee_id,
                     'name' => $employee->name,
+                    'gender' => $employee->gender,
                     'position' => $employee->position,
                     'department' => $employee->department ? [
                         'id' => $employee->department->id,

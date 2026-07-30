@@ -58,6 +58,7 @@ class Employee extends Model
         'manager_id',
         'address',
         'date_of_birth',
+        'gender',
 
         'emergency_contact',
         'performance_rating',

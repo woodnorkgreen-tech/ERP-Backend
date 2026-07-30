@@ -170,6 +170,21 @@ class LeaveRequestController extends Controller
 
         $employee = $this->resolveTargetEmployee($user, $validated['employee_id'] ?? null);
         $leaveType = LeaveType::query()->whereKey($validated['leave_type_id'])->firstOrFail();
+
+        if (!$leaveType->isEligibleForEmployee($employee)) {
+            $message = $employee->gender
+                ? "{$leaveType->name} is not available for {$employee->name}."
+                : "{$employee->name}'s gender is not set — required before {$leaveType->name} can be requested.";
+
+            return response()->json([
+                'success' => false,
+                'message' => $message,
+                'errors' => [
+                    'leave_type_id' => [$message],
+                ],
+            ], 422);
+        }
+
         $this->ensureContactEmployeeIsDifferent($employee->id, $validated['contact_employee_id'] ?? null);
 
         if (!$recordAsApproved) {
@@ -274,6 +289,20 @@ class LeaveRequestController extends Controller
         $leaveType = LeaveType::findOrFail($validated['leave_type_id']);
         $year = (int) date('Y', strtotime($validated['start_date']));
         $ignoreRequestId = $validated['ignore_request_id'] ?? null;
+
+        if (!$leaveType->isEligibleForEmployee($employee)) {
+            $message = $employee->gender
+                ? "{$leaveType->name} is not available for {$employee->name}."
+                : "{$employee->name}'s gender is not set — required before {$leaveType->name} can be requested.";
+
+            return response()->json([
+                'success' => false,
+                'message' => $message,
+                'errors' => [
+                    'leave_type_id' => [$message],
+                ],
+            ], 422);
+        }
 
         try {
             $this->leaveService->validateDateRange($validated['start_date'], $validated['end_date']);
@@ -409,6 +438,19 @@ class LeaveRequestController extends Controller
         $leaveType = isset($validated['leave_type_id'])
             ? LeaveType::findOrFail($validated['leave_type_id'])
             : $leaveRequest->leaveType;
+
+        if (!$leaveType->isEligibleForEmployee($leaveRequest->employee)) {
+            $message = "{$leaveType->name} is not available for {$leaveRequest->employee->name}.";
+
+            return response()->json([
+                'success' => false,
+                'message' => $message,
+                'errors' => [
+                    'leave_type_id' => [$message],
+                ],
+            ], 422);
+        }
+
         $this->ensureContactEmployeeIsDifferent($leaveRequest->employee_id, $validated['contact_employee_id'] ?? $leaveRequest->contact_employee_id);
         $this->ensureNoHandoverReasonIsPresent($validated);
 
