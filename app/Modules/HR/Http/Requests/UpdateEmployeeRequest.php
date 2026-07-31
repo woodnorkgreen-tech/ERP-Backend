@@ -35,6 +35,7 @@ class UpdateEmployeeRequest extends FormRequest
             'last_name'            => 'sometimes|required|string|max:255',
             'email'                => ['sometimes', 'nullable', 'email', Rule::unique('employees')->ignore($id)],
             'phone'                => 'nullable|string|max:20',
+            'gender'               => ['nullable', Rule::in(['male', 'female'])],
             'department_id'        => 'sometimes|required|exists:departments,id',
             'position'             => 'sometimes|required|string|max:255',
             'hire_date'            => 'sometimes|required|date',

@@ -13,6 +13,7 @@ class LeaveType extends Model
     protected $fillable = [
         'name',
         'code',
+        'restricted_gender',
         'days_per_year',
         'monthly_accrual_rate',
         'allow_advance',
@@ -38,5 +39,26 @@ class LeaveType extends Model
     public function balanceAdjustments(): HasMany
     {
         return $this->hasMany(LeaveBalanceAdjustment::class);
+    }
+
+    /**
+     * Whether the given employee may request this leave type. Unrestricted
+     * types (restricted_gender = null) are open to everyone. A restricted
+     * type with no gender recorded on the employee is treated as ineligible
+     * — a missing gender must never silently grant a gender-specific benefit
+     * (or silently deny it to the person it's actually for); the profile
+     * needs completing first.
+     */
+    public function isEligibleForEmployee(Employee $employee): bool
+    {
+        if (!$this->restricted_gender) {
+            return true;
+        }
+
+        if (!$employee->gender) {
+            return false;
+        }
+
+        return strtolower($employee->gender) === strtolower($this->restricted_gender);
     }
 }

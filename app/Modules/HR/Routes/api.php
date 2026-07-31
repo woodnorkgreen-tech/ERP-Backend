@@ -28,6 +28,7 @@ use App\Modules\HR\Http\Controllers\EmployeeSkillController;
 use App\Modules\HR\Http\Controllers\PerformanceReviewController;
 use App\Modules\HR\Http\Controllers\OnboardingController;
 use App\Modules\HR\Http\Controllers\OffboardingController;
+use App\Modules\HR\Http\Controllers\EmployeeStagingController;
 use App\Constants\Permissions;
 
 // Unprotected HR Routes (public recruitment only)
@@ -68,6 +69,22 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
         Route::post('employees/template/commit', [EmployeeController::class, 'commitImport'])
             ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+
+        // Employee Staging Repository & Selective Data-Pull
+        Route::prefix('staging')->group(function () {
+            Route::post('upload', [EmployeeStagingController::class, 'upload'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+            Route::get('records', [EmployeeStagingController::class, 'listRecords'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+            Route::get('match/{email}', [EmployeeStagingController::class, 'matchByEmail'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+            Route::get('batches', [EmployeeStagingController::class, 'index'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+            Route::delete('batches/{batchId}', [EmployeeStagingController::class, 'destroyBatch'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_DELETE);
+            Route::post('mark-applied/{id}', [EmployeeStagingController::class, 'markApplied'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+        });
 
         // middlewareFor, not middleware([...]): an associative array passed to
         // middleware() is flattened, which stacked ALL five permission checks
