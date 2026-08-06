@@ -14,6 +14,7 @@ use App\Modules\ProcurementStores\Controllers\POVerificationController;
 
 Route::get('/test', [ProcurementStoresController::class, 'test']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
+Route::get('/inventory/{material}/control-options', [ProcurementStoresController::class, 'controlOptions']);
 Route::post('/check-in', [ProcurementStoresController::class, 'checkIn']);
 Route::post('/check-out', [ProcurementStoresController::class, 'checkOut']);
 Route::post('/batch-check-in', [ProcurementStoresController::class, 'batchCheckIn']);

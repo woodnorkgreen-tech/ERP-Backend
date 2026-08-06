@@ -68,17 +68,21 @@ class InventoryService
             $stock->quantity_on_hand += $quantity;
             $stock->save();
 
+            $controlled = app(ControlledInventoryService::class)->apply($material, $quantity, $type, $meta);
+
             // 3. Generate or use provided batch number
             $batchNumber = $meta['batch_number'] ?? $this->generateBatchNumber();
 
             // 4. Log the movement with batch number
-            return InventoryLog::create([
+            $log = InventoryLog::create([
                 'material_id' => $materialId,
                 'user_id' => Auth::id(),
                 'type' => $type,
                 'batch_number' => $batchNumber,
                 'lot_number' => $meta['lot_number'] ?? null,
                 'expiry_date' => $meta['expiry_date'] ?? null,
+                'inventory_lot_id' => $controlled['inventory_lot_id'],
+                'inventory_serial_item_id' => $controlled['inventory_serial_item_id'],
                 'quantity' => $quantity,
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,
@@ -91,6 +95,12 @@ class InventoryService
                 'usage_type' => $usageType,
                 'logged_at' => $meta['logged_at'] ?? now(),
             ]);
+
+            foreach ($controlled['allocations'] as $allocation) {
+                $log->allocations()->create($allocation);
+            }
+
+            return $log->load('allocations');
         });
     }
 

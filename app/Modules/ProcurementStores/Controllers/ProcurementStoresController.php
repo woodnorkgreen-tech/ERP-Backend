@@ -6,15 +6,58 @@ use App\Http\Controllers\Controller;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\InventoryLog;
+use App\Modules\ProcurementStores\Models\InventoryLot;
+use App\Modules\ProcurementStores\Models\InventorySerialItem;
 use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Services\BoardRegistrationService;
 use App\Modules\ProcurementStores\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class ProcurementStoresController extends Controller
 {
+    public function controlOptions(LibraryMaterial $material): JsonResponse
+    {
+        $lots = InventoryLot::where('material_id', $material->id)
+            ->where('status', 'Released')->whereRaw('(quantity_on_hand - quantity_reserved) > 0')
+            ->orderByRaw('expiry_date IS NULL, expiry_date ASC')->get()
+            ->map(fn ($lot) => [
+                'id' => $lot->id, 'lot_number' => $lot->lot_number,
+                'expiry_date' => $lot->expiry_date?->toDateString(), 'available' => $lot->available,
+                'warehouse_code' => $lot->warehouse_code, 'location_bin' => $lot->location_bin,
+                'is_expired' => $lot->expiry_date?->isPast() ?? false,
+            ]);
+
+        $serials = InventorySerialItem::where('material_id', $material->id)
+            ->whereIn('status', ['Available', 'Issued'])->orderBy('tracking_code')->get([
+                'id', 'tracking_code', 'manufacturer_serial', 'status', 'condition_grade',
+                'inventory_lot_id', 'project_id', 'holder_name', 'location_bin',
+            ]);
+
+        return response()->json(['data' => ['lots' => $lots, 'serial_items' => $serials]]);
+    }
+
+    private function validateControlledMovement(Request $request, LibraryMaterial $material, string $type): void
+    {
+        $quantity = (float) $request->quantity;
+        if ($material->is_serialized) {
+            if ($quantity !== (float) (int) $quantity) {
+                throw ValidationException::withMessages(['quantity' => 'Serialized stock must move in whole units.']);
+            }
+            $field = $type === 'check_in' ? 'serial_numbers' : 'serial_item_ids';
+            $values = array_values(array_filter($request->input($field, []), fn ($value) => $value !== null && $value !== ''));
+            if (count($values) !== (int) $quantity || count($values) !== count(array_unique($values))) {
+                throw ValidationException::withMessages([$field => "Provide exactly {$quantity} unique serialized units."]);
+            }
+            $request->merge([$field => $values]);
+        }
+        if ($type === 'return' && $material->is_batch_controlled && !$material->is_serialized && !$request->filled('inventory_lot_id')) {
+            throw ValidationException::withMessages(['inventory_lot_id' => 'Select the original lot for this return.']);
+        }
+    }
+
     /**
      * Diagnostic test endpoint.
      */
@@ -144,6 +187,8 @@ class ProcurementStoresController extends Controller
             'logged_at' => 'nullable|date',
             'lot_number' => 'nullable|string|max:100',
             'expiry_date' => 'nullable|date|after_or_equal:today',
+            'serial_numbers' => 'nullable|array',
+            'serial_numbers.*' => 'string|max:150',
         ]);
 
         $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->findOrFail($request->material_id);
@@ -154,6 +199,7 @@ class ProcurementStoresController extends Controller
         if ($material->is_expiry_controlled && !$request->filled('expiry_date')) {
             return response()->json(['message' => 'An expiry date is required for this material.'], 422);
         }
+        $this->validateControlledMovement($request, $material, 'check_in');
 
         if ($material->isBoardTrackable() && (float) $request->quantity !== (float) (int) $request->quantity) {
             return response()->json([
@@ -226,7 +272,10 @@ class ProcurementStoresController extends Controller
             'quantity' => 'required|numeric|min:0.01',
             'project_id' => 'nullable|exists:projects,id',
             'notes' => 'nullable|string',
-            'logged_at' => 'nullable|date'
+            'logged_at' => 'nullable|date',
+            'inventory_lot_id' => 'nullable|exists:inventory_lots,id',
+            'serial_item_ids' => 'nullable|array',
+            'serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
         ]);
 
         $material = LibraryMaterial::with('materialCategory.parent')->find($request->material_id);
@@ -238,6 +287,7 @@ class ProcurementStoresController extends Controller
                 'redirect' => 'board_request',
             ], 422);
         }
+        $this->validateControlledMovement($request, $material, 'check_out');
 
         $service = new InventoryService();
 
@@ -319,7 +369,10 @@ class ProcurementStoresController extends Controller
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
             'project_id' => 'nullable|exists:projects,id',
-            'notes' => 'nullable|string'
+            'notes' => 'nullable|string',
+            'inventory_lot_id' => 'nullable|exists:inventory_lots,id',
+            'serial_item_ids' => 'nullable|array',
+            'serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
         ]);
 
         // Board materials must be returned through the Board Lifecycle endpoint so that
@@ -333,6 +386,7 @@ class ProcurementStoresController extends Controller
                 'redirect' => 'board_lifecycle',
             ], 422);
         }
+        $this->validateControlledMovement($request, $material, 'return');
 
         $service = new InventoryService();
         $log = $service->adjustStock(
@@ -361,7 +415,10 @@ class ProcurementStoresController extends Controller
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
-            'notes' => 'required|string|min:5'
+            'notes' => 'required|string|min:5',
+            'inventory_lot_id' => 'nullable|exists:inventory_lots,id',
+            'serial_item_ids' => 'nullable|array',
+            'serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
         ]);
 
         // Board materials must be scrapped through the Board Lifecycle endpoint so that
@@ -375,6 +432,7 @@ class ProcurementStoresController extends Controller
                 'redirect' => 'board_lifecycle',
             ], 422);
         }
+        $this->validateControlledMovement($request, $material, 'defective');
 
         $service = new InventoryService();
 

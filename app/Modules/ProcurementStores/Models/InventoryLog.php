@@ -21,6 +21,8 @@ class InventoryLog extends Model
         'batch_number',
         'lot_number',
         'expiry_date',
+        'inventory_lot_id',
+        'inventory_serial_item_id',
         'quantity',
         'balance_after',
         'project_id',
@@ -52,5 +54,10 @@ class InventoryLog extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(\App\Models\Project::class, 'project_id');
+    }
+
+    public function allocations()
+    {
+        return $this->hasMany(InventoryMovementAllocation::class);
     }
 }
