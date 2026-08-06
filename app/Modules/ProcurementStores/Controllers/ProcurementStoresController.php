@@ -194,6 +194,10 @@ class ProcurementStoresController extends Controller
 
         $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->findOrFail($request->material_id);
 
+        if (($material->item_status ?? 'Active') !== 'Active') {
+            return response()->json(['message' => "Only Active Material Library items can be received. This item is {$material->item_status}."], 422);
+        }
+
         if ($material->is_batch_controlled && !$request->filled('lot_number')) {
             return response()->json(['message' => 'A supplier or internal lot number is required for this material.'], 422);
         }

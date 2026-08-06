@@ -6,6 +6,8 @@ Material Library owns catalogue identity and classification: material name, SKU,
 
 Stores Receive Stock owns the first physical inventory facts: quantity, receipt unit cost, warehouse/bin, reference, lot, expiry, and serial identities. Every balance is derived from posted inventory movements. The material `unit_cost` exposed for valuation is a read-only weighted average derived from receipt transactions, not a registration input.
 
+The Receive Stock picker presents only Active catalogue items and supports direct narrowing by material class (Boards, Consumables, Reusables), category, SKU, and name. Selection never creates a second material record; it posts a receipt against the existing Material Library identity.
+
 ## Operating contract
 
 The Material Library owns item identity and policy. Stores owns physical quantity, location and movement. An operator may record what happened, but may not reinterpret how an item behaves.
