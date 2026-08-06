@@ -20,7 +20,6 @@ Route::post('/check-out', [ProcurementStoresController::class, 'checkOut']);
 Route::post('/batch-check-in', [ProcurementStoresController::class, 'batchCheckIn']);
 Route::post('/batch-check-out', [ProcurementStoresController::class, 'batchCheckOut']);
 Route::post('/update-settings', [ProcurementStoresController::class, 'updateStockSettings']);
-Route::post('/adjust-stock', [ProcurementStoresController::class, 'adjustStock']);
 Route::post('/returns', [ProcurementStoresController::class, 'returns']);
 Route::post('/defective', [ProcurementStoresController::class, 'markDefective']);
 Route::get('/inventory-logs', [ProcurementStoresController::class, 'inventoryLogs']);

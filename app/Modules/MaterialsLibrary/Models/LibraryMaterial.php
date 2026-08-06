@@ -206,6 +206,11 @@ class LibraryMaterial extends Model
         return $this->hasOne(\App\Modules\ProcurementStores\Models\Stock::class, 'material_id');
     }
 
+    public function inventoryLogs(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Modules\ProcurementStores\Models\InventoryLog::class, 'material_id');
+    }
+
     /**
      * Whether this catalogue item must use the individual board lifecycle.
      *

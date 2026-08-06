@@ -75,6 +75,7 @@ class ProcurementStoresController extends Controller
     public function inventory(Request $request): JsonResponse
     {
         $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom'])
+            ->withCount('inventoryLogs')
             // The Material Library is the catalogue; Store Inventory contains only
             // items that have entered stock control. A zero balance remains visible
             // once a stock row exists because reorder settings and history matter.
@@ -172,6 +173,11 @@ class ProcurementStoresController extends Controller
                 'min_stock_level'   => (float) ($material->stock?->min_stock_level ?? 0),
                 'location'          => $material->stock?->location_bin ?? 'Not Set',
                 'warehouse_code'    => $material->stock?->warehouse_code ?? 'MAIN',
+                'can_set_opening_stock' => !$isBoard
+                    && !$material->is_serialized
+                    && !$material->is_batch_controlled
+                    && (int) $material->inventory_logs_count === 0
+                    && $onHand == 0,
                 '_stock_value'      => $isBoard
                     ? (float) ($bc?->in_stores_value ?? 0)
                     : $onHand * (float) $material->unit_cost,
@@ -361,9 +367,8 @@ class ProcurementStoresController extends Controller
     }
 
     /**
-     * Update stock policy settings: reorder level, physical location, warehouse.
-     * Stock quantity is intentionally NOT adjustable here — it moves only through
-     * inventory transactions (check_in, check_out, return, defective).
+     * Update stock policy settings and, before any movements exist, establish an
+     * opening balance for simple quantity-tracked stock.
      */
     public function updateStockSettings(Request $request): JsonResponse
     {
@@ -371,108 +376,62 @@ class ProcurementStoresController extends Controller
             return response()->json(['message' => 'Only Stores team members can update stock settings.'], 403);
         }
 
-        $request->validate([
+        $validated = $request->validate([
             'material_id'     => 'required|exists:library_materials,id',
             'min_stock_level' => 'nullable|numeric|min:0',
             'location_bin'    => 'nullable|string|max:50',
             'warehouse_code'  => 'nullable|string|max:20',
+            'opening_quantity' => 'nullable|numeric|min:0',
         ]);
 
-        $stock = Stock::firstOrCreate(
-            ['material_id' => $request->material_id],
-            ['quantity_on_hand' => 0, 'quantity_reserved' => 0]
-        );
+        $material = LibraryMaterial::findOrFail($validated['material_id']);
+        $stock = DB::transaction(function () use ($request, $validated, $material) {
+            $stock = Stock::firstOrCreate(
+                ['material_id' => $material->id],
+                ['quantity_on_hand' => 0, 'quantity_reserved' => 0]
+            );
+            $stock = Stock::whereKey($stock->id)->lockForUpdate()->firstOrFail();
 
-        if ($request->has('min_stock_level')) {
-            $stock->min_stock_level = $request->min_stock_level;
-        }
-        if ($request->has('location_bin')) {
-            $stock->location_bin = $request->location_bin;
-        }
-        if ($request->has('warehouse_code')) {
-            $stock->warehouse_code = $request->warehouse_code;
-        }
+            if ($request->filled('opening_quantity') && (float) $validated['opening_quantity'] > 0) {
+                if ($material->isBoardTrackable() || $material->is_serialized || $material->is_batch_controlled) {
+                    throw ValidationException::withMessages([
+                        'opening_quantity' => 'Tracked boards, lots and serial items must enter through Receive Stock.',
+                    ]);
+                }
+                if ((float) $stock->quantity_on_hand !== 0.0
+                    || InventoryLog::where('material_id', $material->id)->exists()) {
+                    throw ValidationException::withMessages([
+                        'opening_quantity' => 'Opening stock can only be set once, before any stock movements exist.',
+                    ]);
+                }
 
-        $stock->save();
+                $opening = (float) $validated['opening_quantity'];
+                $stock->quantity_on_hand = $opening;
+                InventoryLog::create([
+                    'material_id' => $material->id,
+                    'user_id' => auth()->id(),
+                    'type' => 'adjustment',
+                    'batch_number' => app(InventoryService::class)->generateBatchNumber(),
+                    'quantity' => $opening,
+                    'balance_after' => $opening,
+                    'notes' => 'Opening stock established from Stock Settings.',
+                    'usage_type' => $material->expectedUsageType(),
+                    'logged_at' => now(),
+                ]);
+            }
+
+            if ($request->has('min_stock_level')) $stock->min_stock_level = $request->min_stock_level;
+            if ($request->has('location_bin')) $stock->location_bin = $request->location_bin;
+            if ($request->has('warehouse_code')) $stock->warehouse_code = $request->warehouse_code;
+
+            $stock->save();
+            return $stock;
+        });
 
         return response()->json([
             'message' => 'Stock settings updated successfully',
             'data' => $stock,
             'status' => 'success'
-        ]);
-    }
-
-    /**
-     * Reconcile a simple quantity-tracked item to a verified physical count.
-     * The user supplies the counted balance; the system calculates and records
-     * the variance so quantity history remains auditable.
-     */
-    public function adjustStock(Request $request): JsonResponse
-    {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
-            return response()->json(['message' => 'Only Stores team members can adjust stock.'], 403);
-        }
-
-        $validated = $request->validate([
-            'material_id' => 'required|integer|exists:library_materials,id',
-            'counted_quantity' => 'required|numeric|min:0',
-            'reason' => 'required|string|min:10|max:1000',
-            'reference_no' => 'nullable|string|max:100',
-        ]);
-
-        $material = LibraryMaterial::findOrFail($validated['material_id']);
-        if ($material->isBoardTrackable()) {
-            return response()->json([
-                'message' => 'Board stock is controlled by individual QR-labelled board records. Reconcile the specific boards instead.',
-                'redirect' => 'board_registry',
-            ], 422);
-        }
-        if ($material->is_serialized || $material->is_batch_controlled) {
-            return response()->json([
-                'message' => 'This item is lot/serial controlled. Reconcile its individual serials or lots instead of overriding the total.',
-                'redirect' => 'control_options',
-            ], 422);
-        }
-
-        $result = DB::transaction(function () use ($material, $validated) {
-            $stock = Stock::where('material_id', $material->id)->lockForUpdate()->firstOrFail();
-            $counted = (float) $validated['counted_quantity'];
-            $reserved = (float) $stock->quantity_reserved;
-            if ($counted < $reserved) {
-                throw ValidationException::withMessages([
-                    'counted_quantity' => "Counted stock cannot be below the {$reserved} units currently reserved.",
-                ]);
-            }
-
-            $previous = (float) $stock->quantity_on_hand;
-            $variance = $counted - $previous;
-            if (abs($variance) < 0.00001) {
-                throw ValidationException::withMessages([
-                    'counted_quantity' => 'The counted quantity matches the current balance; no adjustment is required.',
-                ]);
-            }
-
-            $stock->update(['quantity_on_hand' => $counted]);
-            $log = InventoryLog::create([
-                'material_id' => $material->id,
-                'user_id' => auth()->id(),
-                'type' => 'adjustment',
-                'batch_number' => app(InventoryService::class)->generateBatchNumber(),
-                'quantity' => $variance,
-                'balance_after' => $counted,
-                'reference_no' => $validated['reference_no'] ?? null,
-                'notes' => "Physical count adjustment. Previous balance: {$previous}. Reason: {$validated['reason']}",
-                'usage_type' => $material->expectedUsageType(),
-                'logged_at' => now(),
-            ]);
-
-            return compact('stock', 'log', 'previous', 'counted', 'variance');
-        });
-
-        return response()->json([
-            'message' => 'Stock count reconciled successfully.',
-            'data' => $result,
-            'status' => 'success',
         ]);
     }
 
