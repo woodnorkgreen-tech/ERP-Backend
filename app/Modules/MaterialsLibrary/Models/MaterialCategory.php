@@ -15,6 +15,7 @@ class MaterialCategory extends Model
 
     protected $fillable = [
         'name',
+        'item_type_id',
         'code',
         'parent_id',
         'sort_order',
@@ -39,6 +40,11 @@ class MaterialCategory extends Model
     public function parent(): BelongsTo
     {
         return $this->belongsTo(MaterialCategory::class, 'parent_id');
+    }
+
+    public function itemType(): BelongsTo
+    {
+        return $this->belongsTo(MaterialItemType::class, 'item_type_id');
     }
 
     public function children(): HasMany

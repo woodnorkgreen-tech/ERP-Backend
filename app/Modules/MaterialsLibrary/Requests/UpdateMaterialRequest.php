@@ -29,6 +29,7 @@ class UpdateMaterialRequest extends FormRequest
 
         return [
             'workstation_id' => 'sometimes|exists:workstations,id',
+            'item_type_id' => 'sometimes|required|integer|exists:material_item_types,id',
             'material_code' => [
                 'sometimes',
                 'string',
@@ -36,6 +37,9 @@ class UpdateMaterialRequest extends FormRequest
                 Rule::unique('library_materials', 'material_code')->ignore($materialId),
             ],
             'material_name' => 'sometimes|required|string|max:255',
+            'brand_manufacturer' => 'nullable|string|max:150',
+            'manufacturer_part_number' => 'nullable|string|max:150',
+            'alternative_item_name' => 'nullable|string|max:255',
             'category' => 'nullable|string|max:100',
             'subcategory' => 'nullable|string|max:100',
             'material_type'       => 'nullable|in:consumable,reusable',
@@ -52,6 +56,12 @@ class UpdateMaterialRequest extends FormRequest
             'minimum_reusable_width_mm' => 'nullable|numeric|min:0',
             'minimum_reusable_area_m2' => 'nullable|numeric|min:0',
             'unit_of_measure' => 'sometimes|string|max:50',
+            'base_uom_id' => 'sometimes|required|integer|exists:units_of_measure,id',
+            'purchase_uom_id' => 'nullable|integer|exists:units_of_measure,id',
+            'issue_uom_id' => 'sometimes|required|integer|exists:units_of_measure,id',
+            'valuation_method' => 'sometimes|in:FIFO,Landed Cost,Weighted Average',
+            'revision_version' => 'sometimes|string|max:20',
+            'effective_date' => 'nullable|date',
             'unit_cost' => 'nullable|numeric|min:0',
             'attributes' => 'nullable|array',
             'is_active' => 'boolean',

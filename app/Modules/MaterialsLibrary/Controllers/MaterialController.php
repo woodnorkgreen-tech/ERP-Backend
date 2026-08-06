@@ -9,6 +9,7 @@ use App\Modules\MaterialsLibrary\Requests\StoreMaterialRequest;
 use App\Modules\MaterialsLibrary\Requests\UpdateMaterialRequest;
 use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
 use App\Modules\MaterialsLibrary\Support\MaterialControl;
+use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -69,7 +70,7 @@ class MaterialController extends Controller
      */
     private function buildMaterialQuery(Request $request, ?int $workstationId = null)
     {
-        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent']);
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom']);
 
         if ($request->boolean('with_trashed')) {
             $query->withTrashed();
@@ -198,6 +199,7 @@ class MaterialController extends Controller
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
         $data = $this->syncControlCompatibility($data);
+        $data = $this->syncUomCompatibility($data);
 
         // Wrap attributes in 'attributes' key for JSON column if not already
         if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
@@ -237,6 +239,7 @@ class MaterialController extends Controller
         $data = $request->validated();
         $data['updated_by'] = auth()->id();
         $data = $this->syncControlCompatibility($data, $material);
+        $data = $this->syncUomCompatibility($data, $material);
 
          // Wrap attributes in 'attributes' key for JSON column if not already
          if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
@@ -339,6 +342,17 @@ class MaterialController extends Controller
             $data['item_status'] = $data['is_active'] ? 'Active' : 'Inactive';
         }
 
+        return $data;
+    }
+
+    private function syncUomCompatibility(array $data, ?LibraryMaterial $material = null): array
+    {
+        $baseUomId = $data['base_uom_id'] ?? $material?->base_uom_id;
+        if ($baseUomId) {
+            $baseUom = UnitOfMeasure::where('is_active', true)->findOrFail($baseUomId);
+            $data['unit_of_measure'] = $baseUom->code; // keep legacy consumers synchronized
+            $data['issue_uom_id'] ??= $baseUomId;
+        }
         return $data;
     }
 

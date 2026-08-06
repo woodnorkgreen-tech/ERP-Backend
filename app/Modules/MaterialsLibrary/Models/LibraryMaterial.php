@@ -22,8 +22,12 @@ class LibraryMaterial extends Model
      */
     protected $fillable = [
         'workstation_id',
+        'item_type_id',
         'material_code',
         'material_name',
+        'brand_manufacturer',
+        'manufacturer_part_number',
+        'alternative_item_name',
         'category',
         'subcategory',
         'material_category_id',
@@ -40,12 +44,20 @@ class LibraryMaterial extends Model
         'minimum_reusable_width_mm',
         'minimum_reusable_area_m2',
         'unit_of_measure',
+        'base_uom_id',
+        'purchase_uom_id',
+        'issue_uom_id',
         'unit_cost',
+        'valuation_method',
+        'revision_version',
+        'effective_date',
         'attributes',
         'is_active',
         'notes',
         'created_by',
         'updated_by',
+        'approved_by',
+        'approval_date',
     ];
 
     /**
@@ -63,6 +75,8 @@ class LibraryMaterial extends Model
         'minimum_reusable_length_mm' => 'decimal:2',
         'minimum_reusable_width_mm' => 'decimal:2',
         'minimum_reusable_area_m2' => 'decimal:4',
+        'effective_date' => 'date',
+        'approval_date' => 'datetime',
     ];
 
     /**
@@ -76,6 +90,37 @@ class LibraryMaterial extends Model
     public function workstation(): BelongsTo
     {
         return $this->belongsTo(Workstation::class);
+    }
+
+    public function itemType(): BelongsTo
+    {
+        return $this->belongsTo(MaterialItemType::class, 'item_type_id');
+    }
+
+    public function baseUom(): BelongsTo
+    {
+        return $this->belongsTo(UnitOfMeasure::class, 'base_uom_id');
+    }
+
+    public function purchaseUom(): BelongsTo
+    {
+        return $this->belongsTo(UnitOfMeasure::class, 'purchase_uom_id');
+    }
+
+    public function issueUom(): BelongsTo
+    {
+        return $this->belongsTo(UnitOfMeasure::class, 'issue_uom_id');
+    }
+
+    public function compatibleWorkstations(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Workstation::class, 'material_workstations', 'material_id', 'workstation_id')
+            ->withPivot('is_primary')->withTimestamps();
+    }
+
+    public function uomConversions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(MaterialUomConversion::class, 'material_id');
     }
 
     /**

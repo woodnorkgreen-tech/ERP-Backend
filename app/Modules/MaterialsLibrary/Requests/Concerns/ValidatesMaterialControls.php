@@ -36,6 +36,10 @@ trait ValidatesMaterialControls
                 if ($category?->allowed_uoms && !in_array($this->input('unit_of_measure'), $category->allowed_uoms, true)) {
                     $validator->errors()->add('unit_of_measure', 'The unit of measure is not allowed for this category.');
                 }
+                if ($category?->item_type_id && $this->input('item_type_id')
+                    && (int) $category->item_type_id !== (int) $this->input('item_type_id')) {
+                    $validator->errors()->add('item_type_id', 'The selected item type does not own this category.');
+                }
             }
         }];
     }

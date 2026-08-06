@@ -17,11 +17,18 @@ class LibraryMaterialResource extends JsonResource
         return [
             'id' => $this->id,
             'workstation_id' => $this->workstation_id,
+            'item_type_id' => $this->item_type_id,
+            'item_type' => $this->whenLoaded('itemType', fn () => [
+                'id' => $this->itemType->id, 'code' => $this->itemType->code, 'name' => $this->itemType->name,
+            ]),
             'workstation_name' => $this->whenLoaded('workstation', function () {
                 return $this->workstation->name;
             }),
             'material_code'        => $this->material_code,
             'material_name'        => $this->material_name,
+            'brand_manufacturer'   => $this->brand_manufacturer,
+            'manufacturer_part_number' => $this->manufacturer_part_number,
+            'alternative_item_name' => $this->alternative_item_name,
             'category'             => $this->category,
             'subcategory'          => $this->subcategory,
             'material_category_id' => $this->material_category_id,
@@ -42,6 +49,13 @@ class LibraryMaterialResource extends JsonResource
                 ? 'individual_board'
                 : ($this->issue_disposition === 'returnable' ? 'reusable_item' : 'quantity'),
             'unit_of_measure' => $this->unit_of_measure,
+            'base_uom_id' => $this->base_uom_id,
+            'purchase_uom_id' => $this->purchase_uom_id,
+            'issue_uom_id' => $this->issue_uom_id,
+            'base_uom' => $this->whenLoaded('baseUom', fn () => $this->baseUom?->code),
+            'valuation_method' => $this->valuation_method,
+            'revision_version' => $this->revision_version,
+            'effective_date' => $this->effective_date?->toDateString(),
             'unit_cost' => (float) $this->unit_cost,
             'attributes' => ($this->attributes && isset($this->attributes['attributes'])) ? $this->attributes['attributes'] : [],
             'is_active' => $this->is_active,
