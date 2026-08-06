@@ -9,6 +9,7 @@ use App\Modules\Support\Http\Requests\UpdateSupportTicketRequest;
 use App\Modules\Support\Http\Resources\SupportTicketResource;
 use App\Modules\Support\Models\SupportTicket;
 use App\Modules\Support\Models\SupportTicketAttachment;
+use App\Modules\Support\Services\SupportMetricsService;
 use App\Modules\Support\Services\SupportTicketService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,7 +19,16 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SupportTicketController extends Controller
 {
-    public function __construct(private readonly SupportTicketService $service) {}
+    public function __construct(
+        private readonly SupportTicketService $service,
+        private readonly SupportMetricsService $metrics,
+    ) {}
+
+    public function metrics(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', SupportTicket::class);
+        return response()->json(['data' => $this->metrics->forUser($request->user())]);
+    }
 
     public function index(Request $request): JsonResponse
     {

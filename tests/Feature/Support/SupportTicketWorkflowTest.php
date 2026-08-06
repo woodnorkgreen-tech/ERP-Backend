@@ -275,6 +275,89 @@ class SupportTicketWorkflowTest extends TestCase
             ->assertJsonPath('data.assignee.id', $agent->id);
     }
 
+    public function test_desk_metrics_report_service_levels_within_the_viewers_scope(): void
+    {
+        $owner = $this->user('Employee');
+        $other = $this->user('Employee');
+        $admin = $this->user('Admin');
+
+        $awaiting = $this->ticket($owner);
+        $awaiting->forceFill(['created_at' => now()->subMinutes(60)])->save();
+
+        $hit = $this->ticket($owner);
+        $hit->update([
+            'status' => 'resolved',
+            'resolved_at' => now()->subHour(),
+            'resolution_due_at' => now(),
+        ]);
+
+        $missed = $this->ticket($other);
+        $missed->update([
+            'status' => 'resolved',
+            'resolved_at' => now(),
+            'resolution_due_at' => now()->subHour(),
+        ]);
+
+        Sanctum::actingAs($admin);
+        $this->getJson('/api/support/tickets/metrics')
+            ->assertOk()
+            ->assertJsonPath('data.total.value', 3)
+            ->assertJsonPath('data.unassigned', 1)
+            ->assertJsonPath('data.awaiting.count', 1)
+            ->assertJsonPath('data.resolved_today.count', 2)
+            ->assertJsonPath('data.resolved_today.sla_hit_pct', 50)
+            ->assertJsonPath('data.status_totals.open', 1)
+            ->assertJsonPath('data.status_totals.resolved', 2);
+
+        $this->assertGreaterThanOrEqual(59, $this->getJson('/api/support/tickets/metrics')->json('data.awaiting.avg_wait_minutes'));
+
+        // A requester's figures describe their own tickets only.
+        Sanctum::actingAs($other);
+        $this->getJson('/api/support/tickets/metrics')
+            ->assertOk()
+            ->assertJsonPath('data.total.value', 1)
+            ->assertJsonPath('data.resolved_today.sla_hit_pct', 0);
+    }
+
+    public function test_a_reply_cannot_reach_a_status_the_management_panel_would_reject(): void
+    {
+        $owner = $this->user('Employee');
+        $admin = $this->user('Admin');
+        $ticket = $this->ticket($owner);
+        $ticket->update(['status' => 'closed']);
+
+        Sanctum::actingAs($admin);
+        $this->patchJson("/api/support/tickets/{$ticket->id}", ['status' => 'waiting_on_user'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('status');
+
+        // Reopening is the only legal move out of closed, by either route.
+        $this->patchJson("/api/support/tickets/{$ticket->id}", ['status' => 'in_progress'])->assertOk();
+        $this->postJson("/api/support/tickets/{$ticket->id}/replies", [
+            'message' => 'Please confirm whether the printer is now reachable.',
+            'action' => 'waiting_on_user',
+        ])->assertOk()->assertJsonPath('data.status', 'waiting_on_user');
+    }
+
+    public function test_a_save_that_changes_nothing_does_not_notify_the_requester(): void
+    {
+        $owner = $this->user('Employee');
+        $admin = $this->user('Admin');
+        $ticket = $this->ticket($owner);
+
+        Sanctum::actingAs($admin);
+        $this->patchJson("/api/support/tickets/{$ticket->id}", ['priority' => $ticket->priority])->assertOk();
+
+        $this->assertFalse(AppNotification::where('user_id', $owner->id)->where('type', 'support_ticket_updated')->exists());
+        $this->assertDatabaseMissing('support_ticket_activities', [
+            'support_ticket_id' => $ticket->id,
+            'action' => 'updated',
+        ]);
+
+        $this->patchJson("/api/support/tickets/{$ticket->id}", ['priority' => 'urgent'])->assertOk();
+        $this->assertTrue(AppNotification::where('user_id', $owner->id)->where('type', 'support_ticket_updated')->exists());
+    }
+
     private function user(string $role): User
     {
         $user = User::factory()->create(['is_active' => true]);
