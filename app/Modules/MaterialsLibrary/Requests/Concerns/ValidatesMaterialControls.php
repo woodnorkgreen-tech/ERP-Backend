@@ -26,6 +26,11 @@ trait ValidatesMaterialControls
             if ($disposition === 'recoverable_remainder' && $tracking !== 'dimension_piece') {
                 $validator->errors()->add('tracking_mode', 'Recoverable remainder items must use dimension_piece tracking.');
             }
+            if ($disposition === 'recoverable_remainder'
+                && !$this->filled('minimum_reusable_area_m2')
+                && (!$this->filled('minimum_reusable_length_mm') || !$this->filled('minimum_reusable_width_mm'))) {
+                $validator->errors()->add('minimum_reusable_area_m2', 'Define a minimum recoverable area or both minimum length and width.');
+            }
 
             $categoryId = $this->input('material_category_id');
             if ($categoryId) {
