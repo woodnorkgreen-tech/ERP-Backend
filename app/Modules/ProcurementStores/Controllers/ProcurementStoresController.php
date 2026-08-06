@@ -31,7 +31,7 @@ class ProcurementStoresController extends Controller
      */
     public function inventory(Request $request): JsonResponse
     {
-        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent']);
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom']);
 
         // Filter by Search Query
         if ($request->filled('search')) {
@@ -97,6 +97,15 @@ class ProcurementStoresController extends Controller
                 'is_active'         => $material->is_active,
                 'notes'             => $material->notes,
                 'material_type'     => $material->material_type ?? 'consumable',
+                'item_status'       => $material->item_status ?? ($material->is_active ? 'Active' : 'Inactive'),
+                'issue_disposition' => $material->issue_disposition ?? ($material->material_type === 'reusable' ? 'returnable' : 'consumed'),
+                'tracking_mode'     => $material->tracking_mode ?? ($material->isBoardTrackable() ? 'dimension_piece' : 'bulk_quantity'),
+                'is_hazardous'      => (bool) $material->is_hazardous,
+                'is_serialized'     => (bool) $material->is_serialized,
+                'is_batch_controlled' => (bool) $material->is_batch_controlled,
+                'is_expiry_controlled' => (bool) $material->is_expiry_controlled,
+                'is_project_chargeable' => (bool) $material->is_project_chargeable,
+                'base_uom'          => $material->baseUom?->code ?? $material->unit_of_measure,
                 'board_trackable'   => $material->isBoardTrackable(),
                 'stock_handling'    => $material->isBoardTrackable()
                     ? 'individual_board'
