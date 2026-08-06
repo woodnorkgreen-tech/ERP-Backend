@@ -74,7 +74,11 @@ class ProcurementStoresController extends Controller
      */
     public function inventory(Request $request): JsonResponse
     {
-        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom']);
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom'])
+            // The Material Library is the catalogue; Store Inventory contains only
+            // items that have entered stock control. A zero balance remains visible
+            // once a stock row exists because reorder settings and history matter.
+            ->whereHas('stock');
 
         // Filter by Search Query
         if ($request->filled('search')) {
@@ -91,7 +95,9 @@ class ProcurementStoresController extends Controller
             $query->where('category', 'like', "%{$request->category}%");
         }
 
-        $paginator = $query->latest()->paginate($request->get('per_page', 50));
+        $query->latest('library_materials.created_at');
+        $summaryMaterials = (clone $query)->get();
+        $paginator = $query->paginate(min((int) $request->get('per_page', 50), 200));
 
         // For board-tracked (individual) materials, quantity_on_hand on the stock row
         // also counts ungraded Quarantine boards, which overstates what's actually
@@ -99,22 +105,26 @@ class ProcurementStoresController extends Controller
         // inventory matches the board registry:
         //   on_hand   = boards physically in stores (Available + Quarantine)
         //   available = ready-to-issue (Available) minus soft reservations
-        $boardMaterialIds = $paginator->getCollection()
-            ->filter(fn($m) => optional($m->stock)->tracking_mode === Stock::TRACK_BY_AREA)
+        $allMaterials = $summaryMaterials->concat($paginator->getCollection())->unique('id');
+        $boardMaterialIds = $allMaterials
+            ->filter(fn($m) => $m->isBoardTrackable())
             ->pluck('id');
 
         $boardCounts = $boardMaterialIds->isNotEmpty()
             ? Board::whereIn('library_material_id', $boardMaterialIds)
                 ->selectRaw("library_material_id,
                     SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) AS available_cnt,
-                    SUM(CASE WHEN status IN ('Available', 'Quarantine') THEN 1 ELSE 0 END) AS in_stores_cnt")
+                    SUM(CASE WHEN status IN ('Available', 'Quarantine') THEN 1 ELSE 0 END) AS in_stores_cnt,
+                    SUM(CASE WHEN status IN ('Available', 'Quarantine') THEN current_value ELSE 0 END) AS in_stores_value")
                 ->groupBy('library_material_id')
                 ->get()
                 ->keyBy('library_material_id')
             : collect();
 
-        $paginator->getCollection()->transform(function ($material) use ($boardCounts) {
-            $isBoard = optional($material->stock)->tracking_mode === Stock::TRACK_BY_AREA;
+        $formatMaterial = function ($material) use ($boardCounts) {
+            // The governed master controls behaviour. stocks.tracking_mode is a
+            // compatibility projection and must never override master data.
+            $isBoard = $material->isBoardTrackable();
             $bc      = $isBoard ? $boardCounts->get($material->id) : null;
 
             $reserved   = (float) ($material->stock?->quantity_reserved ?? 0);
@@ -130,9 +140,12 @@ class ProcurementStoresController extends Controller
                 'workstation_id'    => $material->workstation_id,
                 'material_name'     => $material->material_name,
                 'material_code'     => $material->material_code,
-                'category'          => $material->category,
-                'subcategory'       => $material->subcategory,
-                'unit_of_measure'   => $material->unit_of_measure,
+                'material_category_id' => $material->material_category_id,
+                'category'          => $material->materialCategory?->parent?->name
+                    ?? $material->materialCategory?->name ?? $material->category,
+                'subcategory'       => $material->materialCategory?->parent
+                    ? $material->materialCategory->name : $material->subcategory,
+                'unit_of_measure'   => $material->baseUom?->code ?? $material->unit_of_measure,
                 'unit_cost'         => $material->unit_cost,
                 'workstation'       => $material->workstation,
                 'workstation_name'  => $material->workstation?->name ?? 'N/A',
@@ -158,11 +171,36 @@ class ProcurementStoresController extends Controller
                 'available'         => $available,
                 'min_stock_level'   => (float) ($material->stock?->min_stock_level ?? 0),
                 'location'          => $material->stock?->location_bin ?? 'Not Set',
+                'warehouse_code'    => $material->stock?->warehouse_code ?? 'MAIN',
+                '_stock_value'      => $isBoard
+                    ? (float) ($bc?->in_stores_value ?? 0)
+                    : $onHand * (float) $material->unit_cost,
             ];
+        };
+
+        $summaryRows = $summaryMaterials->map($formatMaterial);
+        $paginator->getCollection()->transform(function ($material) use ($formatMaterial) {
+            $row = $formatMaterial($material);
+            unset($row['_stock_value']);
+            return $row;
         });
+
+        $summary = [
+            'total_items' => $summaryRows->count(),
+            'total_value' => round((float) $summaryRows->sum('_stock_value'), 2),
+            'low_stock_count' => $summaryRows->filter(fn ($row) =>
+                $row['min_stock_level'] > 0 && $row['available'] <= $row['min_stock_level']
+            )->count(),
+            'out_of_stock_count' => $summaryRows->where('available', '<=', 0)->count(),
+            'board_item_count' => $summaryRows->where('board_trackable', true)->count(),
+            'reusable_item_count' => $summaryRows->filter(fn ($row) =>
+                $row['issue_disposition'] === 'returnable' && !$row['board_trackable']
+            )->count(),
+        ];
 
         return response()->json([
             'data'   => $paginator,
+            'summary' => $summary,
             'status' => 'success',
         ]);
     }

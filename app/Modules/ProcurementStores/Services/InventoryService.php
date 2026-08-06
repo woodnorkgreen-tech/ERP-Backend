@@ -58,12 +58,25 @@ class InventoryService
             // Ensure the row exists before locking; insert has no race risk.
             Stock::firstOrCreate(
                 ['material_id' => $materialId],
-                ['quantity_on_hand' => 0, 'warehouse_code' => $meta['warehouse_code'] ?? 'MAIN']
+                [
+                    'quantity_on_hand' => 0,
+                    'warehouse_code' => $meta['warehouse_code'] ?? 'MAIN',
+                    'tracking_mode' => $material->isBoardTrackable()
+                        ? Stock::TRACK_BY_AREA
+                        : Stock::TRACK_BY_COUNT,
+                ]
             );
 
             // Lock the row for the duration of this transaction so concurrent
             // check-outs cannot both read the same balance and race to negative.
             $stock = Stock::where('material_id', $materialId)->lockForUpdate()->firstOrFail();
+
+            $expectedTrackingMode = $material->isBoardTrackable()
+                ? Stock::TRACK_BY_AREA
+                : Stock::TRACK_BY_COUNT;
+            if ($stock->tracking_mode !== $expectedTrackingMode) {
+                $stock->tracking_mode = $expectedTrackingMode;
+            }
 
             $previousQuantity = (float) $stock->quantity_on_hand;
             $stock->quantity_on_hand += $quantity;

@@ -10,9 +10,13 @@ use App\Modules\MaterialsLibrary\Requests\UpdateMaterialRequest;
 use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
 use App\Modules\MaterialsLibrary\Support\MaterialControl;
 use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
+use App\Modules\ProcurementStores\Models\Board;
+use App\Modules\ProcurementStores\Models\InventoryLog;
+use App\Modules\ProcurementStores\Models\Stock;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class MaterialController extends Controller
 {
@@ -241,6 +245,23 @@ class MaterialController extends Controller
         $data = $this->syncControlCompatibility($data, $material);
         $data = $this->syncUomCompatibility($data, $material);
 
+        $nextTrackingMode = $data['tracking_mode'] ?? $material->tracking_mode;
+        $nextDisposition = $data['issue_disposition'] ?? $material->issue_disposition;
+        if (($nextTrackingMode !== 'dimension_piece' || $nextDisposition !== 'recoverable_remainder')
+            && Board::where('library_material_id', $material->id)->exists()) {
+            throw ValidationException::withMessages([
+                'tracking_mode' => 'This item has board history and must remain a measured/recoverable board item.',
+            ]);
+        }
+
+        $nextBaseUomId = $data['base_uom_id'] ?? $material->base_uom_id;
+        if ((int) $nextBaseUomId !== (int) $material->base_uom_id
+            && InventoryLog::where('material_id', $material->id)->exists()) {
+            throw ValidationException::withMessages([
+                'base_uom_id' => 'Base UOM cannot be changed after stock movements exist. Configure a purchase/issue conversion instead.',
+            ]);
+        }
+
          // Wrap attributes in 'attributes' key for JSON column if not already
          if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
              $data['attributes'] = ['attributes' => $data['attributes']];
@@ -248,7 +269,17 @@ class MaterialController extends Controller
 
         $data = $this->syncCategoryStrings($data);
 
-        $material->update($data);
+        DB::transaction(function () use ($material, $data) {
+            $material->update($data);
+
+            // stocks.tracking_mode is retained for legacy board endpoints, but is
+            // always projected from the governed Material Library controls.
+            $material->stock?->update([
+                'tracking_mode' => $material->fresh()->isBoardTrackable()
+                    ? Stock::TRACK_BY_AREA
+                    : Stock::TRACK_BY_COUNT,
+            ]);
+        });
         $material->load('stock');
 
         return response()->json([
