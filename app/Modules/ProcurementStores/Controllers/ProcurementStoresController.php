@@ -403,6 +403,80 @@ class ProcurementStoresController extends Controller
     }
 
     /**
+     * Reconcile a simple quantity-tracked item to a verified physical count.
+     * The user supplies the counted balance; the system calculates and records
+     * the variance so quantity history remains auditable.
+     */
+    public function adjustStock(Request $request): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can adjust stock.'], 403);
+        }
+
+        $validated = $request->validate([
+            'material_id' => 'required|integer|exists:library_materials,id',
+            'counted_quantity' => 'required|numeric|min:0',
+            'reason' => 'required|string|min:10|max:1000',
+            'reference_no' => 'nullable|string|max:100',
+        ]);
+
+        $material = LibraryMaterial::findOrFail($validated['material_id']);
+        if ($material->isBoardTrackable()) {
+            return response()->json([
+                'message' => 'Board stock is controlled by individual QR-labelled board records. Reconcile the specific boards instead.',
+                'redirect' => 'board_registry',
+            ], 422);
+        }
+        if ($material->is_serialized || $material->is_batch_controlled) {
+            return response()->json([
+                'message' => 'This item is lot/serial controlled. Reconcile its individual serials or lots instead of overriding the total.',
+                'redirect' => 'control_options',
+            ], 422);
+        }
+
+        $result = DB::transaction(function () use ($material, $validated) {
+            $stock = Stock::where('material_id', $material->id)->lockForUpdate()->firstOrFail();
+            $counted = (float) $validated['counted_quantity'];
+            $reserved = (float) $stock->quantity_reserved;
+            if ($counted < $reserved) {
+                throw ValidationException::withMessages([
+                    'counted_quantity' => "Counted stock cannot be below the {$reserved} units currently reserved.",
+                ]);
+            }
+
+            $previous = (float) $stock->quantity_on_hand;
+            $variance = $counted - $previous;
+            if (abs($variance) < 0.00001) {
+                throw ValidationException::withMessages([
+                    'counted_quantity' => 'The counted quantity matches the current balance; no adjustment is required.',
+                ]);
+            }
+
+            $stock->update(['quantity_on_hand' => $counted]);
+            $log = InventoryLog::create([
+                'material_id' => $material->id,
+                'user_id' => auth()->id(),
+                'type' => 'adjustment',
+                'batch_number' => app(InventoryService::class)->generateBatchNumber(),
+                'quantity' => $variance,
+                'balance_after' => $counted,
+                'reference_no' => $validated['reference_no'] ?? null,
+                'notes' => "Physical count adjustment. Previous balance: {$previous}. Reason: {$validated['reason']}",
+                'usage_type' => $material->expectedUsageType(),
+                'logged_at' => now(),
+            ]);
+
+            return compact('stock', 'log', 'previous', 'counted', 'variance');
+        });
+
+        return response()->json([
+            'message' => 'Stock count reconciled successfully.',
+            'data' => $result,
+            'status' => 'success',
+        ]);
+    }
+
+    /**
      * Process a stock return (Add back to inventory from project)
      */
     public function returns(Request $request): JsonResponse
