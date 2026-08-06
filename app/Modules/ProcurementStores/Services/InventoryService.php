@@ -6,6 +6,7 @@ use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
 class InventoryService
 {
@@ -47,6 +48,13 @@ class InventoryService
     public function adjustStock(int $materialId, float $quantity, string $type, array $meta = [])
     {
         return DB::transaction(function () use ($materialId, $quantity, $type, $meta) {
+            $material = LibraryMaterial::findOrFail($materialId);
+            $usageType = $material->expectedUsageType();
+
+            if ($quantity < 0 && ($material->item_status ?? 'Active') !== 'Active') {
+                throw new \DomainException("{$material->material_name} cannot be issued while its item status is {$material->item_status}.");
+            }
+
             // Ensure the row exists before locking; insert has no race risk.
             Stock::firstOrCreate(
                 ['material_id' => $materialId],
@@ -76,7 +84,9 @@ class InventoryService
                 'reference_no' => $meta['reference_no'] ?? null,
                 'recipient_name' => $meta['recipient_name'] ?? $meta['requestor_name'] ?? null,
                 'notes' => $meta['notes'] ?? null,
-                'usage_type' => $meta['usage_type'] ?? 'consumable',
+                // Usage behaviour is owned by the material master. Transaction
+                // screens cannot silently reinterpret return obligations.
+                'usage_type' => $usageType,
                 'logged_at' => $meta['logged_at'] ?? now(),
             ]);
         });

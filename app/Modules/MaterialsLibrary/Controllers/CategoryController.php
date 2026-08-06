@@ -30,6 +30,11 @@ class CategoryController extends Controller
                     'name'      => $child->name,
                     'code'      => $child->code,
                     'parent_id' => $child->parent_id,
+                    'is_selectable' => $child->is_selectable,
+                    'default_issue_disposition' => $child->default_issue_disposition,
+                    'default_tracking_mode' => $child->default_tracking_mode,
+                    'allowed_uoms' => $child->allowed_uoms,
+                    'required_attributes' => $child->required_attributes,
                 ]),
             ]);
 
@@ -52,6 +57,11 @@ class CategoryController extends Controller
                 'parent_id'   => $cat->parent_id,
                 'parent_name' => $cat->parent?->name,
                 'is_root'     => $cat->isRoot(),
+                'is_selectable' => $cat->is_selectable,
+                'default_issue_disposition' => $cat->default_issue_disposition,
+                'default_tracking_mode' => $cat->default_tracking_mode,
+                'allowed_uoms' => $cat->allowed_uoms,
+                'required_attributes' => $cat->required_attributes,
             ]);
 
         return response()->json(['data' => $categories]);

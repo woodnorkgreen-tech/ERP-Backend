@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Models\User;
+use App\Modules\MaterialsLibrary\Support\MaterialControl;
 
 
 class LibraryMaterial extends Model
@@ -27,6 +28,17 @@ class LibraryMaterial extends Model
         'subcategory',
         'material_category_id',
         'material_type',
+        'item_status',
+        'issue_disposition',
+        'tracking_mode',
+        'is_hazardous',
+        'is_serialized',
+        'is_batch_controlled',
+        'is_expiry_controlled',
+        'is_project_chargeable',
+        'minimum_reusable_length_mm',
+        'minimum_reusable_width_mm',
+        'minimum_reusable_area_m2',
         'unit_of_measure',
         'unit_cost',
         'attributes',
@@ -43,6 +55,14 @@ class LibraryMaterial extends Model
         'attributes' => 'array',
         'unit_cost' => 'decimal:2',
         'is_active' => 'boolean',
+        'is_hazardous' => 'boolean',
+        'is_serialized' => 'boolean',
+        'is_batch_controlled' => 'boolean',
+        'is_expiry_controlled' => 'boolean',
+        'is_project_chargeable' => 'boolean',
+        'minimum_reusable_length_mm' => 'decimal:2',
+        'minimum_reusable_width_mm' => 'decimal:2',
+        'minimum_reusable_area_m2' => 'decimal:4',
     ];
 
     /**
@@ -150,6 +170,11 @@ class LibraryMaterial extends Model
      */
     public function isBoardTrackable(): bool
     {
+        if ($this->tracking_mode) {
+            return $this->tracking_mode === 'dimension_piece'
+                && $this->issue_disposition === 'recoverable_remainder';
+        }
+
         if ($this->material_type !== 'reusable') {
             return false;
         }
@@ -166,5 +191,11 @@ class LibraryMaterial extends Model
             config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']),
             true
         );
+    }
+
+    public function expectedUsageType(): string
+    {
+        return MaterialControl::legacyUsageType($this->issue_disposition
+            ?: ($this->material_type === 'reusable' ? 'returnable' : 'consumed'));
     }
 }

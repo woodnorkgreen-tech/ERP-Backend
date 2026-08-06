@@ -8,6 +8,7 @@ use App\Modules\MaterialsLibrary\Models\MaterialCategory;
 use App\Modules\MaterialsLibrary\Requests\StoreMaterialRequest;
 use App\Modules\MaterialsLibrary\Requests\UpdateMaterialRequest;
 use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
+use App\Modules\MaterialsLibrary\Support\MaterialControl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -196,6 +197,7 @@ class MaterialController extends Controller
         $data = $request->validated();
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
+        $data = $this->syncControlCompatibility($data);
 
         // Wrap attributes in 'attributes' key for JSON column if not already
         if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
@@ -234,6 +236,7 @@ class MaterialController extends Controller
 
         $data = $request->validated();
         $data['updated_by'] = auth()->id();
+        $data = $this->syncControlCompatibility($data, $material);
 
          // Wrap attributes in 'attributes' key for JSON column if not already
          if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
@@ -314,11 +317,26 @@ class MaterialController extends Controller
 
         if ($cat->parent) {
             // Leaf category: parent is the root
-            $data['category']    = $data['category']    ?? $cat->parent->name;
-            $data['subcategory'] = $data['subcategory'] ?? $cat->name;
+            $data['category']    = $cat->parent->name;
+            $data['subcategory'] = $cat->name;
         } else {
             // Root category: use it directly, leave subcategory untouched
-            $data['category'] = $data['category'] ?? $cat->name;
+            $data['category'] = $cat->name;
+            $data['subcategory'] = null;
+        }
+
+        return $data;
+    }
+
+    private function syncControlCompatibility(array $data, ?LibraryMaterial $material = null): array
+    {
+        $disposition = $data['issue_disposition'] ?? $material?->issue_disposition ?? 'consumed';
+        $data['material_type'] = MaterialControl::legacyMaterialType($disposition);
+
+        if (isset($data['item_status'])) {
+            $data['is_active'] = $data['item_status'] === 'Active';
+        } elseif (array_key_exists('is_active', $data)) {
+            $data['item_status'] = $data['is_active'] ? 'Active' : 'Inactive';
         }
 
         return $data;

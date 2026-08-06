@@ -19,11 +19,19 @@ class MaterialCategory extends Model
         'parent_id',
         'sort_order',
         'is_active',
+        'is_selectable',
+        'default_issue_disposition',
+        'default_tracking_mode',
+        'allowed_uoms',
+        'required_attributes',
     ];
 
     protected $casts = [
         'is_active'   => 'boolean',
         'sort_order'  => 'integer',
+        'is_selectable' => 'boolean',
+        'allowed_uoms' => 'array',
+        'required_attributes' => 'array',
     ];
 
     // ─── Relationships ────────────────────────────────────────────────────────
