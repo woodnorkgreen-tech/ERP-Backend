@@ -74,11 +74,18 @@ class ProcurementStoresController extends Controller
      */
     public function inventory(Request $request): JsonResponse
     {
-        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom'])
-            // The Material Library is the catalogue; Store Inventory contains only
-            // items that have entered stock control. A zero balance remains visible
-            // once a stock row exists because reorder settings and history matter.
-            ->whereHas('stock');
+        $includeUnstocked = $request->boolean('include_unstocked');
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom']);
+
+        if ($includeUnstocked) {
+            // Receive Stock is the controlled bridge from catalogue identity to
+            // physical inventory, so it must be able to select every active item.
+            $query->where('item_status', 'Active');
+        } else {
+            // Store Inventory and outbound operations show only items that have
+            // entered stock control. Zero balances remain visible for reorder use.
+            $query->whereHas('stock');
+        }
 
         // Filter by Search Query
         if ($request->filled('search')) {
@@ -97,7 +104,8 @@ class ProcurementStoresController extends Controller
 
         $query->latest('library_materials.created_at');
         $summaryMaterials = (clone $query)->get();
-        $paginator = $query->paginate(min((int) $request->get('per_page', 50), 200));
+        $pageLimit = $includeUnstocked ? 500 : 200;
+        $paginator = $query->paginate(min((int) $request->get('per_page', 50), $pageLimit));
 
         // For board-tracked (individual) materials, quantity_on_hand on the stock row
         // also counts ungraded Quarantine boards, which overstates what's actually
@@ -172,6 +180,7 @@ class ProcurementStoresController extends Controller
                 'min_stock_level'   => (float) ($material->stock?->min_stock_level ?? 0),
                 'location'          => $material->stock?->location_bin ?? 'Not Set',
                 'warehouse_code'    => $material->stock?->warehouse_code ?? 'MAIN',
+                'is_stocked'        => $material->stock !== null,
                 'can_set_stock_quantity' => !$isBoard
                     && !$material->is_serialized
                     && !$material->is_batch_controlled,
