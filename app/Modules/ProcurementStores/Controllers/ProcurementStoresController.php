@@ -187,6 +187,7 @@ class ProcurementStoresController extends Controller
             'logged_at' => 'nullable|date',
             'lot_number' => 'nullable|string|max:100',
             'expiry_date' => 'nullable|date|after_or_equal:today',
+            'receipt_unit_cost' => 'nullable|numeric|min:0',
             'serial_numbers' => 'nullable|array',
             'serial_numbers.*' => 'string|max:150',
         ]);

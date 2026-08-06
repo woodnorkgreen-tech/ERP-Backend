@@ -75,9 +75,6 @@ return [
         'Subcategory' => 'subcategory',
         'UOM' => 'unit_of_measure',
         'Unit of Measure' => 'unit_of_measure',
-        'Unit Cost' => 'unit_cost',
-        'Cost per Sqm' => 'unit_cost',
-        'Cost per Unit' => 'unit_cost',
         'Notes' => 'notes',
     ],
 

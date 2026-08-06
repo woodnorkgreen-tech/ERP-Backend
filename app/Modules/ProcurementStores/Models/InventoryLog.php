@@ -24,6 +24,7 @@ class InventoryLog extends Model
         'inventory_lot_id',
         'inventory_serial_item_id',
         'quantity',
+        'receipt_unit_cost',
         'balance_after',
         'project_id',
         'supplier_id',
@@ -36,6 +37,7 @@ class InventoryLog extends Model
 
     protected $casts = [
         'quantity' => 'decimal:2',
+        'receipt_unit_cost' => 'decimal:4',
         'balance_after' => 'decimal:2',
         'logged_at' => 'datetime',
         'expiry_date' => 'date',

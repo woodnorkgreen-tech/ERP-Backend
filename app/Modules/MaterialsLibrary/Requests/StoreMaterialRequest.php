@@ -55,7 +55,6 @@ class StoreMaterialRequest extends FormRequest
             'valuation_method' => 'sometimes|in:FIFO,Landed Cost,Weighted Average',
             'revision_version' => 'sometimes|string|max:20',
             'effective_date' => 'nullable|date',
-            'unit_cost' => 'nullable|numeric|min:0',
             'attributes' => 'nullable|array',
             'is_active' => 'boolean',
             'notes' => 'nullable|string',

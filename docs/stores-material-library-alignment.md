@@ -1,5 +1,11 @@
 # Stores and Material Library Alignment
 
+## Data ownership boundary
+
+Material Library owns catalogue identity and classification: material name, SKU, category/subcategory, item type, UOM, technical specification, issue disposition, tracking mode, and control flags. Creating or importing a catalogue item must not establish stock.
+
+Stores Receive Stock owns the first physical inventory facts: quantity, receipt unit cost, warehouse/bin, reference, lot, expiry, and serial identities. Every balance is derived from posted inventory movements. The material `unit_cost` exposed for valuation is a read-only weighted average derived from receipt transactions, not a registration input.
+
 ## Operating contract
 
 The Material Library owns item identity and policy. Stores owns physical quantity, location and movement. An operator may record what happened, but may not reinterpret how an item behaves.

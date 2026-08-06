@@ -65,8 +65,23 @@ class InventoryService
             // check-outs cannot both read the same balance and race to negative.
             $stock = Stock::where('material_id', $materialId)->lockForUpdate()->firstOrFail();
 
+            $previousQuantity = (float) $stock->quantity_on_hand;
             $stock->quantity_on_hand += $quantity;
             $stock->save();
+
+            // Cost is receipt evidence, not catalogue input. Keep the material's
+            // valuation cost derived from posted receipts using weighted average.
+            if ($type === 'check_in' && array_key_exists('receipt_unit_cost', $meta) && $meta['receipt_unit_cost'] !== null) {
+                $receivedQuantity = abs($quantity);
+                $newQuantity = $previousQuantity + $receivedQuantity;
+                if ($newQuantity > 0) {
+                    $material->unit_cost = (
+                        ($previousQuantity * (float) $material->unit_cost)
+                        + ($receivedQuantity * (float) $meta['receipt_unit_cost'])
+                    ) / $newQuantity;
+                    $material->save();
+                }
+            }
 
             $controlled = app(ControlledInventoryService::class)->apply($material, $quantity, $type, $meta);
 
@@ -84,6 +99,7 @@ class InventoryService
                 'inventory_lot_id' => $controlled['inventory_lot_id'],
                 'inventory_serial_item_id' => $controlled['inventory_serial_item_id'],
                 'quantity' => $quantity,
+                'receipt_unit_cost' => $type === 'check_in' ? ($meta['receipt_unit_cost'] ?? null) : null,
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,
                 'supplier_id' => $meta['supplier_id'] ?? null,
