@@ -247,6 +247,9 @@ class ProcurementStoresController extends Controller
             'data'         => $log,
             'batch_number' => $log->batch_number,
             'status'       => 'success',
+            'labels_required' => count($boards) > 0,
+            'label_status' => count($boards) > 0 ? 'pending_print' : 'not_applicable',
+            'label_count' => count($boards),
             'boards'       => array_map(fn($b) => [
                 'id'            => $b->id,
                 'tracking_code' => $b->tracking_code,
