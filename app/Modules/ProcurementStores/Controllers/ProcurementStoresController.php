@@ -140,12 +140,20 @@ class ProcurementStoresController extends Controller
             'location' => 'nullable|string',
             'reference_no' => 'nullable|string',
             'notes' => 'nullable|string',
-            'usage_type' => 'nullable|string|in:consumable,reusable',
             'type' => 'nullable|string',
-            'logged_at' => 'nullable|date'
+            'logged_at' => 'nullable|date',
+            'lot_number' => 'nullable|string|max:100',
+            'expiry_date' => 'nullable|date|after_or_equal:today',
         ]);
 
         $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->findOrFail($request->material_id);
+
+        if ($material->is_batch_controlled && !$request->filled('lot_number')) {
+            return response()->json(['message' => 'A supplier or internal lot number is required for this material.'], 422);
+        }
+        if ($material->is_expiry_controlled && !$request->filled('expiry_date')) {
+            return response()->json(['message' => 'An expiry date is required for this material.'], 422);
+        }
 
         if ($material->isBoardTrackable() && (float) $request->quantity !== (float) (int) $request->quantity) {
             return response()->json([

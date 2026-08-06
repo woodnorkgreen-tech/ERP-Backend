@@ -19,6 +19,8 @@ class InventoryLog extends Model
         'user_id',
         'type',
         'batch_number',
+        'lot_number',
+        'expiry_date',
         'quantity',
         'balance_after',
         'project_id',
@@ -33,7 +35,8 @@ class InventoryLog extends Model
     protected $casts = [
         'quantity' => 'decimal:2',
         'balance_after' => 'decimal:2',
-        'logged_at' => 'datetime'
+        'logged_at' => 'datetime',
+        'expiry_date' => 'date',
     ];
 
     public function material(): BelongsTo

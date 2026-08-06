@@ -77,6 +77,8 @@ class InventoryService
                 'user_id' => Auth::id(),
                 'type' => $type,
                 'batch_number' => $batchNumber,
+                'lot_number' => $meta['lot_number'] ?? null,
+                'expiry_date' => $meta['expiry_date'] ?? null,
                 'quantity' => $quantity,
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,
