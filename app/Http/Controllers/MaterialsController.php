@@ -618,8 +618,12 @@ class MaterialsController extends Controller
             // Check for additional materials and create budget additions automatically
             $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
 
-            // Disable automatic background sync - users must trigger sync manually from the budget
-            // $this->syncMaterialsToBudget($taskId, $request->projectElements, $idMapping);
+            // Saving alone must not move the budget — the budget only follows a
+            // materials list that both departments have approved, which is done
+            // in approveMaterials(). Until then the budget shows the "materials
+            // changed" banner (BudgetController::checkMaterialsUpdate) and can
+            // be synced manually.
+            // $this->syncMaterialsToBudget($taskId, $idMapping);
             
             /* 
             // Trigger Procurement Sync immediately using the ID Mapping
@@ -1266,14 +1270,14 @@ class MaterialsController extends Controller
     /**
      * Sync materials data to budget whenever materials are updated
      */
-    private function syncMaterialsToBudget(int $materialsTaskId, array $projectElements, array $idMapping = []): void
+    private function syncMaterialsToBudget(int $materialsTaskId, array $idMapping = []): array
     {
         try {
             // Find the budget task for this enquiry
             $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($materialsTaskId);
             if (!$materialsTask) {
                 \Log::warning('Materials task not found for budget sync', ['taskId' => $materialsTaskId]);
-                return;
+                return ['synced' => false, 'reason' => 'materials_task_not_found'];
             }
 
             $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
@@ -1284,7 +1288,7 @@ class MaterialsController extends Controller
                 \Log::info('No budget task found for enquiry - skipping materials sync', [
                     'enquiryId' => $materialsTask->project_enquiry_id
                 ]);
-                return;
+                return ['synced' => false, 'reason' => 'no_budget_task'];
             }
 
             // Get budget data
@@ -1293,29 +1297,29 @@ class MaterialsController extends Controller
                 \Log::info('No budget data found - skipping materials sync', [
                     'budgetTaskId' => $budgetTask->id
                 ]);
-                return;
+                return ['synced' => false, 'reason' => 'no_budget_data'];
             }
 
-            // The budget was already signed off. Silently rewriting its totals
-            // behind a "completed" status would hide the change from whoever
-            // relies on that status (Finance/procurement gates, etc). Reopen
-            // it and stop here — materials_imported_at is deliberately left
-            // stale so the existing "approved materials list has changed"
-            // sync banner (BudgetController::checkMaterialsUpdate) picks it
-            // up and the numbers only change via a deliberate manual Sync.
+            // The budget was already signed off, so the approved figures are
+            // about to change underneath whoever relies on that status
+            // (Finance/procurement gates, etc). Reopen it so the change is
+            // visible and audited, then sync — dual approval is the authority
+            // on what the materials cost, and leaving the budget showing stale
+            // numbers behind a "completed" badge is the worse failure.
+            $reopened = false;
             if ($budgetTask->status === 'completed') {
                 $budgetTask->update(['status' => 'in_progress', 'completed_at' => null]);
                 $budgetTask->recordCustomAction('status_transition', [
                     'from' => 'completed',
                     'to' => 'in_progress',
                     'actor_type' => 'system',
-                    'reason' => 'Materials list was updated and re-approved after this budget was marked complete. Reopened for review — sync the updated materials list when ready.',
+                    'reason' => 'Materials list was updated and re-approved after this budget was marked complete. Reopened and re-synced with the approved materials — review the updated totals.',
                 ]);
+                $reopened = true;
                 \Log::info('Budget task reopened: materials re-approved after budget completion', [
                     'budgetTaskId' => $budgetTask->id,
                     'materialsTaskId' => $materialsTaskId,
                 ]);
-                return;
             }
 
             // Get materials data to sync
@@ -1327,7 +1331,7 @@ class MaterialsController extends Controller
                 \Log::info('No materials data found - skipping materials sync', [
                     'materialsTaskId' => $materialsTaskId
                 ]);
-                return;
+                return ['synced' => false, 'reason' => 'no_materials_data', 'budgetReopened' => $reopened];
             }
 
             // --- BUILD INDEXES OF EXISTING BUDGET DATA ---
@@ -1526,6 +1530,13 @@ class MaterialsController extends Controller
                 'materials_imported_from_task' => $materialsTaskId,
                 'materials_manually_modified' => false,
                 'materials_import_metadata' => [
+                    // Procurement refuses to sync from a budget whose metadata
+                    // doesn't name the approved materials list as its source
+                    // (ProcurementService::ensureBudgetReadyForProcurement).
+                    // This path *is* that source — both departments just
+                    // approved it — so it has to say so, exactly as
+                    // BudgetService::buildMaterialsImportMetadata() does.
+                    'source' => 'approved_materials_list',
                     'imported_at' => now()->toISOString(),
                     'materials_task_id' => $materialsTaskId,
                     'materials_task_title' => $materialsTask->title,
@@ -1542,12 +1553,38 @@ class MaterialsController extends Controller
                 'idMappingCount' => count($idMapping)
             ]);
 
+            // This path writes TaskBudgetData directly rather than going through
+            // BudgetService, so it has to carry the budget -> procurement push
+            // itself. Without it, approving materials updates the budget and
+            // leaves procurement on the previous figures.
+            $procurementTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
+                ->where('type', 'procurement')
+                ->first();
+
+            if ($procurementTask) {
+                app(\App\Services\ProcurementService::class)->syncWithBudget($procurementTask->id, $idMapping);
+            }
+
+            return [
+                'synced' => true,
+                'budgetTaskId' => $budgetTask->id,
+                'budgetReopened' => $reopened,
+                'materialsTotal' => $materialsTotal,
+                'grandTotal' => $currentSummary['grandTotal'],
+            ];
+
         } catch (\Exception $e) {
             \Log::error('Failed to sync materials to budget', [
                 'materialsTaskId' => $materialsTaskId,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
+
+            return [
+                'synced' => false,
+                'reason' => 'error',
+                'error' => $e->getMessage(),
+            ];
         }
     }
 
@@ -1763,6 +1800,8 @@ class MaterialsController extends Controller
             ], 422);
         }
 
+        $budgetSync = null;
+
         try {
             // Check Design Gate before proceeding
             $gate = $this->checkDesignApprovalGate($taskId);
@@ -1856,10 +1895,10 @@ class MaterialsController extends Controller
                 })->toArray();
 
                 $this->createBudgetAdditionsForAdditionalMaterials($taskId, $projectElements);
-                
+
                 // Automatic budget sync on final approval
                 \Log::info('Final approval received - syncing latest materials to budget', ['taskId' => $taskId]);
-                $this->syncMaterialsToBudget($taskId, $projectElements); 
+                $budgetSync = $this->syncMaterialsToBudget($taskId);
             }
 
             // NEW: Handle Base Snapshot on First Approval
@@ -1876,6 +1915,11 @@ class MaterialsController extends Controller
                 'message' => ucfirst($department) . ' approval recorded successfully',
                 'approval_status' => $approvalStatus,
                 'task_status' => $materialsData->task()->value('status'),
+                // Null until both departments have approved. Once they have, the
+                // caller can tell an actual budget update apart from a silent
+                // no-op (no budget task yet, sync error) instead of reading
+                // "approval recorded successfully" as "the budget moved".
+                'budget_sync' => $budgetSync,
             ]);
 
         } catch (\Exception $e) {
