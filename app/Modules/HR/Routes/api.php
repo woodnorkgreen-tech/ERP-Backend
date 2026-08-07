@@ -9,6 +9,7 @@ use App\Modules\HR\Http\Controllers\PayrollEngineController;
 use App\Modules\HR\Http\Controllers\PayrollRunController;
 use App\Modules\HR\Http\Controllers\LeaveDashboardController;
 use App\Modules\HR\Http\Controllers\LeaveHandoverController;
+use App\Modules\HR\Http\Controllers\LeaveRegisterController;
 use App\Modules\HR\Http\Controllers\LeaveRequestController;
 use App\Modules\HR\Http\Controllers\LeaveTypeController;
 use App\Modules\HR\Http\Controllers\HRActionController;
@@ -232,6 +233,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('adjust-balance', [LeaveRequestController::class, 'adjustBalance'])
                 ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
             Route::get('balance-adjustments', [LeaveRequestController::class, 'balanceAdjustments']);
+
+            // Leave register: company-wide per-employee leave summary + breakdown
+            Route::get('register', [LeaveRegisterController::class, 'index'])
+                ->middleware('permission:' . Permissions::LEAVE_BALANCE_VIEW);
+            Route::get('register/export', [LeaveRegisterController::class, 'export'])
+                ->middleware('permission:' . Permissions::LEAVE_BALANCE_VIEW);
 
             // Leave handovers
             Route::get('handovers', [LeaveHandoverController::class, 'index']);

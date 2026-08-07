@@ -21,9 +21,8 @@ class LeaveManagementServiceTest extends TestCase
             'is_active' => true,
         ]);
 
-        $leaveType = LeaveType::create([
+        $leaveType = LeaveType::updateOrCreate(['code' => 'ANNUAL'], [
             'name' => 'Annual Leave',
-            'code' => 'ANNUAL',
             'days_per_year' => 21,
             'color' => 'emerald',
             'is_active' => true,
@@ -49,9 +48,8 @@ class LeaveManagementServiceTest extends TestCase
             'is_active' => true,
         ]);
 
-        $leaveType = LeaveType::create([
+        $leaveType = LeaveType::updateOrCreate(['code' => 'PATERNITY'], [
             'name' => 'Paternity Leave',
-            'code' => 'PATERNITY',
             'days_per_year' => 14,
             'color' => 'green',
             'is_active' => true,

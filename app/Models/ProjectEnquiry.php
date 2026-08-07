@@ -104,6 +104,11 @@ class ProjectEnquiry extends Model
         return $this->belongsTo(User::class, 'project_officer_id');
     }
 
+    public function assignedPo(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_po');
+    }
+
     public function project(): HasOne
     {
         return $this->hasOne(Project::class, 'enquiry_id');
