@@ -153,6 +153,22 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             ->middleware('throttle:60,1');
         Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'index']);
         Route::get('budget-lines/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'budgetLines']);
+
+        // The project cost account: budget vs committed vs actual, the
+        // unbudgeted panel, exception spend and how much of the budget has been
+        // answered at all.
+        Route::get('account/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'show']);
+
+        // Verification. Policy-gated, and the service additionally refuses to let
+        // anyone verify a cost they reported themselves.
+        Route::prefix('verification')->group(function () {
+            Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'index']);
+            Route::post('{cost}/verify', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'verify']);
+            Route::post('{cost}/query', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'query']);
+            Route::post('{cost}/reject', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reject']);
+            Route::post('{cost}/reverse', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reverse']);
+            Route::post('{cost}/resubmit', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'resubmit']);
+        });
     });
 
     Route::prefix('support')->group(function () {

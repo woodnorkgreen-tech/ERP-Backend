@@ -28,6 +28,13 @@ class FinanceServiceProvider extends ServiceProvider
         // Load migrations from the module
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 
+        // Registered explicitly: the policy lives in the module rather than in
+        // app/Policies, so Laravel's naming convention will not find it.
+        \Illuminate\Support\Facades\Gate::policy(
+            \App\Modules\Finance\CostCollector\Models\CostLine::class,
+            \App\Modules\Finance\CostCollector\Policies\CostLinePolicy::class,
+        );
+
         if ($this->app->runningInConsole()) {
             $this->commands([
                 \App\Modules\Finance\CostCollector\Console\ProjectBudgetsCommand::class,

@@ -101,6 +101,14 @@ class Permissions
     const FINANCE_QUOTE_APPROVE = 'finance.quote.approve';
     const FINANCE_QUOTE_DELETE = 'finance.quote.delete';
 
+    // Cost collector. Separated from petty cash on purpose: reporting a cost and
+    // paying for one are different jobs held by different people, and the brief
+    // requires requester, approver and poster to be separable.
+    const FINANCE_COSTS_CREATE = 'finance.costs.create';
+    const FINANCE_COSTS_READ = 'finance.costs.read';
+    const FINANCE_COSTS_VERIFY = 'finance.costs.verify';
+    const FINANCE_COSTS_REVERSE = 'finance.costs.reverse';
+
     const FINANCE_INVOICE_CREATE = 'finance.invoice.create';
     const FINANCE_INVOICE_READ = 'finance.invoice.read';
     const FINANCE_INVOICE_UPDATE = 'finance.invoice.update';
