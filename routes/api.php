@@ -136,6 +136,25 @@ Route::prefix('projects')->group(function () {
 
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
+    // Cost collector — the single intake for spend from anywhere in the ERP.
+    // Reached over the authenticated mobile API rather than a tokenised public
+    // link: casual workers and vendors have no account, so a named staff member
+    // captures on their behalf and `payee` stays separate from `submitted_by`.
+    Route::prefix('costs')->group(function () {
+        Route::get('expense-codes', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'index']);
+        Route::get('expense-codes/families', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'families']);
+        Route::get('expense-codes/{code}', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'show']);
+
+        // Throttled: this writes to the cost ledger, and the July audit found no
+        // rate limiting on any money-moving endpoint in Finance.
+        Route::post('evidence', [App\Modules\Finance\CostCollector\Http\Controllers\CostEvidenceController::class, 'store'])
+            ->middleware('throttle:60,1');
+        Route::post('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'store'])
+            ->middleware('throttle:60,1');
+        Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'index']);
+        Route::get('budget-lines/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'budgetLines']);
+    });
+
     Route::prefix('support')->group(function () {
         Route::get('tickets/assignees', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'assignees']);
         Route::get('tickets/metrics', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'metrics']);
