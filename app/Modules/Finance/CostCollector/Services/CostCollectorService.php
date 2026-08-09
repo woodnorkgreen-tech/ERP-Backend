@@ -149,6 +149,64 @@ class CostCollectorService implements CollectsCost
         });
     }
 
+    /**
+     * Post a cost from a source document that already carried its own approval —
+     * a paid disbursement, an approved GRN, a completed payroll run.
+     *
+     * Catalogue validation is deliberately NOT applied here, and only here. It
+     * exists to make human capture correct; a payment that already happened is
+     * not a proposal to be corrected. Refusing to import 1,384 real payments
+     * because the catalogue cannot yet classify them would leave every cost
+     * account understated, which is a worse answer than an unclassified line.
+     *
+     * Everything else still holds: producer-only (a source is required), append
+     * -only, idempotent, and period-checked.
+     */
+    public function postFromSource(CostContext $context, array $attributes = []): CostLine
+    {
+        if (blank($context->sourceType) || ! $context->sourceId) {
+            throw CostValidationException::withErrors([
+                'sourceType' => ['postFromSource is for producers; a source document is required.'],
+            ]);
+        }
+
+        if ($existing = $this->existingFor($context)) {
+            return $existing;
+        }
+
+        $code = filled($context->expenseCode)
+            ? ExpenseCode::active()->where('code', $context->expenseCode)->first()
+            : null;
+
+        $resolved = $this->resolver->resolve($context, $code ?? new ExpenseCode());
+
+        return DB::transaction(function () use ($context, $code, $resolved, $attributes) {
+            $money = $this->money($context);
+
+            $line = CostLine::create([
+                ...$resolved,
+                ...$money,
+                ...$attributes,
+                'expense_code_id' => $code?->id,
+                'ref' => 'PENDING',
+                'nature' => $context->nature,
+                'status' => CostLine::STATUS_VERIFIED,
+                'verified_at' => now(),
+                'consumes_line_id' => $context->consumesLineId,
+                'description' => $context->description,
+                'source_type' => $context->sourceType,
+                'source_id' => $context->sourceId,
+                'source_ref' => $context->sourceRef,
+                'details' => $context->details ?: null,
+                'payee_name' => $context->payeeName,
+            ]);
+
+            $line->forceFill(['ref' => 'CL-' . str_pad((string) $line->id, 7, '0', STR_PAD_LEFT)])->save();
+
+            return $line;
+        });
+    }
+
     private function existingPlanned(PlannedLine $line): ?CostLine
     {
         return CostLine::where('source_type', $line->sourceType)
@@ -288,10 +346,14 @@ class CostCollectorService implements CollectsCost
      */
     private function money(CostContext $context): array
     {
-        $amount = (string) $context->amount;
-        $tax = (string) ($context->taxAmount ?? '0');
+        // Normalised before any bcmath call. A producer reading a legacy column
+        // can hand us an empty string rather than null, and bcmath raises on a
+        // malformed operand — the single writer must not be crashable by its
+        // callers' data quality.
+        $amount = $this->numeric($context->amount, '0');
+        $tax = $this->numeric($context->taxAmount, '0');
         $net = bcsub($amount, $tax, 2);
-        $rate = (string) ($context->fxRate ?? '1');
+        $rate = $this->numeric($context->fxRate, '1');
 
         return [
             'currency' => $context->currency,
@@ -301,6 +363,12 @@ class CostCollectorService implements CollectsCost
             'net_amount' => $net,
             'base_net_amount' => bcmul($net, $rate, 2),
         ];
+    }
+
+    /** Blank, null and non-numeric all collapse to the fallback. */
+    private function numeric(mixed $value, string $fallback): string
+    {
+        return is_numeric($value) ? (string) $value : $fallback;
     }
 
     /**
