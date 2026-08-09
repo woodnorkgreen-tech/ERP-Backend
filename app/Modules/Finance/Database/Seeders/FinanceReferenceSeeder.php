@@ -24,6 +24,10 @@ class FinanceReferenceSeeder extends Seeder
             FinanceTaxSeeder::class,
             PaymentSourceSeeder::class,
             FinanceSettingsSeeder::class,
+            AccountingPeriodSeeder::class,
+            // Last: expense codes resolve GL accounts, cost centres, activities
+            // and tax treatments that the seeders above create.
+            ExpenseCodeSeeder::class,
         ]);
     }
 }
