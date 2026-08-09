@@ -22,6 +22,15 @@ final class CostContext
         /** Gross amount as it appears on the receipt, as a decimal string. */
         public readonly string $amount,
 
+        /**
+         * planned | committed | accrued | actual.
+         *
+         * Manual capture is always an actual. Producers post commitments (an
+         * approved PO) and accruals (goods received, not yet invoiced); the
+         * budget projector posts planned lines.
+         */
+        public readonly string $nature = 'actual',
+
         // ── Cost object: supply any one, the resolver derives the others ──
         public readonly ?int $projectId = null,
         public readonly ?int $enquiryId = null,
@@ -42,6 +51,8 @@ final class CostContext
         public readonly ?string $taxAmount = null,
         public readonly ?string $incurredAt = null,
         public readonly string $currency = 'KES',
+        /** Rate to base currency. Only meaningful when currency is not KES. */
+        public readonly ?string $fxRate = null,
 
         // ── Counterparty ──
         public readonly ?string $payeeType = null,   // supplier|employee|casual|authority
@@ -60,5 +71,16 @@ final class CostContext
 
         public readonly ?string $description = null,
         public readonly ?string $costCause = null,   // defaults to 'planned'
+
+        /**
+         * The source document already carried its own approval — an approved GRN,
+         * a completed payroll run — so the line lands verified rather than queuing
+         * for a human to approve what procurement or HR already did.
+         *
+         * Only server-side producers may set this. It is never accepted from an
+         * HTTP request, because that would let a submitter approve their own cost
+         * and defeat the separation of duties the whole design rests on.
+         */
+        public readonly bool $sourceApproved = false,
     ) {}
 }
