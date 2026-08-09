@@ -9,6 +9,8 @@ use App\Modules\Finance\PettyCash\Services\LedgerEntry;
 use App\Modules\Finance\PettyCash\Services\LedgerService;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
+use App\Modules\Finance\PettyCash\Requests\CreateTopUpRequest;
+use App\Modules\Finance\PettyCash\Support\PaymentMethods;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -64,20 +66,15 @@ class PettyCashTopUpController extends Controller
     /**
      * Store a newly created top-up.
      */
-    public function store(Request $request): JsonResponse
+    public function store(CreateTopUpRequest $request): JsonResponse
     {
+        // CreateTopUpRequest replaces the inline validator it never got wired
+        // ahead of: it adds an upper amount bound, checks the payment method
+        // against the one canonical list, requires a reference for non-cash, and
+        // enforces the M-Pesa code format. It also returns Laravel's own 422
+        // shape, which the form already reads.
         try {
-            // Validate the request data
-            $validationErrors = $this->service->validateTopUpData($request->all());
-            if (!empty($validationErrors)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validationErrors,
-                ], 422);
-            }
-
-            $topUp = $this->service->createTopUp($request->all());
+            $topUp = $this->service->createTopUp($request->validated());
 
             return response()->json([
                 'success' => true,
@@ -406,24 +403,11 @@ class PettyCashTopUpController extends Controller
      */
     public function paymentMethods(): JsonResponse
     {
-        $methods = [
-            'cash' => 'Cash',
-            'mpesa' => 'M-Pesa',
-            'equity' => 'Equity',
-            'stanbic' => 'Stanbic',
-            'ncba' => 'NCBA',
-            'kcb' => 'KCB',
-            'family' => 'Family Bank',
-            'bank_transfer' => 'Bank Transfer',
-            'other' => 'Other',
-        ];
-
+        // Served from PaymentMethods so the client never keeps its own copy —
+        // the frontend had two, both missing the bank options.
         return response()->json([
             'success' => true,
-            'data' => collect($methods)->map(fn ($label, $value) => [
-                'value' => $value,
-                'label' => $label,
-            ])->values(),
+            'data' => PaymentMethods::options(),
         ]);
     }
 

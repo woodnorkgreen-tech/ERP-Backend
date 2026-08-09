@@ -118,6 +118,70 @@ class TopUpIntegrityTest extends TestCase
         $this->assertSame('50000.00', $this->derivedBalance());
     }
 
+    public function test_creating_a_top_up_validates_and_keeps_every_field(): void
+    {
+        $this->custodian->givePermissionTo(
+            \Spatie\Permission\Models\Permission::findOrCreate('finance.petty_cash.create_top_up', 'web'),
+        );
+
+        $response = $this->actingAs($this->custodian, 'sanctum')
+            ->postJson('/api/finance/petty-cash/top-ups', [
+                'amount' => 25000,
+                'payment_method' => 'equity',
+                'transaction_code' => 'EQ-99812',
+                'date_topped_up' => now()->toDateString(),
+                'description' => 'Monthly float',
+            ]);
+
+        $response->assertCreated();
+
+        // date_topped_up must survive: the request uses validated(), which drops
+        // anything the rules do not declare.
+        $this->assertDatabaseHas('petty_cash_top_ups', [
+            'amount' => 25000,
+            'payment_method' => 'equity',
+            'date_topped_up' => now()->toDateString(),
+        ]);
+    }
+
+    public function test_the_bank_payment_methods_are_accepted(): void
+    {
+        // The rule these replaced listed only cash/mpesa/bank_transfer/other, so
+        // wiring it unchanged would have rejected every bank method the column
+        // actually allows.
+        foreach (['equity', 'stanbic', 'ncba', 'kcb', 'family', 'bank_transfer'] as $method) {
+            $this->actingAs($this->custodian, 'sanctum')
+                ->postJson('/api/finance/petty-cash/top-ups', [
+                    'amount' => 1000,
+                    'payment_method' => $method,
+                    'transaction_code' => strtoupper($method) . '-001',
+                    'date_topped_up' => now()->toDateString(),
+                ])
+                ->assertCreated();
+        }
+    }
+
+    public function test_a_non_cash_top_up_needs_a_reference_and_a_future_date_is_refused(): void
+    {
+        $this->actingAs($this->custodian, 'sanctum')
+            ->postJson('/api/finance/petty-cash/top-ups', [
+                'amount' => 1000,
+                'payment_method' => 'equity',
+                'date_topped_up' => now()->toDateString(),
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['transaction_code']);
+
+        $this->actingAs($this->custodian, 'sanctum')
+            ->postJson('/api/finance/petty-cash/top-ups', [
+                'amount' => 1000,
+                'payment_method' => 'cash',
+                'date_topped_up' => now()->addWeek()->toDateString(),
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['date_topped_up']);
+    }
+
     public function test_editing_a_top_up_requires_permission(): void
     {
         $topUp = $this->topUp();

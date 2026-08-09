@@ -115,7 +115,16 @@ Frontend UX is workable for the happy path but has two workflow-breaking gaps fo
    explicit permission (`delete_top_up`, and a new `edit_top_up` that had no counterpart, which is
    part of why that endpoint ended up with no check at all). Pinned by `TopUpIntegrityTest`, whose
    central assertion is that the cached balance still equals the ledger it summarises.
-2. **BE3** — wire the existing, unused `FormRequest` classes into the controllers. Near-zero risk, closes several validation gaps at once. **STILL OPEN.**
+2. ~~**BE3** — wire the unused `FormRequest` classes.~~ **DONE for top-up creation**, and the reason
+   they were never wired turned out to matter: `CreateTopUpRequest` restricted `payment_method` to
+   `cash|mpesa|bank_transfer|other`, a list written before the bank options existed. Wiring it as
+   found would have rejected equity, stanbic, ncba, kcb and family — all valid in the column enum.
+   It now reads `PaymentMethods::values()`.
+   - Also had to declare `date_topped_up`: the request uses `validated()`, which drops anything the
+     rules do not name, so the field the form has always sent would have been silently discarded.
+   - `CreateDisbursementRequest` / `UpdateDisbursementRequest` are **still unwired** — the
+     disbursement create path carries more fields and deserves the same field-by-field check rather
+     than an assumption that the rules are current.
 3. ~~**FE1, FE2**~~ **DONE.** FE1 (error transform) was already fixed by earlier work in the module;
    FE2 — Void was unreachable from the transaction table. The emit, the local wrapper *and* the
    parent's modal all already existed; the only missing piece was a button. It now sits **before**
@@ -129,7 +138,15 @@ Frontend UX is workable for the happy path but has two workflow-breaking gaps fo
    single declared Super Admin bypass; `TransactionList`'s own `isSuperAdmin` and
    `RequisitionShow`'s inline role array are gone. Four permissions the frontend had always asked
    for turned out never to have been seeded — the role checks were a workaround for grants that were
-   impossible, not a policy decision. Label-map consolidation (FE3) is partly done: 5 copies → 2.
+   impossible, not a policy decision.
+   - **FE3 now also DONE.** Payment methods had six definitions — the column enum, an inline map in
+     the top-up controller, a stale `Rule::in`, a `<select>` in `TopUpForm`, and label maps in the
+     service and `ReportsPanel`. Three were wrong in different ways: the select was missing
+     `bank_transfer` so it could never be chosen, and both label maps were missing every bank
+     option, which is why the history filter could not filter by them. All six now resolve to
+     `PettyCash\Support\PaymentMethods`, served over the existing `payment-methods` endpoint and
+     consumed through a `usePaymentMethods` composable. `requires_reference` travels with each
+     option, so adding a method that needs a transaction code is a backend row, not a UI change.
 6. ~~**BE9 / BE17** — `getProjectBudgetsSummary` performance.~~ **CLOSED BY DELETION.** See
    `REFACTOR_TASKS.md` BE-17. Also removed: `ProjectBudgetsTab.vue`, the `budgets/summary` route and
    controller action, and the unread `budget_snapshot` in `workspace()`. All of it rendered a
