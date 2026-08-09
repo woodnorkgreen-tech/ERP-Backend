@@ -157,6 +157,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // The project cost account: budget vs committed vs actual, the
         // unbudgeted panel, exception spend and how much of the budget has been
         // answered at all.
+        Route::get('accounts', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'index']);
         Route::get('account/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'show']);
 
         // Verification. Policy-gated, and the service additionally refuses to let

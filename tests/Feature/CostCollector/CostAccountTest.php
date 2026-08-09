@@ -118,6 +118,31 @@ class CostAccountTest extends TestCase
         $this->assertEqualsWithDelta(50.0, $response->json('data.coverage.percent'), 0.01);
     }
 
+    public function test_the_accounts_grid_lists_one_row_per_project_with_grand_totals(): void
+    {
+        $planned = $this->line(CostLine::NATURE_PLANNED, '60000.00');
+        $this->line(CostLine::NATURE_ACTUAL, '18000.00', ['consumes_line_id' => $planned->id]);
+        $this->line(CostLine::NATURE_ACTUAL, '4500.00');            // unbudgeted
+        $this->line(CostLine::NATURE_ACTUAL, '900.00', ['status' => CostLine::STATUS_SUBMITTED]);
+
+        $response = $this->getJson('/api/costs/accounts')->assertOk();
+
+        $response->assertJsonCount(1, 'rows');
+        $response->assertJsonPath('rows.0.enquiry_id', $this->enquiryId);
+        $response->assertJsonPath('rows.0.job_number', 'WNG-ACC-001');
+        $response->assertJsonPath('rows.0.planned', '60000.00');
+        // 18,000 budgeted + 4,500 unbudgeted; the unverified 900 does not count.
+        $response->assertJsonPath('rows.0.actual', '22500.00');
+        $response->assertJsonPath('rows.0.unbudgeted', '4500.00');
+        $response->assertJsonPath('rows.0.remaining', '37500.00');
+
+        // Totals span every project, not just the page — a page total in a
+        // financial table invites being read as the whole.
+        $response->assertJsonPath('totals.planned', '60000.00');
+        $response->assertJsonPath('totals.actual', '22500.00');
+        $response->assertJsonPath('meta.total', 1);
+    }
+
     public function test_reversed_and_unverified_lines_do_not_count(): void
     {
         $planned = $this->line(CostLine::NATURE_PLANNED, '60000.00');

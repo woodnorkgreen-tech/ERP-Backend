@@ -15,6 +15,110 @@ use Illuminate\Support\Facades\DB;
  */
 class CostAccountService
 {
+    /**
+     * Every project's cost account, one row each.
+     *
+     * Aggregated in SQL and paginated on the aggregate, not looped in PHP: the
+     * equivalent petty-cash summary decodes JSON and sums in a foreach, which is
+     * why it cannot scale past a few thousand projects (audit BE9/BE17).
+     *
+     * @return array{rows: array<int, array<string, mixed>>, totals: array<string, string>, meta: array<string, int>}
+     */
+    public function index(array $filters = [], int $perPage = 25): array
+    {
+        $aggregate = CostLine::query()
+            ->counting()
+            ->whereNotNull('project_enquiry_id')
+            ->selectRaw('
+                project_enquiry_id,
+                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END)   AS planned,
+                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END)   AS committed,
+                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END)   AS actual,
+                SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) AS unbudgeted
+            ', [
+                CostLine::NATURE_PLANNED,
+                CostLine::NATURE_COMMITTED,
+                CostLine::NATURE_ACTUAL,
+                CostLine::NATURE_PLANNED,
+            ])
+            ->groupBy('project_enquiry_id');
+
+        $paginator = $aggregate->paginate(max(1, min($perPage, 100)));
+
+        $enquiries = ProjectEnquiry::whereIn('id', collect($paginator->items())->pluck('project_enquiry_id'))
+            ->get(['id', 'job_number', 'title', 'status'])
+            ->keyBy('id');
+
+        $rows = collect($paginator->items())->map(function ($row) use ($enquiries) {
+            $enquiry = $enquiries->get($row->project_enquiry_id);
+            $planned = $this->money($row->planned);
+            $spent = bcadd($this->money($row->actual), $this->money($row->committed), 2);
+
+            return [
+                'enquiry_id' => $row->project_enquiry_id,
+                'job_number' => $enquiry?->job_number,
+                'title' => $enquiry?->title,
+                'status' => $enquiry?->status,
+                'planned' => $planned,
+                'committed' => $this->money($row->committed),
+                'actual' => $this->money($row->actual),
+                'unbudgeted' => $this->money($row->unbudgeted),
+                'remaining' => bcsub($planned, $spent, 2),
+                'utilisation_percent' => bccomp($planned, '0', 2) === 1
+                    ? round((float) bcdiv($spent, $planned, 4) * 100, 1)
+                    : null,
+            ];
+        })->all();
+
+        return [
+            'rows' => $rows,
+            // Totals across ALL projects, not just this page — a page total in a
+            // financial table invites being read as the whole.
+            'totals' => $this->grandTotals($filters),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'total' => $paginator->total(),
+            ],
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function grandTotals(array $filters): array
+    {
+        $row = CostLine::query()
+            ->counting()
+            ->whereNotNull('project_enquiry_id')
+            ->selectRaw('
+                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS planned,
+                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS committed,
+                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS actual,
+                SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) AS unbudgeted
+            ', [
+                CostLine::NATURE_PLANNED,
+                CostLine::NATURE_COMMITTED,
+                CostLine::NATURE_ACTUAL,
+                CostLine::NATURE_PLANNED,
+            ])
+            ->first();
+
+        $planned = $this->money($row?->planned);
+        $spent = bcadd($this->money($row?->actual), $this->money($row?->committed), 2);
+
+        return [
+            'planned' => $planned,
+            'committed' => $this->money($row?->committed),
+            'actual' => $this->money($row?->actual),
+            'unbudgeted' => $this->money($row?->unbudgeted),
+            'remaining' => bcsub($planned, $spent, 2),
+        ];
+    }
+
+    private function money(mixed $value): string
+    {
+        return number_format((float) ($value ?? 0), 2, '.', '');
+    }
+
     /** @return array<string, mixed> */
     public function forEnquiry(ProjectEnquiry $enquiry): array
     {
