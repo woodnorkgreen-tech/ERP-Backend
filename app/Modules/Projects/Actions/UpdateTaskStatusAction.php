@@ -2,6 +2,7 @@
 
 namespace App\Modules\Projects\Actions;
 
+use App\Events\EnquiryTaskCompleted;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Modules\Projects\Services\EnquiryWorkflowService;
 use App\Modules\Projects\Services\NotificationService;
@@ -57,6 +58,16 @@ class UpdateTaskStatusAction
         // 3. Handle Notifications
         if ($status === 'completed' && $oldStatus !== 'completed') {
             $this->notificationService->sendEnquiryTaskCompleted($updatedTask, $user);
+
+            // Announce the transition so downstream concerns can observe it
+            // without this action having to know about them. The budget task
+            // opening a project's cost account is the first such listener.
+            EnquiryTaskCompleted::dispatch(
+                $updatedTask->id,
+                (string) $updatedTask->type,
+                $updatedTask->project_enquiry_id,
+                $user->id,
+            );
         }
 
 

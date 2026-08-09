@@ -24,6 +24,12 @@ class EventServiceProvider extends ServiceProvider
             \App\Listeners\ActivateProjectAfterFinance::class,
         ],
 
+        // Completing the budget task opens the project's cost account. Queued,
+        // so a cost-ledger problem can never stop someone completing a task.
+        \App\Events\EnquiryTaskCompleted::class => [
+            \App\Listeners\ProjectBudgetLinesOnTaskCompletion::class,
+        ],
+
         // ── Board Material Workflow ───────────────────────────────────────────
         \App\Events\Stores\BoardRequestRaised::class => [
             \App\Listeners\Stores\NotifyStorekeepersOfPendingRequest::class,
