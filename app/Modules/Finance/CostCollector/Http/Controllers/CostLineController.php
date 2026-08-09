@@ -2,6 +2,7 @@
 
 namespace App\Modules\Finance\CostCollector\Http\Controllers;
 
+use App\Constants\EnquiryConstants;
 use App\Http\Controllers\Controller;
 use App\Models\ProjectEnquiry;
 use App\Modules\Finance\CostCollector\Contracts\CollectsCost;
@@ -57,6 +58,54 @@ class CostLineController extends Controller
                 'last_page' => $lines->lastPage(),
                 'total' => $lines->total(),
             ],
+        ]);
+    }
+
+    /**
+     * The projects this person is actually working on.
+     *
+     * The capture screen previously asked for an enquiry id in a number field —
+     * a site technician does not know their job is enquiry 487. This returns the
+     * handful they are assigned to, newest first, so choosing a project is one
+     * tap rather than a lookup.
+     *
+     * `q` searches the wider list for the cases where someone is reporting a
+     * cost against a job they are not assigned to, which is common enough
+     * (a driver, a store keeper) that it cannot be a dead end.
+     */
+    public function myProjects(Request $request): JsonResponse
+    {
+        $validated = $request->validate(['q' => 'nullable|string|max:120']);
+        $userId = $request->user()->id;
+        $search = $validated['q'] ?? null;
+
+        $enquiries = ProjectEnquiry::query()
+            ->whereNotIn('status', EnquiryConstants::getClosedStatuses())
+            ->whereNotNull('job_number')
+            ->when($search, fn ($query, $term) => $query->where(function ($q) use ($term) {
+                $q->where('job_number', 'like', "%{$term}%")
+                    ->orWhere('title', 'like', "%{$term}%");
+            }))
+            // Without a search term, narrow to what this person is on. Both the
+            // pivot and the legacy column are checked, because task assignment
+            // still writes the older field in places.
+            ->when(! $search, fn ($query) => $query->whereHas('enquiryTasks', fn ($task) => $task
+                ->where(fn ($q) => $q
+                    ->whereHas('assignedUsers', fn ($u) => $u->where('users.id', $userId))
+                    ->orWhere('assigned_user_id', $userId))))
+            ->latest('id')
+            ->limit($search ? 25 : 10)
+            ->get(['id', 'job_number', 'title', 'venue', 'status']);
+
+        return response()->json([
+            'data' => $enquiries->map(fn (ProjectEnquiry $enquiry) => [
+                'enquiry_id' => $enquiry->id,
+                'job_number' => $enquiry->job_number,
+                'title' => $enquiry->title,
+                'venue' => $enquiry->venue,
+                'status' => $enquiry->status,
+            ]),
+            'meta' => ['scope' => $search ? 'search' : 'assigned'],
         ]);
     }
 

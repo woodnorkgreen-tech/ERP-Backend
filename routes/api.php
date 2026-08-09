@@ -152,6 +152,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'store'])
             ->middleware('throttle:60,1');
         Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'index']);
+        Route::get('my-projects', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'myProjects']);
         Route::get('budget-lines/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'budgetLines']);
 
         // The project cost account: budget vs committed vs actual, the
