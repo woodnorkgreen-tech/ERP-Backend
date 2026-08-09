@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\BudgetAddition;
+use App\Models\GovernanceAuditLog;
 use App\Models\TaskBudgetData;
 use App\Models\TaskMaterialsData;
 use App\Modules\Projects\Models\EnquiryTask;
@@ -169,9 +170,14 @@ class BudgetAdditionService
      */
     public function approve(int $taskId, string $additionId, ?string $notes = null): BudgetAddition
     {
-        // Handle virtual additions (from materials task) - they don't exist in DB yet
+        // Both paths converge here so the decision is recorded once. Virtual
+        // additions (from the materials task) return early into their own
+        // method, which is why the audit trail previously missed them too.
         if (str_starts_with($additionId, 'materials_additional_')) {
-            return $this->approveVirtualAddition($taskId, $additionId, $notes);
+            $addition = $this->approveVirtualAddition($taskId, $additionId, $notes);
+            $this->recordDecision($taskId, $addition, 'approved', $notes);
+
+            return $addition;
         }
 
         // Handle regular database additions
@@ -183,7 +189,10 @@ class BudgetAdditionService
             throw new \Exception('Failed to approve budget addition');
         }
 
-        return $addition->fresh(['creator', 'approver']);
+        $fresh = $addition->fresh(['creator', 'approver']);
+        $this->recordDecision($taskId, $fresh, 'approved', $notes);
+
+        return $fresh;
     }
 
     /**
@@ -193,7 +202,10 @@ class BudgetAdditionService
     {
         // Handle virtual additions (from materials task) - they don't exist in DB yet
         if (str_starts_with($additionId, 'materials_additional_')) {
-            return $this->rejectVirtualAddition($taskId, $additionId, $reason);
+            $addition = $this->rejectVirtualAddition($taskId, $additionId, $reason);
+            $this->recordDecision($taskId, $addition, 'rejected', $reason);
+
+            return $addition;
         }
 
         // Handle regular database additions
@@ -205,7 +217,60 @@ class BudgetAdditionService
             throw new \Exception('Failed to reject budget addition');
         }
 
-        return $addition->fresh(['creator', 'approver']);
+        $fresh = $addition->fresh(['creator', 'approver']);
+        $this->recordDecision($taskId, $fresh, 'rejected', $reason);
+
+        return $fresh;
+    }
+
+    /**
+     * Record an approve/reject decision on a budget addition.
+     *
+     * Approved additions feed quote pricing, so this is the mechanism by which a
+     * project's cost grows after the budget is set — and until now it left no
+     * trace at all: status, approved_by and approved_at were mutated directly
+     * with no audit row and no notification, unlike quote invalidation in the
+     * same subsystem, which does both (audit X4).
+     *
+     * Logging failures are swallowed deliberately. An audit row that cannot be
+     * written must not roll back a decision a human has already made; the
+     * warning is left in the application log instead.
+     */
+    private function recordDecision(int $taskId, BudgetAddition $addition, string $decision, ?string $notes): void
+    {
+        try {
+            $enquiryId = EnquiryTask::whereKey($taskId)->value('project_enquiry_id');
+
+            GovernanceAuditLog::create([
+                'project_enquiry_id' => $enquiryId,
+                'user_id' => Auth::id(),
+                'gate_type' => 'Budget Addition',
+                'action_status' => $decision === 'approved' ? 'authorized' : 'rejected',
+                'model_type' => BudgetAddition::class,
+                'model_id' => $addition->id,
+                'message' => sprintf(
+                    "Budget addition '%s' %s (%s)",
+                    $addition->title ?? $addition->id,
+                    $decision,
+                    number_format((float) ($addition->total_amount ?? 0), 2),
+                ),
+                'context' => [
+                    'task_id' => $taskId,
+                    'addition_id' => $addition->id,
+                    'budget_type' => $addition->budget_type ?? null,
+                    'total_amount' => $addition->total_amount ?? null,
+                    'notes' => $notes,
+                ],
+                'ip_address' => request()?->ip(),
+            ]);
+        } catch (\Throwable $e) {
+            \Log::warning('Failed to record budget addition decision', [
+                'task_id' => $taskId,
+                'addition_id' => $addition->id,
+                'decision' => $decision,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

@@ -129,10 +129,16 @@ Frontend UX is workable for the happy path but has two workflow-breaking gaps fo
    FE2 — Void was unreachable from the transaction table. The emit, the local wrapper *and* the
    parent's modal all already existed; the only missing piece was a button. It now sits **before**
    Delete, so the reversible action is the nearer one.
-4. **X4** — add `GovernanceAuditLog`/notification calls to `BudgetAdditionService`. **PARTIALLY
-   ADDRESSED:** budget additions now project into the cost ledger as `planned` lines carrying
-   `cost_cause = CLIENT-CHANGE` and a poster, so scope growth finally has a trail. The
-   `GovernanceAuditLog` call itself is still absent.
+4. ~~**X4** — `GovernanceAuditLog` on `BudgetAdditionService`.~~ **DONE.** Approve and reject now
+   write a `Budget Addition` audit row carrying the enquiry, the decider, the amount and the notes.
+   Both the database path *and* the virtual (materials-task) path are covered — the virtual one
+   returned early into its own method, which is why it was missed alongside the main one.
+   - The audit write is wrapped: a row that cannot be written must not roll back a decision a human
+     has already made. Pinned by a test that drops the table and asserts the approval still stands.
+   - Budget additions additionally project into the cost ledger as `planned` lines carrying
+     `cost_cause = CLIENT-CHANGE`, so scope growth is visible in the project's cost account as well
+     as in the governance log.
+   - Notifications are still not sent on this path.
 5. ~~**FE3 / BE7 / FE4 / FE5** — duplicated label maps and decorative RBAC.~~ **DONE for the RBAC
    half.** `usePermissions` now checks the granular permission each gate is named after, with a
    single declared Super Admin bypass; `TransactionList`'s own `isSuperAdmin` and
