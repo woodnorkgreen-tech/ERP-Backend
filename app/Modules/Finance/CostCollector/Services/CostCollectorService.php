@@ -7,6 +7,7 @@ use App\Modules\Finance\CostCollector\Contracts\CostContext;
 use App\Modules\Finance\CostCollector\Exceptions\CostValidationException;
 use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\CostCollector\Contracts\PlannedLine;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use Illuminate\Support\Facades\DB;
 
@@ -62,6 +63,7 @@ class CostCollectorService implements CollectsCost
                 'unit_rate' => $context->details['unit_price'] ?? $context->details['unit_rate'] ?? null,
                 'source_type' => $context->sourceType,
                 'source_id' => $context->sourceId,
+                'source_ref' => $context->sourceRef,
                 'details' => $context->details ?: null,
                 'evidence' => $context->evidence ?: null,
                 'submitted_by_user_id' => auth()->id(),
@@ -79,6 +81,101 @@ class CostCollectorService implements CollectsCost
 
             return $line;
         });
+    }
+
+    /**
+     * Post a budget line as `planned`.
+     *
+     * Kept on this class rather than letting the projector write directly,
+     * because "CostCollectorService is the only writer of cost_lines" is what
+     * makes the append-only and period invariants true instead of merely
+     * intended. A second writer would quietly repeal both.
+     *
+     * Planned lines land VERIFIED: completing the budget task is the approval,
+     * and queuing a budget for someone to re-approve line by line would be
+     * ceremony with no decision behind it.
+     */
+    public function postPlanned(PlannedLine $line): CostLine
+    {
+        if ($existing = $this->existingPlanned($line)) {
+            return $existing;
+        }
+
+        $this->validatePlanned($line);
+
+        $context = new CostContext(
+            expenseCode: '',
+            amount: $line->amount,
+            nature: CostLine::NATURE_PLANNED,
+            projectId: $line->projectId,
+            enquiryId: $line->enquiryId,
+            jobNumber: $line->jobNumber,
+            taskId: $line->taskId,
+            costCause: $line->isAddition ? 'CLIENT-CHANGE' : null,
+        );
+
+        // Reuses the same resolution path as a captured cost, so a planned line
+        // and the actual that consumes it are classified identically. Only the
+        // expense code is absent — the catalogue describes spending, and a budget
+        // line predates the decision about what will actually be bought.
+        $resolved = $this->resolver->resolve($context, new ExpenseCode());
+
+        return DB::transaction(function () use ($line, $resolved) {
+            $created = CostLine::create([
+                ...$resolved,
+                'ref' => 'PENDING',
+                'nature' => CostLine::NATURE_PLANNED,
+                'status' => CostLine::STATUS_VERIFIED,
+                'verified_at' => now(),
+                'currency' => 'KES',
+                'fx_rate' => '1',
+                'amount' => $line->amount,
+                'tax_amount' => '0.00',
+                'net_amount' => $line->amount,
+                'base_net_amount' => $line->amount,
+                'description' => $line->description,
+                'unit' => $line->unit,
+                'quantity' => $line->quantity,
+                'unit_rate' => $line->unitRate,
+                'source_type' => $line->sourceType,
+                'source_id' => $line->sourceId,
+                'source_ref' => $line->sourceRef,
+                'details' => ['budget_category' => $line->category, 'is_addition' => $line->isAddition],
+            ]);
+
+            $created->forceFill(['ref' => 'CL-' . str_pad((string) $created->id, 7, '0', STR_PAD_LEFT)])->save();
+
+            return $created;
+        });
+    }
+
+    private function existingPlanned(PlannedLine $line): ?CostLine
+    {
+        return CostLine::where('source_type', $line->sourceType)
+            ->where('source_id', $line->sourceId)
+            ->where('source_ref', $line->sourceRef)
+            ->first();
+    }
+
+    private function validatePlanned(PlannedLine $line): void
+    {
+        $errors = [];
+
+        if (! is_numeric($line->amount)) {
+            $errors['amount'][] = 'Budget line amount must be numeric.';
+        }
+
+        if (! $line->projectId && ! $line->enquiryId && blank($line->jobNumber)) {
+            $errors['project'][] = 'A budget line must belong to a project.';
+        }
+
+        if (blank($line->sourceRef)) {
+            $errors['sourceRef'][] = 'A budget line needs its source key, otherwise re-projection would duplicate it.';
+        }
+
+        if ($errors) {
+            throw CostValidationException::withErrors($errors);
+        }
     }
 
     private function expenseCode(CostContext $context): ExpenseCode
@@ -102,6 +199,7 @@ class CostCollectorService implements CollectsCost
 
         return CostLine::where('source_type', $context->sourceType)
             ->where('source_id', $context->sourceId)
+            ->where('source_ref', $context->sourceRef)
             ->first();
     }
 

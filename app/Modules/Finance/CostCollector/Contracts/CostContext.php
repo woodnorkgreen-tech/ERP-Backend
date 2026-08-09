@@ -45,6 +45,15 @@ final class CostContext
         public readonly ?string $sourceType = null,
         public readonly ?int $sourceId = null,
 
+        /**
+         * Identifies a line WITHIN the source document, for sources whose parts
+         * are keyed by string rather than by row id — a budget line inside a
+         * task_budget_data JSON array, for instance. Empty for whole-document
+         * sources, never null, so the idempotency index cannot be defeated by
+         * MySQL treating NULLs as distinct.
+         */
+        public readonly string $sourceRef = '',
+
         // ── Money ──
         /** Left null at capture: recoverability depends on eTIMS validity and
          *  the claim window, which Finance decides at verification. */
