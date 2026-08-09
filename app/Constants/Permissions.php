@@ -101,6 +101,11 @@ class Permissions
     const FINANCE_QUOTE_APPROVE = 'finance.quote.approve';
     const FINANCE_QUOTE_DELETE = 'finance.quote.delete';
 
+    // Editing a top-up moves the cash balance. FINANCE_PETTY_CASH_DELETE_TOP_UP
+    // already existed; there was no counterpart for editing, which is part of
+    // why that endpoint ended up with no check at all rather than the wrong one.
+    const FINANCE_PETTY_CASH_EDIT_TOP_UP = 'finance.petty_cash.edit_top_up';
+
     // Cost collector. Separated from petty cash on purpose: reporting a cost and
     // paying for one are different jobs held by different people, and the brief
     // requires requester, approver and poster to be separable.

@@ -3,11 +3,15 @@
 namespace App\Modules\Finance\PettyCash\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Constants\Permissions;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
+use App\Modules\Finance\PettyCash\Services\LedgerEntry;
+use App\Modules\Finance\PettyCash\Services\LedgerService;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use App\Modules\Finance\PettyCash\Resources\PettyCashBalanceResource;
 use Exception;
 
@@ -15,11 +19,13 @@ class PettyCashTopUpController extends Controller
 {
     protected $service;
     protected $repository;
+    protected LedgerService $ledger;
 
-    public function __construct(PettyCashService $service, PettyCashRepository $repository)
+    public function __construct(PettyCashService $service, PettyCashRepository $repository, LedgerService $ledger)
     {
         $this->service = $service;
         $this->repository = $repository;
+        $this->ledger = $ledger;
     }
 
     /**
@@ -92,6 +98,15 @@ class PettyCashTopUpController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
+        // Editing a top-up posts an adjustment entry for the amount delta, i.e.
+        // it moves the cash balance. This endpoint previously had no
+        // authorization of any kind (audit BE2).
+        abort_unless(
+            $request->user()?->can(Permissions::FINANCE_PETTY_CASH_EDIT_TOP_UP),
+            403,
+            'You do not have permission to edit a top-up.',
+        );
+
         try {
             $topUp = $this->repository->findTopUp($id);
 
@@ -415,8 +430,14 @@ class PettyCashTopUpController extends Controller
     /**
      * Remove the specified top-up from storage.
      */
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
+        abort_unless(
+            $request->user()?->can(Permissions::FINANCE_PETTY_CASH_DELETE_TOP_UP),
+            403,
+            'You do not have permission to delete a top-up.',
+        );
+
         try {
             $topUp = $this->repository->findTopUp($id);
 
@@ -441,11 +462,27 @@ class PettyCashTopUpController extends Controller
                 ], 400);
             }
 
-            $topUp->delete();
+            // Reverse before removing, in one transaction. Deleting the row on
+            // its own left the original TOP-xxxxxx credit in the ledger and the
+            // cached balance permanently overstated (audit BE1) — the ledger is
+            // the source of truth, so it must be told.
+            $balance = DB::transaction(function () use ($topUp, $request) {
+                $balance = $this->ledger->post(
+                    LedgerEntry::reversalForTopUp($topUp, $request->user()?->id),
+                );
+
+                $topUp->delete();
+
+                return $balance;
+            });
 
             return response()->json([
                 'success' => true,
-                'message' => 'Top-up deleted successfully',
+                'message' => 'Top-up deleted and its ledger entry reversed.',
+                // The plain figure, not the full balance resource: this response
+                // only needs to confirm where the balance landed, and building
+                // the richer payload here would couple deletion to it.
+                'data' => ['current_balance' => (float) $balance->current_balance],
             ]);
         } catch (Exception $e) {
             return response()->json([

@@ -83,39 +83,6 @@ class PettyCashController extends Controller
     }
 
     /**
-     * Get summary of project budgets vs actual petty cash spend
-     */
-    public function getProjectBudgetsSummary(Request $request): JsonResponse
-    {
-        try {
-            $filters = $request->only(['start_date', 'end_date']);
-            $perPage = $request->get('per_page', 15);
-            
-            $result = $this->repository->getProjectBudgetsSummary($filters, (int)$perPage);
-            $summary = $result['paginator'];
-            $stats = $result['stats'];
-
-            return response()->json([
-                'success' => true,
-                'data' => $summary->items(),
-                'stats' => $stats,
-                'meta' => [
-                    'current_page' => $summary->currentPage(),
-                    'last_page' => $summary->lastPage(),
-                    'per_page' => $summary->perPage(),
-                    'total' => $summary->total(),
-                ]
-            ]);
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve project budgets summary',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
      * Get a compact finance workspace snapshot for dashboard refreshes.
      */
     public function workspace(Request $request): JsonResponse
@@ -125,25 +92,19 @@ class PettyCashController extends Controller
 
             $balance = $this->repository->getCurrentBalance();
             $summary = $this->service->getTransactionSummary($filters);
-            $budgetResult = $this->repository->getProjectBudgetsSummary($filters, 5);
-            $budgetPaginator = $budgetResult['paginator'];
 
+            // `budget_snapshot` removed: no client ever read it, and building it
+            // ran a full scan of every budget with the summing done in PHP. It
+            // also carried the same fabricated category split as the retired
+            // Project Budgets tab — budget_category is null on every
+            // disbursement, so three of its four figures were always zero.
+            // Finance › Cost Accounts answers this from the cost ledger.
             return response()->json([
                 'success' => true,
                 'data' => [
                     'balance' => (new PettyCashBalanceResource($balance))->resolve(),
                     'summary' => $summary,
                     'recent_transactions' => $this->service->getRecentTransactions(5),
-                    'budget_snapshot' => [
-                        'data' => $budgetPaginator->items(),
-                        'stats' => $budgetResult['stats'],
-                        'meta' => [
-                            'current_page' => $budgetPaginator->currentPage(),
-                            'last_page' => $budgetPaginator->lastPage(),
-                            'per_page' => $budgetPaginator->perPage(),
-                            'total' => $budgetPaginator->total(),
-                        ],
-                    ],
                     'requisition_snapshot' => $this->getRequisitionSnapshot(),
                 ],
                 'filters' => $filters,
