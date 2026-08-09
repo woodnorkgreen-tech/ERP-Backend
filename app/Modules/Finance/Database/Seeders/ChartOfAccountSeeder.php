@@ -4,149 +4,220 @@ namespace App\Modules\Finance\Database\Seeders;
 
 use App\Modules\Finance\Models\ChartOfAccount;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\DB;
 
+/**
+ * WNG chart of accounts.
+ *
+ * Replaces the previous 120-row export, which used a `COS-001` / `ADM-002`
+ * scheme with colon-nested names and had never received a posting anywhere in
+ * the application. The expense catalogue references a numeric chart (1030 Petty
+ * Cash Float, 1211 Project WIP – Direct Materials, 5100–5800 Cost of Sales), so
+ * the chart is rebuilt to match the catalogue rather than the catalogue bent to
+ * match a stale export.
+ *
+ * Structure:
+ *   1000–1999  Assets            (1400/1500/1600 are the capex families)
+ *   2000–2999  Liabilities
+ *   3000–3999  Equity
+ *   4000–4999  Revenue
+ *   5000–5999  Cost of sales     — mirrors the 121x WIP children one-for-one, so
+ *                                  the WIP→COS transfer at revenue recognition
+ *                                  (catalogue NE-023) is a straight mapping
+ *   6000–6999  Production overhead   (brief §2C)
+ *   7000–7999  Operating expenses    (brief §2D)
+ *   8000–8999  Other / below-the-line
+ *
+ * Header accounts aggregate and are not postable; only leaves accept entries.
+ *
+ * Idempotent: upserts by `code`, then deactivates any account not in this list
+ * rather than deleting it, so a code retired mid-year cannot orphan history.
+ */
 class ChartOfAccountSeeder extends Seeder
 {
-    /**
-     * Run the database seeds.
-     */
+    /** [code, name, category, account_type, normal_balance, parent, postable] */
+    private const ACCOUNTS = [
+        // ── Assets ────────────────────────────────────────────────────────
+        ['1000', 'Current Assets',                     'asset', 'balance_sheet', 'debit',  null,   false],
+        ['1010', 'Bank – Main Account',                'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1020', 'Bank – Secondary Account',           'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1030', 'Petty Cash Float',                   'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1040', 'Mobile Money Float',                 'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1100', 'Accounts Receivable',                'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1110', 'Retentions Receivable',              'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1200', 'Raw-material Inventory',             'asset', 'balance_sheet', 'debit',  '1000', true],
+
+        ['1210', 'Project Work in Progress',           'asset', 'balance_sheet', 'debit',  '1000', false],
+        ['1211', 'Project WIP – Direct Materials',     'asset', 'balance_sheet', 'debit',  '1210', true],
+        ['1212', 'Project WIP – Direct Labour',        'asset', 'balance_sheet', 'debit',  '1210', true],
+        ['1213', 'Project WIP – Subcontractors',       'asset', 'balance_sheet', 'debit',  '1210', true],
+        ['1214', 'Project WIP – Transport & Logistics','asset', 'balance_sheet', 'debit',  '1210', true],
+        ['1215', 'Project WIP – Equipment & Site',     'asset', 'balance_sheet', 'debit',  '1210', true],
+        ['1216', 'Project WIP – Project Utilities',    'asset', 'balance_sheet', 'debit',  '1210', true],
+        ['1217', 'Project WIP – Project Facilitation', 'asset', 'balance_sheet', 'debit',  '1210', true],
+        ['1218', 'Project WIP – Venue & Statutory',    'asset', 'balance_sheet', 'debit',  '1210', true],
+        ['1219', 'Project WIP – Rework & Warranty',    'asset', 'balance_sheet', 'debit',  '1210', true],
+
+        ['1300', 'Staff Advances / Imprest',           'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1310', 'Supplier Advances',                  'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1320', 'Refundable Deposits',                'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1330', 'Input VAT Recoverable',              'asset', 'balance_sheet', 'debit',  '1000', true],
+        ['1340', 'Prepaid Expenses',                   'asset', 'balance_sheet', 'debit',  '1000', true],
+
+        ['1400', 'Property, Plant & Equipment',        'asset', 'capex', 'debit', null,   false],
+        ['1410', 'Machinery & Equipment',              'asset', 'capex', 'debit', '1400', true],
+        ['1420', 'Motor Vehicles',                     'asset', 'capex', 'debit', '1400', true],
+        ['1430', 'Furniture & Fittings',               'asset', 'capex', 'debit', '1400', true],
+        ['1440', 'Computers & IT Equipment',           'asset', 'capex', 'debit', '1400', true],
+        ['1450', 'Tools & Equipment',                  'asset', 'capex', 'debit', '1400', true],
+
+        ['1500', 'Reusable Hire Assets',               'asset', 'capex', 'debit', null,   false],
+        ['1510', 'Exhibition Counters & Booths',       'asset', 'capex', 'debit', '1500', true],
+        ['1520', 'Stage & Flooring Systems',           'asset', 'capex', 'debit', '1500', true],
+        ['1530', 'Lightboxes & Display Systems',       'asset', 'capex', 'debit', '1500', true],
+
+        ['1600', 'Leasehold Improvements',             'asset', 'capex', 'debit', null,   true],
+        ['1900', 'Accumulated Depreciation',           'asset', 'balance_sheet', 'credit', null, true],
+
+        // ── Liabilities ───────────────────────────────────────────────────
+        ['2000', 'Current Liabilities',                'liability', 'balance_sheet', 'credit', null,   false],
+        ['2100', 'Accounts Payable',                   'liability', 'balance_sheet', 'credit', '2000', true],
+        ['2110', 'Output VAT Payable',                 'liability', 'balance_sheet', 'credit', '2000', true],
+        ['2120', 'Withholding Tax Payable',            'liability', 'balance_sheet', 'credit', '2000', true],
+        ['2130', 'PAYE Payable',                       'liability', 'balance_sheet', 'credit', '2000', true],
+        ['2140', 'Statutory Deductions Payable',       'liability', 'balance_sheet', 'credit', '2000', true],
+        ['2150', 'Accrued Expenses',                   'liability', 'balance_sheet', 'credit', '2000', true],
+        ['2200', 'Client Deposits',                    'liability', 'balance_sheet', 'credit', '2000', true],
+        ['2300', 'Loans Payable',                      'liability', 'balance_sheet', 'credit', null,   true],
+
+        // ── Equity ────────────────────────────────────────────────────────
+        ['3100', 'Share Capital',                      'equity', 'balance_sheet', 'credit', null, true],
+        ['3200', 'Retained Earnings',                  'equity', 'balance_sheet', 'credit', null, true],
+        ['3300', 'Dividends & Drawings',               'equity', 'balance_sheet', 'debit',  null, true],
+
+        // ── Revenue ───────────────────────────────────────────────────────
+        ['4100', 'Project Revenue',                    'revenue', 'revenue', 'credit', null, true],
+        ['4200', 'Hire & Rental Revenue',              'revenue', 'revenue', 'credit', null, true],
+        ['4900', 'Other Income',                       'revenue', 'revenue', 'credit', null, true],
+
+        // ── Cost of sales — one-for-one with the 121x WIP children ────────
+        ['5000', 'Cost of Sales',                      'expense', 'direct_cost', 'debit', null,   false],
+        ['5100', 'Cost of Sales – Direct Materials',   'expense', 'direct_cost', 'debit', '5000', true],
+        ['5200', 'Cost of Sales – Direct Labour',      'expense', 'direct_cost', 'debit', '5000', true],
+        ['5300', 'Cost of Sales – Subcontractors',     'expense', 'direct_cost', 'debit', '5000', true],
+        ['5400', 'Cost of Sales – Transport & Logistics','expense','direct_cost','debit', '5000', true],
+        ['5500', 'Cost of Sales – Equipment & Site',   'expense', 'direct_cost', 'debit', '5000', true],
+        ['5600', 'Cost of Sales – Project Utilities',  'expense', 'direct_cost', 'debit', '5000', true],
+        ['5700', 'Cost of Sales – Project Facilitation','expense','direct_cost', 'debit', '5000', true],
+        ['5800', 'Cost of Sales – Venue & Statutory',  'expense', 'direct_cost', 'debit', '5000', true],
+        ['5900', 'Cost of Sales – Rework & Warranty',  'expense', 'direct_cost', 'debit', '5000', true],
+
+        // ── Production overhead (brief §2C) ───────────────────────────────
+        ['6000', 'Production Overhead',                'expense', 'overhead', 'debit', null,   false],
+        ['6100', 'Workshop Electricity',               'expense', 'overhead', 'debit', '6000', true],
+        ['6110', 'Workshop Rent',                      'expense', 'overhead', 'debit', '6000', true],
+        ['6200', 'Machinery Repairs & Maintenance',    'expense', 'overhead', 'debit', '6000', true],
+        ['6300', 'Indirect Production Labour',         'expense', 'overhead', 'debit', '6000', true],
+        ['6400', 'Small Tools & Workshop Consumables', 'expense', 'overhead', 'debit', '6000', true],
+        ['6500', 'Machinery Depreciation',             'expense', 'overhead', 'debit', '6000', true],
+        ['6600', 'PPE & Workshop Safety',              'expense', 'overhead', 'debit', '6000', true],
+        ['6700', 'Cleaning & Waste Disposal',          'expense', 'overhead', 'debit', '6000', true],
+
+        // ── Operating expenses (brief §2D) ────────────────────────────────
+        ['7000', 'Operating Expenses',                 'expense', 'opex', 'debit', null,   false],
+        ['7100', 'Office Rent & Electricity',          'expense', 'opex', 'debit', '7000', true],
+        ['7200', 'Administration Airtime & Internet',  'expense', 'opex', 'debit', '7000', true],
+        ['7300', 'Professional Fees – Finance, HR, IT, Legal', 'expense', 'opex', 'debit', '7000', true],
+        ['7400', 'Office Transport',                   'expense', 'opex', 'debit', '7000', true],
+        ['7500', 'Recruitment & Training',             'expense', 'opex', 'debit', '7000', true],
+        ['7600', 'Staff Welfare',                      'expense', 'opex', 'debit', '7000', true],
+        ['7700', 'Marketing & Business Development',   'expense', 'opex', 'debit', '7000', true],
+        ['7800', 'Bank & Mobile-money Charges',        'expense', 'opex', 'debit', '7000', true],
+        ['7900', 'Insurance & Licences',               'expense', 'opex', 'debit', '7000', true],
+
+        // ── Other / below the line ────────────────────────────────────────
+        ['8100', 'Interest Expense',                   'expense', 'opex', 'debit', null, true],
+        ['8200', 'Foreign Exchange Gain / Loss',       'expense', 'opex', 'debit', null, true],
+        ['8300', 'Depreciation – Non-production',      'expense', 'opex', 'debit', null, true],
+
+        // Catalogue §7: money paid that can never be supported by a valid tax
+        // invoice lands here, after senior approval — never hidden in a general
+        // expense line, and separately reportable as non-deductible.
+        ['8900', 'Unsupported / Non-deductible Expense', 'expense', 'opex', 'debit', null, true],
+    ];
+
     public function run(): void
     {
-        $accounts = [
-            ['code' => 'AP-001', 'name' => 'Accounts Payable (A/P)', 'category' => 'liability'],
-            ['code' => 'AR-001', 'name' => 'Accounts Receivable (A/R)', 'category' => 'asset'],
-            ['code' => 'AR-002', 'name' => 'Accounts Receivable (A/R) - EUR', 'category' => 'asset'],
-            ['code' => 'STD-001', 'name' => 'Short Term Debtors', 'category' => 'asset'],
-            ['code' => 'CASH-001', 'name' => 'Cash Account', 'category' => 'asset'],
-            ['code' => 'EQB-001', 'name' => 'Equity Bank', 'category' => 'asset'],
-            ['code' => 'FMB-001', 'name' => 'Family Bank', 'category' => 'asset'],
-            ['code' => 'FK-001', 'name' => 'Faulu Kenya', 'category' => 'asset'],
-            ['code' => 'KCB-001', 'name' => 'KCB Bank', 'category' => 'asset'],
-            ['code' => 'NCBA-001', 'name' => 'NCBA', 'category' => 'asset'],
-            ['code' => 'NIC-001', 'name' => 'NIC Dollar Account', 'category' => 'asset'],
-            ['code' => 'PETTY-001', 'name' => 'Petty cash', 'category' => 'asset'],
-            ['code' => 'SBM-001', 'name' => 'SBM', 'category' => 'asset'],
-            ['code' => 'STB-001', 'name' => 'Stanbic Bank', 'category' => 'asset'],
-            ['code' => 'COS-001', 'name' => 'Change in inventory - COS', 'category' => 'expense'],
-            ['code' => 'COS-002', 'name' => 'Cost of Sales', 'category' => 'expense'],
-            ['code' => 'COS-003', 'name' => 'Cost of Sales:Branding', 'category' => 'expense'],
-            ['code' => 'COS-004', 'name' => 'Cost of Sales:Courier - Projects', 'category' => 'expense'],
-            ['code' => 'COS-005', 'name' => 'Cost of Sales:Fabrication', 'category' => 'expense'],
-            ['code' => 'COS-006', 'name' => 'Cost of Sales:Field Facilitation', 'category' => 'expense'],
-            ['code' => 'COS-007', 'name' => 'Cost of Sales:Jomat hardware', 'category' => 'expense'],
-            ['code' => 'COS-008', 'name' => 'Cost of Sales:Materials', 'category' => 'expense'],
-            ['code' => 'COS-009', 'name' => 'Cost of Sales:Motor bike and motor vehicle fuel', 'category' => 'expense'],
-            ['code' => 'COS-010', 'name' => 'Cost of Sales:Paints & Hardware', 'category' => 'expense'],
-            ['code' => 'COS-011', 'name' => 'Cost of Sales:Parking Fees', 'category' => 'expense'],
-            ['code' => 'COS-012', 'name' => 'Cost of Sales:Plotting & Cutting', 'category' => 'expense'],
-            ['code' => 'COS-013', 'name' => 'Cost of Sales:Printing', 'category' => 'expense'],
-            ['code' => 'COS-014', 'name' => 'Cost of Sales:Team Meals', 'category' => 'expense'],
-            ['code' => 'COS-015', 'name' => 'Cost of Sales:Teams accomodation', 'category' => 'expense'],
-            ['code' => 'COS-016', 'name' => 'Cost of Sales:Transport & Delivery', 'category' => 'expense'],
-            ['code' => 'COS-017', 'name' => 'Discounts given - COS', 'category' => 'expense'],
-            ['code' => 'INV-001', 'name' => 'Inventory Shrinkage', 'category' => 'expense'],
-            ['code' => 'COS-018', 'name' => 'Other - COS', 'category' => 'expense'],
-            ['code' => 'COS-019', 'name' => 'Overhead - COS', 'category' => 'expense'],
-            ['code' => 'EXP-001', 'name' => 'Pasting Expenses', 'category' => 'expense'],
-            ['code' => 'COS-020', 'name' => 'Subcontractors - COS', 'category' => 'expense'],
-            ['code' => 'DIV-001', 'name' => 'Dividend disbursed', 'category' => 'equity'],
-            ['code' => 'EQE-001', 'name' => 'Equity in earnings of subsidiaries', 'category' => 'equity'],
-            ['code' => 'OBE-001', 'name' => 'Opening Balance Equity', 'category' => 'equity'],
-            ['code' => 'OCI-001', 'name' => 'Other comprehensive income', 'category' => 'equity'],
-            ['code' => 'RE-001', 'name' => 'Retained Earnings', 'category' => 'equity'],
-            ['code' => 'SC-001', 'name' => 'Share capital', 'category' => 'equity'],
-            ['code' => 'ADM-001', 'name' => 'Administration expenses', 'category' => 'expense'],
-            ['code' => 'ADM-002', 'name' => 'Administration expenses:Courier & Postage', 'category' => 'expense'],
-            ['code' => 'ADM-003', 'name' => 'Administration expenses:Depreciation Expense', 'category' => 'expense'],
-            ['code' => 'AMO-001', 'name' => 'Amortisation expense', 'category' => 'expense'],
-            ['code' => 'ATM-001', 'name' => 'Atm charges', 'category' => 'expense'],
-            ['code' => 'BD-001', 'name' => 'Bad Debts', 'category' => 'expense'],
-            ['code' => 'DEL-001', 'name' => 'Delivery/Trolley expenses', 'category' => 'expense'],
-            ['code' => 'EXD-001', 'name' => 'EXCISE DUTY', 'category' => 'expense'],
-            ['code' => 'FIN-001', 'name' => 'Finance cost', 'category' => 'expense'],
-            ['code' => 'FIN-002', 'name' => 'Finance cost:Bad debts', 'category' => 'expense'],
-            ['code' => 'FIN-003', 'name' => 'Finance cost:Bank charges', 'category' => 'expense'],
-            ['code' => 'FIN-004', 'name' => 'Finance cost:Interest expense', 'category' => 'expense'],
-            ['code' => 'FIN-005', 'name' => 'Finance cost:Mpesa charges', 'category' => 'expense'],
-            ['code' => 'ITX-001', 'name' => 'Income tax expense', 'category' => 'expense'],
-            ['code' => 'INS-001', 'name' => 'Insurance - Disability', 'category' => 'expense'],
-            ['code' => 'INS-002', 'name' => 'Insurance - General', 'category' => 'expense'],
-            ['code' => 'INS-003', 'name' => 'Insurance - Liability', 'category' => 'expense'],
-            ['code' => 'LPF-001', 'name' => 'Legal and professional fees', 'category' => 'expense'],
-            ['code' => 'LDO-001', 'name' => 'Loss on discontinued operations, net of tax', 'category' => 'expense'],
-            ['code' => 'MC-001', 'name' => 'Management compensation', 'category' => 'expense'],
-            ['code' => 'MAE-001', 'name' => 'Meals and entertainment', 'category' => 'expense'],
-            ['code' => 'MED-001', 'name' => 'Medical expenses', 'category' => 'expense'],
-            ['code' => 'MBMV-001', 'name' => 'Motor bike and motor vehicle car wash', 'category' => 'expense'],
-            ['code' => 'MBMV-002', 'name' => 'Motor bike and motor vehicles Repair', 'category' => 'expense'],
-            ['code' => 'OPE-001', 'name' => 'Operating Expenses', 'category' => 'expense'],
-            ['code' => 'OPE-002', 'name' => 'Operating Expenses:Advertising/Promotional', 'category' => 'expense'],
-            ['code' => 'OPE-003', 'name' => 'Operating Expenses:Audit & Accountancy Fees', 'category' => 'expense'],
-            ['code' => 'OPE-004', 'name' => 'Operating Expenses:Commissions and fees', 'category' => 'expense'],
-            ['code' => 'OPE-005', 'name' => 'Operating Expenses:Consultancy Fees', 'category' => 'expense'],
-            ['code' => 'OPE-006', 'name' => 'Operating Expenses:Consumables', 'category' => 'expense'],
-            ['code' => 'OPE-007', 'name' => 'Operating Expenses:Corporate social Responsibility', 'category' => 'expense'],
-            ['code' => 'OPE-008', 'name' => 'Operating Expenses:Director Expenses', 'category' => 'expense'],
-            ['code' => 'OPE-009', 'name' => 'Operating Expenses:Director Expenses:Courier - Director\'s Errands', 'category' => 'expense'],
-            ['code' => 'OPE-010', 'name' => 'Operating Expenses:Dues and subacriptions', 'category' => 'expense'],
-            ['code' => 'OPE-011', 'name' => 'Operating Expenses:Dues and subscriptions', 'category' => 'expense'],
-            ['code' => 'OPE-012', 'name' => 'Operating Expenses:Electricity & Water', 'category' => 'expense'],
-            ['code' => 'OPE-013', 'name' => 'Operating Expenses:Equipment Rental', 'category' => 'expense'],
-            ['code' => 'OPE-014', 'name' => 'Operating Expenses:Garbage Collections', 'category' => 'expense'],
-            ['code' => 'OPE-015', 'name' => 'Operating Expenses:Generator fuel, Repair and Maintenance', 'category' => 'expense'],
-            ['code' => 'OPE-016', 'name' => 'Operating Expenses:Insurance premium', 'category' => 'expense'],
-            ['code' => 'OPE-017', 'name' => 'Operating Expenses:Licenses and permits', 'category' => 'expense'],
-            ['code' => 'OPE-018', 'name' => 'Operating Expenses:Office Casual/Stipend', 'category' => 'expense'],
-            ['code' => 'OPE-019', 'name' => 'Operating Expenses:Office expenses', 'category' => 'expense'],
-            ['code' => 'OPE-020', 'name' => 'Operating Expenses:Packaging and Delivery', 'category' => 'expense'],
-            ['code' => 'OPE-021', 'name' => 'Operating Expenses:Professional Fees', 'category' => 'expense'],
-            ['code' => 'OPE-022', 'name' => 'Operating Expenses:Rent & lease Payments', 'category' => 'expense'],
-            ['code' => 'OPE-023', 'name' => 'Operating Expenses:Repairs and Maintenance', 'category' => 'expense'],
-            ['code' => 'OPE-024', 'name' => 'Operating Expenses:Samples', 'category' => 'expense'],
-            ['code' => 'OPE-025', 'name' => 'Operating Expenses:Security And Fees', 'category' => 'expense'],
-            ['code' => 'OPE-026', 'name' => 'Operating Expenses:Set Up Casuals', 'category' => 'expense'],
-            ['code' => 'OPE-027', 'name' => 'Operating Expenses:Shipping & Delivery Expense', 'category' => 'expense'],
-            ['code' => 'OPE-028', 'name' => 'Operating Expenses:Site Visist', 'category' => 'expense'],
-            ['code' => 'OPE-029', 'name' => 'Operating Expenses:Staff Welfare', 'category' => 'expense'],
-            ['code' => 'OPE-030', 'name' => 'Operating Expenses:Stationery & Printing', 'category' => 'expense'],
-            ['code' => 'OPE-031', 'name' => 'Operating Expenses:Telephone & Internet', 'category' => 'expense'],
-            ['code' => 'OPE-032', 'name' => 'Operating Expenses:Transport & Delivery', 'category' => 'expense'],
-            ['code' => 'OGAE-001', 'name' => 'Other general and administrative expenses', 'category' => 'expense'],
-            ['code' => 'OSE-001', 'name' => 'Other selling expenses', 'category' => 'expense'],
-            ['code' => 'OTEA-001', 'name' => 'Other Types of Expenses-Advertising Expenses', 'category' => 'expense'],
-            ['code' => 'OTE-001', 'name' => 'Overtime expense', 'category' => 'expense'],
-            ['code' => 'PE-001', 'name' => 'Payroll Expenses', 'category' => 'expense'],
-            ['code' => 'PE-002', 'name' => 'Personnel Expenses', 'category' => 'expense'],
-            ['code' => 'PE-003', 'name' => 'Personnel Expenses:Housing levy', 'category' => 'expense'],
-            ['code' => 'PE-004', 'name' => 'Personnel Expenses:Nita Levy', 'category' => 'expense'],
-            ['code' => 'PE-005', 'name' => 'Personnel Expenses:NSSF Expense', 'category' => 'expense'],
-            ['code' => 'PE-006', 'name' => 'Personnel Expenses:Salaries', 'category' => 'expense'],
-            ['code' => 'PE-007', 'name' => 'Personnel Expenses:Wages-Direct Labour', 'category' => 'expense'],
-            ['code' => 'PS-001', 'name' => 'Printing Supplies', 'category' => 'expense'],
-            ['code' => 'RI-001', 'name' => 'Return Inwards', 'category' => 'revenue'],
-            ['code' => 'RE-002', 'name' => 'Rider\'s Expense', 'category' => 'expense'],
-            ['code' => 'SUP-001', 'name' => 'Supplies', 'category' => 'expense'],
-            ['code' => 'TSE-001', 'name' => 'Travel expenses - selling expenses', 'category' => 'expense'],
-            ['code' => 'UCBPE-001', 'name' => 'Unapplied Cash Bill Payment Expense', 'category' => 'expense'],
-            ['code' => 'UE-001', 'name' => 'Uncategorised Expense', 'category' => 'expense'],
-            ['code' => 'UTIL-001', 'name' => 'Utilities', 'category' => 'expense'],
-            ['code' => 'VP-001', 'name' => 'Vat Penalty', 'category' => 'expense'],
-            ['code' => 'WE-001', 'name' => 'Wage expenses', 'category' => 'expense'],
-            ['code' => 'WNGA-001', 'name' => 'WNG Give aways', 'category' => 'expense'],
+        DB::transaction(function () {
+            foreach (self::ACCOUNTS as [$code, $name, $category, $type, $balance, , $postable]) {
+                ChartOfAccount::updateOrCreate(
+                    ['code' => $code],
+                    [
+                        'name' => $name,
+                        'category' => $category,
+                        'account_type' => $type,
+                        'normal_balance' => $balance,
+                        'is_postable' => $postable,
+                        'is_active' => true,
+                    ]
+                );
+            }
+
+            // Second pass: parents exist by now.
+            $ids = ChartOfAccount::pluck('id', 'code');
+            foreach (self::ACCOUNTS as [$code, , , , , $parent]) {
+                ChartOfAccount::where('code', $code)
+                    ->update(['parent_id' => $parent ? $ids[$parent] ?? null : null]);
+            }
+
+            // Purge anything outside this chart. The previous export had never
+            // received a posting, so leaving 120 dead rows behind would only make
+            // the account picker ambiguous. Rows that ARE referenced are retired
+            // instead of deleted, so a code that once carried postings stays
+            // resolvable — the seeder is safe to re-run at any point later.
+            $stale = ChartOfAccount::whereNotIn('code', array_column(self::ACCOUNTS, 0))->get();
+
+            foreach ($stale as $account) {
+                if ($this->isReferenced($account->id)) {
+                    $account->update(['is_active' => false]);
+                    continue;
+                }
+
+                $account->delete();
+            }
+        });
+    }
+
+    /**
+     * Does anything point at this account? Checked by column rather than by
+     * relationship so a table added later is a one-line change here, and a
+     * missing table (partially migrated environment) is not fatal.
+     */
+    private function isReferenced(int $accountId): bool
+    {
+        $references = [
+            'payment_sources' => ['gl_account_id'],
+            'posting_rules'   => ['debit_account_id', 'credit_account_id'],
+            'expense_codes'   => ['default_debit_account_id'],
+            'chart_of_accounts' => ['parent_id'],
         ];
 
-        foreach ($accounts as $account) {
-            ChartOfAccount::updateOrCreate(
-                ['code' => $account['code']],
-                [
-                    'name' => $account['name'],
-                    'category' => $account['category'],
-                    'is_active' => true,
-                ]
-            );
+        foreach ($references as $table => $columns) {
+            if (! \Illuminate\Support\Facades\Schema::hasTable($table)) {
+                continue;
+            }
+
+            foreach ($columns as $column) {
+                if (! \Illuminate\Support\Facades\Schema::hasColumn($table, $column)) {
+                    continue;
+                }
+
+                if (DB::table($table)->where($column, $accountId)->exists()) {
+                    return true;
+                }
+            }
         }
 
-        $this->command->info('Chart of accounts seeded successfully from embedded data.');
+        return false;
     }
 }
