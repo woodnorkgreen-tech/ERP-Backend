@@ -113,10 +113,9 @@ class BudgetProjector
             ->filter(function ($pair) {
                 [$material] = $pair;
 
-                // `is_included` is an explicit exclusion flag; absent means included.
                 return is_array($material)
                     && filled($material['id'] ?? null)
-                    && ($material['is_included'] ?? true) !== false;
+                    && $this->isIncluded($material);
             })
             ->map(function ($pair) use ($budget, $enquiryId, $taskId) {
                 [$material, $elementName] = $pair;
@@ -135,6 +134,7 @@ class BudgetProjector
                     unitRate: $rate,
                     sourceId: $budget->id,
                     sourceRef: (string) $material['id'],
+                    isAddition: (bool) ($material['isAddition'] ?? false),
                 );
             })
             ->values();
@@ -207,6 +207,26 @@ class BudgetProjector
         }
 
         return $orphans->count();
+    }
+
+    /**
+     * The exclusion flag is spelled both ways in stored data — `is_included` in
+     * 178 budgets and `isIncluded` in 259 — because the budget screen changed
+     * key style at some point and old rows were never rewritten. Checking only
+     * one spelling would silently project excluded materials as budget on the
+     * majority of records.
+     *
+     * Absent means included: exclusion has to be explicit.
+     */
+    private function isIncluded(array $material): bool
+    {
+        foreach (['is_included', 'isIncluded'] as $key) {
+            if (array_key_exists($key, $material) && $material[$key] === false) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function describe(?string $prefix, ?string $detail): ?string

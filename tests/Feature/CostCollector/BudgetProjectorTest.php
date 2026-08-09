@@ -109,6 +109,36 @@ class BudgetProjectorTest extends TestCase
         $this->assertDatabaseMissing('cost_lines', ['source_ref' => '4911e61d-c080-4b46-9cde-881b0dec425d']);
     }
 
+    /**
+     * Stored budgets spell the exclusion flag both ways — `is_included` in 178
+     * records and `isIncluded` in 259 — and the camelCase shape also uses
+     * numeric-string ids rather than UUIDs. Both must behave identically.
+     */
+    public function test_it_honours_the_camel_case_exclusion_flag_too(): void
+    {
+        $budget = $this->budget(['materials_data' => [[
+            'id' => 'element-1',
+            'name' => 'Signage',
+            'materials' => [
+                [
+                    'id' => '47132', 'description' => 'Forex board 4mm',
+                    'unitOfMeasurement' => 'Sheets', 'quantity' => 1,
+                    'unitPrice' => 2000, 'totalPrice' => 2000, 'isIncluded' => true,
+                ],
+                [
+                    'id' => '47133', 'description' => 'Dropped from scope',
+                    'unitOfMeasurement' => 'sqm', 'quantity' => 2,
+                    'unitPrice' => 800, 'totalPrice' => 1600, 'isIncluded' => false,
+                ],
+            ],
+        ]]]);
+
+        $this->assertSame(1, $this->projector->project($budget)['projected']);
+
+        $this->assertDatabaseHas('cost_lines', ['source_ref' => '47132']);
+        $this->assertDatabaseMissing('cost_lines', ['source_ref' => '47133']);
+    }
+
     public function test_it_projects_the_three_flat_arrays(): void
     {
         $budget = $this->budget([

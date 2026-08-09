@@ -27,5 +27,11 @@ class FinanceServiceProvider extends ServiceProvider
     {
         // Load migrations from the module
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                \App\Modules\Finance\CostCollector\Console\ProjectBudgetsCommand::class,
+            ]);
+        }
     }
 }
