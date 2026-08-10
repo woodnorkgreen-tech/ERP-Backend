@@ -27,6 +27,7 @@ class CostCollectorService implements CollectsCost
 {
     public function __construct(
         private CostContextResolver $resolver,
+        private CostNotifier $notifier,
     ) {}
 
     public function collect(CostContext $context): CostLine
@@ -78,6 +79,12 @@ class CostCollectorService implements CollectsCost
             // Assigned from the primary key so it is unique without a counter to
             // race on. job_number already carries the project context.
             $line->forceFill(['ref' => 'CL-' . str_pad((string) $line->id, 7, '0', STR_PAD_LEFT)])->save();
+
+            // Only a cost that is actually waiting warrants telling anyone. A
+            // producer-posted line lands verified and needs no queue.
+            if ($line->status === CostLine::STATUS_SUBMITTED) {
+                $this->notifier->submitted($line);
+            }
 
             return $line;
         });

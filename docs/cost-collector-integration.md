@@ -57,6 +57,43 @@ understated.
 
 ---
 
+## Who gets told
+
+`CostNotifier` is the one place that decides. Types are registered in
+`config/notifications.php` under the `finance` module.
+
+| Event | Goes to | Why |
+|---|---|---|
+| `cost_submitted` | anyone with `finance.costs.verify` | the queue belongs to a role, not a person |
+| `cost_queried` | the reporter | **the one that matters** — without it a query is sent back to nobody |
+| `cost_verified` / `cost_rejected` / `cost_reversed` | the reporter | they asked; they should hear the answer |
+
+Answering a query re-notifies the verifiers, or a resolved query sits waiting for someone who does
+not know it moved.
+
+Every send is wrapped. A notification that cannot be delivered must never roll back the decision
+that triggered it — verifying a cost is the real work; telling someone is a courtesy allowed to fail
+on its own. A producer-posted cost has no human reporter and notifies nobody.
+
+### Why verifiers are resolved by hand rather than broadcast
+
+`NotificationService::dispatchNotification(permission: …)` looks like the obvious way to reach the
+queue, and it is wrong here. That path additionally filters recipients through `userCanSeeModule`,
+which gates the `finance` module on holding a **Finance** or **Accounts** *role*.
+
+The cost collector is deliberately permission-based — the entire point of replacing the hardcoded
+`hasRole('Super Admin')` checks was that someone can be granted `finance.costs.verify` without a
+role. Broadcasting would therefore have silently dropped exactly the people who were granted the
+right explicitly, and the queue would have looked empty to them forever.
+
+`CostNotifier::verifierIds()` resolves permission holders directly and passes them as explicit
+recipients, which bypass the module filter. Holding the permission is a stronger signal of "should
+see this" than holding a role.
+
+**If you add a producer or a new notification type here, do the same.** A test caught this only
+because it granted the permission without the role — which is precisely the configuration the
+permission model exists to support.
+
 ## The rule producers must follow
 
 > **Stock-tracked materials cost the project at ISSUE, not at purchase.** Buying into store is a

@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Finance\CostCollector\Exceptions\CostValidationException;
 use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\Services\JournalPostingService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -22,6 +23,15 @@ use Illuminate\Support\Facades\DB;
  */
 class CostVerificationService
 {
+    private JournalPostingService $journalPostingService;
+
+    public function __construct(
+        private CostNotifier $notifier,
+        ?JournalPostingService $journalPostingService = null,
+    ) {
+        $this->journalPostingService = $journalPostingService ?? new JournalPostingService();
+    }
+
     /**
      * @param array{tax_amount?: string, vat_treatment_id?: int, wht_category_id?: int} $tax
      */
@@ -49,7 +59,13 @@ class CostVerificationService
                 'query_note' => null,
             ])->save();
 
-            return $line->refresh();
+            $line->refresh();
+            
+            $this->journalPostingService->postCostLine($line);
+            
+            $this->notifier->verified($line);
+
+            return $line;
         });
     }
 
@@ -70,6 +86,9 @@ class CostVerificationService
             'verified_at' => null,
         ])->save();
 
+        // The one that matters most: without it a query goes back to nobody.
+        $this->notifier->queried($line);
+
         return $line;
     }
 
@@ -83,6 +102,8 @@ class CostVerificationService
             'verified_by' => $verifier->id,
             'verified_at' => now(),
         ])->save();
+
+        $this->notifier->rejected($line);
 
         return $line;
     }
@@ -114,6 +135,8 @@ class CostVerificationService
             'verified_at' => now(),
         ])->save();
 
+        $this->notifier->reversed($line);
+
         return $line;
     }
 
@@ -123,6 +146,10 @@ class CostVerificationService
         $this->assertCanTransition($line, CostLine::STATUS_SUBMITTED);
 
         $line->forceFill(['status' => CostLine::STATUS_SUBMITTED])->save();
+
+        // Back in the queue, so the verifiers need telling again — otherwise an
+        // answered query sits waiting for someone who does not know it moved.
+        $this->notifier->submitted($line);
 
         return $line;
     }
