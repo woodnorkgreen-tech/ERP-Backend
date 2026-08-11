@@ -14,7 +14,7 @@ class DesignBomItemController extends Controller
     public function index(DesignItem $item): JsonResponse
     {
         return response()->json([
-            'data' => DesignBomItemResource::collection($item->bomItems()->latest()->get()),
+            'data' => DesignBomItemResource::collection($item->bomItems()->with('material.baseUom')->latest()->get()),
         ]);
     }
 
@@ -25,7 +25,7 @@ class DesignBomItemController extends Controller
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
 
-        $bomItem = DesignBomItem::create($data);
+        $bomItem = DesignBomItem::create($data)->load('material.baseUom');
 
         return response()->json([
             'message' => 'BOM item created successfully',
@@ -38,6 +38,7 @@ class DesignBomItemController extends Controller
         $data = $request->validated();
         $data['updated_by'] = auth()->id();
         $bomItem->update($data);
+        $bomItem->load('material.baseUom');
 
         return response()->json([
             'message' => 'BOM item updated successfully',

@@ -34,7 +34,7 @@ class DesignItemController extends Controller
     public function index(Request $request, string $stream): JsonResponse
     {
         $query = DesignItem::where('stream', $stream)
-            ->with(['job.enquiry.deliverables', 'type', 'printMaterial', 'documents', 'bomItems', 'handoffs']);
+            ->with(['job.enquiry.deliverables', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs']);
 
         $status = $request->input('status', $request->route('status'));
         if ($status) {
@@ -69,7 +69,7 @@ class DesignItemController extends Controller
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
 
-        $item = DesignItem::create($data)->load(['job', 'type', 'printMaterial', 'documents', 'bomItems', 'handoffs']);
+        $item = DesignItem::create($data)->load(['job', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs']);
 
         return response()->json([
             'message' => 'Design item created successfully',
@@ -83,7 +83,7 @@ class DesignItemController extends Controller
         $data['updated_by'] = auth()->id();
 
         $item->update($data);
-        $item->load(['job', 'type', 'printMaterial', 'documents', 'bomItems', 'handoffs']);
+        $item->load(['job', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs']);
 
         return response()->json([
             'message' => 'Design item updated successfully',
@@ -126,7 +126,7 @@ class DesignItemController extends Controller
 
         return response()->json([
             'message' => 'Structural Design marked production ready',
-            'data' => new DesignItemResource($item->fresh(['job', 'type', 'documents', 'bomItems', 'handoffs'])),
+            'data' => new DesignItemResource($item->fresh(['job', 'type', 'documents', 'bomItems.material.baseUom', 'handoffs'])),
         ]);
     }
 }

@@ -113,7 +113,7 @@ class DesignJobController extends Controller
             'items.type',
             'items.printMaterial',
             'items.documents',
-            'items.bomItems',
+            'items.bomItems.material.baseUom',
             'items.handoffs',
             'documents',
         ]);
