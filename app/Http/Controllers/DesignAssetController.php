@@ -79,6 +79,50 @@ class DesignAssetController extends Controller
     }
 
     /**
+     * Attach an external link as a design asset (in place of a file upload).
+     */
+    public function storeLink(Request $request, EnquiryTask $task)
+    {
+        // TODO: Add authorization policy when implemented
+        // $this->authorize('update', $task);
+
+        $validated = $request->validate([
+            'url' => 'required|url|max:2048',
+            'name' => 'sometimes|string|max:255',
+            'category' => 'sometimes|string|in:concept,mockup,artwork,logo,ui-ux,illustration,prototype,presentation,other',
+            'description' => 'sometimes|string|max:1000',
+            'requirement_id' => 'sometimes|integer|exists:design_requirements,id',
+        ]);
+
+        $name = $validated['name'] ?? (parse_url($validated['url'], PHP_URL_HOST) ?: $validated['url']);
+
+        $asset = DesignAsset::create([
+            'enquiry_task_id' => $task->id,
+            'name' => $name,
+            'original_name' => $name,
+            'source' => 'link',
+            'external_url' => $validated['url'],
+            'category' => $validated['category'] ?? 'other',
+            'status' => 'pending',
+            'description' => $validated['description'] ?? null,
+            'tags' => [],
+            'uploaded_by' => auth()->id(),
+        ]);
+
+        if (!empty($validated['requirement_id'])) {
+            $requirement = \App\Models\DesignRequirement::find($validated['requirement_id']);
+            if ($requirement) {
+                $requirement->update([
+                    'asset_id' => $asset->id,
+                    'status' => 'fulfilled',
+                ]);
+            }
+        }
+
+        return response()->json([$asset], 201);
+    }
+
+    /**
      * Display the specified design asset.
      */
     public function show(DesignAsset $asset)
@@ -134,7 +178,11 @@ class DesignAssetController extends Controller
    public function download($task, $asset)
 {
     $asset = DesignAsset::findOrFail($asset);
-    
+
+    if ($asset->isLink()) {
+        return redirect()->away($asset->external_url);
+    }
+
     if (!Storage::disk('public')->exists($asset->file_path)) {
         abort(404, 'File not found');
     }

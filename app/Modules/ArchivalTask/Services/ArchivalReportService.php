@@ -433,9 +433,9 @@ class ArchivalReportService
                     foreach ($assets as $asset) {
                         $documents[] = [
                             'name' => "Design: {$asset->name}",
-                            'type' => strtoupper(pathinfo($asset->file_path, PATHINFO_EXTENSION)),
+                            'type' => $asset->isLink() ? 'LINK' : strtoupper(pathinfo($asset->file_path, PATHINFO_EXTENSION)),
                             'category' => 'Design',
-                            'url' => storage_url($asset->file_path),
+                            'url' => $asset->isLink() ? $asset->external_url : storage_url($asset->file_path),
                             'asset_id' => $asset->id,
                             'task_status' => $designTask->status,
                         ];
