@@ -16,6 +16,8 @@ class DesignDocumentResource extends JsonResource
             'document_type' => $this->document_type,
             'name' => $this->name,
             'original_name' => $this->original_name,
+            'source' => $this->source ?? 'file',
+            'external_url' => $this->external_url,
             'file_path' => $this->file_path,
             'file_size' => (int) $this->file_size,
             'mime_type' => $this->mime_type,

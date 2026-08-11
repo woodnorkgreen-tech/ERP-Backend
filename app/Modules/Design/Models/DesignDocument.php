@@ -14,6 +14,8 @@ class DesignDocument extends Model
         'document_type',
         'name',
         'original_name',
+        'source',
+        'external_url',
         'file_path',
         'file_size',
         'mime_type',
@@ -42,5 +44,10 @@ class DesignDocument extends Model
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    public function isLink(): bool
+    {
+        return $this->source === 'link';
     }
 }

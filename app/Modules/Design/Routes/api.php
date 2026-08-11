@@ -45,6 +45,7 @@ Route::put('/bom-items/{bomItem}', [DesignBomItemController::class, 'update']);
 Route::delete('/bom-items/{bomItem}', [DesignBomItemController::class, 'destroy']);
 
 Route::post('/documents', [DesignDocumentController::class, 'store']);
+Route::post('/documents/link', [DesignDocumentController::class, 'storeLink']);
 Route::get('/documents/{document}/download', [DesignDocumentController::class, 'download']);
 Route::delete('/documents/{document}', [DesignDocumentController::class, 'destroy']);
 
