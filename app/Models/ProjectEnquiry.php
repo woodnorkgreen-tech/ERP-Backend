@@ -210,6 +210,10 @@ class ProjectEnquiry extends Model
             return [
                 'id'             => $d->uuid,
                 'uuid'           => $d->uuid,
+                // Real project_deliverables.id, for modules (e.g. Design) that need
+                // to link back to this row via a foreign key. 'id' above is kept as
+                // the uuid for backward compatibility with existing consumers.
+                'deliverable_id' => $d->id,
                 'name'           => $d->name,
                 'classification' => $d->classification,
                 'status'         => $d->status,

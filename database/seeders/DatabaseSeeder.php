@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use App\Modules\MaterialsLibrary\Database\Seeders\WorkstationSeeder;
 use App\Modules\MaterialsLibrary\Database\Seeders\MaterialCategorySeeder;
+use App\Modules\Design\Database\Seeders\DesignTypeSeeder;
 
 class DatabaseSeeder extends Seeder
 {
@@ -45,6 +46,9 @@ class DatabaseSeeder extends Seeder
         // Materials Library — workstations and category taxonomy
         $this->call(WorkstationSeeder::class);
         $this->call(MaterialCategorySeeder::class);
+
+        // Design module — starter Graphic/Structural types
+        $this->call(DesignTypeSeeder::class);
 
         // Seed Universal Task System data
         // $this->call(UniversalTaskSeeder::class); TODO: FRANSIS

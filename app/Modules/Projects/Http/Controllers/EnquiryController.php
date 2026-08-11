@@ -321,6 +321,7 @@ class EnquiryController extends Controller
 
             // Auto-create initial tasks based on workflow preset
             app(\App\Modules\Projects\Services\EnquiryWorkflowService::class)->initializeWorkflow($enquiry);
+            app(\App\Modules\Design\Services\DesignProjectSyncService::class)->syncUpcoming($enquiry);
 
             DB::commit();
 

@@ -784,6 +784,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::prefix('enquiry-tasks/{task}/design-assets')->group(function () {
             Route::get('/', [DesignAssetController::class, 'index']);
             Route::post('/', [DesignAssetController::class, 'store']);
+            Route::post('/link', [DesignAssetController::class, 'storeLink']);
 
             // Specific routes FIRST
             Route::get('/{asset}/download', [DesignAssetController::class, 'download']);
