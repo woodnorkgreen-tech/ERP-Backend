@@ -15,15 +15,24 @@ class MaterialCategory extends Model
 
     protected $fillable = [
         'name',
+        'item_type_id',
         'code',
         'parent_id',
         'sort_order',
         'is_active',
+        'is_selectable',
+        'default_issue_disposition',
+        'default_tracking_mode',
+        'allowed_uoms',
+        'required_attributes',
     ];
 
     protected $casts = [
         'is_active'   => 'boolean',
         'sort_order'  => 'integer',
+        'is_selectable' => 'boolean',
+        'allowed_uoms' => 'array',
+        'required_attributes' => 'array',
     ];
 
     // ─── Relationships ────────────────────────────────────────────────────────
@@ -31,6 +40,11 @@ class MaterialCategory extends Model
     public function parent(): BelongsTo
     {
         return $this->belongsTo(MaterialCategory::class, 'parent_id');
+    }
+
+    public function itemType(): BelongsTo
+    {
+        return $this->belongsTo(MaterialItemType::class, 'item_type_id');
     }
 
     public function children(): HasMany

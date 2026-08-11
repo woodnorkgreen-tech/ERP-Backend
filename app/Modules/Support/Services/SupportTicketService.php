@@ -21,7 +21,7 @@ class SupportTicketService
         'low' => ['response' => 16, 'resolution' => 48],
     ];
     private const TRANSITIONS = [
-        'open' => ['assigned', 'in_progress', 'resolved', 'closed'],
+        'open' => ['assigned', 'in_progress', 'waiting_on_user', 'resolved', 'closed'],
         'assigned' => ['open', 'in_progress', 'waiting_on_user', 'resolved', 'closed'],
         'in_progress' => ['waiting_on_user', 'resolved', 'closed'],
         'waiting_on_user' => ['in_progress', 'resolved', 'closed'],
@@ -114,9 +114,7 @@ class SupportTicketService
                 $data['resolution_due_at'] = $ticket->created_at->copy()->addHours($targets['resolution']);
             }
 
-            if ($targetStatus !== $ticket->status && !in_array($targetStatus, self::TRANSITIONS[$ticket->status] ?? [], true)) {
-                throw ValidationException::withMessages(['status' => ["A ticket cannot move from {$ticket->status} to {$targetStatus}."]]);
-            }
+            $this->assertTransition($ticket, $targetStatus);
 
             if (array_key_exists('assigned_to', $data) && $data['assigned_to'] && $ticket->status === 'open' && !isset($data['status'])) {
                 $data['status'] = 'assigned';
@@ -143,9 +141,14 @@ class SupportTicketService
                 ->map(fn ($value, $key) => ['from' => $before[$key], 'to' => $value])
                 ->all();
 
-            if ($changes !== []) {
-                $ticket->activities()->create(['actor_id' => $actor->id, 'action' => 'updated', 'changes' => $changes]);
+            // A save that changed nothing is not news. Without this guard a
+            // no-op save — or dropping a board card back where it started —
+            // tells the requester their ticket was "updated".
+            if ($changes === []) {
+                return $ticket;
             }
+
+            $ticket->activities()->create(['actor_id' => $actor->id, 'action' => 'updated', 'changes' => $changes]);
 
             NotificationService::send(
                 type: 'support_ticket_updated',
@@ -205,27 +208,32 @@ class SupportTicketService
                     && !$ticket->assigned_to
                     && $author->can('support.manage')
                     && !$author->hasRole(['Super Admin', 'Admin']);
-                if ($autoClaimed) {
-                    $ticket->update([
-                        'assigned_to' => $author->id,
-                        'status' => $action === 'keep' ? 'in_progress' : $ticket->status,
-                    ]);
+
+                // Every status change goes through one guarded decision so a
+                // reply cannot reach a state that `update()` (and the board's
+                // drag-and-drop) would reject.
+                $reopening = !$internal
+                    && $author->id === $ticket->reporter_id
+                    && in_array($ticket->status, ['waiting_on_user', 'resolved'], true);
+
+                $nextStatus = $ticket->status;
+                if ($autoClaimed && $action === 'keep') $nextStatus = 'in_progress';
+                if ($reopening) $nextStatus = 'in_progress';
+                elseif (!$internal && $action === 'waiting_on_user') $nextStatus = 'waiting_on_user';
+                elseif (!$internal && $action === 'resolved') $nextStatus = 'resolved';
+
+                $this->assertTransition($ticket, $nextStatus);
+
+                $attributes = ['last_activity_at' => now()];
+                if ($autoClaimed) $attributes['assigned_to'] = $author->id;
+                if ($nextStatus !== $ticket->status) $attributes['status'] = $nextStatus;
+                if ($reopening) {
+                    $attributes += ['resolved_at' => null, 'resolved_by' => null, 'resolution' => null];
+                } elseif ($nextStatus === 'resolved') {
+                    $attributes += ['resolution' => $message, 'resolved_at' => now(), 'resolved_by' => $author->id];
                 }
 
-                if (!$internal && $author->id === $ticket->reporter_id && in_array($ticket->status, ['waiting_on_user', 'resolved'], true)) {
-                    $ticket->update(['status' => 'in_progress', 'resolved_at' => null, 'resolved_by' => null, 'resolution' => null]);
-                } elseif (!$internal && $action === 'waiting_on_user') {
-                    $ticket->update(['status' => 'waiting_on_user']);
-                } elseif (!$internal && $action === 'resolved') {
-                    $ticket->update([
-                        'status' => 'resolved',
-                        'resolution' => $message,
-                        'resolved_at' => now(),
-                        'resolved_by' => $author->id,
-                    ]);
-                }
-
-                $ticket->update(['last_activity_at' => now()]);
+                $ticket->update($attributes);
                 $ticket->activities()->create([
                     'actor_id' => $author->id,
                     'action' => $internal ? 'internal_note_added' : 'reply_added',
@@ -280,6 +288,24 @@ class SupportTicketService
             $ticket->activities()->create(['actor_id' => $user->id, 'action' => 'attachment_added', 'changes' => ['name' => $file->getClientOriginalName()]]);
             return $attachment;
         });
+    }
+
+    /**
+     * The single gate on the ticket lifecycle. Both the management panel and a
+     * reply that carries an action route through here, so the board can trust
+     * that a rejected drop means the same thing everywhere.
+     */
+    private function assertTransition(SupportTicket $ticket, ?string $target): void
+    {
+        if ($target === null || $target === $ticket->status) {
+            return;
+        }
+
+        if (!in_array($target, self::TRANSITIONS[$ticket->status] ?? [], true)) {
+            throw ValidationException::withMessages([
+                'status' => ["A ticket cannot move from {$ticket->status} to {$target}."],
+            ]);
+        }
     }
 
     private function storeAttachment(SupportTicket $ticket, User $user, UploadedFile $file, ?int $messageId = null): SupportTicketAttachment

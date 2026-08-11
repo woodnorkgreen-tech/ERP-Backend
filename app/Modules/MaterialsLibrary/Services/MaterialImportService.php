@@ -45,14 +45,6 @@ class MaterialImportService
         'unit' => 'unit_of_measure',
         'measure' => 'unit_of_measure',
         
-        'unit_cost' => 'unit_cost',
-        'cost' => 'unit_cost',
-        'cost_per_sqm' => 'unit_cost',
-        'cost_per_roll' => 'unit_cost',
-        'cost_per_unit' => 'unit_cost',
-        'price' => 'unit_cost',
-        'unit_price' => 'unit_cost',
-        
         'notes' => 'notes',
         'remarks' => 'notes',
         'comment' => 'notes',
@@ -171,23 +163,14 @@ class MaterialImportService
             if (isset(self::STANDARD_COLUMNS[$normalizedHeader])) {
                 $dbColumn = self::STANDARD_COLUMNS[$normalizedHeader];
                 
-                // Handle special cases
-                if ($dbColumn === 'unit_cost') {
-                     // If we already have a cost (e.g. from Cost per Roll) and this is Cost per Sqm, 
-                     // we might want to prefer one or store both.
-                     // For now, let's update if the value is numeric
-                     if (is_numeric($value)) {
-                         $materialData[$dbColumn] = $value;
-                     }
-                } else {
-                    // Don't overwrite existing value with empty value (especially for UOM/Issue Unit duplicate cols)
-                    if (!empty($value) || !isset($materialData[$dbColumn])) {
-                        $materialData[$dbColumn] = $value;
-                    }
+                // Don't overwrite existing value with empty value (especially for UOM/Issue Unit duplicate cols)
+                if (!empty($value) || !isset($materialData[$dbColumn])) {
+                    $materialData[$dbColumn] = $value;
                 }
             } else {
                 // It's a dynamic attribute
-                if (!in_array($normalizedHeader, ['line_#', 'line', 'line#', 'workstation'])) {
+                $receiptOnly = ['quantity', 'qty', 'opening_stock', 'unit_cost', 'cost', 'cost_per_sqm', 'cost_per_roll', 'cost_per_unit', 'price', 'unit_price'];
+                if (!in_array($normalizedHeader, [...$receiptOnly, 'line_#', 'line', 'line#', 'workstation'])) {
                     $attributes[$normalizedHeader] = $value;
                 }
             }

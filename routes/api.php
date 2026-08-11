@@ -138,6 +138,7 @@ Route::prefix('projects')->group(function () {
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('support')->group(function () {
         Route::get('tickets/assignees', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'assignees']);
+        Route::get('tickets/metrics', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'metrics']);
         Route::get('tickets', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'index']);
         Route::post('tickets', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'store'])->middleware('throttle:10,1');
         Route::get('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'show']);
