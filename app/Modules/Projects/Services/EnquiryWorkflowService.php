@@ -349,7 +349,7 @@ class EnquiryWorkflowService
     /**
      * Reassign task to a different user
      */
-    public function reassignEnquiryTask(int $taskId, int $newAssignedUserId, int $reassignedByUserId, string $reason = null): EnquiryTask
+    public function reassignEnquiryTask(int $taskId, int $newAssignedUserId, int $reassignedByUserId, ?string $reason = null): EnquiryTask
     {
         $task = EnquiryTask::findOrFail($taskId);
         $newAssignedUser = User::findOrFail($newAssignedUserId);
