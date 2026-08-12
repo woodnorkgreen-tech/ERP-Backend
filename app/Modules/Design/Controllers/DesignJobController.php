@@ -7,6 +7,7 @@ use App\Models\ProjectEnquiry;
 use App\Modules\Design\Models\DesignJob;
 use App\Modules\Design\Requests\StoreDesignJobRequest;
 use App\Modules\Design\Resources\DesignJobResource;
+use App\Modules\Design\Services\DesignNotificationService;
 use App\Modules\Design\Services\DesignProjectSyncService;
 use App\Modules\Design\Support\DesignAccess;
 use Illuminate\Http\JsonResponse;
@@ -15,8 +16,10 @@ use Illuminate\Validation\Rule;
 
 class DesignJobController extends Controller
 {
-    public function __construct(private readonly DesignProjectSyncService $projectSyncService)
-    {
+    public function __construct(
+        private readonly DesignProjectSyncService $projectSyncService,
+        private readonly DesignNotificationService $notifications
+    ) {
     }
 
     public function index(Request $request): JsonResponse
@@ -101,6 +104,7 @@ class DesignJobController extends Controller
         $data['updated_by'] = auth()->id();
 
         $job = DesignJob::create($data)->load(['enquiry.client', 'enquiry.deliverables', 'enquiry.projectOfficer', 'project', 'items', 'documents']);
+        $this->notifications->notifyJobSynced($job);
 
         return response()->json([
             'message' => 'Design job created successfully',
@@ -186,6 +190,10 @@ class DesignJobController extends Controller
                 'created_by' => auth()->id(),
             ]
         );
+
+        if ($job->wasRecentlyCreated) {
+            $this->notifications->notifyJobSynced($job->loadMissing(['enquiry.client']));
+        }
 
         return response()->json([
             'message' => 'Design job synced from project successfully',

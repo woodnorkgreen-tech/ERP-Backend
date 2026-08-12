@@ -7,13 +7,16 @@ use App\Modules\Design\Models\DesignHandoff;
 use App\Modules\Design\Models\DesignItem;
 use App\Modules\Design\Resources\DesignHandoffResource;
 use App\Modules\Design\Services\DesignHandoffService;
+use App\Modules\Design\Services\DesignNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class DesignHandoffController extends Controller
 {
-    public function __construct(private readonly DesignHandoffService $handoffs)
-    {
+    public function __construct(
+        private readonly DesignHandoffService $handoffs,
+        private readonly DesignNotificationService $notifications
+    ) {
     }
 
     public function store(Request $request, DesignItem $item): JsonResponse
@@ -67,9 +70,12 @@ class DesignHandoffController extends Controller
             'reason' => 'required|string|max:2000',
         ]);
 
+        $handoff = $this->handoffs->reject($handoff, $data['reason']);
+        $this->notifications->notifyHandoffRejected($handoff);
+
         return response()->json([
             'message' => 'Design handoff rejected successfully',
-            'data' => new DesignHandoffResource($this->handoffs->reject($handoff, $data['reason'])),
+            'data' => new DesignHandoffResource($handoff),
         ]);
     }
 }

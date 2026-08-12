@@ -10,6 +10,7 @@ use App\Modules\Design\Requests\StoreDesignItemRequest;
 use App\Modules\Design\Resources\DesignItemResource;
 use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Design\Services\DesignItemReadinessService;
+use App\Modules\Design\Services\DesignNotificationService;
 use App\Modules\Design\Services\DimensionConversionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,7 +20,8 @@ class DesignItemController extends Controller
     public function __construct(
         private readonly DimensionConversionService $dimensions,
         private readonly DesignItemReadinessService $readiness,
-        private readonly DesignHandoffService $handoffs
+        private readonly DesignHandoffService $handoffs,
+        private readonly DesignNotificationService $notifications
     ) {
     }
 
@@ -73,6 +75,8 @@ class DesignItemController extends Controller
 
         $item = DesignItem::create($data)->load(['job', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs']);
 
+        $this->notifications->notifyItemAssigned($item);
+
         return response()->json([
             'message' => 'Design item created successfully',
             'data' => new DesignItemResource($item),
@@ -81,11 +85,17 @@ class DesignItemController extends Controller
 
     public function update(StoreDesignItemRequest $request, DesignItem $item): JsonResponse
     {
+        $previousAssignedTo = $item->assigned_to;
+
         $data = $this->dimensions->normalize($request->validated());
         $data['updated_by'] = auth()->id();
 
         $item->update($data);
-        $item->load(['job', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs']);
+        $item->load(['job', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs', 'assignedUser']);
+
+        if ($item->assigned_to && $item->assigned_to !== $previousAssignedTo) {
+            $this->notifications->notifyItemAssigned($item);
+        }
 
         return response()->json([
             'message' => 'Design item updated successfully',
@@ -111,6 +121,7 @@ class DesignItemController extends Controller
         ]);
 
         $this->handoffs->createPrintingHandoffOnce($item->fresh(['job.enquiry.client', 'type', 'printMaterial', 'documents']));
+        $this->notifications->notifyItemReady($item->fresh(['job.enquiry.client', 'type']));
 
         return response()->json([
             'message' => 'Graphic Design marked print ready and synced to Printing',
@@ -127,6 +138,8 @@ class DesignItemController extends Controller
             'production_ready_at' => now(),
             'updated_by' => auth()->id(),
         ]);
+
+        $this->notifications->notifyItemReady($item->fresh(['job.enquiry.client', 'type']));
 
         return response()->json([
             'message' => 'Structural Design marked production ready',

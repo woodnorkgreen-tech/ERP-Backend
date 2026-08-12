@@ -239,12 +239,20 @@ class NotificationService
             // (e.g. manifest submissions awaiting review) reach the roles
             // that TASK_VISIBILITY_MAPPING now grants task access to.
             'projects' => ['Project Officer', 'Project Manager', 'Manager', 'Client Service', 'Logistics'],
+            'design' => ['Designer'],
             'universal-task' => ['Employee', 'Manager'],
             'support' => ['Employee', 'Manager', 'HR', 'Finance', 'Accounts', 'Costing', 'Designer', 'Project Officer', 'Project Manager', 'Production', 'Logistics', 'Stores', 'Procurement'],
         ];
 
         if (isset($moduleRoles[strtolower($module)]) && $user->hasRole($moduleRoles[strtolower($module)])) {
             return true;
+        }
+
+        if (strtolower($module) === 'design') {
+            $departmentName = $user->department?->name ?? $user->employee?->department?->name;
+            if ($departmentName === 'Design/Creatives') {
+                return true;
+            }
         }
 
         return $user->can($module . '.access') || $user->can($module . '.read');

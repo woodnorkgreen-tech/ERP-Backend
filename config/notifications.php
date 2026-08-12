@@ -331,6 +331,29 @@ return [
             'module' => 'projects', 'label' => 'Project Scope Updated',
             'default_channels' => ['database'], 'urgency' => 'warning',
         ],
+
+        // Design module lifecycle
+        'design_job_synced' => [
+            'module' => 'design', 'label' => 'Design Job Synced',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'design_job_ready' => [
+            'module' => 'design', 'label' => 'Design Job Ready',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'design_item_assigned' => [
+            'module' => 'design', 'label' => 'Design Item Assigned',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'design_item_ready' => [
+            'module' => 'design', 'label' => 'Design Item Ready',
+            'default_channels' => ['database'], 'urgency' => 'success',
+        ],
+        'design_handoff_rejected' => [
+            'module' => 'design', 'label' => 'Design Handoff Rejected',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
+
         'pettycash_requisition_submitted' => [
             'module' => 'finance', 'label' => 'Petty Cash Requisition Submitted',
             'default_channels' => ['database', 'push'], 'urgency' => 'warning',

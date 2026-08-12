@@ -12,6 +12,10 @@ class DesignProjectSyncService
 
     public const ALLOWED_SYNC_WINDOWS = [7, 14, 30, 90];
 
+    public function __construct(private readonly DesignNotificationService $notifications)
+    {
+    }
+
     /**
      * Scan all open enquiries due within the given window and sync any that
      * qualify. Used by both the scheduled command (default window) and the
@@ -55,6 +59,19 @@ class DesignProjectSyncService
         if (!$this->hasDesignWorkflow($enquiry) || !$this->isDueInUpcomingWindow($enquiry, $days)) {
             return null;
         }
+
+        $job = $this->syncFromEnquiry($enquiry);
+
+        if ($job->wasRecentlyCreated) {
+            $this->notifications->notifyJobSynced($job->loadMissing(['enquiry.client']));
+        }
+
+        return $job;
+    }
+
+    public function syncFromEnquiry(ProjectEnquiry $enquiry): DesignJob
+    {
+        $enquiry->loadMissing(['client', 'project', 'deliverables', 'projectOfficer']);
 
         return DesignJob::updateOrCreate(
             ['project_enquiry_id' => $enquiry->id],
