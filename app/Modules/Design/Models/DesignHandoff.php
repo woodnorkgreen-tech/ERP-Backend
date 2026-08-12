@@ -14,13 +14,17 @@ class DesignHandoff extends Model
         'target_record_id',
         'status',
         'payload_snapshot',
+        'rejection_reason',
         'handed_off_by',
+        'responded_by',
+        'responded_at',
         'handed_off_at',
     ];
 
     protected $casts = [
         'payload_snapshot' => 'array',
         'handed_off_at' => 'datetime',
+        'responded_at' => 'datetime',
     ];
 
     public function item(): BelongsTo
@@ -31,5 +35,10 @@ class DesignHandoff extends Model
     public function handedOffBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'handed_off_by');
+    }
+
+    public function respondedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'responded_by');
     }
 }

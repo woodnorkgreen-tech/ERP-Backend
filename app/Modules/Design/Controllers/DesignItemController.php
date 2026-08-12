@@ -8,6 +8,7 @@ use App\Modules\Design\Models\DesignItem;
 use App\Modules\Design\Models\DesignJob;
 use App\Modules\Design\Requests\StoreDesignItemRequest;
 use App\Modules\Design\Resources\DesignItemResource;
+use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Design\Services\DesignItemReadinessService;
 use App\Modules\Design\Services\DimensionConversionService;
 use Illuminate\Http\JsonResponse;
@@ -17,7 +18,8 @@ class DesignItemController extends Controller
 {
     public function __construct(
         private readonly DimensionConversionService $dimensions,
-        private readonly DesignItemReadinessService $readiness
+        private readonly DesignItemReadinessService $readiness,
+        private readonly DesignHandoffService $handoffs
     ) {
     }
 
@@ -108,8 +110,10 @@ class DesignItemController extends Controller
             'updated_by' => auth()->id(),
         ]);
 
+        $this->handoffs->createPrintingHandoffOnce($item->fresh(['job.enquiry.client', 'type', 'printMaterial', 'documents']));
+
         return response()->json([
-            'message' => 'Graphic Design marked print ready',
+            'message' => 'Graphic Design marked print ready and synced to Printing',
             'data' => new DesignItemResource($item->fresh(['job', 'type', 'printMaterial', 'documents', 'handoffs'])),
         ]);
     }

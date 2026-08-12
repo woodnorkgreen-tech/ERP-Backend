@@ -50,3 +50,5 @@ Route::get('/documents/{document}/download', [DesignDocumentController::class, '
 Route::delete('/documents/{document}', [DesignDocumentController::class, 'destroy']);
 
 Route::post('/items/{item}/handoff', [DesignHandoffController::class, 'store']);
+Route::post('/handoffs/{handoff}/accept', [DesignHandoffController::class, 'accept']);
+Route::post('/handoffs/{handoff}/reject', [DesignHandoffController::class, 'reject']);

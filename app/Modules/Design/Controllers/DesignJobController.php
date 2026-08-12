@@ -8,6 +8,7 @@ use App\Modules\Design\Models\DesignJob;
 use App\Modules\Design\Requests\StoreDesignJobRequest;
 use App\Modules\Design\Resources\DesignJobResource;
 use App\Modules\Design\Services\DesignProjectSyncService;
+use App\Modules\Design\Support\DesignAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -20,6 +21,8 @@ class DesignJobController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $this->authorizeLeadView($request);
+
         $validated = $request->validate([
             'due_within_days' => ['sometimes', 'integer', Rule::in(DesignProjectSyncService::ALLOWED_SYNC_WINDOWS)],
         ]);
@@ -91,6 +94,8 @@ class DesignJobController extends Controller
 
     public function store(StoreDesignJobRequest $request): JsonResponse
     {
+        $this->authorizeLeadView($request);
+
         $data = $request->validated();
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
@@ -103,8 +108,10 @@ class DesignJobController extends Controller
         ], 201);
     }
 
-    public function show(DesignJob $job): JsonResponse
+    public function show(Request $request, DesignJob $job): JsonResponse
     {
+        $this->authorizeLeadView($request);
+
         $job->load([
             'enquiry.client',
             'enquiry.deliverables',
@@ -123,6 +130,8 @@ class DesignJobController extends Controller
 
     public function update(StoreDesignJobRequest $request, DesignJob $job): JsonResponse
     {
+        $this->authorizeLeadView($request);
+
         $data = $request->validated();
         $data['updated_by'] = auth()->id();
 
@@ -137,6 +146,8 @@ class DesignJobController extends Controller
 
     public function syncUpcoming(Request $request): JsonResponse
     {
+        $this->authorizeLeadView($request);
+
         $validated = $request->validate([
             'days' => ['sometimes', 'integer', Rule::in(DesignProjectSyncService::ALLOWED_SYNC_WINDOWS)],
         ]);
@@ -153,8 +164,10 @@ class DesignJobController extends Controller
         ]);
     }
 
-    public function syncFromProject(ProjectEnquiry $enquiry): JsonResponse
+    public function syncFromProject(Request $request, ProjectEnquiry $enquiry): JsonResponse
     {
+        $this->authorizeLeadView($request);
+
         $enquiry->loadMissing(['client', 'project', 'deliverables', 'projectOfficer']);
 
         $job = DesignJob::updateOrCreate(
@@ -178,5 +191,10 @@ class DesignJobController extends Controller
             'message' => 'Design job synced from project successfully',
             'data' => new DesignJobResource($job->load(['enquiry.client', 'enquiry.deliverables', 'enquiry.projectOfficer', 'project', 'items', 'documents'])),
         ]);
+    }
+
+    private function authorizeLeadView(Request $request): void
+    {
+        abort_unless(DesignAccess::userCanAccessLeadViews($request->user()), 403, 'Only Design leads can manage Design jobs.');
     }
 }

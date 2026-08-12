@@ -25,8 +25,12 @@ class DesignItemReadinessService
             $errors['print_material'][] = 'Select a print material or enter a temporary material name.';
         }
 
-        if (!$item->documents()->where('status', 'active')->exists()) {
-            $errors['documents'][] = 'At least one active final document/artwork is required.';
+        if (!$item->documents()
+            ->where('status', 'active')
+            ->where('document_type', 'artwork')
+            ->where('source', 'link')
+            ->exists()) {
+            $errors['documents'][] = 'Attach an active Artwork link before marking this item print ready.';
         }
 
         if ($errors) {
@@ -48,8 +52,11 @@ class DesignItemReadinessService
             }
         }
 
-        if (!$item->documents()->where('status', 'active')->exists()) {
-            $errors['documents'][] = 'At least one active final render/document is required.';
+        if (!$item->documents()
+            ->where('status', 'active')
+            ->whereIn('document_type', ['render', 'technical_drawing', 'model_file'])
+            ->exists()) {
+            $errors['documents'][] = 'At least one active final render, technical drawing, or model file is required.';
         }
 
         if (!$item->bomItems()->exists()) {
