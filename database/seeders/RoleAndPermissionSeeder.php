@@ -103,6 +103,8 @@ class RoleAndPermissionSeeder extends Seeder
         $accountsRole = Role::firstOrCreate(['name' => 'Accounts'], ['description' => 'Financial accounting and invoicing']);
         $accountsRole->givePermissionTo([
             Permissions::FINANCE_VIEW, Permissions::FINANCE_BUDGET_READ,
+            Permissions::FINANCE_BUDGET_ADDITIONS_READ, Permissions::FINANCE_BUDGET_ADDITIONS_APPROVE,
+            Permissions::FINANCE_BUDGET_ADDITIONS_REJECT, Permissions::FINANCE_BUDGET_ADDITIONS_REVERSE,
             Permissions::FINANCE_QUOTE_APPROVE,
             Permissions::PROJECT_READ, Permissions::USER_READ,
             Permissions::DASHBOARD_FINANCE,
@@ -118,6 +120,9 @@ class RoleAndPermissionSeeder extends Seeder
         $costingRole = Role::firstOrCreate(['name' => 'Costing'], ['description' => 'Cost analysis and budget management']);
         $costingRole->givePermissionTo([
             Permissions::FINANCE_VIEW, Permissions::FINANCE_BUDGET_READ, Permissions::FINANCE_BUDGET_UPDATE,
+            Permissions::FINANCE_EXPENSE_CODES_MANAGE,
+            Permissions::FINANCE_BUDGET_ADDITIONS_READ, Permissions::FINANCE_BUDGET_ADDITIONS_APPROVE,
+            Permissions::FINANCE_BUDGET_ADDITIONS_REJECT, Permissions::FINANCE_BUDGET_ADDITIONS_REVERSE,
             Permissions::FINANCE_QUOTE_APPROVE,
             Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE,
             Permissions::USER_READ, Permissions::DASHBOARD_FINANCE
@@ -149,14 +154,16 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::ENQUIRY_READ, Permissions::ENQUIRY_UPDATE,
             Permissions::DEPARTMENT_READ, Permissions::TASK_CREATE, Permissions::TASK_READ, Permissions::TASK_UPDATE,
             Permissions::TASK_ASSIGN, Permissions::USER_READ,
-            Permissions::DASHBOARD_PROJECTS
+            Permissions::DASHBOARD_PROJECTS, Permissions::PROJECT_COSTS_READ_ASSIGNED,
+            Permissions::PROJECT_BUDGET_ADDITIONS_CREATE
         ]);
 
         $projectOfficerRole = Role::firstOrCreate(['name' => 'Project Officer'], ['description' => 'Project coordination support']);
         $projectOfficerRole->givePermissionTo([
             Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS,
             Permissions::ENQUIRY_READ, Permissions::DEPARTMENT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::TASK_ASSIGN, Permissions::USER_READ, Permissions::DASHBOARD_PROJECTS
+            Permissions::TASK_ASSIGN, Permissions::USER_READ, Permissions::DASHBOARD_PROJECTS,
+            Permissions::PROJECT_COSTS_READ_ASSIGNED, Permissions::PROJECT_BUDGET_ADDITIONS_CREATE
         ]);
 
         // Operational Roles (Production, Logistics, Stores, Procurement)

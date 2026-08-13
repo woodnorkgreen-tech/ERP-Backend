@@ -46,8 +46,20 @@ class DatabaseSeeder extends Seeder
         $this->call(WorkstationSeeder::class);
         $this->call(MaterialCategorySeeder::class);
 
+        // Finance Module Seeds
+        $this->call([
+            \App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class,
+            \App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder::class,
+            \App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class,
+            \App\Modules\Finance\Database\Seeders\FinanceTaxSeeder::class,
+            \App\Modules\Finance\Database\Seeders\FinanceSettingsSeeder::class,
+            \App\Modules\Finance\Database\Seeders\ExpenseCodeSeeder::class,
+            \App\Modules\Finance\Database\Seeders\PaymentSourceSeeder::class,
+            \App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class,
+        ]);
+
         // Seed Universal Task System data
-        // $this->call(UniversalTaskSeeder::class); TODO: FRANSIS
+        $this->call(UniversalTaskSeeder::class);
 
     }
 }
