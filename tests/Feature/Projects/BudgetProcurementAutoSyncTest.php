@@ -3,8 +3,11 @@
 namespace Tests\Feature\Projects;
 
 use App\Constants\EnquiryConstants;
+use App\Models\ElementMaterial;
+use App\Models\ProjectElement;
 use App\Models\ProjectEnquiry;
 use App\Models\TaskBudgetData;
+use App\Models\TaskMaterialsData;
 use App\Models\TaskProcurementData;
 use App\Models\User;
 use App\Modules\ClientService\Models\Client;
@@ -163,12 +166,117 @@ class BudgetProcurementAutoSyncTest extends TestCase
         $this->assertSame(40.0, (float) $procurementData->procurement_items[0]['quantity']);
     }
 
+    /**
+     * The regression test for the gate itself.
+     *
+     * Every other case here hand-writes `materials_import_metadata` into its
+     * fixture. That fabricated a state the application never actually produced:
+     * `syncFromApprovedMaterials` — the one and only importer — set
+     * `materials_imported_at` but never stamped the metadata, while procurement
+     * refused to import unless `metadata.source` equalled a string nothing wrote.
+     * So the suite stayed green while procurement import failed on every real
+     * project with "budget source is not the approved materials list".
+     *
+     * This drives the real importer end to end and touches no metadata, so it
+     * fails if the stamp and the gate ever disagree again.
+     */
+    public function test_a_budget_built_by_the_real_importer_reaches_procurement(): void
+    {
+        [$budgetTask, $procurementTask, $materialsTask] = $this->project(withMaterialsTask: true);
+
+        $materialsData = TaskMaterialsData::create([
+            'enquiry_task_id' => $materialsTask->id,
+            'project_info' => [
+                'approval_status' => [
+                    'all_approved' => true,
+                    'project_officer' => ['approved' => true],
+                    'production' => ['approved' => true],
+                ],
+            ],
+        ]);
+
+        $element = ProjectElement::create([
+            'task_materials_data_id' => $materialsData->id,
+            'element_type' => 'Stage',
+            'name' => 'Main Stage',
+            'persistent_id' => 'elem-persist-1',
+            'category' => 'production',
+            'is_included' => true,
+            'sort_order' => 1,
+        ]);
+
+        ElementMaterial::create([
+            'project_element_id' => $element->id,
+            'persistent_id' => 'mat-persist-1',
+            'description' => 'Timber Sheet',
+            'unit_of_measurement' => 'Pcs',
+            'quantity' => 12,
+            'unit_cost' => 50,
+            'is_included' => true,
+            'sort_order' => 1,
+        ]);
+
+        // The real path: no fixture stamps anything by hand.
+        app(BudgetService::class)->syncFromApprovedMaterials($budgetTask->id);
+
+        $budgetData = TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
+
+        $this->assertSame(
+            BudgetService::IMPORT_SOURCE_APPROVED_MATERIALS,
+            $budgetData->materials_import_metadata['source'] ?? null,
+            'The importer must stamp the provenance that procurement gates on.'
+        );
+
+        $procurementData = TaskProcurementData::where('enquiry_task_id', $procurementTask->id)->first();
+
+        $this->assertNotNull(
+            $procurementData,
+            'A budget built from the approved materials list must reach procurement without a manual import.'
+        );
+        $this->assertSame(12.0, (float) $procurementData->procurement_items[0]['quantity']);
+    }
+
+    /**
+     * The gate still has to refuse a budget that positively names some other
+     * origin — absent provenance is "unknown", but a foreign stamp is "no".
+     */
+    public function test_a_budget_stamped_with_a_foreign_source_is_refused(): void
+    {
+        [$budgetTask, $procurementTask] = $this->project();
+
+        TaskBudgetData::create([
+            'enquiry_task_id' => $budgetTask->id,
+            'project_info' => ['projectId' => 'ENQ-1'],
+            'materials_data' => [$this->budgetElement(quantity: 10)],
+            'labour_data' => [],
+            'expenses_data' => [],
+            'logistics_data' => [],
+            'budget_summary' => [],
+            'status' => 'draft',
+            'materials_imported_at' => now(),
+            'materials_import_metadata' => ['source' => 'manual_entry'],
+        ]);
+
+        app(BudgetService::class)->saveBudgetData($budgetTask->id, [
+            'projectInfo' => ['projectId' => 'ENQ-1'],
+            'materials' => [$this->budgetElement(quantity: 25)],
+            'labour' => [],
+            'expenses' => [],
+            'logistics' => [],
+        ]);
+
+        $this->assertNull(
+            TaskProcurementData::where('enquiry_task_id', $procurementTask->id)->first(),
+            'A budget stamped with a non-approved source must not reach procurement.'
+        );
+    }
+
     public function test_an_unready_budget_is_never_pulled_into_procurement(): void
     {
         [$budgetTask, $procurementTask] = $this->project();
 
-        // Budget task is complete, but the figures did not come from the
-        // approved materials list — procurement must stay empty.
+        // Nothing was ever imported — no `materials_imported_at`, so these
+        // figures have no approved-materials provenance at all.
         TaskBudgetData::create([
             'enquiry_task_id' => $budgetTask->id,
             'project_info' => ['projectId' => 'ENQ-1'],
@@ -216,8 +324,8 @@ class BudgetProcurementAutoSyncTest extends TestCase
         ];
     }
 
-    /** @return array{0: EnquiryTask, 1: EnquiryTask} */
-    private function project(): array
+    /** @return array{0: EnquiryTask, 1: EnquiryTask, 2: ?EnquiryTask} */
+    private function project(bool $withMaterialsTask = false): array
     {
         $creator = User::create([
             'name' => uniqid('user_'),
@@ -253,9 +361,24 @@ class BudgetProcurementAutoSyncTest extends TestCase
             'contact_person' => 'Jane Test',
             'enquiry_number' => 'ENQ-TEST-' . uniqid(),
             'created_by' => $creator->id,
-            'selected_workflow_tasks' => ['budget', 'procurement'],
+            'selected_workflow_tasks' => $withMaterialsTask
+                ? ['materials', 'budget', 'procurement']
+                : ['budget', 'procurement'],
             'workflow_preset_type' => 'external_project',
         ]);
+
+        $materialsTask = $withMaterialsTask
+            ? EnquiryTask::create([
+                'project_enquiry_id' => $enquiry->id,
+                'title' => 'Materials',
+                'type' => 'materials',
+                'status' => 'completed',
+                'priority' => EnquiryConstants::PRIORITY_MEDIUM,
+                'task_description' => 'Materials task',
+                'task_order' => 0,
+                'created_by' => $creator->id,
+            ])
+            : null;
 
         $budgetTask = EnquiryTask::create([
             'project_enquiry_id' => $enquiry->id,
@@ -282,6 +405,6 @@ class BudgetProcurementAutoSyncTest extends TestCase
             'created_by' => $creator->id,
         ]);
 
-        return [$budgetTask, $procurementTask];
+        return [$budgetTask, $procurementTask, $materialsTask];
     }
 }

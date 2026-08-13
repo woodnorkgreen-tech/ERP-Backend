@@ -33,6 +33,10 @@ class CostNotificationTest extends TestCase
 
         $this->seed(FinanceDimensionSeeder::class);
         $this->seed(AccountingPeriodSeeder::class);
+        // Verifying posts a journal, and posting needs somewhere to post to.
+        // Without the chart, both legs resolve to null and every verify in this
+        // class dies on the posting side before reaching what it came to assert.
+        $this->seed(\App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class);
 
         Permission::findOrCreate(Permissions::FINANCE_COSTS_VERIFY, 'web');
 
@@ -93,7 +97,7 @@ class CostNotificationTest extends TestCase
     {
         $line = $this->line(['status' => CostLine::STATUS_QUERIED]);
 
-        $this->service()->resubmit($line);
+        $this->service()->resubmit($line, $this->reporter, 'A clearer receipt has now been attached.');
 
         // Resolved from the permission rather than a named person — the queue
         // belongs to whoever can act on it. An answered query that told nobody

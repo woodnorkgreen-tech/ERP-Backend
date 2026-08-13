@@ -4,6 +4,7 @@ namespace App\Modules\Finance\CostCollector\Services;
 
 use App\Models\ProjectEnquiry;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -15,6 +16,70 @@ use Illuminate\Support\Facades\DB;
  */
 class CostAccountService
 {
+    private const NATURE_SUMS = '
+        SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS planned,
+        SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS committed,
+        SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS accrued,
+        SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS actual,
+        SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) AS unbudgeted
+    ';
+
+    private function natureBindings(): array
+    {
+        return [
+            CostLine::NATURE_PLANNED,
+            CostLine::NATURE_COMMITTED,
+            CostLine::NATURE_ACCRUED,
+            CostLine::NATURE_ACTUAL,
+            CostLine::NATURE_PLANNED,
+        ];
+    }
+
+    /**
+     * The rows every figure on the accounts grid is summed from.
+     *
+     * Every filter here was previously accepted and then ignored: `index()` and
+     * `grandTotals()` both took a `$filters` array, and only the project-status
+     * branch was ever written — against a relation that did not exist. Nothing
+     * on the screen could be narrowed by anything.
+     *
+     * `status` filters the PROJECT's status, not the cost line's. Cost lines are
+     * already restricted to verified by `counting()`; what a finance user wants
+     * is "show me live jobs only", because closed and cancelled projects
+     * otherwise sit in the list with no way to exclude them.
+     */
+    private function accountQuery(array $filters = [])
+    {
+        return CostLine::query()
+            ->counting()
+            ->whereNotNull('project_enquiry_id')
+            ->when(
+                $filters['status'] ?? null,
+                fn ($q, $status) => $q->whereHas('projectEnquiry', fn ($e) => $e->where('status', $status)),
+            )
+            ->when(
+                $filters['cost_centre_id'] ?? null,
+                fn ($q, $id) => $q->where('cost_centre_id', $id),
+            )
+            ->when(
+                $filters['from'] ?? null,
+                fn ($q, $from) => $q->where('incurred_at', '>=', Carbon::parse($from)->startOfDay()),
+            )
+            ->when(
+                $filters['to'] ?? null,
+                fn ($q, $to) => $q->where('incurred_at', '<=', Carbon::parse($to)->endOfDay()),
+            )
+            // Search runs over the project rather than the cost line: on this
+            // screen a row IS a project, so "2451" means the job, not a
+            // description that happens to contain it.
+            ->when(
+                filled($filters['q'] ?? null),
+                fn ($q) => $q->whereHas('projectEnquiry', fn ($e) => $e
+                    ->where('job_number', 'like', '%' . $filters['q'] . '%')
+                    ->orWhere('title', 'like', '%' . $filters['q'] . '%')),
+            );
+    }
+
     /**
      * Every project's cost account, one row each.
      *
@@ -26,22 +91,34 @@ class CostAccountService
      */
     public function index(array $filters = [], int $perPage = 25): array
     {
-        $aggregate = CostLine::query()
-            ->counting()
-            ->whereNotNull('project_enquiry_id')
-            ->selectRaw('
-                project_enquiry_id,
-                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END)   AS planned,
-                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END)   AS committed,
-                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END)   AS actual,
-                SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) AS unbudgeted
-            ', [
-                CostLine::NATURE_PLANNED,
-                CostLine::NATURE_COMMITTED,
-                CostLine::NATURE_ACTUAL,
-                CostLine::NATURE_PLANNED,
-            ])
+        $aggregate = $this->accountQuery($filters)
+            ->selectRaw(
+                'project_enquiry_id, MAX(incurred_at) AS last_cost_at, ' . self::NATURE_SUMS,
+                $this->natureBindings(),
+            )
             ->groupBy('project_enquiry_id');
+
+        // These two are HAVING conditions, not WHERE: "overrun" and "has
+        // unbudgeted spend" are properties of the summed row, so they cannot be
+        // applied before the GROUP BY. They are the two questions this screen
+        // exists to answer, and neither was askable.
+        if (($filters['overrun_only'] ?? false) === true) {
+            $aggregate->havingRaw(
+                'SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) > 0
+                 AND SUM(CASE WHEN nature <> ? THEN net_amount ELSE 0 END)
+                     > SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END)',
+                [CostLine::NATURE_PLANNED, CostLine::NATURE_PLANNED, CostLine::NATURE_PLANNED],
+            );
+        }
+
+        if (($filters['unbudgeted_only'] ?? false) === true) {
+            $aggregate->havingRaw(
+                'SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) > 0',
+                [CostLine::NATURE_PLANNED],
+            );
+        }
+
+        $this->applySort($aggregate, $filters);
 
         $paginator = $aggregate->paginate(max(1, min($perPage, 100)));
 
@@ -52,15 +129,19 @@ class CostAccountService
         $rows = collect($paginator->items())->map(function ($row) use ($enquiries) {
             $enquiry = $enquiries->get($row->project_enquiry_id);
             $planned = $this->money($row->planned);
-            $spent = bcadd($this->money($row->actual), $this->money($row->committed), 2);
+            $spent = bcadd(bcadd($this->money($row->actual), $this->money($row->accrued), 2), $this->money($row->committed), 2);
 
             return [
                 'enquiry_id' => $row->project_enquiry_id,
                 'job_number' => $enquiry?->job_number,
                 'title' => $enquiry?->title,
                 'status' => $enquiry?->status,
+                // A project whose last cost landed months ago is either finished
+                // or forgotten, and the grid could not tell you which.
+                'last_cost_at' => $row->last_cost_at ? substr((string) $row->last_cost_at, 0, 10) : null,
                 'planned' => $planned,
                 'committed' => $this->money($row->committed),
+                'accrued' => $this->money($row->accrued),
                 'actual' => $this->money($row->actual),
                 'unbudgeted' => $this->money($row->unbudgeted),
                 'remaining' => bcsub($planned, $spent, 2),
@@ -83,31 +164,48 @@ class CostAccountService
         ];
     }
 
-    /** @return array<string, string> */
-    private function grandTotals(array $filters): array
+    /**
+     * Sort on any money column.
+     *
+     * The aliases are the aggregate's own, so ordering happens in SQL across
+     * every page rather than on the 25 rows that happen to be in hand. Whitelist
+     * only — these names reach the ORDER BY clause.
+     */
+    private function applySort($query, array $filters): void
     {
-        $row = CostLine::query()
-            ->counting()
-            ->whereNotNull('project_enquiry_id')
-            ->selectRaw('
-                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS planned,
-                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS committed,
-                SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS actual,
-                SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) AS unbudgeted
-            ', [
-                CostLine::NATURE_PLANNED,
-                CostLine::NATURE_COMMITTED,
-                CostLine::NATURE_ACTUAL,
-                CostLine::NATURE_PLANNED,
-            ])
+        $sortable = [
+            'planned' => 'planned',
+            'committed' => 'committed',
+            'accrued' => 'accrued',
+            'actual' => 'actual',
+            'unbudgeted' => 'unbudgeted',
+            'last_cost' => 'last_cost_at',
+        ];
+
+        $column = $sortable[$filters['sort'] ?? ''] ?? null;
+        $direction = ($filters['direction'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
+
+        // Biggest spend first by default: on a list of cost accounts the useful
+        // starting point is where the money is, not the lowest project id.
+        $query->orderByRaw(
+            $column ? "{$column} {$direction}" : 'actual desc',
+        );
+    }
+
+    /** @return array<string, string> */
+    private function grandTotals(array $filters = []): array
+    {
+        $row = $this->accountQuery($filters)
+            ->selectRaw(self::NATURE_SUMS, $this->natureBindings())
             ->first();
 
         $planned = $this->money($row?->planned);
-        $spent = bcadd($this->money($row?->actual), $this->money($row?->committed), 2);
+        $spent = bcadd(bcadd($this->money($row?->actual), $this->money($row?->accrued), 2), $this->money($row?->committed), 2);
 
         return [
             'planned' => $planned,
             'committed' => $this->money($row?->committed),
+            'accrued' => $this->money($row?->accrued),
             'actual' => $this->money($row?->actual),
             'unbudgeted' => $this->money($row?->unbudgeted),
             'remaining' => bcsub($planned, $spent, 2),
@@ -143,10 +241,49 @@ class CostAccountService
                 'title' => $enquiry->title,
             ],
             'totals' => $this->totals($categories),
+            'revisions' => $this->revisionSplit($enquiry),
             'categories' => $categories,
             'unbudgeted' => $this->unbudgeted($enquiry),
             'exceptions' => $this->exceptionSpend($enquiry),
             'coverage' => $this->coverage($enquiry),
+        ];
+    }
+
+    /**
+     * The lines behind one category figure.
+     *
+     * The panel showed category totals and a variance, and clicking a category
+     * did nothing — so there was no path from "materials is 40% over" to the
+     * costs causing it, which is the only question the screen is asked. The
+     * budget line and the spend against it come back together, because a
+     * variance is read as a pair.
+     *
+     * @return array<string, mixed>
+     */
+    public function linesForCategory(ProjectEnquiry $enquiry, string $category): array
+    {
+        $lines = CostLine::withReferenceNames()
+            ->with(['expenseCode', 'submittedBy'])
+            ->where('project_enquiry_id', $enquiry->id)
+            ->counting()
+            ->where(function ($q) use ($category) {
+                // 'uncategorised' is the label `forEnquiry` gives rows with no
+                // budget_category, so the drill-down has to match that absence
+                // rather than look for the literal string.
+                $extract = "JSON_UNQUOTE(JSON_EXTRACT(details, '$.budget_category'))";
+
+                $category === 'uncategorised'
+                    ? $q->whereRaw("COALESCE({$extract}, 'uncategorised') = 'uncategorised'")
+                    : $q->whereRaw("{$extract} = ?", [$category]);
+            })
+            ->orderBy('nature')
+            ->orderByDesc('net_amount')
+            ->get();
+
+        return [
+            'category' => $category,
+            'planned' => $lines->where('nature', CostLine::NATURE_PLANNED)->values(),
+            'spend' => $lines->where('nature', '!=', CostLine::NATURE_PLANNED)->values(),
         ];
     }
 
@@ -199,6 +336,45 @@ class CostAccountService
             'remaining' => bcsub($planned, $spent, 2),
             'utilisation_percent' => bccomp($planned, '0', 2) === 1
                 ? round((float) bcdiv($spent, $planned, 4) * 100, 1)
+                : null,
+        ];
+    }
+
+    /**
+     * How much of the approved budget is the original, and how much was added later.
+     *
+     * `totals.planned` is now the authorised ceiling including every approved
+     * revision, which is correct but hides the thing a reviewer most wants to
+     * know: whether a project is on budget because it was estimated well, or
+     * because its budget has been raised three times. Those are opposite stories
+     * and the single figure tells neither.
+     *
+     * Split on the projection's own source, so the two figures cannot disagree
+     * with the lines they came from.
+     *
+     * @return array<string, mixed>
+     */
+    private function revisionSplit(ProjectEnquiry $enquiry): array
+    {
+        $planned = CostLine::query()
+            ->where('project_enquiry_id', $enquiry->id)
+            ->where('nature', CostLine::NATURE_PLANNED)
+            ->counting();
+
+        $total = $this->money((clone $planned)->sum('net_amount'));
+        $revised = $this->money(
+            (clone $planned)->where('source_type', 'BudgetAddition')->sum('net_amount')
+        );
+
+        return [
+            'baseline' => bcsub($total, $revised, 2),
+            'approved_additions' => $revised,
+            'approved_total' => $total,
+            'revision_count' => (clone $planned)->where('source_type', 'BudgetAddition')
+                ->distinct()->count('source_id'),
+            // The share of the working budget that was not in the original plan.
+            'addition_percent' => bccomp($total, '0', 2) === 1
+                ? round((float) bcdiv($revised, $total, 4) * 100, 1)
                 : null,
         ];
     }

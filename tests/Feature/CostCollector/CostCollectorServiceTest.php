@@ -31,6 +31,7 @@ class CostCollectorServiceTest extends TestCase
 
         $this->seed(FinanceDimensionSeeder::class);
         $this->seed(AccountingPeriodSeeder::class);
+        $this->seed(\App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class);
 
         $this->collector = app(CollectsCost::class);
     }
@@ -211,6 +212,21 @@ class CostCollectorServiceTest extends TestCase
         // No verifier is attributed: the approval belonged to the source document,
         // and naming someone who never saw this line would be a false trail.
         $this->assertNull($line->verified_by);
+        $this->assertNotNull($line->journal_entry_id);
+        $this->assertNotNull($line->posted_at);
+    }
+
+    public function test_an_approved_purchase_commitment_reserves_budget_without_posting_gl(): void
+    {
+        $line = $this->collector->postFromSource(new CostContext(
+            expenseCode: '', amount: '12500.00', nature: CostLine::NATURE_COMMITTED,
+            jobNumber: 'WNG-TEST-001', sourceType: 'PurchaseOrderItem', sourceId: 77,
+        ));
+
+        $this->assertSame(CostLine::STATUS_VERIFIED, $line->status);
+        $this->assertSame(CostLine::NATURE_COMMITTED, $line->nature);
+        $this->assertNull($line->journal_entry_id);
+        $this->assertNull($line->posted_at);
     }
 
     public function test_a_locked_period_refuses_the_write(): void
@@ -223,6 +239,21 @@ class CostCollectorServiceTest extends TestCase
 
         $this->collector->collect(new CostContext(
             expenseCode: 'TST-001', amount: '100.00', jobNumber: 'WNG-TEST-001',
+        ));
+    }
+
+    public function test_a_producer_cannot_post_into_a_locked_period(): void
+    {
+        AccountingPeriod::forDate(now())->update(['status' => AccountingPeriod::STATUS_LOCKED]);
+
+        $this->expectException(CostValidationException::class);
+
+        $this->collector->postFromSource(new CostContext(
+            expenseCode: '',
+            amount: '100.00',
+            jobNumber: 'WNG-TEST-001',
+            sourceType: 'GoodsReceiptNote',
+            sourceId: 44,
         ));
     }
 

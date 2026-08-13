@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\CostCollector;
 
+use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
@@ -10,6 +11,7 @@ use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 class CostCollectorApiTest extends TestCase
@@ -25,7 +27,12 @@ class CostCollectorApiTest extends TestCase
         $this->seed(FinanceDimensionSeeder::class);
         $this->seed(AccountingPeriodSeeder::class);
 
+        foreach ([Permissions::FINANCE_COSTS_CREATE, Permissions::FINANCE_COSTS_READ] as $name) {
+            Permission::findOrCreate($name, 'web');
+        }
+
         $this->user = User::factory()->create(['is_active' => true]);
+        $this->user->givePermissionTo([Permissions::FINANCE_COSTS_CREATE, Permissions::FINANCE_COSTS_READ]);
         $this->actingAs($this->user, 'sanctum');
     }
 
@@ -118,6 +125,49 @@ class CostCollectorApiTest extends TestCase
         $this->assertSame($this->user->id, CostLine::firstOrFail()->submitted_by_user_id);
     }
 
+    public function test_reporter_can_correct_a_queried_cost_with_revision_history(): void
+    {
+        $code = $this->code(['job_id_rule' => ExpenseCode::JOB_OPTIONAL]);
+        $line = CostLine::create([
+            'ref' => 'CL-0099001', 'expense_code_id' => $code->id,
+            'nature' => CostLine::NATURE_ACTUAL, 'status' => CostLine::STATUS_QUERIED,
+            'job_number' => 'WNG-TEST-001', 'amount' => '5000.00',
+            'tax_amount' => '0.00', 'net_amount' => '5000.00', 'base_net_amount' => '5000.00',
+            'currency' => 'KES', 'fx_rate' => '1', 'incurred_at' => now(),
+            'description' => 'Incorrect description', 'submitted_by_user_id' => $this->user->id,
+        ]);
+
+        $this->putJson("/api/costs/{$line->id}/correction", [
+            'amount' => 4500,
+            'description' => 'Corrected receipt amount',
+            'response' => 'The first amount included an unrelated item.',
+        ])->assertOk()
+            ->assertJsonPath('data.status', CostLine::STATUS_SUBMITTED)
+            ->assertJsonPath('data.latest_revision.before.amount', '5000.00')
+            ->assertJsonPath('data.latest_revision.after.amount', '4500.00');
+
+        $line->refresh();
+        $this->assertSame('4500.00', $line->amount);
+        $this->assertSame('5000.00', $line->capture_meta['revisions'][0]['before']['amount']);
+    }
+
+    public function test_reporting_a_cost_requires_the_create_permission(): void
+    {
+        $this->code(['job_id_rule' => ExpenseCode::JOB_OPTIONAL]);
+
+        // finance.costs.create was seeded and granted but checked nowhere, so
+        // any authenticated user could write to the cost ledger.
+        $stranger = User::factory()->create(['is_active' => true]);
+
+        $this->actingAs($stranger, 'sanctum')
+            ->postJson('/api/costs', [
+                'expense_code' => 'DM-WD-001', 'amount' => 5000, 'job_number' => 'WNG-TEST-001',
+            ])
+            ->assertForbidden();
+
+        $this->assertSame(0, CostLine::count());
+    }
+
     public function test_a_catalogue_rejection_returns_field_level_errors(): void
     {
         $this->code();   // job_id_rule = required
@@ -193,6 +243,22 @@ class CostCollectorApiTest extends TestCase
             ->assertJsonPath('data.0.budgeted', '60000.00')
             ->assertJsonPath('data.0.spent', '18000.00')
             ->assertJsonPath('data.0.remaining', '42000.00');
+    }
+
+    /**
+     * A project's budget is commercially sensitive, and this endpoint returns
+     * all of it — every line, with what is left on each. It was reachable by any
+     * authenticated account from a guessable enquiry id, because it was the one
+     * cost endpoint with no authorisation call on it at all.
+     */
+    public function test_budget_lines_are_not_readable_without_a_cost_permission(): void
+    {
+        $enquiryId = $this->makeEnquiry();
+        $outsider = User::factory()->create(['is_active' => true]);
+
+        $this->actingAs($outsider, 'sanctum')
+            ->getJson("/api/costs/budget-lines/{$enquiryId}")
+            ->assertForbidden();
     }
 
     public function test_evidence_uploads_separately_from_the_cost(): void

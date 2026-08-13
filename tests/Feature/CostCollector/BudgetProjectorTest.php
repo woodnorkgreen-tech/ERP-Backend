@@ -81,6 +81,8 @@ class BudgetProjectorTest extends TestCase
             'materials' => [
                 [
                     'id' => '2495f5e6-b609-456c-b506-1ab0ffc1cf83',
+                    'libraryMaterialId' => 912,
+                    'persistent_id' => 'project-material-912',
                     'description' => 'MDF board 18mm', 'unitOfMeasurement' => 'pcs',
                     'quantity' => 10, 'unitPrice' => 2500, 'totalPrice' => 25000,
                     'is_included' => true,
@@ -105,6 +107,8 @@ class BudgetProjectorTest extends TestCase
         $this->assertSame('pcs', $line->unit);
         $this->assertSame('Reception Counter — MDF board 18mm', $line->description);
         $this->assertSame('materials', $line->details['budget_category']);
+        $this->assertSame(912, $line->details['library_material_id']);
+        $this->assertSame('project-material-912', $line->details['project_material_id']);
 
         $this->assertDatabaseMissing('cost_lines', ['source_ref' => '4911e61d-c080-4b46-9cde-881b0dec425d']);
     }
@@ -184,6 +188,32 @@ class BudgetProjectorTest extends TestCase
 
         $this->assertSame(1, CostLine::count());
         $this->assertSame($firstId, CostLine::firstOrFail()->id);
+    }
+
+    public function test_reprojecting_a_repriced_line_reverses_the_old_version_and_posts_the_new_budget(): void
+    {
+        $budget = $this->budget(['expenses_data' => [
+            ['id' => 'expense-1', 'description' => 'Permits', 'amount' => 8000],
+        ]]);
+
+        $this->projector->project($budget);
+        $old = CostLine::where('source_ref', 'expense-1')->firstOrFail();
+
+        $budget->update(['expenses_data' => [
+            ['id' => 'expense-1', 'description' => 'Permits and licence', 'amount' => 9500],
+        ]]);
+
+        $this->projector->project($budget->fresh());
+
+        $this->assertSame(CostLine::STATUS_REVERSED, $old->fresh()->status);
+        $this->assertStringStartsWith('REV-', $old->fresh()->source_ref);
+
+        $current = CostLine::where('source_ref', 'expense-1')->firstOrFail();
+        $this->assertNotSame($old->id, $current->id);
+        $this->assertSame('9500.00', $current->net_amount);
+        $this->assertSame('Permits and licence', $current->description);
+        $this->assertSame('9500.00', (string) CostLine::counting()
+            ->where('nature', CostLine::NATURE_PLANNED)->sum('net_amount'));
     }
 
     public function test_a_line_deleted_from_the_budget_stops_counting(): void

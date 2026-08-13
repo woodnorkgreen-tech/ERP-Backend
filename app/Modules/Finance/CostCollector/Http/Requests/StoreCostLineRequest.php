@@ -5,6 +5,8 @@ namespace App\Modules\Finance\CostCollector\Http\Requests;
 use App\Modules\Finance\CostCollector\Contracts\CostContext;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Validator;
 
 /**
  * Shape-checks an incoming cost before the collector applies the catalogue rules.
@@ -54,6 +56,25 @@ class StoreCostLineRequest extends FormRequest
             'tax_amount.lte' => 'Tax cannot be more than the amount on the receipt.',
             'incurred_at.before_or_equal' => 'A cost cannot be dated in the future.',
         ];
+    }
+
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            $prefix = 'cost-evidence/' . $this->user()->id . '/';
+
+            foreach ($this->input('evidence', []) as $index => $item) {
+                $path = $item['path'] ?? null;
+                if (! is_string($path)
+                    || ! str_starts_with($path, $prefix)
+                    || ! Storage::disk('public')->exists($path)) {
+                    $validator->errors()->add(
+                        "evidence.{$index}.path",
+                        'This attachment is missing or was not uploaded by your account.',
+                    );
+                }
+            }
+        }];
     }
 
     public function toContext(): CostContext

@@ -158,4 +158,126 @@ class CostAccountTest extends TestCase
             ->assertJsonPath('data.totals.actual', '0.00')
             ->assertJsonPath('data.totals.remaining', '60000.00');
     }
+
+    /* ── Drill-down ──────────────────────────────────────────────────────── */
+
+    public function test_a_category_can_be_opened_to_the_lines_behind_it(): void
+    {
+        $planned = $this->line(CostLine::NATURE_PLANNED, '60000.00', ['description' => 'Trucking budget']);
+        $this->line(CostLine::NATURE_ACTUAL, '18000.00', [
+            'consumes_line_id' => $planned->id, 'description' => 'Lorry hire, day one',
+        ]);
+        $this->line(CostLine::NATURE_ACTUAL, '4500.00', ['description' => 'Emergency boda']);
+
+        // A different category must not leak into the drill-down.
+        $this->line(CostLine::NATURE_ACTUAL, '2000.00', [
+            'description' => 'Vinyl', 'details' => ['budget_category' => 'materials'],
+        ]);
+
+        $response = $this->getJson(
+            "/api/costs/account/{$this->enquiryId}/category-lines?category=logistics",
+        )->assertOk();
+
+        $response->assertJsonPath('category', 'logistics');
+        $response->assertJsonCount(1, 'planned');
+        $response->assertJsonPath('planned.0.description', 'Trucking budget');
+
+        // The variance is read as budget against charge, so both come back.
+        $response->assertJsonCount(2, 'spend');
+        $this->assertEqualsCanonicalizing(
+            ['Lorry hire, day one', 'Emergency boda'],
+            collect($response->json('spend'))->pluck('description')->all(),
+        );
+    }
+
+    public function test_the_drill_down_finds_costs_with_no_category_at_all(): void
+    {
+        // `forEnquiry` labels these 'uncategorised', so the drill-down has to
+        // match that absence rather than search for the literal string.
+        $this->line(CostLine::NATURE_ACTUAL, '3000.00', [
+            'description' => 'Unlabelled spend', 'details' => [],
+        ]);
+
+        $this->getJson("/api/costs/account/{$this->enquiryId}/category-lines?category=uncategorised")
+            ->assertOk()
+            ->assertJsonCount(1, 'spend')
+            ->assertJsonPath('spend.0.description', 'Unlabelled spend');
+    }
+
+    /* ── Grid filters, which the service accepted and ignored ────────────── */
+
+    public function test_the_grid_can_be_narrowed_to_projects_that_are_over_budget(): void
+    {
+        $planned = $this->line(CostLine::NATURE_PLANNED, '10000.00');
+        $this->line(CostLine::NATURE_ACTUAL, '25000.00', ['consumes_line_id' => $planned->id]);
+
+        $withinBudget = $this->secondProject();
+        $otherPlanned = $this->line(CostLine::NATURE_PLANNED, '80000.00', [
+            'project_enquiry_id' => $withinBudget,
+        ]);
+        $this->line(CostLine::NATURE_ACTUAL, '1000.00', [
+            'project_enquiry_id' => $withinBudget, 'consumes_line_id' => $otherPlanned->id,
+        ]);
+
+        $this->getJson('/api/costs/accounts')
+            ->assertOk()
+            ->assertJsonCount(2, 'rows');
+
+        $this->getJson('/api/costs/accounts?overrun_only=true')
+            ->assertOk()
+            ->assertJsonCount(1, 'rows')
+            ->assertJsonPath('rows.0.enquiry_id', $this->enquiryId);
+    }
+
+    public function test_the_grid_can_be_narrowed_to_projects_with_unbudgeted_spend(): void
+    {
+        $planned = $this->line(CostLine::NATURE_PLANNED, '60000.00');
+        $this->line(CostLine::NATURE_ACTUAL, '5000.00', ['consumes_line_id' => $planned->id]);
+
+        $messy = $this->secondProject();
+        $this->line(CostLine::NATURE_ACTUAL, '900.00', ['project_enquiry_id' => $messy]);
+
+        $this->getJson('/api/costs/accounts?unbudgeted_only=true')
+            ->assertOk()
+            ->assertJsonCount(1, 'rows')
+            ->assertJsonPath('rows.0.enquiry_id', $messy);
+    }
+
+    public function test_the_grid_searches_the_project_not_the_cost_description(): void
+    {
+        $this->line(CostLine::NATURE_ACTUAL, '5000.00');
+
+        $other = $this->secondProject();
+        $this->line(CostLine::NATURE_ACTUAL, '900.00', ['project_enquiry_id' => $other]);
+
+        // On this screen a row is a project, so a search term means the job.
+        $this->getJson('/api/costs/accounts?q=WNG-ACC-002')
+            ->assertOk()
+            ->assertJsonCount(1, 'rows')
+            ->assertJsonPath('rows.0.enquiry_id', $other);
+    }
+
+    public function test_the_grid_reports_when_a_project_last_recorded_a_cost(): void
+    {
+        $this->line(CostLine::NATURE_ACTUAL, '5000.00', ['incurred_at' => '2026-05-04 10:00:00']);
+        $this->line(CostLine::NATURE_ACTUAL, '2000.00', ['incurred_at' => '2026-07-19 10:00:00']);
+
+        $this->getJson('/api/costs/accounts')
+            ->assertOk()
+            ->assertJsonPath('rows.0.last_cost_at', '2026-07-19');
+    }
+
+    /** A second project, so the filters have something to exclude. */
+    private function secondProject(): int
+    {
+        $clientId = DB::table('clients')->value('id');
+
+        return DB::table('project_enquiries')->insertGetId([
+            'date_received' => now()->toDateString(), 'client_id' => $clientId,
+            'title' => 'Second Activation', 'contact_person' => 'Contact',
+            'enquiry_number' => 'ENQ-ACC-002', 'job_number' => 'WNG-ACC-002',
+            'created_by' => DB::table('users')->value('id'),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
 }

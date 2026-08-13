@@ -2,9 +2,14 @@
 
 namespace App\Modules\Finance\CostCollector\Models;
 
+use App\Models\ProjectEnquiry;
+use App\Models\User;
+use App\Modules\Finance\Models\VatTreatment;
+use App\Modules\Finance\Models\WhtCategory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 /**
  * One cost fact against a project.
@@ -72,6 +77,38 @@ class CostLine extends Model
         return $this->belongsTo(ExpenseCode::class);
     }
 
+    public function submittedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'submitted_by_user_id');
+    }
+
+    public function verifiedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    /**
+     * The project this cost belongs to.
+     *
+     * `CostAccountService` filtered on this relation before it existed, so the
+     * project-status filter threw the moment anything passed it — which nothing
+     * did, because the controller never forwarded a filter either.
+     */
+    public function projectEnquiry(): BelongsTo
+    {
+        return $this->belongsTo(ProjectEnquiry::class, 'project_enquiry_id');
+    }
+
+    public function vatTreatment(): BelongsTo
+    {
+        return $this->belongsTo(VatTreatment::class);
+    }
+
+    public function whtCategory(): BelongsTo
+    {
+        return $this->belongsTo(WhtCategory::class);
+    }
+
     /** The planned line this fulfils. Null means unbudgeted spend. */
     public function consumesLine(): BelongsTo
     {
@@ -87,6 +124,57 @@ class CostLine extends Model
     public function scopeCounting($query)
     {
         return $query->where('status', self::STATUS_VERIFIED);
+    }
+
+    /**
+     * Resolve every dimension a verifier needs to read, in the same query.
+     *
+     * Cost centre, activity, cause and payee type are reference tables with no
+     * Eloquent model — deliberately, they are rows Finance adds rather than
+     * classes anyone codes against. Correlated subselects give the names without
+     * inventing four models, and without the N+1 that eager loading four
+     * belongsTo relations across a 100-row queue would produce.
+     *
+     * The supplier name is guarded on `requires_supplier_record`: `payee_id` is
+     * a bare unsigned integer whose meaning depends on the payee type, so
+     * joining it straight to suppliers would put a supplier's name against an
+     * employee who happens to share the id.
+     */
+    public function scopeWithReferenceNames($query)
+    {
+        $lookup = fn (string $table, string $column, string $localKey) => DB::table($table)
+            ->select($column)
+            ->whereColumn("{$table}.id", "cost_lines.{$localKey}")
+            ->limit(1);
+
+        return $query
+            ->select('cost_lines.*')
+            ->addSelect([
+                'cost_centre_name' => $lookup('cost_centres', 'name', 'cost_centre_id'),
+                'activity_name' => $lookup('activities', 'name', 'activity_id'),
+                'cost_cause_name' => $lookup('cost_causes', 'name', 'cost_cause_id'),
+                'cost_cause_is_exception' => $lookup('cost_causes', 'is_exception', 'cost_cause_id'),
+                'payee_type_name' => $lookup('payee_types', 'name', 'payee_type_id'),
+                'journal_entry_no' => $lookup('journal_entries', 'entry_no', 'journal_entry_id'),
+                // Aliased, unlike the rest: this one reads `cost_lines` from
+                // inside a query on `cost_lines`, so without a distinct name the
+                // WHERE compares the outer row to itself and never matches.
+                'consumes_line_description' => DB::table('cost_lines as planned_line')
+                    ->select('description')
+                    ->whereColumn('planned_line.id', 'cost_lines.consumes_line_id')
+                    ->limit(1),
+                'consumes_line_budgeted' => DB::table('cost_lines as planned_budget')
+                    ->select('net_amount')
+                    ->whereColumn('planned_budget.id', 'cost_lines.consumes_line_id')
+                    ->limit(1),
+                'payee_supplier_name' => DB::table('suppliers')
+                    ->select('supplier_name')
+                    ->whereColumn('suppliers.id', 'cost_lines.payee_id')
+                    ->whereExists(fn ($q) => $q->selectRaw('1')->from('payee_types')
+                        ->whereColumn('payee_types.id', 'cost_lines.payee_type_id')
+                        ->where('payee_types.requires_supplier_record', true))
+                    ->limit(1),
+            ]);
     }
 
     public function scopeOfNature($query, string ...$natures)

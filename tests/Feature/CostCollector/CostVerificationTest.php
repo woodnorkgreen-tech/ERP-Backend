@@ -5,6 +5,7 @@ namespace Tests\Feature\CostCollector;
 use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -25,6 +26,7 @@ class CostVerificationTest extends TestCase
 
         $this->seed(FinanceDimensionSeeder::class);
         $this->seed(AccountingPeriodSeeder::class);
+        $this->seed(\App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class);
 
         foreach ([
             Permissions::FINANCE_COSTS_READ,
@@ -99,6 +101,81 @@ class CostVerificationTest extends TestCase
         $this->assertSame(CostLine::STATUS_SUBMITTED, $line->fresh()->status);
     }
 
+    public function test_a_super_admin_still_needs_a_reason_to_verify_their_own_cost(): void
+    {
+        $line = $this->line(['submitted_by_user_id' => $this->superAdmin()->id]);
+
+        $this->actingAs($this->superAdmin(), 'sanctum')
+            ->postJson("/api/costs/verification/{$line->id}/verify")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['override_reason']);
+
+        $this->assertSame(CostLine::STATUS_SUBMITTED, $line->fresh()->status);
+
+        // A keystroke is not a reason. The shape check refuses it before the
+        // service is ever reached.
+        $this->actingAs($this->superAdmin(), 'sanctum')
+            ->postJson("/api/costs/verification/{$line->id}/verify", ['override_reason' => 'ok'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['override_reason']);
+
+        $this->assertSame(CostLine::STATUS_SUBMITTED, $line->fresh()->status);
+    }
+
+    public function test_a_super_admin_may_verify_their_own_cost_and_the_override_is_recorded(): void
+    {
+        $admin = $this->superAdmin();
+        $line = $this->line(['submitted_by_user_id' => $admin->id]);
+        $reason = 'Sole finance staffer on duty over the weekend close.';
+
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/costs/verification/{$line->id}/verify", ['override_reason' => $reason])
+            ->assertOk()
+            ->assertJsonPath('data.status', CostLine::STATUS_VERIFIED);
+
+        $this->assertSame(CostLine::STATUS_VERIFIED, $line->fresh()->status);
+
+        // The point of allowing it at all is that it leaves a trail.
+        $audit = DB::table('hr_audit_logs')
+            ->where('action', 'cost_self_verification_override')
+            ->where('model_id', $line->id)
+            ->first();
+
+        $this->assertNotNull($audit, 'The self-verification was not recorded.');
+        $this->assertSame($admin->id, (int) $audit->user_id);
+        $this->assertSame($reason, json_decode($audit->context, true)['reason']);
+    }
+
+    public function test_the_override_never_applies_to_someone_elses_cost(): void
+    {
+        // A reason supplied where none is needed must not become a way to skip
+        // anything — this is an ordinary verification and stays one.
+        $line = $this->line();
+
+        $this->actingAs($this->verifier, 'sanctum')
+            ->postJson("/api/costs/verification/{$line->id}/verify", [
+                'override_reason' => 'Reason supplied but not applicable here.',
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseMissing('hr_audit_logs', [
+            'action' => 'cost_self_verification_override',
+            'model_id' => $line->id,
+        ]);
+    }
+
+    private function superAdmin(): User
+    {
+        return $this->admin ??= tap(
+            User::factory()->create(['is_active' => true]),
+            fn (User $user) => $user->assignRole(
+                \Spatie\Permission\Models\Role::findOrCreate('Super Admin', 'web'),
+            ),
+        );
+    }
+
+    private ?User $admin = null;
+
     public function test_finance_splits_the_tax_at_verification(): void
     {
         $line = $this->line();
@@ -145,9 +222,12 @@ class CostVerificationTest extends TestCase
 
         // The person who reported it can answer without any special right.
         $this->actingAs($this->reporter, 'sanctum')
-            ->postJson("/api/costs/verification/{$line->id}/resubmit")
+            ->postJson("/api/costs/verification/{$line->id}/resubmit", [
+                'response' => 'A clearer receipt has now been attached.',
+            ])
             ->assertOk()
-            ->assertJsonPath('data.status', CostLine::STATUS_SUBMITTED);
+            ->assertJsonPath('data.status', CostLine::STATUS_SUBMITTED)
+            ->assertJsonPath('data.latest_query_response.response', 'A clearer receipt has now been attached.');
     }
 
     public function test_reversing_stops_a_cost_counting(): void
@@ -162,14 +242,22 @@ class CostVerificationTest extends TestCase
         $this->assertSame(0, CostLine::counting()->count());
     }
 
-    public function test_a_posted_cost_must_be_reversed_by_journal_instead(): void
+    public function test_a_posted_cost_creates_a_compensating_journal_when_reversed(): void
     {
-        $line = $this->line(['status' => CostLine::STATUS_VERIFIED, 'posted_at' => now()]);
+        $line = $this->line(['status' => CostLine::STATUS_VERIFIED]);
+        $original = app(JournalPostingService::class)->postCostLine($line);
 
         $this->actingAs($this->verifier, 'sanctum')
             ->postJson("/api/costs/verification/{$line->id}/reverse", ['reason' => 'Wrong project.'])
-            ->assertStatus(422)
-            ->assertJsonValidationErrors(['status']);
+            ->assertOk()
+            ->assertJsonPath('data.status', CostLine::STATUS_REVERSED);
+
+        $reversal = \App\Modules\Finance\Models\JournalEntry::where('reversal_of_id', $original->id)
+            ->with('lines')->firstOrFail();
+
+        $this->assertTrue($reversal->isBalanced());
+        $this->assertSame('credit', $reversal->lines->firstWhere('account_id', $original->lines[0]->account_id)->entry_type);
+        $this->assertSame('reversed', $original->fresh()->status);
     }
 
     public function test_illegal_transitions_are_refused(): void
@@ -193,5 +281,62 @@ class CostVerificationTest extends TestCase
         $this->actingAs($this->reporter, 'sanctum')
             ->getJson('/api/costs/verification')
             ->assertForbidden();
+    }
+
+    /**
+     * The race that left a rejected cost with a posted journal behind it.
+     *
+     * `verify()` re-read under a row lock; `query`, `reject`, `reverse` and
+     * `resubmit` read status off the route-bound model and wrote over it
+     * unconditionally. Two requests arriving together therefore both saw
+     * `submitted`, and whichever wrote last won regardless of what the other
+     * had already done to the ledger.
+     *
+     * A stale in-memory model is exactly what the loser of that race holds, so
+     * it is what these assert against.
+     */
+    public function test_a_stale_reject_cannot_overwrite_a_completed_verification(): void
+    {
+        $line = $this->line();
+        $stale = CostLine::findOrFail($line->id);
+
+        $service = $this->app->make(\App\Modules\Finance\CostCollector\Services\CostVerificationService::class);
+        $service->verify($line, $this->verifier);
+
+        try {
+            $service->reject($stale, $this->verifier, 'Raced against the verification.');
+            $this->fail('A rejection was allowed to overwrite a verified cost.');
+        } catch (\App\Modules\Finance\CostCollector\Exceptions\CostValidationException $e) {
+            $this->assertArrayHasKey('status', $e->errors);
+        }
+
+        $line->refresh();
+        $this->assertSame(CostLine::STATUS_VERIFIED, $line->status);
+        $this->assertNotNull($line->posted_at);
+    }
+
+    public function test_a_stale_query_cannot_reopen_a_verified_cost(): void
+    {
+        $line = $this->line();
+        $stale = CostLine::findOrFail($line->id);
+
+        $service = $this->app->make(\App\Modules\Finance\CostCollector\Services\CostVerificationService::class);
+        $service->verify($line, $this->verifier);
+
+        $this->expectException(\App\Modules\Finance\CostCollector\Exceptions\CostValidationException::class);
+        $service->query($stale, $this->verifier, 'Which project was this for?');
+    }
+
+    public function test_a_cost_cannot_be_reversed_twice(): void
+    {
+        $line = $this->line();
+        $service = $this->app->make(\App\Modules\Finance\CostCollector\Services\CostVerificationService::class);
+        $service->verify($line, $this->verifier);
+
+        $stale = CostLine::findOrFail($line->id);
+        $service->reverse($line->fresh(), $this->verifier, 'Duplicate of an earlier claim.');
+
+        $this->expectException(\App\Modules\Finance\CostCollector\Exceptions\CostValidationException::class);
+        $service->reverse($stale, $this->verifier, 'Reversing it a second time.');
     }
 }

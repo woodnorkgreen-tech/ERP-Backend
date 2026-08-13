@@ -10,15 +10,19 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
+use App\Constants\Permissions;
+use App\Services\ProjectFinancialAccess;
 
 class BudgetAdditionController extends Controller
 {
     protected $budgetAdditionService;
 
-    public function __construct(BudgetAdditionService $budgetAdditionService)
+    public function __construct(
+        BudgetAdditionService $budgetAdditionService,
+        private ProjectFinancialAccess $access,
+    )
     {
         $this->budgetAdditionService = $budgetAdditionService;
-        // No permission restrictions for budget additions (for now)
     }
 
     /**
@@ -26,6 +30,9 @@ class BudgetAdditionController extends Controller
      */
     public function index(int $taskId): JsonResponse
     {
+        $task = $this->access->task($taskId);
+        abort_unless($this->access->canReadAdditions(request()->user(), $task), 403);
+
         try {
             $additions = $this->budgetAdditionService->getForTask($taskId);
 
@@ -46,6 +53,9 @@ class BudgetAdditionController extends Controller
      */
     public function store(Request $request, int $taskId): JsonResponse
     {
+        $task = $this->access->task($taskId);
+        abort_unless($this->access->canCreateAddition($request->user(), $task), 403);
+
         try {
             $addition = $this->budgetAdditionService->create($taskId, $request->all());
 
@@ -72,6 +82,9 @@ class BudgetAdditionController extends Controller
      */
     public function show(int $taskId, int $additionId): JsonResponse
     {
+        $task = $this->access->task($taskId);
+        abort_unless($this->access->canReadAdditions(request()->user(), $task), 403);
+
         try {
             // Find the budget data for this task
             $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
@@ -100,6 +113,9 @@ class BudgetAdditionController extends Controller
      */
     public function update(Request $request, int $taskId, string $additionId): JsonResponse
     {
+        $task = $this->access->task($taskId);
+        abort_unless($this->access->canCreateAddition($request->user(), $task), 403);
+
         \Log::info('BudgetAdditionController::update - Starting', [
             'taskId' => $taskId,
             'additionId' => $additionId,
@@ -109,12 +125,11 @@ class BudgetAdditionController extends Controller
 
         $validator = Validator::make($request->all(), [
             'title' => 'sometimes|string|max:255',
-            'description' => 'nullable|string|max:1000',
+            'description' => 'sometimes|required|string|min:10|max:1000',
             'materials' => 'sometimes|array',
             'labour' => 'sometimes|array',
             'expenses' => 'sometimes|array',
             'logistics' => 'sometimes|array',
-            'status' => 'sometimes|in:draft,pending_approval,approved,rejected'
         ]);
 
         if ($validator->fails()) {
@@ -155,13 +170,20 @@ class BudgetAdditionController extends Controller
 
             $addition = BudgetAddition::where('task_budget_data_id', $budgetData->id)->findOrFail($additionId);
 
+            abort_if($addition->status === 'approved', 422, 'Approved additions are immutable. Create a correction instead.');
+            abort_unless(
+                (int) $addition->created_by === (int) $request->user()->id
+                    || $request->user()->can(Permissions::FINANCE_BUDGET_UPDATE),
+                403
+            );
+
             \Log::info('BudgetAdditionController::update - Addition found', [
                 'additionId' => $addition->id,
                 'currentStatus' => $addition->status
             ]);
 
             $updateData = $request->only([
-                'title', 'description', 'materials', 'labour', 'expenses', 'logistics', 'status'
+                'title', 'description', 'materials', 'labour', 'expenses', 'logistics'
             ]);
 
             \Log::info('BudgetAdditionController::update - Updating addition', [
@@ -183,6 +205,8 @@ class BudgetAdditionController extends Controller
                 'message' => 'Budget addition updated successfully'
             ]);
 
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
         } catch (\Exception $e) {
             \Log::error('BudgetAdditionController::update - Exception occurred', [
                 'taskId' => $taskId,
@@ -202,6 +226,12 @@ class BudgetAdditionController extends Controller
      */
     public function approve(Request $request, int $taskId, string $additionId): JsonResponse
     {
+        $task = $this->access->task($taskId);
+        $permission = $request->input('action') === 'reject'
+            ? Permissions::FINANCE_BUDGET_ADDITIONS_REJECT
+            : Permissions::FINANCE_BUDGET_ADDITIONS_APPROVE;
+        abort_unless($request->user()->can($permission), 403);
+
         \Log::info('BudgetAdditionController::approve - Request received', [
             'taskId' => $taskId,
             'additionId' => $additionId,
@@ -228,6 +258,18 @@ class BudgetAdditionController extends Controller
         }
 
         try {
+            if (!str_starts_with($additionId, 'materials_additional_')) {
+                $budgetData = TaskBudgetData::where('enquiry_task_id', $task->id)->firstOrFail();
+                $candidate = BudgetAddition::where('task_budget_data_id', $budgetData->id)->findOrFail($additionId);
+                abort_if(
+                    (int) $candidate->created_by === (int) $request->user()->id
+                        && ! \App\Support\SelfApproval::allowedFor($request->user()),
+                    403,
+                    'You raised this budget addition, so someone else has to approve or reject it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'
+                );
+                abort_if($candidate->status === 'approved', 422, 'This addition is already approved.');
+            }
+
             \Log::info('BudgetAdditionController::approve - Processing approval', [
                 'taskId' => $taskId,
                 'additionId' => $additionId,
@@ -256,6 +298,13 @@ class BudgetAdditionController extends Controller
                 'message' => $message
             ]);
 
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'The budget addition could not be decided.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
         } catch (\Exception $e) {
             \Log::error('BudgetAdditionController::approve - Approval failed', [
                 'taskId' => $taskId,
@@ -277,6 +326,9 @@ class BudgetAdditionController extends Controller
      */
     public function createFromMaterial(Request $request, int $taskId): JsonResponse
     {
+        $task = $this->access->task($taskId);
+        abort_unless($this->access->canCreateAddition($request->user(), $task), 403);
+
         \Log::info('BudgetAdditionController::createFromMaterial called', [
             'taskId' => $taskId,
             'request_data' => $request->all()
@@ -346,6 +398,9 @@ class BudgetAdditionController extends Controller
      */
     public function destroy(int $taskId, string $additionId): JsonResponse
     {
+        $task = $this->access->task($taskId);
+        abort_unless($this->access->canCreateAddition(request()->user(), $task), 403);
+
         try {
             // Handle virtual additions - they can't be deleted directly
             if (str_starts_with($additionId, 'materials_additional_')) {
@@ -362,6 +417,12 @@ class BudgetAdditionController extends Controller
 
             $addition = BudgetAddition::where('task_budget_data_id', $budgetData->id)->findOrFail($additionId);
 
+            abort_unless(
+                (int) $addition->created_by === (int) request()->user()->id
+                    || request()->user()->can(Permissions::FINANCE_BUDGET_UPDATE),
+                403
+            );
+
             // Only allow deletion of draft additions
             if ($addition->status !== 'draft') {
                 return response()->json([
@@ -375,6 +436,8 @@ class BudgetAdditionController extends Controller
                 'message' => 'Budget addition deleted successfully'
             ]);
 
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to delete budget addition',

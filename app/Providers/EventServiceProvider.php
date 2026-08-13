@@ -30,6 +30,44 @@ class EventServiceProvider extends ServiceProvider
             \App\Listeners\ProjectBudgetLinesOnTaskCompletion::class,
         ],
 
+        // The budget's material list is a mirror of the approved one, so approval
+        // refreshes it. This replaced a Sync button and an orange "materials have
+        // changed" banner — a budget was only ever as current as somebody
+        // noticing, and two copies with a manual reconciler is how they drifted.
+        \App\Events\MaterialsApproved::class => [
+            \App\Listeners\SyncBudgetWithApprovedMaterials::class,
+        ],
+
+        // An approved addition is a budget revision, so it has to move the
+        // ceiling every "budget vs actual" figure is measured against. Before
+        // this, approval changed a status and nothing else, and the project went
+        // on being judged against its pre-addition budget.
+        \App\Events\BudgetAdditionApproved::class => [
+            \App\Listeners\ProjectApprovedBudgetAddition::class,
+        ],
+
+        // Petty cash actuals into the project's cost account. Queued, so the
+        // cost ledger can never stop somebody paying out of the tin — and the
+        // void listener keeps a backed-out payment from overstating a project.
+        \App\Events\PettyCashDisbursementPaid::class => [
+            \App\Listeners\RecordPettyCashCost::class,
+        ],
+        \App\Events\PettyCashDisbursementVoided::class => [
+            \App\Listeners\ReversePettyCashCost::class,
+        ],
+        \App\Events\PurchaseOrderApproved::class => [
+            \App\Listeners\RecordPurchaseOrderCommitments::class,
+        ],
+        \App\Events\GoodsReceiptRecorded::class => [
+            \App\Listeners\RecordGoodsReceiptAccruals::class,
+        ],
+        \App\Events\Stores\StockIssued::class => [
+            \App\Listeners\RecordStockIssueCost::class,
+        ],
+        \App\Events\Stores\StockReturned::class => [
+            \App\Listeners\RecordStockReturnCredit::class,
+        ],
+
         // ── Board Material Workflow ───────────────────────────────────────────
         \App\Events\Stores\BoardRequestRaised::class => [
             \App\Listeners\Stores\NotifyStorekeepersOfPendingRequest::class,

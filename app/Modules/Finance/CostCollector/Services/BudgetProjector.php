@@ -135,6 +135,10 @@ class BudgetProjector
                     sourceId: $budget->id,
                     sourceRef: (string) $material['id'],
                     isAddition: (bool) ($material['isAddition'] ?? false),
+                    details: array_filter([
+                        'library_material_id' => $material['libraryMaterialId'] ?? $material['library_material_id'] ?? null,
+                        'project_material_id' => $material['persistent_id'] ?? $material['persistentId'] ?? $material['id'] ?? null,
+                    ], fn ($value) => $value !== null && $value !== ''),
                 );
             })
             ->values();

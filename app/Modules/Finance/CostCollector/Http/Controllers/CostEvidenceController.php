@@ -26,7 +26,10 @@ class CostEvidenceController extends Controller
             'file' => 'required|file|max:10240|mimes:jpg,jpeg,png,heic,webp,pdf',
         ]);
 
-        $path = $request->file('file')->store('cost-evidence/' . now()->format('Y/m'), 'public');
+        $path = $request->file('file')->store(
+            'cost-evidence/' . $request->user()->id . '/' . now()->format('Y/m'),
+            'public',
+        );
 
         return response()->json([
             'data' => [

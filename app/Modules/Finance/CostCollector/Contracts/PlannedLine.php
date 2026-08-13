@@ -37,5 +37,8 @@ final class PlannedLine
          * budget, so its cause is a client change rather than plan.
          */
         public readonly bool $isAddition = false,
+
+        /** Stable operational identifiers used to match actuals exactly. */
+        public readonly array $details = [],
     ) {}
 }

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\BudgetAdditionApproved;
 use App\Models\BudgetAddition;
 use App\Models\GovernanceAuditLog;
 use App\Models\TaskBudgetData;
@@ -176,6 +177,7 @@ class BudgetAdditionService
         if (str_starts_with($additionId, 'materials_additional_')) {
             $addition = $this->approveVirtualAddition($taskId, $additionId, $notes);
             $this->recordDecision($taskId, $addition, 'approved', $notes);
+            $this->announceApproval($addition);
 
             return $addition;
         }
@@ -185,14 +187,49 @@ class BudgetAdditionService
 
         $addition = BudgetAddition::where('task_budget_data_id', $budgetData->id)->findOrFail($additionId);
 
+        // Separation of duties, with the central exception (Super Admin, or a
+        // role holding APPROVALS_SELF_APPROVE). See App\Support\SelfApproval.
+        if ((int) $addition->created_by === (int) Auth::id() && ! \App\Support\SelfApproval::allowed()) {
+            throw ValidationException::withMessages([
+                'approval' => ['You raised this budget addition, so someone else has to approve it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'],
+            ]);
+        }
+        if (!$addition->isPending()) {
+            throw ValidationException::withMessages([
+                'status' => ['Only pending budget additions can be approved.'],
+            ]);
+        }
+
         if (!$addition->approve(Auth::id(), $notes)) {
             throw new \Exception('Failed to approve budget addition');
         }
 
         $fresh = $addition->fresh(['creator', 'approver']);
         $this->recordDecision($taskId, $fresh, 'approved', $notes);
+        $this->announceApproval($fresh);
 
         return $fresh;
+    }
+
+    /**
+     * Tell Finance the budget ceiling moved.
+     *
+     * Both approval paths converge here so neither can be the one that forgets.
+     * The virtual (materials-derived) path was already the one that slipped past
+     * the audit trail once, which is reason enough not to trust two call sites to
+     * stay in step.
+     *
+     * Only ever fired for an addition that really is approved: the event means
+     * "this money is authorised", and a listener acting on anything less would put
+     * unapproved spend into a project's budget.
+     */
+    private function announceApproval(?BudgetAddition $addition): void
+    {
+        if (! $addition || ! $addition->isApproved()) {
+            return;
+        }
+
+        BudgetAdditionApproved::dispatch($addition);
     }
 
     /**
@@ -212,6 +249,17 @@ class BudgetAdditionService
         $budgetData = $this->getOrCreateBudgetData($taskId);
 
         $addition = BudgetAddition::where('task_budget_data_id', $budgetData->id)->findOrFail($additionId);
+
+        if ((int) $addition->created_by === (int) Auth::id() && ! \App\Support\SelfApproval::allowed()) {
+            throw ValidationException::withMessages([
+                'approval' => ['You raised this budget addition, so someone else has to reject it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'],
+            ]);
+        }
+        if (!$addition->isPending()) {
+            throw ValidationException::withMessages([
+                'status' => ['Only pending budget additions can be rejected.'],
+            ]);
+        }
 
         if (!$addition->reject(Auth::id(), $reason)) {
             throw new \Exception('Failed to reject budget addition');
@@ -280,7 +328,7 @@ class BudgetAdditionService
     {
         $validator = Validator::make($data, [
             'title' => 'required|string|max:255',
-            'description' => 'nullable|string|max:1000',
+            'description' => 'required|string|min:10|max:1000',
             'budget_type' => 'required|in:main,supplementary',
             'materials' => 'nullable|array',
             'materials.*.description' => 'required|string',
@@ -352,7 +400,9 @@ class BudgetAdditionService
      */
     private function determineInitialStatus(string $budgetType): string
     {
-        return $budgetType === 'main' ? 'approved' : 'draft';
+        // Every post-budget change needs an independent decision. Budget type
+        // describes the ledger treatment; it must never grant approval.
+        return 'pending_approval';
     }
 
     /**

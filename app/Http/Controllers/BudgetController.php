@@ -116,39 +116,42 @@ class BudgetController extends Controller
     }
 
     /**
-     * Import materials into budget
+     * Re-sync this budget with the approved materials list.
+     *
+     * Kept as an operational valve rather than a step in anyone's workflow. The
+     * system syncs on approval and on first save, so this exists for the case
+     * where that queued listener failed — not for a person to decide whether the
+     * two lists should agree. There is no `force`: a sync is a sync, and the only
+     * thing it ever preserved was the budget's own rates.
      */
     public function importMaterials(int $taskId): JsonResponse
     {
         try {
-            $result = $this->budgetService->importMaterials($taskId, (bool)request('force', false));
+            $result = $this->budgetService->syncFromApprovedMaterials($taskId);
             $budget = $result['budget'];
 
-            // Transform the response to match frontend expectations
-            $response = [
-                'projectInfo' => $budget->project_info,
-                'materials' => $budget->materials_data ?? [],
-                'labour' => $budget->labour_data ?? [],
-                'expenses' => $budget->expenses_data ?? [],
-                'logistics' => $budget->logistics_data ?? [],
-                'budgetSummary' => $budget->budget_summary,
-                'status' => $budget->status ?? 'draft',
-                'materialsImportInfo' => [
-                    'importedAt' => $budget->materials_imported_at,
-                    'importedFromTask' => $budget->materials_imported_from_task,
-                    'manuallyModified' => $budget->materials_manually_modified ?? false,
-                    'importMetadata' => $budget->materials_import_metadata
-                ]
-            ];
             return response()->json([
-                'data' => $response,
-                'message' => $result['message']
+                'data' => [
+                    'projectInfo' => $budget->project_info,
+                    'materials' => $budget->materials_data ?? [],
+                    'labour' => $budget->labour_data ?? [],
+                    'expenses' => $budget->expenses_data ?? [],
+                    'logistics' => $budget->logistics_data ?? [],
+                    'budgetSummary' => $budget->budget_summary,
+                    'status' => $budget->status ?? 'draft',
+                    'materialsImportInfo' => [
+                        'importedAt' => $budget->materials_imported_at,
+                        'importedFromTask' => $budget->materials_imported_from_task,
+                    ],
+                ],
+                'message' => $result['message'],
+                'reopened' => $result['reopened'],
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => $e->getMessage(), // Pass through the actual error message
-                'error' => $e->getMessage()
-            ], 400); // Changed to 400 for client errors like approval needed
+                'message' => $e->getMessage(),
+                'error' => $e->getMessage(),
+            ], 400);
         }
     }
 
@@ -157,23 +160,6 @@ class BudgetController extends Controller
         $user = $request->user();
 
         return $user && $user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Costing']);
-    }
-
-    public function checkMaterialsUpdate(int $taskId): JsonResponse
-    {
-        try {
-            $result = $this->budgetService->checkMaterialsUpdate($taskId);
-
-            return response()->json([
-                'data' => $result,
-                'message' => 'Materials update check completed'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to check materials update',
-                'error' => $e->getMessage()
-            ], 500);
-        }
     }
 
     /**

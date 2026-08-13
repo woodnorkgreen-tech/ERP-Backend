@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MaterialsApproved;
+
 use App\Models\TaskMaterialsData;
 use App\Models\MaterialVersion;
 use App\Models\ProjectElement;
@@ -618,12 +620,10 @@ class MaterialsController extends Controller
             // Check for additional materials and create budget additions automatically
             $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
 
-            // Saving alone must not move the budget — the budget only follows a
-            // materials list that both departments have approved, which is done
-            // in approveMaterials(). Until then the budget shows the "materials
-            // changed" banner (BudgetController::checkMaterialsUpdate) and can
-            // be synced manually.
-            // $this->syncMaterialsToBudget($taskId, $idMapping);
+            // Saving alone must not move the budget: the budget follows a list
+            // both departments have approved, and approveMaterials() announces
+            // that. Saving an unapproved edit into the budget would put figures
+            // nobody signed off in front of Finance and procurement.
             
             /* 
             // Trigger Procurement Sync immediately using the ID Mapping
@@ -1270,323 +1270,6 @@ class MaterialsController extends Controller
     /**
      * Sync materials data to budget whenever materials are updated
      */
-    private function syncMaterialsToBudget(int $materialsTaskId, array $idMapping = []): array
-    {
-        try {
-            // Find the budget task for this enquiry
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($materialsTaskId);
-            if (!$materialsTask) {
-                \Log::warning('Materials task not found for budget sync', ['taskId' => $materialsTaskId]);
-                return ['synced' => false, 'reason' => 'materials_task_not_found'];
-            }
-
-            $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
-                ->where('type', 'budget')
-                ->first();
-
-            if (!$budgetTask) {
-                \Log::info('No budget task found for enquiry - skipping materials sync', [
-                    'enquiryId' => $materialsTask->project_enquiry_id
-                ]);
-                return ['synced' => false, 'reason' => 'no_budget_task'];
-            }
-
-            // Get budget data
-            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
-            if (!$budgetData) {
-                \Log::info('No budget data found - skipping materials sync', [
-                    'budgetTaskId' => $budgetTask->id
-                ]);
-                return ['synced' => false, 'reason' => 'no_budget_data'];
-            }
-
-            // The budget was already signed off, so the approved figures are
-            // about to change underneath whoever relies on that status
-            // (Finance/procurement gates, etc). Reopen it so the change is
-            // visible and audited, then sync — dual approval is the authority
-            // on what the materials cost, and leaving the budget showing stale
-            // numbers behind a "completed" badge is the worse failure.
-            $reopened = false;
-            if ($budgetTask->status === 'completed') {
-                $budgetTask->update(['status' => 'in_progress', 'completed_at' => null]);
-                $budgetTask->recordCustomAction('status_transition', [
-                    'from' => 'completed',
-                    'to' => 'in_progress',
-                    'actor_type' => 'system',
-                    'reason' => 'Materials list was updated and re-approved after this budget was marked complete. Reopened and re-synced with the approved materials — review the updated totals.',
-                ]);
-                $reopened = true;
-                \Log::info('Budget task reopened: materials re-approved after budget completion', [
-                    'budgetTaskId' => $budgetTask->id,
-                    'materialsTaskId' => $materialsTaskId,
-                ]);
-            }
-
-            // Get materials data to sync
-            $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)
-                ->with(['elements.materials.libraryMaterial'])
-                ->first();
-
-            if (!$materialsData) {
-                \Log::info('No materials data found - skipping materials sync', [
-                    'materialsTaskId' => $materialsTaskId
-                ]);
-                return ['synced' => false, 'reason' => 'no_materials_data', 'budgetReopened' => $reopened];
-            }
-
-            // --- BUILD INDEXES OF EXISTING BUDGET DATA ---
-            $existingMaterials = $budgetData->materials_data ?? [];
-            $budgetElementsById = []; // Key: IDString -> ElementData
-            $budgetMaterialsById = []; // Key: IDString -> MaterialData
-            $budgetMaterialsByPersistentId = []; // Key: UUID -> MaterialData
-            $budgetElementsByPersistentId = []; // Key: UUID -> ElementData
-            
-            // Fallbacks for content matching (if IDs fail)
-            $budgetElementsByKey = []; // Key: Name|Type -> ElementData
-            $budgetMaterialsByKey = []; // Key: ElemKey|MatDesc -> MaterialData
-
-            foreach ($existingMaterials as $existingElem) {
-                if (isset($existingElem['id'])) {
-                    $budgetElementsById[(string)$existingElem['id']] = $existingElem;
-                }
-                if (isset($existingElem['persistent_id'])) {
-                    $budgetElementsByPersistentId[(string)$existingElem['persistent_id']] = $existingElem;
-                }
-                
-                // Fallback Key for Element
-                $elemKey = strtolower(trim($existingElem['name'] ?? '')) . '|' . strtolower($existingElem['elementType'] ?? 'custom');
-                $budgetElementsByKey[$elemKey] = $existingElem;
-
-                foreach ($existingElem['materials'] ?? [] as $existingMat) {
-                    if (isset($existingMat['id'])) {
-                        $budgetMaterialsById[(string)$existingMat['id']] = $existingMat;
-                    }
-                    if (isset($existingMat['persistent_id'])) {
-                        $budgetMaterialsByPersistentId[(string)$existingMat['persistent_id']] = $existingMat;
-                    }
-                    
-                    // Fallback Key for Material
-                    $matKey = $elemKey . '|' . strtolower(trim($existingMat['description'] ?? ''));
-                    $budgetMaterialsByKey[$matKey] = $existingMat;
-                }
-            }
-
-            // --- TRANSFORM MATERIALS FOR BUDGET ---
-            $budgetMaterials = [];
-            foreach ($materialsData->elements as $element) {
-                // Skip elements that are not included
-                if (!$element->is_included) {
-                    continue;
-                }
-
-                // Resolve matching budget element
-                $matchingBudgetElem = null;
-
-                // 0. Try Persistent ID Mapping
-                if (!empty($element->persistent_id)) {
-                    $matchingBudgetElem = $budgetElementsByPersistentId[(string)$element->persistent_id] ?? null;
-                }
-
-                // A. Try ID Mapping (New ID -> Old ID -> Budget Lookup)
-                $oldElementId = null;
-                if (isset($idMapping[(string)$element->id])) {
-                    $oldElementId = $idMapping[(string)$element->id]['old_id'];
-                }
-                
-                if ($oldElementId) {
-                    $matchingBudgetElem = $budgetElementsById[(string)$oldElementId] ?? null;
-                    if (!$matchingBudgetElem) {
-                        \Log::warning("Materials Sync: Element ID match failed", ['new' => $element->id, 'old' => $oldElementId]);
-                    }
-                }
-
-                // B. Try Fallback Key (if ID match failed)
-                if (!$matchingBudgetElem) {
-                    $newElemKey = strtolower(trim($element->name)) . '|' . strtolower($element->element_type);
-                    $matchingBudgetElem = $budgetElementsByKey[$newElemKey] ?? null;
-                }
-
-                $elementMaterials = [];
-                foreach ($element->materials as $material) {
-                    // Skip materials that are not included or marked additional
-                    if (!$material->is_included || $material->is_additional) {
-                        continue;
-                    }
-
-                    // Resolve price and existing data
-                    $unitPrice = 0.0;
-                    $hasCustomPrice = false;
-                    $oldQty = 0.0;
-                    
-                    // Resolve matching budget material
-                    $matchingBudgetMat = null;
-
-                    // 0. Try Persistent ID Mapping (Highest Reliability)
-                    if (!empty($material->persistent_id)) {
-                        $matchingBudgetMat = $budgetMaterialsByPersistentId[(string)$material->persistent_id] ?? null;
-                    }
-                    
-                    // A. Try ID Mapping
-                    $oldMaterialId = null;
-                    if (isset($idMapping[(string)$element->id]['materials'][(string)$material->id])) {
-                        $oldMaterialId = $idMapping[(string)$element->id]['materials'][(string)$material->id];
-                    }
-
-                    if ($oldMaterialId) {
-                        $matchingBudgetMat = $budgetMaterialsById[(string)$oldMaterialId] ?? null;
-                        if (!$matchingBudgetMat) {
-                             \Log::warning("Materials Sync: Material ID match failed", ['new' => $material->id, 'old' => $oldMaterialId]);
-                        }
-                    }
-
-                    // B. Try Fallback Key
-                    if (!$matchingBudgetMat) {
-                         // Construct key using CURRENT element details + Material Description
-                         $currentElemKey = strtolower(trim($element->name)) . '|' . strtolower($element->element_type);
-                         $newMatKey = $currentElemKey . '|' . strtolower(trim($material->description));
-                         $matchingBudgetMat = $budgetMaterialsByKey[$newMatKey] ?? null;
-                    }
-
-                    if ($matchingBudgetMat) {
-                         $unitPrice = (float)($matchingBudgetMat['unitPrice'] ?? 0);
-                         $hasCustomPrice = true;
-                         $oldQty = (float)($matchingBudgetMat['quantity'] ?? 0);
-
-                         \Log::info('Preserved budget price during sync', [
-                             'material' => $material->description,
-                             'price' => $unitPrice
-                         ]);
-                    }
-
-                    // If no custom price found/preserved, use library/default
-                    if (!$hasCustomPrice) {
-                        $unitPrice = (float)($material->unit_cost ?: ($material->libraryMaterial->unit_cost ?? 0.0));
-                    }
-
-                    $newMaterialData = [
-                        'id' => (string) $material->id, // Use NEW ID to keep budget fresh
-                        'persistent_id' => $material->persistent_id,
-                        'description' => $material->description,
-                        'unitOfMeasurement' => $material->unit_of_measurement,
-                        'quantity' => (float) $material->quantity,
-                        'isIncluded' => true,
-                        'unitPrice' => $unitPrice,
-                        'totalPrice' => $unitPrice * (float) $material->quantity,
-                        'isAddition' => false,
-                        'notes' => $material->notes,
-                        'category' => $element->category
-                    ];
-
-                    // Track quantity changes for user awareness
-                    if ($hasCustomPrice && abs($oldQty - (float)$material->quantity) > 0.001) {
-                         $newMaterialData['_quantityChanged'] = true;
-                         $newMaterialData['_oldQuantity'] = $oldQty;
-                    }
-
-                    $elementMaterials[] = $newMaterialData;
-                }
-
-                if (!empty($elementMaterials)) {
-                    $budgetMaterials[] = [
-                        'id' => (string) $element->id, // Use NEW ID
-                        'elementType' => $element->element_type,
-                        'name' => $element->name,
-                        'persistent_id' => $element->persistent_id,
-                        'category' => $element->category,
-                        'materials' => $elementMaterials,
-                        'isIncluded' => true,
-                        'notes' => $element->notes
-                    ];
-                }
-            }
-
-            // Recalculate materials total
-            $materialsTotal = 0;
-            foreach ($budgetMaterials as $element) {
-                foreach ($element['materials'] ?? [] as $material) {
-                    $materialsTotal += (float) ($material['totalPrice'] ?? 0);
-                }
-            }
-
-            // Update budget
-            $currentSummary = $budgetData->budget_summary ?? [
-                'materialsTotal' => 0,
-                'labourTotal' => 0,
-                'expensesTotal' => 0,
-                'logisticsTotal' => 0,
-                'grandTotal' => 0
-            ];
-            
-            $currentSummary['materialsTotal'] = $materialsTotal;
-            $currentSummary['grandTotal'] = $materialsTotal + 
-                                          ($currentSummary['labourTotal'] ?? 0) + 
-                                          ($currentSummary['expensesTotal'] ?? 0) + 
-                                          ($currentSummary['logisticsTotal'] ?? 0);
-
-            $budgetData->update([
-                'materials_data' => $budgetMaterials,
-                'budget_summary' => $currentSummary,
-                'materials_imported_at' => now(),
-                'materials_imported_from_task' => $materialsTaskId,
-                'materials_manually_modified' => false,
-                'materials_import_metadata' => [
-                    // Procurement refuses to sync from a budget whose metadata
-                    // doesn't name the approved materials list as its source
-                    // (ProcurementService::ensureBudgetReadyForProcurement).
-                    // This path *is* that source — both departments just
-                    // approved it — so it has to say so, exactly as
-                    // BudgetService::buildMaterialsImportMetadata() does.
-                    'source' => 'approved_materials_list',
-                    'imported_at' => now()->toISOString(),
-                    'materials_task_id' => $materialsTaskId,
-                    'materials_task_title' => $materialsTask->title,
-                    'total_elements' => count($budgetMaterials),
-                    'total_materials' => array_sum(array_map(function ($element) {
-                        return count($element['materials']);
-                    }, $budgetMaterials))
-                ],
-                'updated_at' => now()
-            ]);
-
-            \Log::info("Materials synced to budget successfully (ID Mapping Active)", [
-                'taskId' => $materialsTaskId,
-                'idMappingCount' => count($idMapping)
-            ]);
-
-            // This path writes TaskBudgetData directly rather than going through
-            // BudgetService, so it has to carry the budget -> procurement push
-            // itself. Without it, approving materials updates the budget and
-            // leaves procurement on the previous figures.
-            $procurementTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
-                ->where('type', 'procurement')
-                ->first();
-
-            if ($procurementTask) {
-                app(\App\Services\ProcurementService::class)->syncWithBudget($procurementTask->id, $idMapping);
-            }
-
-            return [
-                'synced' => true,
-                'budgetTaskId' => $budgetTask->id,
-                'budgetReopened' => $reopened,
-                'materialsTotal' => $materialsTotal,
-                'grandTotal' => $currentSummary['grandTotal'],
-            ];
-
-        } catch (\Exception $e) {
-            \Log::error('Failed to sync materials to budget', [
-                'materialsTaskId' => $materialsTaskId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return [
-                'synced' => false,
-                'reason' => 'error',
-                'error' => $e->getMessage(),
-            ];
-        }
-    }
 
     /**
      * Create budget additions for materials marked as additional
@@ -1800,8 +1483,6 @@ class MaterialsController extends Controller
             ], 422);
         }
 
-        $budgetSync = null;
-
         try {
             // Check Design Gate before proceeding
             $gate = $this->checkDesignApprovalGate($taskId);
@@ -1896,9 +1577,11 @@ class MaterialsController extends Controller
 
                 $this->createBudgetAdditionsForAdditionalMaterials($taskId, $projectElements);
 
-                // Automatic budget sync on final approval
-                \Log::info('Final approval received - syncing latest materials to budget', ['taskId' => $taskId]);
-                $budgetSync = $this->syncMaterialsToBudget($taskId);
+                // The budget mirrors the approved list, so approval refreshes
+                // it. Announced rather than done here: reconciling another
+                // module's JSON inside this controller is what produced two
+                // competing merge implementations in the first place.
+                MaterialsApproved::dispatch($taskId);
             }
 
             // NEW: Handle Base Snapshot on First Approval
@@ -1919,7 +1602,6 @@ class MaterialsController extends Controller
                 // caller can tell an actual budget update apart from a silent
                 // no-op (no budget task yet, sync error) instead of reading
                 // "approval recorded successfully" as "the budget moved".
-                'budget_sync' => $budgetSync,
             ]);
 
         } catch (\Exception $e) {

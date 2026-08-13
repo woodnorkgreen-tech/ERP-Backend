@@ -3,10 +3,12 @@
 namespace Tests\Feature\CostCollector;
 
 use App\Constants\EnquiryConstants;
+use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /**
@@ -107,13 +109,27 @@ class MyProjectsTest extends TestCase
             ->assertJsonCount(0, 'data');
     }
 
-    public function test_search_reaches_projects_you_are_not_assigned_to(): void
+    /**
+     * Searching is scoped by permission, not by the presence of a search term.
+     *
+     * Someone with no finance permission sees only their own jobs however they
+     * look, so a stray search cannot become a way to read the whole project list.
+     */
+    public function test_search_does_not_widen_the_list_without_portfolio_access(): void
     {
-        // A driver or store keeper routinely reports against a job nobody
-        // assigned them to; an assigned-only picker would be a dead end.
         $this->enquiry('WNG-01-2026-050', 'Safaricom Roadshow');
 
-        $response = $this->actingAs($this->technician, 'sanctum')
+        $this->actingAs($this->technician, 'sanctum')
+            ->getJson('/api/costs/my-projects?q=Safaricom')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+    }
+
+    public function test_portfolio_access_reaches_projects_you_are_not_assigned_to(): void
+    {
+        $this->enquiry('WNG-01-2026-050', 'Safaricom Roadshow');
+
+        $response = $this->actingAs($this->portfolioUser(), 'sanctum')
             ->getJson('/api/costs/my-projects?q=Safaricom')
             ->assertOk();
 
@@ -126,9 +142,20 @@ class MyProjectsTest extends TestCase
     {
         $this->enquiry('WNG-07-2026-077', 'Some Project');
 
-        $this->actingAs($this->technician, 'sanctum')
+        $this->actingAs($this->portfolioUser(), 'sanctum')
             ->getJson('/api/costs/my-projects?q=07-2026-077')
             ->assertOk()
             ->assertJsonCount(1, 'data');
+    }
+
+    /** Someone who may read the cost portfolio, so search spans every open job. */
+    private function portfolioUser(): User
+    {
+        Permission::findOrCreate(Permissions::FINANCE_COSTS_READ, 'web');
+
+        $user = User::factory()->create(['is_active' => true]);
+        $user->givePermissionTo(Permissions::FINANCE_COSTS_READ);
+
+        return $user;
     }
 }

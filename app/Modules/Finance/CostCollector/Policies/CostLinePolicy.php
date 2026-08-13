@@ -36,6 +36,26 @@ class CostLinePolicy
         return $user->can(Permissions::FINANCE_COSTS_VERIFY);
     }
 
+    /**
+     * Who may break separation of duties and verify their own cost.
+     *
+     * Separation of duties is the rule; this is the documented exception for a
+     * one-person finance function or an out-of-hours close, mirroring the
+     * emergency self-approval the petty-cash requisition flow already allows.
+     * It is not a silent bypass — the service additionally demands a written
+     * reason and records the override against the line.
+     *
+     * Who counts as the exception is no longer decided here. It is the shared
+     * `self-approve` ability (App\Support\SelfApproval), so this module agrees
+     * with petty cash, spend vouchers, budget additions and receipts instead of
+     * keeping its own hard-coded role string — which is what let Super Admin be
+     * the only possible answer, with no way to grant it to a Finance Manager.
+     */
+    public function verifyOwn(User $user, CostLine $line): bool
+    {
+        return \App\Support\SelfApproval::allowedFor($user);
+    }
+
     public function reverse(User $user, CostLine $line): bool
     {
         return $user->can(Permissions::FINANCE_COSTS_REVERSE);

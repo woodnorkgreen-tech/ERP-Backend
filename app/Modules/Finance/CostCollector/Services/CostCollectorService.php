@@ -9,6 +9,9 @@ use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Contracts\PlannedLine;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
+use App\Modules\Finance\Services\JournalPostingService;
+use App\Modules\ProcurementStores\Models\Supplier;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -28,6 +31,7 @@ class CostCollectorService implements CollectsCost
     public function __construct(
         private CostContextResolver $resolver,
         private CostNotifier $notifier,
+        private JournalPostingService $journalPosting,
     ) {}
 
     public function collect(CostContext $context): CostLine
@@ -80,6 +84,11 @@ class CostCollectorService implements CollectsCost
             // race on. job_number already carries the project context.
             $line->forceFill(['ref' => 'CL-' . str_pad((string) $line->id, 7, '0', STR_PAD_LEFT)])->save();
 
+            if ($line->status === CostLine::STATUS_VERIFIED
+                && in_array($line->nature, [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL], true)) {
+                $this->journalPosting->postCostLine($line);
+            }
+
             // Only a cost that is actually waiting warrants telling anyone. A
             // producer-posted line lands verified and needs no queue.
             if ($line->status === CostLine::STATUS_SUBMITTED) {
@@ -87,6 +96,68 @@ class CostCollectorService implements CollectsCost
             }
 
             return $line;
+        });
+    }
+
+    /** @param array{amount:string,description:?string,response:string} $changes */
+    public function correctQueried(CostLine $line, User $user, array $changes): CostLine
+    {
+        $payeeType = $line->payee_type_id
+            ? DB::table('payee_types')->whereKey($line->payee_type_id)->value('code')
+            : null;
+        $context = new CostContext(
+            expenseCode: (string) $line->expenseCode?->code,
+            amount: $changes['amount'], nature: CostLine::NATURE_ACTUAL,
+            projectId: $line->project_id, enquiryId: $line->project_enquiry_id,
+            jobNumber: $line->job_number, incurredAt: $line->incurred_at?->toIso8601String(),
+            currency: $line->currency, fxRate: (string) $line->fx_rate,
+            payeeType: $payeeType, payeeId: $line->payee_id, payeeName: $line->payee_name,
+            consumesLineId: $line->consumes_line_id, details: $line->details ?? [],
+            evidence: $line->evidence ?? [], description: $changes['description'],
+        );
+        $code = $this->expenseCode($context);
+        $resolved = $this->resolver->resolve($context, $code);
+        $this->validate($context, $code, $resolved);
+
+        return DB::transaction(function () use ($line, $user, $changes, $context, $resolved) {
+            $line = CostLine::whereKey($line->id)->lockForUpdate()->firstOrFail();
+            if ($line->status !== CostLine::STATUS_QUERIED
+                || $line->submitted_by_user_id !== $user->id || $line->posted_at) {
+                throw CostValidationException::withErrors([
+                    'status' => ['Only the reporter can correct their queried, unposted cost.'],
+                ]);
+            }
+            $money = $this->money($context);
+            $meta = $line->capture_meta ?? [];
+            $meta['revisions'][] = [
+                'before' => ['amount' => (string) $line->amount, 'description' => $line->description],
+                'after' => ['amount' => $money['amount'], 'description' => $changes['description']],
+                'response' => $changes['response'], 'revised_by' => $user->id,
+                'revised_at' => now()->toIso8601String(),
+            ];
+            $line->forceFill([
+                ...$resolved, ...$money, ...$this->budgetSnapshot($context, $money['net_amount']),
+                'description' => $changes['description'], 'status' => CostLine::STATUS_SUBMITTED,
+                'capture_meta' => $meta,
+            ])->save();
+            $this->notifier->submitted($line);
+            return $line;
+        });
+    }
+
+    /** Release an authoritative source commitment; commitments never reach GL. */
+    public function releaseCommitment(CostLine $line, string $reason): void
+    {
+        DB::transaction(function () use ($line, $reason) {
+            $line = CostLine::whereKey($line->id)->lockForUpdate()->firstOrFail();
+            if ($line->nature === CostLine::NATURE_COMMITTED
+                && $line->status === CostLine::STATUS_VERIFIED && ! $line->posted_at) {
+                $line->forceFill([
+                    'status' => CostLine::STATUS_REVERSED,
+                    'query_note' => $reason,
+                    'verified_at' => now(),
+                ])->save();
+            }
         });
     }
 
@@ -104,10 +175,6 @@ class CostCollectorService implements CollectsCost
      */
     public function postPlanned(PlannedLine $line): CostLine
     {
-        if ($existing = $this->existingPlanned($line)) {
-            return $existing;
-        }
-
         $this->validatePlanned($line);
 
         $context = new CostContext(
@@ -128,6 +195,27 @@ class CostCollectorService implements CollectsCost
         $resolved = $this->resolver->resolve($context, new ExpenseCode());
 
         return DB::transaction(function () use ($line, $resolved) {
+            $existing = CostLine::where('source_type', $line->sourceType)
+                ->where('source_id', $line->sourceId)
+                ->where('source_ref', $line->sourceRef)
+                ->lockForUpdate()
+                ->first();
+
+            if ($existing && $this->plannedLineMatches($existing, $line, $resolved)) {
+                return $existing;
+            }
+
+            if ($existing) {
+                // Preserve the old financial fact, but release the canonical
+                // source key for its replacement. Consumers remain linked to the
+                // exact budget version against which their spend was approved.
+                $existing->forceFill([
+                    'source_ref' => 'REV-' . $existing->id . '-' . substr(sha1((string) $line->sourceRef), 0, 16),
+                    'status' => CostLine::STATUS_REVERSED,
+                    'query_note' => 'Superseded by a revised project budget line.',
+                ])->save();
+            }
+
             $created = CostLine::create([
                 ...$resolved,
                 'ref' => 'PENDING',
@@ -147,13 +235,46 @@ class CostCollectorService implements CollectsCost
                 'source_type' => $line->sourceType,
                 'source_id' => $line->sourceId,
                 'source_ref' => $line->sourceRef,
-                'details' => ['budget_category' => $line->category, 'is_addition' => $line->isAddition],
+                'details' => [
+                    'budget_category' => $line->category,
+                    'is_addition' => $line->isAddition,
+                    ...$line->details,
+                ],
             ]);
 
             $created->forceFill(['ref' => 'CL-' . str_pad((string) $created->id, 7, '0', STR_PAD_LEFT)])->save();
 
             return $created;
         });
+    }
+
+    /** @param array<string, mixed> $resolved */
+    private function plannedLineMatches(CostLine $existing, PlannedLine $line, array $resolved): bool
+    {
+        return $existing->status === CostLine::STATUS_VERIFIED
+            && bccomp((string) $existing->net_amount, $line->amount, 2) === 0
+            && (string) $existing->description === (string) $line->description
+            && (string) $existing->unit === (string) $line->unit
+            && $this->sameDecimal($existing->quantity, $line->quantity, 3)
+            && $this->sameDecimal($existing->unit_rate, $line->unitRate, 4)
+            && ($existing->details['budget_category'] ?? null) === $line->category
+            && (bool) ($existing->details['is_addition'] ?? false) === $line->isAddition
+            && collect($line->details)->every(fn ($value, $key) =>
+                (string) ($existing->details[$key] ?? '') === (string) $value
+            )
+            && $existing->project_id === ($resolved['project_id'] ?? null)
+            && $existing->project_enquiry_id === ($resolved['project_enquiry_id'] ?? null)
+            && $existing->activity_id === ($resolved['activity_id'] ?? null)
+            && $existing->cost_cause_id === ($resolved['cost_cause_id'] ?? null);
+    }
+
+    private function sameDecimal(mixed $left, mixed $right, int $scale): bool
+    {
+        if ($left === null || $right === null) {
+            return $left === null && $right === null;
+        }
+
+        return bccomp((string) $left, (string) $right, $scale) === 0;
     }
 
     /**
@@ -187,6 +308,12 @@ class CostCollectorService implements CollectsCost
 
         $resolved = $this->resolver->resolve($context, $code ?? new ExpenseCode());
 
+        $errors = [];
+        $this->validatePeriod($resolved, $errors);
+        if ($errors) {
+            throw CostValidationException::withErrors($errors);
+        }
+
         return DB::transaction(function () use ($context, $code, $resolved, $attributes) {
             $money = $this->money($context);
 
@@ -209,6 +336,10 @@ class CostCollectorService implements CollectsCost
             ]);
 
             $line->forceFill(['ref' => 'CL-' . str_pad((string) $line->id, 7, '0', STR_PAD_LEFT)])->save();
+
+            if (in_array($line->nature, [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL], true)) {
+                $this->journalPosting->postCostLine($line);
+            }
 
             return $line;
         });
@@ -297,6 +428,27 @@ class CostCollectorService implements CollectsCost
             $errors['jobNumber'][] = "'{$code->expense_type}' cannot be charged to a Job ID — it is not a project cost.";
         }
 
+        if ($code->requires_supplier && (! $context->payeeId || $context->payeeType !== 'SUPPLIER')) {
+            $errors['payee_id'][] = "'{$code->expense_type}' requires a supplier selected from the supplier master.";
+        }
+
+        if ($context->payeeType === 'SUPPLIER'
+            && (! $context->payeeId || ! Supplier::whereKey($context->payeeId)->exists())) {
+            $errors['payee_id'][] = 'Select a valid supplier from the supplier master.';
+        }
+
+        if ($code->requires_asset_record && blank($context->details['asset_id'] ?? null)) {
+            $errors['details.asset_id'][] = "'{$code->expense_type}' requires an asset record.";
+        }
+
+        $this->validateBudgetLine($context, $resolved, $errors);
+
+        if (($resolved['project_enquiry_id'] ?? null)
+            && ! $context->consumesLineId
+            && blank($context->details['unbudgeted_reason'] ?? null)) {
+            $errors['details.unbudgeted_reason'][] = 'Explain why this project cost is outside the approved budget.';
+        }
+
         foreach ($code->requiredDetailKeys() as $key) {
             if (blank($context->details[$key] ?? null)) {
                 $errors["details.{$key}"][] = $this->labelFor($code->detailFields(), $key) . ' is required.';
@@ -314,6 +466,29 @@ class CostCollectorService implements CollectsCost
 
         if ($errors) {
             throw CostValidationException::withErrors($errors);
+        }
+    }
+
+    /** @param array<string, mixed> $resolved @param array<string, array<int, string>> $errors */
+    private function validateBudgetLine(CostContext $context, array $resolved, array &$errors): void
+    {
+        if (! $context->consumesLineId) {
+            return;
+        }
+
+        $planned = CostLine::find($context->consumesLineId);
+        if (! $planned || $planned->nature !== CostLine::NATURE_PLANNED
+            || $planned->status !== CostLine::STATUS_VERIFIED) {
+            $errors['consumes_line_id'][] = 'Select an active approved budget line.';
+            return;
+        }
+
+        $sameProject = ($resolved['project_enquiry_id'] && $planned->project_enquiry_id === $resolved['project_enquiry_id'])
+            || ($resolved['project_id'] && $planned->project_id === $resolved['project_id'])
+            || (filled($resolved['job_number']) && $planned->job_number === $resolved['job_number']);
+
+        if (! $sameProject) {
+            $errors['consumes_line_id'][] = 'The selected budget line does not belong to this project.';
         }
     }
 
@@ -357,8 +532,8 @@ class CostCollectorService implements CollectsCost
         // can hand us an empty string rather than null, and bcmath raises on a
         // malformed operand — the single writer must not be crashable by its
         // callers' data quality.
-        $amount = $this->numeric($context->amount, '0');
-        $tax = $this->numeric($context->taxAmount, '0');
+        $amount = bcadd($this->numeric($context->amount, '0'), '0', 2);
+        $tax = bcadd($this->numeric($context->taxAmount, '0'), '0', 2);
         $net = bcsub($amount, $tax, 2);
         $rate = $this->numeric($context->fxRate, '1');
 

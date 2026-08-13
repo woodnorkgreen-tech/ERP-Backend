@@ -48,7 +48,7 @@ understated.
 | Module | Cost event | Nature | Status |
 |---|---|---|---|
 | **Projects** | budget task completes | `planned` | ✅ **event-driven** — `EnquiryTaskCompleted` → `ProjectBudgetLinesOnTaskCompletion` (queued) |
-| **Petty Cash** | disbursement paid | `actual` | ⚠️ **command only** — `finance:backfill-petty-cash`. Needs hooking to `VoucherService` |
+| **Petty Cash** | disbursement paid | `actual` | ✅ **event-driven** — `PettyCashDisbursementPaid` → `RecordPettyCashCost` (queued). A void fires `PettyCashDisbursementVoided` → `ReversePettyCashCost`, so a backed-out payment stops counting. `finance:backfill-petty-cash` remains for historical rows |
 | **Stores** | material issued to a job | `actual` | ❌ not wired. `inventory_logs` already has `project_id` **and** `receipt_unit_cost` — cheapest real win |
 | **HR** | overtime approved | `actual` | ❌ not wired. `ot_entries.project_id` exists |
 | **Procurement** | PO approved / GRN / Bill | `committed` → `accrued` → `actual` | ❌ not wired, and `purchase_orders` has **no** `project_id` — three nullable hops via `Requisition` |
@@ -119,3 +119,10 @@ cost line lands a moment later, and a bad projection never becomes an operationa
 3. Set `sourceType`/`sourceId` from the source document. This is what makes retries safe.
 4. Decide the `nature` deliberately: a commitment is not an accrual is not an actual.
 5. Add a test that fires the listener twice and asserts one cost line.
+6. Handle the source document being **undone**. Producers refuse to cost a
+   voided document, but that only covers lines created after the void — a document
+   costed while live and reversed afterwards keeps its cost line and overstates the
+   project forever. Petty cash pairs `RecordPettyCashCost` with `ReversePettyCashCost`
+   for exactly this. Note that `CostVerificationService::reverse()` refuses a line that
+   already reached the journal: that one needs a compensating entry, which a listener
+   has no business inventing, so log it for Finance instead.

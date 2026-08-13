@@ -35,6 +35,13 @@ class FinanceServiceProvider extends ServiceProvider
             \App\Modules\Finance\CostCollector\Policies\CostLinePolicy::class,
         );
 
+        // Bound to the disbursement so bulk endpoints can authorize against the
+        // class and single-record endpoints against the model, under one rule.
+        \Illuminate\Support\Facades\Gate::policy(
+            \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::class,
+            \App\Modules\Finance\PettyCash\Policies\PettyCashPolicy::class,
+        );
+
         if ($this->app->runningInConsole()) {
             $this->commands([
                 \App\Modules\Finance\CostCollector\Console\ProjectBudgetsCommand::class,

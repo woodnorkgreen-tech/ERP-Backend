@@ -9,15 +9,19 @@ use Illuminate\Support\Facades\DB;
 /**
  * WNG expense catalogue.
  *
- * PARTIAL — this seeds the two blocks supplied in full: NE-001…NE-023
- * (non-expense cash movements, inventory, prepayments, tax, capex) and the
- * direct-materials family DM-WD/GL/PL/MT/PR/FN/DC/EL. Direct labour,
- * subcontractors, transport, equipment, utilities, facilitation, venue, rework,
- * production overhead, operating expenses and the remaining capex codes are NOT
- * seeded, because their codes and GL accounts have not been supplied and
- * inventing them would put wrong numbers into the ledger.
+ * Three blocks, each in its own class so they stay readable:
  *
- * Adding them is a data drop into the arrays below, not a code change.
+ * - direct materials, DM-WD/GL/PL/MT/PR/FN/DC/EL, below;
+ * - the rest of project spend plus the common overheads, in
+ *   {@see OperationalExpenseCodes} — labour, subcontractors, transport,
+ *   equipment, utilities, facilitation, venue and rework, each pointing at the
+ *   WIP child the chart of accounts already carries for it;
+ * - NE-001…NE-023 non-expense cash movements, in {@see NonExpenseCodes}.
+ *
+ * Still absent: production overhead (6xxx) and the remaining capex codes.
+ * Neither has a capture path yet — production overhead is absorbed rather than
+ * captured, and capex needs the asset register in the loop — so seeding them
+ * would add codes nothing can currently post.
  *
  * `default_debit_gl` is stored verbatim from the catalogue and the account FK is
  * resolved by reading the leading four-digit code out of it. Several rows name
@@ -156,6 +160,32 @@ class ExpenseCodeSeeder extends Seeder
                 'example' => $example,
             ]);
         }
+
+        yield [
+            'code' => 'OE-FIN-001',
+            'accounting_class' => 'Operating expense',
+            'expense_family' => 'Finance costs',
+            'expense_type' => 'Bank and mobile-money transaction charges',
+            'simple_meaning' => 'Fees charged by a bank, card provider or mobile-money operator for moving funds.',
+            'example' => 'M-Pesa transfer charge on a supplier payment.',
+            'recording_rule' => 'Post separately from the underlying purchase so cash and expense reconcile without misclassifying the fee.',
+            'default_debit_gl' => '7800 Bank & Mobile-money Charges',
+            'job_id_rule' => ExpenseCode::JOB_OPTIONAL,
+            'job_id_rule_note' => 'Use the related Job ID when the fee is directly attributable to a project payment.',
+            'default_cost_centre' => 'Finance',
+            'project_activity' => 'Not Applicable',
+            'vat_default' => 'No VAT unless separately evidenced by the provider.',
+            'default_vat_treatment_code' => 'OOS',
+            'wht_review' => 'No',
+            'default_wht_category_code' => 'NONE',
+            'key_control' => 'Must agree to the provider statement and the related payment reference.',
+            'pl_report_line' => 'Operating expenses – Bank and mobile-money charges',
+            'cash_flow_class' => 'operating',
+            'minimum_evidence' => [],
+            'extra_operational_data' => [],
+        ];
+
+        yield from OperationalExpenseCodes::rows();
 
         yield from NonExpenseCodes::rows();
     }

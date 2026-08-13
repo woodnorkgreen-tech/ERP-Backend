@@ -26,6 +26,7 @@ class BudgetAdditionAuditTest extends TestCase
     private EnquiryTask $task;
     private TaskBudgetData $budgetData;
     private User $approver;
+    private User $requester;
 
     protected function setUp(): void
     {
@@ -33,6 +34,9 @@ class BudgetAdditionAuditTest extends TestCase
 
         $this->service = app(BudgetAdditionService::class);
         $this->approver = User::factory()->create();
+        // Separation of duties: whoever asks for more budget may not authorise
+        // it. These tests are about the audit trail, so they need two people.
+        $this->requester = User::factory()->create();
 
         $clientId = DB::table('clients')->insertGetId([
             'full_name' => 'Client', 'email' => uniqid() . '@t.local', 'phone' => '0700000000',
@@ -68,7 +72,7 @@ class BudgetAdditionAuditTest extends TestCase
             'budget_type' => 'supplementary',
             'total_amount' => 45000,
             'status' => 'pending_approval',
-            'created_by' => $this->approver->id,
+            'created_by' => $this->requester->id,
         ]);
     }
 

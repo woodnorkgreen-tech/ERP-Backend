@@ -105,7 +105,12 @@ class BudgetResyncOnMaterialsReapprovalTest extends TestCase
             'enquiry_task_id' => $budgetTask->id,
             'project_info' => ['projectId' => $enquiry->enquiry_number],
             'materials_data' => [],
-            'labour_data' => [],
+            // Real labour, not just a labourTotal in the summary. The summary is
+            // recomputed from the underlying lines on every sync, so a fixture
+            // claiming 100 of labour with an empty labour_data was asserting that
+            // a stored total outlives the data behind it — which is the same
+            // drift, one level down.
+            'labour_data' => [['description' => 'Install crew', 'amount' => 100, 'is_included' => true]],
             'expenses_data' => [],
             'logistics_data' => [],
             'budget_summary' => ['materialsTotal' => 0, 'labourTotal' => 100, 'expensesTotal' => 0, 'logisticsTotal' => 0, 'grandTotal' => 100],
@@ -116,10 +121,9 @@ class BudgetResyncOnMaterialsReapprovalTest extends TestCase
 
         $response = $this->approveAsProduction($materialsTask, $this->user('Production'))->assertOk();
 
-        // The approval response now reports what actually happened to the budget,
-        // rather than only logging it server-side.
-        $response->assertJsonPath('budget_sync.synced', true)
-            ->assertJsonPath('budget_sync.budgetReopened', true);
+        // Approval no longer reconciles the budget inline — it announces, and a
+        // listener syncs. The response therefore says nothing about the budget;
+        // what matters is the state it ends up in, which is asserted below.
 
         $budgetTask->refresh();
         $this->assertSame('in_progress', $budgetTask->status, 'Completed budget must be reopened when materials are re-approved.');
