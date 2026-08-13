@@ -111,10 +111,27 @@ open item BE-0 in `REFACTOR_TASKS.md`).
 
 ### Phase 0 — Finish what's already moving (no new scope)
 
-- [ ] **BE-0** Land the still-open items from `PettyCash/docs/REFACTOR_TASKS.md`: `PettyCashPolicy`
-  (unblocks the role table in §2), field-level 422 error passthrough, the unreachable Void button, and
-  the unguarded `PettyCashTopUpController::update/destroy`. Building a GL on top of a known-unguarded
-  base just moves the bug into the ledger. *(M, dep: none)*
+- [x] **BE-0 (partly)** Land the still-open items from `PettyCash/docs/REFACTOR_TASKS.md`:
+  - [x] `PettyCashPolicy` — replaces 11 `hasRole('Super Admin')` checks in `PettyCashController` and
+    2 role-list checks in `PettyCashRequisitionController`. No role strings remain anywhere in the
+    PettyCash module outside the policy itself.
+    **This widened access deliberately.** AcHAcounts/Admin/Manager already held
+    `void_disbursement`, `delete_disbursement` and `edit_disbursement`; the Super-Admin-only checks
+    meant none of them could use the grant. Honouring it is the point — it is what makes §2's role
+    separation expressible at all.
+    **`clearAll` was deliberately NOT widened.** `finance.petty_cash.admin` is granted to Accounts, so
+    gating a full-data-wipe on it would hand that wipe to a second role as a side effect of tidying
+    authorization. It stays Super-Admin-only via the policy's `before()`.
+  - [x] the unguarded `PettyCashTopUpController::update/destroy` — already fixed before this pass;
+    both now check `edit_top_up`/`delete_top_up` and `destroy` posts a ledger reversal.
+  - [ ] field-level 422 error passthrough
+  - [ ] the unreachable Void button
+
+  Note for whoever picks up the rest: the permissions table carries three orphans —
+  `finance.petty_cash.create`, `.update` and `.void` are granted to Accounts and Super Admin but no
+  constant points at them (the live ones are `.create_disbursement`, `.edit_disbursement`,
+  `.void_disbursement`). They grant nothing and should be retired, but deleting permission rows is
+  destructive and was left alone here.
 
 ### Phase 1 — Classification dimensions on the existing voucher
 
@@ -141,16 +158,45 @@ open item BE-0 in `REFACTOR_TASKS.md`).
 
 ### Phase 3 — Supplier and tax
 
-- [ ] **D-3** `suppliers` master: legal name, KRA PIN, VAT status, eTIMS default, WHT category *(M)*
-- [ ] **BE-5** WHT/VAT computed at posting time from `Supplier.wht_category` + a Finance-editable rate
+- [x] **D-3** `suppliers` master: legal name, KRA PIN, VAT status, eTIMS default, WHT category *(M)*
+  — **extended the existing ProcurementStores `suppliers` table rather than creating a second master.**
+  All columns nullable: six suppliers already existed, and a required KRA PIN would have made the
+  procurement form unusable until somebody backfilled them. Also added `residency`, because WHT rates
+  differ for non-residents and `wht_categories` already carried a residency column to match on.
+- [x] **BE-5** WHT/VAT computed at posting time from `Supplier.wht_category` + a Finance-editable rate
   table (never hardcoded — brief §8 explicitly requires this configurable pre-go-live) *(M)*
-- [ ] **FE-2** Supplier lookup by name/PIN with inline "save as new supplier" on the voucher form — no
+  — `TaxResolver` + `VatTreatment`/`WhtCategory` models (the seeded tables had no models at all).
+  `wht_amount` on `cost_lines` had a column and a `0.00` default that **nothing ever wrote**, so every
+  supplier payment recorded zero withholding regardless of category; `CostVerificationService` now
+  prices it. VAT resolves supplier-first (an unregistered supplier charges none whatever was bought);
+  WHT resolves expense-code-first (the rate follows the nature of the service, not the vendor).
+  **Known gap:** `wht_categories.aggregate_monthly` says the threshold is meant to be tested against a
+  supplier's month, not a single payment. That needs a supplier-month view which does not exist, so
+  the threshold is applied per payment today — a series of small payments under-withholds.
+- [x] **FE-2** Supplier lookup by name/PIN with inline "save as new supplier" on the voucher form — no
   separate admin screen required for a first-time vendor *(M)*
+  — `SupplierPicker.vue`, reusing the existing `useSuppliers` composable rather than a second client.
+  Supplier search now covers `legal_name` and `kra_pin`, which it did not before. The capture form
+  sends `payee_id` alongside `payee_name`: the id is what makes withholding computable, and
+  `CostSubmission` had no `payee_id` field at all, so the frontend could not have linked a supplier
+  even though the API already accepted one. Inline creation deliberately does **not** ask for tax
+  fields — nobody at the counter knows a vendor's WHT category, and a guess produces a wrong rate that
+  looks settled. Payees who are not suppliers keep a plain name and no tax identity.
 
 ### Phase 4 — Beyond petty cash
 
 - [ ] **BE-6** Payment-method-agnostic posting: bank/mobile-money/card transactions reuse
   `JournalService` the same way petty cash does *(L)*
+
+> **Blocker found 2026-08-10 — Stores, HR and Payroll all need a valuation source before they can be
+> wired.** `cost-collector-integration.md` calls Stores the cheapest win because `inventory_logs` has
+> `project_id` and `receipt_unit_cost`. The columns exist; the cost does not. `receipt_unit_cost` is
+> **null on every row of every type** (14 check_in, 52 check_out, 1 return, 3 adjustment), nothing
+> populates it, and there is no fallback: `inventory_lots` tracks quantity with no cost column and
+> there is no item master carrying a price. `ot_entries` is the same shape — `project_id`, `hours` and
+> a full approval chain, but no rate and no amount. Wiring either today posts cost lines worth zero.
+> Deciding where material cost comes from (standard cost on the material master / weighted average at
+> GRN / the PO line) is a Finance decision and is the real next dependency, not a coding task.
 - Links into `quote-to-cash-redesign.md` Phase 2 (AR/billing) for the invoice/AP side —
   **do not build a second Invoice/AP model here.**
 

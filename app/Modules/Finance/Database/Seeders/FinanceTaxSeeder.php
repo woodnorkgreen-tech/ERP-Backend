@@ -24,23 +24,34 @@ class FinanceTaxSeeder extends Seeder
 {
     private const FLOOR = '2020-01-01';
 
-    /** [code, name, rate, recoverable, requires_etims, claim_window_months] */
+    /**
+     * The GL account each tax posts to, by chart code.
+     *
+     * Only the recoverable treatments carry one. Non-recoverable, exempt and
+     * out-of-scope VAT is genuinely part of what the project cost, so it stays
+     * inside `net_amount` and posts to the expense account with everything else
+     * — a null here is that statement, not a missing configuration.
+     */
+    private const VAT_INPUT_ACCOUNT = '1330';     // Input VAT Recoverable
+    private const WHT_PAYABLE_ACCOUNT = '2120';   // Withholding Tax Payable
+
+    /** [code, name, rate, recoverable, requires_etims, claim_window_months, gl_code] */
     private const VAT_TREATMENTS = [
-        ['STD16-REC',    'Standard rated 16% – input recoverable',     16.000, true,  true,  6],
-        ['STD16-NONREC', 'Standard rated 16% – input NOT recoverable',  16.000, false, true,  null],
-        ['ZERO',         'Zero rated',                                   0.000, true,  true,  6],
-        ['EXEMPT',       'Exempt',                                       0.000, false, false, null],
+        ['STD16-REC',    'Standard rated 16% – input recoverable',     16.000, true,  true,  6,    self::VAT_INPUT_ACCOUNT],
+        ['STD16-NONREC', 'Standard rated 16% – input NOT recoverable',  16.000, false, true,  null, null],
+        ['ZERO',         'Zero rated',                                   0.000, true,  true,  6,    self::VAT_INPUT_ACCOUNT],
+        ['EXEMPT',       'Exempt',                                       0.000, false, false, null, null],
         // Brief §8: emoluments, imports, interest and airline passenger ticketing
         // need their own code so they are never treated as missing-document
         // exceptions in the eTIMS gap report.
-        ['OOS',          'Out of scope / eTIMS excluded',                0.000, false, false, null],
+        ['OOS',          'Out of scope / eTIMS excluded',                0.000, false, false, null, null],
     ];
 
-    /** [code, name, rate, residency, threshold, aggregate_monthly] */
+    /** [code, name, rate, residency, threshold, aggregate_monthly, gl_code] */
     private const WHT_CATEGORIES = [
-        ['PROF-RES',     'Resident professional / management / training fees', 5.000, 'resident', null, true],
-        ['CONTRACT-RES', 'Resident contractual payments',                      3.000, 'resident', null, true],
-        ['NONE',         'Not subject to withholding tax',                     0.000, 'resident', null, false],
+        ['PROF-RES',     'Resident professional / management / training fees', 5.000, 'resident', null, true,  self::WHT_PAYABLE_ACCOUNT],
+        ['CONTRACT-RES', 'Resident contractual payments',                      3.000, 'resident', null, true,  self::WHT_PAYABLE_ACCOUNT],
+        ['NONE',         'Not subject to withholding tax',                     0.000, 'resident', null, false, null],
     ];
 
     public function run(): void
@@ -48,7 +59,14 @@ class FinanceTaxSeeder extends Seeder
         DB::transaction(function () {
             $now = now();
 
-            foreach (self::VAT_TREATMENTS as [$code, $name, $rate, $recoverable, $etims, $window]) {
+            // Resolved once by chart code rather than held as ids: the chart is
+            // reseeded independently and its primary keys are not stable, but
+            // the codes are what the expense catalogue itself references.
+            $accounts = DB::table('chart_of_accounts')
+                ->whereIn('code', [self::VAT_INPUT_ACCOUNT, self::WHT_PAYABLE_ACCOUNT])
+                ->pluck('id', 'code');
+
+            foreach (self::VAT_TREATMENTS as [$code, $name, $rate, $recoverable, $etims, $window, $glCode]) {
                 DB::table('vat_treatments')->updateOrInsert(
                     ['code' => $code, 'effective_from' => self::FLOOR],
                     [
@@ -57,6 +75,7 @@ class FinanceTaxSeeder extends Seeder
                         'is_recoverable' => $recoverable,
                         'requires_etims' => $etims,
                         'claim_window_months' => $window,
+                        'gl_account_id' => $glCode ? $accounts->get($glCode) : null,
                         'effective_to' => null,
                         'is_active' => true,
                         'updated_at' => $now,
@@ -65,7 +84,7 @@ class FinanceTaxSeeder extends Seeder
                 );
             }
 
-            foreach (self::WHT_CATEGORIES as [$code, $name, $rate, $residency, $threshold, $monthly]) {
+            foreach (self::WHT_CATEGORIES as [$code, $name, $rate, $residency, $threshold, $monthly, $glCode]) {
                 DB::table('wht_categories')->updateOrInsert(
                     ['code' => $code, 'effective_from' => self::FLOOR],
                     [
@@ -74,6 +93,7 @@ class FinanceTaxSeeder extends Seeder
                         'residency' => $residency,
                         'threshold_amount' => $threshold,
                         'aggregate_monthly' => $monthly,
+                        'gl_account_id' => $glCode ? $accounts->get($glCode) : null,
                         'effective_to' => null,
                         'is_active' => true,
                         'updated_at' => $now,

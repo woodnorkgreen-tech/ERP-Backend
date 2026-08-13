@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Events\GoodsReceiptRecorded;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Http\Resources\GoodsReceiptNoteResource;
@@ -155,13 +156,24 @@ class GoodsReceiptNoteController extends Controller
         try {
             DB::beginTransaction();
 
-            // Check if this PO already has a GRN
-            $existingGrn = GoodsReceiptNote::where('purchase_order_id', $request->purchase_order_id)->first();
-            if ($existingGrn) {
-                DB::rollBack();
-                return response()->json([
-                    'message' => 'This Purchase Order already has a Goods Receipt Note.'
-                ], 422);
+            $purchaseOrder = PurchaseOrder::with('items')->lockForUpdate()
+                ->findOrFail($request->purchase_order_id);
+            foreach ($request->items as $item) {
+                $poItem = $purchaseOrder->items->firstWhere('id', (int) $item['purchase_order_item_id']);
+                if (! $poItem) {
+                    DB::rollBack();
+                    return response()->json(['message' => 'A receipt item does not belong to this purchase order.'], 422);
+                }
+                $accepted = DB::table('goods_receipt_note_items')
+                    ->where('purchase_order_item_id', $poItem->id)->where('accepted', true)
+                    ->sum('received_quantity');
+                $remaining = (float) $poItem->quantity - (float) $accepted;
+                if (($item['accepted'] ?? false) && (float) $item['received_quantity'] > $remaining) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => "Received quantity exceeds the {$remaining} remaining on PO item {$poItem->id}.",
+                    ], 422);
+                }
             }
 
             $grn = GoodsReceiptNote::create([
@@ -179,7 +191,8 @@ class GoodsReceiptNoteController extends Controller
                 $grn->items()->create([
                     'purchase_order_item_id' => $item['purchase_order_item_id'],
                     'material_id' => $item['material_id'] ?? null,
-                    'ordered_quantity' => $item['ordered_quantity'],
+                    'ordered_quantity' => $purchaseOrder->items
+                        ->firstWhere('id', (int) $item['purchase_order_item_id'])->quantity,
                     'received_quantity' => $item['received_quantity'],
                     'condition' => $item['condition'],
                     'accepted' => $item['accepted'],
@@ -187,6 +200,8 @@ class GoodsReceiptNoteController extends Controller
             }
 
             DB::commit();
+
+            GoodsReceiptRecorded::dispatch($grn->id);
 
             $this->syncProjectProcurement($grn);
 
@@ -203,68 +218,26 @@ class GoodsReceiptNoteController extends Controller
 
     public function update(Request $request, $id)
     {
-        $grn = GoodsReceiptNote::findOrFail($id);
+        GoodsReceiptNote::findOrFail($id);
 
-        $validator = Validator::make($request->all(), [
-            'store_location' => 'required|in:Karen Village Store,Matasia Store,Mombasa Store,Gichagi Store',
-            'quality_check' => 'required|in:pass,fail',
-            'notes' => 'nullable|string',
-            'items' => 'required|array|min:1',
-            'items.*.id' => 'sometimes|exists:goods_receipt_note_items,id',
-            'items.*.purchase_order_item_id' => 'required|exists:purchase_order_items,id',
-            'items.*.material_id' => 'nullable|integer',
-            'items.*.ordered_quantity' => 'required|integer|min:1',
-            'items.*.received_quantity' => 'required|integer|min:0',
-            'items.*.condition' => 'required|in:good,fair,damaged,for_repair',
-            'items.*.accepted' => 'required|boolean',
-        ]);
+        return response()->json([
+            'message' => 'Posted goods receipts are immutable. Record a return or a new receipt instead of rewriting receipt history.',
+        ], 422);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        try {
-            DB::beginTransaction();
-
-            $grn->update([
-                'store_location' => $request->store_location,
-                'quality_check' => $request->quality_check,
-                'notes' => $request->notes,
-            ]);
-
-            // Delete existing items and create new ones
-            $grn->items()->delete();
-
-            foreach ($request->items as $item) {
-                $grn->items()->create([
-                    'purchase_order_item_id' => $item['purchase_order_item_id'],
-                    'material_id' => $item['material_id'] ?? null,
-                    'ordered_quantity' => $item['ordered_quantity'],
-                    'received_quantity' => $item['received_quantity'],
-                    'condition' => $item['condition'],
-                    'accepted' => $item['accepted'],
-                ]);
-            }
-
-            DB::commit();
-
-            $this->syncProjectProcurement($grn);
-
-            return new GoodsReceiptNoteResource($grn->load([
-                'items.purchaseOrderItem.material',
-                'purchaseOrder.supplier',
-                'receivedByUser'
-            ]));
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['message' => 'Error updating GRN: ' . $e->getMessage()], 500);
-        }
     }
 
     public function destroy($id)
     {
         try {
             $grn = GoodsReceiptNote::findOrFail($id);
+            $itemIds = $grn->items()->pluck('id');
+            if (\App\Modules\Finance\CostCollector\Models\CostLine::where(
+                'source_type', \App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem::class
+            )->whereIn('source_id', $itemIds)->exists()) {
+                return response()->json([
+                    'message' => 'This receipt has entered the cost ledger and cannot be deleted. Use a return or reversal.',
+                ], 422);
+            }
             $purchaseOrderId = $grn->purchase_order_id;
             $grn->delete();
 
@@ -283,11 +256,16 @@ class GoodsReceiptNoteController extends Controller
      */
     public function getAvailablePurchaseOrders()
     {
-        $purchaseOrders = PurchaseOrder::with(['items.material', 'supplier'])
-            ->whereDoesntHave('goodsReceiptNote')
+        $purchaseOrders = PurchaseOrder::with([
+                'items.material', 'items.goodsReceiptNoteItems', 'supplier'
+            ])
             ->where('status', 'approved')
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->filter(fn (PurchaseOrder $po) => $po->items->contains(fn ($item) =>
+                (float) $item->goodsReceiptNoteItems->where('accepted', true)->sum('received_quantity')
+                    < (float) $item->quantity
+            ))->values();
 
         return PurchaseOrderResource::collection($purchaseOrders);
     }

@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Observers;
 
+use App\Events\PurchaseOrderApproved;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 
@@ -11,6 +12,10 @@ class PurchaseOrderObserver
     {
         if (!$purchaseOrder->wasChanged('status')) {
             return;
+        }
+
+        if ($purchaseOrder->status === 'approved') {
+            PurchaseOrderApproved::dispatch($purchaseOrder->id);
         }
 
         NotificationService::send(

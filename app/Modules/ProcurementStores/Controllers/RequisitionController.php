@@ -275,6 +275,7 @@ class RequisitionController extends Controller
             'items.*.budget_item_id'     => 'nullable|string',
             'items.*.budget_item_persistent_id' => 'nullable|string',
             'items.*.material_id'        => 'nullable|exists:library_materials,id',
+            'items.*.expense_code_id'    => 'required_if:requested_by_type,project|integer|exists:expense_codes,id',
             // Either material_id must be present OR custom_description must be provided
             'items.*.custom_description' => 'nullable|string',
             'items.*.quantity'           => 'required|integer|min:1',
@@ -388,6 +389,7 @@ class RequisitionController extends Controller
             'items.*.budget_item_id' => 'nullable|string',
             'items.*.budget_item_persistent_id' => 'nullable|string',
             'items.*.material_id' => 'nullable|exists:library_materials,id',
+            'items.*.expense_code_id' => 'nullable|integer|exists:expense_codes,id',
             'items.*.custom_description' => 'nullable|string',
             'items.*.quantity' => 'required_with:items|integer|min:1',
             'items.*.unit_price' => 'required_with:items|numeric|min:0',
