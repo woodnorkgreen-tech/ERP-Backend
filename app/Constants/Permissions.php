@@ -74,6 +74,8 @@ class Permissions
     const PROJECT_ASSIGN_USERS = 'project.assign_users';
     const PROJECT_VIEW_REPORTS = 'project.view_reports';
     const PROJECT_CLOSE = 'project.close';
+    const PROJECT_COSTS_READ_ASSIGNED = 'project.costs.read_assigned';
+    const PROJECT_BUDGET_ADDITIONS_CREATE = 'project.budget_additions.create';
 
     // ===========================================
     // ENQUIRY MANAGEMENT PERMISSIONS
@@ -113,6 +115,29 @@ class Permissions
     const FINANCE_COSTS_READ = 'finance.costs.read';
     const FINANCE_COSTS_VERIFY = 'finance.costs.verify';
     const FINANCE_COSTS_REVERSE = 'finance.costs.reverse';
+    const FINANCE_EXPENSE_CODES_MANAGE = 'finance.expense_codes.manage';
+
+    const FINANCE_BUDGET_ADDITIONS_READ = 'finance.budget_additions.read';
+    const FINANCE_BUDGET_ADDITIONS_APPROVE = 'finance.budget_additions.approve';
+    const FINANCE_BUDGET_ADDITIONS_REJECT = 'finance.budget_additions.reject';
+    const FINANCE_BUDGET_ADDITIONS_REVERSE = 'finance.budget_additions.reverse';
+
+    // Spend vouchers deliberately split maker, checker and poster. A single
+    // broad Finance permission would let the person requesting cash approve and
+    // post their own document, defeating the control the workflow represents.
+    const FINANCE_SPEND_VOUCHERS_READ = 'finance.spend_vouchers.read';
+    const FINANCE_SPEND_VOUCHERS_CREATE = 'finance.spend_vouchers.create';
+    const FINANCE_SPEND_VOUCHERS_APPROVE = 'finance.spend_vouchers.approve';
+    const FINANCE_SPEND_VOUCHERS_POST = 'finance.spend_vouchers.post';
+
+    const FINANCE_RECEIVABLES_READ = 'finance.receivables.read';
+    const FINANCE_RECEIVABLES_RECORD = 'finance.receivables.record';
+    const FINANCE_RECEIVABLES_VERIFY = 'finance.receivables.verify';
+    const FINANCE_RECEIVABLES_CORRECT = 'finance.receivables.correct';
+    const FINANCE_RECEIVABLES_REVERSE = 'finance.receivables.reverse';
+    const FINANCE_RECEIVABLES_BILLING_BASIS = 'finance.receivables.billing_basis';
+    const FINANCE_RECEIVABLES_RELEASE = 'finance.receivables.release';
+    const FINANCE_RECEIVABLES_OVERRIDE = 'finance.receivables.override';
 
     const FINANCE_INVOICE_CREATE = 'finance.invoice.create';
     const FINANCE_INVOICE_READ = 'finance.invoice.read';
@@ -251,6 +276,28 @@ class Permissions
     const DASHBOARD_FINANCE = 'dashboard.finance';
     const DASHBOARD_PROJECTS = 'dashboard.projects';
 
+    // ===========================================
+    // CROSS-CUTTING APPROVAL PERMISSIONS
+    // ===========================================
+    /**
+     * Approve, verify or disburse against your own submission.
+     *
+     * Separation of duties is the default everywhere in this system: whoever
+     * raises a requisition, records a receipt, reports a cost or creates a
+     * budget addition may not be the person who signs it off. That is the
+     * control that stops one person inventing and approving a payment on their
+     * own, so this permission should sit with very few people — it is the
+     * documented exception for a one-person finance function or an
+     * out-of-hours close, not a default for approvers.
+     *
+     * Super Admin holds this implicitly through the global Gate::before bypass
+     * in AppServiceProvider; it never needs to be granted to them explicitly.
+     *
+     * Every self-approval that actually happens is still written to the audit
+     * trail, marked as such — the permission removes the block, not the record.
+     */
+    const APPROVALS_SELF_APPROVE = 'approvals.self_approve';
+
     /**
      * Get all permission constants as an array
      */
@@ -291,6 +338,18 @@ class Permissions
             self::FINANCE_QUOTE_APPROVE, self::FINANCE_QUOTE_DELETE, self::FINANCE_INVOICE_CREATE,
             self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
             self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
+            self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
+            self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
+            self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
+            self::FINANCE_SPEND_VOUCHERS_APPROVE, self::FINANCE_SPEND_VOUCHERS_POST,
+            self::FINANCE_RECEIVABLES_READ, self::FINANCE_RECEIVABLES_RECORD, self::FINANCE_RECEIVABLES_VERIFY,
+            self::FINANCE_RECEIVABLES_CORRECT, self::FINANCE_RECEIVABLES_REVERSE,
+            self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
+            self::FINANCE_RECEIVABLES_OVERRIDE,
+
+            // Cross-cutting approvals
+            self::APPROVALS_SELF_APPROVE,
+
             self::FINANCE_PETTY_CASH_VIEW,
             self::FINANCE_PETTY_CASH_VIEW_BALANCE,
             self::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -391,6 +450,14 @@ class Permissions
                 self::FINANCE_QUOTE_APPROVE, self::FINANCE_QUOTE_DELETE, self::FINANCE_INVOICE_CREATE,
                 self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
                 self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
+                self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
+                self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
+                self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
+                self::FINANCE_SPEND_VOUCHERS_APPROVE, self::FINANCE_SPEND_VOUCHERS_POST,
+                self::FINANCE_RECEIVABLES_READ, self::FINANCE_RECEIVABLES_RECORD, self::FINANCE_RECEIVABLES_VERIFY,
+                self::FINANCE_RECEIVABLES_CORRECT, self::FINANCE_RECEIVABLES_REVERSE,
+                self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
+                self::FINANCE_RECEIVABLES_OVERRIDE,
                 self::FINANCE_PETTY_CASH_VIEW,
                 self::FINANCE_PETTY_CASH_VIEW_BALANCE,
                 self::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -422,6 +489,9 @@ class Permissions
             ],
             'admin' => [
                 self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
+            ],
+            'approvals' => [
+                self::APPROVALS_SELF_APPROVE,
             ],
             'tasks' => [
                 self::TASK_CREATE, self::TASK_READ, self::TASK_UPDATE, self::TASK_DELETE,
@@ -519,6 +589,8 @@ class Permissions
             self::FINANCE_PETTY_CASH_ADMIN => 'Full Petty Cash Administration',
 
             // Admin
+            self::APPROVALS_SELF_APPROVE => 'Approve Your Own Submissions (bypasses separation of duties)',
+
             self::ADMIN_ACCESS => 'Access System Control Panel',
             self::ADMIN_SETTINGS => 'Modify Global System Config',
             self::ADMIN_LOGS_VIEW => 'Audit System Activity Logs',

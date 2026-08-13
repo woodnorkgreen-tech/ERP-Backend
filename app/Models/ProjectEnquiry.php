@@ -58,6 +58,7 @@ class ProjectEnquiry extends Model
         'quote_waived_at',
         'finance_released',
         'finance_released_at',
+        'mobilization_threshold_percentage',
     ];
 
     protected $casts = [
@@ -82,6 +83,7 @@ class ProjectEnquiry extends Model
         'quote_waived_at' => 'datetime',
         'finance_released' => 'boolean',
         'finance_released_at' => 'datetime',
+        'mobilization_threshold_percentage' => 'decimal:2',
     ];
 
     public function client(): BelongsTo

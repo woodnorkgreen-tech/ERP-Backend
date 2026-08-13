@@ -143,6 +143,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('costs')->group(function () {
         Route::get('expense-codes', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'index']);
         Route::get('expense-codes/families', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'families']);
+        // Declared ahead of {code} so "recent" is not resolved as a code.
+        Route::get('expense-codes/recent', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'recent']);
+        Route::post('expense-codes', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'store'])
+            ->middleware('throttle:20,1');
         Route::get('expense-codes/{code}', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'show']);
 
         // Throttled: this writes to the cost ledger, and the July audit found no
@@ -152,6 +156,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'store'])
             ->middleware('throttle:60,1');
         Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'index']);
+        Route::put('{cost}/correction', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'correct']);
         Route::get('my-projects', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'myProjects']);
         Route::get('budget-lines/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'budgetLines']);
 
@@ -160,16 +165,27 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // answered at all.
         Route::get('accounts', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'index']);
         Route::get('account/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'show']);
+        Route::get('account/{enquiry}/category-lines', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'categoryLines']);
 
         // Verification. Policy-gated, and the service additionally refuses to let
         // anyone verify a cost they reported themselves.
         Route::prefix('verification')->group(function () {
             Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'index']);
-            Route::post('{cost}/verify', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'verify']);
-            Route::post('{cost}/query', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'query']);
-            Route::post('{cost}/reject', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reject']);
-            Route::post('{cost}/reverse', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reverse']);
-            Route::post('{cost}/resubmit', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'resubmit']);
+            Route::get('{cost}', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'show']);
+            Route::get('{cost}/tax-preview', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'taxPreview']);
+
+            // Throttled like `store` and `evidence` already were. These five
+            // write the cost ledger and post journals; leaving them unlimited
+            // while rate-limiting capture protected the cheap end of the module
+            // and left the expensive end open.
+            Route::middleware('throttle:60,1')->group(function () {
+                Route::post('{cost}/verify', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'verify']);
+                Route::post('{cost}/query', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'query']);
+                Route::post('{cost}/reject', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reject']);
+                Route::post('{cost}/reverse', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reverse']);
+                Route::post('{cost}/resubmit', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'resubmit']);
+                Route::post('{cost}/reclassify', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reclassify']);
+            });
         });
     });
 
@@ -512,7 +528,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('/', [App\Http\Controllers\BudgetController::class, 'getBudgetData']);;
         Route::post('/', [App\Http\Controllers\BudgetController::class, 'saveBudgetData']);
         Route::post('/import-materials', [App\Http\Controllers\BudgetController::class, 'importMaterials']);
-        Route::get('/check-materials-update', [App\Http\Controllers\BudgetController::class, 'checkMaterialsUpdate']);
         Route::get('/pdf', [App\Http\Controllers\BudgetController::class, 'downloadPdf']);
 
         // Budget versioning routes
@@ -760,15 +775,32 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote'])
             ->middleware('quote.access');
         Route::get('enquiries/{enquiry}/workflow-state', [EnquiryController::class, 'workflowState']);
-        Route::middleware('quote.access')->group(function () {
-            Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
-            Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
-            Route::post('enquiries/{enquiry}/quote-waiver', [EnquiryController::class, 'waiveQuoteRequirement']);
-            Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
-            Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
-            Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);
-            Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
-        });
+        Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
+        Route::get('receivables/payment-sources', [EnquiryController::class, 'receivablesPaymentSources'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::get('receivables/receipts/unallocated', [EnquiryController::class, 'unallocatedReceipts'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::post('receivables/receipts/{receipt}/allocations', [EnquiryController::class, 'allocateReceipt'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
+        Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
+        Route::post('enquiries/{enquiry}/quote-waiver', [EnquiryController::class, 'waiveQuoteRequirement'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::put('enquiries/{enquiry}/receivables-terms', [EnquiryController::class, 'updateReceivablesTerms'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::get('enquiries/{enquiry}/invoices', [EnquiryController::class, 'projectInvoices'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::post('enquiries/{enquiry}/invoices', [EnquiryController::class, 'createProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/issue', [EnquiryController::class, 'issueProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/allocate', [EnquiryController::class, 'allocatePaymentToInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
+        Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
+        Route::post('enquiries/{enquiry}/payments/{payment}/verify', [EnquiryController::class, 'verifyPayment'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_VERIFY);
+        Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_CORRECT);
+        Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_REVERSE);
+        Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RELEASE);
         Route::get('enquiries/{enquiry}/completion-readiness', [EnquiryController::class, 'completionReadiness']);
         Route::post('enquiries/{enquiry}/complete', [EnquiryController::class, 'completeProject']);
         Route::get('enquiries/{enquiry}/closure-readiness', [EnquiryController::class, 'closureReadiness']);
@@ -847,11 +879,23 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Finance Module Routes
     Route::prefix('finance')->group(function () {
+        // Spend Vouchers Routes
+        Route::prefix('spend-vouchers')->group(function () {
+            Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
+            Route::post('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'store']);
+            Route::get('/{id}', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'show']);
+            Route::post('/{id}/approve', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'approve']);
+            Route::post('/{id}/post', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'post']);
+        });
+
         // Petty Cash Module Routes
         Route::prefix('petty-cash')->group(function () {
             // Disbursement management routes
             Route::get('disbursements', [PettyCashController::class, 'index']);
             Route::post('disbursements', [PettyCashController::class, 'store']);
+            Route::post('direct-disbursement-requests/{id}/approve', [PettyCashController::class, 'approveDirectRequest']);
+            Route::get('direct-disbursement-requests', [PettyCashController::class, 'directRequests']);
+            Route::post('direct-disbursement-requests/{id}/reject', [PettyCashController::class, 'rejectDirectRequest']);
             Route::get('disbursements/{id}', [PettyCashController::class, 'show']);
             Route::put('disbursements/{id}', [PettyCashController::class, 'update']);
             Route::delete('disbursements/{id}', [PettyCashController::class, 'destroy']);
@@ -866,6 +910,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
             // Projects reference for job numbers
             Route::get('projects', [PettyCashController::class, 'getProjects']);
+            Route::get('disbursement-references', [PettyCashController::class, 'disbursementReferences']);
             Route::get('projects/{jobNumber}/budget-items', [PettyCashController::class, 'getProjectBudgetItems']);
             Route::get('accounts', [PettyCashController::class, 'accounts']);
 

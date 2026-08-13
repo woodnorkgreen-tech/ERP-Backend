@@ -35,6 +35,28 @@ class AppServiceProvider extends ServiceProvider
             return $user->hasRole('Super Admin') ? true : null;
         });
 
+        /**
+         * May this user sign off their own submission?
+         *
+         * Separation of duties is enforced in a dozen places — petty-cash
+         * requisitions, spend vouchers, budget additions, cost verification,
+         * client receipts, overtime. Each used to answer this question its own
+         * way: some hard-coded `hasRole('Super Admin')`, most simply refused
+         * with no exception at all, which meant a Super Admin could not clear a
+         * blocked approval without a code change.
+         *
+         * They now all ask this one ability, so the answer is defined once.
+         * Super Admin passes via the Gate::before bypass above without holding
+         * the permission; anyone else needs APPROVALS_SELF_APPROVE, granted
+         * through a role like any other permission.
+         *
+         * Callers remain responsible for recording that a self-approval took
+         * place. This lifts the block; it does not hide the act.
+         */
+        \Illuminate\Support\Facades\Gate::define('self-approve', function ($user) {
+            return $user->can(\App\Constants\Permissions::APPROVALS_SELF_APPROVE);
+        });
+
         // Disable foreign key checks during migrations in local environment
         if (app()->environment('local') && app()->runningInConsole()) {
             try {
