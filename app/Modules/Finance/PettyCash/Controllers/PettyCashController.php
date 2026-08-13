@@ -4,12 +4,16 @@ namespace App\Modules\Finance\PettyCash\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\PettyCash\Models\DirectDisbursementRequest;
+use App\Constants\Permissions;
+use App\Modules\Finance\PettyCash\Requests\CreateDisbursementRequest;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use App\Modules\Finance\PettyCash\Imports\PettyCashDisbursementImport;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel as ExcelFacade;
 use App\Modules\Finance\PettyCash\Resources\PettyCashBalanceResource;
@@ -82,6 +86,23 @@ class PettyCashController extends Controller
         );
     }
 
+    public function disbursementReferences(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'expense_codes' => \App\Modules\Finance\CostCollector\Models\ExpenseCode::active()
+                    ->orderBy('sort_order')->orderBy('expense_type')->get([
+                        'id', 'code', 'expense_family', 'expense_type', 'job_id_rule', 'key_control',
+                    ]),
+                'payment_sources' => \App\Modules\Finance\Models\PaymentSource::query()
+                    ->where('is_active', true)
+                    ->whereIn('type', ['petty_cash', 'bank', 'mobile_money', 'card'])
+                    ->orderBy('name')->get(['id', 'code', 'name', 'type', 'currency']),
+            ],
+        ]);
+    }
+
     /**
      * Get a compact finance workspace snapshot for dashboard refreshes.
      */
@@ -124,7 +145,7 @@ class PettyCashController extends Controller
         $baseQuery = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::query();
 
         $user = Auth::user();
-        if ($user && !$user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Finance Manager'])) {
+        if ($user && !$user->can('viewAllRequisitions', PettyCashDisbursement::class)) {
             $baseQuery->where('user_id', $user->id);
         }
 
@@ -180,21 +201,25 @@ class PettyCashController extends Controller
                 ], 404);
             }
 
-            $budgetTask = $enquiry->enquiryTasks->filter(function($t) {
-                return $t->type === 'budget';
-            })->first();
-
-            $budgetData = $budgetTask ? $budgetTask->budgetData : null;
-            $items = [];
-
-            if ($budgetData) {
-                // Return categories that have budget allocated
-                $summary = $budgetData->budget_summary ?? [];
-                if (($summary['materialsTotal'] ?? 0) > 0) $items[] = ['id' => 'materials', 'name' => 'Materials'];
-                if (($summary['labourTotal'] ?? 0) > 0) $items[] = ['id' => 'labour', 'name' => 'Labour'];
-                if (($summary['logisticsTotal'] ?? 0) > 0) $items[] = ['id' => 'logistics', 'name' => 'Logistics'];
-                if (($summary['expensesTotal'] ?? 0) > 0) $items[] = ['id' => 'expenses', 'name' => 'Expenses'];
-            }
+            $items = \App\Modules\Finance\CostCollector\Models\CostLine::query()
+                ->where('project_enquiry_id', $enquiry->id)
+                ->where('nature', \App\Modules\Finance\CostCollector\Models\CostLine::NATURE_PLANNED)
+                ->where('status', \App\Modules\Finance\CostCollector\Models\CostLine::STATUS_VERIFIED)
+                ->withSum([
+                    'consumers as spent' => fn ($query) => $query
+                        ->where('status', \App\Modules\Finance\CostCollector\Models\CostLine::STATUS_VERIFIED),
+                ], 'net_amount')
+                ->orderBy('id')
+                ->get()
+                ->map(fn ($line) => [
+                    'id' => $line->id,
+                    'name' => $line->description ?: $line->ref,
+                    'ref' => $line->ref,
+                    'category' => $line->details['budget_category'] ?? 'uncategorised',
+                    'budgeted' => (string) $line->net_amount,
+                    'spent' => number_format((float) ($line->spent ?? 0), 2, '.', ''),
+                    'remaining' => bcsub((string) $line->net_amount, (string) ($line->spent ?: '0'), 2),
+                ])->values();
 
             return response()->json([
                 'success' => true,
@@ -269,20 +294,38 @@ class PettyCashController extends Controller
     /**
      * Store a newly created disbursement.
      */
-    public function store(Request $request): JsonResponse
+    public function store(CreateDisbursementRequest $request): JsonResponse
     {
         try {
-            // Validate the request data
-            $validationErrors = $this->service->validateDisbursementData($request->all());
-            if (!empty($validationErrors)) {
+            $validated = $request->validated();
+
+            if (empty($validated['requisition_id'])) {
+                $directRequest = DirectDisbursementRequest::firstOrCreate(
+                    ['idempotency_key' => $validated['idempotency_key']],
+                    [
+                        'status' => 'pending_approval',
+                        'payload' => $validated,
+                        'requested_by' => $request->user()->id,
+                    ],
+                );
+
+                if ($directRequest->wasRecentlyCreated) {
+                    $this->service->logActivity(
+                        'submitted', 'direct_disbursement_request', $directRequest->id,
+                        'Exceptional direct payment submitted for approval',
+                        ['amount' => $validated['amount'], 'receiver' => $validated['receiver']],
+                    );
+                }
+
                 return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validationErrors,
-                ], 422);
+                    'success' => true,
+                    'pending_approval' => true,
+                    'message' => 'Exceptional direct payment submitted for independent approval',
+                    'data' => $directRequest,
+                ], $directRequest->wasRecentlyCreated ? 202 : 200);
             }
 
-            $result = $this->service->createDisbursement($request->all());
+            $result = $this->service->createDisbursement($validated);
 
             if (isset($result['success']) && !$result['success']) {
                 return response()->json([
@@ -296,9 +339,12 @@ class PettyCashController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Disbursement created successfully',
+                'message' => ($result['replayed'] ?? false)
+                    ? 'Disbursement already processed'
+                    : 'Disbursement created successfully',
                 'data' => $disbursement->load('topUp', 'creator'),
-            ], 201);
+                'replayed' => (bool) ($result['replayed'] ?? false),
+            ], ($result['replayed'] ?? false) ? 200 : 201);
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
@@ -306,6 +352,118 @@ class PettyCashController extends Controller
                 'error' => $e->getMessage(),
             ], 400);
         }
+    }
+
+    public function approveDirectRequest(Request $request, int $id): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE), 403);
+
+        $claim = DB::transaction(function () use ($request, $id) {
+            $directRequest = DirectDisbursementRequest::query()->lockForUpdate()->findOrFail($id);
+
+            if ($directRequest->requested_by === $request->user()->id && ! \App\Support\SelfApproval::allowedFor($request->user())) {
+                return ['error' => 'You raised this direct payment, so someone else has to approve it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'];
+            }
+            if ($directRequest->status !== 'pending_approval') {
+                return ['error' => 'Only pending direct payments can be approved.'];
+            }
+
+            $directRequest->update(['status' => 'processing']);
+
+            return ['request' => $directRequest];
+        });
+
+        if (isset($claim['error'])) {
+            return response()->json(['success' => false, 'message' => $claim['error']], 422);
+        }
+
+        /** @var DirectDisbursementRequest $directRequest */
+        $directRequest = $claim['request'];
+        $payload = $directRequest->payload;
+        $payload['created_by'] = $directRequest->requested_by;
+        try {
+            $result = $this->service->createDisbursement($payload);
+        } catch (\Throwable $failure) {
+            $directRequest->update(['status' => 'pending_approval']);
+            throw $failure;
+        }
+
+        if (! ($result['success'] ?? false)) {
+            $directRequest->update(['status' => 'pending_approval']);
+
+            return response()->json(['success' => false, 'message' => 'Payment could not be disbursed.', 'errors' => $result['errors']], 422);
+        }
+
+        $directRequest->update([
+            'status' => 'approved',
+            'approved_by' => $request->user()->id,
+            'approved_at' => now(),
+            'disbursement_id' => $result['data']->id,
+        ]);
+        $this->service->logActivity(
+            'approved', 'direct_disbursement_request', $directRequest->id,
+            'Exceptional direct payment independently approved and disbursed',
+            ['disbursement_id' => $result['data']->id],
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Direct payment approved and disbursed',
+            'data' => $result['data']->load('topUp', 'creator'),
+        ]);
+    }
+
+    public function directRequests(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_READ), 403);
+
+        $query = DirectDisbursementRequest::query()->latest();
+        if ($request->filled('status')) {
+            $query->where('status', $request->string('status')->toString());
+        }
+
+        return response()->json(['success' => true, 'data' => $query->paginate(25)]);
+    }
+
+    public function rejectDirectRequest(Request $request, int $id): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE), 403);
+        $validated = $request->validate(['reason' => ['required', 'string', 'min:10', 'max:1000']]);
+
+        $result = DB::transaction(function () use ($request, $id, $validated) {
+            $directRequest = DirectDisbursementRequest::query()->lockForUpdate()->findOrFail($id);
+
+            if ($directRequest->requested_by === $request->user()->id && ! \App\Support\SelfApproval::allowedFor($request->user())) {
+                return ['error' => 'You raised this direct payment, so someone else has to reject it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'];
+            }
+            if ($directRequest->status !== 'pending_approval') {
+                return ['error' => 'Only pending direct payments can be rejected.'];
+            }
+
+            $directRequest->update([
+                'status' => 'rejected',
+                'approved_by' => $request->user()->id,
+                'approved_at' => now(),
+                'rejection_reason' => $validated['reason'],
+            ]);
+
+            $this->service->logActivity(
+                'rejected', 'direct_disbursement_request', $directRequest->id,
+                'Exceptional direct payment rejected', ['reason' => $validated['reason']],
+            );
+
+            return ['request' => $directRequest];
+        });
+
+        if (isset($result['error'])) {
+            return response()->json(['success' => false, 'message' => $result['error']], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Direct payment rejected',
+            'data' => $result['request'],
+        ]);
     }
 
     /**
@@ -341,10 +499,10 @@ class PettyCashController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('update', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can update transaction history.',
+                'message' => 'You do not have permission to update a disbursement.',
             ], 403);
         }
 
@@ -397,10 +555,10 @@ class PettyCashController extends Controller
      */
     public function void(Request $request, int $id): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('void', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can void transaction history.',
+                'message' => 'You do not have permission to void a disbursement.',
             ], 403);
         }
 
@@ -440,10 +598,10 @@ class PettyCashController extends Controller
      */
     public function destroy(int $id): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('delete', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can delete transaction history.',
+                'message' => 'You do not have permission to delete a disbursement.',
             ], 403);
         }
 
@@ -477,10 +635,10 @@ class PettyCashController extends Controller
      */
     public function bulkDestroy(Request $request): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('delete', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can delete transaction history.',
+                'message' => 'You do not have permission to delete a disbursement.',
             ], 403);
         }
 
@@ -506,10 +664,12 @@ class PettyCashController extends Controller
      */
     public function clearAll(): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        // Routed through the policy like everything else, but the policy keeps
+        // this one Super-Admin-only on purpose — see PettyCashPolicy::clearAll().
+        if (!Auth::user()?->can('clearAll', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can clear transaction history.',
+                'message' => 'Only a Super Admin may clear petty cash history.',
             ], 403);
         }
 
@@ -891,10 +1051,10 @@ class PettyCashController extends Controller
      */
     public function archive(Request $request, int $id): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('archive', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can archive transaction history.',
+                'message' => 'You do not have permission to archive a disbursement.',
             ], 403);
         }
 
@@ -934,10 +1094,10 @@ class PettyCashController extends Controller
      */
     public function bulkArchive(Request $request): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('archive', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can archive transaction history.',
+                'message' => 'You do not have permission to archive a disbursement.',
             ], 403);
         }
 
@@ -968,10 +1128,10 @@ class PettyCashController extends Controller
      */
     public function archiveGroup(Request $request, int $id): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('archive', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can archive transaction history.',
+                'message' => 'You do not have permission to archive a disbursement.',
             ], 403);
         }
 
@@ -996,10 +1156,10 @@ class PettyCashController extends Controller
      */
     public function bulkArchiveGroups(Request $request): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('archive', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can archive transaction history.',
+                'message' => 'You do not have permission to archive a disbursement.',
             ], 403);
         }
 
@@ -1030,10 +1190,10 @@ class PettyCashController extends Controller
      */
     public function getActivityLogs(Request $request): JsonResponse
     {
-        if (!Auth::user()->hasRole('Super Admin')) {
+        if (!Auth::user()?->can('viewActivityLogs', PettyCashDisbursement::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can view activity logs.',
+                'message' => 'You do not have permission to view petty cash activity logs.',
             ], 403);
         }
 

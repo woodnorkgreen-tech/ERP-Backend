@@ -27,6 +27,7 @@ class PettyCashCostProducerTest extends TestCase
 
         $this->seed(FinanceDimensionSeeder::class);
         $this->seed(AccountingPeriodSeeder::class);
+        $this->seed(\App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class);
 
         $this->producer = app(PettyCashCostProducer::class);
         $this->user = User::factory()->create();

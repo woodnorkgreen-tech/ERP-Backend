@@ -3,6 +3,7 @@
 namespace App\Modules\Finance\PettyCash\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisitionItem;
 use App\Modules\HR\Models\Department;
@@ -18,6 +19,8 @@ use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\HR\Models\TechnicalLabour;
 use Exception;
+use App\Exceptions\GovernanceException;
+use App\Services\Governance\ProjectGovernanceService;
 
 class PettyCashRequisitionController extends Controller
 {
@@ -32,7 +35,7 @@ class PettyCashRequisitionController extends Controller
                 ->withCount('items');
 
             // If not admin/finance, only show their own
-            if ($user && !$user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Finance Manager'])) {
+            if ($user && !$user->can('viewAllRequisitions', PettyCashDisbursement::class)) {
                 $query->where('user_id', $user->id);
             }
 
@@ -92,7 +95,7 @@ class PettyCashRequisitionController extends Controller
             $query = PettyCashRequisition::query();
 
             // Scope to user if not admin
-            if ($user && !$user->hasRole(['Super Admin', 'Admin', 'Accounts', 'Finance Manager'])) {
+            if ($user && !$user->can('viewAllRequisitions', PettyCashDisbursement::class)) {
                 $query->where('user_id', $user->id);
             }
 
@@ -190,6 +193,13 @@ class PettyCashRequisitionController extends Controller
             ], 422);
         }
 
+        if ($request->category === 'Projects' && !$request->filled('project_id') && !$request->filled('enquiry_id') && !$request->filled('project_name')) {
+            return response()->json([
+                'success' => false,
+                'errors' => ['project_id' => ['Project requisitions must be linked to a project, enquiry, or named project.']],
+            ], 422);
+        }
+
         try {
             DB::beginTransaction();
 
@@ -263,6 +273,10 @@ class PettyCashRequisitionController extends Controller
             $requisition = PettyCashRequisition::with(['requester.employee', 'department', 'items.payee', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
                 ->findOrFail($id);
 
+            if (!$this->mayView($requisition)) {
+                return response()->json(['success' => false, 'message' => 'You may only view your own requisitions'], 403);
+            }
+
             // Ensure signing token exists (lazy generation)
             if (!$requisition->signing_token) {
                 $requisition->signing_token = \Illuminate\Support\Str::random(60);
@@ -288,6 +302,10 @@ class PettyCashRequisitionController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         $requisition = PettyCashRequisition::findOrFail($id);
+
+        if (!$this->mayEdit($requisition)) {
+            return response()->json(['success' => false, 'message' => 'This requisition cannot be edited by this user or in its current state'], 403);
+        }
 
         // Validation rules based on status
         $rules = [
@@ -321,6 +339,13 @@ class PettyCashRequisitionController extends Controller
             return response()->json([
                 'success' => false,
                 'errors' => $validator->errors()
+            ], 422);
+        }
+
+        if ($request->category === 'Projects' && !$request->filled('project_id') && !$request->filled('enquiry_id') && !$request->filled('project_name')) {
+            return response()->json([
+                'success' => false,
+                'errors' => ['project_id' => ['Project requisitions must be linked to a project, enquiry, or named project.']],
             ], 422);
         }
 
@@ -420,27 +445,8 @@ class PettyCashRequisitionController extends Controller
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
 
-            // Check if it has an active disbursement
-            if ($requisition->status === 'disbursed' && $requisition->disbursement()->exists()) {
-                 // Option 1: Block delete if disbursement is active (safer)
-                 // Option 2: Allow soft delete, but warn user. 
-                 // Since we are adding "Delete" capacity as requested, we will proceed with Soft Delete.
-                 // The Disbursement record itself might still exist unless we delete it too.
-                 
-                 // If the user wants to "Delete" a disbursed item, they might expect the money to be returned to balance?
-                 // Or just hide the record? The prompt says "delete for only ... disbursed"
-                 // I advised "Void" instead. But user said "Proceed".
-                 // I will perform a soft delete on the requisition.
-                 // Ideally, we should also void the disbursement to fix the balance.
-                 // Let's TRY to void the disbursement if it exists to keep balance correct.
-                 
-                 $service = app(PettyCashService::class);
-                 $disbursement = $requisition->disbursement;
-                 if ($disbursement && !$disbursement->deleted_at) {
-                     // Attempt to void the disbursement first to restore balance
-                     // We need a reason. We'll use "Requisition Deleted".
-                     $service->voidDisbursement($disbursement, 'Requisition Deleted by User');
-                 }
+            if (!$this->mayEdit($requisition) || !in_array($requisition->status, ['pending', 'rejected'], true)) {
+                return response()->json(['success' => false, 'message' => 'Only pending or rejected requisitions may be deleted'], 409);
             }
 
             $requisition->delete(); // Soft delete
@@ -466,6 +472,26 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
+
+            if (!Auth::user()?->can('update', PettyCashDisbursement::class)) {
+                return response()->json(['success' => false, 'message' => 'You are not authorized to approve requisitions'], 403);
+            }
+            $selfApproval = $requisition->user_id === Auth::id();
+            if ($selfApproval && ! \App\Support\SelfApproval::allowed()) {
+                return response()->json([
+                    'success' => false,
+                    'code' => 'SELF_APPROVAL_FORBIDDEN',
+                    'message' => 'You raised this requisition, so someone else has to approve it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.',
+                ], 403);
+            }
+            if ($selfApproval) {
+                $request->validate([
+                    'override_reason' => ['required', 'string', 'min:15', 'max:1000'],
+                ], [
+                    'override_reason.required' => 'Explain why independent approval is unavailable.',
+                    'override_reason.min' => 'The override reason must be at least 15 characters.',
+                ]);
+            }
             
             if ($requisition->status !== 'pending') {
                 return response()->json([
@@ -474,17 +500,57 @@ class PettyCashRequisitionController extends Controller
                 ], 400);
             }
 
+            $enquiry = $requisition->enquiry ?? $requisition->project?->enquiry;
+            if ($enquiry) {
+                $gate = app(ProjectGovernanceService::class)->checkGate($enquiry, 'expenditure', [
+                    'amount' => (float) $requisition->total_amount,
+                    'source' => 'petty_cash_requisition',
+                    'requisition_id' => $requisition->id,
+                ]);
+                if (!$gate->isAuthorized()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => $gate->getMessage(),
+                        'code' => 'PROJECT_BUDGET_NOT_READY',
+                        'context' => $gate->context,
+                    ], 422);
+                }
+            }
+
             $requisition->update([
                 'status' => 'approved',
                 'approved_by' => Auth::id(),
                 'approved_at' => now(),
             ]);
 
+            if ($selfApproval) {
+                app(PettyCashService::class)->logActivity(
+                    'self_approval_override',
+                    'requisition',
+                    $requisition->id,
+                    "Emergency self-approval override for {$requisition->requisition_number}",
+                    [
+                        'reason' => $request->string('override_reason')->toString(),
+                        'amount' => (float) $requisition->total_amount,
+                        'project_id' => $requisition->project_id,
+                        'enquiry_id' => $requisition->enquiry_id,
+                    ],
+                );
+            }
+
             return response()->json([
                 'success' => true,
-                'message' => 'Requisition marked as Approved',
+                'message' => $selfApproval
+                    ? 'Requisition approved using the audited emergency override'
+                    : 'Requisition marked as Approved',
                 'data' => $requisition
             ]);
+        } catch (GovernanceException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'code' => 'PROJECT_BUDGET_NOT_READY',
+            ], 422);
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
@@ -501,6 +567,13 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
+
+            if (!Auth::user()?->can('create', PettyCashDisbursement::class)) {
+                return response()->json(['success' => false, 'message' => 'You are not authorized to disburse requisitions'], 403);
+            }
+            if ($requisition->user_id === Auth::id() && ! \App\Support\SelfApproval::allowed()) {
+                return response()->json(['success' => false, 'message' => 'You raised this requisition, so someone else has to pay it out. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'], 403);
+            }
             
             if ($requisition->status !== 'approved') {
                 return response()->json([
@@ -510,14 +583,35 @@ class PettyCashRequisitionController extends Controller
             }
 
             $service = app(PettyCashService::class);
+
+            $validatedPayment = $request->validate([
+                'idempotency_key' => ['required', 'uuid'],
+                'expense_code_id' => ['required', 'integer', 'exists:expense_codes,id'],
+                'payment_source_id' => ['required', 'integer', 'exists:payment_sources,id'],
+                'planned_cost_line_id' => ['nullable', 'integer', 'exists:cost_lines,id'],
+                'amount' => ['required', 'numeric', 'min:0.01'],
+                'receiver' => ['required', 'string', 'max:255'],
+                'description' => ['required', 'string', 'max:1000'],
+                'date_disbursed' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+                'transaction_cost' => ['nullable', 'numeric', 'min:0'],
+                'transaction_code' => ['nullable', 'string', 'max:255'],
+                'receipt_type' => ['required', 'in:etr,non_etr,none'],
+                'receipt_number' => ['nullable', 'string', 'max:100', 'required_if:receipt_type,etr'],
+                'tax_amount' => ['required', 'numeric', 'min:0', 'lte:amount'],
+            ]);
+
+            if (bccomp((string) $validatedPayment['amount'], (string) $requisition->total_amount, 2) !== 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'The payment must equal the approved requisition total. Edit and re-approve the requisition to change the amount.',
+                    'errors' => ['amount' => ['Amount must equal the approved requisition total.']],
+                ], 422);
+            }
             
             // Prepare disbursement data
-            $disbursementData = $request->only([
-                'amount', 'receiver', 'account', 'description', 
-                'classification', 'project_name', 'project_id', 'project_enquiry_id', 'tax', 
-                'date_disbursed', 'job_number', 'payment_method',
-                'transaction_cost', 'transaction_code'
-            ]);
+            $disbursementData = array_merge($request->only([
+                'project_name', 'project_id', 'project_enquiry_id', 'job_number', 'venue',
+            ]), $validatedPayment);
             $disbursementData['requisition_id'] = $requisition->id;
             $disbursementData['status'] = 'active';
 
@@ -569,6 +663,17 @@ class PettyCashRequisitionController extends Controller
 
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
+
+            if (!Auth::user()?->can('update', PettyCashDisbursement::class)) {
+                return response()->json(['success' => false, 'message' => 'You are not authorized to reject requisitions'], 403);
+            }
+            if ($requisition->user_id === Auth::id() && ! \App\Support\SelfApproval::allowed()) {
+                return response()->json([
+                    'success' => false,
+                    'code' => 'SELF_REVIEW_FORBIDDEN',
+                    'message' => 'You raised this requisition, so someone else has to reject it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.',
+                ], 403);
+            }
 
             if ($requisition->status !== 'pending') {
                 return response()->json([
@@ -663,13 +768,18 @@ class PettyCashRequisitionController extends Controller
 
         try {
             $item = PettyCashRequisitionItem::where('requisition_id', $requisitionId)
+                ->with('payee.user')
                 ->findOrFail($itemId);
 
-            // Check authorization: Must be the payee of the item
-            $user = Auth::user();
-            // Assuming Employee model has a user_id or we match by email/id
-            // For now, allow the requester or the specific employee if matched
-            // Usually, payee_id links to employees table which might link to users
+            $requisition = PettyCashRequisition::with('items')->findOrFail($requisitionId);
+            $isRequester = $requisition->user_id === Auth::id();
+            $isPayee = $item->payee?->user?->id === Auth::id();
+            if (!$isRequester && !$isPayee) {
+                return response()->json(['success' => false, 'message' => 'Only the requester or named recipient may confirm this item'], 403);
+            }
+            if ($requisition->status !== 'disbursed') {
+                return response()->json(['success' => false, 'message' => 'Receipt can only be confirmed after disbursement'], 409);
+            }
             
             $item->update([
                 'digital_signature' => $request->signature,
@@ -677,7 +787,7 @@ class PettyCashRequisitionController extends Controller
             ]);
 
             // Check if all items in the requisition are now received
-            $requisition = PettyCashRequisition::with('items')->find($requisitionId);
+            $requisition->load('items');
             $allItemsReceived = $requisition->items->every(fn($i) => $i->received_at !== null);
 
             if ($allItemsReceived) {
@@ -1250,5 +1360,21 @@ class PettyCashRequisitionController extends Controller
     {
         // Reuse the existing internal logic but wrap it for public safety if needed
         return $this->getProjectTeamMembers($request);
+    }
+
+    private function mayView(PettyCashRequisition $requisition): bool
+    {
+        return $requisition->user_id === Auth::id()
+            || (Auth::user()?->can('viewAllRequisitions', PettyCashDisbursement::class) ?? false);
+    }
+
+    private function mayEdit(PettyCashRequisition $requisition): bool
+    {
+        if (Auth::user()?->can('update', PettyCashDisbursement::class)) {
+            return true;
+        }
+
+        return $requisition->user_id === Auth::id()
+            && in_array($requisition->status, ['pending', 'rejected'], true);
     }
 }

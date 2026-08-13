@@ -73,14 +73,15 @@ class PettyCashCostProducer
 
         $this->collector->postFromSource(
             new CostContext(
-                expenseCode: '',            // catalogue cannot classify these yet
+                expenseCode: (string) ($disbursement->expenseCode?->code ?? ''),
                 amount: (string) $disbursement->amount,
                 nature: CostLine::NATURE_ACTUAL,
                 enquiryId: $enquiry->id,
                 jobNumber: $disbursement->job_number,
+                consumesLineId: $disbursement->planned_cost_line_id,
                 sourceType: PettyCashDisbursement::class,
                 sourceId: $disbursement->id,
-                taxAmount: (string) ($disbursement->tax ?? '0'),
+                taxAmount: (string) ($disbursement->tax_amount ?? '0'),
                 incurredAt: (string) ($disbursement->date_disbursed ?? $disbursement->created_at),
                 payeeName: $disbursement->receiver,
                 description: $disbursement->description,
@@ -90,6 +91,10 @@ class PettyCashCostProducer
                     // lines can be mapped to expense codes once the catalogue is
                     // complete, rather than being lost to an "uncategorised" bucket.
                     'legacy_account' => $disbursement->account,
+                    'receipt_type' => $disbursement->receipt_type,
+                    'receipt_number' => $disbursement->receipt_number,
+                    'transaction_cost' => $disbursement->transaction_cost,
+                    'payment_source_id' => $disbursement->payment_source_id,
                     'payment_method' => $disbursement->payment_method,
                     'transaction_code' => $disbursement->transaction_code,
                     'venue' => $disbursement->venue,
@@ -97,6 +102,30 @@ class PettyCashCostProducer
             ),
             ['site' => $disbursement->venue],
         );
+
+        if (bccomp((string) ($disbursement->transaction_cost ?? '0'), '0', 2) === 1) {
+            $this->collector->postFromSource(
+                new CostContext(
+                    expenseCode: 'OE-FIN-001',
+                    amount: (string) $disbursement->transaction_cost,
+                    nature: CostLine::NATURE_ACTUAL,
+                    enquiryId: $enquiry->id,
+                    jobNumber: $disbursement->job_number,
+                    sourceType: PettyCashDisbursement::class,
+                    sourceId: $disbursement->id,
+                    sourceRef: 'transaction-fee',
+                    taxAmount: '0',
+                    incurredAt: (string) ($disbursement->date_disbursed ?? $disbursement->created_at),
+                    payeeName: $disbursement->paymentSource?->name ?: 'Payment provider',
+                    description: 'Transaction fee: ' . $disbursement->description,
+                    details: array_filter([
+                        'related_payment_reference' => $disbursement->transaction_code,
+                        'payment_source_id' => $disbursement->payment_source_id,
+                    ]),
+                ),
+                ['site' => $disbursement->venue],
+            );
+        }
 
         return 'posted';
     }

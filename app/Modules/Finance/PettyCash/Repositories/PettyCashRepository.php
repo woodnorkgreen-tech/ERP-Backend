@@ -52,7 +52,7 @@ class PettyCashRepository
      */
     public function getDisbursements(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry')
+        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry', 'plannedCostLine')
             ->orderBy('date_disbursed', 'desc')
             ->orderBy('created_at', 'desc');
 

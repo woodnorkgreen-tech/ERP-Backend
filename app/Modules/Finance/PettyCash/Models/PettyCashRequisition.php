@@ -13,11 +13,13 @@ use App\Modules\HR\Models\Employee;
 
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-use App\Traits\Governed;
-
 class PettyCashRequisition extends Model
 {
-    use HasFactory, SoftDeletes, Governed;
+    // A pending requisition is a request for review, not yet a financial
+    // commitment. Governance is deliberately evaluated when Finance approves
+    // it; running the gate on model creation made it impossible to request a
+    // budget correction through the normal workflow.
+    use HasFactory, SoftDeletes;
 
     protected $table = 'petty_cash_requisitions';
 

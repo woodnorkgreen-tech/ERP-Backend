@@ -30,11 +30,11 @@ return new class extends Migration
             $table->string('voucher_no', 32)->unique();
 
             $table->enum('type', [
-                'payment', 'advance', 'retirement', 'refund', 'top_up', 'reversal',
+                'payment', 'advance', 'retirement', 'reimbursement', 'refund', 'top_up', 'reversal',
             ])->index();
 
             $table->enum('status', [
-                'draft', 'pending_approval', 'approved', 'paid', 'rejected', 'reversed',
+                'draft', 'pending_approval', 'approved', 'paid', 'posted', 'rejected', 'reversed',
             ])->default('draft')->index();
 
             // Two dates, deliberately: when the money moved, and which period the

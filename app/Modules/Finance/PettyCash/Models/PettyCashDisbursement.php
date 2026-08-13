@@ -25,6 +25,7 @@ class PettyCashDisbursement extends Model
         'top_up_id',
         'receiver',
         'account',
+        'expense_code_id',
         'amount',
         'description',
         'project_name',
@@ -34,6 +35,7 @@ class PettyCashDisbursement extends Model
         'classification',
         'job_number',
         'payment_method',
+        'payment_source_id',
         'transaction_code',
         'status',
         'void_reason',
@@ -41,13 +43,19 @@ class PettyCashDisbursement extends Model
         'voided_by',
         'voided_at',
         'tax',
+        'receipt_type',
+        'receipt_number',
+        'tax_amount',
         'date_disbursed',
         'is_archived',
         'archived_at',
         'archived_by',
         'requisition_id',
+        'direct_payment_reason',
         'transaction_cost',
         'budget_category',
+        'planned_cost_line_id',
+        'idempotency_key',
         'created_at',
     ];
 
@@ -65,6 +73,7 @@ class PettyCashDisbursement extends Model
         'is_archived' => 'boolean',
         'archived_at' => 'datetime',
         'transaction_cost' => 'decimal:2',
+        'tax_amount' => 'decimal:2',
     ];
 
     /**
@@ -73,6 +82,19 @@ class PettyCashDisbursement extends Model
     public function topUp(): BelongsTo
     {
         return $this->belongsTo(PettyCashTopUp::class, 'top_up_id');
+    }
+
+    public function expenseCode(): BelongsTo
+    {
+        return $this->belongsTo(
+            \App\Modules\Finance\CostCollector\Models\ExpenseCode::class,
+            'expense_code_id',
+        );
+    }
+
+    public function paymentSource(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Finance\Models\PaymentSource::class, 'payment_source_id');
     }
 
     /**
@@ -107,6 +129,14 @@ class PettyCashDisbursement extends Model
     public function enquiry(): BelongsTo
     {
         return $this->belongsTo(\App\Models\ProjectEnquiry::class, 'project_enquiry_id');
+    }
+
+    public function plannedCostLine(): BelongsTo
+    {
+        return $this->belongsTo(
+            \App\Modules\Finance\CostCollector\Models\CostLine::class,
+            'planned_cost_line_id',
+        );
     }
 
     /**

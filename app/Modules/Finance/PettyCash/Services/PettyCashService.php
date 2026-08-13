@@ -2,13 +2,17 @@
 
 namespace App\Modules\Finance\PettyCash\Services;
 
+use App\Events\PettyCashDisbursementPaid;
+use App\Events\PettyCashDisbursementVoided;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Exception;
+use Throwable;
 use App\Modules\Finance\PettyCash\Services\TopUpAllocator;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation;
 
@@ -118,13 +122,141 @@ class PettyCashService
     public function createDisbursement(array $data): array
     {
         try {
-            return DB::transaction(function () use ($data) {
+            $result = DB::transaction(function () use ($data) {
+                if (! empty($data['idempotency_key'])) {
+                    $existing = PettyCashDisbursement::where('idempotency_key', $data['idempotency_key'])->first();
+
+                    if ($existing) {
+                        return ['success' => true, 'data' => $existing, 'replayed' => true];
+                    }
+                }
+
                 $data = $this->projectIdentityResolver->resolve($data);
+
+                $expenseCode = \App\Modules\Finance\CostCollector\Models\ExpenseCode::active()
+                    ->find($data['expense_code_id'] ?? 0);
+                $paymentSource = \App\Modules\Finance\Models\PaymentSource::query()
+                    ->where('is_active', true)->find($data['payment_source_id'] ?? 0);
+
+                if (! $expenseCode || ! $paymentSource) {
+                    return ['success' => false, 'errors' => [
+                        'expense_code_id' => $expenseCode ? [] : ['Select an active expense type.'],
+                        'payment_source_id' => $paymentSource ? [] : ['Select an active payment source.'],
+                    ]];
+                }
+
+                if (! empty($data['requisition_id'])) {
+                    $requisition = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::query()
+                        ->lockForUpdate()->find($data['requisition_id']);
+                    if (! $requisition || $requisition->status !== 'approved') {
+                        return ['success' => false, 'errors' => [
+                            'requisition_id' => ['Only an approved, undisbursed requisition may be paid.'],
+                        ]];
+                    }
+                    if ($requisition->disbursement()->where('status', 'active')->exists()) {
+                        return ['success' => false, 'errors' => [
+                            'requisition_id' => ['This requisition has already been disbursed.'],
+                        ]];
+                    }
+                    if ($requisition->user_id === \Illuminate\Support\Facades\Auth::id() && ! \App\Support\SelfApproval::allowed()) {
+                        return ['success' => false, 'errors' => [
+                            'requisition_id' => ['You raised this requisition, so someone else has to pay it out. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'],
+                        ]];
+                    }
+                    if (bccomp((string) ($data['amount'] ?? 0), (string) $requisition->total_amount, 2) !== 0) {
+                        return ['success' => false, 'errors' => [
+                            'amount' => ['Payment must equal the approved requisition total. Edit and re-approve the request to change it.'],
+                        ]];
+                    }
+                    $data['receiver'] = $requisition->payee_name ?: $data['receiver'];
+                    $data['description'] = $requisition->purpose ?: $data['description'];
+                    $data['project_id'] ??= $requisition->project_id;
+                    $data['project_enquiry_id'] ??= $requisition->enquiry_id;
+                    $data['project_name'] = $requisition->project_name ?: ($data['project_name'] ?? null);
+                }
+
+                $hasProject = filled($data['project_id'] ?? null)
+                    || filled($data['project_enquiry_id'] ?? null)
+                    || filled($data['job_number'] ?? null);
+                if ($expenseCode->requiresJobId() && ! $hasProject) {
+                    return ['success' => false, 'errors' => [
+                        'project_id' => ['This expense type requires a project.'],
+                    ]];
+                }
+                if ($expenseCode->forbidsJobId() && $hasProject) {
+                    return ['success' => false, 'errors' => [
+                        'project_id' => ['This overhead expense type cannot be charged to a project.'],
+                    ]];
+                }
+
+                // Legacy columns remain as immutable reporting snapshots; the
+                // catalogue/source IDs are the authoritative classifications.
+                $data['account'] = $expenseCode->expense_type;
+                $data['classification'] = $hasProject ? 'operations' : 'admin';
+                $data['payment_method'] = match ($paymentSource->type) {
+                    'petty_cash' => 'cash',
+                    'mobile_money' => 'mpesa',
+                    'bank' => 'bank_transfer',
+                    default => 'other',
+                };
+                $data['tax'] = match ($data['receipt_type'] ?? 'none') {
+                    'etr' => 'etr',
+                    default => 'no_etr',
+                };
+
+                if (! empty($data['planned_cost_line_id'])) {
+                    $planned = \App\Modules\Finance\CostCollector\Models\CostLine::query()
+                        ->whereKey($data['planned_cost_line_id'])
+                        ->where('nature', \App\Modules\Finance\CostCollector\Models\CostLine::NATURE_PLANNED)
+                        ->where('status', \App\Modules\Finance\CostCollector\Models\CostLine::STATUS_VERIFIED)
+                        ->first();
+
+                    if (! $planned) {
+                        return [
+                            'success' => false,
+                            'errors' => ['planned_cost_line_id' => ['The selected budget line is no longer active.']],
+                        ];
+                    }
+
+                    $sameEnquiry = empty($data['project_enquiry_id'])
+                        || ! $planned->project_enquiry_id
+                        || (int) $data['project_enquiry_id'] === (int) $planned->project_enquiry_id;
+                    $sameProject = empty($data['project_id'])
+                        || ! $planned->project_id
+                        || (int) $data['project_id'] === (int) $planned->project_id;
+                    $sameJob = blank($data['job_number'] ?? null)
+                        || blank($planned->job_number)
+                        || strcasecmp(trim((string) $data['job_number']), trim((string) $planned->job_number)) === 0;
+
+                    if (! $sameEnquiry || ! $sameProject || ! $sameJob) {
+                        return [
+                            'success' => false,
+                            'errors' => ['planned_cost_line_id' => ['The selected budget line belongs to a different project.']],
+                        ];
+                    }
+
+                    $data['project_id'] ??= $planned->project_id;
+                    $data['project_enquiry_id'] ??= $planned->project_enquiry_id;
+                    $data['job_number'] = filled($data['job_number'] ?? null)
+                        ? $data['job_number']
+                        : $planned->job_number;
+                    $data['budget_category'] = $planned->details['budget_category'] ?? $data['budget_category'] ?? null;
+                }
 
                 // Row-level lock the balance record
                 $balance = PettyCashBalance::where('id', 1)->lockForUpdate()->first();
                 if (!$balance) {
                     $balance = PettyCashBalance::create(['id' => 1, 'current_balance' => 0.00]);
+                }
+
+                // Recheck after obtaining the singleton balance lock. This
+                // serializes concurrent submissions using the same key.
+                if (! empty($data['idempotency_key'])) {
+                    $existing = PettyCashDisbursement::where('idempotency_key', $data['idempotency_key'])->first();
+
+                    if ($existing) {
+                        return ['success' => true, 'data' => $existing, 'replayed' => true];
+                    }
                 }
 
                 $totalToDeduct = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
@@ -237,6 +369,25 @@ class PettyCashService
 
                 return ['success' => true, 'data' => $disbursement];
             });
+
+            // Dispatched after the transaction closes, never inside it: a cost
+            // line must not exist for a payment that rolled back. The listener
+            // is queued, so the project's cost account follows a moment later
+            // without the payment waiting on it.
+            if (($result['success'] ?? false) && isset($result['data']) && ! ($result['replayed'] ?? false)) {
+                try {
+                    PettyCashDisbursementPaid::dispatch($result['data']->id);
+                } catch (Throwable $eventFailure) {
+                    // The cash movement has committed. Returning an error here
+                    // would encourage a retry and could duplicate payment.
+                    Log::critical('Petty-cash paid event dispatch failed after commit.', [
+                        'disbursement_id' => $result['data']->id,
+                        'exception' => $eventFailure,
+                    ]);
+                }
+            }
+
+            return $result;
         } catch (Exception $e) {
             throw new Exception('Failed to create disbursement: ' . $e->getMessage());
         }
@@ -245,7 +396,7 @@ class PettyCashService
     /**
      * Synchronize requisition status based on disbursement state.
      */
-    public function syncRequisitionStatus(int $requisitionId, string $forcedStatus = null): void
+    public function syncRequisitionStatus(int $requisitionId, ?string $forcedStatus = null): void
     {
         $requisition = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::find($requisitionId);
         if (!$requisition) return;
@@ -325,6 +476,10 @@ class PettyCashService
             $this->logActivity('voided', 'disbursement', $disbursement->id, "Disbursement voided. Reason: " . $reason);
 
             DB::commit();
+
+            // After commit for the same reason as creation: the cost ledger must
+            // never back out a line for a void that did not stick.
+            PettyCashDisbursementVoided::dispatch($disbursement->id, Auth::id(), $reason);
 
             return $result;
         } catch (Exception $e) {
@@ -583,6 +738,10 @@ class PettyCashService
         $validBudgetCategories = ['materials', 'labour', 'logistics', 'expenses'];
         if (!empty($data['budget_category']) && !in_array($data['budget_category'], $validBudgetCategories)) {
             $errors['budget_category'] = ['Invalid budget category selected.'];
+        }
+
+        if (!empty($data['planned_cost_line_id']) && !is_numeric($data['planned_cost_line_id'])) {
+            $errors['planned_cost_line_id'] = ['Invalid project budget line selected.'];
         }
 
         return $errors;

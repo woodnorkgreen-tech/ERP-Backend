@@ -8,6 +8,8 @@ use App\Models\User;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation;
+use App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder;
+use Illuminate\Support\Facades\DB;
 
 class AllocationIntegrationTest extends TestCase
 {
@@ -15,6 +17,7 @@ class AllocationIntegrationTest extends TestCase
 
     public function test_multi_topup_allocation_persists_and_updates_remaining_balances()
     {
+        $this->seed(FinanceReferenceSeeder::class);
         $user = User::factory()->create();
 
         // Create two top-ups: older 50, newer 100
@@ -37,6 +40,8 @@ class AllocationIntegrationTest extends TestCase
         $service = app(\App\Modules\Finance\PettyCash\Services\PettyCashService::class);
 
         $res = $service->createDisbursement([
+            'expense_code_id' => DB::table('expense_codes')->where('job_id_rule', 'not_allowed')->value('id'),
+            'payment_source_id' => DB::table('payment_sources')->where('code', 'PC-MAIN')->value('id'),
             'amount' => 120.00,
             'transaction_cost' => 3.00,
             'receiver' => 'Integration Test',
