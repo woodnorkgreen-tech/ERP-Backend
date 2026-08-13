@@ -77,10 +77,30 @@ class ProcurementStoresController extends Controller
         $includeUnstocked = $request->boolean('include_unstocked');
         $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom']);
 
+        if ($request->input('selection_context') === 'project') {
+            // Rank by demonstrated execution use, not by catalogue creation date.
+            // Physical issues are the strongest signal; repeated appearance in
+            // project specifications keeps frequently prepared items near the top
+            // even before their next Stores issue occurs.
+            $query->withCount([
+                'inventoryLogs as recent_project_issue_count' => fn ($issues) => $issues
+                    ->whereNotNull('project_id')
+                    ->whereIn('type', ['check_out', 'issue', 'consumption'])
+                    ->where('logged_at', '>=', now()->subDays(90)),
+                'projectSpecifications as project_specification_count' => fn ($specifications) => $specifications
+                    ->where('is_included', true),
+            ]);
+        }
+
         if ($includeUnstocked) {
             // Receive Stock is the controlled bridge from catalogue identity to
             // physical inventory, so it must be able to select every active item.
-            $query->where('item_status', 'Active');
+            $query->where(function ($active) {
+                $active->where('item_status', 'Active')
+                    ->orWhere(function ($legacy) {
+                        $legacy->whereNull('item_status')->where('is_active', true);
+                    });
+            });
         } else {
             // Store Inventory and outbound operations show only items that have
             // entered stock control. Zero balances remain visible for reorder use.
@@ -102,7 +122,13 @@ class ProcurementStoresController extends Controller
             $query->where('category', 'like', "%{$request->category}%");
         }
 
-        $query->latest('library_materials.created_at');
+        if ($request->input('selection_context') === 'project') {
+            $query->orderByDesc('recent_project_issue_count')
+                ->orderByDesc('project_specification_count')
+                ->orderBy('library_materials.material_name');
+        } else {
+            $query->latest('library_materials.created_at');
+        }
         $summaryMaterials = (clone $query)->get();
         $pageLimit = $includeUnstocked ? 500 : 200;
         $paginator = $query->paginate(min((int) $request->get('per_page', 50), $pageLimit));
@@ -181,6 +207,12 @@ class ProcurementStoresController extends Controller
                 'location'          => $material->stock?->location_bin ?? 'Not Set',
                 'warehouse_code'    => $material->stock?->warehouse_code ?? 'MAIN',
                 'is_stocked'        => $material->stock !== null,
+                'recent_project_issue_count' => (int) ($material->recent_project_issue_count ?? 0),
+                'project_specification_count' => (int) ($material->project_specification_count ?? 0),
+                'project_usage_score' => ((int) ($material->recent_project_issue_count ?? 0) * 3)
+                    + (int) ($material->project_specification_count ?? 0),
+                'is_frequently_used' => (int) ($material->recent_project_issue_count ?? 0) >= 3
+                    || (int) ($material->project_specification_count ?? 0) >= 5,
                 'can_set_stock_quantity' => !$isBoard
                     && !$material->is_serialized
                     && !$material->is_batch_controlled,
@@ -210,11 +242,19 @@ class ProcurementStoresController extends Controller
             )->count(),
         ];
 
-        return response()->json([
+        $response = [
             'data'   => $paginator,
-            'summary' => $summary,
             'status' => 'success',
-        ]);
+        ];
+
+        // Project material selectors need availability, not the company's
+        // aggregate inventory valuation. Keep that finance/stores summary out
+        // of the operational selection response.
+        if ($request->input('selection_context') !== 'project') {
+            $response['summary'] = $summary;
+        }
+
+        return response()->json($response);
     }
 
     /**
@@ -329,6 +369,7 @@ class ProcurementStoresController extends Controller
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
             'project_id' => 'nullable|exists:projects,id',
+            'project_material_id' => 'nullable|exists:element_materials,id',
             'notes' => 'nullable|string',
             'logged_at' => 'nullable|date',
             'inventory_lot_id' => 'nullable|exists:inventory_lots,id',
@@ -346,6 +387,23 @@ class ProcurementStoresController extends Controller
             ], 422);
         }
         $this->validateControlledMovement($request, $material, 'check_out');
+
+        if ($request->filled('project_material_id')) {
+            $project = \App\Models\Project::findOrFail($request->project_id);
+            $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')->findOrFail($request->project_material_id);
+            $materialsData = $planned->element?->taskMaterialsData;
+            if (! data_get($materialsData?->project_info, 'approval_status.all_approved', false)
+                || (int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
+                || (int) $planned->library_material_id !== (int) $material->id) {
+                throw ValidationException::withMessages(['project_material_id' => 'This is not an approved material line for the selected project.']);
+            }
+            $issued = (float) InventoryLog::where('project_material_id', $planned->id)
+                ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
+                - (float) InventoryLog::where('project_material_id', $planned->id)->where('type', 'return')->sum('quantity');
+            if ((float) $request->quantity > max(0, (float) $planned->quantity - $issued)) {
+                throw ValidationException::withMessages(['quantity' => 'Quantity exceeds the remaining approved project requirement.']);
+            }
+        }
 
         $service = new InventoryService();
 
@@ -441,7 +499,7 @@ class ProcurementStoresController extends Controller
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
-            'project_id' => 'nullable|exists:projects,id',
+            'original_issue_log_id' => 'required|exists:inventory_logs,id',
             'notes' => 'nullable|string',
             'inventory_lot_id' => 'nullable|exists:inventory_lots,id',
             'serial_item_ids' => 'nullable|array',
@@ -461,13 +519,38 @@ class ProcurementStoresController extends Controller
         }
         $this->validateControlledMovement($request, $material, 'return');
 
-        $service = new InventoryService();
-        $log = $service->adjustStock(
-            $request->material_id, 
-            $request->quantity, 
-            'return', 
-            $request->all()
-        );
+        $log = DB::transaction(function () use ($request) {
+            $issue = InventoryLog::query()->lockForUpdate()
+                ->findOrFail($request->integer('original_issue_log_id'));
+
+            if (! in_array($issue->type, ['check_out', 'issue', 'consumption'], true)) {
+                throw ValidationException::withMessages(['original_issue_log_id' => 'Select an original stock issue.']);
+            }
+            if ((int) $issue->material_id !== $request->integer('material_id')) {
+                throw ValidationException::withMessages(['material_id' => 'The returned material must match the original issue.']);
+            }
+
+            $issued = abs((float) $issue->quantity);
+            $alreadyReturned = (float) InventoryLog::where('original_issue_log_id', $issue->id)
+                ->where('type', 'return')->sum('quantity');
+            if ($alreadyReturned + (float) $request->quantity > $issued + 0.00001) {
+                throw ValidationException::withMessages([
+                    'quantity' => 'Return quantity exceeds the unreturned quantity from the original issue.',
+                ]);
+            }
+
+            $meta = $request->all();
+            $meta['project_id'] = $issue->project_id;
+            $meta['project_material_id'] = $issue->project_material_id;
+            $meta['reference_no'] = $issue->reference_no;
+
+            return app(InventoryService::class)->adjustStock(
+                $request->integer('material_id'),
+                (float) $request->quantity,
+                'return',
+                $meta,
+            );
+        });
 
         return response()->json([
             'message' => 'Material returned successfully',
@@ -544,6 +627,7 @@ class ProcurementStoresController extends Controller
         $request->validate([
             'items' => 'required|array|min:1',
             'items.*.material_id' => 'required|exists:library_materials,id',
+            'items.*.project_material_id' => 'nullable|exists:element_materials,id',
             'items.*.quantity' => 'required|numeric|min:0.01',
             'items.*.reference_no' => 'nullable|string',
             'items.*.notes' => 'nullable|string',
@@ -626,6 +710,7 @@ class ProcurementStoresController extends Controller
         $request->validate([
             'items' => 'required|array|min:1',
             'items.*.material_id' => 'required|exists:library_materials,id',
+            'items.*.project_material_id' => 'nullable|exists:element_materials,id',
             'items.*.quantity' => 'required|numeric|min:0.01',
             'items.*.reference_no' => 'nullable|string',
             'items.*.notes' => 'nullable|string',
@@ -663,26 +748,97 @@ class ProcurementStoresController extends Controller
 
         // All items validated, process the batch
         $batchNumber = $service->generateBatchNumber();
-        $logs = [];
+        // One project pick is one operational decision: either every selected
+        // line posts or none does. This avoids a half-issued preparation list.
+        $logs = DB::transaction(function () use ($request, $service, $batchNumber) {
+            $posted = [];
+            foreach ($request->items as $item) {
+                $material = LibraryMaterial::with('materialCategory.parent')->findOrFail($item['material_id']);
+                $stock = Stock::where('material_id', $item['material_id'])->lockForUpdate()->first();
+                if (! $stock || ((float) $stock->quantity_on_hand - (float) $stock->quantity_reserved) < (float) $item['quantity']) {
+                    throw ValidationException::withMessages([
+                        'items' => "Insufficient stock for {$material->material_name}.",
+                    ]);
+                }
 
-        foreach ($request->items as $item) {
-            $meta = array_merge(
-                $item,
-                [
+                if (! empty($item['project_material_id'])) {
+                    if (! $request->project_id) {
+                        throw ValidationException::withMessages(['project_id' => 'A project is required for approved material issues.']);
+                    }
+
+                    $project = \App\Models\Project::findOrFail($request->project_id);
+                    $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')
+                        ->lockForUpdate()->findOrFail($item['project_material_id']);
+                    $materialsData = $planned->element?->taskMaterialsData;
+                    $approved = (bool) data_get($materialsData?->project_info, 'approval_status.all_approved', false);
+
+                    if (! $approved || (int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id) {
+                        throw ValidationException::withMessages([
+                            'items' => "{$planned->description} is not an approved material line for this project.",
+                        ]);
+                    }
+                    if ((int) $planned->library_material_id !== (int) $item['material_id']) {
+                        throw ValidationException::withMessages([
+                            'items' => "{$planned->description} is linked to a different Material Library item.",
+                        ]);
+                    }
+
+                    $netIssued = (float) InventoryLog::where('project_material_id', $planned->id)
+                        ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
+                        - (float) InventoryLog::where('project_material_id', $planned->id)
+                            ->where('type', 'return')->sum('quantity');
+
+                    // Pre-linkage issues are allocated FIFO across repeated
+                    // approved lines for the same catalogue material. This keeps
+                    // historical projects truthful without charging the same
+                    // legacy issue to every repeated line.
+                    $legacyIssued = (float) InventoryLog::where('project_id', $project->id)
+                        ->where('material_id', $planned->library_material_id)
+                        ->whereNull('project_material_id')
+                        ->whereIn('type', ['check_out', 'issue', 'consumption'])
+                        ->sum(DB::raw('ABS(quantity)'))
+                        - (float) InventoryLog::where('project_id', $project->id)
+                            ->where('material_id', $planned->library_material_id)
+                            ->whereNull('project_material_id')
+                            ->where('type', 'return')->sum('quantity');
+                    $earlierRequirement = (float) \App\Models\ElementMaterial::query()
+                        ->where('library_material_id', $planned->library_material_id)
+                        ->where('is_included', true)
+                        ->where('id', '<', $planned->id)
+                        ->whereHas('element', fn ($query) => $query->where('task_materials_data_id', $materialsData->id))
+                        ->sum('quantity');
+                    $legacyForThisLine = min(
+                        (float) $planned->quantity,
+                        max(0, $legacyIssued - $earlierRequirement),
+                    );
+                    $netIssued += $legacyForThisLine;
+                    $remaining = max(0, (float) $planned->quantity - $netIssued);
+                    if ((float) $item['quantity'] > $remaining + 0.00001) {
+                        throw ValidationException::withMessages([
+                            'items' => "{$planned->description} has only {$remaining} remaining on the approved requirement.",
+                        ]);
+                    }
+
+                }
+
+                $meta = array_merge($item, [
                     'batch_number' => $batchNumber,
                     'project_id' => $request->project_id ?? null,
-                    'notes' => $item['notes'] ?? 'Batch check-out',
-                    'logged_at' => $request->logged_at ?? now()
-                ]
-            );
-            
-            $logs[] = $service->adjustStock(
-                $item['material_id'],
-                -$item['quantity'], // Negative for check-out
-                'check_out',
-                $meta
-            );
-        }
+                    'recipient_name' => $item['requestor'] ?? null,
+                    'notes' => $item['notes'] ?? 'Project material issue',
+                    'logged_at' => $request->logged_at ?? now(),
+                ]);
+
+                $posted[] = $service->adjustStock(
+                    $item['material_id'],
+                    -$item['quantity'],
+                    'check_out',
+                    $meta,
+                );
+            }
+
+            return $posted;
+        });
 
         return response()->json([
             'message' => 'Batch check-out processed successfully',
@@ -869,6 +1025,21 @@ class ProcurementStoresController extends Controller
                 $issued   = abs($ml->where('type', 'check_out')->sum('quantity'));
                 $returned = (float) $ml->where('type', 'return')->sum('quantity');
                 $balance  = $issued - $returned;
+                $issues = $ml->where('type', 'check_out')->map(function (InventoryLog $issue) use ($ml) {
+                    $issueQuantity = abs((float) $issue->quantity);
+                    $linkedReturns = (float) $ml->where('type', 'return')
+                        ->where('original_issue_log_id', $issue->id)->sum('quantity');
+
+                    return [
+                        'id' => $issue->id,
+                        'batch_number' => $issue->batch_number,
+                        'issued_at' => ($issue->logged_at ?? $issue->created_at)?->toIso8601String(),
+                        'recipient_name' => $issue->recipient_name,
+                        'issued' => $issueQuantity,
+                        'returned' => $linkedReturns,
+                        'remaining' => max(0, $issueQuantity - $linkedReturns),
+                    ];
+                })->filter(fn (array $issue) => $issue['remaining'] > 0)->values();
                 return $balance > 0 ? [
                     'material_id'   => $material->id,
                     'material_name' => $material->material_name,
@@ -877,6 +1048,7 @@ class ProcurementStoresController extends Controller
                     'issued'        => $issued,
                     'returned'      => $returned,
                     'balance'       => $balance,
+                    'issues'        => $issues,
                 ] : null;
             })->filter()->values();
         };

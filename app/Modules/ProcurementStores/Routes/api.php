@@ -115,7 +115,6 @@ Route::get('/boards/reconciliation/latest',  [BoardController::class, 'latestRec
 Route::post('/boards/reconciliation',        [BoardController::class, 'saveReconciliation']);
 
 // Lifecycle transitions
-Route::post('/boards/{id}/allocate',                 [BoardController::class, 'allocate']);
 Route::post('/boards/{id}/start-processing',         [BoardController::class, 'startProcessing']);
 Route::post('/boards/{id}/consume',                  [BoardController::class, 'consume']);
 Route::post('/boards/{id}/transition',               [BoardController::class, 'transition']);

@@ -53,6 +53,9 @@ class BoardRequestController extends Controller
             'job_ref'  => 'required|string|max:100',
             'job_name' => 'nullable|string|max:255',
             'material_id' => 'required|integer|exists:library_materials,id',
+            'project_id' => 'nullable|integer|exists:projects,id',
+            'project_material_id' => 'nullable|integer|exists:element_materials,id',
+            'recipient_name' => 'nullable|string|max:255',
             'qty'         => 'required|integer|min:1|max:200',
             'notes'       => 'nullable|string|max:500',
         ]);
@@ -62,6 +65,26 @@ class BoardRequestController extends Controller
             return response()->json([
                 'message' => "'{$material->material_name}' is not a board/sheet item. Issue it through the normal Stores workflow.",
             ], 422);
+        }
+
+        if ($request->filled('project_material_id')) {
+            $project = \App\Models\Project::findOrFail($request->project_id);
+            $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')
+                ->findOrFail($request->project_material_id);
+            $materialsData = $planned->element?->taskMaterialsData;
+            if (! data_get($materialsData?->project_info, 'approval_status.all_approved', false)
+                || (int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
+                || (int) $planned->library_material_id !== (int) $material->id) {
+                return response()->json(['message' => 'This board is not an approved material line for the selected project.'], 422);
+            }
+
+            $alreadyIssued = (float) InventoryLog::where('project_material_id', $planned->id)
+                ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
+                - (float) InventoryLog::where('project_material_id', $planned->id)
+                    ->where('type', 'return')->sum('quantity');
+            if ((float) $request->qty > max(0, (float) $planned->quantity - $alreadyIssued)) {
+                return response()->json(['message' => 'Board quantity exceeds the remaining approved requirement.'], 422);
+            }
         }
 
         $available = Board::where('library_material_id', $material->id)
@@ -108,9 +131,12 @@ class BoardRequestController extends Controller
         $boardRequest = DB::transaction(function () use ($request, $material) {
             $br = BoardRequest::create([
                 'job_ref'      => $request->job_ref,
+                'project_id'   => $request->project_id,
                 'job_name'     => $request->job_name,
                 'material_id'  => $material->id,
+                'project_material_id' => $request->project_material_id,
                 'qty_requested'=> $request->qty,
+                'recipient_name' => $request->recipient_name,
                 'status'       => 'pending',
                 'requested_by' => auth()->id(),
                 'notes'        => $request->notes,
@@ -191,7 +217,7 @@ class BoardRequestController extends Controller
             return response()->json(['message' => 'No available boards found for this material.'], 422);
         }
 
-        DB::transaction(function () use ($boards, $boardRequest) {
+        $issueLog = DB::transaction(function () use ($boards, $boardRequest) {
             foreach ($boards as $board) {
                 $board->transitionTo('Allocated', auth()->id(),
                     "Issued for job {$boardRequest->job_ref} — request #{$boardRequest->id}",
@@ -216,19 +242,27 @@ class BoardRequestController extends Controller
                 $stock->decrement('quantity_on_hand', $fulfilled);
             }
 
-            InventoryLog::create([
+            return InventoryLog::create([
                 'material_id'  => $boardRequest->material_id,
                 'user_id'      => auth()->id(),
                 'type'         => 'check_out',
                 'usage_type'   => 'reusable',
                 'quantity'     => -$fulfilled,
                 'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
+                'project_id' => $boardRequest->project_id,
+                'project_material_id' => $boardRequest->project_material_id,
                 'reference_no' => $boardRequest->job_ref,   // enables outstandingReusables grouping by job
+                'recipient_name' => $boardRequest->recipient_name,
                 'notes'        => "{$fulfilled} board(s) issued to job {$boardRequest->job_ref}. "
                     . 'Codes: ' . $boards->pluck('tracking_code')->join(', '),
                 'logged_at'    => now(),
             ]);
         });
+
+        // Board issues are cost-bearing Stores issues too. The generic inventory
+        // service dispatches this automatically; this specialized lifecycle owns
+        // its stock movement, so it must announce the same accounting event.
+        \App\Events\Stores\StockIssued::dispatch($issueLog);
 
         // Advance the workflow: create Logistics dispatch task + notify
         $this->workflow->onRequestFulfilled($boardRequest, $boards);

@@ -115,6 +115,8 @@ class InventoryService
                 'receipt_unit_cost' => $type === 'check_in' ? ($meta['receipt_unit_cost'] ?? null) : null,
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,
+                'project_material_id' => $meta['project_material_id'] ?? null,
+                'original_issue_log_id' => $meta['original_issue_log_id'] ?? null,
                 'supplier_id' => $meta['supplier_id'] ?? null,
                 'reference_no' => $meta['reference_no'] ?? null,
                 'recipient_name' => $meta['recipient_name'] ?? $meta['requestor_name'] ?? null,
@@ -127,6 +129,14 @@ class InventoryService
 
             foreach ($controlled['allocations'] as $allocation) {
                 $log->allocations()->create($allocation);
+            }
+
+            if (in_array($type, ['check_out', 'issue', 'consumption'], true) && ($meta['project_id'] ?? $meta['reference_no'] ?? null)) {
+                \App\Events\Stores\StockIssued::dispatch($log);
+            }
+
+            if ($type === 'return' && $log->original_issue_log_id) {
+                \App\Events\Stores\StockReturned::dispatch($log);
             }
 
             return $log->load('allocations');

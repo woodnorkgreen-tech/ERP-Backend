@@ -27,6 +27,8 @@ class InventoryLog extends Model
         'receipt_unit_cost',
         'balance_after',
         'project_id',
+        'project_material_id',
+        'original_issue_log_id',
         'supplier_id',
         'reference_no',
         'recipient_name',
@@ -61,5 +63,20 @@ class InventoryLog extends Model
     public function allocations()
     {
         return $this->hasMany(InventoryMovementAllocation::class);
+    }
+
+    public function originalIssue(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'original_issue_log_id');
+    }
+
+    public function projectMaterial(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\ElementMaterial::class, 'project_material_id');
+    }
+
+    public function returns()
+    {
+        return $this->hasMany(self::class, 'original_issue_log_id');
     }
 }

@@ -1063,11 +1063,12 @@ class BoardController extends Controller
 
         $board          = Board::findOrFail($id);
         $previousStatus = $board->status;
+        $returnLog      = null;
         // Capture before transitionTo() clears assigned_job_ref on → Available / Quarantine
         $previousJobRef = $board->assigned_job_ref;
 
         try {
-            DB::transaction(function () use ($request, $board, $previousStatus, $previousJobRef) {
+            DB::transaction(function () use ($request, $board, $previousStatus, $previousJobRef, &$returnLog) {
                 $board->transitionTo(
                     $request->status,
                     auth()->id(),
@@ -1082,10 +1083,30 @@ class BoardController extends Controller
         // Return to stores — board came back from a job (Available = intact, Quarantine = Grade C/D for review)
         // Triggered from: Allocated, At Station, or WIP → Available or Quarantine
         if (in_array($request->status, ['Available', 'Quarantine']) && in_array($previousStatus, ['Allocated', 'At Station', 'WIP'])) {
+            $issue = \App\Modules\ProcurementStores\Models\InventoryLog::query()
+                ->where('material_id', $board->library_material_id)
+                ->where('reference_no', $previousJobRef)
+                ->whereIn('type', ['check_out', 'issue', 'consumption'])
+                ->latest('id')
+                ->lockForUpdate()
+                ->get()
+                ->first(function ($candidate) {
+                    $returned = (float) \App\Modules\ProcurementStores\Models\InventoryLog::query()
+                        ->where('original_issue_log_id', $candidate->id)
+                        ->where('type', 'return')
+                        ->sum('quantity');
+
+                    return $returned < abs((float) $candidate->quantity);
+                });
+
+            if (! $issue) {
+                throw new \InvalidArgumentException('The original board issue could not be found. Reconcile this board before returning it.');
+            }
+
             if ($stock) {
                 $stock->increment('quantity_on_hand', 1);
             }
-            \App\Modules\ProcurementStores\Models\InventoryLog::create([
+            $returnLog = \App\Modules\ProcurementStores\Models\InventoryLog::create([
                 'material_id'  => $board->library_material_id,
                 'user_id'      => auth()->id(),
                 'type'         => 'return',
@@ -1096,6 +1117,9 @@ class BoardController extends Controller
                 // reference_no ties this return to its check_out so outstandingReusables()
                 // can net the two off and stop showing the board as still outstanding.
                 'reference_no' => $previousJobRef,
+                'original_issue_log_id' => $issue->id,
+                'project_id' => $issue->project_id,
+                'project_material_id' => $issue->project_material_id,
                 'notes'        => "Board returned to stores: {$board->tracking_code}. "
                     . ($request->notes ?? 'Returned intact from job.'),
                 'logged_at'    => now(),
@@ -1155,6 +1179,10 @@ class BoardController extends Controller
             });
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        if ($returnLog) {
+            \App\Events\Stores\StockReturned::dispatch($returnLog);
         }
 
         return response()->json([
