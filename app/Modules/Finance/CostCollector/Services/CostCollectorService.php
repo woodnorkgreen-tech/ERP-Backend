@@ -63,9 +63,7 @@ class CostCollectorService implements CollectsCost
                 'status' => $this->initialStatus($context),
                 'consumes_line_id' => $context->consumesLineId,
                 'description' => $context->description,
-                'unit' => $context->details['uom'] ?? $context->details['unit'] ?? null,
-                'quantity' => $context->details['quantity'] ?? null,
-                'unit_rate' => $context->details['unit_price'] ?? $context->details['unit_rate'] ?? null,
+                ...$this->measure($context),
                 'source_type' => $context->sourceType,
                 'source_id' => $context->sourceId,
                 'source_ref' => $context->sourceRef,
@@ -320,6 +318,8 @@ class CostCollectorService implements CollectsCost
             $line = CostLine::create([
                 ...$resolved,
                 ...$money,
+                ...$this->measure($context),
+                // Caller overrides last: postStockReturn signs its own amounts.
                 ...$attributes,
                 'expense_code_id' => $code?->id,
                 'ref' => 'PENDING',
@@ -343,6 +343,29 @@ class CostCollectorService implements CollectsCost
 
             return $line;
         });
+    }
+
+    /**
+     * How much of what, at what rate.
+     *
+     * Producers report this in `details` under whichever name their own domain
+     * uses — a Stores issue calls the rate `unit_cost`, a requisition calls it
+     * `unit_price`. Lifting it onto the columns here means every cost line
+     * carries its quantity the same way, whoever reported it, so a cost account
+     * can show "4 sheets at 2,250" instead of only a total.
+     *
+     * @return array<string, mixed>
+     */
+    private function measure(CostContext $context): array
+    {
+        return [
+            'unit' => $context->details['uom'] ?? $context->details['unit'] ?? null,
+            'quantity' => $context->details['quantity'] ?? null,
+            'unit_rate' => $context->details['unit_price']
+                ?? $context->details['unit_rate']
+                ?? $context->details['unit_cost']
+                ?? null,
+        ];
     }
 
     private function existingPlanned(PlannedLine $line): ?CostLine
