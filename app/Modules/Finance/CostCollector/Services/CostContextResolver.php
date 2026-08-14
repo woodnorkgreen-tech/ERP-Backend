@@ -2,7 +2,10 @@
 
 namespace App\Modules\Finance\CostCollector\Services;
 
+use App\Models\Project;
+use App\Models\ProjectEnquiry;
 use App\Modules\Finance\CostCollector\Contracts\CostContext;
+use App\Modules\Finance\CostCollector\Exceptions\CostValidationException;
 use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\PettyCash\Services\ProjectIdentityResolver;
@@ -70,11 +73,98 @@ class CostContextResolver
             return [];
         }
 
-        return $this->projectIdentity->resolve(array_filter([
+        $identity = $this->projectIdentity->resolve(array_filter([
             'project_id' => $context->projectId,
             'project_enquiry_id' => $context->enquiryId,
             'job_number' => $context->jobNumber,
         ]));
+
+        $this->assertIdentityAgrees($identity);
+
+        return $identity;
+    }
+
+    /**
+     * The identity resolver fills gaps; it does not check that what it was given
+     * agrees. That gap let a Stores movement post with a project, an enquiry and
+     * a job number that each named a different job — the cost landed on another
+     * project's budget line while still displaying the originating job number.
+     *
+     * A cost whose own identity fields contradict each other cannot be corrected
+     * later by reading it, because there is no way to tell which field was right.
+     * Refuse it at the boundary instead. For a producer this surfaces as a failed
+     * outbox posting the operator can see and repair; nothing is silently lost,
+     * and no stock movement is reversed by it.
+     */
+    private function assertIdentityAgrees(array $identity): void
+    {
+        $projectId = $identity['project_id'] ?? null;
+        $enquiryId = $identity['project_enquiry_id'] ?? null;
+        $jobNumber = $identity['job_number'] ?? null;
+
+        if (! $projectId && ! $enquiryId) {
+            return;
+        }
+
+        $project = $projectId ? Project::find($projectId) : null;
+        $enquiry = $enquiryId ? ProjectEnquiry::find($enquiryId) : null;
+
+        if ($projectId && ! $project) {
+            throw CostValidationException::withErrors([
+                'project' => ["Project #{$projectId} does not exist, so this cost has no owner."],
+            ]);
+        }
+
+        if ($enquiryId && ! $enquiry) {
+            throw CostValidationException::withErrors([
+                'project' => ["Enquiry #{$enquiryId} does not exist, so this cost has no owner."],
+            ]);
+        }
+
+        if ($project && $enquiry && (int) $project->enquiry_id !== (int) $enquiry->id) {
+            throw CostValidationException::withErrors([
+                'project' => [sprintf(
+                    'Project #%d belongs to enquiry #%s, but this cost names enquiry #%d. Refusing to post a cost whose project and enquiry disagree.',
+                    $project->id,
+                    $project->enquiry_id ?? 'none',
+                    $enquiry->id,
+                )],
+            ]);
+        }
+
+        if (blank($jobNumber)) {
+            return;
+        }
+
+        // Both notations are legitimate: the enquiry's job number is canonical,
+        // and the project's display code is what several modules write on their
+        // own records. Either identifies the same job; anything else does not.
+        $accepted = array_values(array_filter([
+            $enquiry?->job_number,
+            $project?->enquiry?->job_number,
+            $project?->project_id,
+        ]));
+
+        if (! $accepted) {
+            return;
+        }
+
+        $normalise = fn (?string $value) => PettyCashCostProducer::normaliseJobNumber((string) $value);
+        $supplied = $normalise($jobNumber);
+
+        foreach ($accepted as $candidate) {
+            if ($normalise($candidate) === $supplied) {
+                return;
+            }
+        }
+
+        throw CostValidationException::withErrors([
+            'project' => [sprintf(
+                'Job number "%s" does not belong to the resolved job (%s). Refusing to post a cost whose job number contradicts its project.',
+                $jobNumber,
+                implode(' / ', array_unique($accepted)),
+            )],
+        ]);
     }
 
     /**
