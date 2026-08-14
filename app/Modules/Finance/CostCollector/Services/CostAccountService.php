@@ -143,6 +143,7 @@ class CostAccountService
                 'committed' => $this->money($row->committed),
                 'accrued' => $this->money($row->accrued),
                 'actual' => $this->money($row->actual),
+                'spent' => $spent,
                 'unbudgeted' => $this->money($row->unbudgeted),
                 'remaining' => bcsub($planned, $spent, 2),
                 'utilisation_percent' => bccomp($planned, '0', 2) === 1
@@ -207,6 +208,7 @@ class CostAccountService
             'committed' => $this->money($row?->committed),
             'accrued' => $this->money($row?->accrued),
             'actual' => $this->money($row?->actual),
+            'spent' => $spent,
             'unbudgeted' => $this->money($row?->unbudgeted),
             'remaining' => bcsub($planned, $spent, 2),
         ];
@@ -227,8 +229,9 @@ class CostAccountService
                 COALESCE(JSON_UNQUOTE(JSON_EXTRACT(details, '$.budget_category')), 'uncategorised') AS category,
                 nature,
                 SUM(net_amount) AS total,
+                SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) AS unbudgeted,
                 COUNT(*) AS line_count
-            ")
+            ", [CostLine::NATURE_PLANNED])
             ->groupBy('category', 'nature')
             ->get();
 
@@ -308,6 +311,15 @@ class CostAccountService
                 'committed' => $of(CostLine::NATURE_COMMITTED),
                 'accrued' => $of(CostLine::NATURE_ACCRUED),
                 'actual' => $of(CostLine::NATURE_ACTUAL),
+                // The figure every remaining and utilisation number is derived
+                // from. It was computed here and thrown away, leaving the reader
+                // to add three columns to check a fourth.
+                'spent' => $spent,
+                // Already inside `spent` — surfaced per category so an overrun
+                // can be read as planned-but-expensive or simply unplanned.
+                'unbudgeted' => (string) number_format(
+                    (float) $group->sum('unbudgeted'), 2, '.', ''
+                ),
                 'remaining' => bcsub($planned, $spent, 2),
                 // Negative planned with spend against it is an overrun; the sign
                 // is left as-is so the client does not have to guess direction.
@@ -333,6 +345,8 @@ class CostAccountService
             'committed' => $sum('committed'),
             'accrued' => $sum('accrued'),
             'actual' => $sum('actual'),
+            'spent' => $spent,
+            'unbudgeted' => $sum('unbudgeted'),
             'remaining' => bcsub($planned, $spent, 2),
             'utilisation_percent' => bccomp($planned, '0', 2) === 1
                 ? round((float) bcdiv($spent, $planned, 4) * 100, 1)
