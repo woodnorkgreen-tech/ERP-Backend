@@ -29,6 +29,7 @@ class ProcurementStoresController extends Controller
         $postings = StoresFinancePosting::with([
                 'inventoryLog.material:id,material_name,material_code',
                 'inventoryLog.project:id,project_id', 'costLine:id,ref',
+                'inventoryLog.projectMaterial:id,unit_cost,description',
             ])
             ->whereIn('status', ['pending', 'processing', 'failed'])
             ->latest()
@@ -44,6 +45,13 @@ class ProcurementStoresController extends Controller
                     'processing_started_at' => $posting->processing_started_at?->toIso8601String(),
                     'needs_valuation' => $posting->posting_type === 'issue_cost'
                         && str_contains(strtolower((string) $posting->last_error), 'unit cost'),
+                    // What the approved plan expected this to cost. Offered as a
+                    // starting figure only: it is an estimate, and a Stores issue
+                    // posts as an actual, so a person still has to accept or
+                    // replace it and say what the number is based on.
+                    'planned_unit_cost' => $log?->projectMaterial?->unit_cost !== null
+                        ? (float) $log->projectMaterial->unit_cost
+                        : null,
                     'created_at' => $posting->created_at?->toIso8601String(),
                     'cost_line' => $posting->costLine,
                     'inventory_log_id' => $log?->id, 'type' => $log?->type,
