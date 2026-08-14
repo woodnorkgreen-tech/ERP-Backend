@@ -311,8 +311,31 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             $query->where('enquiry_id', request()->enquiry_id);
         }
 
+        $projects = $query->get();
+        $materialsByEnquiry = \App\Models\TaskMaterialsData::query()
+            ->with('task:id,project_enquiry_id')
+            ->withCount('elements')
+            ->whereHas('task', fn ($task) => $task->whereIn('project_enquiry_id', $projects->pluck('enquiry_id')))
+            ->get()
+            ->keyBy(fn ($materials) => $materials->task?->project_enquiry_id);
+
+        $projects->each(function ($project) use ($materialsByEnquiry) {
+            $materials = $materialsByEnquiry->get($project->enquiry_id);
+            $approval = data_get($materials?->project_info, 'approval_status', []);
+            $provided = $materials !== null && (int) $materials->elements_count > 0;
+            $project->setAttribute('materials_status', [
+                'provided' => $provided,
+                'all_approved' => $provided && (bool) ($approval['all_approved'] ?? false),
+                'approved_count' => collect(['design', 'production', 'finance'])
+                    ->filter(fn ($department) => (bool) data_get($approval, "{$department}.approved", false))
+                    ->count(),
+                'required_approvals' => 3,
+                'element_count' => (int) ($materials?->elements_count ?? 0),
+            ]);
+        });
+
         return response()->json([
-            'data' => $query->get(),
+            'data' => $projects,
             'message' => 'Projects retrieved successfully'
         ]);
     }); // No permission for debugging
@@ -757,8 +780,31 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
                 $query->where('enquiry_id', request()->enquiry_id);
             }
 
+            $projects = $query->get();
+            $materialsByEnquiry = \App\Models\TaskMaterialsData::query()
+                ->with('task:id,project_enquiry_id')
+                ->withCount('elements')
+                ->whereHas('task', fn ($task) => $task->whereIn('project_enquiry_id', $projects->pluck('enquiry_id')))
+                ->get()
+                ->keyBy(fn ($materials) => $materials->task?->project_enquiry_id);
+
+            $projects->each(function ($project) use ($materialsByEnquiry) {
+                $materials = $materialsByEnquiry->get($project->enquiry_id);
+                $approval = data_get($materials?->project_info, 'approval_status', []);
+                $provided = $materials !== null && (int) $materials->elements_count > 0;
+                $project->setAttribute('materials_status', [
+                    'provided' => $provided,
+                    'all_approved' => $provided && (bool) ($approval['all_approved'] ?? false),
+                    'approved_count' => collect(['design', 'production', 'finance'])
+                        ->filter(fn ($department) => (bool) data_get($approval, "{$department}.approved", false))
+                        ->count(),
+                    'required_approvals' => 3,
+                    'element_count' => (int) ($materials?->elements_count ?? 0),
+                ]);
+            });
+
             return response()->json([
-                'data' => $query->get(),
+                'data' => $projects,
                 'message' => 'Projects retrieved successfully'
             ]);
         }); // No permission for debugging
