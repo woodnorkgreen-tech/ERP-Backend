@@ -44,6 +44,7 @@ class BoardRegistrationService
         ?int   $width     = null,
         ?int   $thickness = null,
         ?int   $userId    = null,
+        ?float $unitValue = null,
     ): array {
         $material->loadMissing(['workstation', 'materialCategory.parent']);
 
@@ -54,8 +55,9 @@ class BoardRegistrationService
         $length    = $length    ?? ($attrs['standard_length_mm'] ?? config('boards.default_dimensions.length', 2440));
         $width     = $width     ?? ($attrs['standard_width_mm']  ?? config('boards.default_dimensions.width',  1220));
         $thickness = $thickness ?? ($attrs['thickness_mm']       ?? config('boards.default_dimensions.thickness', 18));
+        $boardValue = $this->receiptValue($material, $unitValue);
 
-        return DB::transaction(function () use ($material, $quantity, $batchNumber, $length, $width, $thickness, $userId) {
+        return DB::transaction(function () use ($material, $quantity, $batchNumber, $length, $width, $thickness, $userId, $boardValue) {
             $boards = [];
             for ($i = 0; $i < $quantity; $i++) {
                 $boards[] = $this->registerBoard(
@@ -65,7 +67,7 @@ class BoardRegistrationService
                     length:    $length,
                     width:     $width,
                     thickness: $thickness,
-                    value:     (float) $material->unit_cost,
+                    value:     $boardValue,
                     userId:    $userId,
                     notes:     "Received — batch {$batchNumber}. Awaiting label print.",
                 );
@@ -112,6 +114,7 @@ class BoardRegistrationService
         ?int   $width     = null,
         ?int   $thickness = null,
         ?int   $userId    = null,
+        ?float $unitValue = null,
     ): array {
         if (is_int($material)) {
             $material = LibraryMaterial::with(['workstation', 'materialCategory.parent'])->findOrFail($material);
@@ -128,8 +131,9 @@ class BoardRegistrationService
         $length    = $length    ?? ($attrs['standard_length_mm'] ?? config('boards.default_dimensions.length', 2440));
         $width     = $width     ?? ($attrs['standard_width_mm']  ?? config('boards.default_dimensions.width',  1220));
         $thickness = $thickness ?? ($attrs['thickness_mm']       ?? config('boards.default_dimensions.thickness', 18));
+        $boardValue = $this->receiptValue($material, $unitValue);
 
-        return DB::transaction(function () use ($material, $quantity, $batchNumber, $length, $width, $thickness, $userId) {
+        return DB::transaction(function () use ($material, $quantity, $batchNumber, $length, $width, $thickness, $userId, $boardValue) {
             $boards = [];
 
             for ($i = 0; $i < $quantity; $i++) {
@@ -140,7 +144,7 @@ class BoardRegistrationService
                     length:     $length,
                     width:      $width,
                     thickness:  $thickness,
-                    value:      (float) $material->unit_cost,
+                    value:      $boardValue,
                     userId:     $userId,
                     notes:      "Received — batch {$batchNumber}. Awaiting label print.",
                 );
@@ -202,6 +206,17 @@ class BoardRegistrationService
 
         $parentAreaM2  = ($parentBoard->length * $parentBoard->width) / 1_000_000;
         $offcutAreaM2  = ($length * $width) / 1_000_000;
+        if ($offcutAreaM2 >= $parentAreaM2) {
+            throw new \InvalidArgumentException('A remainder must be smaller than the original board. Return an untouched board through inspection instead.');
+        }
+        $minimumArea = (float) ($parentBoard->libraryMaterial->minimum_reusable_area_m2 ?? 0);
+        $minimumLength = (float) ($parentBoard->libraryMaterial->minimum_reusable_length_mm ?? 0);
+        $minimumWidth = (float) ($parentBoard->libraryMaterial->minimum_reusable_width_mm ?? 0);
+        if (($minimumArea > 0 && $offcutAreaM2 < $minimumArea)
+            || ($minimumLength > 0 && $length < $minimumLength)
+            || ($minimumWidth > 0 && $width < $minimumWidth)) {
+            throw new \InvalidArgumentException('The remainder is below this material’s minimum reusable dimensions and must be recorded as consumed or waste.');
+        }
         $proportion    = $parentAreaM2 > 0 ? $offcutAreaM2 / $parentAreaM2 : 0;
         $offcutValue   = round($parentBoard->current_value * $proportion, 2);
 
@@ -209,7 +224,7 @@ class BoardRegistrationService
             $offcut = $this->registerBoard(
                 material:      $parentBoard->libraryMaterial,
                 batch:         $parentBoard->batch_number . '-OFFCUT',
-                status:        'Available',   // offcuts are immediately usable
+                status:        'Quarantine',  // becomes Available only after Stores physically racks it
                 length:        $length,
                 width:         $width,
                 thickness:     $thickness,
@@ -221,6 +236,16 @@ class BoardRegistrationService
                 notes:         "Offcut from {$parentBoard->tracking_code}",
             );
 
+            // The remainder is still physically with Production. Preserve its
+            // project lineage until Stores scans it into the rack; do not count
+            // it as Stores stock merely because Production declared it.
+            $offcut->update([
+                'assigned_job_ref' => $parentBoard->assigned_job_ref,
+                'original_issue_log_id' => $parentBoard->original_issue_log_id,
+                'project_id' => $parentBoard->project_id,
+                'project_material_id' => $parentBoard->project_material_id,
+            ]);
+
             // Consume the parent
             $parentBoard->transitionTo(
                 'Consumed',
@@ -228,27 +253,30 @@ class BoardRegistrationService
                 "Consumed — offcut {$offcut->tracking_code} generated"
             );
 
-            // The offcut goes back into Available inventory — increment stock so
-            // quantity_on_hand stays in sync with COUNT(*) boards WHERE status = Available.
-            $stock = Stock::where('material_id', $parentBoard->library_material_id)->first();
-            if ($stock) {
-                $stock->increment('quantity_on_hand', 1);
-            }
-
-            InventoryLog::create([
-                'material_id'  => $parentBoard->library_material_id,
-                'user_id'      => $userId ?? \Illuminate\Support\Facades\Auth::id(),
-                'type'         => 'return',
-                'usage_type'   => 'reusable',
-                'batch_number' => $parentBoard->batch_number . '-OFFCUT',
-                'quantity'     => 1,
-                'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
-                'notes'        => "Offcut {$offcut->tracking_code} returned to Available from parent {$parentBoard->tracking_code}",
-                'logged_at'    => now(),
-            ]);
-
             return $offcut;
         });
+    }
+
+    /**
+     * What one received board is worth.
+     *
+     * The receipt price is the truth for a physical board: it is what this
+     * delivery actually cost, not a blended catalogue average. Board issue and
+     * every downstream project cost are gated on this being non-zero, so a
+     * board received without a value is unissuable until someone repairs it.
+     *
+     * The catalogue fallback re-reads the material because check-in updates
+     * `unit_cost` through its own model instance inside adjustStock. The caller
+     * is holding an instance loaded before that write, so reading `unit_cost`
+     * off it would use the pre-receipt figure — zero, for a first delivery.
+     */
+    private function receiptValue(LibraryMaterial $material, ?float $unitValue): float
+    {
+        if ($unitValue !== null && $unitValue > 0) {
+            return $unitValue;
+        }
+
+        return (float) ($material->newQuery()->whereKey($material->getKey())->value('unit_cost') ?? 0);
     }
 
     // ─── Private core ─────────────────────────────────────────────────────────
@@ -318,8 +346,15 @@ class BoardRegistrationService
     {
         $fromCategory = strtoupper($material->materialCategory?->code ?? '');
         $fromSubcat   = strtoupper(preg_replace('/[^A-Z0-9]/i', '', substr($material->subcategory ?? '', 0, 4)));
-        $fromWs       = strtoupper($material->workstation?->code ?? '');
+        $fromWs       = strtoupper(preg_replace('/[^A-Z0-9]/i', '', $material->workstation?->code ?? ''));
         $catCode      = $fromCategory ?: $fromSubcat ?: $fromWs ?: 'BRD';
+
+        // tracking_code is char(30) and the rest of the format costs 14, so the
+        // category segment has 16 to work with. Seeded category codes are short,
+        // but the workstation fallback is user-entered and unbounded — without
+        // this clamp a long workstation code makes board registration die on a
+        // raw column-length error rather than producing a usable code.
+        $catCode = substr($catCode, 0, 16) ?: 'BRD';
 
         $year   = now()->year;
         $prefix = "WNG-{$catCode}-{$year}-";

@@ -9,6 +9,8 @@ use App\Modules\ProcurementStores\Models\InventoryLog;
 use App\Modules\ProcurementStores\Models\InventoryLot;
 use App\Modules\ProcurementStores\Models\InventorySerialItem;
 use App\Modules\ProcurementStores\Models\Stock;
+use App\Modules\ProcurementStores\Models\StoresFinancePosting;
+use App\Modules\ProcurementStores\Jobs\ProcessStoresFinancePosting;
 use App\Modules\ProcurementStores\Services\BoardRegistrationService;
 use App\Modules\ProcurementStores\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
@@ -18,6 +20,90 @@ use Illuminate\Validation\ValidationException;
 
 class ProcurementStoresController extends Controller
 {
+    public function financeSyncExceptions(): JsonResponse
+    {
+        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to view Stores accounting exceptions.'], 403);
+        }
+
+        $postings = StoresFinancePosting::with([
+                'inventoryLog.material:id,material_name,material_code',
+                'inventoryLog.project:id,project_id', 'costLine:id,ref',
+            ])
+            ->whereIn('status', ['pending', 'processing', 'failed'])
+            ->latest()
+            ->limit(100)
+            ->get()
+            ->map(function (StoresFinancePosting $posting) {
+                $log = $posting->inventoryLog;
+                return [
+                    'id' => $posting->id, 'posting_type' => $posting->posting_type,
+                    'status' => $posting->status, 'attempts' => $posting->attempts,
+                    'last_error' => $posting->last_error,
+                    'next_retry_at' => $posting->next_retry_at?->toIso8601String(),
+                    'processing_started_at' => $posting->processing_started_at?->toIso8601String(),
+                    'needs_valuation' => $posting->posting_type === 'issue_cost'
+                        && str_contains(strtolower((string) $posting->last_error), 'unit cost'),
+                    'created_at' => $posting->created_at?->toIso8601String(),
+                    'cost_line' => $posting->costLine,
+                    'inventory_log_id' => $log?->id, 'type' => $log?->type,
+                    'quantity' => $log?->quantity, 'reference_no' => $log?->reference_no,
+                    'logged_at' => $log?->logged_at?->toIso8601String(),
+                    'material' => $log?->material, 'project' => $log?->project,
+                ];
+            });
+
+        return response()->json(['data' => $postings]);
+    }
+
+    public function retryFinanceSync(StoresFinancePosting $inventoryLog): JsonResponse
+    {
+        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to retry Stores accounting.'], 403);
+        }
+        if ($inventoryLog->status !== 'failed') {
+            return response()->json(['message' => 'Only a failed Finance posting can be retried.'], 422);
+        }
+
+        $inventoryLog->update([
+            'status' => 'pending', 'last_error' => null, 'next_retry_at' => null,
+            'last_retried_by' => auth()->id(),
+        ]);
+        ProcessStoresFinancePosting::dispatch($inventoryLog->id)->onQueue('stores-finance');
+
+        return response()->json(['message' => 'Finance posting queued. Stock will not move again.']);
+    }
+
+    public function resolveFinanceValuation(Request $request, StoresFinancePosting $inventoryLog): JsonResponse
+    {
+        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to resolve Stores valuation.'], 403);
+        }
+        $validated = $request->validate([
+            'unit_cost' => 'required|numeric|min:0.01',
+            'reason' => 'required|string|min:5|max:500',
+        ]);
+        if ($inventoryLog->status !== 'failed' || $inventoryLog->posting_type !== 'issue_cost') {
+            return response()->json(['message' => 'Only a failed Stores issue valuation can be resolved here.'], 422);
+        }
+
+        DB::transaction(function () use ($inventoryLog, $validated) {
+            $posting = StoresFinancePosting::whereKey($inventoryLog->id)->lockForUpdate()->firstOrFail();
+            $movement = InventoryLog::whereKey($posting->inventory_log_id)->lockForUpdate()->firstOrFail();
+            $movement->update(['receipt_unit_cost' => $validated['unit_cost']]);
+            Board::where('original_issue_log_id', $movement->id)->where('current_value', '<=', 0)
+                ->update(['current_value' => $validated['unit_cost']]);
+            $posting->update([
+                'status' => 'pending', 'last_error' => null, 'next_retry_at' => null,
+                'resolved_unit_cost' => $validated['unit_cost'], 'resolution_notes' => $validated['reason'],
+                'resolved_by' => auth()->id(), 'resolved_at' => now(), 'last_retried_by' => auth()->id(),
+            ]);
+            ProcessStoresFinancePosting::dispatch($posting->id)->onQueue('stores-finance')->afterCommit();
+        });
+
+        return response()->json(['message' => 'Valuation recorded and Finance posting queued.']);
+    }
+
     public function controlOptions(LibraryMaterial $material): JsonResponse
     {
         $lots = InventoryLot::where('material_id', $material->id)
@@ -327,6 +413,10 @@ class ProcurementStoresController extends Controller
                     width:       $request->width     ?? null,
                     thickness:   $request->thickness ?? null,
                     userId:      auth()->id(),
+                    // What this delivery actually cost per board. Without it the
+                    // boards inherit a catalogue average that is still zero on a
+                    // first receipt, and every one of them is unissuable.
+                    unitValue:   $request->filled('receipt_unit_cost') ? (float) $request->receipt_unit_cost : null,
                 );
                 $log->update(['usage_type' => 'reusable']);
             }
@@ -399,7 +489,7 @@ class ProcurementStoresController extends Controller
             }
             $issued = (float) InventoryLog::where('project_material_id', $planned->id)
                 ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
-                - (float) InventoryLog::where('project_material_id', $planned->id)->where('type', 'return')->sum('quantity');
+                - (float) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
             if ((float) $request->quantity > max(0, (float) $planned->quantity - $issued)) {
                 throw ValidationException::withMessages(['quantity' => 'Quantity exceeds the remaining approved project requirement.']);
             }
@@ -521,13 +611,23 @@ class ProcurementStoresController extends Controller
 
         $log = DB::transaction(function () use ($request) {
             $issue = InventoryLog::query()->lockForUpdate()
-                ->findOrFail($request->integer('original_issue_log_id'));
+                ->find($request->integer('original_issue_log_id'));
+            if (! $issue) {
+                throw ValidationException::withMessages([
+                    'original_issue_log_id' => 'This issue is no longer available. Refresh the project custody list and select the current issue.',
+                ]);
+            }
 
             if (! in_array($issue->type, ['check_out', 'issue', 'consumption'], true)) {
                 throw ValidationException::withMessages(['original_issue_log_id' => 'Select an original stock issue.']);
             }
             if ((int) $issue->material_id !== $request->integer('material_id')) {
                 throw ValidationException::withMessages(['material_id' => 'The returned material must match the original issue.']);
+            }
+            if ($issue->usage_type !== 'reusable') {
+                throw ValidationException::withMessages([
+                    'original_issue_log_id' => 'Consumable issues are final and cannot be returned to stock.',
+                ]);
             }
 
             $issued = abs((float) $issue->quantity);
@@ -681,6 +781,7 @@ class ProcurementStoresController extends Controller
                         width:       $item['width']     ?? null,
                         thickness:   $item['thickness'] ?? null,
                         userId:      auth()->id(),
+                        unitValue:   isset($item['receipt_unit_cost']) ? (float) $item['receipt_unit_cost'] : null,
                     );
                     $log->update(['usage_type' => 'reusable']);
                     $allBoards = array_merge($allBoards, $boards);
@@ -786,7 +887,7 @@ class ProcurementStoresController extends Controller
                     $netIssued = (float) InventoryLog::where('project_material_id', $planned->id)
                         ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
                         - (float) InventoryLog::where('project_material_id', $planned->id)
-                            ->where('type', 'return')->sum('quantity');
+                            ->fulfilmentReopeningReturns()->sum('quantity');
 
                     // Pre-linkage issues are allocated FIFO across repeated
                     // approved lines for the same catalogue material. This keeps
@@ -800,7 +901,7 @@ class ProcurementStoresController extends Controller
                         - (float) InventoryLog::where('project_id', $project->id)
                             ->where('material_id', $planned->library_material_id)
                             ->whereNull('project_material_id')
-                            ->where('type', 'return')->sum('quantity');
+                            ->fulfilmentReopeningReturns()->sum('quantity');
                     $earlierRequirement = (float) \App\Models\ElementMaterial::query()
                         ->where('library_material_id', $planned->library_material_id)
                         ->where('is_included', true)
@@ -854,7 +955,10 @@ class ProcurementStoresController extends Controller
      */
     public function inventoryLogs(Request $request): JsonResponse
     {
-        $query = InventoryLog::with(['material', 'user', 'project.enquiry']);
+        // materialCategory.parent feeds the appended board_trackable attribute,
+        // which the Project Material Desk uses to keep tracked boards out of the
+        // bulk return list. Without it that accessor lazy-loads once per row.
+        $query = InventoryLog::with(['material.materialCategory.parent', 'user', 'project.enquiry']);
 
         if ($request->filled('type')) {
             $query->where('type', $request->type);
@@ -1008,27 +1112,67 @@ class ProcurementStoresController extends Controller
      * Get outstanding reusable items grouped by job/project.
      *
      * Two sub-categories:
-     *  - Consumable-class reusables: linked by project_id FK
+     *  - Quantity or serial tracked reusable items linked by project_id FK
      *  - Board materials: issued via board requests; reference_no holds the job_ref
      */
     public function outstandingReusables(): JsonResponse
     {
-        $logs = InventoryLog::with(['material', 'project.enquiry'])
-            ->where('usage_type', 'reusable')
-            ->whereIn('type', ['check_out', 'return'])
-            ->get();
+        // Net the balances in SQL first and hydrate only the scopes that still
+        // hold stock. Loading every reusable movement ever recorded made this
+        // endpoint's cost track total movement history, when the response only
+        // ever describes the projects currently holding something.
+        $balanceExpression = "SUM(CASE WHEN type = 'check_out' THEN ABS(quantity) ELSE -quantity END) > 0";
 
-        $materialSummary = function ($groupedLogs) {
-            return $groupedLogs->groupBy('material_id')->map(function ($ml) {
+        $outstandingScope = fn () => InventoryLog::query()
+            ->where('usage_type', 'reusable')
+            ->whereIn('type', ['check_out', 'return']);
+
+        $outstandingProjectIds = $outstandingScope()
+            ->whereNotNull('project_id')
+            ->groupBy('project_id', 'material_id')
+            ->havingRaw($balanceExpression)
+            ->pluck('project_id')->unique()->values();
+
+        $outstandingJobRefs = $outstandingScope()
+            ->whereNull('project_id')->whereNotNull('reference_no')
+            ->groupBy('reference_no', 'material_id')
+            ->havingRaw($balanceExpression)
+            ->pluck('reference_no')->unique()->values();
+
+        $logs = $outstandingProjectIds->isEmpty() && $outstandingJobRefs->isEmpty()
+            ? collect()
+            : InventoryLog::with(['material', 'project.enquiry'])
+                ->where('usage_type', 'reusable')
+                ->whereIn('type', ['check_out', 'return'])
+                ->where(fn ($scope) => $scope
+                    ->whereIn('project_id', $outstandingProjectIds)
+                    ->orWhere(fn ($job) => $job->whereNull('project_id')->whereIn('reference_no', $outstandingJobRefs)))
+                ->get();
+
+        // A board issue is closed by physical identity, not only by a `return`
+        // quantity. Consumed and scrapped identities close project custody but
+        // must never increase stock or create a Finance return credit.
+        $boardsByIssue = Board::query()
+            ->whereIn('original_issue_log_id', $logs->where('type', 'check_out')->pluck('id'))
+            ->get(['id', 'original_issue_log_id', 'status'])
+            ->groupBy('original_issue_log_id');
+
+        $materialSummary = function ($groupedLogs) use ($boardsByIssue) {
+            return $groupedLogs->groupBy('material_id')->map(function ($ml) use ($boardsByIssue) {
                 $material = $ml->first()->material;
                 if (!$material) return null;
-                $issued   = abs($ml->where('type', 'check_out')->sum('quantity'));
-                $returned = (float) $ml->where('type', 'return')->sum('quantity');
-                $balance  = $issued - $returned;
-                $issues = $ml->where('type', 'check_out')->map(function (InventoryLog $issue) use ($ml) {
+                $issues = $ml->where('type', 'check_out')->map(function (InventoryLog $issue) use ($ml, $boardsByIssue) {
                     $issueQuantity = abs((float) $issue->quantity);
                     $linkedReturns = (float) $ml->where('type', 'return')
                         ->where('original_issue_log_id', $issue->id)->sum('quantity');
+                    $linkedBoards = $boardsByIssue->get($issue->id, collect());
+                    $closedBoards = $linkedBoards->whereIn('status', ['Available', 'Quarantine', 'Consumed', 'Scrapped'])->count();
+                    // Returned boards and recovered offcuts already have a return
+                    // movement. max(), rather than addition, prevents one parent
+                    // consumption plus its offcut recovery closing two units.
+                    $resolved = $linkedBoards->isNotEmpty()
+                        ? min($issueQuantity, max($linkedReturns, (float) $closedBoards))
+                        : min($issueQuantity, $linkedReturns);
 
                     return [
                         'id' => $issue->id,
@@ -1037,9 +1181,15 @@ class ProcurementStoresController extends Controller
                         'recipient_name' => $issue->recipient_name,
                         'issued' => $issueQuantity,
                         'returned' => $linkedReturns,
-                        'remaining' => max(0, $issueQuantity - $linkedReturns),
+                        'resolved' => $resolved,
+                        'remaining' => max(0, $issueQuantity - $resolved),
                     ];
-                })->filter(fn (array $issue) => $issue['remaining'] > 0)->values();
+                })->values();
+                $issued = (float) $issues->sum('issued');
+                $returned = (float) $issues->sum('returned');
+                $resolved = (float) $issues->sum('resolved');
+                $balance = (float) $issues->sum('remaining');
+                $openIssues = $issues->filter(fn (array $issue) => $issue['remaining'] > 0)->values();
                 return $balance > 0 ? [
                     'material_id'   => $material->id,
                     'material_name' => $material->material_name,
@@ -1047,8 +1197,9 @@ class ProcurementStoresController extends Controller
                     'unit'          => $material->unit_of_measure,
                     'issued'        => $issued,
                     'returned'      => $returned,
+                    'resolved'      => $resolved,
                     'balance'       => $balance,
-                    'issues'        => $issues,
+                    'issues'        => $openIssues,
                 ] : null;
             })->filter()->values();
         };
@@ -1065,6 +1216,9 @@ class ProcurementStoresController extends Controller
                     'project_id'   => $projectId,
                     'project_code' => $project->project_id ?? 'N/A',
                     'project_title'=> $project->enquiry?->title ?? 'N/A',
+                    'oldest_issued_at' => $projectLogs->where('type', 'check_out')->min(fn ($log) => $log->logged_at ?? $log->created_at)?->toIso8601String(),
+                    'days_outstanding' => (int) optional($projectLogs->where('type', 'check_out')->min(fn ($log) => $log->logged_at ?? $log->created_at))->diffInDays(now()),
+                    'custodians' => $projectLogs->where('type', 'check_out')->pluck('recipient_name')->filter()->unique()->values(),
                     'items'        => $items,
                 ] : null;
             })->filter()->values();
@@ -1077,6 +1231,9 @@ class ProcurementStoresController extends Controller
                 return $items->count() > 0 ? [
                     'ref_type' => 'job',
                     'job_ref'  => $jobRef,
+                    'oldest_issued_at' => $jobLogs->where('type', 'check_out')->min(fn ($log) => $log->logged_at ?? $log->created_at)?->toIso8601String(),
+                    'days_outstanding' => (int) optional($jobLogs->where('type', 'check_out')->min(fn ($log) => $log->logged_at ?? $log->created_at))->diffInDays(now()),
+                    'custodians' => $jobLogs->where('type', 'check_out')->pluck('recipient_name')->filter()->unique()->values(),
                     'items'    => $items,
                 ] : null;
             })->filter()->values();

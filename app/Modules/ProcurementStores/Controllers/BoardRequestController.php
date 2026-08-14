@@ -49,6 +49,10 @@ class BoardRequestController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to raise board requests.'], 403);
+        }
+
         $request->validate([
             'job_ref'  => 'required|string|max:100',
             'job_name' => 'nullable|string|max:255',
@@ -81,7 +85,7 @@ class BoardRequestController extends Controller
             $alreadyIssued = (float) InventoryLog::where('project_material_id', $planned->id)
                 ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
                 - (float) InventoryLog::where('project_material_id', $planned->id)
-                    ->where('type', 'return')->sum('quantity');
+                    ->fulfilmentReopeningReturns()->sum('quantity');
             if ((float) $request->qty > max(0, (float) $planned->quantity - $alreadyIssued)) {
                 return response()->json(['message' => 'Board quantity exceeds the remaining approved requirement.'], 422);
             }
@@ -187,77 +191,119 @@ class BoardRequestController extends Controller
             'board_ids.*' => 'integer|exists:boards,id',
         ]);
 
-        $boardRequest = BoardRequest::with('material')->findOrFail($id);
+        // Selection, eligibility and stock all resolve under one transaction so
+        // two storekeepers cannot claim the same physical board, and so a request
+        // can never be fulfilled beyond the quantity it reserved.
+        try {
+            [$boardRequest, $boards, $issueLog] = DB::transaction(function () use ($request, $id) {
+                $boardRequest = BoardRequest::with('material')->whereKey($id)->lockForUpdate()->firstOrFail();
 
-        if ($boardRequest->isFulfilled()) {
-            return response()->json(['message' => 'This request has already been fulfilled.'], 422);
+                if (! in_array($boardRequest->status, ['pending', 'partial'], true)) {
+                    throw new \InvalidArgumentException($boardRequest->status === 'cancelled'
+                        ? 'This request was cancelled and its reservation has already been released.'
+                        : 'This request has already been fulfilled.');
+                }
+
+                $needed = (int) $boardRequest->qty_requested - (int) $boardRequest->qty_fulfilled;
+                if ($needed < 1) {
+                    throw new \InvalidArgumentException('This request has no outstanding board quantity.');
+                }
+
+                // Use provided board IDs or auto-select FIFO. Either way the
+                // count is capped by what this request still has reserved —
+                // over-issuing here would bypass the approved-requirement check
+                // that store() applied when the request was raised.
+                if (!empty($request->board_ids)) {
+                    $ids = array_values(array_unique($request->board_ids));
+                    if (count($ids) > $needed) {
+                        throw new \InvalidArgumentException(
+                            "This request has only {$needed} board(s) outstanding. Raise another request for the rest."
+                        );
+                    }
+
+                    $boards = Board::whereIn('id', $ids)
+                        ->where('library_material_id', $boardRequest->material_id)
+                        ->where('status', 'Available')
+                        ->orderBy('id')
+                        ->lockForUpdate()
+                        ->get();
+
+                    if ($boards->count() !== count($ids)) {
+                        throw new \InvalidArgumentException('One or more selected boards are not available.');
+                    }
+                } else {
+                    $boards = Board::where('library_material_id', $boardRequest->material_id)
+                        ->where('status', 'Available')
+                        ->oldest()
+                        ->limit($needed)
+                        ->lockForUpdate()
+                        ->get();
+                }
+
+                if ($boards->isEmpty()) {
+                    throw new \InvalidArgumentException('No available boards found for this material.');
+                }
+                if ($boards->contains(fn (Board $board) => (float) $board->current_value <= 0)) {
+                    throw new \InvalidArgumentException(
+                        'One or more selected boards have no recorded value. Record their receipt valuation before issue.'
+                    );
+                }
+
+                foreach ($boards as $board) {
+                    $board->transitionTo('Allocated', auth()->id(),
+                        "Issued for job {$boardRequest->job_ref} — request #{$boardRequest->id}",
+                        $boardRequest->job_ref
+                    );
+                }
+
+                $fulfilled = $boards->count();
+                $boardRequest->increment('qty_fulfilled', $fulfilled);
+
+                $newTotal = $boardRequest->qty_fulfilled;
+                $boardRequest->update([
+                    'status'       => $newTotal >= $boardRequest->qty_requested ? 'fulfilled' : 'partial',
+                    'fulfilled_by' => auth()->id(),
+                    'fulfilled_at' => now(),
+                ]);
+
+                // Release reservation, deduct stock. The row is locked for the
+                // rest of this transaction so a concurrent fulfilment or cancel
+                // cannot read the same balance and race it negative.
+                $stock = Stock::where('material_id', $boardRequest->material_id)->lockForUpdate()->first();
+                if ($stock) {
+                    $stock->decrement('quantity_reserved', $fulfilled);
+                    $stock->decrement('quantity_on_hand', $fulfilled);
+                }
+
+                $issueLog = InventoryLog::create([
+                    'material_id'  => $boardRequest->material_id,
+                    'user_id'      => auth()->id(),
+                    'type'         => 'check_out',
+                    'usage_type'   => 'reusable',
+                    'quantity'     => -$fulfilled,
+                    'receipt_unit_cost' => $boards->avg(fn (Board $board) => (float) $board->current_value),
+                    'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
+                    'project_id' => $boardRequest->project_id,
+                    'project_material_id' => $boardRequest->project_material_id,
+                    'reference_no' => $boardRequest->job_ref,   // enables outstandingReusables grouping by job
+                    'recipient_name' => $boardRequest->recipient_name,
+                    'notes'        => "{$fulfilled} board(s) issued to job {$boardRequest->job_ref}. "
+                        . 'Codes: ' . $boards->pluck('tracking_code')->join(', '),
+                    'logged_at'    => now(),
+                ]);
+
+                Board::whereIn('id', $boards->pluck('id'))->update([
+                    'original_issue_log_id' => $issueLog->id,
+                    'board_request_id' => $boardRequest->id,
+                    'project_id' => $boardRequest->project_id,
+                    'project_material_id' => $boardRequest->project_material_id,
+                ]);
+
+                return [$boardRequest, $boards, $issueLog];
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
-
-        $needed = $boardRequest->qty_requested - $boardRequest->qty_fulfilled;
-
-        // Use provided board IDs or auto-select FIFO
-        if (!empty($request->board_ids)) {
-            $boards = Board::whereIn('id', $request->board_ids)
-                ->where('library_material_id', $boardRequest->material_id)
-                ->where('status', 'Available')
-                ->get();
-
-            if ($boards->count() !== count($request->board_ids)) {
-                return response()->json(['message' => 'One or more selected boards are not available.'], 422);
-            }
-        } else {
-            $boards = Board::where('library_material_id', $boardRequest->material_id)
-                ->where('status', 'Available')
-                ->oldest()
-                ->limit($needed)
-                ->get();
-        }
-
-        if ($boards->isEmpty()) {
-            return response()->json(['message' => 'No available boards found for this material.'], 422);
-        }
-
-        $issueLog = DB::transaction(function () use ($boards, $boardRequest) {
-            foreach ($boards as $board) {
-                $board->transitionTo('Allocated', auth()->id(),
-                    "Issued for job {$boardRequest->job_ref} — request #{$boardRequest->id}",
-                    $boardRequest->job_ref
-                );
-            }
-
-            $fulfilled = $boards->count();
-            $boardRequest->increment('qty_fulfilled', $fulfilled);
-
-            $newTotal = $boardRequest->qty_fulfilled;
-            $boardRequest->update([
-                'status'       => $newTotal >= $boardRequest->qty_requested ? 'fulfilled' : 'partial',
-                'fulfilled_by' => auth()->id(),
-                'fulfilled_at' => now(),
-            ]);
-
-            // Release reservation, deduct stock
-            $stock = Stock::where('material_id', $boardRequest->material_id)->first();
-            if ($stock) {
-                $stock->decrement('quantity_reserved', $fulfilled);
-                $stock->decrement('quantity_on_hand', $fulfilled);
-            }
-
-            return InventoryLog::create([
-                'material_id'  => $boardRequest->material_id,
-                'user_id'      => auth()->id(),
-                'type'         => 'check_out',
-                'usage_type'   => 'reusable',
-                'quantity'     => -$fulfilled,
-                'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
-                'project_id' => $boardRequest->project_id,
-                'project_material_id' => $boardRequest->project_material_id,
-                'reference_no' => $boardRequest->job_ref,   // enables outstandingReusables grouping by job
-                'recipient_name' => $boardRequest->recipient_name,
-                'notes'        => "{$fulfilled} board(s) issued to job {$boardRequest->job_ref}. "
-                    . 'Codes: ' . $boards->pluck('tracking_code')->join(', '),
-                'logged_at'    => now(),
-            ]);
-        });
 
         // Board issues are cost-bearing Stores issues too. The generic inventory
         // service dispatches this automatically; this specialized lifecycle owns
@@ -280,20 +326,38 @@ class BoardRequestController extends Controller
      */
     public function cancel(int $id): JsonResponse
     {
-        $boardRequest = BoardRequest::findOrFail($id);
-
-        if ($boardRequest->isFulfilled()) {
-            return response()->json(['message' => 'Cannot cancel a fulfilled request.'], 422);
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to cancel board requests.'], 403);
         }
 
-        DB::transaction(function () use ($boardRequest) {
-            $unreleased = $boardRequest->qty_requested - $boardRequest->qty_fulfilled;
+        try {
+            DB::transaction(function () use ($id) {
+                $boardRequest = BoardRequest::whereKey($id)->lockForUpdate()->firstOrFail();
 
-            Stock::where('material_id', $boardRequest->material_id)
-                ->decrement('quantity_reserved', $unreleased);
+                // Releasing a reservation is a once-only act. Guarding on
+                // 'fulfilled' alone let an already-cancelled request release
+                // the same quantity again, driving quantity_reserved negative
+                // and reporting more stock available than physically exists.
+                if (! in_array($boardRequest->status, ['pending', 'partial'], true)) {
+                    throw new \InvalidArgumentException($boardRequest->status === 'cancelled'
+                        ? 'This request is already cancelled and its reservation has been released.'
+                        : 'Cannot cancel a fulfilled request.');
+                }
 
-            $boardRequest->update(['status' => 'cancelled']);
-        });
+                $unreleased = (int) $boardRequest->qty_requested - (int) $boardRequest->qty_fulfilled;
+
+                if ($unreleased > 0) {
+                    $stock = Stock::where('material_id', $boardRequest->material_id)->lockForUpdate()->first();
+                    if ($stock) {
+                        $stock->decrement('quantity_reserved', min($unreleased, (int) $stock->quantity_reserved));
+                    }
+                }
+
+                $boardRequest->update(['status' => 'cancelled']);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response()->json(['message' => 'Board request cancelled and reservation released.']);
     }
