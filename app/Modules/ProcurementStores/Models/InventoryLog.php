@@ -29,10 +29,15 @@ class InventoryLog extends Model
         'project_id',
         'project_material_id',
         'original_issue_log_id',
+        'return_kind',
         'supplier_id',
         'reference_no',
         'recipient_name',
         'notes',
+        'finance_sync_status',
+        'finance_sync_attempts',
+        'finance_sync_error',
+        'finance_synced_at',
         'usage_type',
         'logged_at'
     ];
@@ -43,6 +48,7 @@ class InventoryLog extends Model
         'balance_after' => 'decimal:2',
         'logged_at' => 'datetime',
         'expiry_date' => 'date',
+        'finance_synced_at' => 'datetime',
     ];
 
     public function material(): BelongsTo
@@ -78,5 +84,20 @@ class InventoryLog extends Model
     public function returns()
     {
         return $this->hasMany(self::class, 'original_issue_log_id');
+    }
+
+    /**
+     * Returns of the originally issued item reopen an approved requirement.
+     * Recovered offcuts reduce project cost but do not mean the project needs
+     * another full board. The notes fallback keeps pre-migration offcuts correct.
+     */
+    public function scopeFulfilmentReopeningReturns($query)
+    {
+        return $query->where('type', 'return')
+            ->where(function ($scope) {
+                $scope->whereNull('return_kind')
+                    ->where(fn ($legacy) => $legacy->whereNull('notes')->orWhere('notes', 'not like', 'Offcut %'))
+                    ->orWhere('return_kind', '!=', 'recovered_offcut');
+            });
     }
 }

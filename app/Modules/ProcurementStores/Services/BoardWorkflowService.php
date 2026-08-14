@@ -10,6 +10,8 @@ use App\Models\User;
 use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\BoardRequest;
 use App\Modules\ProcurementStores\Models\BoardWorkflowTask;
+use App\Modules\ProcurementStores\Models\InventoryLog;
+use App\Modules\ProcurementStores\Models\Stock;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -226,9 +228,10 @@ class BoardWorkflowService
      * Storekeeper confirms that an offcut or returned board has been racked.
      * Handles both TYPE_OFFCUT_TO_RETURN and TYPE_BOARD_RETURNED tasks.
      */
-    public function returnOffcut(int $taskId, User $actor): BoardWorkflowTask
+    public function returnOffcut(int $taskId, User $actor, ?string $conditionGrade = null, ?string $notes = null): BoardWorkflowTask
     {
-        return DB::transaction(function () use ($taskId, $actor) {
+        $recoveryLog = null;
+        $task = DB::transaction(function () use ($taskId, $actor, $conditionGrade, $notes, &$recoveryLog) {
             $task = BoardWorkflowTask::where('id', $taskId)
                 ->whereIn('task_type', [
                     BoardWorkflowTask::TYPE_OFFCUT_TO_RETURN,
@@ -241,17 +244,62 @@ class BoardWorkflowService
             // Payload key differs by task type: offcuts use 'offcut_id', board returns use 'board_id'
             $boardId = $task->payload['offcut_id'] ?? $task->payload['board_id'] ?? null;
             if ($boardId) {
-                $board = Board::findOrFail($boardId);
+                $board = Board::whereKey($boardId)->lockForUpdate()->firstOrFail();
                 $note  = $task->task_type === BoardWorkflowTask::TYPE_OFFCUT_TO_RETURN
                     ? 'Offcut physically returned to rack by storekeeper'
                     : 'Board physically returned to rack by storekeeper';
 
                 if ($board->hasStatus('Quarantine')) {
-                    // Board was graded C/D and placed in Quarantine on return from production.
-                    // Storekeeper now confirms it is racked and available — use transitionTo()
-                    // so board.status is properly updated (not just the movement log).
-                    $board->transitionTo('Available', $actor->id, $note);
-                    $board->update(['assigned_job_ref' => null]);
+                    if ($task->task_type === BoardWorkflowTask::TYPE_OFFCUT_TO_RETURN) {
+                        $accepted = in_array($conditionGrade, ['A', 'B'], true);
+                        if ($accepted) {
+                            $board->transitionTo('Available', $actor->id, $notes ?: $note, null, $conditionGrade);
+                        } else {
+                            $board->update(['condition_grade' => $conditionGrade]);
+                            \App\Modules\ProcurementStores\Models\BoardMovement::create([
+                                'board_id' => $board->id, 'from_status' => 'Quarantine', 'to_status' => 'Quarantine',
+                                'performed_by' => $actor->id, 'notes' => $notes, 'job_ref' => $task->job_ref,
+                                'condition_grade' => $conditionGrade,
+                            ]);
+                        }
+                        $stock = Stock::where('material_id', $board->library_material_id)->lockForUpdate()->first();
+                        if ($stock) $stock->increment('quantity_on_hand', 1);
+                        $recoveryLog = InventoryLog::create([
+                            'material_id' => $board->library_material_id,
+                            'user_id' => $actor->id,
+                            'type' => 'return',
+                            'usage_type' => 'reusable',
+                            'batch_number' => $board->batch_number,
+                            'quantity' => 1,
+                            'receipt_unit_cost' => $board->current_value,
+                            'balance_after' => $stock?->fresh()->quantity_on_hand ?? 0,
+                            'original_issue_log_id' => $board->original_issue_log_id,
+                            'return_kind' => 'recovered_offcut',
+                            'project_id' => $board->project_id,
+                            'project_material_id' => $board->project_material_id,
+                            'reference_no' => $task->job_ref,
+                            'notes' => "Offcut {$board->tracking_code} physically received from parent board #{$board->parent_board_id}",
+                            'logged_at' => now(),
+                        ]);
+                        $board->update([
+                            'return_received_at' => now(),
+                            'return_received_by' => $actor->id,
+                            'return_log_id' => $recoveryLog->id,
+                            'quarantine_review_status' => $accepted ? null : 'pending',
+                        ]);
+                        if (!$accepted) $recoveryLog = null; // Finance waits for manager valuation/release.
+                    } else {
+                        // Racking a damaged return confirms location, not quality.
+                        $board->update(['assigned_job_ref' => null]);
+                        \App\Modules\ProcurementStores\Models\BoardMovement::create([
+                            'board_id' => $board->id,
+                            'from_status' => 'Quarantine',
+                            'to_status' => 'Quarantine',
+                            'performed_by' => $actor->id,
+                            'notes' => $note . ' — remains quarantined pending supervisor review',
+                            'job_ref' => $task->job_ref,
+                        ]);
+                    }
                 } elseif ($board->hasStatus('Available')) {
                     // Board already Available (normal offcut path) — clear job ref and
                     // write a racking confirmation note without changing status.
@@ -274,6 +322,10 @@ class BoardWorkflowService
 
             return $task->fresh();
         });
+
+        if ($recoveryLog) \App\Events\Stores\StockReturned::dispatch($recoveryLog);
+
+        return $task;
     }
 
     /**
@@ -303,10 +355,10 @@ class BoardWorkflowService
     /**
      * Return pending workflow tasks for a given role (the action inbox).
      */
-    public function pendingTasksForRole(string $role): \Illuminate\Database\Eloquent\Collection
+    public function pendingTasksForRoles(array $roles): \Illuminate\Database\Eloquent\Collection
     {
         return BoardWorkflowTask::with(['boardRequest.material', 'assignedUser'])
-            ->where('assigned_role', $role)
+            ->whereIn('assigned_role', $roles)
             ->whereIn('status', ['pending', 'in_progress'])
             ->orderBy('due_at')
             ->get();

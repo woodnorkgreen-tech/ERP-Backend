@@ -25,6 +25,9 @@ Route::post('/defective', [ProcurementStoresController::class, 'markDefective'])
 Route::get('/inventory-logs', [ProcurementStoresController::class, 'inventoryLogs']);
 Route::get('/inventory-logs/pdf', [ProcurementStoresController::class, 'inventoryLogsPdf']);
 Route::get('/outstanding-reusables', [ProcurementStoresController::class, 'outstandingReusables']);
+Route::get('/finance-sync-exceptions', [ProcurementStoresController::class, 'financeSyncExceptions']);
+Route::post('/finance-sync-exceptions/{inventoryLog}/retry', [ProcurementStoresController::class, 'retryFinanceSync']);
+Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [ProcurementStoresController::class, 'resolveFinanceValuation']);
 Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'destroyLog']);
 
 // Suppliers
@@ -95,6 +98,8 @@ Route::get('/boards/my-wip',                               [BoardController::cla
 Route::get('/boards/command-center-metrics',         [BoardController::class, 'commandCenterMetrics']);
 Route::get('/boards/stock-registry',                 [BoardController::class, 'stockRegistry']);
 Route::get('/boards/compliance-exceptions',          [BoardController::class, 'complianceExceptions']);
+Route::get('/boards/quarantine-returns',             [BoardController::class, 'quarantineReturns']);
+Route::post('/boards/{id}/review-quarantine-return', [BoardController::class, 'reviewQuarantineReturn']);
 Route::get('/boards/consumption-details',            [BoardController::class, 'consumptionDetails']);
 
 // QR scan lookup — must be before /{id} to avoid conflict
@@ -102,10 +107,15 @@ Route::get('/boards/by-code/{trackingCode}',         [BoardController::class, 's
 
 // Query endpoints
 Route::get('/boards/available',                      [BoardController::class, 'available']);
+Route::get('/boards/job/{jobRef}/history',           [BoardController::class, 'jobHistory']);
 Route::get('/boards/job/{jobRef}',                   [BoardController::class, 'byJob']);
 Route::post('/boards/job/{jobRef}/calculate-variance', [BoardController::class, 'calculateVariance']);
 Route::post('/boards/job/{jobRef}/dispatch-to-station',[BoardController::class, 'dispatchToStation']);
 Route::post('/boards/job/{jobRef}/start-wip',          [BoardController::class, 'startWip']);
+Route::post('/boards/job/{jobRef}/bulk-return',        [BoardController::class, 'bulkReturn']);
+Route::post('/boards/job/{jobRef}/return-batches',     [BoardController::class, 'initiateReturnBatch']);
+Route::get('/boards/return-batches',                   [BoardController::class, 'returnBatches']);
+Route::post('/boards/return-batches/{batch}/mark-missing', [BoardController::class, 'markReturnBatchMissing']);
 
 // Label confirmation
 Route::post('/boards/batch/{batchNumber}/confirm-labels', [BoardController::class, 'confirmLabels']);
@@ -117,6 +127,9 @@ Route::post('/boards/reconciliation',        [BoardController::class, 'saveRecon
 // Lifecycle transitions
 Route::post('/boards/{id}/start-processing',         [BoardController::class, 'startProcessing']);
 Route::post('/boards/{id}/consume',                  [BoardController::class, 'consume']);
+Route::post('/boards/{id}/initiate-return',           [BoardController::class, 'initiateReturn']);
+Route::post('/boards/{id}/receive-return',            [BoardController::class, 'receiveReturn']);
+Route::post('/boards/{id}/note',                      [BoardController::class, 'addNote']);
 Route::post('/boards/{id}/transition',               [BoardController::class, 'transition']);
 
 // CRUD

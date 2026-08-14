@@ -85,6 +85,23 @@ class LibraryMaterial extends Model
     protected $hidden = [];
 
     /**
+     * Board classification is a server-owned rule. Appending it means every
+     * serialization of a material carries the authoritative answer, so clients
+     * never have to re-derive it from tracking_mode and disposition and drift
+     * out of step with isBoardTrackable().
+     *
+     * Eager-load materialCategory.parent alongside this wherever a collection
+     * of materials is serialized — the category fallback path would otherwise
+     * lazy-load once per row.
+     */
+    protected $appends = ['board_trackable'];
+
+    public function getBoardTrackableAttribute(): bool
+    {
+        return $this->isBoardTrackable();
+    }
+
+    /**
      * Get the workstation that owns the material.
      */
     public function workstation(): BelongsTo
