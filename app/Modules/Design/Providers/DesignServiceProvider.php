@@ -5,6 +5,7 @@ namespace App\Modules\Design\Providers;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use App\Modules\Design\Console\Commands\SyncPrintingHandoffs;
 use App\Modules\Design\Console\Commands\SyncUpcomingDesignJobs;
 
 class DesignServiceProvider extends ServiceProvider
@@ -21,6 +22,7 @@ class DesignServiceProvider extends ServiceProvider
 
         if ($this->app->runningInConsole()) {
             $this->commands([
+                SyncPrintingHandoffs::class,
                 SyncUpcomingDesignJobs::class,
             ]);
         }

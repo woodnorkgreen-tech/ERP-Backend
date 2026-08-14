@@ -12,6 +12,7 @@ use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Design\Services\DesignItemReadinessService;
 use App\Modules\Design\Services\DesignNotificationService;
 use App\Modules\Design\Services\DimensionConversionService;
+use App\Modules\Printing\Services\PrintIntakeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -21,6 +22,7 @@ class DesignItemController extends Controller
         private readonly DimensionConversionService $dimensions,
         private readonly DesignItemReadinessService $readiness,
         private readonly DesignHandoffService $handoffs,
+        private readonly PrintIntakeService $printingIntake,
         private readonly DesignNotificationService $notifications
     ) {
     }
@@ -120,11 +122,12 @@ class DesignItemController extends Controller
             'updated_by' => auth()->id(),
         ]);
 
-        $this->handoffs->createPrintingHandoffOnce($item->fresh(['job.enquiry.client', 'type', 'printMaterial', 'documents']));
+        $handoff = $this->handoffs->createPrintingHandoffOnce($item->fresh(['job.enquiry.client', 'type', 'printMaterial', 'documents']));
+        $this->printingIntake->accept($handoff);
         $this->notifications->notifyItemReady($item->fresh(['job.enquiry.client', 'type']));
 
         return response()->json([
-            'message' => 'Graphic Design marked print ready and synced to Printing',
+            'message' => 'Graphic Design marked print ready and queued in Printing',
             'data' => new DesignItemResource($item->fresh(['job', 'type', 'printMaterial', 'documents', 'handoffs'])),
         ]);
     }

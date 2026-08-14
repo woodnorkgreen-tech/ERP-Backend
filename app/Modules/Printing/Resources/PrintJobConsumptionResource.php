@@ -18,6 +18,7 @@ class PrintJobConsumptionResource extends JsonResource
             'artwork_height_m' => $this->float('artwork_height_m'),
             'artwork_count' => $this->artwork_count,
             'quantity' => $this->float('quantity'),
+            'tile_count' => $this->tile_count,
             'bleed_preset' => $this->bleed_preset,
             'bleed_left_m' => $this->float('bleed_left_m'),
             'bleed_right_m' => $this->float('bleed_right_m'),
@@ -34,6 +35,15 @@ class PrintJobConsumptionResource extends JsonResource
             'variance_percent' => $this->float('variance_percent'),
             'variance_reason' => $this->variance_reason,
             'roll' => $this->whenLoaded('roll', fn () => new PrintRollResource($this->roll)),
+            'job' => $this->whenLoaded('job', fn () => [
+                'id' => $this->job->id,
+                'title' => $this->job->title,
+                'job_number' => $this->job->job_number,
+                'status' => $this->job->status,
+                'completed_at' => $this->job->completed_at,
+            ]),
+            'created_at' => $this->created_at,
+            'updated_at' => $this->updated_at,
         ];
     }
 

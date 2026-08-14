@@ -55,7 +55,7 @@ class PrintMaterialRequestController extends Controller
             'stores_inventory_log_id' => ['nullable', 'integer', 'exists:inventory_logs,id'],
             'rolls' => ['required', 'array', 'min:1'],
             'rolls.*.received_length_m' => ['required', 'numeric', 'min:0.001'],
-            'rolls.*.roll_width_m' => ['nullable', 'numeric', 'min:0'],
+            'rolls.*.roll_width_m' => ['required', 'numeric', 'min:0.001'],
             'rolls.*.received_at' => ['nullable', 'date'],
             'rolls.*.location' => ['nullable', 'string', 'max:255'],
             'rolls.*.notes' => ['nullable', 'string', 'max:3000'],
@@ -79,5 +79,18 @@ class PrintMaterialRequestController extends Controller
             'data' => new PrintMaterialRequestResource($materialRequest->fresh('material')),
             'rolls' => PrintRollResource::collection($created),
         ]);
+    }
+
+    public function destroy(PrintMaterialRequest $materialRequest): JsonResponse
+    {
+        if ($materialRequest->rolls()->exists()) {
+            return response()->json([
+                'message' => 'This request has received rolls and cannot be deleted. Delete the unused rolls first.',
+            ], 422);
+        }
+
+        $materialRequest->delete();
+
+        return response()->json(null, 204);
     }
 }

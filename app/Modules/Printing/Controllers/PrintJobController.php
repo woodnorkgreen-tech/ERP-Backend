@@ -3,6 +3,8 @@
 namespace App\Modules\Printing\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Assets\Models\AssetCategory;
+use App\Modules\HR\Models\Department;
 use App\Modules\Printing\Models\PrintJob;
 use App\Modules\Printing\Resources\PrintJobConsumptionResource;
 use App\Modules\Printing\Resources\PrintJobResource;
@@ -10,6 +12,7 @@ use App\Modules\Printing\Services\PrintJobService;
 use App\Modules\Printing\Services\PrintMaterialUsageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class PrintJobController extends Controller
 {
@@ -22,7 +25,7 @@ class PrintJobController extends Controller
     public function index(Request $request): JsonResponse
     {
         $jobs = PrintJob::query()
-            ->with(['consumptions.roll', 'operator', 'machine'])
+            ->with(['consumptions' => fn ($query) => $query->latest(), 'consumptions.roll', 'operator', 'machine'])
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('tab'), fn ($q) => $this->applyTab($q, (string) $request->get('tab')))
             ->when($request->filled('order_type'), fn ($q) => $q->where('order_type', $request->string('order_type')))
@@ -30,6 +33,10 @@ class PrintJobController extends Controller
             ->when($request->filled('project_enquiry_id'), fn ($q) => $q->where('project_enquiry_id', $request->integer('project_enquiry_id')))
             ->when($request->filled('operator_id'), fn ($q) => $q->where('operator_id', $request->integer('operator_id')))
             ->when($request->filled('machine_asset_id'), fn ($q) => $q->where('machine_asset_id', $request->integer('machine_asset_id')))
+            ->when($request->filled('material_id'), fn ($q) => $q->whereHas('consumptions', fn ($inner) => $inner->where('material_id', $request->integer('material_id'))))
+            ->when($request->filled('print_roll_id'), fn ($q) => $q->whereHas('consumptions', fn ($inner) => $inner->where('print_roll_id', $request->integer('print_roll_id'))))
+            ->when($request->filled('date_from'), fn ($q) => $q->whereRaw('DATE(COALESCE(completed_at, scheduled_at, created_at)) >= ?', [$request->date('date_from')->format('Y-m-d')]))
+            ->when($request->filled('date_to'), fn ($q) => $q->whereRaw('DATE(COALESCE(completed_at, scheduled_at, created_at)) <= ?', [$request->date('date_to')->format('Y-m-d')]))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $term = '%' . $request->get('search') . '%';
                 $q->where(fn ($inner) => $inner
@@ -115,6 +122,7 @@ class PrintJobController extends Controller
             'artwork_height_m' => ['nullable', 'numeric', 'min:0'],
             'artwork_count' => ['nullable', 'integer', 'min:1'],
             'quantity' => ['nullable', 'numeric', 'min:0'],
+            'tile_count' => ['nullable', 'integer', 'min:1'],
             'bleed_preset' => ['nullable', 'string', 'max:100'],
             'bleed_left_m' => ['nullable', 'numeric', 'min:0'],
             'bleed_right_m' => ['nullable', 'numeric', 'min:0'],
@@ -146,10 +154,44 @@ class PrintJobController extends Controller
             'order_type' => ['sometimes', 'in:original,reprint,test,internal,outsourced'],
             'due_date' => ['nullable', 'date'],
             'scheduled_at' => ['nullable', 'date'],
-            'operator_id' => ['nullable', 'integer', 'exists:users,id'],
-            'machine_asset_id' => ['nullable', 'integer', 'exists:assets,id'],
+            'operator_id' => ['nullable', 'integer', $this->designOperatorRule()],
+            'machine_asset_id' => ['nullable', 'integer', $this->printingMachineRule()],
             'remarks' => ['nullable', 'string', 'max:3000'],
             'status' => ['sometimes', 'in:queued,preflight,ready_to_print,printing,printed,qc_failed,reprint_required,completed,cancelled'],
         ];
+    }
+
+    private function designOperatorRule()
+    {
+        $departmentIds = Department::query()
+            ->where('name', 'like', '%design%')
+            ->orWhere('name', 'like', '%creative%')
+            ->pluck('id');
+
+        return Rule::exists('users', 'id')
+            ->where(fn ($query) => $query
+                ->where('is_active', true)
+                ->whereIn('department_id', $departmentIds));
+    }
+
+    private function printingMachineRule()
+    {
+        $categoryIds = AssetCategory::query()
+            ->where('name', 'like', '%print%')
+            ->pluck('id');
+        $departmentIds = Department::query()
+            ->where('name', 'like', '%print%')
+            ->pluck('id');
+
+        return Rule::exists('assets', 'id')
+            ->where(fn ($query) => $query
+                ->where('is_active', true)
+                ->whereNull('deleted_at')
+                ->where(fn ($inner) => $inner
+                    ->where('name', 'like', '%print%')
+                    ->orWhere('category', 'like', '%print%')
+                    ->orWhere('subcategory', 'like', '%print%')
+                    ->orWhereIn('category_id', $categoryIds)
+                    ->orWhereIn('department_id', $departmentIds)));
     }
 }

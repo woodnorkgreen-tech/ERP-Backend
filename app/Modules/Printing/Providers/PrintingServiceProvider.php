@@ -2,6 +2,7 @@
 
 namespace App\Modules\Printing\Providers;
 
+use App\Modules\Printing\Console\Commands\DedupePrintJobs;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 
@@ -11,6 +12,12 @@ class PrintingServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom(__DIR__ . '/../Database/Migrations');
         $this->registerRoutes();
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                DedupePrintJobs::class,
+            ]);
+        }
     }
 
     protected function registerRoutes(): void

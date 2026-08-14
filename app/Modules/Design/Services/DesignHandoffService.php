@@ -16,11 +16,21 @@ class DesignHandoffService
             ->where('target_module', 'printing')
             ->first();
 
-        if ($existing) {
+        if ($existing && $existing->status !== 'pending') {
             return $existing;
         }
 
         $artwork = $this->finalArtworkLink($item);
+
+        if ($existing) {
+            $existing->update([
+                'payload_snapshot' => $this->printingPayload($item, $artwork),
+                'handed_off_by' => auth()->id(),
+                'handed_off_at' => now(),
+            ]);
+
+            return $existing->fresh();
+        }
 
         return DesignHandoff::create([
             'design_item_id' => $item->id,
@@ -110,6 +120,10 @@ class DesignHandoffService
             'width_value' => $item->width_value !== null ? (float) $item->width_value : null,
             'length_m' => $item->length_m !== null ? (float) $item->length_m : null,
             'width_m' => $item->width_m !== null ? (float) $item->width_m : null,
+            'design_height_m' => $item->width_m !== null ? (float) $item->width_m : null,
+            'design_length_m' => $item->length_m !== null ? (float) $item->length_m : null,
+            'print_width_m' => $item->width_m !== null ? (float) $item->width_m : null,
+            'running_length_m' => $item->length_m !== null ? (float) $item->length_m : null,
             'print_material_id' => $item->print_material_id,
             'print_material_name' => $item->printMaterial?->material_name
                 ?? $item->printMaterial?->name,

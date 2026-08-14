@@ -32,6 +32,11 @@ class PrintJob extends Model
         'final_artwork_url',
         'final_artwork_document_id',
         'artwork_version',
+        'design_height_m',
+        'design_length_m',
+        'print_width_m',
+        'running_length_m',
+        'artwork_quantity',
         'order_type',
         'reprint_of_job_id',
         'reprint_reason',
@@ -54,6 +59,11 @@ class PrintJob extends Model
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
         'artwork_version' => 'integer',
+        'design_height_m' => 'decimal:3',
+        'design_length_m' => 'decimal:3',
+        'print_width_m' => 'decimal:3',
+        'running_length_m' => 'decimal:3',
+        'artwork_quantity' => 'decimal:3',
     ];
 
     public function handoff(): BelongsTo

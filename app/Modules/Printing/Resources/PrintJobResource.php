@@ -25,6 +25,11 @@ class PrintJobResource extends JsonResource
             'final_artwork_url' => $this->final_artwork_url,
             'final_artwork_document_id' => $this->final_artwork_document_id,
             'artwork_version' => $this->artwork_version,
+            'design_height_m' => $this->float('design_height_m'),
+            'design_length_m' => $this->float('design_length_m'),
+            'print_width_m' => $this->float('print_width_m'),
+            'running_length_m' => $this->float('running_length_m'),
+            'artwork_quantity' => $this->float('artwork_quantity'),
             'order_type' => $this->order_type,
             'reprint_of_job_id' => $this->reprint_of_job_id,
             'reprint_reason' => $this->reprint_reason,
@@ -43,5 +48,10 @@ class PrintJobResource extends JsonResource
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];
+    }
+
+    private function float(string $key): ?float
+    {
+        return $this->{$key} !== null ? (float) $this->{$key} : null;
     }
 }

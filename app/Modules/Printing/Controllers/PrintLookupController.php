@@ -5,6 +5,7 @@ namespace App\Modules\Printing\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Modules\Assets\Models\Asset;
+use App\Modules\HR\Models\Department;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,7 +33,15 @@ class PrintLookupController extends Controller
     public function machines(Request $request): JsonResponse
     {
         $machines = Asset::query()
+            ->with(['assetCategory:id,name', 'department:id,name'])
             ->active()
+            ->where(function ($q) {
+                $q->where('name', 'like', '%print%')
+                    ->orWhere('category', 'like', '%print%')
+                    ->orWhere('subcategory', 'like', '%print%')
+                    ->orWhereHas('assetCategory', fn ($category) => $category->where('name', 'like', '%print%'))
+                    ->orWhereHas('department', fn ($department) => $department->where('name', 'like', '%print%'));
+            })
             ->when($request->filled('search'), fn ($q) => $q->search($request->get('search')))
             ->orderBy('name')
             ->limit((int) $request->get('limit', 12))
@@ -41,6 +50,8 @@ class PrintLookupController extends Controller
                 'id' => $asset->id,
                 'name' => $asset->name,
                 'asset_code' => $asset->asset_code,
+                'category' => $asset->assetCategory?->name ?? $asset->category,
+                'department' => $asset->department?->name,
             ]);
 
         return response()->json(['data' => $machines]);
@@ -48,14 +59,30 @@ class PrintLookupController extends Controller
 
     public function operators(Request $request): JsonResponse
     {
+        $designDepartmentIds = Department::query()
+            ->where('name', 'like', '%design%')
+            ->orWhere('name', 'like', '%creative%')
+            ->pluck('id');
+
         $operators = User::query()
+            ->with('department:id,name')
+            ->active()
+            ->whereIn('department_id', $designDepartmentIds)
             ->when($request->filled('search'), function ($q) use ($request) {
                 $term = '%' . $request->get('search') . '%';
-                $q->where('name', 'like', $term)->orWhere('email', 'like', $term);
+                $q->where(fn ($inner) => $inner
+                    ->where('name', 'like', $term)
+                    ->orWhere('email', 'like', $term));
             })
             ->orderBy('name')
             ->limit((int) $request->get('limit', 12))
-            ->get(['id', 'name', 'email']);
+            ->get()
+            ->map(fn ($operator) => [
+                'id' => $operator->id,
+                'name' => $operator->name,
+                'email' => $operator->email,
+                'department' => $operator->department?->name,
+            ]);
 
         return response()->json(['data' => $operators]);
     }
