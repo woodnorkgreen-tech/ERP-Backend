@@ -50,6 +50,13 @@ class InventoryService
         return DB::transaction(function () use ($materialId, $quantity, $type, $meta) {
             $material = LibraryMaterial::findOrFail($materialId);
             $usageType = $material->expectedUsageType();
+            // A catalogue item may be reclassified after it was issued. Return
+            // custody is governed by the immutable original movement, otherwise
+            // changing master data can silently erase an existing obligation.
+            if ($type === 'return' && !empty($meta['original_issue_log_id'])) {
+                $usageType = InventoryLog::whereKey($meta['original_issue_log_id'])->value('usage_type')
+                    ?: $usageType;
+            }
 
             if ($quantity < 0 && ($material->item_status ?? 'Active') !== 'Active') {
                 throw new \DomainException("{$material->material_name} cannot be issued while its item status is {$material->item_status}.");
@@ -117,6 +124,7 @@ class InventoryService
                 'project_id' => $meta['project_id'] ?? null,
                 'project_material_id' => $meta['project_material_id'] ?? null,
                 'original_issue_log_id' => $meta['original_issue_log_id'] ?? null,
+                'return_kind' => $type === 'return' ? ($meta['return_kind'] ?? 'whole_item') : null,
                 'supplier_id' => $meta['supplier_id'] ?? null,
                 'reference_no' => $meta['reference_no'] ?? null,
                 'recipient_name' => $meta['recipient_name'] ?? $meta['requestor_name'] ?? null,
