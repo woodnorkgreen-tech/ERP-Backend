@@ -18,7 +18,7 @@ class StoreDesignItemRequest extends FormRequest
             'project_deliverable_id' => 'nullable|integer|exists:project_deliverables,id',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'status' => 'nullable|in:pending,in_design,submitted,awaiting_client_approval,client_approved,client_changes_requested,approved,done,not_approved,cancelled,print_ready,production_ready,handed_off',
+            'status' => 'nullable|in:pending,in_design,awaiting_client_approval,client_changes_requested,done,cancelled,print_ready,production_ready',
             'assigned_to' => 'nullable|integer|exists:users,id',
             'quantity' => 'nullable|numeric|min:0',
             'dimension_unit' => 'nullable|in:m,cm,mm',

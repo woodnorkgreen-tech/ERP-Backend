@@ -16,6 +16,8 @@ use Illuminate\Validation\Rule;
 
 class PrintJobController extends Controller
 {
+    private const PILOT_STATUSES = ['queued', 'printing', 'reprint_required', 'completed', 'cancelled'];
+
     public function __construct(
         private readonly PrintJobService $jobs,
         private readonly PrintMaterialUsageService $usage
@@ -45,7 +47,7 @@ class PrintJobController extends Controller
                     ->orWhere('project_name', 'like', $term)
                     ->orWhere('client_name', 'like', $term));
             })
-            ->orderByRaw("FIELD(status, 'queued', 'preflight', 'ready_to_print', 'printing', 'printed', 'qc_failed', 'reprint_required', 'completed', 'cancelled')")
+            ->orderByRaw("FIELD(status, 'queued', 'printing', 'reprint_required', 'completed', 'cancelled', 'preflight', 'ready_to_print', 'printed', 'qc_failed')")
             ->latest()
             ->paginate((int) $request->get('per_page', 30));
 
@@ -67,7 +69,7 @@ class PrintJobController extends Controller
     public function status(Request $request, PrintJob $job): JsonResponse
     {
         $data = $request->validate([
-            'status' => ['required', 'in:queued,preflight,ready_to_print,printing,printed,qc_failed,reprint_required,completed,cancelled'],
+            'status' => ['required', 'in:' . implode(',', self::PILOT_STATUSES)],
             'reason' => ['nullable', 'string', 'max:2000'],
         ]);
 
@@ -92,7 +94,7 @@ class PrintJobController extends Controller
     {
         $data = $request->validate([
             'reason' => ['required', 'string', 'max:2000'],
-            'status' => ['nullable', 'in:queued,preflight,ready_to_print,printing,printed,qc_failed,reprint_required,completed,cancelled'],
+            'status' => ['nullable', 'in:' . implode(',', self::PILOT_STATUSES)],
         ]);
 
         $job->events()->create([
@@ -140,9 +142,9 @@ class PrintJobController extends Controller
     private function applyTab($query, string $tab)
     {
         return match ($tab) {
-            'queue' => $query->whereIn('status', ['queued', 'preflight', 'ready_to_print']),
-            'in_progress' => $query->whereIn('status', ['printing', 'printed']),
-            'needs_attention' => $query->whereIn('status', ['qc_failed', 'reprint_required']),
+            'queue' => $query->where('status', 'queued'),
+            'in_progress' => $query->where('status', 'printing'),
+            'needs_attention' => $query->where('status', 'reprint_required'),
             'completed' => $query->where('status', 'completed'),
             default => $query,
         };
@@ -151,13 +153,12 @@ class PrintJobController extends Controller
     private function updateRules(): array
     {
         return [
-            'order_type' => ['sometimes', 'in:original,reprint,test,internal,outsourced'],
             'due_date' => ['nullable', 'date'],
             'scheduled_at' => ['nullable', 'date'],
             'operator_id' => ['nullable', 'integer', $this->designOperatorRule()],
             'machine_asset_id' => ['nullable', 'integer', $this->printingMachineRule()],
             'remarks' => ['nullable', 'string', 'max:3000'],
-            'status' => ['sometimes', 'in:queued,preflight,ready_to_print,printing,printed,qc_failed,reprint_required,completed,cancelled'],
+            'status' => ['sometimes', 'in:' . implode(',', self::PILOT_STATUSES)],
         ];
     }
 

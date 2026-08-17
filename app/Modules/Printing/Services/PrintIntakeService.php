@@ -40,6 +40,7 @@ class PrintIntakeService
                 $payload = $handoff->payload_snapshot ?? [];
                 $existing->update(array_filter([
                     'design_handoff_id' => $existing->design_handoff_id ?: $handoff->id,
+                    'original_design_handoff_id' => $existing->original_design_handoff_id ?: $handoff->id,
                     'design_height_m' => $payload['design_height_m'] ?? $payload['width_m'] ?? null,
                     'design_length_m' => $payload['design_length_m'] ?? $payload['length_m'] ?? null,
                     'print_width_m' => $payload['print_width_m'] ?? $payload['width_m'] ?? null,
@@ -57,13 +58,14 @@ class PrintIntakeService
 
             $job = PrintJob::create([
                 'design_handoff_id' => $handoff->id,
+                'original_design_handoff_id' => $handoff->id,
                 'design_item_id' => $payload['design_item_id'] ?? $handoff->design_item_id,
                 'design_job_id' => $payload['design_job_id'] ?? null,
                 'project_enquiry_id' => $payload['project_enquiry_id'] ?? null,
                 'project_id' => $payload['project_id'] ?? null,
                 'client_id' => $payload['client_id'] ?? null,
                 'job_number' => $payload['job_number'] ?? null,
-                'project_name' => $payload['job_title'] ?? null,
+                'project_name' => $payload['project_name'] ?? $payload['job_title'] ?? null,
                 'client_name' => $payload['client_name'] ?? null,
                 'title' => $payload['title'] ?? 'Print job',
                 'description' => $payload['type'] ?? null,

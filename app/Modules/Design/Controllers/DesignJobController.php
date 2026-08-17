@@ -88,9 +88,8 @@ class DesignJobController extends Controller
                 'all' => (int) $counts->sum(),
                 'pending' => (int) $counts->get('pending', 0),
                 'in_design' => (int) $counts->get('in_design', 0),
-                'submitted' => (int) $counts->get('submitted', 0),
-                'approved' => (int) $counts->get('approved', 0),
-                'handed_off' => (int) $counts->get('handed_off', 0),
+                'done' => (int) $counts->get('done', 0),
+                'cancelled' => (int) $counts->get('cancelled', 0),
             ],
         ]);
     }

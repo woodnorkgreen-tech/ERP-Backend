@@ -34,11 +34,10 @@ class DesignDashboardController extends Controller
         $designerMetrics = DesignItem::query()
             ->with('assignedUser:id,name,email')
             ->selectRaw('assigned_to, count(*) as total')
-            ->selectRaw("sum(case when status in ('pending', 'in_design', 'submitted', 'awaiting_client_approval', 'client_changes_requested') then 1 else 0 end) as active")
+            ->selectRaw("sum(case when status in ('pending', 'in_design', 'awaiting_client_approval', 'client_changes_requested') then 1 else 0 end) as active")
             ->selectRaw("sum(case when status = 'done' then 1 else 0 end) as done")
             ->selectRaw("sum(case when status = 'print_ready' then 1 else 0 end) as print_ready")
             ->selectRaw("sum(case when status = 'production_ready' then 1 else 0 end) as production_ready")
-            ->selectRaw("sum(case when status = 'handed_off' then 1 else 0 end) as handed_off")
             ->whereNotNull('assigned_to')
             ->groupBy('assigned_to')
             ->orderByDesc('total')
@@ -52,7 +51,6 @@ class DesignDashboardController extends Controller
                 'done' => (int) $item->done,
                 'print_ready' => (int) $item->print_ready,
                 'production_ready' => (int) $item->production_ready,
-                'handed_off' => (int) $item->handed_off,
             ])
             ->values();
 
@@ -62,22 +60,20 @@ class DesignDashboardController extends Controller
             ->groupBy('design_handoffs.status')
             ->pluck('total', 'handoff_status');
 
-        $activeStatuses = ['pending', 'in_design', 'submitted', 'awaiting_client_approval', 'client_changes_requested'];
+        $activeStatuses = ['pending', 'in_design', 'awaiting_client_approval', 'client_changes_requested'];
 
         return response()->json([
             'data' => [
-                'active_jobs' => DesignJob::whereNotIn('status', ['cancelled', 'handed_off'])->count(),
+                'active_jobs' => DesignJob::whereNotIn('status', ['cancelled', 'done'])->count(),
                 'total_items' => (clone $itemScope)->count(),
                 'active_items' => (clone $itemScope)->whereIn('status', $activeStatuses)->count(),
                 'graphic_in_progress' => (clone $itemScope)->where('stream', 'graphic')->whereIn('status', $activeStatuses)->count(),
                 'structural_in_progress' => (clone $itemScope)->where('stream', 'structural')->whereIn('status', $activeStatuses)->count(),
                 'awaiting_client_approval' => (int) ($statusCounts['awaiting_client_approval'] ?? 0),
-                'client_approved' => (int) ($statusCounts['client_approved'] ?? 0),
                 'client_changes_requested' => (int) ($statusCounts['client_changes_requested'] ?? 0),
                 'done' => (int) ($statusCounts['done'] ?? 0),
                 'print_ready' => (int) ($statusCounts['print_ready'] ?? 0),
                 'production_ready' => (int) ($statusCounts['production_ready'] ?? 0),
-                'handed_off' => (int) ($statusCounts['handed_off'] ?? 0),
                 'rejected_handoffs' => (int) ($handoffCounts['rejected'] ?? 0),
                 'status_counts' => $statusCounts,
                 'stream_counts' => $streamCounts,

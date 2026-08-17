@@ -17,7 +17,7 @@ class PrintingDashboardService
         return [
             'kpis' => [
                 'queued_jobs' => (clone $jobs)->where('status', 'queued')->count(),
-                'in_progress_jobs' => (clone $jobs)->whereIn('status', ['preflight', 'ready_to_print', 'printing', 'printed'])->count(),
+                'in_progress_jobs' => (clone $jobs)->where('status', 'printing')->count(),
                 'completed_jobs' => (clone $jobs)->where('status', 'completed')->count(),
                 'reprints' => (clone $jobs)->where('order_type', 'reprint')->count(),
                 'low_rolls' => PrintRoll::where('status', 'active')->where('remaining_length_m', '<=', 5)->count(),

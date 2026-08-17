@@ -75,11 +75,6 @@ class DesignHandoffService
             'responded_at' => now(),
         ]);
 
-        $handoff->item()->update([
-            'status' => 'handed_off',
-            'updated_by' => auth()->id(),
-        ]);
-
         return $handoff->fresh();
     }
 
@@ -111,6 +106,7 @@ class DesignHandoffService
             'client_name' => $item->job?->enquiry?->client?->full_name
                 ?? $item->job?->enquiry?->client?->name,
             'job_number' => $item->job?->job_number,
+            'project_name' => $item->job?->enquiry?->title ?? $item->job?->title,
             'job_title' => $item->job?->title,
             'title' => $item->title,
             'type' => $item->type?->name,

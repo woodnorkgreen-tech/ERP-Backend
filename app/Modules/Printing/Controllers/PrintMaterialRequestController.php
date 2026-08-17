@@ -9,6 +9,8 @@ use App\Modules\Printing\Resources\PrintRollResource;
 use App\Modules\Printing\Services\PrintRollService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class PrintMaterialRequestController extends Controller
 {
@@ -51,6 +53,12 @@ class PrintMaterialRequestController extends Controller
 
     public function receive(Request $request, PrintMaterialRequest $materialRequest): JsonResponse
     {
+        if (in_array($materialRequest->status, ['received', 'rejected', 'cancelled'], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['This material request cannot receive more rolls.'],
+            ]);
+        }
+
         $data = $request->validate([
             'stores_inventory_log_id' => ['nullable', 'integer', 'exists:inventory_logs,id'],
             'rolls' => ['required', 'array', 'min:1'],
@@ -61,24 +69,26 @@ class PrintMaterialRequestController extends Controller
             'rolls.*.notes' => ['nullable', 'string', 'max:3000'],
         ]);
 
-        $created = collect($data['rolls'])->map(function (array $roll) use ($data, $materialRequest) {
-            return $this->rolls->createRoll($roll + [
-                'material_id' => $materialRequest->material_id,
-                'print_material_request_id' => $materialRequest->id,
-                'source_inventory_log_id' => $data['stores_inventory_log_id'] ?? $materialRequest->stores_inventory_log_id,
+        return DB::transaction(function () use ($data, $materialRequest) {
+            $created = collect($data['rolls'])->map(function (array $roll) use ($data, $materialRequest) {
+                return $this->rolls->createRoll($roll + [
+                    'material_id' => $materialRequest->material_id,
+                    'print_material_request_id' => $materialRequest->id,
+                    'source_inventory_log_id' => $data['stores_inventory_log_id'] ?? $materialRequest->stores_inventory_log_id,
+                ]);
+            });
+
+            $materialRequest->update([
+                'status' => 'received',
+                'stores_inventory_log_id' => $data['stores_inventory_log_id'] ?? $materialRequest->stores_inventory_log_id,
+                'received_by' => auth()->id(),
+            ]);
+
+            return response()->json([
+                'data' => new PrintMaterialRequestResource($materialRequest->fresh('material')),
+                'rolls' => PrintRollResource::collection($created),
             ]);
         });
-
-        $materialRequest->update([
-            'status' => 'received',
-            'stores_inventory_log_id' => $data['stores_inventory_log_id'] ?? $materialRequest->stores_inventory_log_id,
-            'received_by' => auth()->id(),
-        ]);
-
-        return response()->json([
-            'data' => new PrintMaterialRequestResource($materialRequest->fresh('material')),
-            'rolls' => PrintRollResource::collection($created),
-        ]);
     }
 
     public function destroy(PrintMaterialRequest $materialRequest): JsonResponse

@@ -42,8 +42,6 @@ class DesignHandoffController extends Controller
             'handed_off_at' => now(),
         ]);
 
-        $item->update(['status' => 'handed_off', 'updated_by' => auth()->id()]);
-
         return response()->json([
             'message' => 'Design item handed off successfully',
             'data' => new DesignHandoffResource($handoff),

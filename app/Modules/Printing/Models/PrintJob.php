@@ -19,6 +19,7 @@ class PrintJob extends Model
 
     protected $fillable = [
         'design_handoff_id',
+        'original_design_handoff_id',
         'design_item_id',
         'design_job_id',
         'project_enquiry_id',

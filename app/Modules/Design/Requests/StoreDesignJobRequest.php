@@ -20,7 +20,7 @@ class StoreDesignJobRequest extends FormRequest
             'job_number' => 'nullable|string|max:100',
             'title' => 'required|string|max:255',
             'source_type' => 'nullable|in:project_scope,manual,revision,internal_concept',
-            'status' => 'nullable|in:pending,in_design,submitted,approved,not_approved,cancelled,partially_handed_off,handed_off',
+            'status' => 'nullable|in:pending,in_design,done,cancelled',
             'priority' => 'nullable|in:low,normal,high,urgent',
             'due_date' => 'nullable|date',
         ];

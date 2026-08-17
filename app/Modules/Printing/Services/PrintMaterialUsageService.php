@@ -7,6 +7,7 @@ use App\Modules\Printing\Models\PrintJobConsumption;
 use App\Modules\Printing\Models\PrintManualConsumption;
 use App\Modules\Printing\Models\PrintRoll;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class PrintMaterialUsageService
 {
@@ -21,6 +22,13 @@ class PrintMaterialUsageService
         return DB::transaction(function () use ($job, $data) {
             $consumption = $job->consumptions()->latest('id')->lockForUpdate()->first();
             $roll = PrintRoll::query()->lockForUpdate()->findOrFail($data['print_roll_id']);
+            $previousRollId = $consumption?->print_roll_id;
+            if ($roll->status !== 'active' && $previousRollId !== $roll->id) {
+                throw ValidationException::withMessages([
+                    'print_roll_id' => ['Select an active roll before recording material usage.'],
+                ]);
+            }
+
             $data['artwork_width_m'] = $data['artwork_width_m'] ?? $job->print_width_m;
             $data['artwork_height_m'] = $data['artwork_height_m'] ?? $job->running_length_m;
             $data['quantity'] = $data['quantity'] ?? $job->artwork_quantity ?? 1;
@@ -28,7 +36,6 @@ class PrintMaterialUsageService
             $calculated = $this->calculator->calculate($data);
             $actual = (float) ($data['actual_running_m'] ?? $calculated['calculated_running_m'] ?? 0);
             $previousActual = $consumption ? (float) $consumption->actual_running_m : 0;
-            $previousRollId = $consumption?->print_roll_id;
 
             $payload = array_merge($data, $calculated, [
                 'material_id' => $roll->material_id,
