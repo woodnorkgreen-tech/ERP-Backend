@@ -349,6 +349,10 @@ class LeaveManagementService
                 $advanceAvailableDays = $leaveType->allow_advance
                     ? max($requestableDays - $accruedRemaining, 0)
                     : 0;
+                // Displayed "used" folds in manual adjustments (e.g. a balance correction for
+                // leave taken outside the system) so it stays consistent with "available" —
+                // otherwise the two figures visibly stop adding up to the allocation.
+                $displayedUsedDays = $usedDays + $adjustmentDays;
 
                 return [
                     'leave_type_id' => $leaveType->id,
@@ -359,7 +363,7 @@ class LeaveManagementService
                     'allocated_days' => $metrics['year_entitlement_days'],
                     'earned_days' => $metrics['earned_days'],
                     'carry_forward_days' => $carryForwardDays,
-                    'used_days' => $usedDays,
+                    'used_days' => $displayedUsedDays,
                     'pending_days' => $pendingDays,
                     'adjustment_days' => $adjustmentDays,
                     'available_days' => $accruedRemaining,
