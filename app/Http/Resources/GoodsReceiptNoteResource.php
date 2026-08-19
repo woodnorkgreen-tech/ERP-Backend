@@ -15,6 +15,7 @@ class GoodsReceiptNoteResource extends JsonResource
             'batch_number' => $this->batch_number,
             'store_location' => $this->store_location,
             'quality_check' => $this->quality_check,
+            'store_status' => $this->store_status,
             'notes' => $this->notes,
             
             'purchase_order' => $this->whenLoaded('purchaseOrder', function () {
