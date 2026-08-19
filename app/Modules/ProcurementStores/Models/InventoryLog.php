@@ -24,6 +24,7 @@ class InventoryLog extends Model
         'project_id',
         'supplier_id',
         'reference_no',
+        'unit_price',
         'recipient_name',
         'notes',
         'usage_type',
@@ -33,6 +34,7 @@ class InventoryLog extends Model
     protected $casts = [
         'quantity' => 'decimal:2',
         'balance_after' => 'decimal:2',
+        'unit_price' => 'decimal:2',
         'logged_at' => 'datetime'
     ];
 
