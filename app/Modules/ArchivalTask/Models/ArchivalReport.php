@@ -93,6 +93,15 @@ class ArchivalReport extends Model
         'reviewer_sign_date',
         // Status
         'status',
+        'submitted_by',
+        'submitted_at',
+        'approved_by',
+        'approved_at',
+        'correction_requested_by',
+        'correction_requested_at',
+        'correction_notes',
+        'correction_resolved_at',
+        'revision_number',
         'created_by',
     ];
 
@@ -104,6 +113,11 @@ class ArchivalReport extends Model
         'setdown_date' => 'date',
         'project_officer_sign_date' => 'date',
         'reviewer_sign_date' => 'date',
+        'submitted_at' => 'datetime',
+        'approved_at' => 'datetime',
+        'correction_requested_at' => 'datetime',
+        'correction_resolved_at' => 'datetime',
+        'revision_number' => 'integer',
         'materials_mrf_attached' => 'boolean',
         'all_deliverables_available' => 'boolean',
         'setup_aligned_to_schedule' => 'boolean',
@@ -112,7 +126,6 @@ class ArchivalReport extends Model
         'client_kept_informed' => 'boolean',
         'delivered_on_schedule' => 'boolean',
         'delivery_issues' => 'boolean',
-        'client_confidence' => 'boolean',
         'client_confidence' => 'boolean',
         'checklist_ppt' => 'boolean',
         'checklist_cutlist' => 'boolean',
@@ -150,6 +163,11 @@ class ArchivalReport extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function correctionRequester(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'correction_requested_by');
     }
 
     /**

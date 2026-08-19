@@ -9,6 +9,7 @@ use App\Modules\Logistics\Controllers\DeliveryController;
 use App\Modules\Logistics\Controllers\DriverDeliveryController;
 use App\Modules\Logistics\Controllers\MaintenanceController;
 use App\Modules\Logistics\Controllers\InspectionController;
+use App\Constants\Permissions;
 
 // ── Fleet (drivers & vehicles) ────────────────────────────────────────────────
 Route::prefix('fleet')->group(function () {
@@ -61,10 +62,12 @@ Route::prefix('logistics')->group(function () {
     // Deliveries
     Route::get('/deliveries',                           [DeliveryController::class, 'index']);
     Route::get('/deliveries/{delivery}',                [DeliveryController::class, 'show']);
-    Route::patch('/deliveries/{delivery}/start',        [DeliveryController::class, 'start']);
-    Route::patch('/deliveries/{delivery}/cancel',       [DeliveryController::class, 'cancel']);
-    Route::patch('/deliveries/{delivery}/edit',         [DeliveryController::class, 'edit']);  
-    Route::patch('/deliveries/{delivery}/stops/{stop}', [DeliveryController::class, 'updateStop']);
+    Route::middleware('permission:' . Permissions::LOGISTICS_DELIVERIES_MANAGE)->group(function () {
+        Route::patch('/deliveries/{delivery}/start',        [DeliveryController::class, 'start']);
+        Route::patch('/deliveries/{delivery}/cancel',       [DeliveryController::class, 'cancel']);
+        Route::patch('/deliveries/{delivery}/edit',         [DeliveryController::class, 'edit']);
+        Route::patch('/deliveries/{delivery}/stops/{stop}', [DeliveryController::class, 'updateStop']);
+    });
 
     // Driver App (Flutter)
     Route::prefix('driver')->group(function () {

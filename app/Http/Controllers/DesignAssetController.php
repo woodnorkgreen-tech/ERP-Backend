@@ -232,11 +232,13 @@ class DesignAssetController extends Controller
      */
     public function approve($task, $asset)
     {
-        // Manually resolve the DesignAsset model
-        $designAsset = DesignAsset::findOrFail($asset);
-        
-        // TODO: Add authorization policy when implemented
-        // $this->authorize('approve', $designAsset);
+        $designTask = \App\Modules\Projects\Models\EnquiryTask::whereKey($task)
+            ->where('type', 'design')
+            ->firstOrFail();
+        abort_unless($designTask->isUserAuthorized(auth()->user()), 403, 'You are not authorized to approve assets for this Design task.');
+        $designAsset = DesignAsset::whereKey($asset)
+            ->where('enquiry_task_id', $designTask->id)
+            ->firstOrFail();
 
         $designAsset->update([
             'status' => 'approved',
@@ -244,9 +246,12 @@ class DesignAssetController extends Controller
             'approved_at' => now(),
         ]);
 
+        app(\App\Modules\Projects\Actions\AutoSyncTaskStateAction::class)->execute($designTask->fresh());
+
         return response()->json([
             'message' => 'Asset approved successfully',
-            'asset' => $designAsset->load(['uploader', 'approver'])
+            'asset' => $designAsset->load(['uploader', 'approver']),
+            'task_status' => $designTask->fresh()->status,
         ]);
     }
 

@@ -19,6 +19,9 @@ class ClientProfileController extends Controller
      */
     private const ACTIVE_DELIVERY_STATUSES = ['in_transit'];
 
+    /** Confirmed dispatches Client Service must follow before and after departure. */
+    private const DELIVERY_FOLLOW_UP_STATUSES = ['pending', 'in_transit'];
+
     /**
      * A stop still awaiting the client — not yet completed. This is the real
      * combined-trip guard: on a shared vehicle one client's drop can already be
@@ -88,12 +91,13 @@ class ClientProfileController extends Controller
     }
 
     /**
-     * List of clients that currently have goods on an in-transit delivery.
-     * Powers the "Out for delivery" grouping + row indicator on the clients table.
+     * Clients with a confirmed delivery awaiting departure or already in transit.
+     * Draft dispatch batches are intentionally excluded: they are still internal
+     * planning and should not be communicated as a committed client delivery.
      */
     public function activeDeliveryClients(): JsonResponse
     {
-        $clients = Delivery::whereIn('status', self::ACTIVE_DELIVERY_STATUSES)
+        $clients = Delivery::whereIn('status', self::DELIVERY_FOLLOW_UP_STATUSES)
             ->whereHas('stops', fn ($q) => $q->whereIn('status', self::ACTIVE_STOP_STATUSES))
             ->with([
                 // Only the still-pending stops carry a client who is genuinely awaiting.
@@ -101,14 +105,28 @@ class ClientProfileController extends Controller
                 'stops.tripRequest.project.client',
             ])
             ->get()
-            ->flatMap(fn ($d) => $d->stops)
-            ->map(fn ($s) => $s->tripRequest?->project?->client)
+            ->flatMap(fn ($delivery) => $delivery->stops->map(function ($stop) use ($delivery) {
+                $client = $stop->tripRequest?->project?->client;
+
+                return $client ? compact('client', 'delivery') : null;
+            }))
             ->filter()
-            ->unique('id')
-            ->map(fn ($c) => [
-                'id' => $c->id,
-                'name' => $c->full_name ?? $c->company_name ?? 'Client',
-            ])
+            ->groupBy(fn ($item) => $item['client']->id)
+            ->map(function ($items) {
+                $client = $items->first()['client'];
+                $deliveries = $items->pluck('delivery')->unique('id');
+                $inTransit = $deliveries->firstWhere('status', 'in_transit');
+                $nextDelivery = $deliveries->sortBy('delivery_date')->first();
+
+                return [
+                    'id' => $client->id,
+                    'name' => $client->full_name ?? $client->company_name ?? 'Client',
+                    'stage' => $inTransit ? 'in_transit' : 'scheduled',
+                    'delivery_count' => $deliveries->count(),
+                    'delivery_code' => ($inTransit ?? $nextDelivery)?->delivery_code,
+                    'delivery_date' => $nextDelivery?->delivery_date?->toDateString(),
+                ];
+            })
             ->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)
             ->values();
 

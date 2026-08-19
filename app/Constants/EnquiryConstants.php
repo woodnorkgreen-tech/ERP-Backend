@@ -61,6 +61,13 @@ class EnquiryConstants
         'Procurement' => ['materials', 'procurement', 'budget'],
         'Procurement Officer' => ['materials', 'procurement', 'budget'],
         'Production' => ['materials', 'teams', 'production', 'budget'],
+        // Client Service is a collaborating department on logistics tasks
+        // (see TASK_TYPE_DEPARTMENT_MAPPING) but that grant only fires when
+        // the user's department_id happens to match the department row —
+        // role and department are independent fields, so a Client Service
+        // user without that exact department set had no path in. This is
+        // the role-based fallback, same as every other row here.
+        'Client Service' => ['logistics'],
     ];
 
     // Mapping of enquiry statuses to the tasks required to achieve them.

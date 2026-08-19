@@ -28,9 +28,13 @@ class TripRequestController extends Controller
     {
         $user        = Auth::user();
         $isLogistics = $this->isLogisticsTeam($user);
+        $isClientService = $user?->hasAnyRole(['Client Service']) ?? false;
 
         $query = TripRequest::with($this->with)
-            ->when(!$isLogistics, fn($q) => $q->where('requested_by_id', $user->employee?->id))
+            // Client Service follows every client/project trip; ordinary users
+            // only see requests they personally submitted.
+            ->when($isClientService && !$isLogistics, fn($q) => $q->whereNotNull('project_id'))
+            ->when(!$isLogistics && !$isClientService, fn($q) => $q->where('requested_by_id', $user->employee?->id))
             ->when($request->status,     fn($q) => $q->where('status', $request->status))
             ->when($request->priority,   fn($q) => $q->where('priority', $request->priority))
             ->when($request->project_id, fn($q) => $q->where('project_id', $request->project_id))
@@ -252,6 +256,12 @@ class TripRequestController extends Controller
             ? $roles
             : $roles->pluck('name')->toArray();
 
-        return array_intersect(['Logistics', 'Super Admin', 'Admin'], $roleNames) !== [];
+        return array_intersect([
+            'Logistics',
+            'Logistics Officer',
+            'Logistics Manager',
+            'Super Admin',
+            'Admin',
+        ], $roleNames) !== [];
     }
 }

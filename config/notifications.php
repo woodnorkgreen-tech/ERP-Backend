@@ -20,6 +20,12 @@ return [
             'default_channels' => ['database', 'mail'],
             'urgency' => 'success',
         ],
+        'leave_request_lead_rejected' => [
+            'module' => 'hr',
+            'label' => 'Leave Request Lead Rejected',
+            'default_channels' => ['database', 'mail'],
+            'urgency' => 'warning',
+        ],
         'leave_request_approved' => [
             'module' => 'hr',
             'label' => 'Leave Request Approved',
@@ -225,6 +231,10 @@ return [
             'module' => 'procurement-stores', 'label' => 'Purchase Order Status Changed',
             'default_channels' => ['database'], 'urgency' => 'info',
         ],
+        'logistics_manifest_submission_received' => [
+            'module' => 'projects', 'label' => 'Loading Sheet Items Submitted for Review',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
         'project_activity' => [
             'module' => 'projects', 'label' => 'Project Activity',
             'default_channels' => ['database'], 'urgency' => 'info',
@@ -240,6 +250,28 @@ return [
         'finance_requisition_pending' => [
             'module' => 'finance', 'label' => 'Finance Requisition Pending',
             'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
+
+        // ICT support
+        'support_ticket_received' => [
+            'module' => 'support', 'label' => 'Support Ticket Received',
+            'default_channels' => ['database'], 'urgency' => 'success',
+        ],
+        'support_ticket_created' => [
+            'module' => 'support', 'label' => 'New Support Ticket',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'support_ticket_assigned' => [
+            'module' => 'support', 'label' => 'Support Ticket Assigned',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
+        ],
+        'support_ticket_updated' => [
+            'module' => 'support', 'label' => 'Support Ticket Updated',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'support_ticket_reply' => [
+            'module' => 'support', 'label' => 'Support Ticket Reply',
+            'default_channels' => ['database', 'push'], 'urgency' => 'info',
         ],
 
         // Projects - Enquiry & task lifecycle

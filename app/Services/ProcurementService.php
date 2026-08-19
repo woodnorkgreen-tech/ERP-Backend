@@ -52,7 +52,7 @@ class ProcurementService
             throw new \DomainException('No materials found in budget data. Please import materials into the budget task first.');
         }
 
-        $this->ensureBudgetReadyForProcurement($budgetTask, $budgetData);
+        $this->ensureBudgetReadyForProcurement($budgetData);
 
         \Log::info("Retrieved budget data", [
             'budget_data_id' => $budgetData->id,
@@ -280,9 +280,13 @@ class ProcurementService
     {
         try {
             $procurementData = TaskProcurementData::where('enquiry_task_id', $taskId)->first();
-            
-            // If no procurement data exists yet, nothing to sync
+
+            // Nothing imported yet. This used to just return, which is why the
+            // budget had to be synced, saved and submitted by hand before
+            // procurement showed anything. Pull the budget in automatically the
+            // moment it is ready instead.
             if (!$procurementData || !$procurementData->budget_imported) {
+                $this->autoImportWhenBudgetReady($taskId);
                 return;
             }
 
@@ -302,7 +306,7 @@ class ProcurementService
 
             // Transform current budget data to fresh procurement items
             $freshItems = $this->transformBudgetToProcurement($budgetData);
-            $this->ensureBudgetReadyForProcurement($budgetTask, $budgetData);
+            $this->ensureBudgetReadyForProcurement($budgetData);
             
             // Index existing items by budgetItemId for easy lookup
             $existingItemsMap = collect($procurementData->procurement_items ?? [])
@@ -401,15 +405,65 @@ class ProcurementService
         }
     }
 
-    private function ensureBudgetReadyForProcurement(EnquiryTask $budgetTask, TaskBudgetData $budgetData): void
+    /**
+     * Perform the first budget import automatically.
+     *
+     * The readiness rules are unchanged — a budget still has to be complete and
+     * sourced from the approved materials list before procurement will touch it
+     * (ensureBudgetReadyForProcurement). The only thing that changes is who
+     * triggers the first import: previously a human clicking "Import Budget",
+     * now the sync itself as soon as the budget qualifies.
+     *
+     * An unready budget is the normal state for most of a project's life, so it
+     * is skipped quietly rather than logged as a failure on every read.
+     */
+    private function autoImportWhenBudgetReady(int $taskId): void
     {
-        // Internal budget approval was removed (2026-07): the Budget task
-        // auto-completes once a priced budget is saved, and that completion is
-        // the procurement readiness signal. Legacy 'approved' budgets pass too.
-        if ($budgetTask->status !== 'completed' && $budgetData->status !== 'approved') {
-            throw new \DomainException('Cannot import procurement items until the Budget task is completed.');
+        $task = EnquiryTask::find($taskId);
+        if (!$task || $task->type !== 'procurement') {
+            return;
         }
 
+        $budgetTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
+            ->where('type', 'budget')
+            ->first();
+
+        if (!$budgetTask) {
+            return;
+        }
+
+        $budgetData = TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
+        if (!$budgetData || empty($budgetData->materials_data) || !is_array($budgetData->materials_data)) {
+            return;
+        }
+
+        try {
+            $this->ensureBudgetReadyForProcurement($budgetData);
+        } catch (\DomainException $e) {
+            return;
+        }
+
+        $this->importBudgetData($taskId);
+
+        \Log::info('Procurement auto-imported the budget on first sync', [
+            'procurement_task_id' => $taskId,
+            'budget_task_id' => $budgetTask->id,
+        ]);
+    }
+
+    private function ensureBudgetReadyForProcurement(TaskBudgetData $budgetData): void
+    {
+        // Budget task completion is deliberately NOT required.
+        //
+        // It used to be, which meant procurement only started tracking a budget
+        // once someone clicked "Complete Task", and — worse — stopped tracking
+        // it again the moment the budget was reopened for revision, freezing
+        // procurement on figures it knew were stale. Procurement now follows the
+        // budget continuously.
+        //
+        // The provenance checks below are the real gate, and they are unchanged:
+        // procurement only ever mirrors a budget built from an approved
+        // materials list, never an ad-hoc one.
         if (!$budgetData->materials_imported_at) {
             throw new \DomainException('Cannot import procurement items: budget has not imported the approved materials list.');
         }

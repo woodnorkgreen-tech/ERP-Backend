@@ -102,6 +102,7 @@ class LogisticsTaskController extends Controller
     {
         try {
             $validated = $request->validate([
+                'transport_arrangement' => 'sometimes|in:company,client',
                 'vehicle_identification' => 'nullable|string|max:100',
                 'driver_name' => 'nullable|string|max:100',
                 'route.destination' => 'nullable|string|max:255',
@@ -114,7 +115,7 @@ class LogisticsTaskController extends Controller
             $logisticsTask = $this->logisticsService->saveLogisticsPlanning($taskId, $validated);
 
             return response()->json([
-                'message' => 'Trip plan saved',
+                'message' => 'Transport plan saved',
                 'data' => $logisticsTask
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -232,7 +233,7 @@ class LogisticsTaskController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             throw $e;
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json(['message' => 'Manifest item not found for this task'], 404);
+            return response()->json(['message' => 'Loading sheet item not found for this task'], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to update transport item',
@@ -253,7 +254,7 @@ class LogisticsTaskController extends Controller
                 'message' => 'Transport item deleted successfully'
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json(['message' => 'Manifest item not found for this task'], 404);
+            return response()->json(['message' => 'Loading sheet item not found for this task'], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to delete transport item',
@@ -312,6 +313,9 @@ class LogisticsTaskController extends Controller
                 'items'                          => 'required|array',
                 'items.*.id'                     => 'required|string',
                 'items.*.item_name'              => 'required|string|max:255',
+                'items.*.quantity'               => 'nullable|integer|min:0',
+                'items.*.unit'                   => 'nullable|string|max:50',
+                'items.*.main_category'          => 'nullable|string|max:50',
                 'items.*.status'                 => 'required|in:present,missing,coming_later',
                 'items.*.notes'                  => 'nullable|string|max:500',
                 'items.*.checkedBy'              => 'nullable|string|max:255',

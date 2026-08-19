@@ -3,6 +3,8 @@
 namespace App\Modules\ArchivalTask\Http\Controllers;
 
 use App\Modules\ArchivalTask\Services\ArchivalReportService;
+use App\Modules\ArchivalTask\Models\ArchivalReport;
+use App\Modules\Projects\Models\EnquiryTask;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
@@ -22,6 +24,7 @@ class ArchivalReportController extends Controller
      */
     public function index(int $taskId): JsonResponse
     {
+        $this->authorizedTask($taskId);
         try {
             $report = $this->service->getReportByTask($taskId);
             
@@ -42,8 +45,10 @@ class ArchivalReportController extends Controller
      */
     public function store(Request $request, int $taskId): JsonResponse
     {
+        $this->authorizedTask($taskId);
+        abort_if(ArchivalReport::where('enquiry_task_id', $taskId)->exists(), 409, 'A closure report already exists for this task.');
         try {
-            
+            $this->normalizeProjectScope($request);
             $validated = $request->validate($this->getValidationRules());
             
             $report = $this->service->createReport($taskId, $validated);
@@ -68,8 +73,10 @@ class ArchivalReportController extends Controller
      */
     public function update(Request $request, int $taskId, int $reportId): JsonResponse
     {
+        $report = $this->reportForTask($taskId, $reportId);
+        abort_unless($report->status === 'draft', 409, 'Submitted or approved closure reports cannot be edited.');
         try {
-            
+            $this->normalizeProjectScope($request);
             $validated = $request->validate($this->getValidationRules(false));
             
             $report = $this->service->updateReport($reportId, $validated);
@@ -94,6 +101,8 @@ class ArchivalReportController extends Controller
      */
     public function destroy(int $taskId, int $reportId): JsonResponse
     {
+        $report = $this->reportForTask($taskId, $reportId);
+        abort_unless($report->status === 'draft', 409, 'Only a draft closure report can be deleted.');
         try {
             $this->service->deleteReport($reportId);
             
@@ -113,6 +122,8 @@ class ArchivalReportController extends Controller
      */
     public function uploadAttachment(Request $request, int $taskId, int $reportId): JsonResponse
     {
+        $report = $this->reportForTask($taskId, $reportId);
+        abort_unless($report->status === 'draft', 409, 'Attachments cannot be changed after submission.');
         try {
             $request->validate([
                 'file' => 'required|file|max:10240', // 10MB max
@@ -142,6 +153,8 @@ class ArchivalReportController extends Controller
      */
     public function deleteAttachment(int $taskId, int $reportId, string $attachmentId): JsonResponse
     {
+        $report = $this->reportForTask($taskId, $reportId);
+        abort_unless($report->status === 'draft', 409, 'Attachments cannot be changed after submission.');
         try {
             $success = $this->service->deleteAttachment($reportId, $attachmentId);
             
@@ -167,6 +180,9 @@ class ArchivalReportController extends Controller
      */
     public function autoPopulate(int $taskId): JsonResponse
     {
+        $this->authorizedTask($taskId);
+        $existing = ArchivalReport::where('enquiry_task_id', $taskId)->first();
+        abort_if($existing && $existing->status !== 'draft', 409, 'A submitted or approved report cannot be re-synchronised.');
         try {
             $data = $this->service->autoPopulateData($taskId);
             
@@ -187,16 +203,52 @@ class ArchivalReportController extends Controller
      */
     public function changeStatus(Request $request, int $taskId, int $reportId): JsonResponse
     {
-        try {
-            $request->validate([
-                'status' => 'required|in:draft,submitted,approved',
-            ]);
+        $report = $this->reportForTask($taskId, $reportId);
+        $request->validate([
+            'status' => 'required|in:submitted,approved,returned',
+            'correction_notes' => 'required_if:status,returned|nullable|string|max:2000',
+        ]);
 
-            $report = $this->service->changeStatus($reportId, $request->input('status'));
+        try {
+            $targetStatus = $request->input('status');
+            $allowedTransition = ($report->status === 'draft' && $targetStatus === 'submitted')
+                || ($report->status === 'submitted' && in_array($targetStatus, ['approved', 'returned'], true));
+            if (!$allowedTransition) {
+                return response()->json([
+                    'message' => "Invalid closure transition from {$report->status} to {$targetStatus}.",
+                ], 422);
+            }
+
+            $user = $request->user();
+            if (in_array($targetStatus, ['approved', 'returned'], true)) {
+                if (!$user->hasRole(['Super Admin', 'Admin', 'Project Manager'])) {
+                    return response()->json(['message' => 'Only a Project Manager or administrator may review project closure.'], 403);
+                }
+            }
+            if (in_array($targetStatus, ['submitted', 'approved'], true)) {
+                $missingChecks = count($this->service->getMissingRequiredChecks($taskId, $report));
+
+                if ($missingChecks || !$report->archive_reference || !$report->archive_location
+                ) {
+                    return response()->json([
+                        'message' => 'Complete the closure checks and archive details before submission.',
+                    ], 422);
+                }
+            }
+
+            $report = $this->service->changeStatus(
+                $reportId,
+                $targetStatus,
+                $user,
+                $request->input('correction_notes')
+            );
+            $reportData = $this->service->getReportByTask($taskId);
             
             return response()->json([
-                'data' => $report,
-                'message' => 'Status updated successfully'
+                'data' => $reportData,
+                'message' => $targetStatus === 'returned'
+                    ? 'Closure report returned for correction.'
+                    : 'Status updated successfully'
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -211,6 +263,7 @@ class ArchivalReportController extends Controller
      */
     public function generatePdf(int $taskId, int $reportId)
     {
+        $this->reportForTask($taskId, $reportId);
         try {
             $report = $this->service->getReportById($reportId);
             
@@ -218,36 +271,16 @@ class ArchivalReportController extends Controller
                 return response()->json(['message' => 'Report not found'], 404);
             }
 
-            // Fetch related project data (Materials, Budget, Design Assets)
-            $enquiryId = $report->enquiryTask->project_enquiry_id;
-            
-            // 1. Materials Data
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
-                ->where('type', 'materials')
-                ->first();
-            $materialsData = $materialsTask ? \App\Models\TaskMaterialsData::with('elements')->where('enquiry_task_id', $materialsTask->id)->first() : null;
-
-            // 2. Budget Data
-            $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
-                ->where('type', 'budget')
-                ->first();
-            $budgetData = $budgetTask ? \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first() : null;
-
-            // 3. Design Assets
-            $designTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
-                ->where('type', 'design')
-                ->first();
-            $designAssets = $designTask ? \App\Models\DesignAsset::where('enquiry_task_id', $designTask->id)->get() : [];
-
-            // Load view with data
             $pdf = Pdf::loadView('reports.archival', [
                 'report' => $report,
-                'materialsData' => $materialsData,
-                'budgetData' => $budgetData,
-                'designAssets' => $designAssets
+                'financialSummary' => $this->service->getFinancialSummary($taskId),
+                'systemDocuments' => $this->service->getSystemDocuments($taskId),
+                'closureContext' => $this->service->getClosureContext($taskId),
+                'handoverSummary' => $this->service->getHandoverSummary($taskId),
             ]);
             
-            return $pdf->download('archival-report-' . $reportId . '.pdf');
+            $reference = preg_replace('/[^A-Za-z0-9_-]+/', '-', $report->project_code ?: (string) $reportId);
+            return $pdf->download('project-closure-' . trim($reference, '-') . '.pdf');
         } catch (\Exception $e) {
              return response()->json([
                 'message' => 'Failed to generate PDF',
@@ -261,6 +294,7 @@ class ArchivalReportController extends Controller
      */
     public function analyze(int $taskId, int $reportId): JsonResponse
     {
+        $this->reportForTask($taskId, $reportId);
         try {
             $analysis = $this->service->analyzeReport($reportId);
             
@@ -345,12 +379,6 @@ class ArchivalReportController extends Controller
             'site_clearance_status' => 'nullable|string|max:100',
             'outstanding_items' => 'nullable|string',
             
-            // Section 9: Signatures
-            'project_officer_signature' => 'nullable|string|max:255',
-            'project_officer_sign_date' => 'nullable|date',
-            'reviewed_by' => 'nullable|string|max:255',
-            'reviewer_sign_date' => 'nullable|date',
-
             // Checklist
             'checklist_ppt' => 'nullable|boolean',
             'checklist_cutlist' => 'nullable|boolean',
@@ -365,9 +393,6 @@ class ArchivalReportController extends Controller
             'archive_reference' => 'nullable|string',
             'archive_location' => 'nullable|string',
             'retention_period' => 'nullable|string',
-            
-            // Status
-            'status' => 'nullable|in:draft,submitted,approved',
             
             // Related data
             'setup_items' => 'nullable|array',
@@ -386,5 +411,36 @@ class ArchivalReportController extends Controller
         ];
 
         return $rules;
+    }
+
+    private function normalizeProjectScope(Request $request): void
+    {
+        $scope = $request->input('project_scope');
+        if (!is_array($scope)) {
+            return;
+        }
+
+        $request->merge([
+            'project_scope' => collect($scope)
+                ->map(fn ($item) => is_array($item) ? ($item['name'] ?? null) : $item)
+                ->filter()
+                ->implode("\n"),
+        ]);
+    }
+
+    private function authorizedTask(int $taskId): EnquiryTask
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        abort_unless($task->type === 'report', 404, 'Closure task not found.');
+        abort_unless($task->isUserAuthorized(request()->user()), 403, 'You are not authorized to manage this closure report.');
+
+        return $task;
+    }
+
+    private function reportForTask(int $taskId, int $reportId): ArchivalReport
+    {
+        $this->authorizedTask($taskId);
+
+        return ArchivalReport::where('enquiry_task_id', $taskId)->findOrFail($reportId);
     }
 }

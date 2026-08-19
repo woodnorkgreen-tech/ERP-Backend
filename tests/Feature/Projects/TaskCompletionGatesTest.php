@@ -8,6 +8,7 @@ use App\Models\Project;
 use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\ArchivalTask\Models\ArchivalReport as ArchivalReportModel;
+use App\Modules\ArchivalTask\Services\ArchivalReportService;
 use App\Modules\ClientService\Models\Client;
 use App\Modules\logisticsTask\Models\LogisticsChecklist;
 use App\Modules\logisticsTask\Models\LogisticsTask;
@@ -82,16 +83,161 @@ class TaskCompletionGatesTest extends TestCase
         $this->completeAs($task, $this->user())->assertStatus(422);
     }
 
-    public function test_report_completes_once_officer_signature_present(): void
+    public function test_report_completes_once_closure_is_fully_approved(): void
     {
         $task = $this->task($this->enquiry(), 'report');
         ArchivalReportModel::create([
             'enquiry_task_id' => $task->id,
             'project_officer_signature' => 'J. Doe',
             'project_officer_sign_date' => now()->toDateString(),
+            'reviewed_by' => 'A. Manager',
+            'reviewer_sign_date' => now()->toDateString(),
+            'archive_reference' => 'ARC-TEST',
+            'archive_location' => 'ERP / Projects / TEST',
+            'status' => 'approved',
+            'checklist_site_survey_form' => true,
+            'checklist_project_budget_file' => true,
+            'checklist_material_list' => true,
+            'checklist_qc_checklist' => true,
+            'checklist_setup_setdown' => true,
+            'checklist_client_feedback' => true,
         ]);
 
         $this->completeAs($task, $this->user())->assertOk();
+    }
+
+    public function test_manager_can_return_submitted_closure_for_correction_with_mandatory_notes(): void
+    {
+        $submitter = $this->user('Project Officer');
+        $reviewer = $this->user('Project Manager');
+        $task = $this->task($this->enquiry(['created_by' => $submitter->id]), 'report', [
+            'assigned_user_id' => $reviewer->id,
+        ]);
+        $report = ArchivalReportModel::create([
+            'enquiry_task_id' => $task->id,
+            'status' => 'submitted',
+            'submitted_by' => $submitter->id,
+            'submitted_at' => now(),
+        ]);
+
+        Sanctum::actingAs($reviewer);
+        $this->postJson("/api/projects/tasks/{$task->id}/archival/{$report->id}/status", [
+            'status' => 'returned',
+        ])->assertUnprocessable();
+
+        $this->postJson("/api/projects/tasks/{$task->id}/archival/{$report->id}/status", [
+            'status' => 'returned',
+            'correction_notes' => 'Attach the signed handover record and clarify the outstanding item.',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'draft')
+            ->assertJsonPath('data.capabilities.can_edit', true)
+            ->assertJsonPath('data.correction_notes', 'Attach the signed handover record and clarify the outstanding item.');
+
+        $this->assertDatabaseHas('archival_reports', [
+            'id' => $report->id,
+            'status' => 'draft',
+            'correction_requested_by' => $reviewer->id,
+            'revision_number' => 1,
+        ]);
+    }
+
+    public function test_authorized_manager_can_review_their_own_closure_report(): void
+    {
+        $submitter = $this->user('Project Manager');
+        $task = $this->task($this->enquiry(['created_by' => $submitter->id]), 'report', [
+            'assigned_user_id' => $submitter->id,
+        ]);
+        $report = ArchivalReportModel::create([
+            'enquiry_task_id' => $task->id,
+            'status' => 'submitted',
+            'submitted_by' => $submitter->id,
+            'submitted_at' => now(),
+            'archive_reference' => 'ARC-SELF-REVIEW',
+            'archive_location' => 'ERP / Projects / SELF-REVIEW',
+        ]);
+
+        Sanctum::actingAs($submitter);
+        $this->postJson("/api/projects/tasks/{$task->id}/archival/{$report->id}/status", [
+            'status' => 'approved',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'approved')
+            ->assertJsonPath('data.approved_by', $submitter->id)
+            ->assertJsonPath('data.submitted_by', $submitter->id);
+    }
+
+    public function test_report_requires_only_controls_from_the_project_workflow(): void
+    {
+        $enquiry = $this->enquiry(['workflow_preset_type' => 'design_only']);
+        $this->task($enquiry, 'design', ['status' => 'completed', 'completed_at' => now()]);
+        $reportTask = $this->task($enquiry, 'report');
+        $report = ArchivalReportModel::create([
+            'enquiry_task_id' => $reportTask->id,
+            'project_officer_signature' => 'J. Doe',
+            'project_officer_sign_date' => now()->toDateString(),
+            'reviewed_by' => 'A. Manager',
+            'reviewer_sign_date' => now()->toDateString(),
+            'archive_reference' => 'ARC-DESIGN',
+            'archive_location' => 'ERP / Projects / DESIGN',
+            'status' => 'approved',
+        ]);
+
+        $service = app(ArchivalReportService::class);
+        $this->assertSame(['checklist_ppt'], $service->getRequiredChecklistFields($reportTask->id));
+        $this->completeAs($reportTask, $this->user())->assertStatus(422);
+
+        $report->update(['checklist_ppt' => true]);
+        $this->completeAs($reportTask->fresh(), $this->user())->assertOk();
+    }
+
+    public function test_closure_context_describes_the_instantiated_workflow(): void
+    {
+        $enquiry = $this->enquiry(['workflow_preset_type' => 'branding']);
+        $this->task($enquiry, 'design', ['status' => 'completed', 'completed_at' => now()]);
+        $this->task($enquiry, 'production', ['status' => 'in_progress']);
+        $reportTask = $this->task($enquiry, 'report');
+
+        $context = app(ArchivalReportService::class)->getClosureContext($reportTask->id);
+
+        $this->assertSame('Branding & Merchandising', $context['preset_label']);
+        $this->assertSame(2, $context['task_summary']['total']);
+        $this->assertSame(1, $context['task_summary']['completed']);
+        $this->assertSame(50, $context['task_summary']['completion_percentage']);
+        $this->assertSame(
+            ['checklist_ppt', 'checklist_qc_checklist'],
+            collect($context['required_checks'])->pluck('key')->all()
+        );
+    }
+
+    public function test_archival_report_normalizes_submitted_handover_responses(): void
+    {
+        $enquiry = $this->enquiry(['workflow_preset_type' => 'design_only']);
+        $handoverTask = $this->task($enquiry, 'handover', ['status' => 'completed']);
+        $reportTask = $this->task($enquiry, 'report');
+        HandoverSurvey::create([
+            'task_id' => $handoverTask->id,
+            'access_token' => 'tok_' . uniqid(),
+            'submitted' => true,
+            'submitted_at' => now(),
+            'respondent_info' => ['name' => 'Jane Client'],
+            'responses' => [
+                'overall_rating' => 4,
+                'finishing' => ['rating' => 5, 'remarks' => 'Excellent finishing.'],
+                'delivered_on_time' => 'yes',
+                'improvement_suggestions' => 'Share progress photos earlier.',
+            ],
+            'question_config_snapshot' => config('survey_questions'),
+            'review_status' => 'approved_positive',
+        ]);
+
+        $summary = app(ArchivalReportService::class)->getHandoverSummary($reportTask->id);
+
+        $this->assertSame('Jane Client', $summary['respondent']);
+        $this->assertSame(4.5, $summary['average_rating']);
+        $this->assertTrue($summary['delivered_on_time']);
+        $this->assertSame(
+            'Excellent finishing.',
+            collect($summary['sections'])->flatMap(fn (array $section) => $section['answers'])->firstWhere('id', 'finishing')['remarks']
+        );
     }
 
     public function test_setup_cannot_complete_with_open_issues(): void

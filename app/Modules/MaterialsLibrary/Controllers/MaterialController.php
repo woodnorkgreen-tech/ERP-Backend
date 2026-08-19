@@ -8,9 +8,15 @@ use App\Modules\MaterialsLibrary\Models\MaterialCategory;
 use App\Modules\MaterialsLibrary\Requests\StoreMaterialRequest;
 use App\Modules\MaterialsLibrary\Requests\UpdateMaterialRequest;
 use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
+use App\Modules\MaterialsLibrary\Support\MaterialControl;
+use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
+use App\Modules\ProcurementStores\Models\Board;
+use App\Modules\ProcurementStores\Models\InventoryLog;
+use App\Modules\ProcurementStores\Models\Stock;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class MaterialController extends Controller
 {
@@ -20,6 +26,10 @@ class MaterialController extends Controller
     public function index(Request $request): JsonResponse
     {
         $materials = $this->buildMaterialQuery($request)->paginate($request->get('per_page', 50));
+        $materials->setCollection(
+            $materials->getCollection()
+                ->map(fn (LibraryMaterial $material) => (new LibraryMaterialResource($material))->resolve($request))
+        );
         
         $stats = [
             'total_value' => (float) LibraryMaterial::active()
@@ -51,6 +61,10 @@ class MaterialController extends Controller
     {
         $materials = $this->buildMaterialQuery($request, $workstationId)
             ->paginate($request->get('per_page', 50));
+        $materials->setCollection(
+            $materials->getCollection()
+                ->map(fn (LibraryMaterial $material) => (new LibraryMaterialResource($material))->resolve($request))
+        );
 
         return response()->json($materials);
     }
@@ -60,7 +74,7 @@ class MaterialController extends Controller
      */
     private function buildMaterialQuery(Request $request, ?int $workstationId = null)
     {
-        $query = LibraryMaterial::with(['workstation', 'stock']);
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom']);
 
         if ($request->boolean('with_trashed')) {
             $query->withTrashed();
@@ -93,6 +107,18 @@ class MaterialController extends Controller
 
         if ($request->filled('material_type')) {
             $query->where('material_type', $request->material_type);
+        }
+
+        if ($request->boolean('board_trackable')) {
+            $eligible = config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']);
+            $query->where('material_type', 'reusable')
+                ->where(function ($q) use ($eligible) {
+                    $q->whereIn('category', $eligible)
+                        ->orWhereHas('materialCategory', function ($categoryQuery) use ($eligible) {
+                            $categoryQuery->whereIn('name', $eligible)
+                                ->orWhereHas('parent', fn ($parentQuery) => $parentQuery->whereIn('name', $eligible));
+                        });
+                });
         }
 
         if ($request->filled('search')) {
@@ -176,6 +202,8 @@ class MaterialController extends Controller
         $data = $request->validated();
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
+        $data = $this->syncControlCompatibility($data);
+        $data = $this->syncUomCompatibility($data);
 
         // Wrap attributes in 'attributes' key for JSON column if not already
         if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
@@ -214,6 +242,25 @@ class MaterialController extends Controller
 
         $data = $request->validated();
         $data['updated_by'] = auth()->id();
+        $data = $this->syncControlCompatibility($data, $material);
+        $data = $this->syncUomCompatibility($data, $material);
+
+        $nextTrackingMode = $data['tracking_mode'] ?? $material->tracking_mode;
+        $nextDisposition = $data['issue_disposition'] ?? $material->issue_disposition;
+        if (($nextTrackingMode !== 'dimension_piece' || $nextDisposition !== 'recoverable_remainder')
+            && Board::where('library_material_id', $material->id)->exists()) {
+            throw ValidationException::withMessages([
+                'tracking_mode' => 'This item has board history and must remain a measured/recoverable board item.',
+            ]);
+        }
+
+        $nextBaseUomId = $data['base_uom_id'] ?? $material->base_uom_id;
+        if ((int) $nextBaseUomId !== (int) $material->base_uom_id
+            && InventoryLog::where('material_id', $material->id)->exists()) {
+            throw ValidationException::withMessages([
+                'base_uom_id' => 'Base UOM cannot be changed after stock movements exist. Configure a purchase/issue conversion instead.',
+            ]);
+        }
 
          // Wrap attributes in 'attributes' key for JSON column if not already
          if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
@@ -222,7 +269,17 @@ class MaterialController extends Controller
 
         $data = $this->syncCategoryStrings($data);
 
-        $material->update($data);
+        DB::transaction(function () use ($material, $data) {
+            $material->update($data);
+
+            // stocks.tracking_mode is retained for legacy board endpoints, but is
+            // always projected from the governed Material Library controls.
+            $material->stock?->update([
+                'tracking_mode' => $material->fresh()->isBoardTrackable()
+                    ? Stock::TRACK_BY_AREA
+                    : Stock::TRACK_BY_COUNT,
+            ]);
+        });
         $material->load('stock');
 
         return response()->json([
@@ -294,13 +351,39 @@ class MaterialController extends Controller
 
         if ($cat->parent) {
             // Leaf category: parent is the root
-            $data['category']    = $data['category']    ?? $cat->parent->name;
-            $data['subcategory'] = $data['subcategory'] ?? $cat->name;
+            $data['category']    = $cat->parent->name;
+            $data['subcategory'] = $cat->name;
         } else {
             // Root category: use it directly, leave subcategory untouched
-            $data['category'] = $data['category'] ?? $cat->name;
+            $data['category'] = $cat->name;
+            $data['subcategory'] = null;
         }
 
+        return $data;
+    }
+
+    private function syncControlCompatibility(array $data, ?LibraryMaterial $material = null): array
+    {
+        $disposition = $data['issue_disposition'] ?? $material?->issue_disposition ?? 'consumed';
+        $data['material_type'] = MaterialControl::legacyMaterialType($disposition);
+
+        if (isset($data['item_status'])) {
+            $data['is_active'] = $data['item_status'] === 'Active';
+        } elseif (array_key_exists('is_active', $data)) {
+            $data['item_status'] = $data['is_active'] ? 'Active' : 'Inactive';
+        }
+
+        return $data;
+    }
+
+    private function syncUomCompatibility(array $data, ?LibraryMaterial $material = null): array
+    {
+        $baseUomId = $data['base_uom_id'] ?? $material?->base_uom_id;
+        if ($baseUomId) {
+            $baseUom = UnitOfMeasure::where('is_active', true)->findOrFail($baseUomId);
+            $data['unit_of_measure'] = $baseUom->code; // keep legacy consumers synchronized
+            $data['issue_uom_id'] ??= $baseUomId;
+        }
         return $data;
     }
 

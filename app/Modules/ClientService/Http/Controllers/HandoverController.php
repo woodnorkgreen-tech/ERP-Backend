@@ -30,7 +30,6 @@ class HandoverController extends Controller
             \Log::error('Error fetching handovers: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve handovers',
-                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -45,7 +44,7 @@ class HandoverController extends Controller
             return response()->json($this->handoverService->getAwaitingReview($filters));
         } catch (\Exception $e) {
             \Log::error('Error fetching awaiting-review handovers: ' . $e->getMessage());
-            return response()->json(['message' => 'Failed to retrieve awaiting review list', 'error' => $e->getMessage()], 500);
+            return response()->json(['message' => 'Failed to retrieve awaiting review list'], 500);
         }
     }
 
@@ -63,7 +62,6 @@ class HandoverController extends Controller
             \Log::error('Error fetching pending feedback: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve pending feedback',
-                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -80,7 +78,6 @@ class HandoverController extends Controller
             \Log::error('Error fetching handover stats: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve handover statistics',
-                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -104,7 +101,6 @@ class HandoverController extends Controller
             \Log::error('Error fetching handover detail: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to retrieve handover detail',
-                'error' => $e->getMessage()
             ], 500);
         }
     }

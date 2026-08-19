@@ -104,14 +104,11 @@ class ProjectGovernanceService
             return GateResult::blocked('Unable to evaluate governance: this task is not linked to a project enquiry.');
         }
 
-        // Map task types or attributes to gates
-        $gateMapping = [
-            'procurement' => 'financial',
-            'production' => 'financial',
-            'logistics' => 'financial',
-            'setup' => 'financial',
-            'setdown' => 'financial',
-        ];
+        // The financial (70% deposit) gate no longer blocks individual task
+        // transitions here — it only guards marking the whole project complete
+        // (see CompleteProjectAction::execute). Task-level gate mappings can be
+        // added here for policies that are meant to block specific task types.
+        $gateMapping = [];
 
         $gateType = $gateMapping[$task->type] ?? null;
 

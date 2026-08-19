@@ -41,8 +41,20 @@ class CompleteProjectAction
         $user = User::find($userId);
         $isAdmin = $user && $user->hasRole(EnquiryConstants::ROLES_ADMIN);
 
-        $readiness = $this->buildReadiness($enquiry);
         $overrodeBlockers = false;
+
+        // Financial clearance (70% mobilization deposit) is enforced here, at
+        // project completion, rather than on individual operational tasks.
+        $financeGate = $this->governanceService->checkGate($enquiry, 'financial');
+        if (!$financeGate->isAuthorized()) {
+            if (!$isAdmin) {
+                throw new \Exception($financeGate->getMessage());
+            }
+            $overrodeBlockers = true;
+            Log::warning("Admin override: user {$userId} completing project {$enquiry->id} despite financial gate: {$financeGate->getMessage()}");
+        }
+
+        $readiness = $this->buildReadiness($enquiry);
 
         if (!$readiness['can_complete']) {
             $parts = [];

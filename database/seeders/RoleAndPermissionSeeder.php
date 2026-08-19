@@ -40,7 +40,9 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
             Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
             Permissions::HR_VIEW_EMPLOYEES, Permissions::ADMIN_ACCESS, Permissions::DASHBOARD_ADMIN,
-            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE
+            Permissions::SUPPORT_MANAGE, Permissions::CLIENT_HANDOVER_REVIEW,
+            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE,
+            Permissions::LEAVE_BALANCE_VIEW
         ]);
 
         $hrRole = Role::firstOrCreate(['name' => 'HR'], ['description' => 'Human Resources access']);
@@ -54,7 +56,8 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::OVERTIME_MANAGE_FLAGS,
             Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE,
             Permissions::OFFBOARDING_VIEW, Permissions::OFFBOARDING_CREATE, Permissions::OFFBOARDING_MANAGE,
-            Permissions::OFFBOARDING_APPROVE, Permissions::OFFBOARDING_CLEARANCE, Permissions::OFFBOARDING_SETTLEMENT
+            Permissions::OFFBOARDING_APPROVE, Permissions::OFFBOARDING_CLEARANCE, Permissions::OFFBOARDING_SETTLEMENT,
+            Permissions::LEAVE_BALANCE_VIEW
         ]);
 
         $clientServiceRole = Role::firstOrCreate(['name' => 'Client Service'], ['description' => 'Client acquisition and enquiry management']);
@@ -170,7 +173,10 @@ class RoleAndPermissionSeeder extends Seeder
         $logisticsRole = Role::firstOrCreate(['name' => 'Logistics'], ['description' => 'Logistics and delivery coordination']);
         $logisticsRole->givePermissionTo([
             Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW
+            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
+            Permissions::LOGISTICS_VIEW, Permissions::LOGISTICS_DELIVERIES_MANAGE,
+            Permissions::LOGISTICS_DRIVERS_MANAGE, Permissions::LOGISTICS_FLEET_MANAGE,
+            Permissions::LOGISTICS_ROUTES_MANAGE, Permissions::LOGISTICS_TRACKING_VIEW
         ]);
 
         $storesRole = Role::firstOrCreate(['name' => 'Stores'], ['description' => 'Inventory and stores management']);

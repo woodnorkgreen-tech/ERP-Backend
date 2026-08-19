@@ -118,8 +118,37 @@ Route::get('projects/tasks/{taskId}/quote/excel/download', [App\Http\Controllers
     ->name('quote.excel.download')
     ->middleware('signed:relative');
 
+// QR-code driven logistics confirmations: the token in the URL IS the
+// credential (random UUID, validated + expiry/revocation checked inside each
+// controller's availableLink()). These are meant to be opened by a driver or
+// site contact who has no ERP account, so they must live outside auth:sanctum
+// — moved here 2026-07-28 after they were found gated behind login.
+Route::prefix('projects')->group(function () {
+    Route::get('/manifest-submit/{token}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'show']);
+    Route::post('/manifest-submit/{token}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'submit']);
+    Route::get('/loading-confirm/{token}', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'show']);
+    Route::patch('/loading-confirm/{token}/items', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'updateItems']);
+    Route::post('/loading-confirm/{token}/confirm', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'confirm']);
+    Route::get('/return-confirm/{token}', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'show']);
+    Route::patch('/return-confirm/{token}/items', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'updateItems']);
+    Route::post('/return-confirm/{token}/confirm', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'confirm']);
+});
+
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
+    Route::prefix('support')->group(function () {
+        Route::get('tickets/assignees', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'assignees']);
+        Route::get('tickets/metrics', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'metrics']);
+        Route::get('tickets', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'index']);
+        Route::post('tickets', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'store'])->middleware('throttle:10,1');
+        Route::get('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'show']);
+        Route::patch('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'update']);
+        Route::post('tickets/{ticket}/replies', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'reply']);
+        Route::post('tickets/{ticket}/confirm-resolution', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'confirmResolution']);
+        Route::post('tickets/{ticket}/attachments', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'uploadAttachment']);
+        Route::get('tickets/{ticket}/attachments/{attachment}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'downloadAttachment']);
+    });
+
     // Action Logs
     Route::get('/logs/{type}/{id}', [App\Http\Controllers\ActionLogController::class, 'index']);
 
@@ -607,10 +636,17 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('/return-checklist/generate',            [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'generateReturnChecklist']);
             Route::post('/return-checklist/authorize',           [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'authorizeReturn']);
             Route::get('/return-checklist/pdf',                  [App\Modules\logisticsTask\Http\Controllers\LogisticsTaskController::class, 'downloadReturnChecklistPdf']);
+            Route::get('/manifest-submissions', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'index']);
+            Route::post('/manifest-submission-links', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'store']);
+            Route::delete('/manifest-submission-links/{link}', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'revoke']);
+            Route::patch('/manifest-submissions/{submission}/review', [App\Modules\logisticsTask\Http\Controllers\ManifestSubmissionController::class, 'review']);
+            Route::get('/loading-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'index']);
+            Route::post('/loading-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'store']);
+            Route::delete('/loading-confirmation-links/{link}', [App\Modules\logisticsTask\Http\Controllers\LoadingConfirmationController::class, 'revoke']);
+            Route::get('/return-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'index']);
+            Route::post('/return-confirmation-links', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'store']);
+            Route::delete('/return-confirmation-links/{link}', [App\Modules\logisticsTask\Http\Controllers\ReturnConfirmationController::class, 'revoke']);
         });
-
-
-
 
         // Archival Task Routes (Project Memorial Report)
         Route::prefix('tasks/{taskId}/archival')->group(function () {
@@ -690,6 +726,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::middleware('quote.access')->group(function () {
             Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
             Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
+            Route::post('enquiries/{enquiry}/quote-waiver', [EnquiryController::class, 'waiveQuoteRequirement']);
             Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
             Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
             Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);

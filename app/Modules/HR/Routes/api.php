@@ -9,6 +9,7 @@ use App\Modules\HR\Http\Controllers\PayrollEngineController;
 use App\Modules\HR\Http\Controllers\PayrollRunController;
 use App\Modules\HR\Http\Controllers\LeaveDashboardController;
 use App\Modules\HR\Http\Controllers\LeaveHandoverController;
+use App\Modules\HR\Http\Controllers\LeaveRegisterController;
 use App\Modules\HR\Http\Controllers\LeaveRequestController;
 use App\Modules\HR\Http\Controllers\LeaveTypeController;
 use App\Modules\HR\Http\Controllers\HRActionController;
@@ -23,10 +24,12 @@ use App\Modules\HR\Http\Controllers\InterviewController;
 use App\Modules\HR\Http\Controllers\SalaryAdvanceController;
 use App\Modules\HR\Http\Controllers\OvertimeController;
 use App\Modules\HR\Http\Controllers\CompensatoryLeaveController;
+use App\Modules\HR\Http\Controllers\TeamManagementController;
 use App\Modules\HR\Http\Controllers\EmployeeSkillController;
 use App\Modules\HR\Http\Controllers\PerformanceReviewController;
 use App\Modules\HR\Http\Controllers\OnboardingController;
 use App\Modules\HR\Http\Controllers\OffboardingController;
+use App\Modules\HR\Http\Controllers\EmployeeStagingController;
 use App\Constants\Permissions;
 
 // Unprotected HR Routes (public recruitment only)
@@ -67,6 +70,22 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
         Route::post('employees/template/commit', [EmployeeController::class, 'commitImport'])
             ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+
+        // Employee Staging Repository & Selective Data-Pull
+        Route::prefix('staging')->group(function () {
+            Route::post('upload', [EmployeeStagingController::class, 'upload'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+            Route::get('records', [EmployeeStagingController::class, 'listRecords'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+            Route::get('match/{email}', [EmployeeStagingController::class, 'matchByEmail'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+            Route::get('batches', [EmployeeStagingController::class, 'index'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_READ);
+            Route::delete('batches/{batchId}', [EmployeeStagingController::class, 'destroyBatch'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_DELETE);
+            Route::post('mark-applied/{id}', [EmployeeStagingController::class, 'markApplied'])
+                ->middleware('permission:' . Permissions::EMPLOYEE_UPDATE);
+        });
 
         // middlewareFor, not middleware([...]): an associative array passed to
         // middleware() is flattened, which stacked ALL five permission checks
@@ -215,6 +234,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
                 ->middleware('permission:' . Permissions::LEAVE_REQUEST_APPROVE);
             Route::get('balance-adjustments', [LeaveRequestController::class, 'balanceAdjustments']);
 
+            // Leave register: company-wide per-employee leave summary + breakdown
+            Route::get('register', [LeaveRegisterController::class, 'index'])
+                ->middleware('permission:' . Permissions::LEAVE_BALANCE_VIEW);
+            Route::get('register/export', [LeaveRegisterController::class, 'export'])
+                ->middleware('permission:' . Permissions::LEAVE_BALANCE_VIEW);
+
             // Leave handovers
             Route::get('handovers', [LeaveHandoverController::class, 'index']);
             Route::get('handovers/leave-request/{leaveRequestId}', [LeaveHandoverController::class, 'show']);
@@ -269,6 +294,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         // Employee Self-Service
         Route::get('self-service/activity', [\App\Modules\HR\Http\Controllers\SelfServiceController::class, 'activity']);
+        Route::get('self-service/team-management', [TeamManagementController::class, 'index']);
 
         // Profile Updates (Employee Self-Service)
         Route::post('profile-updates', [\App\Modules\HR\Http\Controllers\SelfServiceController::class, 'updateProfile']);

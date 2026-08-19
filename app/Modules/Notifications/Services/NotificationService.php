@@ -235,8 +235,12 @@ class NotificationService
             'logistics' => ['Logistics', 'Driver', 'Manager'],
             'production' => ['Production', 'Production Manager', 'Quality Control', 'Manager'],
             'procurement-stores' => ['Procurement', 'Stores', 'Accounts', 'Manager'],
-            'projects' => ['Project Officer', 'Project Manager', 'Manager'],
+            // Client Service/Logistics added so logistics-task notifications
+            // (e.g. manifest submissions awaiting review) reach the roles
+            // that TASK_VISIBILITY_MAPPING now grants task access to.
+            'projects' => ['Project Officer', 'Project Manager', 'Manager', 'Client Service', 'Logistics'],
             'universal-task' => ['Employee', 'Manager'],
+            'support' => ['Employee', 'Manager', 'HR', 'Finance', 'Accounts', 'Costing', 'Designer', 'Project Officer', 'Project Manager', 'Production', 'Logistics', 'Stores', 'Procurement'],
         ];
 
         if (isset($moduleRoles[strtolower($module)]) && $user->hasRole($moduleRoles[strtolower($module)])) {

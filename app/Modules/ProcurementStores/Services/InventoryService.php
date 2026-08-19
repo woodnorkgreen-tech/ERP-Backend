@@ -6,6 +6,7 @@ use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
 class InventoryService
 {
@@ -47,38 +48,88 @@ class InventoryService
     public function adjustStock(int $materialId, float $quantity, string $type, array $meta = [])
     {
         return DB::transaction(function () use ($materialId, $quantity, $type, $meta) {
+            $material = LibraryMaterial::findOrFail($materialId);
+            $usageType = $material->expectedUsageType();
+
+            if ($quantity < 0 && ($material->item_status ?? 'Active') !== 'Active') {
+                throw new \DomainException("{$material->material_name} cannot be issued while its item status is {$material->item_status}.");
+            }
+
             // Ensure the row exists before locking; insert has no race risk.
             Stock::firstOrCreate(
                 ['material_id' => $materialId],
-                ['quantity_on_hand' => 0, 'warehouse_code' => $meta['warehouse_code'] ?? 'MAIN']
+                [
+                    'quantity_on_hand' => 0,
+                    'warehouse_code' => $meta['warehouse_code'] ?? 'MAIN',
+                    'tracking_mode' => $material->isBoardTrackable()
+                        ? Stock::TRACK_BY_AREA
+                        : Stock::TRACK_BY_COUNT,
+                ]
             );
 
             // Lock the row for the duration of this transaction so concurrent
             // check-outs cannot both read the same balance and race to negative.
             $stock = Stock::where('material_id', $materialId)->lockForUpdate()->firstOrFail();
 
+            $expectedTrackingMode = $material->isBoardTrackable()
+                ? Stock::TRACK_BY_AREA
+                : Stock::TRACK_BY_COUNT;
+            if ($stock->tracking_mode !== $expectedTrackingMode) {
+                $stock->tracking_mode = $expectedTrackingMode;
+            }
+
+            $previousQuantity = (float) $stock->quantity_on_hand;
             $stock->quantity_on_hand += $quantity;
             $stock->save();
+
+            // Cost is receipt evidence, not catalogue input. Keep the material's
+            // valuation cost derived from posted receipts using weighted average.
+            if ($type === 'check_in' && array_key_exists('receipt_unit_cost', $meta) && $meta['receipt_unit_cost'] !== null) {
+                $receivedQuantity = abs($quantity);
+                $newQuantity = $previousQuantity + $receivedQuantity;
+                if ($newQuantity > 0) {
+                    $material->unit_cost = (
+                        ($previousQuantity * (float) $material->unit_cost)
+                        + ($receivedQuantity * (float) $meta['receipt_unit_cost'])
+                    ) / $newQuantity;
+                    $material->save();
+                }
+            }
+
+            $controlled = app(ControlledInventoryService::class)->apply($material, $quantity, $type, $meta);
 
             // 3. Generate or use provided batch number
             $batchNumber = $meta['batch_number'] ?? $this->generateBatchNumber();
 
             // 4. Log the movement with batch number
-            return InventoryLog::create([
+            $log = InventoryLog::create([
                 'material_id' => $materialId,
                 'user_id' => Auth::id(),
                 'type' => $type,
                 'batch_number' => $batchNumber,
+                'lot_number' => $meta['lot_number'] ?? null,
+                'expiry_date' => $meta['expiry_date'] ?? null,
+                'inventory_lot_id' => $controlled['inventory_lot_id'],
+                'inventory_serial_item_id' => $controlled['inventory_serial_item_id'],
                 'quantity' => $quantity,
+                'receipt_unit_cost' => $type === 'check_in' ? ($meta['receipt_unit_cost'] ?? null) : null,
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,
                 'supplier_id' => $meta['supplier_id'] ?? null,
                 'reference_no' => $meta['reference_no'] ?? null,
                 'recipient_name' => $meta['recipient_name'] ?? $meta['requestor_name'] ?? null,
                 'notes' => $meta['notes'] ?? null,
-                'usage_type' => $meta['usage_type'] ?? 'consumable',
+                // Usage behaviour is owned by the material master. Transaction
+                // screens cannot silently reinterpret return obligations.
+                'usage_type' => $usageType,
                 'logged_at' => $meta['logged_at'] ?? now(),
             ]);
+
+            foreach ($controlled['allocations'] as $allocation) {
+                $log->allocations()->create($allocation);
+            }
+
+            return $log->load('allocations');
         });
     }
 

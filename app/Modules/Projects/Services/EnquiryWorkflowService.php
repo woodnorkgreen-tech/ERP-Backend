@@ -612,9 +612,6 @@ class EnquiryWorkflowService
         $user = auth()->user();
         $isAdmin = $user && $user->hasRole(\App\Constants\EnquiryConstants::ROLES_ADMIN);
 
-        // Workflow ordering: prerequisite task types must be satisfied first.
-        $this->validateTaskDependencies($task, (bool) $isAdmin);
-
         // Site Survey — a final survey save is the evidence of completion. Draft
         // records must never unlock Design.
         if ($task->type === 'site-survey' && !$isAdmin) {
@@ -740,13 +737,32 @@ class EnquiryWorkflowService
             }
         }
 
-        // 6. Report/Archival Validation — mirrors ReportTask.vue's own
-        // completion gate (project_officer_signature + sign date) so the
-        // frontend and backend agree on what "done" means for this type.
-        if ($task->type === 'report' && !$isAdmin) {
+        // 6. Report/Archival Validation — a project is only archived after
+        // approval, sign-off, and all required closure records are confirmed.
+        // Closure governance applies to every role, including administrators.
+        // Administrative access must not silently bypass an approved archive.
+        if ($task->type === 'report') {
             $report = \App\Modules\ArchivalTask\Models\ArchivalReport::where('enquiry_task_id', $task->id)->first();
             if (!$report || !$report->project_officer_signature || !$report->project_officer_sign_date) {
                 throw new WorkflowValidationException("Cannot complete Archival & Reporting task. The report must be signed off by the Project Officer first.");
+            }
+
+            if (!$report->reviewed_by || !$report->reviewer_sign_date) {
+                throw new WorkflowValidationException("Cannot complete Archival & Reporting task. Management review and date are required.");
+            }
+
+            if (!$report->archive_reference || !$report->archive_location) {
+                throw new WorkflowValidationException("Cannot complete Archival & Reporting task. Archive reference and location are required.");
+            }
+
+            if ($report->status !== 'approved') {
+                throw new WorkflowValidationException("Cannot complete Archival & Reporting task. Submit and approve the report first.");
+            }
+
+            $missingChecks = count(app(\App\Modules\ArchivalTask\Services\ArchivalReportService::class)
+                ->getMissingRequiredChecks($task->id, $report));
+            if ($missingChecks > 0) {
+                throw new WorkflowValidationException("Cannot complete Archival & Reporting task. {$missingChecks} required archive checklist item(s) remain incomplete.");
             }
         }
 
@@ -789,33 +805,40 @@ class EnquiryWorkflowService
             }
         }
 
-        // 10. Logistics validation: a usable trip plan, manifest, and verified load.
+        // 10. Logistics validation: company transport needs a trip plan. Every
+        // dispatch still needs an accurate loading sheet and verified load.
         if ($task->type === 'logistics' && !$isAdmin) {
             $logisticsTask = \App\Modules\logisticsTask\Models\LogisticsTask::where('task_id', $task->id)
                 ->withCount('transportItems')
                 ->first();
             if (!$logisticsTask) {
-                throw new WorkflowValidationException('Complete the logistics trip plan before dispatch.');
+                throw new WorkflowValidationException('Complete the logistics transport details before dispatch.');
             }
 
             $planning = $logisticsTask->logistics_planning ?? [];
-            $requiredPlanning = [
-                'vehicle registration' => data_get($planning, 'vehicle_identification'),
-                'driver' => data_get($planning, 'driver_name'),
-                'destination' => data_get($planning, 'route.destination'),
-                'load time' => data_get($planning, 'timeline.loading_time'),
-                'departure time' => data_get($planning, 'timeline.departure_time'),
-                'delivery date' => data_get($planning, 'timeline.setup_start_time'),
-                'delivery time' => data_get($planning, 'timeline.setup_start_hour'),
-            ];
-            $missingPlanning = collect($requiredPlanning)->filter(fn ($value) => blank($value))->keys();
-            if ($missingPlanning->isNotEmpty()) {
-                throw new WorkflowValidationException(
-                    'Complete the trip plan: '.$missingPlanning->join(', ', ' and ').'.'
-                );
+            $transportArrangement = data_get($planning, 'transport_arrangement', 'company');
+            if (!in_array($transportArrangement, ['company', 'client'], true)) {
+                throw new WorkflowValidationException('Select whether transport is arranged by the company or the client.');
+            }
+            if ($transportArrangement === 'company') {
+                $requiredPlanning = [
+                    'vehicle registration' => data_get($planning, 'vehicle_identification'),
+                    'driver' => data_get($planning, 'driver_name'),
+                    'destination' => data_get($planning, 'route.destination'),
+                    'load time' => data_get($planning, 'timeline.loading_time'),
+                    'departure time' => data_get($planning, 'timeline.departure_time'),
+                    'delivery date' => data_get($planning, 'timeline.setup_start_time'),
+                    'delivery time' => data_get($planning, 'timeline.setup_start_hour'),
+                ];
+                $missingPlanning = collect($requiredPlanning)->filter(fn ($value) => blank($value))->keys();
+                if ($missingPlanning->isNotEmpty()) {
+                    throw new WorkflowValidationException(
+                        'Complete the company transport plan: '.$missingPlanning->join(', ', ' and ').'.'
+                    );
+                }
             }
             if ($logisticsTask->transport_items_count < 1) {
-                throw new WorkflowValidationException('Add at least one item to the load manifest before dispatch.');
+                throw new WorkflowValidationException('Add at least one item to the loading sheet before dispatch.');
             }
 
             $checklist = $logisticsTask
@@ -855,31 +878,6 @@ class EnquiryWorkflowService
                 );
             }
         }
-    }
-
-    /**
-     * Enforce workflow ordering: a task cannot be completed until its
-     * prerequisite task types are satisfied. Admins may override, but the
-     * bypass is logged for the governance trail.
-     */
-    private function validateTaskDependencies(EnquiryTask $task, bool $isAdmin): void
-    {
-        $blocking = $task->blockingPrerequisiteTitles();
-
-        if (empty($blocking)) {
-            return;
-        }
-
-        $blockingList = implode(', ', $blocking);
-
-        if ($isAdmin) {
-            Log::warning("Admin override: completing '{$task->type}' task {$task->id} before prerequisites are done: {$blockingList}");
-            return;
-        }
-
-        throw new WorkflowValidationException(
-            "Cannot complete \"{$task->title}\" yet. Finish the prerequisite task(s) first: {$blockingList}."
-        );
     }
 
     /**

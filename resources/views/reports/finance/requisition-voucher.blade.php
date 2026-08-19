@@ -343,9 +343,8 @@
             
             <div class="header">
                 <div class="logo-box">
-                    <img src="{{ public_path('logo-outline.png') }}" class="logo-img" alt="WNG Logo"/>
+                    <img src="{{ public_path('woodnork-green-logo.png') }}" class="logo-img" alt="Woodnork Green logo"/>
                     <div class="company-info">
-                        <div class="company-name">Woodnork Green</div>
                         <div class="kra-pin">KRA PIN: P051451468C</div>
                         <div style="font-size:7px; font-weight:bold; color:#94a3b8; text-transform:uppercase; margin-top:1px;">Verified Official Document</div>
                     </div>

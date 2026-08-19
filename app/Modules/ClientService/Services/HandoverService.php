@@ -15,7 +15,7 @@ class HandoverService
      */
     public function getHandovers(array $filters = []): array
     {
-        $query = HandoverSurvey::with(['task.enquiry.client', 'reviewer'])
+        $query = HandoverSurvey::with(['task.enquiry.client', 'task.enquiry.projectOfficer', 'task.enquiry.assignedPo', 'reviewer'])
             ->where('submitted', true);
 
         // Filter by client
@@ -73,12 +73,9 @@ class HandoverService
         // Apply timeliness filter (on_time vs delayed)
         if (!empty($filters['timeliness'])) {
             $formatted = $formatted->filter(function ($h) use ($filters) {
-                // Find actual survey responses
-                $survey = HandoverSurvey::find($h['id']);
-                if (!$survey) return false;
-                $onTime = data_get($survey->responses, 'delivered_on_time');
-                $isOnTime = ($onTime === true || $onTime === 'yes' || $onTime === 1 || $onTime === '1' || $onTime === 'true');
-                return $filters['timeliness'] === 'on_time' ? $isOnTime : !$isOnTime;
+                return $filters['timeliness'] === 'on_time'
+                    ? $h['delivered_on_time']
+                    : !$h['delivered_on_time'];
             });
         }
 
@@ -124,6 +121,7 @@ class HandoverService
         $query = ProjectEnquiry::with([
                 'client',
                 'projectOfficer',
+                'assignedPo',
                 'enquiryTasks' => fn ($q) => $q->where('type', 'handover')->with('handoverSurvey'),
             ])
             ->where('status', EnquiryConstants::STATUS_COMPLETED)
@@ -160,7 +158,7 @@ class HandoverService
                 'client_name'      => $e->client->full_name ?? 'N/A',
                 'project_title'    => $e->title ?? 'N/A',
                 'job_number'       => $e->job_number ?? 'N/A',
-                'project_officer'  => $e->projectOfficer?->name,
+                'project_officer'  => $e->projectOfficer?->name ?? $e->assignedPo?->name,
                 // updated_at is used as a completion proxy (no dedicated completed_at column)
                 'completed_at'     => $e->updated_at ? $e->updated_at->toISOString() : null,
                 'handover_task_id' => $handoverTask?->id,
@@ -184,7 +182,7 @@ class HandoverService
      */
     public function getAwaitingReview(array $filters = []): array
     {
-        $query = HandoverSurvey::with(['task.enquiry.client', 'task.enquiry.projectOfficer'])
+        $query = HandoverSurvey::with(['task.enquiry.client', 'task.enquiry.projectOfficer', 'task.enquiry.assignedPo'])
             ->where('submitted', true)
             ->where('review_status', 'pending');
 
@@ -216,7 +214,7 @@ class HandoverService
                 'client_name'    => $client?->full_name ?? 'N/A',
                 'project_title'  => $enquiry?->title ?? 'N/A',
                 'job_number'     => $enquiry?->job_number ?? 'N/A',
-                'project_officer' => $enquiry?->projectOfficer?->name,
+                'project_officer' => $enquiry?->projectOfficer?->name ?? $enquiry?->assignedPo?->name,
                 'respondent'     => $h->respondent_info['name'] ?? 'N/A',
             ];
         })->values()->toArray();
@@ -236,7 +234,7 @@ class HandoverService
      */
     public function getHandoverDetails(int $id): ?array
     {
-        $handover = HandoverSurvey::with(['task.enquiry.client', 'reviewer', 'ncrReport'])->find($id);
+        $handover = HandoverSurvey::with(['task.enquiry.client', 'task.enquiry.projectOfficer', 'task.enquiry.assignedPo', 'reviewer', 'ncrReport'])->find($id);
 
         if (!$handover) return null;
 
@@ -261,6 +259,7 @@ class HandoverService
             'client_name'     => $client->full_name ?? 'N/A',
             'project_title'   => $enquiry->title ?? 'N/A',
             'job_number'      => $enquiry->job_number ?? 'N/A',
+            'project_officer' => $enquiry?->projectOfficer?->name ?? $enquiry?->assignedPo?->name,
             'respondent'      => $h->respondent_info['name'] ?? 'N/A',
             'feedback_source' => $h->feedback_source ?? 'survey_link',
             'delivered_on_time' => $isOnTime,

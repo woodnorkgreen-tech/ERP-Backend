@@ -3,6 +3,7 @@
 namespace App\Modules\setdownTask\Services;
 
 use App\Modules\setdownTask\Models\SetdownTask;
+use App\Modules\setdownTask\Models\SetdownTaskIssue;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\UploadedFile;
@@ -14,14 +15,15 @@ class SetdownTaskService
      */
     public function getSetdownForTask(int $taskId): ?array
     {
-        $setdownTask = SetdownTask::where('task_id', $taskId)->first();
+        $setdownTask = SetdownTask::where('task_id', $taskId)
+            ->with(['setdownIssues.reporter', 'setdownIssues.assignee'])
+            ->first();
 
         if (!$setdownTask) {
             return null;
         }
 
         $documentation = $setdownTask->documentation ?? [];
-        $issues = $setdownTask->issues ?? [];
 
         return [
             'id' => $setdownTask->id,
@@ -31,7 +33,19 @@ class SetdownTaskService
                 'completion_notes' => $documentation['completion_notes'] ?? null,
                 'photos' => $documentation['photos'] ?? [],
             ],
-            'issues' => $issues,
+            'issues' => $setdownTask->setdownIssues->map(fn (SetdownTaskIssue $issue) => [
+                'id' => $issue->id,
+                'title' => $issue->title,
+                'description' => $issue->description,
+                'category' => $issue->category,
+                'priority' => $issue->priority,
+                'status' => $issue->status,
+                'reported_by' => $issue->reporter?->name,
+                'reported_at' => $issue->created_at?->toISOString(),
+                'assigned_to' => $issue->assignee?->name,
+                'resolved_at' => $issue->resolved_at?->toISOString(),
+                'resolution' => $issue->resolution,
+            ])->values(),
         ];
     }
 
@@ -162,7 +176,7 @@ class SetdownTaskService
     /**
      * Add an issue
      */
-    public function addIssue(int $taskId, array $data): array
+    public function addIssue(int $taskId, array $data): SetdownTaskIssue
     {
         return DB::transaction(function () use ($taskId, $data) {
             // Ensure setdown task exists
@@ -177,69 +191,36 @@ class SetdownTaskService
                 ]
             );
 
-            $issue = [
-                'id' => time(), // Use timestamp as ID
+            return SetdownTaskIssue::create([
+                'setdown_task_id' => $setdownTask->id,
                 'title' => $data['title'],
                 'description' => $data['description'],
                 'category' => $data['category'] ?? 'other',
                 'priority' => $data['priority'] ?? 'medium',
                 'status' => 'open',
-                'reported_by' => auth()->user()->name ?? 'Unknown',
-                'reported_at' => now()->toISOString(),
+                'reported_by' => auth()->id(),
                 'assigned_to' => $data['assigned_to'] ?? null,
-                'resolved_at' => null,
-                'resolution' => null,
-            ];
-
-            $issues = $setdownTask->issues ?? [];
-            $issues[] = $issue;
-            
-            $setdownTask->issues = $issues;
-            $setdownTask->save();
-
-            return $issue;
+            ])->fresh(['reporter', 'assignee']);
         });
     }
 
     /**
      * Update an issue
      */
-    public function updateIssue(int $taskId, int $issueId, array $data): array
+    public function updateIssue(int $taskId, int $issueId, array $data): SetdownTaskIssue
     {
-        $setdownTask = SetdownTask::where('task_id', $taskId)->firstOrFail();
-        
-        $issues = $setdownTask->issues ?? [];
-        $issueIndex = array_search($issueId, array_column($issues, 'id'));
-        
-        if ($issueIndex === false) {
-            throw new \Exception('Issue not found');
-        }
-
-        $issue = &$issues[$issueIndex];
+        $issue = SetdownTaskIssue::whereHas('setdownTask', fn ($query) => $query->where('task_id', $taskId))
+            ->findOrFail($issueId);
 
         if (isset($data['status'])) {
-            $issue['status'] = $data['status'];
-            
-            // If marking as resolved, set resolved_at
-            if ($data['status'] === 'resolved' && !isset($issue['resolved_at'])) {
-                $issue['resolved_at'] = now()->toISOString();
-            } elseif ($data['status'] !== 'resolved' && isset($issue['resolved_at'])) {
-                $issue['resolved_at'] = null;
+            if ($data['status'] === 'resolved' && !$issue->resolved_at) {
+                $data['resolved_at'] = now();
+            } elseif ($data['status'] !== 'resolved') {
+                $data['resolved_at'] = null;
             }
         }
-
-        if (isset($data['resolution'])) {
-            $issue['resolution'] = $data['resolution'];
-        }
-
-        if (isset($data['assigned_to'])) {
-            $issue['assigned_to'] = $data['assigned_to'];
-        }
-
-        $setdownTask->issues = $issues;
-        $setdownTask->save();
-
-        return $issue;
+        $issue->update($data);
+        return $issue->fresh(['reporter', 'assignee']);
     }
 
     /**
@@ -247,19 +228,9 @@ class SetdownTaskService
      */
     public function deleteIssue(int $taskId, int $issueId): bool
     {
-        $setdownTask = SetdownTask::where('task_id', $taskId)->firstOrFail();
-        
-        $issues = $setdownTask->issues ?? [];
-        $issueIndex = array_search($issueId, array_column($issues, 'id'));
-        
-        if ($issueIndex !== false) {
-            array_splice($issues, $issueIndex, 1);
-            $setdownTask->issues = array_values($issues); // Re-index
-            $setdownTask->save();
-            return true;
-        }
-        
-        return false;
+        return SetdownTaskIssue::whereHas('setdownTask', fn ($query) => $query->where('task_id', $taskId))
+            ->findOrFail($issueId)
+            ->delete();
     }
 
     /**

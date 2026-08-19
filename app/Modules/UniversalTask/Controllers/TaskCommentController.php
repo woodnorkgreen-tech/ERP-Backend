@@ -43,15 +43,16 @@ class TaskCommentController
         $user = Auth::user();
 
         // Debug: Log authentication status
-        \Log::info('TaskCommentController@index - User authentication check', [
-            'user_id' => $user ? $user->id : null,
-            'task_id' => $task->id,
-            'authenticated' => $user !== null
-        ]);
+        // TEMP disabled 2026-07-27 for perf testing - revert (uncomment) later
+        // \Log::info('TaskCommentController@index - User authentication check', [
+        //     'user_id' => $user ? $user->id : null,
+        //     'task_id' => $task->id,
+        //     'authenticated' => $user !== null
+        // ]);
 
         // Check if user is authenticated
         if (!$user) {
-            \Log::error('TaskCommentController@index - User not authenticated');
+            // \Log::error('TaskCommentController@index - User not authenticated');
             return response()->json([
                 'success' => false,
                 'error' => [
@@ -116,14 +117,15 @@ class TaskCommentController
         $user = Auth::user();
 
         // Debug: Check authentication and task details
-        \Log::info('Comment creation attempt for task ID: ' . $taskId, [
-            'user_id' => $user ? $user->id : null,
-            'authenticated' => $user !== null
-        ]);
+        // TEMP disabled 2026-07-27 for perf testing - revert (uncomment) later
+        // \Log::info('Comment creation attempt for task ID: ' . $taskId, [
+        //     'user_id' => $user ? $user->id : null,
+        //     'authenticated' => $user !== null
+        // ]);
 
         // Check if user is authenticated
         if (!$user) {
-            \Log::error('Comment creation failed - User not authenticated for task ID: ' . $taskId);
+            // \Log::error('Comment creation failed - User not authenticated for task ID: ' . $taskId);
             return response()->json([
                 'success' => false,
                 'error' => [
@@ -133,10 +135,10 @@ class TaskCommentController
             ], 401);
         }
 
-        \Log::info('Task found: ' . $task->id . ' - ' . $task->title, [
-            'user_id' => $user->id,
-            'user_name' => $user->name
-        ]);
+        // \Log::info('Task found: ' . $task->id . ' - ' . $task->title, [
+        //     'user_id' => $user->id,
+        //     'user_name' => $user->name
+        // ]);
 
         // Check view permission for the task (required to comment)
         if (!$this->permissionService->canView($user, $task)) {

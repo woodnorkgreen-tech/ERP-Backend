@@ -23,7 +23,7 @@ class BudgetService
      */
     public function saveBudgetData(int $taskId, array $data): TaskBudgetData
     {
-        return DB::transaction(function () use ($taskId, $data) {
+        $budgetData = DB::transaction(function () use ($taskId, $data) {
             $existingBudgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
             $status = $this->resolveSaveStatus($existingBudgetData, $data['status'] ?? null);
 
@@ -42,6 +42,43 @@ class BudgetService
 
             return $budgetData;
         });
+
+        // Procurement is a downstream consumer, not part of the budget write —
+        // run it after the commit so a procurement problem can never roll back
+        // a saved budget.
+        $this->syncProcurementWithBudget($taskId);
+
+        return $budgetData;
+    }
+
+    /**
+     * Push the current budget figures into this project's procurement task.
+     *
+     * Procurement already pulls the budget when someone opens the task
+     * (ProcurementService::getProcurementData), but that leaves it stale for
+     * every other reader — dashboards, reports, exports — until a human
+     * happens to open it. Pushing on each budget write keeps the two in step.
+     *
+     * syncWithBudget() no-ops when procurement has never imported the budget,
+     * preserves user-entered procurement state when merging, and swallows its
+     * own failures, so this is safe to call unconditionally.
+     */
+    private function syncProcurementWithBudget(int $budgetTaskId): void
+    {
+        $budgetTask = EnquiryTask::find($budgetTaskId);
+        if (!$budgetTask) {
+            return;
+        }
+
+        $procurementTask = EnquiryTask::where('project_enquiry_id', $budgetTask->project_enquiry_id)
+            ->where('type', 'procurement')
+            ->first();
+
+        if (!$procurementTask) {
+            return;
+        }
+
+        app(ProcurementService::class)->syncWithBudget($procurementTask->id);
     }
 
     /**
@@ -69,6 +106,22 @@ class BudgetService
         }
 
         $this->ensureMaterialsApproved($materialsData);
+
+        // A manual Sync deliberately rewrites the budget's numbers, but if the
+        // task was already marked complete that rewrite must not happen
+        // silently under a "done" status — reopen it so it's visibly back
+        // under review.
+        $wasCompleted = $task->status === 'completed';
+        if ($wasCompleted) {
+            $task->update(['status' => 'in_progress', 'completed_at' => null]);
+            $task->recordCustomAction('status_transition', [
+                'from' => 'completed',
+                'to' => 'in_progress',
+                'actor_type' => auth()->id() ? 'user' : 'system',
+                'actor_id' => auth()->id(),
+                'reason' => 'Reopened: materials list was manually re-synced into an already-completed budget.',
+            ]);
+        }
 
         $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
         
@@ -152,9 +205,16 @@ class BudgetService
             );
         });
 
+        // A materials import rewrites exactly the budget rows procurement
+        // mirrors, so push the result straight through.
+        $this->syncProcurementWithBudget($taskId);
+
         return [
             'budget' => $budgetData,
-            'message' => 'Approved materials list imported into internal budget'
+            'message' => $wasCompleted
+                ? 'Approved materials list imported into internal budget. This budget was reopened for review.'
+                : 'Approved materials list imported into internal budget',
+            'reopened' => $wasCompleted,
         ];
     }
 

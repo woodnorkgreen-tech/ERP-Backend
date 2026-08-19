@@ -185,6 +185,9 @@ class Permissions
     const ADMIN_BACKUP = 'admin.backup';
     const ADMIN_MAINTENANCE = 'admin.maintenance';
 
+    // ICT SUPPORT PERMISSIONS
+    const SUPPORT_MANAGE = 'support.manage';
+
     // ===========================================
     // TASK MANAGEMENT PERMISSIONS
     // ===========================================
@@ -306,6 +309,7 @@ class Permissions
 
             // System Admin Permissions
             self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
+            self::SUPPORT_MANAGE,
 
             // Task Management
             self::TASK_CREATE, self::TASK_READ, self::TASK_UPDATE, self::TASK_DELETE,
@@ -346,6 +350,7 @@ class Permissions
             'role_management' => [
                 self::ROLE_CREATE, self::ROLE_READ, self::ROLE_UPDATE, self::ROLE_DELETE, self::ROLE_ASSIGN_PERMISSION,
             ],
+            'ict_support' => [self::SUPPORT_MANAGE],
             'department_management' => [
                 self::DEPARTMENT_CREATE, self::DEPARTMENT_READ, self::DEPARTMENT_UPDATE, self::DEPARTMENT_DELETE,
                 self::DEPARTMENT_ACCESS, self::DEPARTMENT_MANAGE,
