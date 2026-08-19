@@ -13,6 +13,7 @@ use App\Modules\ProcurementStores\Controllers\BoardRequestController;
 use App\Modules\ProcurementStores\Controllers\POVerificationController;
 
 Route::get('/test', [ProcurementStoresController::class, 'test']);
+Route::post('/inventory/check-availability', [ProcurementStoresController::class, 'checkAvailability']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
 Route::post('/check-in', [ProcurementStoresController::class, 'checkIn']);
 Route::post('/check-out', [ProcurementStoresController::class, 'checkOut']);
@@ -65,6 +66,9 @@ Route::resource('/bills', BillController::class);
 Route::get('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'index']);
 Route::get('/goods-receipt-notes/search', [GoodsReceiptNoteController::class, 'search']);
 Route::get('/goods-receipt-notes/available-purchase-orders', [GoodsReceiptNoteController::class, 'getAvailablePurchaseOrders']);
+Route::get('/goods-receipt-notes/pending-confirmations', [GoodsReceiptNoteController::class, 'pendingConfirmations']);
+Route::get('/goods-receipt-notes/pending-confirmations-count', [GoodsReceiptNoteController::class, 'pendingConfirmationsCount']);
+Route::post('/goods-receipt-note-items/{grnItem}/confirm', [GoodsReceiptNoteController::class, 'confirmItem']);
 Route::get('/goods-receipt-notes/{id}/download', [GoodsReceiptNoteController::class, 'downloadPdf']);
 Route::get('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'show']);
 Route::post('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'store']);
