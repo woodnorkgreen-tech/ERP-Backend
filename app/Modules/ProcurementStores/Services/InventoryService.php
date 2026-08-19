@@ -74,6 +74,7 @@ class InventoryService
                 'project_id' => $meta['project_id'] ?? null,
                 'supplier_id' => $meta['supplier_id'] ?? null,
                 'reference_no' => $meta['reference_no'] ?? null,
+                'unit_price' => $meta['unit_price'] ?? null,
                 'recipient_name' => $meta['recipient_name'] ?? $meta['requestor_name'] ?? null,
                 'notes' => $meta['notes'] ?? null,
                 'usage_type' => $meta['usage_type'] ?? 'consumable',
