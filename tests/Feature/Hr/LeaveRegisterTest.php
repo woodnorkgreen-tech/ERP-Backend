@@ -58,6 +58,8 @@ class LeaveRegisterTest extends TestCase
         $entry = collect($response->json('data'))->firstWhere('employee.id', $employee->id);
 
         $this->assertNotNull($entry);
+        // Employee was hired 2025-01-01, so the full 21-day annual entitlement applies for
+        // 2026 (not gated by month-by-month accrual progress, no carry-forward).
         $this->assertEquals(21.0, $entry['total_allocated_days']);
         $this->assertEquals(3.0, $entry['total_used_days']);
         $this->assertEquals(18.0, $entry['total_remaining_days']);
