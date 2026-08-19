@@ -79,6 +79,11 @@ class RequisitionResource extends JsonResource
                         'budget_item_id' => $item->budget_item_id,
                         'budget_item_persistent_id' => $item->budget_item_persistent_id,
                         'material_id' => $item->material_id,
+                        'supplier_id' => $item->supplier_id,
+                        'supplier' => $item->supplier ? [
+                            'id' => $item->supplier->id,
+                            'supplier_name' => $item->supplier->supplier_name,
+                        ] : null,
                         'custom_description' => $item->custom_description,
                         'material_name' => $item->material ? $item->material->material_name : $item->custom_description,
                         'material' => $item->material ? [

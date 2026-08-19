@@ -197,6 +197,15 @@ class ProcurementOperationalSyncService
         });
     }
 
+    /**
+     * NOTE: 'accepted' on a GRN item now only means Procurement accepted the
+     * goods at the dock (quality check passed). It does NOT mean the item is
+     * in Stock yet — that only happens once Stores confirms it (matches or
+     * creates the material and prices it), which sets store_status =
+     * 'confirmed'. So acceptedQuantity — and everything downstream that
+     * reads it (operationalSync.receivedQuantity, buildSummary, task
+     * status) — is now gated on BOTH accepted AND store_status confirmed.
+     */
     private function receiptState(?PurchaseOrderItem $purchaseOrderItem): array
     {
         if (!$purchaseOrderItem) {
@@ -211,9 +220,19 @@ class ProcurementOperationalSyncService
 
         $orderedQuantity = (float) $receiptItems->sum('ordered_quantity');
         $receivedQuantity = (float) $receiptItems->sum('received_quantity');
-        $acceptedQuantity = (float) $receiptItems
+
+        // Dock-accept only — arrived and passed quality check, but Stores
+        // hasn't matched/priced it into Stock yet.
+        $dockAcceptedQuantity = (float) $receiptItems
             ->filter(fn ($item) => (bool) $item->accepted)
             ->sum('received_quantity');
+
+        // Store-confirmed — actually landed in Stock. This is what
+        // "acceptedQuantity" means everywhere downstream from here on.
+        $acceptedQuantity = (float) $receiptItems
+            ->filter(fn ($item) => (bool) $item->accepted && $item->store_status === 'confirmed')
+            ->sum('received_quantity');
+
         $latestReceipt = $receiptItems->sortByDesc('created_at')->first()?->goodsReceiptNote;
 
         if ($receivedQuantity <= 0) {
@@ -222,6 +241,8 @@ class ProcurementOperationalSyncService
             $status = 'received';
         } elseif ($acceptedQuantity > 0) {
             $status = 'partially_received';
+        } elseif ($dockAcceptedQuantity > 0) {
+            $status = 'pending_store_confirmation';
         } else {
             $status = 'quality_rejected';
         }
@@ -274,7 +295,7 @@ class ProcurementOperationalSyncService
             return 'received';
         }
 
-        if (in_array($receiptStatus, ['partially_received', 'quality_rejected'], true)) {
+        if (in_array($receiptStatus, ['partially_received', 'pending_store_confirmation', 'quality_rejected'], true)) {
             return $receiptStatus;
         }
 

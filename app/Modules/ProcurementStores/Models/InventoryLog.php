@@ -29,6 +29,7 @@ class InventoryLog extends Model
         'project_id',
         'supplier_id',
         'reference_no',
+        'unit_price',
         'recipient_name',
         'notes',
         'usage_type',
@@ -39,8 +40,8 @@ class InventoryLog extends Model
         'quantity' => 'decimal:2',
         'receipt_unit_cost' => 'decimal:4',
         'balance_after' => 'decimal:2',
-        'logged_at' => 'datetime',
-        'expiry_date' => 'date',
+        'unit_price' => 'decimal:2',
+        'logged_at' => 'datetime'
     ];
 
     public function material(): BelongsTo
@@ -56,10 +57,5 @@ class InventoryLog extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(\App\Models\Project::class, 'project_id');
-    }
-
-    public function allocations()
-    {
-        return $this->hasMany(InventoryMovementAllocation::class);
     }
 }

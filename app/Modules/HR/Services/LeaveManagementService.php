@@ -7,7 +7,6 @@ use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\HR\Models\AttendanceHoliday;
 use App\Modules\HR\Models\Employee;
-use App\Modules\HR\Models\AttendanceHoliday;
 use App\Modules\HR\Models\LeaveBalanceAdjustment;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Models\LeaveType;
