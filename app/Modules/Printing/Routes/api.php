@@ -17,6 +17,7 @@ Route::put('/jobs/{job}', [PrintJobController::class, 'update']);
 Route::post('/jobs/{job}/status', [PrintJobController::class, 'status']);
 Route::post('/jobs/{job}/complete', [PrintJobController::class, 'complete']);
 Route::post('/jobs/{job}/reprint', [PrintJobController::class, 'reprint']);
+Route::post('/jobs/{job}/redesign', [PrintJobController::class, 'redesign']);
 Route::post('/jobs/{job}/correction', [PrintJobController::class, 'correction']);
 Route::get('/jobs/{job}/consumption', [PrintJobController::class, 'consumptions']);
 Route::post('/jobs/{job}/consumption', [PrintJobController::class, 'saveConsumption']);

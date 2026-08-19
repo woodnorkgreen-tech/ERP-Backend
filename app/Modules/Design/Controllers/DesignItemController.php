@@ -11,6 +11,7 @@ use App\Modules\Design\Resources\DesignItemResource;
 use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Design\Services\DesignItemReadinessService;
 use App\Modules\Design\Services\DesignNotificationService;
+use App\Modules\Design\Services\DesignRedesignService;
 use App\Modules\Design\Services\DimensionConversionService;
 use App\Modules\Printing\Services\PrintIntakeService;
 use Illuminate\Http\JsonResponse;
@@ -23,7 +24,8 @@ class DesignItemController extends Controller
         private readonly DesignItemReadinessService $readiness,
         private readonly DesignHandoffService $handoffs,
         private readonly PrintIntakeService $printingIntake,
-        private readonly DesignNotificationService $notifications
+        private readonly DesignNotificationService $notifications,
+        private readonly DesignRedesignService $redesigns
     ) {
     }
 
@@ -88,12 +90,28 @@ class DesignItemController extends Controller
     public function update(StoreDesignItemRequest $request, DesignItem $item): JsonResponse
     {
         $previousAssignedTo = $item->assigned_to;
+        $previousStatus = $item->status;
 
         $data = $this->dimensions->normalize($request->validated());
         $data['updated_by'] = auth()->id();
 
+        if (array_key_exists('status', $data) && $data['status'] !== 'print_ready' && $previousStatus === 'print_ready') {
+            $data['print_ready_at'] = null;
+        }
+
         $item->update($data);
         $item->load(['job', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs', 'assignedUser']);
+
+        if ($item->stream === DesignItem::STREAM_GRAPHIC) {
+            if ($previousStatus === 'print_ready' && $item->status !== 'print_ready') {
+                $this->handoffs->cancelPrintingQueueForChanges($item);
+                $item->load('handoffs');
+            } elseif ($item->status === 'print_ready') {
+                $handoff = $this->handoffs->createPrintingHandoffOnce($item);
+                $this->printingIntake->accept($handoff);
+                $item->load('handoffs');
+            }
+        }
 
         if ($item->assigned_to && $item->assigned_to !== $previousAssignedTo) {
             $this->notifications->notifyItemAssigned($item);
@@ -110,6 +128,21 @@ class DesignItemController extends Controller
         $item->delete();
 
         return response()->json(['message' => 'Design item deleted successfully']);
+    }
+
+    public function redesign(Request $request, DesignItem $item): JsonResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $redesign = $this->redesigns->requestFromDesignItem($item, $data['reason']);
+        $this->notifications->notifyItemAssigned($redesign);
+
+        return response()->json([
+            'message' => 'Redesign item created successfully',
+            'data' => new DesignItemResource($redesign),
+        ], 201);
     }
 
     public function markPrintReady(DesignItem $item): JsonResponse

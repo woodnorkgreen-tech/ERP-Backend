@@ -23,29 +23,59 @@ class PrintIntakeService
         return DB::transaction(function () use ($handoff) {
             $handoff = DesignHandoff::query()->whereKey($handoff->id)->lockForUpdate()->firstOrFail();
 
-            if ($handoff->status === 'accepted' && $handoff->target_record_id) {
-                return PrintJob::findOrFail($handoff->target_record_id);
-            }
+            $payload = $handoff->payload_snapshot ?? [];
+            $artwork = $payload['final_artwork'] ?? [];
+            $reprintOfJobId = $payload['redesign_of_print_job_id'] ?? null;
+            $isRedesignReprint = $reprintOfJobId !== null;
+            $artworkVersion = $this->artworkVersion($artwork['version'] ?? null, $isRedesignReprint, $reprintOfJobId);
 
             $existing = PrintJob::query()
-                ->where('design_handoff_id', $handoff->id)
-                ->orWhere(fn ($query) => $query
-                    ->where('design_item_id', $handoff->design_item_id)
-                    ->where('order_type', 'original')
-                    ->whereNull('reprint_of_job_id'))
+                ->when($handoff->target_record_id, fn ($query) => $query->whereKey($handoff->target_record_id))
+                ->when(!$handoff->target_record_id, fn ($query) => $query
+                    ->whereNotIn('status', ['completed', 'cancelled'])
+                    ->where('design_handoff_id', $handoff->id)
+                    ->when(!$isRedesignReprint, fn ($inner) => $inner
+                        ->orWhere(fn ($candidate) => $candidate
+                            ->whereNotIn('status', ['completed', 'cancelled'])
+                            ->where('design_item_id', $handoff->design_item_id)
+                            ->where('order_type', 'original')
+                            ->whereNull('reprint_of_job_id'))))
                 ->oldest()
                 ->first();
 
             if ($existing) {
-                $payload = $handoff->payload_snapshot ?? [];
+                if ($existing->isLocked()) {
+                    $this->handoffs->accept($handoff, $existing->id);
+
+                    return $existing->fresh(['consumptions.roll', 'operator', 'machine']);
+                }
+
                 $existing->update(array_filter([
                     'design_handoff_id' => $existing->design_handoff_id ?: $handoff->id,
-                    'original_design_handoff_id' => $existing->original_design_handoff_id ?: $handoff->id,
+                    'original_design_handoff_id' => $isRedesignReprint ? null : ($existing->original_design_handoff_id ?: $handoff->id),
+                    'design_item_id' => $payload['design_item_id'] ?? $handoff->design_item_id,
+                    'design_job_id' => $payload['design_job_id'] ?? null,
+                    'project_enquiry_id' => $payload['project_enquiry_id'] ?? null,
+                    'project_id' => $payload['project_id'] ?? null,
+                    'client_id' => $payload['client_id'] ?? null,
+                    'job_number' => $payload['job_number'] ?? null,
+                    'project_name' => $payload['project_name'] ?? $payload['job_title'] ?? null,
+                    'client_name' => $payload['client_name'] ?? null,
+                    'title' => $payload['title'] ?? 'Print job',
+                    'description' => $payload['type'] ?? null,
+                    'final_artwork_url' => $artwork['url'] ?? null,
+                    'final_artwork_document_id' => $artwork['id'] ?? null,
+                    'artwork_version' => $artworkVersion,
                     'design_height_m' => $payload['design_height_m'] ?? $payload['width_m'] ?? null,
                     'design_length_m' => $payload['design_length_m'] ?? $payload['length_m'] ?? null,
                     'print_width_m' => $payload['print_width_m'] ?? $payload['width_m'] ?? null,
                     'running_length_m' => $payload['running_length_m'] ?? $payload['length_m'] ?? null,
                     'artwork_quantity' => $payload['quantity'] ?? null,
+                    'order_type' => $isRedesignReprint ? 'reprint' : $existing->order_type,
+                    'reprint_of_job_id' => $reprintOfJobId ?? $existing->reprint_of_job_id,
+                    'reprint_reason' => $payload['redesign_reason'] ?? $existing->reprint_reason,
+                    'remarks' => $payload['print_notes'] ?? $existing->remarks,
+                    'updated_by' => auth()->id(),
                 ], fn ($value) => $value !== null));
 
                 $this->handoffs->accept($handoff, $existing->id);
@@ -53,12 +83,9 @@ class PrintIntakeService
                 return $existing->fresh(['consumptions.roll', 'operator', 'machine']);
             }
 
-            $payload = $handoff->payload_snapshot ?? [];
-            $artwork = $payload['final_artwork'] ?? [];
-
             $job = PrintJob::create([
                 'design_handoff_id' => $handoff->id,
-                'original_design_handoff_id' => $handoff->id,
+                'original_design_handoff_id' => $isRedesignReprint ? null : $handoff->id,
                 'design_item_id' => $payload['design_item_id'] ?? $handoff->design_item_id,
                 'design_job_id' => $payload['design_job_id'] ?? null,
                 'project_enquiry_id' => $payload['project_enquiry_id'] ?? null,
@@ -71,13 +98,15 @@ class PrintIntakeService
                 'description' => $payload['type'] ?? null,
                 'final_artwork_url' => $artwork['url'] ?? null,
                 'final_artwork_document_id' => $artwork['id'] ?? null,
-                'artwork_version' => $artwork['version'] ?? null,
+                'artwork_version' => $artworkVersion,
                 'design_height_m' => $payload['design_height_m'] ?? $payload['width_m'] ?? null,
                 'design_length_m' => $payload['design_length_m'] ?? $payload['length_m'] ?? null,
                 'print_width_m' => $payload['print_width_m'] ?? $payload['width_m'] ?? null,
                 'running_length_m' => $payload['running_length_m'] ?? $payload['length_m'] ?? null,
                 'artwork_quantity' => $payload['quantity'] ?? null,
-                'order_type' => 'original',
+                'order_type' => $isRedesignReprint ? 'reprint' : 'original',
+                'reprint_of_job_id' => $reprintOfJobId,
+                'reprint_reason' => $payload['redesign_reason'] ?? null,
                 'status' => 'queued',
                 'remarks' => $payload['print_notes'] ?? null,
                 'created_by' => auth()->id(),
@@ -103,5 +132,20 @@ class PrintIntakeService
         }
 
         return $this->handoffs->reject($handoff, $reason);
+    }
+
+    private function artworkVersion(mixed $version, bool $isReprint, ?int $originalJobId = null): int
+    {
+        $documentVersion = max(1, (int) ($version ?? 1));
+
+        if (!$isReprint) {
+            return $documentVersion;
+        }
+
+        $originalVersion = $originalJobId
+            ? (int) (PrintJob::query()->whereKey($originalJobId)->value('artwork_version') ?? 1)
+            : 1;
+
+        return max(2, $documentVersion, $originalVersion + 1);
     }
 }

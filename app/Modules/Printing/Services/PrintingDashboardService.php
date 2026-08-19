@@ -10,15 +10,29 @@ use Illuminate\Http\Request;
 
 class PrintingDashboardService
 {
+    private const IN_PROGRESS_STATUSES = [
+        'preflight',
+        'ready_to_print',
+        'printing',
+        'printed',
+        'qc_failed',
+        'reprint_required',
+    ];
+
     public function summary(Request $request): array
     {
         $jobs = $this->filteredJobs($request);
 
         return [
             'kpis' => [
+                'total_jobs' => (clone $jobs)->count(),
                 'queued_jobs' => (clone $jobs)->where('status', 'queued')->count(),
-                'in_progress_jobs' => (clone $jobs)->where('status', 'printing')->count(),
+                'in_progress_jobs' => (clone $jobs)->whereIn('status', self::IN_PROGRESS_STATUSES)->count(),
+                'needs_attention_jobs' => (clone $jobs)->whereIn('status', ['qc_failed', 'reprint_required'])->count(),
                 'completed_jobs' => (clone $jobs)->where('status', 'completed')->count(),
+                'completed_today' => (clone $jobs)->where('status', 'completed')->whereDate('completed_at', today())->count(),
+                'completed_this_week' => (clone $jobs)->where('status', 'completed')->whereBetween('completed_at', [now()->startOfWeek(), now()->endOfWeek()])->count(),
+                'completed_this_month' => (clone $jobs)->where('status', 'completed')->whereBetween('completed_at', [now()->startOfMonth(), now()->endOfMonth()])->count(),
                 'reprints' => (clone $jobs)->where('order_type', 'reprint')->count(),
                 'low_rolls' => PrintRoll::where('status', 'active')->where('remaining_length_m', '<=', 5)->count(),
             ],
@@ -60,13 +74,13 @@ class PrintingDashboardService
                 print_jobs.project_enquiry_id,
                 print_jobs.project_id,
                 print_jobs.job_number,
-                COALESCE(print_jobs.project_name, print_jobs.title) as project_name,
+                COALESCE(MAX(print_jobs.project_name), MAX(print_jobs.title)) as project_name,
                 COUNT(DISTINCT print_jobs.id) as print_jobs_count,
                 COALESCE(SUM(print_job_consumptions.calculated_sqm), 0) as calculated_sqm,
                 COALESCE(SUM(print_job_consumptions.calculated_running_m), 0) as calculated_running_m,
                 COALESCE(SUM(print_job_consumptions.actual_running_m), 0) as actual_running_m,
                 COALESCE(SUM(print_job_consumptions.actual_running_m - print_job_consumptions.calculated_running_m), 0) as variance_m,
-                SUM(CASE WHEN print_jobs.order_type = "reprint" THEN 1 ELSE 0 END) as reprints
+                COUNT(DISTINCT CASE WHEN print_jobs.order_type = "reprint" THEN print_jobs.id END) as reprints
             ')
             ->when($request->filled('project_enquiry_id'), fn ($q) => $q->where('print_jobs.project_enquiry_id', $request->integer('project_enquiry_id')))
             ->when($request->filled('operator_id'), fn ($q) => $q->where('print_jobs.operator_id', $request->integer('operator_id')))
@@ -78,7 +92,7 @@ class PrintingDashboardService
             ->when($request->filled('print_roll_id'), fn ($q) => $q->where('print_job_consumptions.print_roll_id', $request->integer('print_roll_id')))
             ->when($request->filled('date_from'), fn ($q) => $q->whereRaw('DATE(COALESCE(print_jobs.completed_at, print_jobs.scheduled_at, print_jobs.created_at)) >= ?', [$request->date('date_from')->format('Y-m-d')]))
             ->when($request->filled('date_to'), fn ($q) => $q->whereRaw('DATE(COALESCE(print_jobs.completed_at, print_jobs.scheduled_at, print_jobs.created_at)) <= ?', [$request->date('date_to')->format('Y-m-d')]))
-            ->groupBy('print_jobs.project_enquiry_id', 'print_jobs.project_id', 'print_jobs.job_number', 'project_name')
+            ->groupBy('print_jobs.project_enquiry_id', 'print_jobs.project_id', 'print_jobs.job_number')
             ->orderByDesc('actual_running_m')
             ->limit((int) $request->get('limit', 20))
             ->get();

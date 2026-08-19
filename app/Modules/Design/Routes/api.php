@@ -39,6 +39,8 @@ Route::delete('/structural/items/{item}', [DesignItemController::class, 'destroy
 Route::post('/structural/items/{item}/mark-production-ready', [DesignItemController::class, 'markProductionReady']);
 Route::get('/structural/production-ready', [DesignItemController::class, 'index'])->defaults('stream', 'structural')->defaults('status', 'production_ready');
 
+Route::post('/items/{item}/redesign', [DesignItemController::class, 'redesign']);
+
 Route::get('/structural/items/{item}/bom', [DesignBomItemController::class, 'index']);
 Route::post('/structural/items/{item}/bom', [DesignBomItemController::class, 'store']);
 Route::put('/bom-items/{bomItem}', [DesignBomItemController::class, 'update']);

@@ -21,6 +21,11 @@ class DesignItem extends Model
         'design_job_id',
         'design_type_id',
         'project_deliverable_id',
+        'redesign_of_item_id',
+        'redesign_of_print_job_id',
+        'redesign_source',
+        'redesign_reason',
+        'redesign_requested_at',
         'stream',
         'title',
         'description',
@@ -58,6 +63,7 @@ class DesignItem extends Model
         'approved_at' => 'datetime',
         'print_ready_at' => 'datetime',
         'production_ready_at' => 'datetime',
+        'redesign_requested_at' => 'datetime',
     ];
 
     public function job(): BelongsTo
@@ -73,6 +79,11 @@ class DesignItem extends Model
     public function deliverable(): BelongsTo
     {
         return $this->belongsTo(ProjectDeliverable::class, 'project_deliverable_id');
+    }
+
+    public function redesignOfItem(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'redesign_of_item_id');
     }
 
     public function assignedUser(): BelongsTo

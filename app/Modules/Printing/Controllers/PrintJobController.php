@@ -4,6 +4,8 @@ namespace App\Modules\Printing\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Assets\Models\AssetCategory;
+use App\Modules\Design\Resources\DesignItemResource;
+use App\Modules\Design\Services\DesignRedesignService;
 use App\Modules\HR\Models\Department;
 use App\Modules\Printing\Models\PrintJob;
 use App\Modules\Printing\Resources\PrintJobConsumptionResource;
@@ -20,7 +22,8 @@ class PrintJobController extends Controller
 
     public function __construct(
         private readonly PrintJobService $jobs,
-        private readonly PrintMaterialUsageService $usage
+        private readonly PrintMaterialUsageService $usage,
+        private readonly DesignRedesignService $redesigns
     ) {
     }
 
@@ -88,6 +91,16 @@ class PrintJobController extends Controller
         $data = $request->validate(['reason' => ['required', 'string', 'max:2000']]);
 
         return response()->json(['data' => new PrintJobResource($this->jobs->reprint($job, $data['reason']))], 201);
+    }
+
+    public function redesign(Request $request, PrintJob $job): JsonResponse
+    {
+        $data = $request->validate(['reason' => ['required', 'string', 'max:2000']]);
+
+        return response()->json([
+            'message' => 'Redesign item created in Design',
+            'data' => new DesignItemResource($this->redesigns->requestFromPrintJob($job, $data['reason'])),
+        ], 201);
     }
 
     public function correction(Request $request, PrintJob $job): JsonResponse

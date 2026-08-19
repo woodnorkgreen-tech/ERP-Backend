@@ -98,6 +98,7 @@ class PrintJobService
         $reprint->status = 'queued';
         $reprint->reprint_of_job_id = $job->id;
         $reprint->reprint_reason = $reason;
+        $reprint->artwork_version = max(2, ((int) ($job->artwork_version ?? 1)) + 1);
         $reprint->created_by = auth()->id();
         $reprint->updated_by = auth()->id();
         $reprint->save();

@@ -4,6 +4,7 @@ namespace App\Modules\Design\Services;
 
 use App\Modules\Design\Models\DesignHandoff;
 use App\Modules\Design\Models\DesignItem;
+use App\Modules\Printing\Models\PrintJob;
 use Illuminate\Validation\ValidationException;
 
 class DesignHandoffService
@@ -14,19 +15,21 @@ class DesignHandoffService
 
         $existing = $item->handoffs()
             ->where('target_module', 'printing')
+            ->latest()
             ->first();
-
-        if ($existing && $existing->status !== 'pending') {
-            return $existing;
-        }
 
         $artwork = $this->finalArtworkLink($item);
 
         if ($existing) {
             $existing->update([
+                'status' => 'pending',
+                'target_record_id' => null,
                 'payload_snapshot' => $this->printingPayload($item, $artwork),
+                'rejection_reason' => null,
                 'handed_off_by' => auth()->id(),
                 'handed_off_at' => now(),
+                'responded_by' => null,
+                'responded_at' => null,
             ]);
 
             return $existing->fresh();
@@ -40,6 +43,48 @@ class DesignHandoffService
             'handed_off_by' => auth()->id(),
             'handed_off_at' => now(),
         ]);
+    }
+
+    public function cancelPrintingQueueForChanges(DesignItem $item, string $reason = 'Returned to Design for changes.'): void
+    {
+        $handoffs = $item->handoffs()
+            ->where('target_module', 'printing')
+            ->whereIn('status', ['pending', 'accepted'])
+            ->get();
+
+        foreach ($handoffs as $handoff) {
+            $job = $handoff->target_record_id
+                ? PrintJob::find($handoff->target_record_id)
+                : PrintJob::query()
+                    ->where('design_handoff_id', $handoff->id)
+                    ->where('design_item_id', $item->id)
+                    ->latest()
+                    ->first();
+
+            if ($job && $job->status === 'queued') {
+                $job->update([
+                    'status' => 'cancelled',
+                    'updated_by' => auth()->id(),
+                ]);
+
+                $job->events()->create([
+                    'event_type' => 'cancelled_for_design_changes',
+                    'from_status' => 'queued',
+                    'to_status' => 'cancelled',
+                    'reason' => $reason,
+                    'created_by' => auth()->id(),
+                ]);
+            }
+
+            if (!$job || in_array($job->status, ['queued', 'cancelled'], true)) {
+                $handoff->update([
+                    'status' => 'cancelled',
+                    'rejection_reason' => $reason,
+                    'responded_by' => auth()->id(),
+                    'responded_at' => now(),
+                ]);
+            }
+        }
     }
 
     public function reject(DesignHandoff $handoff, string $reason): DesignHandoff
@@ -84,6 +129,12 @@ class DesignHandoffService
             ->where('status', 'active')
             ->where('document_type', 'artwork')
             ->where('source', 'link')
+            ->sortByDesc(fn ($document) => sprintf(
+                '%010d-%010d-%s',
+                (int) ($document->version ?? 0),
+                (int) $document->id,
+                optional($document->created_at)->timestamp ?? 0
+            ))
             ->first();
 
         if (!$artwork) {
@@ -100,6 +151,10 @@ class DesignHandoffService
         return [
             'design_item_id' => $item->id,
             'design_job_id' => $item->design_job_id,
+            'redesign_of_item_id' => $item->redesign_of_item_id,
+            'redesign_of_print_job_id' => $item->redesign_of_print_job_id,
+            'redesign_source' => $item->redesign_source,
+            'redesign_reason' => $item->redesign_reason,
             'project_enquiry_id' => $item->job?->project_enquiry_id,
             'project_id' => $item->job?->project_id,
             'client_id' => $item->job?->client_id,
