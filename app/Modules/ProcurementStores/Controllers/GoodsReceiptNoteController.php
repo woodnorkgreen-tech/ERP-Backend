@@ -3,7 +3,11 @@
 namespace App\Modules\ProcurementStores\Controllers;
 
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
+use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
+use App\Modules\ProcurementStores\Services\InventoryService;
+use App\Modules\ProcurementStores\Services\BoardRegistrationService;
+use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Http\Resources\GoodsReceiptNoteResource;
 use App\Http\Resources\PurchaseOrderResource;
 use Illuminate\Http\Request;
@@ -15,6 +19,58 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class GoodsReceiptNoteController extends Controller
 {
+    /**
+     * Credits Stock for a GRN item once Stores has confirmed it — matched
+     * (or created) the material and priced it. This is the ONLY place stock
+     * gets moved for a GRN; it no longer happens automatically when
+     * Procurement first submits the GRN (see store() below) — Stores has to
+     * confirm each item first via confirmItem().
+     *
+     * Called once per item, only from confirmItem(), guarded there by
+     * store_status so an item can never be credited twice.
+     */
+    private function creditStockForAcceptedItem(GoodsReceiptNote $grn, array $item, float $unitPrice): void
+    {
+        $materialId = $item['material_id'] ?? null;
+        $quantity   = (float) ($item['received_quantity'] ?? 0);
+
+        if (!$materialId || $quantity <= 0) {
+            return;
+        }
+
+        $material = LibraryMaterial::find($materialId);
+        if (!$material) {
+            return;
+        }
+
+        $service = new InventoryService();
+        $log = $service->adjustStock($materialId, $quantity, 'check_in', [
+            'warehouse_code' => $grn->store_location,
+            'reference_no'   => $grn->grn_number,
+            'supplier_id'    => $grn->purchaseOrder?->supplier_id,
+            'unit_price'     => $unitPrice,
+            'notes'          => "Store-confirmed via GRN {$grn->grn_number}",
+        ]);
+
+        // Reusable (board-tracked) materials also need board records, same
+        // as the manual Check-In flow.
+        if ($material->material_type === 'reusable') {
+            try {
+                $registration = new BoardRegistrationService();
+                $registration->validateMaterial($material);
+                $registration->createBoardRecords(
+                    material:    $material,
+                    quantity:    (int) $quantity,
+                    batchNumber: $log->batch_number,
+                    userId:      auth()->id(),
+                );
+                $log->update(['usage_type' => 'reusable']);
+            } catch (\InvalidArgumentException) {
+                // Not board-eligible — plain consumable check-in is enough
+            }
+        }
+    }
+
     private function syncProjectProcurement(GoodsReceiptNote|int $goodsReceiptNote): void
     {
         try {
@@ -176,6 +232,10 @@ class GoodsReceiptNoteController extends Controller
             ]);
 
             foreach ($request->items as $item) {
+                // store_status defaults to 'pending' — Stock is NOT touched
+                // here. It only moves once Stores confirms the item via
+                // confirmItem() below, with a material match/create and a
+                // price. This just records what physically arrived.
                 $grn->items()->create([
                     'purchase_order_item_id' => $item['purchase_order_item_id'],
                     'material_id' => $item['material_id'] ?? null,
@@ -232,7 +292,13 @@ class GoodsReceiptNoteController extends Controller
                 'notes' => $request->notes,
             ]);
 
-            // Delete existing items and create new ones
+            // Delete existing items and create new ones.
+            // NOTE: stock is intentionally NOT re-credited here — it was
+            // already credited once when the GRN was first created (see
+            // creditStockForAcceptedItem in store()). Re-crediting on every
+            // edit would double-count received quantities. If a correction
+            // needs to change what's on the shelf, adjust Stock directly via
+            // Check-In/Check-Out instead of editing an already-received GRN.
             $grn->items()->delete();
 
             foreach ($request->items as $item) {
@@ -290,5 +356,125 @@ class GoodsReceiptNoteController extends Controller
             ->get();
 
         return PurchaseOrderResource::collection($purchaseOrders);
+    }
+
+    /**
+     * Lightweight count for dashboard badges — avoids pulling the full
+     * paginated queue just to show a number.
+     */
+    public function pendingConfirmationsCount()
+    {
+        $count = GoodsReceiptNoteItem::where('accepted', true)
+            ->where('store_status', 'pending')
+            ->count();
+
+        return response()->json(['count' => $count]);
+    }
+
+    /**
+     * Stores' confirmation queue — GRNs that have items dock-accepted by
+     * Procurement but not yet matched/priced into Stock.
+     */
+    public function pendingConfirmations()
+    {
+        $grns = GoodsReceiptNote::with([
+                'items.purchaseOrderItem.material',
+                'purchaseOrder.supplier',
+                'receivedByUser',
+            ])
+            ->where('store_status', 'pending_confirmation')
+            ->whereHas('items', function ($q) {
+                $q->where('accepted', true)->where('store_status', 'pending');
+            })
+            ->orderBy('date', 'asc')
+            ->paginate(20);
+
+        return GoodsReceiptNoteResource::collection($grns)->preserveQuery();
+    }
+
+    /**
+     * Stores confirms a single GRN item: matches it to an existing library
+     * material (or creates a new one), records the price it came in at, and
+     * credits Stock. This is the only place stock actually moves for a GRN.
+     */
+    public function confirmItem(Request $request, $grnItemId)
+    {
+        $validator = Validator::make($request->all(), [
+            'material_id' => 'required_without:new_material|nullable|integer|exists:library_materials,id',
+            'new_material' => 'required_without:material_id|nullable|array',
+            'new_material.material_name' => 'required_with:new_material|string|max:255',
+            'new_material.material_code' => 'nullable|string|max:100',
+            'new_material.unit_of_measure' => 'required_with:new_material|string|max:50',
+            'new_material.material_type' => 'required_with:new_material|string|max:50',
+            'new_material.category' => 'nullable|string|max:100',
+            'unit_price' => 'required|numeric|min:0',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $grnItem = GoodsReceiptNoteItem::with('goodsReceiptNote')->find($grnItemId);
+
+        if (!$grnItem) {
+            return response()->json(['message' => 'GRN item not found.'], 404);
+        }
+
+        if (!$grnItem->accepted) {
+            return response()->json(['message' => 'This item was not accepted at the dock and cannot be confirmed into stock.'], 422);
+        }
+
+        if ($grnItem->store_status === 'confirmed') {
+            return response()->json(['message' => 'This item has already been confirmed.'], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $materialId = $request->input('material_id');
+
+            if (!$materialId) {
+                $material = LibraryMaterial::create($request->input('new_material'));
+                $materialId = $material->id;
+            }
+
+            $grnItem->update([
+                'material_id'  => $materialId,
+                'unit_price'   => $request->input('unit_price'),
+                'store_status' => 'confirmed',
+                'confirmed_by' => auth()->id(),
+                'confirmed_at' => now(),
+            ]);
+
+            $grn = $grnItem->goodsReceiptNote;
+
+            $this->creditStockForAcceptedItem($grn, [
+                'material_id'       => $materialId,
+                'received_quantity' => $grnItem->received_quantity,
+            ], (float) $request->input('unit_price'));
+
+            // Once every accepted item on this GRN is confirmed, close it out.
+            $stillPending = $grn->items()
+                ->where('accepted', true)
+                ->where('store_status', 'pending')
+                ->exists();
+
+            if (!$stillPending) {
+                $grn->update(['store_status' => 'confirmed']);
+            }
+
+            DB::commit();
+
+            $this->syncProjectProcurement($grn);
+
+            return new GoodsReceiptNoteResource($grn->load([
+                'items.purchaseOrderItem.material',
+                'purchaseOrder.supplier',
+                'receivedByUser'
+            ]));
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error confirming item: ' . $e->getMessage()], 500);
+        }
     }
 }
