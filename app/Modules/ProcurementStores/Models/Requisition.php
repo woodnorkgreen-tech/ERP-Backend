@@ -45,6 +45,16 @@ class Requisition extends Model
         return $this->hasOne(PurchaseOrder::class);
     }
 
+    /**
+     * A requisition can now produce more than one Purchase Order — one per
+     * supplier, since different items on the same requisition can be
+     * bought from different suppliers.
+     */
+    public function purchaseOrders()
+    {
+        return $this->hasMany(PurchaseOrder::class);
+    }
+
     public function items()
     {
         return $this->hasMany(RequisitionItem::class);

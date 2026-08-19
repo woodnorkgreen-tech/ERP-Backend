@@ -124,7 +124,7 @@ class RequisitionController extends Controller
     public function index(Request $request)
     {
         $query = Requisition::with([
-            'items.material',
+            'items.material', 'items.supplier',
             'project.enquiry',
             'project',
             'projectEnquiry',
@@ -164,6 +164,10 @@ class RequisitionController extends Controller
             $query->where('urgency', $request->urgency);
         }
 
+        if ($request->has('requested_by_type') && $request->requested_by_type !== '') {
+            $query->where('requested_by_type', $request->requested_by_type);
+        }
+
         // Filter by user if they don't have permission to see all
         if (!$this->canSeeAll()) {
             $query->where('user_id', auth()->id());
@@ -179,7 +183,7 @@ class RequisitionController extends Controller
         $searchTerm = $request->input('searchTerm', '');
 
         $query = Requisition::with([
-            'items.material',
+            'items.material', 'items.supplier',
             'project.enquiry',
             'project',
             'projectEnquiry',
@@ -348,7 +352,7 @@ class RequisitionController extends Controller
             $this->syncProjectProcurement($requisition);
 
             return new RequisitionResource(
-                $requisition->load(['items.material', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
+                $requisition->load(['items.material', 'items.supplier', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
             );
 
         } catch (\Exception $e) {
@@ -360,7 +364,7 @@ class RequisitionController extends Controller
     public function show(Requisition $requisition)
     {
         return new RequisitionResource(
-            $requisition->load(['items.material', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
+            $requisition->load(['items.material', 'items.supplier', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
         );
     }
 
@@ -388,11 +392,15 @@ class RequisitionController extends Controller
             'items.*.budget_item_id' => 'nullable|string',
             'items.*.budget_item_persistent_id' => 'nullable|string',
             'items.*.material_id' => 'nullable|exists:library_materials,id',
+            'items.*.supplier_id' => 'nullable|exists:suppliers,id',
             'items.*.custom_description' => 'nullable|string',
             'items.*.quantity' => 'required_with:items|integer|min:1',
             'items.*.unit_price' => 'required_with:items|numeric|min:0',
             'items.*.internal_budget_unit_price' => 'nullable|numeric|min:0',
-            'items.*.purpose' => 'required_with:items|string',
+            // Project-sourced items don't need a manually typed purpose — the
+            // budget/element info already says why it's needed. Only office
+            // and employee requisitions require it.
+            'items.*.purpose' => 'nullable|string',
             'items.*.procurement_item_snapshot' => 'nullable|array',
         ]);
 
@@ -431,6 +439,18 @@ class RequisitionController extends Controller
                             ? ($input['project_id'] ?? $requisition->project_id)
                             : null
                     );
+                    // purpose is required in the DB — if it wasn't provided
+                    // (normal for project-sourced items, which don't show a
+                    // purpose field), derive one from the budget snapshot so
+                    // it's still meaningful, instead of failing to save.
+                    if (empty($item['purpose'])) {
+                        $snapshot = $item['procurement_item_snapshot'] ?? [];
+                        $item['purpose'] = trim(
+                            ($snapshot['elementName'] ?? '') . ' – ' .
+                            ($snapshot['description'] ?? $item['custom_description'] ?? 'Project material'),
+                            ' –'
+                        ) ?: 'Project material requisition';
+                    }
                     $requisition->items()->create($item);
                 }
 
@@ -444,7 +464,7 @@ class RequisitionController extends Controller
             $this->syncProjectProcurement($requisition);
 
             return new RequisitionResource(
-                $requisition->load(['items.material', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy', 'approvedBy'])
+                $requisition->load(['items.material', 'items.supplier', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy', 'approvedBy'])
             );
 
         } catch (\Exception $e) {
@@ -484,7 +504,7 @@ class RequisitionController extends Controller
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
     }
 
@@ -504,7 +524,7 @@ class RequisitionController extends Controller
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
     }
 
@@ -532,7 +552,7 @@ class RequisitionController extends Controller
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
     }
 }

@@ -43,9 +43,9 @@ class SendPushNotificationJob implements ShouldQueue
         }
 
         $response = Http::withHeaders([
-            'Authorization' => 'Basic ' . $apiKey,
+           'Authorization' => 'Key ' . $apiKey,
             'Content-Type' => 'application/json',
-        ])->post(rtrim(config('onesignal.rest_api_url', 'https://api.onesignal.com'), '/') . '/notifications', [
+      ])->post('https://onesignal.com/api/v1/notifications', [
             'app_id' => $appId,
             'include_player_ids' => $playerIds->all(),
             'headings' => ['en' => $this->payload['title']],
