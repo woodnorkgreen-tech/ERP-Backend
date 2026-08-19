@@ -13,6 +13,7 @@ use App\Modules\HR\Models\LeaveType;
 use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 
@@ -370,6 +371,77 @@ class LeaveManagementService
             ->values();
     }
 
+    /**
+     * @param  int|null  $perPage  Pass null for the full, unpaginated set (used by the export,
+     *                             which must always cover every accessible employee).
+     */
+    public function getLeaveRegister(User $user, int $year, ?int $perPage = null, int $page = 1): Collection|LengthAwarePaginator
+    {
+        $this->syncDefaultLeaveTypes();
+
+        $query = Employee::query()
+            ->accessibleByUser($user)
+            ->active()
+            ->with('department:id,name')
+            ->orderBy('first_name');
+
+        $mapEmployee = fn (Employee $employee) => $this->buildRegisterEntry($employee, $year);
+
+        if ($perPage === null) {
+            return $query->get()->map($mapEmployee)->values();
+        }
+
+        return $query->paginate($perPage, ['*'], 'page', $page)->through($mapEmployee);
+    }
+
+    protected function buildRegisterEntry(Employee $employee, int $year): array
+    {
+        $balances = $this->getLeaveSummaryForEmployee($employee, $year);
+        // Allocated/remaining track Annual Leave specifically — it's the balance that
+        // actually gates future requests. Maternity/Paternity/Sick/Special are distinct,
+        // situational entitlements; summing their allocations together would be a
+        // meaningless number. "Used" is genuinely additive across every type, though.
+        $annualBalance = $balances->firstWhere('code', 'ANNUAL');
+
+        $instances = LeaveRequest::query()
+            ->where('employee_id', $employee->id)
+            ->whereYear('start_date', $year)
+            ->where('status', LeaveRequest::STATUS_APPROVED)
+            ->with('leaveType:id,name,code,color')
+            ->orderBy('start_date')
+            ->get()
+            ->map(function (LeaveRequest $request) {
+                return [
+                    'leave_request_id' => $request->id,
+                    'leave_type_id' => $request->leave_type_id,
+                    'leave_type_name' => $request->leaveType?->name,
+                    'leave_type_code' => $request->leaveType?->code,
+                    'leave_type_color' => $request->leaveType?->color,
+                    'start_date' => $request->start_date?->toDateString(),
+                    'end_date' => $request->end_date?->toDateString(),
+                    'days_requested' => $request->days_requested,
+                    'session' => $request->session,
+                    'reason' => $request->reason,
+                ];
+            })
+            ->values();
+
+        return [
+            'employee' => [
+                'id' => $employee->id,
+                'employee_id' => $employee->employee_id,
+                'name' => $employee->name,
+                'department' => $employee->department?->name,
+                'position' => $employee->position,
+            ],
+            'balances' => $balances->values(),
+            'total_allocated_days' => (float) ($annualBalance['allocated_days'] ?? 0),
+            'total_used_days' => (float) $balances->sum('used_days'),
+            'total_remaining_days' => (float) ($annualBalance['available_days'] ?? 0),
+            'instances' => $instances,
+        ];
+    }
+
     public function getDashboard(User $user, ?int $employeeId = null, ?int $year = null): array
     {
         $this->syncDefaultLeaveTypes();
@@ -383,6 +455,7 @@ class LeaveManagementService
                 'id' => $employee->id,
                 'employee_id' => $employee->employee_id,
                 'name' => $employee->name,
+                'gender' => $employee->gender,
                 'department' => $employee->department?->name,
                 'position' => $employee->position,
             ] : null,
@@ -570,12 +643,13 @@ class LeaveManagementService
             ->orderBy('first_name')
             ->orderBy('last_name');
 
-        return $query->get(['id', 'employee_id', 'first_name', 'last_name', 'position', 'department_id'])
+        return $query->get(['id', 'employee_id', 'first_name', 'last_name', 'position', 'department_id', 'gender'])
             ->map(function (Employee $employee) {
                 return [
                     'id' => $employee->id,
                     'employee_id' => $employee->employee_id,
                     'name' => $employee->name,
+                    'gender' => $employee->gender,
                     'position' => $employee->position,
                     'department' => $employee->department ? [
                         'id' => $employee->department->id,

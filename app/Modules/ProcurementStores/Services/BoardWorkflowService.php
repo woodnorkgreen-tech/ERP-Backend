@@ -90,31 +90,36 @@ class BoardWorkflowService
      * Boards transition Allocated → At Station.
      * Marks dispatch task done, creates Production task, notifies the operator.
      */
-    public function onBoardsDispatched(string $jobRef, Collection $boards, User $actor): BoardWorkflowTask
+    public function onBoardsDispatched(string $jobRef, Collection $boards, User $actor): ?BoardWorkflowTask
     {
         return DB::transaction(function () use ($jobRef, $boards, $actor) {
-            // Transition each board to At Station
-            foreach ($boards as $board) {
-                $board->transitionTo('At Station', $actor->id, "Delivered to station by {$actor->name}");
-            }
-
-            // Close the Logistics dispatch task (optimistic lock prevents double-dispatch)
+            // Formal board requests create a dispatch task. Direct issue from the
+            // board screen is also valid, so task completion is conditional while
+            // the physical board transition remains authoritative.
             $dispatchTask = BoardWorkflowTask::where('job_ref', $jobRef)
                 ->where('task_type', BoardWorkflowTask::TYPE_BOARDS_TO_DISPATCH)
                 ->whereIn('status', ['pending', 'in_progress'])
                 ->lockForUpdate()
-                ->firstOrFail();
+                ->first();
 
-            $dispatchTask->update([
-                'status'       => 'done',
-                'completed_at' => now(),
-                'completed_by' => $actor->id,
-            ]);
+            foreach ($boards as $board) {
+                $board->transitionTo('At Station', $actor->id, "Delivered to station by {$actor->name}");
+            }
+
+            if ($dispatchTask) {
+                $dispatchTask->update([
+                    'status'       => 'done',
+                    'completed_at' => now(),
+                    'completed_by' => $actor->id,
+                ]);
+            }
 
             // Create next task: Production must start WIP
             $this->onBoardsAtStation($jobRef, $boards, $dispatchTask);
 
-            event(new BoardsDispatchedToStation($jobRef, $boards, $actor, $dispatchTask));
+            if ($dispatchTask) {
+                event(new BoardsDispatchedToStation($jobRef, $boards, $actor, $dispatchTask));
+            }
 
             return $dispatchTask;
         });

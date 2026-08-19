@@ -137,8 +137,7 @@
 <table style="width: 100%; margin-bottom: 16px;">
     <tr>
         <td style="width: 55%;">
-            <img src="{{ public_path('logo-outline.png') }}" style="height: 55px; width: auto; margin-bottom: 4px; display: block;" alt="Logo"/>
-            <div style="font-size: 13px; font-weight: bold; text-transform: uppercase; color: #0f172a; letter-spacing: 1px;">Woodnork Green</div>
+            <img src="{{ public_path('woodnork-green-logo.png') }}" style="width: 115px; height: auto; margin-bottom: 4px; display: block;" alt="Woodnork Green logo"/>
         </td>
         <td style="width: 45%; text-align: right; vertical-align: top;">
             <div class="doc-title">Loading Checklist</div>

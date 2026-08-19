@@ -79,8 +79,7 @@
     <table style="margin-bottom: 20px;">
         <tr>
             <td style="width: 50%;">
-                <img src="{{ public_path('logo-outline.png') }}" style="height: 50px; width: auto; margin-bottom: 5px;" alt="Logo"/>
-                <div class="font-bold text-gray-900 uppercase" style="font-size: 12px;">Woodnork Green</div>
+                <img src="{{ public_path('woodnork-green-logo.png') }}" style="width: 110px; height: auto; margin-bottom: 5px;" alt="Woodnork Green logo"/>
             </td>
             <td style="width: 50%; text-align: right;">
                 <h2 class="text-blue-600 uppercase tracking-wide" style="margin: 0 0 5px 0;">Inventory Movement Report</h2>

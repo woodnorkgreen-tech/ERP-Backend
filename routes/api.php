@@ -138,11 +138,13 @@ Route::prefix('projects')->group(function () {
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('support')->group(function () {
         Route::get('tickets/assignees', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'assignees']);
+        Route::get('tickets/metrics', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'metrics']);
         Route::get('tickets', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'index']);
         Route::post('tickets', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'store'])->middleware('throttle:10,1');
         Route::get('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'show']);
         Route::patch('tickets/{ticket}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'update']);
         Route::post('tickets/{ticket}/replies', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'reply']);
+        Route::post('tickets/{ticket}/confirm-resolution', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'confirmResolution']);
         Route::post('tickets/{ticket}/attachments', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'uploadAttachment']);
         Route::get('tickets/{ticket}/attachments/{attachment}', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'downloadAttachment']);
     });

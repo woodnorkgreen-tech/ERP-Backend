@@ -60,6 +60,11 @@ class SupportTicketResource extends JsonResource
                 'created_at' => $activity->created_at?->toISOString(),
             ])),
             'can_manage' => (bool) $canManage,
+            'first_response_at' => $this->first_response_at?->toISOString(),
+            'response_due_at' => $this->response_due_at?->toISOString(),
+            'resolution_due_at' => $this->resolution_due_at?->toISOString(),
+            'is_overdue' => !in_array($this->status, ['waiting_on_user', 'resolved', 'closed'], true)
+                && $this->resolution_due_at?->isPast(),
             'resolved_at' => $this->resolved_at?->toISOString(),
             'last_activity_at' => $this->last_activity_at?->toISOString(),
             'created_at' => $this->created_at?->toISOString(),

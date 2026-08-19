@@ -6,6 +6,7 @@ use App\Modules\MaterialsLibrary\Controllers\MaterialController;
 use App\Modules\MaterialsLibrary\Controllers\MaterialImportController;
 use App\Modules\MaterialsLibrary\Controllers\MaterialExportController;
 use App\Modules\MaterialsLibrary\Controllers\CategoryController;
+use App\Modules\MaterialsLibrary\Controllers\ReferenceDataController;
 
 /*
 |--------------------------------------------------------------------------
@@ -22,6 +23,8 @@ use App\Modules\MaterialsLibrary\Controllers\CategoryController;
 Route::get('workstations', [WorkstationController::class, 'index']);
 Route::get('workstations/{id}/schema', [WorkstationController::class, 'schema']);
 Route::get('workstations/{id}', [WorkstationController::class, 'show']);
+Route::get('reference/item-types', [ReferenceDataController::class, 'itemTypes']);
+Route::get('reference/units-of-measure', [ReferenceDataController::class, 'unitsOfMeasure']);
 
 // Materials
 Route::get('materials/trashed', [MaterialController::class, 'trashed']);
@@ -38,4 +41,3 @@ Route::get('categories',         [CategoryController::class, 'index']);
 // Import
 Route::post('import', [MaterialImportController::class, 'import']);
 Route::get('template/{workstationId}', [MaterialExportController::class, 'downloadTemplate']);
-

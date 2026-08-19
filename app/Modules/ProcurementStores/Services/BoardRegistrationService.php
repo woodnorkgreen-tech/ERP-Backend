@@ -345,23 +345,9 @@ class BoardRegistrationService
      */
     public function validateMaterial(LibraryMaterial $material): void
     {
-        if ($material->material_type !== 'reusable') {
+        if (!$material->isBoardTrackable()) {
             throw new \InvalidArgumentException(
-                "Only reusable materials can be board-tracked. [{$material->material_name}] is [{$material->material_type}]."
-            );
-        }
-
-        $eligibleParents = config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']);
-
-        $parentName = $material->materialCategory?->parent?->name
-            ?? $material->materialCategory?->name
-            ?? $material->category
-            ?? '';
-
-        if (!in_array($parentName, $eligibleParents, true)) {
-            throw new \InvalidArgumentException(
-                "Material [{$material->material_name}] (category: [{$parentName}]) is not board-eligible. "
-                . 'Eligible: ' . implode(', ', $eligibleParents) . '.'
+                "[{$material->material_name}] is not configured as a board/sheet material in the Material Library."
             );
         }
     }

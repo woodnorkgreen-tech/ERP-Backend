@@ -17,14 +17,14 @@
         }
         
         /* Typography & Colors */
-        .text-blue-600 { color: #2563eb; }
+        .text-blue-600 { color: #07ADD4; }
         .text-red-600 { color: #dc2626; }
         .text-gray-600 { color: #4b5563; }
         .text-gray-700 { color: #374151; }
         .text-gray-900 { color: #111827; }
         .text-emerald-600 { color: #059669; }
         
-        .bg-blue-600 { background-color: #2563eb; color: white; }
+        .bg-blue-600 { background-color: #07ADD4; color: white; }
         .bg-gray-100 { background-color: #f3f4f6; }
         
         .font-bold { font-weight: bold; }
@@ -110,8 +110,7 @@
     <table style="margin-bottom: 20px;">
         <tr>
             <td style="width: 50%;">
-                <img src="{{ public_path('logo-outline.png') }}" style="height: 65px; width: auto; margin-bottom: 5px; display: block;" alt="Logo"/>
-                <div class="font-bold text-gray-900 tracking-wide uppercase" style="font-size: 14px;">Woodnork Green</div>
+                <img src="{{ public_path('woodnork-green-logo.png') }}" style="width: 125px; height: auto; margin-bottom: 5px; display: block;" alt="Woodnork Green logo"/>
             </td>
             <td style="width: 50%; text-align: right;">
                 <h2 class="text-blue-600 mb-2 uppercase tracking-wide text-2xl" style="margin: 0 0 10px 0;">PROCUREMENT LIST</h2>

@@ -111,8 +111,7 @@
 <body>
     <div class="header clearfix">
         <div style="float: left;">
-            <img src="{{ public_path('logo-outline.png') }}" style="height: 50px; width: auto; margin-bottom: 5px; display: block;" alt="Logo"/>
-            <div class="company-name">WOODNORK GREEN LTD</div>
+            <img src="{{ public_path('woodnork-green-logo.png') }}" style="width: 110px; height: auto; margin-bottom: 5px; display: block;" alt="Woodnork Green logo"/>
             <div style="font-size: 10px; color: #555;">Goods Receipt Note (GRN)</div>
         </div>
         <div class="document-title">

@@ -615,6 +615,50 @@ class NotificationService
     }
 
     /**
+     * Notify whoever can review this logistics task (assigned users, plus a
+     * role broadcast to Project Manager/Project Officer/Client Service/
+     * Logistics — the same set TASK_VISIBILITY_MAPPING now grants task
+     * access to) that a QR/public manifest submission is waiting on them.
+     */
+    public function sendManifestSubmissionReceived(EnquiryTask $task, int $itemCount, string $submittedByName): void
+    {
+        try {
+            $task->loadMissing(['enquiry', 'assignedUsers']);
+
+            $enquiryTitle = $task->enquiry ? $task->enquiry->title : 'Unknown Project';
+            $enquiryNumber = $task->enquiry ? $task->enquiry->enquiry_number : 'N/A';
+            $itemLabel = $itemCount === 1 ? '1 item' : "{$itemCount} items";
+
+            $explicitUsers = collect([$task->assigned_user_id, $task->assigned_to])
+                ->filter()
+                ->merge($task->assignedUsers->pluck('id'))
+                ->unique()
+                ->map(fn ($id) => User::find($id))
+                ->filter();
+
+            CentralNotificationService::send(
+                type: 'logistics_manifest_submission_received',
+                title: 'Loading Sheet Items Submitted for Review',
+                message: "{$submittedByName} submitted {$itemLabel} for {$enquiryTitle} (#{$enquiryNumber}) — waiting on your review.",
+                module: 'projects',
+                data: [
+                    'task_id' => $task->id,
+                    'enquiry_id' => $task->project_enquiry_id,
+                    'enquiry_title' => $enquiryTitle,
+                    'enquiry_number' => $enquiryNumber,
+                    'submitted_by' => $submittedByName,
+                    'item_count' => $itemCount,
+                    'url' => "/projects/enquiries/{$task->project_enquiry_id}/tasks/{$task->id}",
+                ],
+                users: $explicitUsers->all(),
+                role: ['Project Manager', 'Project Officer', 'Client Service', 'Logistics'],
+            );
+        } catch (\Exception $e) {
+            Log::error("Failed to send manifest submission notification: " . $e->getMessage());
+        }
+    }
+
+    /**
      * Send notification when Universal Task is completed
      */
     public function sendUniversalTaskCompleted(UniversalTask $task, User $completedBy): void

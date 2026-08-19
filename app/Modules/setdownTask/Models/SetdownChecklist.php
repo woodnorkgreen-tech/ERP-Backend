@@ -55,21 +55,21 @@ class SetdownChecklist extends Model
     {
         return [
             [
-                'category' => 'Event Details',
+                'category' => 'Team & Safety',
                 'items' => [
                     ['id' => 1, 'text' => 'Venue briefing & role assignment completed', 'completed' => false],
                     ['id' => 2, 'text' => 'Team assignments and responsibilities confirmed', 'completed' => false]
                 ]
             ],
             [
-                'category' => 'Theme Briefing & Role Assignment',
+                'category' => 'Dismantling Plan',
                 'items' => [
                     ['id' => 3, 'text' => 'Equipment dismantling order confirmed', 'completed' => false],
                     ['id' => 4, 'text' => 'Safety procedures and loading plan reviewed', 'completed' => false]
                 ]
             ],
             [
-                'category' => 'Dismantling & Sorting',
+                'category' => 'Items & Site',
                 'items' => [
                     ['id' => 5, 'text' => 'Inventory / AV equipment removal checked', 'completed' => false],
                     ['id' => 6, 'text' => 'Furniture / Setup items dismantled', 'completed' => false],
@@ -78,7 +78,7 @@ class SetdownChecklist extends Model
                 ]
             ],
             [
-                'category' => 'Loading & Transport',
+                'category' => 'Loading',
                 'items' => [
                     ['id' => 9, 'text' => 'Vehicle loading supervised by Transport Lead', 'completed' => false],
                     ['id' => 10, 'text' => 'Fragile items securely placed and cushioned', 'completed' => false],
@@ -87,9 +87,9 @@ class SetdownChecklist extends Model
                 ]
             ],
             [
-                'category' => 'Final Site Sweep & Departure',
+                'category' => 'Final Clearance',
                 'items' => [
-                    ['id' => 13, 'text' => 'Site cleaned and cleared of all WNC materials', 'completed' => false],
+                    ['id' => 13, 'text' => 'Site cleaned and cleared of all WNG materials', 'completed' => false],
                     ['id' => 14, 'text' => 'Departure time recorded', 'completed' => false]
                 ]
             ]

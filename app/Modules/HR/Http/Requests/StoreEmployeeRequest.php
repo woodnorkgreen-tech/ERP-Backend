@@ -27,6 +27,8 @@ class StoreEmployeeRequest extends FormRequest
             'last_name'            => 'required|string|max:255',
             'email'                => 'nullable|email|unique:employees,email',
             'phone'                => 'nullable|string|max:20',
+            // Drives eligibility for gender-restricted leave types (Maternity/Paternity).
+            'gender'               => ['nullable', Rule::in(['male', 'female'])],
             'department_id'        => 'required|exists:departments,id',
             'position'             => 'required|string|max:255',
             'hire_date'            => 'required|date',

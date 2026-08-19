@@ -9,6 +9,7 @@ use App\Modules\Support\Http\Requests\UpdateSupportTicketRequest;
 use App\Modules\Support\Http\Resources\SupportTicketResource;
 use App\Modules\Support\Models\SupportTicket;
 use App\Modules\Support\Models\SupportTicketAttachment;
+use App\Modules\Support\Services\SupportMetricsService;
 use App\Modules\Support\Services\SupportTicketService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,7 +19,16 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SupportTicketController extends Controller
 {
-    public function __construct(private readonly SupportTicketService $service) {}
+    public function __construct(
+        private readonly SupportTicketService $service,
+        private readonly SupportMetricsService $metrics,
+    ) {}
+
+    public function metrics(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', SupportTicket::class);
+        return response()->json(['data' => $this->metrics->forUser($request->user())]);
+    }
 
     public function index(Request $request): JsonResponse
     {
@@ -30,6 +40,7 @@ class SupportTicketController extends Controller
             'type' => ['nullable', Rule::in(SupportTicket::TYPES)],
             'assigned_to' => ['nullable', 'integer', 'exists:users,id'],
             'scope' => ['nullable', Rule::in(['mine', 'assigned_to_me', 'unassigned', 'all'])],
+            'overdue' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:5', 'max:100'],
         ]);
 
@@ -47,6 +58,11 @@ class SupportTicketController extends Controller
             ->when($validated['priority'] ?? null, fn ($query, $priority) => $query->where('priority', $priority))
             ->when($validated['type'] ?? null, fn ($query, $type) => $query->where('type', $type))
             ->when($validated['assigned_to'] ?? null, fn ($query, $assignedTo) => $query->where('assigned_to', $assignedTo));
+
+        if ($request->boolean('overdue')) {
+            $query->whereNotIn('status', ['waiting_on_user', 'resolved', 'closed'])
+                ->where('resolution_due_at', '<', now());
+        }
 
         $metricsQuery = clone $query;
 
@@ -92,6 +108,7 @@ class SupportTicketController extends Controller
                 'urgent' => (clone $metricsQuery)->where('priority', 'urgent')->whereNotIn('status', ['resolved', 'closed'])->count(),
                 'waiting_on_user' => (clone $metricsQuery)->where('status', 'waiting_on_user')->count(),
                 'assigned_to_me' => (clone $metricsQuery)->where('assigned_to', $request->user()->id)->whereNotIn('status', ['resolved', 'closed'])->count(),
+                'overdue' => (clone $metricsQuery)->whereNotIn('status', ['waiting_on_user', 'resolved', 'closed'])->where('resolution_due_at', '<', now())->count(),
             ],
         ]);
     }
@@ -144,6 +161,13 @@ class SupportTicketController extends Controller
         abort_if($ticket->attachments()->count() >= 10, 422, 'A ticket can contain at most 10 attachments.');
         $attachment = $this->service->addAttachment($ticket, $request->user(), $validated['attachment']);
         return response()->json(['message' => 'Attachment uploaded.', 'data' => ['id' => $attachment->id, 'name' => $attachment->original_name]], 201);
+    }
+
+    public function confirmResolution(Request $request, SupportTicket $ticket): JsonResponse
+    {
+        $this->authorize('view', $ticket);
+        $ticket = $this->service->confirmResolution($ticket, $request->user());
+        return response()->json(['message' => 'Resolution confirmed. Ticket closed.', 'data' => new SupportTicketResource($this->loadTicket($ticket))]);
     }
 
     public function downloadAttachment(Request $request, SupportTicket $ticket, SupportTicketAttachment $attachment): StreamedResponse

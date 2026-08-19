@@ -199,9 +199,8 @@
 <body>
     <div class="header clearfix">
         <div class="logo-box">
-            <img src="{{ public_path('logo-outline.png') }}" class="logo-img" alt="WNG Logo"/>
+            <img src="{{ public_path('woodnork-green-logo.png') }}" class="logo-img" alt="Woodnork Green logo"/>
             <div class="company-info">
-                <div class="company-name">Woodnork Green Ltd</div>
                 <div class="kra-pin">KRA PIN: P051451468C</div>
             </div>
         </div>

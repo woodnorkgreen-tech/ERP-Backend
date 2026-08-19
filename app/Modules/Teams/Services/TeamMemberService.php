@@ -49,26 +49,6 @@ class TeamMemberService
                 ]);
             }
 
-            $alreadyAssignedToPlan = TeamsMember::whereHas(
-                'teamsTask',
-                fn ($query) => $query->where('task_id', $teamTask->task_id)
-            )
-                ->where('is_active', true)
-                ->where(function ($query) use ($data) {
-                    if (!empty($data['technical_labour_id'])) {
-                        $query->where('technical_labour_id', $data['technical_labour_id']);
-                    } else {
-                        $query->whereRaw('LOWER(member_name) = ?', [mb_strtolower($data['member_name'])]);
-                    }
-                })
-                ->exists();
-
-            if ($alreadyAssignedToPlan) {
-                throw ValidationException::withMessages([
-                    'member_name' => 'This person is already assigned elsewhere in this team plan.',
-                ]);
-            }
-
             $member = TeamsMember::create([
                 'teams_task_id' => $teamTaskId,
                 'technical_labour_id' => $data['technical_labour_id'] ?? null,

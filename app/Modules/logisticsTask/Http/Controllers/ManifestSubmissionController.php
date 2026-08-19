@@ -121,6 +121,9 @@ class ManifestSubmissionController extends Controller
             });
         });
 
+        app(\App\Modules\Projects\Services\NotificationService::class)
+            ->sendManifestSubmissionReceived($link->logisticsTask->task, $created->count(), $validated['submitted_by_name']);
+
         return response()->json(['message' => $created->count().' item(s) sent to Logistics for review.', 'data' => $created], 201);
     }
 
