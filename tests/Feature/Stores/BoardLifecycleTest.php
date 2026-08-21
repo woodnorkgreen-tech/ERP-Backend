@@ -118,6 +118,36 @@ class BoardLifecycleTest extends TestCase
         $this->assertSame(0, Board::where('status', 'Allocated')->count());
     }
 
+    public function test_boards_cannot_be_received_for_a_material_with_no_price(): void
+    {
+        $this->actAs('Stores');
+        $this->material->update(['unit_cost' => 0]);
+
+        $this->postJson('/api/procurement-stores/check-in', [
+            'material_id' => $this->material->id,
+            'quantity' => 2,
+        ])->assertStatus(422);
+
+        $this->assertSame(0, Board::where('library_material_id', $this->material->id)->count());
+        $this->assertSame(0.0, $this->onHand());
+    }
+
+    public function test_a_receipt_price_lets_an_unpriced_material_be_received(): void
+    {
+        $this->actAs('Stores');
+        $this->material->update(['unit_cost' => 0]);
+
+        $this->postJson('/api/procurement-stores/check-in', [
+            'material_id' => $this->material->id,
+            'quantity' => 2,
+            'receipt_unit_cost' => 2750.00,
+        ])->assertStatus(200);
+
+        $boards = Board::where('library_material_id', $this->material->id)->get();
+        $this->assertCount(2, $boards);
+        $this->assertTrue($boards->every(fn (Board $board) => (float) $board->current_value === 2750.00));
+    }
+
     public function test_a_board_without_a_recorded_value_cannot_be_issued(): void
     {
         $this->actAs('Stores');

@@ -399,6 +399,17 @@ class ProcurementStoresController extends Controller
             ], 422);
         }
 
+        // An unpriced board is an unissuable board. Catch it at receipt, while the
+        // delivery note is still in hand, rather than at the materials desk.
+        if ($material->isBoardTrackable()
+            && ! $request->filled('receipt_unit_cost')
+            && (float) $material->unit_cost <= 0) {
+            return response()->json([
+                'message' => "[{$material->material_name}] has no catalogue cost yet. Enter the receipt price per board — "
+                    . 'boards received without a value cannot be issued to a project.',
+            ], 422);
+        }
+
         $log    = null;
         $boards = [];
 

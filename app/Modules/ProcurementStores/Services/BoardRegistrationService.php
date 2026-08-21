@@ -270,13 +270,31 @@ class BoardRegistrationService
      * is holding an instance loaded before that write, so reading `unit_cost`
      * off it would use the pre-receipt figure — zero, for a first delivery.
      */
+    /**
+     * The value each board carries from this receipt.
+     *
+     * @throws \InvalidArgumentException  if neither the receipt nor the catalogue prices the board
+     */
     private function receiptValue(LibraryMaterial $material, ?float $unitValue): float
     {
         if ($unitValue !== null && $unitValue > 0) {
             return $unitValue;
         }
 
-        return (float) ($material->newQuery()->whereKey($material->getKey())->value('unit_cost') ?? 0);
+        $catalogue = (float) ($material->newQuery()->whereKey($material->getKey())->value('unit_cost') ?? 0);
+
+        // A board with no value cannot be issued: fulfil() rejects it rather than
+        // post a zero-cost line to a project. Refusing the receipt here surfaces
+        // that while the storekeeper still holds the delivery note, instead of
+        // days later at the materials desk with the boards already on the rack.
+        if ($catalogue <= 0) {
+            throw new \InvalidArgumentException(
+                "[{$material->material_name}] has no catalogue cost, so every board received would be unissuable. "
+                . 'Record the receipt price per board.'
+            );
+        }
+
+        return $catalogue;
     }
 
     // ─── Private core ─────────────────────────────────────────────────────────
