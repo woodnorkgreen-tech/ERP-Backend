@@ -368,6 +368,14 @@ class NotificationApiTest extends TestCase
 
     public function test_module_observers_dispatch_registered_notification_types(): void
     {
+        // These models are built in memory with an id, never persisted: the test
+        // is about what each observer announces, not about the records. The
+        // purchase-order observer also raises PurchaseOrderApproved, and the
+        // listener behind it loads the order to post its commitment — which
+        // cannot find a row that was never written. Faking that one event keeps
+        // the test on its own subject.
+        \Illuminate\Support\Facades\Event::fake([\App\Events\PurchaseOrderApproved::class]);
+
         $types = [];
         $service = \Mockery::mock(NotificationService::class);
         $service->shouldReceive('dispatchNotification')
@@ -478,7 +486,9 @@ class NotificationApiTest extends TestCase
             'user_id' => $this->user->id,
             'type' => 'incident_reported',
         ]);
-        Queue::assertPushed(SendMailNotificationJob::class, 1);
+        // Both types carry mail in the registry: a leave request and an incident
+        // are things the recipient has to learn about without opening the app.
+        Queue::assertPushed(SendMailNotificationJob::class, 2);
     }
 
     public function test_leave_submission_notifications_are_scoped_to_local_reviewers_and_hr(): void
