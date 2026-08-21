@@ -8,9 +8,37 @@ use App\Modules\MaterialsLibrary\Models\Workstation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
+use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
+use App\Modules\MaterialsLibrary\Support\MaterialControl;
+use App\Modules\MaterialsLibrary\Services\MaterialAttributeNormalizationService;
 
 class CategoryController extends Controller
 {
+    public function normalizationPreview(int $id, MaterialAttributeNormalizationService $service): JsonResponse
+    {
+        $category = MaterialCategory::findOrFail($id);
+        return response()->json(['data' => $service->preview($category)]);
+    }
+
+    public function normalizeAttributes(Request $request, int $id, MaterialAttributeNormalizationService $service): JsonResponse
+    {
+        $this->assertManager();
+        $request->validate(['confirm' => 'accepted']);
+        $result = $service->apply(MaterialCategory::findOrFail($id), auth()->id());
+        return response()->json(['message' => "{$result['materials_changed']} material(s) standardized. {$result['materials_skipped']} conflict(s) were left unchanged.", 'data' => $result]);
+    }
+
+    public function rollbackNormalization(Request $request, int $runId, MaterialAttributeNormalizationService $service): JsonResponse
+    {
+        $this->assertManager();
+        $request->validate(['confirm' => 'accepted']);
+        $result = $service->rollback($runId);
+        return response()->json(['message' => "{$result['materials_restored']} material(s) restored.", 'data' => $result]);
+    }
     /**
      * Return the full category tree (parents with their children).
      * Used by the frontend to build cascading dropdowns.

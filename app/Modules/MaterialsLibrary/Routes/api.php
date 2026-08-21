@@ -36,6 +36,9 @@ Route::apiResource('materials', MaterialController::class);
 // Categories
 Route::get('categories/tree',    [CategoryController::class, 'tree']);
 Route::get('categories/{id}/schema', [CategoryController::class, 'schema']);
+Route::get('categories/{id}/normalization-preview', [CategoryController::class, 'normalizationPreview']);
+Route::post('categories/{id}/normalize-attributes', [CategoryController::class, 'normalizeAttributes']);
+Route::post('categories/normalization-runs/{runId}/rollback', [CategoryController::class, 'rollbackNormalization']);
 Route::post('categories',        [CategoryController::class, 'store']);
 Route::put('categories/{id}',    [CategoryController::class, 'update']);
 Route::post('categories/{id}/merge', [CategoryController::class, 'merge']);
