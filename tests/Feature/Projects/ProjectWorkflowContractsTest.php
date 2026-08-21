@@ -297,20 +297,28 @@ class ProjectWorkflowContractsTest extends TestCase
             'payment_method' => 'bank_transfer',
             'transaction_reference' => 'BANK-650',
             'recorded_by' => $accounts->id,
+            // Only verified receipts count toward coverage. A payment somebody
+            // has keyed but nobody has confirmed against the bank must not
+            // release a project, which is the whole point of the two steps.
+            'status' => 'verified',
         ]);
 
         Sanctum::actingAs($accounts);
 
         $response = $this->getJson('/api/projects/enquiries?view=receivables&per_page=10');
 
+        // The receivables view has its own resource, and it publishes the finance
+        // figures as one `finance_summary` object rather than as seven flat
+        // `payment_*` columns copied onto the enquiry. One shape, computed once,
+        // is what keeps the row and the headline above it from disagreeing.
         $response->assertOk()
             ->assertJsonPath('data.data.0.id', $enquiry->id)
-            ->assertJsonPath('data.data.0.payment_progress_percentage', 65)
-            ->assertJsonPath('data.data.0.payment_total_quote', 1000)
-            ->assertJsonPath('data.data.0.payment_total_paid', 650)
-            ->assertJsonPath('data.data.0.payment_remaining', 350)
-            ->assertJsonPath('data.data.0.payment_threshold_amount', 700)
-            ->assertJsonPath('data.data.0.payment_amount_required_for_threshold', 50)
+            ->assertJsonPath('data.data.0.finance_summary.percentage', 65)
+            ->assertJsonPath('data.data.0.finance_summary.total_quote', 1000)
+            ->assertJsonPath('data.data.0.finance_summary.total_paid', 650)
+            ->assertJsonPath('data.data.0.finance_summary.remaining', 350)
+            ->assertJsonPath('data.data.0.finance_summary.threshold_amount', 700)
+            ->assertJsonPath('data.data.0.finance_summary.amount_required_for_threshold', 50)
             ->assertJsonPath('data.data.0.finance_summary.quote_basis', 'client_approved_quote');
     }
 
@@ -335,6 +343,9 @@ class ProjectWorkflowContractsTest extends TestCase
             'payment_method' => 'bank_transfer',
             'transaction_reference' => 'BANK-700',
             'recorded_by' => $accounts->id,
+            // Verified, so the 70% threshold is genuinely met. Releasing without
+            // it takes the override permission, which is a different test.
+            'status' => 'verified',
         ]);
 
         Sanctum::actingAs($accounts);
@@ -367,14 +378,35 @@ class ProjectWorkflowContractsTest extends TestCase
         ]);
         $this->task($enquiry, 'procurement', ['created_by' => $accounts->id]);
 
+        $this->seed(\App\Modules\Finance\Database\Seeders\PaymentSourceSeeder::class);
+        $bank = \App\Modules\Finance\Models\PaymentSource::where('type', 'bank')->firstOrFail();
+
         Sanctum::actingAs($accounts);
 
-        $this->postJson("/api/projects/enquiries/{$enquiry->id}/payments", [
+        // Recording a receipt releases nothing. Capture and verification are two
+        // people now, and money that only one person has seen must not open the
+        // gate — so the response says so rather than reporting a release.
+        $response = $this->postJson("/api/projects/enquiries/{$enquiry->id}/payments", [
             'amount' => 700,
+            'received_amount' => 700,
             'payment_date' => now()->toDateString(),
             'payment_method' => 'bank_transfer',
+            'payment_source_id' => $bank->id,
             'transaction_reference' => 'AUTO-RELEASE-700',
         ])->assertOk()
+            ->assertJsonPath('auto_released', false);
+
+        $this->assertFalse((bool) $enquiry->fresh()->finance_released);
+
+        // Verification is what counts the money, and reaching the threshold on
+        // verified receipts releases the project without anyone asking. It takes
+        // a second person: whoever keyed the receipt may not confirm it arrived.
+        $paymentId = $response->json('data.id');
+
+        Sanctum::actingAs($this->user('Accounts'));
+
+        $this->postJson("/api/projects/enquiries/{$enquiry->id}/payments/{$paymentId}/verify")
+            ->assertOk()
             ->assertJsonPath('auto_released', true)
             ->assertJsonPath('progress.finance_released', true);
 
