@@ -926,6 +926,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Finance Module Routes
     Route::prefix('finance')->group(function () {
+        Route::get('readiness', [\App\Modules\Finance\Controllers\FinanceReadinessController::class, 'show']);
+
         // Spend Vouchers Routes
         Route::prefix('spend-vouchers')->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
