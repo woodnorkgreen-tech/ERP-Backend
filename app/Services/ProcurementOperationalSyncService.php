@@ -110,6 +110,7 @@ class ProcurementOperationalSyncService
                 'requisition.purchaseOrder.supplier',
                 'requisition.purchaseOrder.items.material',
                 'requisition.purchaseOrder.items.goodsReceiptNoteItems.goodsReceiptNote',
+                'requisition.purchaseOrder.items.goodsReceiptNoteItems.inspection',
                 'requisition.purchaseOrder.bills.payments',
             ])
             ->get();
@@ -212,8 +213,10 @@ class ProcurementOperationalSyncService
         $orderedQuantity = (float) $receiptItems->sum('ordered_quantity');
         $receivedQuantity = (float) $receiptItems->sum('received_quantity');
         $acceptedQuantity = (float) $receiptItems
-            ->filter(fn ($item) => (bool) $item->accepted)
-            ->sum('received_quantity');
+            ->filter(fn ($item) => (bool) $item->accepted && $item->stock_status !== 'awaiting_inspection')
+            ->sum(fn ($item) => $item->inspection
+                ? (float) $item->inspection->accepted_quantity
+                : (float) $item->received_quantity);
         $latestReceipt = $receiptItems->sortByDesc('created_at')->first()?->goodsReceiptNote;
 
         if ($receivedQuantity <= 0) {
