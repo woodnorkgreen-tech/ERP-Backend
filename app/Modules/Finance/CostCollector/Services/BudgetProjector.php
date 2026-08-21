@@ -30,17 +30,18 @@ class BudgetProjector
 {
     public function __construct(
         private CostCollectorService $collector,
+        private UnbudgetedSpendAdopter $adopter,
     ) {}
 
     /**
-     * @return array{projected:int, skipped:int, retired:int}
+     * @return array{projected:int, skipped:int, retired:int, adopted:int}
      */
     public function project(TaskBudgetData $budget): array
     {
         $task = $budget->task;
 
         if (! $task) {
-            return ['projected' => 0, 'skipped' => 0, 'retired' => 0];
+            return ['projected' => 0, 'skipped' => 0, 'retired' => 0, 'adopted' => 0];
         }
 
         $lines = $this->linesFor($budget, $task->project_enquiry_id, $task->id);
@@ -58,17 +59,31 @@ class BudgetProjector
             $projected++;
         }
 
+        $retired = $this->retireRemovedLines($budget, $lines);
+
+        // Spend can precede its own budget: a material issued from stores on
+        // Tuesday, against a budget projected on Wednesday, found no planned line
+        // and was recorded unbudgeted — correctly, and then permanently, because
+        // the match was only ever attempted at posting time. The cost account
+        // then reported that money as unplanned AND its budget line as unanswered.
+        //
+        // Run here rather than per line, once the whole budget exists: a cost
+        // claimable by two lines must be seen as ambiguous, and a line-at-a-time
+        // pass would let whichever projected first claim it unopposed.
+        $adopted = $this->adopter->adoptForEnquiry($task->project_enquiry_id);
+
         return [
             'projected' => $projected,
             'skipped' => $skipped,
-            'retired' => $this->retireRemovedLines($budget, $lines),
+            'retired' => $retired,
+            'adopted' => $adopted,
         ];
     }
 
-    /** @return array{budgets:int, projected:int, skipped:int, retired:int} */
+    /** @return array{budgets:int, projected:int, skipped:int, retired:int, adopted:int} */
     public function projectAll(): array
     {
-        $totals = ['budgets' => 0, 'projected' => 0, 'skipped' => 0, 'retired' => 0];
+        $totals = ['budgets' => 0, 'projected' => 0, 'skipped' => 0, 'retired' => 0, 'adopted' => 0];
 
         TaskBudgetData::with('task')->chunkById(100, function ($budgets) use (&$totals) {
             foreach ($budgets as $budget) {
@@ -78,6 +93,7 @@ class BudgetProjector
                 $totals['projected'] += $result['projected'];
                 $totals['skipped'] += $result['skipped'];
                 $totals['retired'] += $result['retired'];
+                $totals['adopted'] += $result['adopted'];
             }
         });
 
