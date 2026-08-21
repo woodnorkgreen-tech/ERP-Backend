@@ -171,7 +171,7 @@ class BudgetProcurementAutoSyncTest extends TestCase
      *
      * Every other case here hand-writes `materials_import_metadata` into its
      * fixture. That fabricated a state the application never actually produced:
-     * `syncFromApprovedMaterials` — the one and only importer — set
+     * `syncFromMaterialsList` — the one and only importer — set
      * `materials_imported_at` but never stamped the metadata, while procurement
      * refused to import unless `metadata.source` equalled a string nothing wrote.
      * So the suite stayed green while procurement import failed on every real
@@ -217,7 +217,7 @@ class BudgetProcurementAutoSyncTest extends TestCase
         ]);
 
         // The real path: no fixture stamps anything by hand.
-        app(BudgetService::class)->syncFromApprovedMaterials($budgetTask->id);
+        app(BudgetService::class)->syncFromMaterialsList($budgetTask->id);
 
         $budgetData = TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
 

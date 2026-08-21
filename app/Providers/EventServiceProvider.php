@@ -30,12 +30,13 @@ class EventServiceProvider extends ServiceProvider
             \App\Listeners\ProjectBudgetLinesOnTaskCompletion::class,
         ],
 
-        // The budget's material list is a mirror of the approved one, so approval
-        // refreshes it. This replaced a Sync button and an orange "materials have
-        // changed" banner — a budget was only ever as current as somebody
-        // noticing, and two copies with a manual reconciler is how they drifted.
-        \App\Events\MaterialsApproved::class => [
-            \App\Listeners\SyncBudgetWithApprovedMaterials::class,
+        // The budget's material list is a mirror of the materials task's, so
+        // every save refreshes it. This replaced a Sync button and an orange
+        // "materials have changed" banner — a budget was only ever as current as
+        // somebody noticing, and two copies with a manual reconciler is how they
+        // drifted.
+        \App\Events\MaterialsListChanged::class => [
+            \App\Listeners\SyncBudgetWithMaterialsList::class,
         ],
 
         // An approved addition is a budget revision, so it has to move the

@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Events\MaterialsApproved;
+use App\Events\MaterialsListChanged;
 
 use App\Models\TaskMaterialsData;
 use App\Models\MaterialVersion;
@@ -631,29 +631,12 @@ class MaterialsController extends Controller
             // revision is now only created when the Project Officer re-approves
             // edited materials (see approveMaterials()).
 
-            // Check for additional materials and create budget additions automatically
-            $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
-
-            // Saving alone must not move the budget: the budget follows a list
-            // both departments have approved, and approveMaterials() announces
-            // that. Saving an unapproved edit into the budget would put figures
-            // nobody signed off in front of Finance and procurement.
-            
-            /* 
-            // Trigger Procurement Sync immediately using the ID Mapping
-            // This ensures meaningful Procurement data is preserved even if Budget IDs changed
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($taskId);
-            if ($materialsTask) {
-                $procurementTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
-                    ->where('type', 'procurement')
-                    ->first();
-                
-                if ($procurementTask) {
-                    \Log::info("Triggering Procurement Sync from Materials Save", ['procurementTaskId' => $procurementTask->id]);
-                    $this->procurementService->syncWithBudget($procurementTask->id, $idMapping);
-                }
-            }
-            */
+            // The budget follows the list on every save, not on approval. Waiting
+            // for two sign-offs meant a single added line stalled the budget, the
+            // Material Desk and procurement all at once, and left three copies of
+            // the same list disagreeing until somebody re-approved. Announced
+            // rather than done here: the listener owns the merge.
+            MaterialsListChanged::dispatch($taskId);
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData->fresh(['elements.materials'])),
@@ -1282,128 +1265,6 @@ class MaterialsController extends Controller
     }
 
     /**
-     * Sync materials data to budget whenever materials are updated
-     */
-
-    /**
-     * Create budget additions for materials marked as additional
-     */
-    private function createBudgetAdditionsForAdditionalMaterials(int $materialsTaskId, array $projectElements): void
-    {
-        try {
-            // Find the budget task for this enquiry
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($materialsTaskId);
-            if (!$materialsTask) {
-                \Log::warning('Materials task not found for budget addition creation', ['taskId' => $materialsTaskId]);
-                return;
-            }
-
-            // Check approval status - ONLY create additions if fully approved
-            $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)->first();
-            if ($materialsData) {
-                $projectInfo = $materialsData->project_info ?? [];
-                $approvalStatus = $projectInfo['approval_status'] ?? [];
-                $isApproved = $approvalStatus['all_approved'] ?? false;
-
-                if (!$isApproved) {
-                    \Log::info('Materials not fully approved - skipping automatic budget additions', [
-                        'materialsTaskId' => $materialsTaskId
-                    ]);
-                    return;
-                }
-            }
-
-            $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
-                ->where('type', 'budget')
-                ->first();
-
-            if (!$budgetTask) {
-                \Log::info('No budget task found for enquiry - skipping automatic budget additions', [
-                    'enquiryId' => $materialsTask->project_enquiry_id
-                ]);
-                return;
-            }
-
-            // Check if budget task is completed - if so, all new materials should be additions
-            $isBudgetCompleted = $budgetTask->status === 'completed';
-
-            // Get budget data
-            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
-            if (!$budgetData) {
-                \Log::info('No budget data found - skipping automatic budget additions', [
-                    'budgetTaskId' => $budgetTask->id
-                ]);
-                return;
-            }
-
-            // Process each element and its materials
-            foreach ($projectElements as $elementData) {
-                foreach ($elementData['materials'] as $materialData) {
-                    // If budget is completed, ALL new materials should be treated as additions
-                    // Otherwise, only materials explicitly marked as "additional"
-                    $shouldCreateAddition = $isBudgetCompleted ||
-                        (isset($materialData['isAdditional']) && $materialData['isAdditional']);
-
-                    if ($shouldCreateAddition) {
-                        // Check if this material already has a budget addition
-                        $existingAddition = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
-                            ->where('title', 'Additional: ' . $materialData['description'])
-                            ->where('status', '!=', 'rejected')
-                            ->first();
-
-                        if (!$existingAddition) {
-                            // Create new budget addition
-                            $additionTitle = $isBudgetCompleted
-                                ? 'Post-Budget Addition: ' . $materialData['description']
-                                : 'Additional: ' . $materialData['description'];
-
-                            $additionDescription = $isBudgetCompleted
-                                ? 'Automatically created from Materials Task after budget completion - Element: ' . ($elementData['name'] ?? 'Unnamed')
-                                : 'Automatically created from Materials Task - Element: ' . ($elementData['name'] ?? 'Unnamed');
-
-                            \App\Models\BudgetAddition::create([
-                                'task_budget_data_id' => $budgetData->id,
-                                'title' => $additionTitle,
-                                'description' => $additionDescription,
-                                'materials' => [
-                                    [
-                                        'id' => 'auto_' . uniqid(),
-                                        'description' => $materialData['description'],
-                                        'unitOfMeasurement' => $materialData['unitOfMeasurement'],
-                                        'quantity' => $materialData['quantity'],
-                                        'unitPrice' => (float) ($materialData['unitCost'] ?? 0),
-                                        'totalPrice' => (float) (($materialData['unitCost'] ?? 0) * $materialData['quantity']),
-                                        'isAddition' => true
-                                    ]
-                                ],
-                                'labour' => [],
-                                'expenses' => [],
-                                'logistics' => [],
-                                'status' => 'pending_approval',
-                                'created_by' => auth()->id() ?? 1, // System or current user
-                            ]);
-
-                            \Log::info('Created automatic budget addition for material', [
-                                'material' => $materialData['description'],
-                                'budgetId' => $budgetData->id,
-                                'isPostBudgetAddition' => $isBudgetCompleted,
-                                'budgetStatus' => $budgetTask->status
-                            ]);
-                        }
-                    }
-                }
-            }
-
-        } catch (\Exception $e) {
-            \Log::error('Failed to create automatic budget additions', [
-                'materialsTaskId' => $materialsTaskId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-        }
-    }
-
-    /**
      * Format materials data for frontend
      */
     private function formatMaterialsData(TaskMaterialsData $materialsData): array
@@ -1589,13 +1450,11 @@ class MaterialsController extends Controller
                     ];
                 })->toArray();
 
-                $this->createBudgetAdditionsForAdditionalMaterials($taskId, $projectElements);
-
-                // The budget mirrors the approved list, so approval refreshes
-                // it. Announced rather than done here: reconciling another
-                // module's JSON inside this controller is what produced two
-                // competing merge implementations in the first place.
-                MaterialsApproved::dispatch($taskId);
+                // Saving already announced the change and the budget already
+                // followed it, so approval has nothing left to push. Re-announced
+                // only because the listener is idempotent and this closes the gap
+                // if a queued sync failed earlier.
+                MaterialsListChanged::dispatch($taskId);
             }
 
             // NEW: Handle Base Snapshot on First Approval

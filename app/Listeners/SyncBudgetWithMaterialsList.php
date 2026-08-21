@@ -2,29 +2,30 @@
 
 namespace App\Listeners;
 
-use App\Events\MaterialsApproved;
+use App\Events\MaterialsListChanged;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Services\BudgetService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Keeps the budget's material list identical to the approved one.
+ * Keeps the budget's material list identical to the materials task's.
  *
  * This is the whole of the "are they in sync?" question. It used to be answered
  * by a person: an orange banner appeared when the two copies differed and offered
- * a Sync button, so a budget was only as current as somebody's attention. Now the
- * approval itself drives the sync and there is no state in which the two lists
- * are allowed to disagree.
+ * a Sync button, so a budget was only as current as somebody's attention. Then
+ * approval drove the sync, which meant an unapproved edit left the two lists
+ * disagreeing until two people signed off. Now every save drives it, and there is
+ * no state in which they are allowed to differ.
  *
- * Idempotent — `syncFromApprovedMaterials` rewrites from the approved list and
- * carries the budget's rates across — so a replayed job is harmless.
+ * Idempotent — `syncFromMaterialsList` rewrites from the materials list and
+ * carries the budget's own rates across — so a replayed job is harmless.
  */
-class SyncBudgetWithApprovedMaterials implements ShouldQueue
+class SyncBudgetWithMaterialsList implements ShouldQueue
 {
     public function __construct(private BudgetService $budgets) {}
 
-    public function handle(MaterialsApproved $event): void
+    public function handle(MaterialsListChanged $event): void
     {
         $materialsTask = EnquiryTask::find($event->materialsTaskId);
 
@@ -36,18 +37,18 @@ class SyncBudgetWithApprovedMaterials implements ShouldQueue
             ->where('type', 'budget')
             ->first();
 
-        // No budget task yet is normal, not a failure: the materials list is
-        // approved before the budget exists on plenty of projects. The budget
-        // pulls the approved list itself when it is first opened, so nothing is
-        // lost by there being nothing to push into.
+        // No budget task yet is normal, not a failure: the materials list exists
+        // before the budget does on plenty of projects. The budget pulls the list
+        // itself when it is first opened, so nothing is lost by there being
+        // nothing to push into.
         if (! $budgetTask) {
             return;
         }
 
         try {
-            $result = $this->budgets->syncFromApprovedMaterials($budgetTask->id);
+            $result = $this->budgets->syncFromMaterialsList($budgetTask->id);
 
-            Log::info('Budget synced with approved materials', [
+            Log::info('Budget synced with materials list', [
                 'materials_task_id' => $event->materialsTaskId,
                 'budget_task_id' => $budgetTask->id,
                 'reopened' => $result['reopened'],
@@ -55,15 +56,15 @@ class SyncBudgetWithApprovedMaterials implements ShouldQueue
         } catch (\Throwable $e) {
             // Logged, never rethrown. In production this is queued, but the test
             // queue runs inline — and rethrowing there made a budget-sync problem
-            // abort the materials approval that triggered it, which is precisely
+            // abort the materials save that triggered it, which is precisely
             // the coupling every other producer in this codebase avoids: a
-            // downstream ledger must never stop someone approving their work.
+            // downstream ledger must never stop someone saving their work.
             //
-            // The failure is still loud. A budget left behind its approved
-            // materials list is the exact thing this listener exists to prevent
+            // The failure is still loud. A budget left behind its materials
+            // list is the exact thing this listener exists to prevent
             // and it is invisible from every screen, so it belongs in the log
             // even though it must not propagate.
-            Log::error('Budget could not be synced with approved materials', [
+            Log::error('Budget could not be synced with materials list', [
                 'materials_task_id' => $event->materialsTaskId,
                 'budget_task_id' => $budgetTask->id,
                 'error' => $e->getMessage(),

@@ -41,7 +41,7 @@ class BudgetService
         }
 
         try {
-            return $this->syncFromApprovedMaterials($taskId)['budget'];
+            return $this->syncFromMaterialsList($taskId)['budget'];
         } catch (\Throwable $e) {
             // No materials task, nothing approved yet, no source data — all
             // ordinary states for a project this early. The budget is returned as
@@ -133,7 +133,7 @@ class BudgetService
      *
      * @return array{budget: TaskBudgetData, reopened: bool, message: string}
      */
-    public function syncFromApprovedMaterials(int $budgetTaskId): array
+    public function syncFromMaterialsList(int $budgetTaskId): array
     {
         $task = EnquiryTask::with('enquiry.client')->findOrFail($budgetTaskId);
 
@@ -153,8 +153,10 @@ class BudgetService
             throw new \Exception('Source materials data not found');
         }
 
-        $this->ensureMaterialsApproved($materialsData);
-
+        // Materials flow into the budget as they are added. Departmental sign-off
+        // is recorded on the materials task for audit, but blocking the import on
+        // it meant a single new line stalled the whole budget until two people
+        // re-approved a list they had already approved.
         $budgetData = TaskBudgetData::where('enquiry_task_id', $budgetTaskId)->first();
 
         // The approved figures are about to change under anyone relying on a
@@ -337,32 +339,6 @@ class BudgetService
         }
 
         return $existingBudgetData?->status ?? 'draft';
-    }
-
-    private function ensureMaterialsApproved(TaskMaterialsData $materialsData): void
-    {
-        $approvalStatus = $materialsData->project_info['approval_status'] ?? null;
-        if (!empty($approvalStatus['all_approved'])) {
-            return;
-        }
-
-        $missingApprovals = [];
-        if (empty($approvalStatus['project_officer']['approved'])) {
-            $missingApprovals[] = 'Project Officer';
-        }
-        if (empty($approvalStatus['production']['approved'])) {
-            $missingApprovals[] = 'Production';
-        }
-
-        if (count($missingApprovals) === 2) {
-            throw new \Exception('Cannot import materials to budget: BOTH Project Officer AND Production approvals are required. Currently missing both approvals.');
-        }
-
-        if (!empty($missingApprovals)) {
-            throw new \Exception('Cannot import materials to budget: Missing approval from ' . $missingApprovals[0] . '. BOTH Project Officer AND Production approvals are mandatory.');
-        }
-
-        throw new \Exception('Cannot import materials to budget: Materials must be approved by BOTH Project Officer AND Production departments.');
     }
 
     /**

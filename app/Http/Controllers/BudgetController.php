@@ -127,7 +127,7 @@ class BudgetController extends Controller
     public function importMaterials(int $taskId): JsonResponse
     {
         try {
-            $result = $this->budgetService->syncFromApprovedMaterials($taskId);
+            $result = $this->budgetService->syncFromMaterialsList($taskId);
             $budget = $result['budget'];
 
             return response()->json([
