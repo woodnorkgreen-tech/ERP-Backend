@@ -129,7 +129,16 @@ class ExpenseCodeSeeder extends Seeder
         DB::transaction(function () use ($accounts) {
             foreach ($this->rows() as $row) {
                 $row['default_debit_account_id'] = $this->resolveAccount($row['default_debit_gl'] ?? null, $accounts);
-                $row['is_active'] = true;
+
+                // A code without a concrete debit account is an accounting
+                // instruction, not yet a postable capture choice (for example
+                // "receiving bank account" or "relevant PPE account"). Leaving
+                // it active made the journal service guess a generic expense
+                // account: the entry balanced, but described the wrong event.
+                // Keep the catalogue row for the future dedicated workflow,
+                // while removing it from ordinary cost capture until Finance
+                // gives it an explicit posting destination.
+                $row['is_active'] = $row['default_debit_account_id'] !== null;
 
                 ExpenseCode::updateOrCreate(['code' => $row['code']], $row);
             }

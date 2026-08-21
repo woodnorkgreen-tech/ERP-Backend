@@ -7,6 +7,7 @@ use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
+use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\PostingRule;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Models\VatTreatment;
@@ -26,6 +27,19 @@ class JournalPostingService
      */
     private const VAT_INPUT_CODE = '1330';
     private const WHT_PAYABLE_CODE = '2120';
+
+    /**
+     * Settlement accounts, by chart code.
+     *
+     * A cost's DEBIT says what the money was for — that comes from the expense
+     * code, and 94 of the 100 codes already carry it. Its CREDIT says what paid
+     * for it, and that is a property of how the cost arose, not of what was
+     * bought. Getting the two confused is what put every journal in this system
+     * against the bank.
+     */
+    private const INVENTORY_CODE = '1200';      // material relieved from the shelf
+    private const ACCRUED_CODE = '2150';        // goods received, not yet invoiced
+    private const PAYABLE_CODE = '2100';        // incurred, still owed to someone
 
     /**
      * Create a balanced GL journal entry for a verified CostLine.
@@ -429,6 +443,15 @@ class JournalPostingService
         $debitId = $rule?->debit_account_id;
         $creditId = $rule?->credit_account_id;
 
+        // Goods received into the store are a stock asset, not project work in
+        // progress — regardless of which job triggered the purchase, because
+        // material bought for a job still routes through Stores and is only
+        // consumed when it is issued. Debiting WIP here and again at issue
+        // charged the project twice for one delivery.
+        if (! $debitId && ($line->source_ref === 'accrual' || $line->nature === CostLine::NATURE_ACCRUED)) {
+            $debitId = $this->accountByCode(self::INVENTORY_CODE);
+        }
+
         if (! $debitId && $line->expense_code_id) {
             // `default_debit_account_id` is the column expense_codes actually
             // carries; `gl_account_id` belongs to payment_sources. Reading the
@@ -438,24 +461,92 @@ class JournalPostingService
             $debitId = $line->expenseCode?->default_debit_account_id;
         }
 
-        // Fallback accounts if rules not yet fully configured
+        // A named expense code must never fall through to a guessed account.
+        // Reference rows whose accounting answer depends on the transaction
+        // (bank transfers, asset purchases, tax settlement) stay inactive until
+        // their dedicated workflow supplies that answer.
+        if (! $debitId && $line->expense_code_id) {
+            throw new InvalidArgumentException(
+                "Expense code {$line->expenseCode?->code} has no debit account configured. Finance must map or retire the code before posting."
+            );
+        }
+
+        // Fallback debit only for historical/source-produced lines that carry
+        // no expense-code identity at all.
+        //
+        // `12%` is the Project WIP band (1211–1219) — but it also matches 1200
+        // Raw-material Inventory, which sorts first. An unmapped cost therefore
+        // debited Inventory, and since a stores issue credits Inventory too, the
+        // entry hit the same account on both sides: balanced, and meaningless.
+        // Inventory is a stock account, never a destination for cost, so it is
+        // excluded explicitly.
         if (! $debitId) {
             $debitId = ChartOfAccount::postable()
+                ->where('code', '!=', self::INVENTORY_CODE)
                 ->where(function ($q) {
-                    $q->where('code', 'COS-001')->orWhere('code', 'like', '12%')->orWhere('category', 'expense');
+                    $q->where('code', 'COS-001')->orWhere('code', 'like', '121%')->orWhere('category', 'expense');
                 })
+                ->orderBy('code')
                 ->value('id');
         }
 
-        if (! $creditId) {
-            $creditId = ChartOfAccount::postable()
-                ->where(function ($q) {
-                    $q->where('code', '1030')->orWhere('code', 'ACC-001')->orWhere('category', 'asset')->orWhere('category', 'liability');
-                })
-                ->value('id');
-        }
+        $creditId ??= $this->settlementAccountFor($line);
 
         return [$debitId, $creditId];
+    }
+
+    /**
+     * What settled this cost — the credit leg.
+     *
+     * This replaces a fallback that read "the first postable account whose
+     * category is asset", which in a seeded chart is the bank. Every cost line
+     * in the system was therefore crediting Bank, which asserts that cash left
+     * the account. For a stores issue no cash moves at all — it moved when the
+     * material was bought — so the bank was being relieved twice for the same
+     * material while Raw-material Inventory never moved at all.
+     *
+     * Resolution is by how the cost arose, in decreasing order of certainty.
+     * The final fallback is deliberately Accounts Payable rather than a cash
+     * account: a cost we cannot trace to a settlement is one we still owe, and
+     * claiming we paid it from the bank is the more damaging of the two guesses.
+     */
+    private function settlementAccountFor(CostLine $line): ?int
+    {
+        // Material off the shelf, or back onto it. No cash is involved either
+        // way; the inventory asset is relieved or restored. A negative net on a
+        // return swaps the legs, so one account serves both directions.
+        if (in_array($line->source_ref, ['stock-issue', 'stock-return'], true)) {
+            return $this->accountByCode(self::INVENTORY_CODE);
+        }
+
+        // Goods received against an order but not yet invoiced: the company owes
+        // the supplier from the moment it accepts delivery.
+        if ($line->source_ref === 'accrual' || $line->nature === CostLine::NATURE_ACCRUED) {
+            return $this->accountByCode(self::ACCRUED_CODE);
+        }
+
+        // Spend that names the float or account it came out of — petty cash
+        // disbursements and their transaction fees carry this.
+        $sourceId = $line->details['payment_source_id'] ?? null;
+        if ($sourceId && $account = PaymentSource::whereKey($sourceId)->value('gl_account_id')) {
+            return (int) $account;
+        }
+
+        // Settled through a spend voucher: use whatever that voucher was paid from.
+        if ($line->funding_voucher_id) {
+            $viaVoucher = SpendVoucher::whereKey($line->funding_voucher_id)
+                ->value('payment_source_id');
+            if ($viaVoucher && $account = PaymentSource::whereKey($viaVoucher)->value('gl_account_id')) {
+                return (int) $account;
+            }
+        }
+
+        return $this->accountByCode(self::PAYABLE_CODE);
+    }
+
+    private function accountByCode(string $code): ?int
+    {
+        return ChartOfAccount::postable()->where('code', $code)->value('id');
     }
 
     /** @return array{0: int|null, 1: int|null} */
