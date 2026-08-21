@@ -442,6 +442,40 @@ class StoresCostProducerTest extends TestCase
         $this->assertSame('-3000.00', $credit?->net_amount);
     }
 
+    public function test_an_unpriced_issue_falls_back_to_the_approved_budget_rate(): void
+    {
+        $enquiryId = $this->createEnquiry('WNG-08-2026-090');
+        $this->createProject($enquiryId, 'WNG-08-2026-090');
+
+        // Nothing priced anywhere except the budget — the production norm.
+        $material = $this->createMaterial('Chipboard Screws 4x40mm', 0.0);
+        $materialLineId = $this->budgetPricedLine($enquiryId, 4.0, '3200.00');
+
+        $log = InventoryLog::create([
+            'material_id' => $material->id,
+            'user_id' => $this->user->id,
+            'type' => 'check_out',
+            'batch_number' => 'ISS-PLAN-0001',
+            'quantity' => -2.00,
+            'balance_after' => 10.00,
+            'project_id' => $enquiryId,
+            'project_material_id' => $materialLineId,
+            'reference_no' => 'WNG-08-2026-090',
+            'recipient_name' => 'Site Worker',
+            'logged_at' => now(),
+        ]);
+
+        $line = $this->producer->postStockIssue($log);
+
+        // 3200 budgeted over 4 planned units = 800 each; two issued = 1600.
+        $this->assertNotNull($line, 'An unpriced issue must value from the budget, not fail.');
+        $this->assertSame('1600.00', $line->net_amount);
+
+        // And it must say so. A plan-priced actual is not evidence of what the
+        // material cost, so it can never be silently indistinguishable.
+        $this->assertTrue($line->details['valued_at_plan'] ?? false);
+    }
+
     public function test_a_stores_issue_records_the_element_it_served(): void
     {
         $enquiryId = $this->createEnquiry('WNG-08-2026-095');
@@ -503,4 +537,58 @@ class StoresCostProducerTest extends TestCase
         $this->assertSame('Stand', $line?->details['element'] ?? null);
     }
 
+    public function test_a_real_receipt_price_always_beats_the_budget_rate(): void
+    {
+        $enquiryId = $this->createEnquiry('WNG-08-2026-091');
+        $this->createProject($enquiryId, 'WNG-08-2026-091');
+
+        $material = $this->createMaterial('Grinding Discs 4 inch', 0.0);
+        $materialLineId = $this->budgetPricedLine($enquiryId, 4.0, '3200.00');
+
+        $log = InventoryLog::create([
+            'material_id' => $material->id,
+            'user_id' => $this->user->id,
+            'type' => 'check_out',
+            'batch_number' => 'ISS-PLAN-0002',
+            'quantity' => -2.00,
+            'receipt_unit_cost' => 500.00,   // what it actually cost
+            'balance_after' => 10.00,
+            'project_id' => $enquiryId,
+            'project_material_id' => $materialLineId,
+            'reference_no' => 'WNG-08-2026-091',
+            'recipient_name' => 'Site Worker',
+            'logged_at' => now(),
+        ]);
+
+        $line = $this->producer->postStockIssue($log);
+
+        $this->assertSame('1000.00', $line->net_amount, 'Receipt price must win over the plan.');
+        $this->assertArrayNotHasKey('valued_at_plan', array_filter($line->details ?? []));
+    }
+
+    public function test_an_issue_with_no_price_anywhere_still_produces_nothing(): void
+    {
+        // The fallback must not invent a value. With no receipt price, no
+        // catalogue price and no budget line, this stays an exception for a
+        // person to resolve rather than a zero posted quietly.
+        $enquiryId = $this->createEnquiry('WNG-08-2026-092');
+        $this->createProject($enquiryId, 'WNG-08-2026-092');
+
+        $material = $this->createMaterial('Matt white sticker', 0.0);
+
+        $log = InventoryLog::create([
+            'material_id' => $material->id,
+            'user_id' => $this->user->id,
+            'type' => 'check_out',
+            'batch_number' => 'ISS-PLAN-0003',
+            'quantity' => -2.00,
+            'balance_after' => 10.00,
+            'project_id' => $enquiryId,
+            'reference_no' => 'WNG-08-2026-092',
+            'recipient_name' => 'Site Worker',
+            'logged_at' => now(),
+        ]);
+
+        $this->assertNull($this->producer->postStockIssue($log));
+    }
 }

@@ -42,7 +42,29 @@ class StoresCostProducer
             return null;
         }
 
+        // Valuation, in decreasing order of truth: what the goods actually cost
+        // on receipt, then the catalogue's weighted average, then the approved
+        // budget rate.
+        //
+        // The budget rung matters because it is the only one this business
+        // populates — 2% of catalogue materials and 5% of project material lines
+        // carry a unit cost, against 93% of budgets. Without it a stores issue
+        // valued at nothing, the posting failed, and a person was asked to price
+        // it by hand from a field that was itself empty.
         $unitCost = (string) ($log->receipt_unit_cost ?? $material?->unit_cost ?? '0.00');
+        $valuedAtPlan = false;
+
+        if (bccomp($unitCost, '0.00', 2) !== 1) {
+            $planRate = $this->plannedUnitRate(
+                $log->project_material_id ? (int) $log->project_material_id : null,
+            );
+
+            if ($planRate !== null) {
+                $unitCost = $planRate;
+                $valuedAtPlan = true;
+            }
+        }
+
         $amount = bcmul((string) $quantity, $unitCost, 2);
         if (bccomp($amount, '0.00', 2) !== 1) {
             return null;
@@ -95,10 +117,32 @@ class StoresCostProducer
                 // Surfaces the mapping gap instead of letting non-wood spend
                 // disappear into the wood account unremarked.
                 'unmapped_expense_code' => $this->usesDefaultExpenseCode($material, (string) $expenseCode) ?: null,
+                // Recorded, never silent: this posted as an actual but was
+                // priced from the budget, so it cannot be read as evidence of
+                // what the material really cost. Material variance on a job
+                // carrying these lines is uninformative by construction.
+                'valued_at_plan' => $valuedAtPlan ?: null,
             ], fn ($value) => $value !== null),
         ));
     }
 
+    /**
+     * The approved budget rate for one project material line.
+     *
+     * Prices live in the budget, not in the catalogue: `task_budget_data`
+     * carries a real `unitPrice` for 93% of budgets, while
+     * `element_materials.unit_cost` is set on 5% of rows and
+     * `library_materials.unit_cost` on 2%. The budget's figure reaches here as
+     * the planned cost line's total, so the rate is that total over the planned
+     * quantity.
+     *
+     * Deliberately exact-match only. `plannedLine()` may fall back to catalogue
+     * identity when a movement predates project-line identity, and dividing
+     * another line's total by this line's quantity would invent a rate.
+     *
+     * Returns null rather than zero when nothing can be resolved, so the caller
+     * can tell "no budget rate" from "budgeted at nothing".
+     */
     /**
      * The element a project material line belongs to.
      *
@@ -116,6 +160,43 @@ class StoresCostProducer
         $name = ElementMaterial::with('element:id,name')->find($projectMaterialId)?->element?->name;
 
         return filled($name) ? (string) $name : null;
+    }
+
+    public function plannedUnitRate(?int $projectMaterialId): ?string
+    {
+        if (! $projectMaterialId) {
+            return null;
+        }
+
+        $material = ElementMaterial::find($projectMaterialId);
+        $quantity = (float) ($material?->quantity ?? 0);
+
+        if (! $material || $quantity <= 0) {
+            return null;
+        }
+
+        // If the rate was ever propagated onto the material line itself, that is
+        // the same budget figure without the division.
+        if ((float) ($material->unit_cost ?? 0) > 0) {
+            return (string) $material->unit_cost;
+        }
+
+        $keys = array_values(array_filter([(string) $material->id, $material->persistent_id]));
+
+        $planned = CostLine::query()
+            ->where('nature', CostLine::NATURE_PLANNED)
+            ->where('status', CostLine::STATUS_VERIFIED)
+            ->whereIn(
+                DB::raw("JSON_UNQUOTE(JSON_EXTRACT(details, '$.project_material_id'))"),
+                $keys,
+            )
+            ->first();
+
+        if (! $planned || bccomp((string) $planned->net_amount, '0.00', 2) !== 1) {
+            return null;
+        }
+
+        return bcdiv((string) $planned->net_amount, (string) $quantity, 4);
     }
 
     /**
