@@ -414,10 +414,60 @@ class PettyCashRepository
             });
         }
 
+        // Everything below reads out of the metadata JSON, which is where the
+        // ledger keeps the disbursement's own fields. These four filters were
+        // collected by the controller and then silently dropped here, so the
+        // panel returned unfiltered rows while reporting itself as active.
+
+        // A top-up entry carries no status key; it is active by construction.
+        if (!empty($filters['status'])) {
+            if ($filters['status'] === 'voided') {
+                $query->where('metadata->status', 'voided');
+            } else {
+                // Deliberately not whereNull('metadata->status'): Laravel expands
+                // that to json_type(...) = 'NULL', and the literal picks up the
+                // connection collation while json_type() returns the server's —
+                // an illegal mix of collations on these utf8mb3 tables.
+                $query->where(function ($q) {
+                    $q->whereRaw("JSON_EXTRACT(metadata, '$.status') IS NULL")
+                      ->orWhere('metadata->status', 'active');
+                });
+            }
+        }
+
+        if (!empty($filters['classification'])) {
+            $query->where('metadata->classification', $filters['classification']);
+        }
+
+        if (!empty($filters['payment_method'])) {
+            $query->where('metadata->payment_method', $filters['payment_method']);
+        }
+
+        if (!empty($filters['creator_id'])) {
+            $query->where('metadata->created_by', (int) $filters['creator_id']);
+        }
+
+        // Archive state lives on the source rows, never on the ledger — a posted
+        // entry is immutable and carries no archive flag. reference_number is the
+        // only link back, and it embeds the zero-padded source id at a fixed
+        // offset, so the join is recoverable without touching the frozen schema.
+        // It is applied in SQL rather than after the fact because pagination has
+        // to count the filtered set, not the whole ledger.
+        $archived = $this->archivedSourceIds();
+        $hasArchived = $archived['disbursement'] || $archived['top_up'];
+
+        if (!empty($filters['show_archived'])) {
+            $hasArchived
+                ? $query->where(fn ($q) => $this->matchArchivedSources($q, $archived))
+                : $query->whereRaw('1 = 0');
+        } elseif ($hasArchived) {
+            $query->whereNot(fn ($q) => $this->matchArchivedSources($q, $archived));
+        }
+
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
         // Transform collection to match old flat transaction format
-        $paginator->getCollection()->transform(function ($item) {
+        $paginator->getCollection()->transform(function ($item) use ($archived) {
             $meta = json_decode($item->metadata, true) ?: [];
             
             // Reconstruct flat transaction columns
@@ -438,7 +488,11 @@ class PettyCashRepository
                 'status' => $meta['status'] ?? 'active',
                 'transaction_code' => $meta['transaction_code'] ?? null,
                 'created_at' => $item->created_at,
-                'is_archived' => false,
+                // The running balance the ledger already stores. Additive field:
+                // it is what makes the transaction list read as a cashbook rather
+                // than an undated pile of payments.
+                'balance_after' => (float) $item->balance_snapshot,
+                'is_archived' => $this->isArchivedEntry($item->reference_number, $archived),
                 'requisition_status' => $meta['requisition_status'] ?? null,
                 'received_at' => $meta['received_at'] ?? null,
                 'signature' => $meta['signature'] ?? null,
@@ -449,6 +503,68 @@ class PettyCashRepository
         });
 
         return $paginator;
+    }
+
+    /**
+     * Ids of the source records an operator has archived, per source type.
+     */
+    private function archivedSourceIds(): array
+    {
+        return [
+            'disbursement' => PettyCashDisbursement::where('is_archived', true)->pluck('id')->all(),
+            'top_up' => PettyCashTopUp::where('is_archived', true)->pluck('id')->all(),
+        ];
+    }
+
+    /**
+     * Constrain a ledger query to entries whose source record is archived.
+     *
+     * Every reference the ledger writes puts the padded source id at a known
+     * offset — PCR-000123 and its PCR-000123-VOID reversal, TOP-000045 and its
+     * TOP-000045-ADJ-… adjustment, REV-TOP-000045 — so one substring per prefix
+     * covers the derivatives too. Archiving a record hides its reversals with it,
+     * which is the behaviour an operator expects.
+     */
+    private function matchArchivedSources($query, array $archived): void
+    {
+        $query->whereRaw('1 = 0');
+
+        if ($archived['disbursement']) {
+            $query->orWhere(fn ($q) => $q
+                ->where('reference_number', 'like', 'PCR-%')
+                ->whereIn(DB::raw('CAST(SUBSTRING(reference_number, 5, 6) AS UNSIGNED)'), $archived['disbursement']));
+        }
+
+        if ($archived['top_up']) {
+            $query->orWhere(fn ($q) => $q
+                ->where('reference_number', 'like', 'TOP-%')
+                ->whereIn(DB::raw('CAST(SUBSTRING(reference_number, 5, 6) AS UNSIGNED)'), $archived['top_up']));
+            $query->orWhere(fn ($q) => $q
+                ->where('reference_number', 'like', 'REV-TOP-%')
+                ->whereIn(DB::raw('CAST(SUBSTRING(reference_number, 9, 6) AS UNSIGNED)'), $archived['top_up']));
+        }
+    }
+
+    /**
+     * The row-level answer to the same question matchArchivedSources() asks in SQL.
+     */
+    private function isArchivedEntry(?string $reference, array $archived): bool
+    {
+        if (! $reference) {
+            return false;
+        }
+
+        if (str_starts_with($reference, 'REV-TOP-')) {
+            return in_array((int) substr($reference, 8, 6), $archived['top_up'], true);
+        }
+        if (str_starts_with($reference, 'TOP-')) {
+            return in_array((int) substr($reference, 4, 6), $archived['top_up'], true);
+        }
+        if (str_starts_with($reference, 'PCR-')) {
+            return in_array((int) substr($reference, 4, 6), $archived['disbursement'], true);
+        }
+
+        return false;
     }
 
     /**
