@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Events\BudgetLinesChanged;
+
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Models\TaskBudgetData;
 use App\Models\TaskMaterialsData;
@@ -75,10 +77,11 @@ class BudgetService
             return $budgetData;
         });
 
-        // Procurement is a downstream consumer, not part of the budget write —
-        // run it after the commit so a procurement problem can never roll back
+        // Procurement and the cost account are downstream consumers, not part of
+        // the budget write — both run after the commit so neither can roll back
         // a saved budget.
         $this->syncProcurementWithBudget($taskId);
+        BudgetLinesChanged::dispatch($taskId);
 
         return $budgetData;
     }
@@ -216,8 +219,10 @@ class BudgetService
         ));
 
         // A sync rewrites exactly the rows procurement mirrors, so push it through
-        // rather than leaving a third copy stale.
+        // rather than leaving a third copy stale. The cost account's planned
+        // lines are the fourth copy and were the one nobody refreshed.
         $this->syncProcurementWithBudget($budgetTaskId);
+        BudgetLinesChanged::dispatch($budgetTaskId);
 
         return [
             'budget' => $budgetData,

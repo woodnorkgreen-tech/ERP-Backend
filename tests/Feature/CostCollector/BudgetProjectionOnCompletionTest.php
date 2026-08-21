@@ -3,6 +3,7 @@
 namespace Tests\Feature\CostCollector;
 
 use App\Events\EnquiryTaskCompleted;
+use App\Listeners\ProjectBudgetLines;
 use App\Listeners\ProjectBudgetLinesOnTaskCompletion;
 use App\Models\TaskBudgetData;
 use App\Models\User;
@@ -21,6 +22,11 @@ use Tests\TestCase;
  * Before this the projector only ran from an artisan command, so a budget
  * approved today did not reach its cost account until somebody remembered to
  * run one — the figure looked live and was a snapshot.
+ *
+ * Completion is no longer the only trigger — budget writes announce the same
+ * thing (see MaterialToCostChainTest) — but it is still a trigger, because a
+ * budget priced before that wiring existed reaches its account when its task is
+ * closed.
  */
 class BudgetProjectionOnCompletionTest extends TestCase
 {
@@ -121,13 +127,13 @@ class BudgetProjectionOnCompletionTest extends TestCase
         $this->assertSame(0, CostLine::count());
     }
 
-    public function test_the_listener_is_queued(): void
+    public function test_the_projection_is_queued(): void
     {
         // The whole point of the seam: a cost-ledger failure must never stop
-        // somebody completing their task.
-        $this->assertInstanceOf(
-            ShouldQueue::class,
-            app(ProjectBudgetLinesOnTaskCompletion::class),
-        );
+        // somebody completing their task. The guarantee sits on the listener
+        // that does the ledger write — completing a task only announces it, and
+        // announcing cannot fail in a way worth queueing.
+        $this->assertInstanceOf(ShouldQueue::class, app(ProjectBudgetLines::class));
+        $this->assertNotInstanceOf(ShouldQueue::class, app(ProjectBudgetLinesOnTaskCompletion::class));
     }
 }

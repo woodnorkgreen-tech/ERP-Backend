@@ -39,6 +39,13 @@ class EventServiceProvider extends ServiceProvider
             \App\Listeners\SyncBudgetWithMaterialsList::class,
         ],
 
+        // A budget write moves the ceiling every "budget vs actual" figure is
+        // measured against, so the planned lines behind that ceiling are
+        // re-projected from it. Queued, for the same reason as the rest.
+        \App\Events\BudgetLinesChanged::class => [
+            \App\Listeners\ProjectBudgetLines::class,
+        ],
+
         // An approved addition is a budget revision, so it has to move the
         // ceiling every "budget vs actual" figure is measured against. Before
         // this, approval changed a status and nothing else, and the project went
