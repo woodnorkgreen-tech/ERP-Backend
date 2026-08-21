@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
 class RequisitionController extends Controller
 {
@@ -278,7 +279,7 @@ class RequisitionController extends Controller
             'items.*.expense_code_id'    => 'required_if:requested_by_type,project|integer|exists:expense_codes,id',
             // Either material_id must be present OR custom_description must be provided
             'items.*.custom_description' => 'nullable|string',
-            'items.*.quantity'           => 'required|integer|min:1',
+            'items.*.quantity'           => 'required|numeric|gt:0',
             'items.*.unit_price'         => 'required|numeric|min:0',
             'items.*.internal_budget_unit_price' => 'nullable|numeric|min:0',
             'items.*.purpose'            => 'required|string',
@@ -320,6 +321,7 @@ class RequisitionController extends Controller
             $requisition = Requisition::create($input);
 
             foreach ($items as $item) {
+                $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null);
                 $item['total'] = $item['quantity'] * $item['unit_price'];
                 $item['custom_description'] = $item['custom_description'] ?? null;
                 $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
@@ -391,7 +393,7 @@ class RequisitionController extends Controller
             'items.*.material_id' => 'nullable|exists:library_materials,id',
             'items.*.expense_code_id' => 'nullable|integer|exists:expense_codes,id',
             'items.*.custom_description' => 'nullable|string',
-            'items.*.quantity' => 'required_with:items|integer|min:1',
+            'items.*.quantity' => 'required_with:items|numeric|gt:0',
             'items.*.unit_price' => 'required_with:items|numeric|min:0',
             'items.*.internal_budget_unit_price' => 'nullable|numeric|min:0',
             'items.*.purpose' => 'required_with:items|string',
@@ -426,6 +428,7 @@ class RequisitionController extends Controller
 
                 $totalAmount = 0;
                 foreach ($items as $item) {
+                    $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null);
                     $item['total'] = $item['quantity'] * $item['unit_price'];
                     $totalAmount  += $item['total'];
                     $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
@@ -508,6 +511,13 @@ class RequisitionController extends Controller
         return new RequisitionResource(
             $requisition->load(['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
+    }
+
+    private function buyingUomId(mixed $materialId): ?int
+    {
+        if (! $materialId) return null;
+        $material = LibraryMaterial::findOrFail((int) $materialId);
+        return $material->purchase_uom_id ?: $material->base_uom_id;
     }
 
     public function reject(Request $request, Requisition $requisition)

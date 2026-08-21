@@ -49,7 +49,40 @@ class InventoryService
     public function adjustStock(int $materialId, float $quantity, string $type, array $meta = [])
     {
         return DB::transaction(function () use ($materialId, $quantity, $type, $meta) {
-            $material = LibraryMaterial::findOrFail($materialId);
+            $material = LibraryMaterial::with('uomConversions')->findOrFail($materialId);
+            $enteredQuantity = $quantity;
+            $conversionFactor = 1.0;
+            $enteredUomId = isset($meta['entered_uom_id']) ? (int) $meta['entered_uom_id'] : null;
+            if ($enteredUomId && $enteredUomId !== (int) $material->base_uom_id) {
+                if ($material->is_serialized || $material->isBoardTrackable()) {
+                    throw ValidationException::withMessages([
+                        'entered_uom_id' => 'Individually tracked items must be moved in their stock unit so every physical item remains accounted for.',
+                    ]);
+                }
+
+                $expectedAlternateUomId = $meta['expected_entered_uom_id'] ?? ($type === 'check_in'
+                    ? $material->purchase_uom_id
+                    : $material->issue_uom_id);
+                if ((int) $expectedAlternateUomId !== $enteredUomId) {
+                    throw ValidationException::withMessages([
+                        'entered_uom_id' => 'Choose the stock unit or the buying/issuing unit configured in the Materials Library.',
+                    ]);
+                }
+
+                $conversion = $material->uomConversions
+                    ->first(fn ($row) => (int) $row->from_uom_id === $enteredUomId
+                        && (int) $row->to_uom_id === (int) $material->base_uom_id);
+                if (! $conversion || (float) $conversion->factor <= 0) {
+                    throw ValidationException::withMessages([
+                        'entered_uom_id' => 'This unit has no conversion to the material’s Stores unit. Complete the unit setup in the Materials Library first.',
+                    ]);
+                }
+                $conversionFactor = (float) $conversion->factor;
+                $quantity *= $conversionFactor;
+                if ($type === 'check_in' && isset($meta['receipt_unit_cost']) && $meta['receipt_unit_cost'] !== null) {
+                    $meta['receipt_unit_cost'] = (float) $meta['receipt_unit_cost'] / $conversionFactor;
+                }
+            }
             $usageType = $material->expectedUsageType();
             // A catalogue item may be reclassified after it was issued. Return
             // custody is governed by the immutable original movement, otherwise
@@ -137,6 +170,9 @@ class InventoryService
                 'inventory_lot_id' => $controlled['inventory_lot_id'],
                 'inventory_serial_item_id' => $controlled['inventory_serial_item_id'],
                 'quantity' => $quantity,
+                'entered_quantity' => $enteredUomId ? $enteredQuantity : null,
+                'entered_uom_id' => $enteredUomId,
+                'uom_conversion_factor' => $enteredUomId ? $conversionFactor : null,
                 'receipt_unit_cost' => $type === 'check_in' ? ($meta['receipt_unit_cost'] ?? null) : null,
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,

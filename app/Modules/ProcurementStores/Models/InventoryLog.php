@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use App\Models\User;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
+use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
 
 class InventoryLog extends Model
 {
@@ -24,6 +25,9 @@ class InventoryLog extends Model
         'inventory_lot_id',
         'inventory_serial_item_id',
         'quantity',
+        'entered_quantity',
+        'entered_uom_id',
+        'uom_conversion_factor',
         'receipt_unit_cost',
         'balance_after',
         'project_id',
@@ -44,6 +48,8 @@ class InventoryLog extends Model
 
     protected $casts = [
         'quantity' => 'decimal:2',
+        'entered_quantity' => 'decimal:6',
+        'uom_conversion_factor' => 'decimal:6',
         'receipt_unit_cost' => 'decimal:4',
         'balance_after' => 'decimal:2',
         'logged_at' => 'datetime',
@@ -59,6 +65,11 @@ class InventoryLog extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function enteredUom(): BelongsTo
+    {
+        return $this->belongsTo(UnitOfMeasure::class, 'entered_uom_id');
     }
 
     public function project(): BelongsTo
@@ -79,6 +90,11 @@ class InventoryLog extends Model
     public function projectMaterial(): BelongsTo
     {
         return $this->belongsTo(\App\Models\ElementMaterial::class, 'project_material_id');
+    }
+
+    public function financePosting()
+    {
+        return $this->hasOne(StoresFinancePosting::class);
     }
 
     public function returns()

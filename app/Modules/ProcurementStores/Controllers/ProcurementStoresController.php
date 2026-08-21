@@ -8,6 +8,7 @@ use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use App\Modules\ProcurementStores\Models\InventoryLot;
 use App\Modules\ProcurementStores\Models\InventorySerialItem;
+use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Models\StoresFinancePosting;
 use App\Modules\ProcurementStores\Jobs\ProcessStoresFinancePosting;
@@ -363,6 +364,7 @@ class ProcurementStoresController extends Controller
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
+            'entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'warehouse_code' => 'sometimes|string',
             'location' => 'nullable|string',
             'reference_no' => 'nullable|string',
@@ -374,6 +376,7 @@ class ProcurementStoresController extends Controller
             'receipt_unit_cost' => 'nullable|numeric|min:0',
             'serial_numbers' => 'nullable|array',
             'serial_numbers.*' => 'string|max:150',
+            'grn_item_id' => 'nullable|integer|exists:goods_receipt_note_items,id',
         ]);
 
         $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->findOrFail($request->material_id);
@@ -403,13 +406,52 @@ class ProcurementStoresController extends Controller
         // creation failure rolls back the stock increment, preventing a state
         // where quantity_on_hand is incremented but no board records exist.
         DB::transaction(function () use ($request, $material, &$log, &$boards) {
+            $grnItem = null;
+            if ($request->filled('grn_item_id')) {
+                $grnItem = GoodsReceiptNoteItem::with(['goodsReceiptNote', 'purchaseOrderItem', 'inspection'])->lockForUpdate()->findOrFail($request->integer('grn_item_id'));
+                if ((int) $grnItem->material_id !== (int) $request->material_id || ! $grnItem->accepted) {
+                    throw ValidationException::withMessages(['grn_item_id' => 'This GRN line does not match the selected accepted material.']);
+                }
+                if ($grnItem->inventory_log_id || $grnItem->stock_status === 'posted') {
+                    throw ValidationException::withMessages(['grn_item_id' => 'This GRN line has already been added to Stores stock.']);
+                }
+                // The PO line is an immutable buying-unit snapshot. Do not make
+                // an older approved receipt change meaning when the catalogue's
+                // current buying unit is edited later.
+                $expectedUomId = (int) ($grnItem->purchaseOrderItem?->uom_id
+                    ?: $material->purchase_uom_id
+                    ?: $material->base_uom_id);
+                if ((int) ($request->entered_uom_id ?: $material->base_uom_id) !== $expectedUomId) {
+                    throw ValidationException::withMessages(['entered_uom_id' => 'Complete this GRN line in the buying unit recorded on the purchase order.']);
+                }
+            }
+
             $service = new InventoryService();
+            $meta = $request->all();
+            if ($grnItem) {
+                $meta['expected_entered_uom_id'] = $expectedUomId;
+                $meta['reference_no'] = $grnItem->goodsReceiptNote?->grn_number;
+                $meta['notes'] = trim(($request->notes ? $request->notes.' · ' : '')."Completed from GRN {$meta['reference_no']}");
+            }
             $log = $service->adjustStock(
                 $request->material_id,
                 $request->quantity,
                 'check_in',
-                $request->all()
+                $meta
             );
+
+            if ($grnItem) {
+                $factor = (float) ($log->uom_conversion_factor ?: 1);
+                $approvedReceiptQuantity = $grnItem->inspection
+                    ? (float) $grnItem->inspection->accepted_quantity
+                    : (float) $grnItem->received_quantity;
+                $expectedStockQuantity = $approvedReceiptQuantity * $factor;
+                if (abs(abs((float) $log->quantity) - $expectedStockQuantity) > 0.00001) {
+                    throw ValidationException::withMessages([
+                        'quantity' => "Receive the full quantity approved for Stores ({$approvedReceiptQuantity}); rejected or quarantined quantities must not enter available stock.",
+                    ]);
+                }
+            }
 
             if ($material->isBoardTrackable()) {
                 $registration = new BoardRegistrationService();
@@ -427,6 +469,16 @@ class ProcurementStoresController extends Controller
                     unitValue:   $request->filled('receipt_unit_cost') ? (float) $request->receipt_unit_cost : null,
                 );
                 $log->update(['usage_type' => 'reusable']);
+            }
+
+            if ($grnItem) {
+                $grnItem->update([
+                    'entered_uom_id' => $request->entered_uom_id ?: $material->base_uom_id,
+                    'stock_quantity' => abs((float) $log->quantity),
+                    'receipt_unit_cost' => $request->receipt_unit_cost,
+                    'stock_status' => 'posted',
+                    'inventory_log_id' => $log->id,
+                ]);
             }
         });
 
@@ -466,6 +518,7 @@ class ProcurementStoresController extends Controller
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
+            'entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'project_id' => 'nullable|exists:projects,id',
             'project_material_id' => 'nullable|exists:element_materials,id',
             'notes' => 'nullable|string',
@@ -475,7 +528,7 @@ class ProcurementStoresController extends Controller
             'serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
         ]);
 
-        $material = LibraryMaterial::with('materialCategory.parent')->find($request->material_id);
+        $material = LibraryMaterial::with(['materialCategory.parent', 'uomConversions'])->find($request->material_id);
         if ($material?->isBoardTrackable()) {
             return response()->json([
                 'message' => "'{$material->material_name}' is a tracked board material. "
@@ -490,11 +543,13 @@ class ProcurementStoresController extends Controller
             $project = \App\Models\Project::findOrFail($request->project_id);
             $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')->findOrFail($request->project_material_id);
             $materialsData = $planned->element?->taskMaterialsData;
-            if (! data_get($materialsData?->project_info, 'approval_status.all_approved', false)
-                || (int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
+            // Validate identity before approval so a line from another project
+            // can never be presented as an approval problem.
+            if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
                 || (int) $planned->library_material_id !== (int) $material->id) {
-                throw ValidationException::withMessages(['project_material_id' => 'This is not an approved material line for the selected project.']);
+                throw ValidationException::withMessages(['project_material_id' => 'This material line does not belong to the selected project.']);
             }
+            $this->assertMaterialsApproved($materialsData);
             $issued = (float) InventoryLog::where('project_material_id', $planned->id)
                 ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
                 - (float) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
@@ -620,6 +675,7 @@ class ProcurementStoresController extends Controller
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
+            'entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'original_issue_log_id' => 'required|exists:inventory_logs,id',
             'notes' => 'nullable|string',
             'inventory_lot_id' => 'nullable|exists:inventory_lots,id',
@@ -629,7 +685,7 @@ class ProcurementStoresController extends Controller
 
         // Board materials must be returned through the Board Lifecycle endpoint so that
         // individual Board records transition back to Available and stock stays in sync.
-        $material = LibraryMaterial::with('materialCategory.parent')->find($request->material_id);
+        $material = LibraryMaterial::with(['materialCategory.parent', 'uomConversions'])->find($request->material_id);
         if ($material?->isBoardTrackable()) {
             return response()->json([
                 'message'  => "'{$material->material_name}' is a tracked board material. "
@@ -640,7 +696,18 @@ class ProcurementStoresController extends Controller
         }
         $this->validateControlledMovement($request, $material, 'return');
 
-        $log = DB::transaction(function () use ($request) {
+        $returnQuantityBase = (float) $request->quantity;
+        if ($request->filled('entered_uom_id') && (int) $request->entered_uom_id !== (int) $material->base_uom_id) {
+            $factor = (float) ($material->uomConversions
+                ->first(fn ($row) => (int) $row->from_uom_id === (int) $request->entered_uom_id
+                    && (int) $row->to_uom_id === (int) $material->base_uom_id)?->factor ?? 0);
+            if ($factor <= 0) {
+                throw ValidationException::withMessages(['entered_uom_id' => 'This return unit has no conversion to the stock unit.']);
+            }
+            $returnQuantityBase *= $factor;
+        }
+
+        $log = DB::transaction(function () use ($request, $returnQuantityBase) {
             $issue = InventoryLog::query()->lockForUpdate()
                 ->find($request->integer('original_issue_log_id'));
             if (! $issue) {
@@ -664,7 +731,7 @@ class ProcurementStoresController extends Controller
             $issued = abs((float) $issue->quantity);
             $alreadyReturned = (float) InventoryLog::where('original_issue_log_id', $issue->id)
                 ->where('type', 'return')->sum('quantity');
-            if ($alreadyReturned + (float) $request->quantity > $issued + 0.00001) {
+            if ($alreadyReturned + $returnQuantityBase > $issued + 0.00001) {
                 throw ValidationException::withMessages([
                     'quantity' => 'Return quantity exceeds the unreturned quantity from the original issue.',
                 ]);
@@ -702,6 +769,7 @@ class ProcurementStoresController extends Controller
         $request->validate([
             'material_id' => 'required|exists:library_materials,id',
             'quantity' => 'required|numeric|min:0.01',
+            'entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'notes' => 'required|string|min:5',
             'inventory_lot_id' => 'nullable|exists:inventory_lots,id',
             'serial_item_ids' => 'nullable|array',
@@ -752,6 +820,8 @@ class ProcurementStoresController extends Controller
             'items.*.material_id' => 'required|exists:library_materials,id',
             'items.*.project_material_id' => 'nullable|exists:element_materials,id',
             'items.*.quantity' => 'required|numeric|min:0.01',
+            'items.*.entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
+            'items.*.receipt_unit_cost' => 'nullable|numeric|min:0',
             'items.*.reference_no' => 'nullable|string',
             'items.*.notes' => 'nullable|string',
             'warehouse_code' => 'sometimes|string',
@@ -773,6 +843,14 @@ class ProcurementStoresController extends Controller
             if ($material?->isBoardTrackable() && (float) $item['quantity'] !== (float) (int) $item['quantity']) {
                 return response()->json([
                     'message' => "Board sheets for '{$material->material_name}' must be received as a whole number.",
+                ], 422);
+            }
+            if ($material?->isBoardTrackable()
+                && ! (isset($item['receipt_unit_cost']) && (float) $item['receipt_unit_cost'] > 0)
+                && (float) $material->unit_cost <= 0) {
+                return response()->json([
+                    'message' => "'{$material->material_name}' has no catalogue cost yet. Enter the receipt price per board — "
+                        . 'boards received without a value cannot be issued to a project.',
                 ], 422);
             }
         }
@@ -836,10 +914,13 @@ class ProcurementStoresController extends Controller
             'items.*.material_id' => 'required|exists:library_materials,id',
             'items.*.project_material_id' => 'nullable|exists:element_materials,id',
             'items.*.quantity' => 'required|numeric|min:0.01',
+            'items.*.entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'items.*.reference_no' => 'nullable|string',
             'items.*.notes' => 'nullable|string',
             'items.*.usage_type' => 'nullable|string|in:consumable,reusable',
             'items.*.requestor' => 'nullable|string',
+            'requestor_name' => 'required|string|max:255',
+            'reference_no' => 'nullable|string|max:255',
             'project_id' => 'nullable|exists:projects,id',
             'logged_at' => 'nullable|date'
         ]);
@@ -883,11 +964,12 @@ class ProcurementStoresController extends Controller
                     $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')
                         ->lockForUpdate()->findOrFail($item['project_material_id']);
                     $materialsData = $planned->element?->taskMaterialsData;
-                    $approved = (bool) data_get($materialsData?->project_info, 'approval_status.all_approved', false);
 
-                    if (! $approved || (int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id) {
+                    // Project ownership, catalogue identity and departmental
+                    // sign-off are all authoritative server-side controls.
+                    if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id) {
                         throw ValidationException::withMessages([
-                            'items' => "{$planned->description} is not an approved material line for this project.",
+                            'items' => "{$planned->description} does not belong to this project.",
                         ]);
                     }
                     if ((int) $planned->library_material_id !== (int) $item['material_id']) {
@@ -895,6 +977,7 @@ class ProcurementStoresController extends Controller
                             'items' => "{$planned->description} is linked to a different Material Library item.",
                         ]);
                     }
+                    $this->assertMaterialsApproved($materialsData);
 
                     $netIssued = (float) InventoryLog::where('project_material_id', $planned->id)
                         ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
@@ -926,7 +1009,7 @@ class ProcurementStoresController extends Controller
                     );
                     $netIssued += $legacyForThisLine;
                     $remaining = max(0, (float) $planned->quantity - $netIssued);
-                    if ((float) $item['quantity'] > $remaining + 0.00001) {
+                    if ($movementQuantity > $remaining + 0.00001) {
                         throw ValidationException::withMessages([
                             'items' => "{$planned->description} has only {$remaining} remaining on the approved requirement.",
                         ]);
@@ -937,7 +1020,8 @@ class ProcurementStoresController extends Controller
                 $meta = array_merge($item, [
                     'batch_number' => $batchNumber,
                     'project_id' => $request->project_id ?? null,
-                    'recipient_name' => $item['requestor'] ?? null,
+                    'recipient_name' => $item['requestor'] ?? $request->requestor_name ?? null,
+                    'reference_no' => $item['reference_no'] ?? $request->reference_no ?? null,
                     'notes' => $item['notes'] ?? 'Project material issue',
                     'logged_at' => $request->logged_at ?? now(),
                 ]);
@@ -960,6 +1044,36 @@ class ProcurementStoresController extends Controller
             'data' => $logs,
             'status' => 'success'
         ]);
+    }
+
+    private function assertMaterialsApproved($materialsData): void
+    {
+        if (! (bool) data_get($materialsData?->project_info, 'approval_status.all_approved', false)) {
+            throw ValidationException::withMessages([
+                'project_material_id' => 'Project Officer and Production must sign off the material list before Stores can issue it.',
+            ]);
+        }
+    }
+
+    /** Convert a user-entered movement quantity for validation against base-unit requirements. */
+    private function quantityInBaseUnit(LibraryMaterial $material, float $quantity, mixed $enteredUomId): float
+    {
+        if (! $enteredUomId || (int) $enteredUomId === (int) $material->base_uom_id) {
+            return $quantity;
+        }
+
+        if ((int) $enteredUomId !== (int) $material->issue_uom_id) {
+            throw ValidationException::withMessages(['items' => "{$material->material_name} must be issued in its stock unit or configured issuing unit."]);
+        }
+
+        $factor = (float) ($material->uomConversions
+            ->first(fn ($row) => (int) $row->from_uom_id === (int) $enteredUomId
+                && (int) $row->to_uom_id === (int) $material->base_uom_id)?->factor ?? 0);
+        if ($factor <= 0) {
+            throw ValidationException::withMessages(['items' => "{$material->material_name} has no valid issuing-unit conversion."]);
+        }
+
+        return $quantity * $factor;
     }
 
     /**

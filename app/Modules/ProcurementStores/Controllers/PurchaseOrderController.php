@@ -11,6 +11,7 @@ use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Controllers\Controller;
 use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
 class PurchaseOrderController extends Controller
 {
@@ -191,6 +192,7 @@ class PurchaseOrderController extends Controller
                     'requisition_item_id' => $item->id,
                     'custom_description' => $item->custom_description,
                     'quantity'           => $item->quantity,
+                    'uom_id'             => $item->uom_id ?: ($item->material?->purchase_uom_id ?: $item->material?->base_uom_id),
                     'unit_price'         => $unitPrice,
                     'total'              => $total,
                 ]);
@@ -223,7 +225,7 @@ class PurchaseOrderController extends Controller
             'delivery_address' => 'required|string',
             'items' => 'required|array|min:1',
             'items.*.material_id' => 'required|exists:library_materials,id',
-            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.quantity' => 'required|numeric|gt:0',
             'items.*.unit_price' => 'required|numeric|min:0',
         ]);
 
@@ -251,6 +253,7 @@ class PurchaseOrderController extends Controller
             $purchaseOrder = PurchaseOrder::create($input);
 
             foreach ($items as $item) {
+                $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null, $item['requisition_item_id'] ?? null);
                 $item['total'] = $item['quantity'] * $item['unit_price'];
                 $purchaseOrder->items()->create($item);
             }
@@ -297,6 +300,7 @@ class PurchaseOrderController extends Controller
 
                 $totalAmount = 0;
                 foreach ($items as $item) {
+                    $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null, $item['requisition_item_id'] ?? null);
                     $item['total'] = $item['quantity'] * $item['unit_price'];
                     $totalAmount += $item['total'];
                     $purchaseOrder->items()->create($item);
@@ -378,6 +382,17 @@ class PurchaseOrderController extends Controller
         $this->syncProjectProcurement($purchaseOrder);
 
         return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
+    }
+
+    private function buyingUomId(mixed $materialId, mixed $requisitionItemId = null): ?int
+    {
+        if ($requisitionItemId) {
+            $saved = \App\Modules\ProcurementStores\Models\RequisitionItem::whereKey((int) $requisitionItemId)->value('uom_id');
+            if ($saved) return (int) $saved;
+        }
+        if (! $materialId) return null;
+        $material = LibraryMaterial::findOrFail((int) $materialId);
+        return $material->purchase_uom_id ?: $material->base_uom_id;
     }
 
     public function getApprovedPurchaseOrders()

@@ -71,6 +71,7 @@ Route::apiResource('/bills', BillController::class);
 Route::get('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'index']);
 Route::get('/goods-receipt-notes/search', [GoodsReceiptNoteController::class, 'search']);
 Route::get('/goods-receipt-notes/available-purchase-orders', [GoodsReceiptNoteController::class, 'getAvailablePurchaseOrders']);
+Route::get('/goods-receipt-notes/receiving-queue', [GoodsReceiptNoteController::class, 'receivingQueue']);
 Route::get('/goods-receipt-notes/{id}/download', [GoodsReceiptNoteController::class, 'downloadPdf']);
 Route::get('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'show']);
 Route::post('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'store']);

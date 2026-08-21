@@ -88,6 +88,8 @@ class RequisitionResource extends JsonResource
                             'material_name' => $item->material->material_name,
                         ] : null,
                         'quantity' => $item->quantity,
+                        'uom_id' => $item->uom_id,
+                        'uom' => $item->uom ? ['id' => $item->uom->id, 'code' => $item->uom->code, 'name' => $item->uom->name] : null,
                         'unit_price' => (float) $item->unit_price,
                         'internal_budget_unit_price' => $item->internal_budget_unit_price !== null ? (float) $item->internal_budget_unit_price : null,
                         'total' => (float) $item->total,
