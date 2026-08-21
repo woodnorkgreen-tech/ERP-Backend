@@ -5,13 +5,15 @@ use App\Modules\ProcurementStores\Controllers\ProcurementStoresController;
 use App\Modules\ProcurementStores\Controllers\SupplierController;
 use App\Modules\ProcurementStores\Controllers\RequisitionController;
 use App\Modules\ProcurementStores\Controllers\PurchaseOrderController;
-use App\Modules\ProcurementStores\Controllers\InvoiceController;
 use App\Modules\ProcurementStores\Controllers\BillController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
 use App\Modules\ProcurementStores\Controllers\BoardController;
 use App\Modules\ProcurementStores\Controllers\BoardRequestController;
-use App\Modules\ProcurementStores\Controllers\POVerificationController;
 
+// apiResource, not resource: `create` and `edit` return HTML form scaffolding,
+// which no controller here implements and no client asks for. Registering them
+// published eight routes that would fatal on a method-not-found if anything ever
+// reached them.
 Route::get('/test', [ProcurementStoresController::class, 'test']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
 Route::get('/inventory/{material}/control-options', [ProcurementStoresController::class, 'controlOptions']);
@@ -32,14 +34,14 @@ Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'dest
 
 // Suppliers
 Route::post('/search/suppliers', [SupplierController::class, 'search']);
-Route::resource('/suppliers', SupplierController::class);
+Route::apiResource('/suppliers', SupplierController::class);
 
 // Requisitions
 Route::post('/search/requisitions', [RequisitionController::class, 'search']);
 Route::post('/requisitions/{requisition}/submit', [RequisitionController::class, 'submitForApproval']);
 Route::post('/requisitions/{requisition}/approve', [RequisitionController::class, 'approve']);
 Route::post('/requisitions/{requisition}/reject', [RequisitionController::class, 'reject']);
-Route::resource('/requisitions', RequisitionController::class);
+Route::apiResource('/requisitions', RequisitionController::class);
 
 // Purchase Orders
 Route::get('/approved-purchase-orders', [PurchaseOrderController::class, 'getApprovedPurchaseOrders']);
@@ -48,7 +50,7 @@ Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController:
 Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
 Route::get('/purchase-orders/{purchaseOrder}/download', [PurchaseOrderController::class, 'downloadPdf']);
-Route::resource('/purchase-orders', PurchaseOrderController::class);
+Route::apiResource('/purchase-orders', PurchaseOrderController::class);
 Route::get('/purchase-orders/link/{requisition}', [PurchaseOrderController::class, 'link'])->name('purchase-orders.link');
 Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 'storeLinked'])->name('purchase-orders.storeLinked');
 
@@ -63,7 +65,7 @@ Route::get('/bills/{bill}/download', [BillController::class, 'downloadPdf']);
 Route::post('/multi-payment', [BillController::class, 'recordMultiBillPayment']);
 
 // Bills - Resource route LAST
-Route::resource('/bills', BillController::class);
+Route::apiResource('/bills', BillController::class);
 
 // Goods Receipt Notes
 Route::get('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'index']);
