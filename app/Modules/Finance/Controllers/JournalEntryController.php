@@ -9,9 +9,11 @@ use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Resources\JournalEntryResource;
+use App\Modules\Finance\Services\LedgerExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * The read side of the general ledger.
@@ -229,6 +231,56 @@ class JournalEntryController extends Controller
                 'coverage' => self::COVERAGE,
             ],
             'filters' => $filters,
+        ]);
+    }
+
+    /**
+     * Document-batched journals for the external accounting package.
+     *
+     * CSV by default because that is what gets keyed or imported; JSON when the
+     * caller wants to render it. Both come off one service call, so the file and
+     * the screen can never disagree.
+     */
+    public function export(Request $request, LedgerExportService $exporter): JsonResponse|StreamedResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
+
+        $filters = $request->validate([
+            'from' => ['required', 'date'],
+            'to' => ['required', 'date', 'after_or_equal:from'],
+            'format' => ['nullable', 'in:json,csv'],
+        ]);
+
+        $data = $exporter->documentJournals($filters['from'], $filters['to']);
+
+        if (($filters['format'] ?? 'csv') === 'json') {
+            return response()->json(['status' => 'success', 'data' => $data]);
+        }
+
+        return response()->streamDownload(function () use ($data) {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, ['Journal no', 'Date', 'Account code', 'Account name', 'Description',
+                'Debit', 'Credit', 'Jobs']);
+
+            foreach ($data['documents'] as $document) {
+                foreach ($document['rows'] as $row) {
+                    fputcsv($out, [
+                        $document['journal_no'],
+                        $document['posting_date'],
+                        $row['account_code'],
+                        $row['account_name'],
+                        $document['description'],
+                        $row['debit'],
+                        $row['credit'],
+                        implode(' ', $document['job_numbers']),
+                    ]);
+                }
+            }
+
+            fclose($out);
+        }, "cost-journals-{$filters['from']}-to-{$filters['to']}.csv", [
+            'Content-Type' => 'text/csv; charset=UTF-8',
         ]);
     }
 }

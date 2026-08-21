@@ -945,6 +945,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::prefix('journals')->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'index']);
             Route::get('trial-balance', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'trialBalance']);
+            // Document-batched journals for WNG's external accounting package.
+            // Also ahead of `{journal}`.
+            Route::get('export', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'export']);
             Route::get('{journal}', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'show']);
         });
 
