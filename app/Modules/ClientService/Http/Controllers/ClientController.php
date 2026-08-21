@@ -2,10 +2,11 @@
 
 namespace App\Modules\ClientService\Http\Controllers;
 
+use App\Http\Controllers\Controller;
+use App\Modules\ClientService\Http\Requests\ClientRequest;
 use App\Modules\ClientService\Models\Client;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Validator;
 
 /**
  * @OA\Schema(
@@ -32,8 +33,28 @@ use Illuminate\Support\Facades\Validator;
  *     @OA\Property(property="updated_at", type="string", format="date-time")
  * )
  */
-class ClientController
+class ClientController extends Controller
 {
+    /**
+     * A company or organisation is known by its trading name, and the form that
+     * creates one never asks for a personal name. Copying it into full_name
+     * here keeps that single rule in one place — the browser used to apply it
+     * too — and keeps the non-null column populated. The individual's own name
+     * stays in contact_person.
+     */
+    private function withResolvedName(array $data): array
+    {
+        if (($data['customer_type'] ?? 'individual') === 'individual') {
+            $data['company_name'] = null;
+
+            return $data;
+        }
+
+        $data['full_name'] = $data['company_name'];
+
+        return $data;
+    }
+
     /**
      * @OA\Post(
      *     path="/api/clientservice/clients",
@@ -74,42 +95,9 @@ class ClientController
      *     @OA\Response(response=401, description="Unauthorized")
      * )
      */
-    public function store(Request $request): JsonResponse
+    public function store(ClientRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'full_name' => 'required|string|max:255',
-            'contact_person' => 'nullable|string|max:255',
-            'email' => 'required|regex:/^.+@.+\..+$/i|unique:clients,email',
-            'phone' => 'required|string|max:20',
-            'alt_contact' => 'nullable|string|max:20',
-            'address' => 'required|string',
-            'city' => 'required|string|max:255',
-            'county' => 'required|string|max:255',
-            'postal_address' => 'nullable|string|max:255',
-            'customer_type' => 'required|in:individual,company,organization',
-            'lead_source' => 'required|string|max:255',
-            'preferred_contact' => 'required|in:email,phone,sms',
-            'industry' => 'nullable|string|max:255',
-            'company_name' => 'required_unless:customer_type,individual|nullable|string|max:255',
-            'registration_date' => 'required|date',
-            'status' => 'sometimes|in:active,inactive',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $data = $validator->validated();
-        if (($data['customer_type'] ?? 'individual') !== 'individual') {
-            $data['full_name'] = $data['company_name'];
-        } else {
-            $data['company_name'] = null;
-        }
-
-        $client = Client::create($data);
+        $client = Client::create($this->withResolvedName($request->validated()));
 
         return response()->json([
             'message' => 'Client created successfully',
@@ -162,42 +150,10 @@ class ClientController
      *     @OA\Response(response=401, description="Unauthorized")
      * )
      */
-    public function update(Request $request, $id): JsonResponse
+    public function update(ClientRequest $request, $id): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'full_name' => 'required|string|max:255',
-            'contact_person' => 'nullable|string|max:255',
-            'email' => 'required|regex:/^.+@.+\..+$/i|unique:clients,email,' . $id,
-            'phone' => 'required|string|max:20',
-            'alt_contact' => 'nullable|string|max:20',
-            'address' => 'required|string',
-            'city' => 'required|string|max:255',
-            'county' => 'required|string|max:255',
-            'postal_address' => 'nullable|string|max:255',
-            'customer_type' => 'required|in:individual,company,organization',
-            'lead_source' => 'required|string|max:255',
-            'preferred_contact' => 'required|in:email,phone,sms',
-            'industry' => 'nullable|string|max:255',
-            'company_name' => 'required_unless:customer_type,individual|nullable|string|max:255',
-            'registration_date' => 'required|date',
-            'status' => 'sometimes|in:active,inactive',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
         $client = Client::findOrFail($id);
-        $data = $validator->validated();
-        if (($data['customer_type'] ?? 'individual') !== 'individual') {
-            $data['full_name'] = $data['company_name'];
-        } else {
-            $data['company_name'] = null;
-        }
-        $client->update($data);
+        $client->update($this->withResolvedName($request->validated()));
 
         return response()->json([
             'message' => 'Client updated successfully',
@@ -247,46 +203,26 @@ class ClientController
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Client::query();
+        $query = Client::query()
+            ->when($request->filled('search'), function ($builder) use ($request) {
+                $search = $request->string('search');
+                $builder->where(fn ($nested) => $nested
+                    ->where('full_name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('contact_person', 'like', "%{$search}%"));
+            })
+            ->when($request->filled('status'), fn ($builder) => $builder->where('status', $request->status))
+            ->when($request->filled('company'), fn ($builder) => $builder->where('company_name', 'like', "%{$request->company}%"))
+            ->orderBy('full_name');
 
-        // Search Filter
-        if ($request->has('search') && $request->search) {
-            $searchTerm = $request->search;
-            $query->where(function ($q) use ($searchTerm) {
-                $q->where('full_name', 'like', "%{$searchTerm}%")
-                  ->orWhere('email', 'like', "%{$searchTerm}%")
-                  ->orWhere('contact_person', 'like', "%{$searchTerm}%");
-            });
+        // The unpaginated branch feeds client dropdowns on the enquiry screens,
+        // which need every option present to be selectable.
+        if (!$request->boolean('paginate')) {
+            return response()->json(['data' => $query->get()]);
         }
-
-        // Status Filter
-        if ($request->has('status') && $request->status) {
-            $query->where('status', $request->status);
-        }
-
-        // Company Filter
-        if ($request->has('company') && $request->company) {
-            $query->where('company_name', 'like', "%{$request->company}%");
-        }
-
-        // Order by name alphabetical
-        $query->orderBy('full_name', 'asc');
-
-        // Check if pagination is requested
-        if ($request->has('paginate') && $request->paginate == 'true') {
-            $perPage = $request->input('per_page', 15);
-            $clients = $query->paginate($perPage);
-
-            return response()->json([
-                'data' => $clients
-            ]);
-        }
-
-        // Return all clients for dropdowns and other uses
-        $clients = $query->get();
 
         return response()->json([
-            'data' => $clients
+            'data' => $query->paginate((int) $request->input('per_page', 15)),
         ]);
     }
 
@@ -389,6 +325,16 @@ class ClientController
     public function destroy($id): JsonResponse
     {
         $client = Client::findOrFail($id);
+
+        // Without this the delete reaches the database and fails on the
+        // enquiries foreign key, surfacing as a 500 the user cannot act on.
+        $enquiryCount = $client->enquiries()->count();
+        if ($enquiryCount > 0) {
+            return response()->json([
+                'message' => "This client has {$enquiryCount} enquiry record(s) and cannot be deleted. Set them to inactive instead.",
+            ], 409);
+        }
+
         $client->delete();
 
         return response()->json([
