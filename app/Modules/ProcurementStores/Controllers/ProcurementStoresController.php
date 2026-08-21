@@ -1084,7 +1084,14 @@ class ProcurementStoresController extends Controller
         // materialCategory.parent feeds the appended board_trackable attribute,
         // which the Project Material Desk uses to keep tracked boards out of the
         // bulk return list. Without it that accessor lazy-loads once per row.
-        $query = InventoryLog::with(['material.materialCategory.parent', 'user', 'project.enquiry']);
+        // projectMaterial.element carries the element a movement served, so the
+        // desk can group custody and history the same way it groups the issue
+        // list. Eager-loaded because the alternative is a query per row.
+        $query = InventoryLog::with([
+            'material.materialCategory.parent', 'enteredUom', 'user', 'project.enquiry',
+            'projectMaterial:id,project_element_id', 'projectMaterial.element:id,name',
+            'financePosting.costLine:id,ref,status,nature,net_amount,base_net_amount,quantity,unit_rate,verified_at',
+        ]);
 
         if ($request->filled('type')) {
             $query->where('type', $request->type);
@@ -1125,11 +1132,140 @@ class ProcurementStoresController extends Controller
     }
 
     /**
+     * Repair a historical project issue that predates requirement-level links.
+     * Stock never moves here. Posted Finance facts remain immutable; those need
+     * a Finance reversal/repost rather than a hidden foreign-key edit.
+     */
+    public function linkProjectMaterial(Request $request, InventoryLog $inventoryLog): JsonResponse
+    {
+        if (! auth()->user()?->hasAnyRole(['Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'A Manager must approve project-material linkage corrections.'], 403);
+        }
+        $validated = $request->validate([
+            'project_material_id' => 'required|integer|exists:element_materials,id',
+            'reason' => 'required|string|min:8|max:500',
+        ]);
+        if (! in_array($inventoryLog->type, ['check_out', 'issue', 'consumption'], true) || ! $inventoryLog->project_id) {
+            return response()->json(['message' => 'Only an unlinked project stock issue can be corrected here.'], 422);
+        }
+        if ($inventoryLog->project_material_id) {
+            return response()->json(['message' => 'This movement is already linked to an approved material line.'], 422);
+        }
+
+        DB::transaction(function () use ($inventoryLog, $validated) {
+            $movement = InventoryLog::with(['financePosting', 'returns.financePosting'])->lockForUpdate()->findOrFail($inventoryLog->id);
+            $postedMovement = collect([$movement->financePosting])
+                ->merge($movement->returns->pluck('financePosting'))
+                ->filter()->first(fn ($posting) => $posting->status === 'posted' || $posting->cost_line_id);
+            if ($postedMovement) {
+                throw ValidationException::withMessages([
+                    'movement' => 'Finance has already posted this movement. Use a Finance reversal and repost so the verified ledger remains immutable.',
+                ]);
+            }
+
+            $project = \App\Models\Project::findOrFail($movement->project_id);
+            $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')
+                ->lockForUpdate()->findOrFail($validated['project_material_id']);
+            $materialsData = $planned->element?->taskMaterialsData;
+            if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id) {
+                throw ValidationException::withMessages(['project_material_id' => 'Choose an approved material line from the same project.']);
+            }
+            if ((int) $planned->library_material_id !== (int) $movement->material_id) {
+                throw ValidationException::withMessages(['project_material_id' => 'The approved line must use the same Material Library item as this stock movement.']);
+            }
+            $this->assertMaterialsApproved($materialsData);
+
+            $alreadyLinked = (float) InventoryLog::where('project_material_id', $planned->id)
+                ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
+                - (float) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
+            $movementNet = abs((float) $movement->quantity)
+                - (float) $movement->returns()->fulfilmentReopeningReturns()->sum('quantity');
+            if ($movementNet > max(0, (float) $planned->quantity - $alreadyLinked) + 0.00001) {
+                throw ValidationException::withMessages(['project_material_id' => 'This issue is larger than the quantity remaining on that approved material line.']);
+            }
+
+            $auditNote = trim(($movement->notes ? $movement->notes.' · ' : '').'Requirement link corrected by '.auth()->user()->name.': '.$validated['reason']);
+            $movement->update(['project_material_id' => $planned->id, 'notes' => $auditNote]);
+            $movement->returns()->update(['project_material_id' => $planned->id]);
+
+            $outbox = app(\App\Modules\ProcurementStores\Services\StoresFinanceOutbox::class);
+            $outbox->queue($movement->fresh(), 'issue_cost');
+            $movement->returns()->get()->each(fn ($return) => $outbox->queue($return, 'return_credit'));
+        });
+
+        return response()->json(['message' => 'Movement linked to the approved material line. Stock was not moved again; Finance posting was queued where required.']);
+    }
+
+    /**
+     * Chronological stock card for one material. balance_after is written in the
+     * same transaction as every movement, so this is audit evidence rather than
+     * a balance reconstructed from today's stock record.
+     */
+    public function materialLedger(Request $request): JsonResponse
+    {
+        if (! auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to view the material ledger.'], 403);
+        }
+
+        $validated = $request->validate([
+            'material_id' => 'required|integer|exists:library_materials,id',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
+        ]);
+
+        $material = LibraryMaterial::with('baseUom:id,code,name')->findOrFail($validated['material_id']);
+        $query = InventoryLog::with(['enteredUom:id,code,name', 'user:id,name', 'project:id,project_id'])
+            ->where('material_id', $material->id);
+
+        $openingBalance = 0.0;
+        if (! empty($validated['start_date'])) {
+            $openingBalance = (float) (InventoryLog::where('material_id', $material->id)
+                ->whereDate('logged_at', '<', $validated['start_date'])
+                ->orderByDesc('logged_at')->orderByDesc('id')->value('balance_after') ?? 0);
+            $query->whereDate('logged_at', '>=', $validated['start_date']);
+        }
+        if (! empty($validated['end_date'])) {
+            $query->whereDate('logged_at', '<=', $validated['end_date']);
+        }
+
+        $rows = $query->orderBy('logged_at')->orderBy('id')->get()->map(fn (InventoryLog $log) => [
+            'id' => $log->id,
+            'date' => ($log->logged_at ?: $log->created_at)?->toIso8601String(),
+            'type' => $log->type,
+            'reference' => $log->reference_no ?: $log->batch_number,
+            'batch_number' => $log->batch_number,
+            'quantity' => (float) $log->quantity,
+            'balance_after' => (float) $log->balance_after,
+            'entered_quantity' => $log->entered_quantity !== null ? (float) $log->entered_quantity : null,
+            'entered_uom' => $log->enteredUom ? ['code' => $log->enteredUom->code, 'name' => $log->enteredUom->name] : null,
+            'conversion_factor' => $log->uom_conversion_factor !== null ? (float) $log->uom_conversion_factor : null,
+            'recorded_unit_cost' => $log->receipt_unit_cost !== null ? (float) $log->receipt_unit_cost : null,
+            'project' => $log->project?->project_id,
+            'recipient' => $log->recipient_name,
+            'notes' => $log->notes,
+            'recorded_by' => $log->user?->name,
+        ]);
+
+        return response()->json(['data' => [
+            'material' => [
+                'id' => $material->id, 'code' => $material->material_code,
+                'name' => $material->material_name,
+                'base_uom' => $material->baseUom?->code ?: $material->unit_of_measure,
+                'current_quantity' => (float) ($material->stock?->quantity_on_hand ?? 0),
+                'current_unit_cost' => (float) $material->unit_cost,
+            ],
+            'opening_balance' => $openingBalance,
+            'closing_balance' => $rows->isNotEmpty() ? (float) $rows->last()['balance_after'] : $openingBalance,
+            'rows' => $rows,
+        ]]);
+    }
+
+    /**
      * Export movement logs to PDF with filtering
      */
     public function inventoryLogsPdf(Request $request)
     {
-        $query = InventoryLog::with(['material', 'user', 'project.enquiry']);
+        $query = InventoryLog::with(['material', 'enteredUom', 'user', 'project.enquiry']);
 
         // Apply filters (same as inventoryLogs)
         if ($request->filled('type')) {
