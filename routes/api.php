@@ -820,6 +820,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             ->middleware('quote.access');
         Route::get('enquiries/{enquiry}/workflow-state', [EnquiryController::class, 'workflowState']);
         Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
+        Route::get('receivables/summary', [EnquiryController::class, 'receivablesSummary'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
         Route::get('receivables/payment-sources', [EnquiryController::class, 'receivablesPaymentSources'])
             ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
         Route::get('receivables/receipts/unallocated', [EnquiryController::class, 'unallocatedReceipts'])

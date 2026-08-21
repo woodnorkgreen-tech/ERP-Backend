@@ -1094,6 +1094,104 @@ class EnquiryController extends Controller
         }
     }
 
+    /**
+     * Headline figures and tab counts for the whole receivables book.
+     *
+     * The billing screen used to derive these in the browser, which meant it had
+     * to hold every receivables project to show six numbers — it fetched page
+     * one, read `last_page`, then fired every remaining page in parallel. Two
+     * consequences: an N-request fan-out that grows with the business, and
+     * totals that were only ever right because the client happened to have
+     * loaded everything. Anything that capped or failed a page silently
+     * understated the book.
+     *
+     * Computed with `FinanceService::getPaymentProgress` — the same call that
+     * produces each row's figures — rather than a SQL aggregate. Quote basis,
+     * approval snapshots and waivers decide a project's billable amount, and
+     * none of that is expressible as a sum; a faster aggregate would be a
+     * headline that disagreed with the rows beneath it.
+     *
+     * Chunked, so memory stays flat as the book grows.
+     */
+    public function receivablesSummary(Request $request): JsonResponse
+    {
+        abort_unless(
+            $request->user()?->can(\App\Constants\Permissions::FINANCE_RECEIVABLES_READ),
+            403,
+            'You do not have access to project receivables.'
+        );
+
+        $stats = [
+            'awaiting_release' => 0,
+            'in_production' => 0,
+            'settled' => 0,
+            'total_outstanding' => 0.0,
+            'total_project_value' => 0.0,
+            'total_paid' => 0.0,
+        ];
+
+        // Named for the tabs they drive, so a count and its tab cannot drift.
+        $tabs = ['action' => 0, 'partial' => 0, 'mobilized' => 0, 'settled' => 0, 'all' => 0];
+
+        // Pushed through the same filter pipeline the list uses, with the view
+        // forced to `receivables`. Re-stating the status set here would let the
+        // summary and the list drift onto different populations — and a headline
+        // that counts a different set from the rows below it is worse than no
+        // headline. The internal/external preset separation rides along for free.
+        $request->merge(['view' => 'receivables']);
+
+        $query = app(\Illuminate\Pipeline\Pipeline::class)
+            ->send(ProjectEnquiry::with('payments', 'quoteApprovals', 'enquiryTasks.quoteData'))
+            ->through([
+                \App\Modules\Projects\Filters\Enquiry\ViewTypeFilter::class,
+            ])
+            ->thenReturn();
+
+        $query->chunkById(200, function ($enquiries) use (&$stats, &$tabs) {
+                foreach ($enquiries as $enquiry) {
+                    $p = $this->financeService->getPaymentProgress($enquiry);
+
+                    $quote = (float) $p['total_quote'];
+                    $paid = (float) $p['total_paid'];
+                    $remaining = (float) $p['remaining'];
+                    $settled = $remaining <= 0 && $quote > 0;
+
+                    $stats['total_project_value'] += $quote;
+                    $stats['total_paid'] += $paid;
+                    $stats['total_outstanding'] += $remaining;
+                    $tabs['all']++;
+
+                    if ($settled) {
+                        $stats['settled']++;
+                        $tabs['settled']++;
+                    } elseif (in_array($enquiry->status, ['awaiting_deposit', 'quote_approved'], true)) {
+                        $stats['awaiting_release']++;
+                    } else {
+                        $stats['in_production']++;
+                    }
+
+                    // Mirrors the client predicates exactly; they are the tab
+                    // definitions and moving them must not redefine them.
+                    if (! $p['has_approved_quote']
+                        || ((float) $p['amount_required_for_threshold'] > 0 && empty($p['finance_released']))) {
+                        $tabs['action']++;
+                    }
+                    if ($paid > 0 && $remaining > 0) {
+                        $tabs['partial']++;
+                    }
+                    if ((float) $p['percentage'] >= (float) $p['threshold_percentage'] && $remaining > 0) {
+                        $tabs['mobilized']++;
+                    }
+                }
+        });
+
+        foreach (['total_outstanding', 'total_project_value', 'total_paid'] as $key) {
+            $stats[$key] = round($stats[$key], 2);
+        }
+
+        return response()->json(['data' => ['stats' => $stats, 'tabs' => $tabs]]);
+    }
+
     public function receivablesPaymentSources(): JsonResponse
     {
         $sources = \App\Modules\Finance\Models\PaymentSource::query()
