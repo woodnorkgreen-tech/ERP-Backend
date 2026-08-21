@@ -244,7 +244,6 @@ class CostAccountService
                 'title' => $enquiry->title,
             ],
             'totals' => $this->totals($categories),
-            'revisions' => $this->revisionSplit($enquiry),
             'categories' => $categories,
             'unbudgeted' => $this->unbudgeted($enquiry),
             'exceptions' => $this->exceptionSpend($enquiry),
@@ -350,45 +349,6 @@ class CostAccountService
             'remaining' => bcsub($planned, $spent, 2),
             'utilisation_percent' => bccomp($planned, '0', 2) === 1
                 ? round((float) bcdiv($spent, $planned, 4) * 100, 1)
-                : null,
-        ];
-    }
-
-    /**
-     * How much of the approved budget is the original, and how much was added later.
-     *
-     * `totals.planned` is now the authorised ceiling including every approved
-     * revision, which is correct but hides the thing a reviewer most wants to
-     * know: whether a project is on budget because it was estimated well, or
-     * because its budget has been raised three times. Those are opposite stories
-     * and the single figure tells neither.
-     *
-     * Split on the projection's own source, so the two figures cannot disagree
-     * with the lines they came from.
-     *
-     * @return array<string, mixed>
-     */
-    private function revisionSplit(ProjectEnquiry $enquiry): array
-    {
-        $planned = CostLine::query()
-            ->where('project_enquiry_id', $enquiry->id)
-            ->where('nature', CostLine::NATURE_PLANNED)
-            ->counting();
-
-        $total = $this->money((clone $planned)->sum('net_amount'));
-        $revised = $this->money(
-            (clone $planned)->where('source_type', 'BudgetAddition')->sum('net_amount')
-        );
-
-        return [
-            'baseline' => bcsub($total, $revised, 2),
-            'approved_additions' => $revised,
-            'approved_total' => $total,
-            'revision_count' => (clone $planned)->where('source_type', 'BudgetAddition')
-                ->distinct()->count('source_id'),
-            // The share of the working budget that was not in the original plan.
-            'addition_percent' => bccomp($total, '0', 2) === 1
-                ? round((float) bcdiv($revised, $total, 4) * 100, 1)
                 : null,
         ];
     }
