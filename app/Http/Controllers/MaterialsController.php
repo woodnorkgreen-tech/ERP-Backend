@@ -537,7 +537,21 @@ class MaterialsController extends Controller
                 ]
             );
 
-            // Delete existing elements and materials (cascade delete will handle materials)
+            // Delete the materials explicitly, then their elements.
+            //
+            // The create migration declared `onDelete('cascade')` on
+            // element_materials.project_element_id, but no such constraint
+            // exists in the database, so deleting an element silently orphaned
+            // every material under it. Two things then broke: the orphan kept
+            // the unique `persistent_id`, which forced a fresh UUID for the same
+            // material line on every save — destroying the stable identity that
+            // cost lines and stock movements point at — and the orphan itself
+            // stayed behind forever. Deleting children first frees the id so the
+            // line below can keep it.
+            ElementMaterial::whereIn(
+                'project_element_id',
+                $materialsData->elements()->pluck('id'),
+            )->delete();
             $materialsData->elements()->delete();
 
             $idMapping = [];
