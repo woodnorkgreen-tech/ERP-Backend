@@ -7,6 +7,7 @@ use App\Modules\Finance\CostCollector\Models\CostLine;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class JournalEntry extends Model
 {
@@ -55,6 +56,24 @@ class JournalEntry extends Model
     public function spendVoucher(): BelongsTo
     {
         return $this->belongsTo(SpendVoucher::class, 'spend_voucher_id');
+    }
+
+    /** The entry this one reverses, if it is itself a compensating entry. */
+    public function reversalOf(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reversal_of_id');
+    }
+
+    /**
+     * The compensating entry that reversed this one, if any.
+     *
+     * hasOne rather than hasMany: `reversal_of_id` carries a unique key, so an
+     * entry can be reversed exactly once. Reading it as a collection would
+     * suggest otherwise.
+     */
+    public function reversedBy(): HasOne
+    {
+        return $this->hasOne(self::class, 'reversal_of_id');
     }
 
     public function isBalanced(): bool

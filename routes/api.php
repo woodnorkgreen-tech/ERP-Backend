@@ -937,6 +937,17 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('/{id}/post', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'post']);
         });
 
+        // General ledger, read-only. Journals are written by JournalPostingService
+        // as a consequence of verifying a cost or posting a voucher; a write
+        // endpoint here would be a second, unreconciled way to move the ledger.
+        // `trial-balance` is declared ahead of `{journal}` so it is not resolved
+        // as an entry id.
+        Route::prefix('journals')->group(function () {
+            Route::get('/', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'index']);
+            Route::get('trial-balance', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'trialBalance']);
+            Route::get('{journal}', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'show']);
+        });
+
         // Petty Cash Module Routes
         Route::prefix('petty-cash')->group(function () {
             // Disbursement management routes
