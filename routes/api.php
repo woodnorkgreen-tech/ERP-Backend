@@ -326,10 +326,14 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             $project->setAttribute('materials_status', [
                 'provided' => $provided,
                 'all_approved' => $provided && (bool) ($approval['all_approved'] ?? false),
-                'approved_count' => collect(['design', 'production', 'finance'])
+                // The materials task records exactly two sign-offs, keyed
+                // 'project_officer' and 'production'. This counted 'design' and
+                // 'finance' instead, which never exist, so the badge could not
+                // reach its own required total.
+                'approved_count' => collect(['project_officer', 'production'])
                     ->filter(fn ($department) => (bool) data_get($approval, "{$department}.approved", false))
                     ->count(),
-                'required_approvals' => 3,
+                'required_approvals' => 2,
                 'element_count' => (int) ($materials?->elements_count ?? 0),
             ]);
         });
@@ -787,10 +791,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
                 $project->setAttribute('materials_status', [
                     'provided' => $provided,
                     'all_approved' => $provided && (bool) ($approval['all_approved'] ?? false),
-                    'approved_count' => collect(['design', 'production', 'finance'])
+                    // Two sign-offs exist, keyed 'project_officer' and
+                    // 'production'; 'design' and 'finance' never do.
+                    'approved_count' => collect(['project_officer', 'production'])
                         ->filter(fn ($department) => (bool) data_get($approval, "{$department}.approved", false))
                         ->count(),
-                    'required_approvals' => 3,
+                    'required_approvals' => 2,
                     'element_count' => (int) ($materials?->elements_count ?? 0),
                 ]);
             });

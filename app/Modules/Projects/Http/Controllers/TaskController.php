@@ -195,11 +195,14 @@ class TaskController extends Controller
                     if ($materialsData) {
                         $approvalStatus = $materialsData->project_info['approval_status'] ?? [];
 
-                        // Count approvals
+                        // The materials task records exactly two sign-offs, keyed
+                        // 'project_officer' and 'production'. This counted
+                        // 'design' and 'finance', which are never written, so the
+                        // badge read 0 or 1 of 3 no matter who had approved.
+                        $departments = ['project_officer', 'production'];
                         $totalApprovals = 0;
-                        $departments = ['design', 'production', 'finance'];
                         foreach ($departments as $dept) {
-                            if (isset($approvalStatus[$dept]['approved']) && $approvalStatus[$dept]['approved']) {
+                            if ($approvalStatus[$dept]['approved'] ?? false) {
                                 $totalApprovals++;
                             }
                         }
@@ -213,16 +216,15 @@ class TaskController extends Controller
                         $task->material_approval = [
                             'needs_approval' => !($approvalStatus['all_approved'] ?? false),
                             'approved_count' => $totalApprovals,
-                            'total_count' => 3,
+                            'total_count' => count($departments),
                             'all_approved' => $approvalStatus['all_approved'] ?? false,
                             'element_count' => $elementCount,
                             'material_count' => $materialCount,
                             'is_gated' => $isDesignGated,
                             'gate_message' => $designGateMessage,
                             'departments' => [
-                                'design' => $approvalStatus['design']['approved'] ?? false,
+                                'project_officer' => $approvalStatus['project_officer']['approved'] ?? false,
                                 'production' => $approvalStatus['production']['approved'] ?? false,
-                                'finance' => $approvalStatus['finance']['approved'] ?? false,
                             ]
                         ];
                     }
