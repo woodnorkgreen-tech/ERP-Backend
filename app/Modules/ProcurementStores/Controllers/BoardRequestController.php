@@ -12,6 +12,7 @@ use App\Modules\ProcurementStores\Services\BoardWorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class BoardRequestController extends Controller
 {
@@ -71,15 +72,32 @@ class BoardRequestController extends Controller
             ], 422);
         }
 
+        // Raising a request reserves physical stock, and this path writes to
+        // Stock and InventoryLog directly rather than through adjustStock — so
+        // the item-status gate that covers every other movement has to be
+        // repeated here or an unfinished item could be reserved against a job.
+        if (($material->item_status ?? 'Active') !== 'Active') {
+            return response()->json([
+                'message' => "'{$material->material_name}' is {$material->item_status} and cannot be reserved yet. "
+                    .'Finish its setup in the Materials Library first.',
+            ], 422);
+        }
+
         if ($request->filled('project_material_id')) {
             $project = \App\Models\Project::findOrFail($request->project_id);
             $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')
                 ->findOrFail($request->project_material_id);
             $materialsData = $planned->element?->taskMaterialsData;
-            if (! data_get($materialsData?->project_info, 'approval_status.all_approved', false)
-                || (int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
+            // Validate project and catalogue identity before applying the same
+            // sign-off gate used by quantity and controlled-stock issues.
+            if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
                 || (int) $planned->library_material_id !== (int) $material->id) {
-                return response()->json(['message' => 'This board is not an approved material line for the selected project.'], 422);
+                return response()->json(['message' => 'This board line does not belong to the selected project.'], 422);
+            }
+            if (! (bool) data_get($materialsData?->project_info, 'approval_status.all_approved', false)) {
+                throw ValidationException::withMessages([
+                    'project_material_id' => 'Project Officer and Production must sign off the material list before Stores can issue it.',
+                ]);
             }
 
             $alreadyIssued = (float) InventoryLog::where('project_material_id', $planned->id)
@@ -87,7 +105,7 @@ class BoardRequestController extends Controller
                 - (float) InventoryLog::where('project_material_id', $planned->id)
                     ->fulfilmentReopeningReturns()->sum('quantity');
             if ((float) $request->qty > max(0, (float) $planned->quantity - $alreadyIssued)) {
-                return response()->json(['message' => 'Board quantity exceeds the remaining approved requirement.'], 422);
+                return response()->json(['message' => 'Board quantity exceeds the remaining project requirement.'], 422);
             }
         }
 

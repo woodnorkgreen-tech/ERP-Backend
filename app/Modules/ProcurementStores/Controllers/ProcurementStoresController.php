@@ -169,8 +169,20 @@ class ProcurementStoresController extends Controller
      */
     public function inventory(Request $request): JsonResponse
     {
+        $request->validate([
+            'material_ids' => 'sometimes|array|max:500',
+            'material_ids.*' => 'integer|distinct|exists:library_materials,id',
+        ]);
+
         $includeUnstocked = $request->boolean('include_unstocked');
-        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom']);
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom', 'purchaseUom', 'issueUom', 'uomConversions']);
+
+        // Project fulfilment knows the exact catalogue identities referenced by
+        // its BOM. Fetching those identities directly avoids treating a valid
+        // link as "unlinked" merely because it fell beyond an inventory page.
+        if ($request->filled('material_ids')) {
+            $query->whereIn('library_materials.id', $request->input('material_ids', []));
+        }
 
         if ($request->input('selection_context') === 'project') {
             // Rank by demonstrated execution use, not by catalogue creation date.
@@ -291,10 +303,18 @@ class ProcurementStoresController extends Controller
                 'is_expiry_controlled' => (bool) $material->is_expiry_controlled,
                 'is_project_chargeable' => (bool) $material->is_project_chargeable,
                 'base_uom'          => $material->baseUom?->code ?? $material->unit_of_measure,
+                'base_uom_id'       => $material->base_uom_id,
+                'purchase_uom'      => $material->purchaseUom ? ['id' => $material->purchaseUom->id, 'code' => $material->purchaseUom->code, 'name' => $material->purchaseUom->name] : null,
+                'issue_uom'         => $material->issueUom ? ['id' => $material->issueUom->id, 'code' => $material->issueUom->code, 'name' => $material->issueUom->name] : null,
+                'uom_conversions'   => $material->uomConversions->map(fn ($row) => ['from_uom_id' => $row->from_uom_id, 'to_uom_id' => $row->to_uom_id, 'factor' => (float) $row->factor])->values(),
                 'board_trackable'   => $material->isBoardTrackable(),
-                'stock_handling'    => $material->isBoardTrackable()
-                    ? 'individual_board'
-                    : ($material->material_type === 'reusable' ? 'reusable_item' : 'quantity'),
+                // Same source as the Materials Library table, so one item is
+                // never described two ways across the two screens.
+                'stock_handling'    => $material->stock_handling,
+                'handling_label'    => $material->handling_label,
+                // Stores must be able to see that a draft is not yet usable,
+                // rather than discovering it when a check-in is refused.
+                'is_draft'          => ($material->item_status ?? 'Active') !== 'Active',
                 'quantity_on_hand'  => $onHand,
                 'quantity_reserved' => $reserved,
                 'available'         => $available,
@@ -341,6 +361,27 @@ class ProcurementStoresController extends Controller
             'data'   => $paginator,
             'status' => 'success',
         ];
+
+        // Drafts are deliberately excluded from selection — you cannot plan
+        // against an item Stores has no way to classify. But silently omitting
+        // them makes a freshly typed master list look like it never saved, so
+        // say how many matched and were held back.
+        if ($includeUnstocked) {
+            $held = LibraryMaterial::query()
+                ->where('item_status', '!=', 'Active')
+                ->when($request->filled('search'), fn ($scope) => $scope->search($request->search))
+                ->when($request->filled('workstation_id'), fn ($scope) => $scope->where('workstation_id', $request->workstation_id))
+                ->count();
+
+            if ($held > 0) {
+                $response['unfinished'] = [
+                    'count' => $held,
+                    'message' => $held === 1
+                        ? '1 matching item is still being set up and cannot be selected yet.'
+                        : "{$held} matching items are still being set up and cannot be selected yet.",
+                ];
+            }
+        }
 
         // Project material selectors need availability, not the company's
         // aggregate inventory valuation. Keep that finance/stores summary out

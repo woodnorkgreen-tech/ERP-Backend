@@ -92,9 +92,24 @@ class InventoryService
                     ?: $usageType;
             }
 
-            if ($quantity < 0 && ($material->item_status ?? 'Active') !== 'Active') {
-                throw new \DomainException("{$material->material_name} cannot be issued while its item status is {$material->item_status}.");
+            // Planning may reference an unfinished item — you can requisition
+            // something you are still setting up, and receiving it is often how
+            // it gets finished. Moving stock may not: an item Stores cannot
+            // classify cannot be counted or costed.
+            //
+            // Returns and write-offs are deliberately exempt. Both are
+            // corrections to movements that already happened, and trapping
+            // stock inside a reclassified item would be worse than the
+            // inconsistency it prevents.
+            $status = $material->item_status ?? 'Active';
+            if ($status !== 'Active' && ! in_array($type, ['return', 'defective'], true)) {
+                $verb = $quantity < 0 ? 'issued' : 'received';
+                throw new \DomainException(
+                    "{$material->material_name} cannot be {$verb} while it is {$status}. "
+                    .'Finish its setup in the Materials Library first.'
+                );
             }
+
 
             // Ensure the row exists before locking; insert has no race risk.
             Stock::firstOrCreate(
