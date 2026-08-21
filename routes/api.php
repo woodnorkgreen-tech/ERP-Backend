@@ -951,6 +951,15 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('{journal}', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'show']);
         });
 
+        // KRA filing schedules. Read-only and download-shaped: Finance files
+        // from these, so each answers as JSON for the screen and CSV for the
+        // filing pack off one computation.
+        Route::prefix('tax')->group(function () {
+            Route::get('vat-input-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'vatInput']);
+            Route::get('etims-gap', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'etimsGap']);
+            Route::get('wht-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'wht']);
+        });
+
         // Petty Cash Module Routes
         Route::prefix('petty-cash')->group(function () {
             // Disbursement management routes
