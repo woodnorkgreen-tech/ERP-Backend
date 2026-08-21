@@ -462,8 +462,25 @@ class MaterialController extends Controller
 
         $data = $this->syncCategoryStrings($data);
 
-        DB::transaction(function () use ($material, $data) {
+        DB::transaction(function () use ($material, $data, $hasConversions, $conversions) {
             $material->update($data);
+            if ($hasConversions) {
+                $this->syncUomConversions($material, $conversions);
+            }
+
+            // An edit can change category and therefore its inherited required
+            // specifications. Never leave an incomplete item marked Active:
+            // keep it searchable, return it to the finishing queue, and let the
+            // existing movement gates prevent ambiguous stock behaviour.
+            $material->load('materialCategory.parent');
+            $resolvedStatus = MaterialCompleteness::resolveStatus(
+                $material,
+                $data['item_status'] ?? $material->item_status,
+            );
+            $material->forceFill([
+                'item_status' => $resolvedStatus,
+                'is_active' => $resolvedStatus === 'Active',
+            ])->save();
 
             // stocks.tracking_mode is retained for legacy board endpoints, but is
             // always projected from the governed Material Library controls.
@@ -581,6 +598,27 @@ class MaterialController extends Controller
             $data['issue_uom_id'] ??= $baseUomId;
         }
         return $data;
+    }
+
+    /** Keep only the practical purchase/issue -> stock conversions supplied by the form. */
+    private function syncUomConversions(LibraryMaterial $material, array $conversions): void
+    {
+        $baseUomId = (int) $material->base_uom_id;
+        MaterialUomConversion::where('material_id', $material->id)->delete();
+
+        foreach ($conversions as $conversion) {
+            $fromUomId = (int) $conversion['from_uom_id'];
+            if (! $baseUomId || $fromUomId === $baseUomId) {
+                continue;
+            }
+
+            MaterialUomConversion::create([
+                'material_id' => $material->id,
+                'from_uom_id' => $fromUomId,
+                'to_uom_id' => $baseUomId,
+                'factor' => $conversion['factor'],
+            ]);
+        }
     }
 
     /**
