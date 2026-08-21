@@ -431,6 +431,10 @@ class CostVerificationReviewTest extends TestCase
             ->postJson("/api/costs/verification/{$line->id}/verify", [
                 'tax_amount' => 1600,
                 'vat_treatment_id' => $treatment->id,
+                // STD16-REC claims input tax back, so the claim reference is
+                // required before it can post.
+                'etims_invoice_no' => 'ETIMS-0001',
+                'supplier_pin' => 'P051234567X',
             ])
             ->assertOk();
 

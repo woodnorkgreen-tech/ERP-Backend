@@ -98,6 +98,16 @@ class CostVerificationController extends Controller
             'tax_amount' => 'nullable|numeric|min:0',
             'vat_treatment_id' => 'nullable|integer|exists:vat_treatments,id',
             'wht_category_id' => 'nullable|integer|exists:wht_categories,id',
+            // Claim evidence. Optional at the shape level and enforced by
+            // CostTaxPricer only where the chosen treatment actually claims
+            // input tax back — the rule is a tax rule, not a form rule, and
+            // belongs where preview and commit both read it.
+            'supplier_invoice_no' => 'nullable|string|max:64',
+            'etims_invoice_no' => 'nullable|string|max:64',
+            // Typed from the receipt when the payee is not a supplier on
+            // record, which is most claimable petty-cash spend.
+            'supplier_pin' => 'nullable|string|max:20',
+            'tax_point_date' => 'nullable|date|before_or_equal:today',
         ]);
 
         return response()->json(
@@ -288,6 +298,16 @@ class CostVerificationController extends Controller
             'tax_amount' => 'nullable|numeric|min:0',
             'vat_treatment_id' => 'nullable|integer|exists:vat_treatments,id',
             'wht_category_id' => 'nullable|integer|exists:wht_categories,id',
+            // Claim evidence. Optional at the shape level and enforced by
+            // CostTaxPricer only where the chosen treatment actually claims
+            // input tax back — the rule is a tax rule, not a form rule, and
+            // belongs where preview and commit both read it.
+            'supplier_invoice_no' => 'nullable|string|max:64',
+            'etims_invoice_no' => 'nullable|string|max:64',
+            // Typed from the receipt when the payee is not a supplier on
+            // record, which is most claimable petty-cash spend.
+            'supplier_pin' => 'nullable|string|max:20',
+            'tax_point_date' => 'nullable|date|before_or_equal:today',
             // Only meaningful when verifying your own cost. The service decides
             // whether it is needed and whether this person may use it at all;
             // shape-checking it here keeps a one-word "reason" out of the audit.

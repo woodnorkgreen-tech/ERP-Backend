@@ -189,6 +189,10 @@ class CostVerificationTest extends TestCase
         $this->actingAs($this->verifier, 'sanctum')
             ->postJson("/api/costs/verification/{$line->id}/verify", [
                 'tax_amount' => 1600, 'vat_treatment_id' => $vatId,
+                // A recoverable, eTIMS-bearing treatment is a claim against
+                // KRA, and CostTaxPricer will not post one without the
+                // reference it is matched on.
+                'etims_invoice_no' => 'ETIMS-0001', 'supplier_pin' => 'P051234567X',
             ])
             ->assertOk();
 
