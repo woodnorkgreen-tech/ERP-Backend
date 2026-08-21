@@ -72,6 +72,33 @@ class CostLine extends Model
         'cos_transferred_at' => 'datetime',
     ];
 
+    /**
+     * Every cost lands in the reporting month its date falls in.
+     *
+     * CostContextResolver already does this for the two capture paths, and
+     * JournalPostingService refuses to post a line without a period — correctly,
+     * because an unassigned line is one no month-end close can ever see. But
+     * anything else that writes a cost line (a console backfill, a producer, a
+     * test fixture) had to remember, and forgetting produced a row that looked
+     * fine until the day it would not post.
+     *
+     * Resolved here from the line's own date so the rule holds for every writer.
+     * A date no period covers still resolves to null and is still refused at
+     * posting: that is a gap in Finance's calendar, not something to paper over.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $line): void {
+            if ($line->accounting_period_id !== null) {
+                return;
+            }
+
+            $line->accounting_period_id = AccountingPeriod::forDate(
+                $line->incurred_at ?? $line->posting_date ?? now(),
+            )?->id;
+        });
+    }
+
     public function expenseCode(): BelongsTo
     {
         return $this->belongsTo(ExpenseCode::class);
