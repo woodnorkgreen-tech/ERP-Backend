@@ -2,7 +2,9 @@
 
 namespace App\Modules\Finance\CostCollector\Console;
 
+use App\Models\User;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\CostCollector\Services\CostVerificationService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -30,9 +32,15 @@ class RepairCostLineDetailCommand extends Command
     protected $signature = 'finance:repair-cost-lines
         {--dry-run : Report what would change and write nothing}
         {--enquiry= : Restrict to one project enquiry id}
+        {--actor= : User id to attribute the re-coding to}
         {--skip-relink : Backfill quantities only, leave budget linkage alone}';
 
     protected $description = 'Backfill quantity and rate onto cost lines, and link unbudgeted spend to budget lines projected after it';
+
+    public function __construct(private CostVerificationService $verification)
+    {
+        parent::__construct();
+    }
 
     public function handle(): int
     {
@@ -43,7 +51,20 @@ class RepairCostLineDetailCommand extends Command
         $this->line($dryRun ? 'DRY RUN — nothing will be written.' : 'Applying repairs.');
 
         $measures = $this->backfillMeasures($dryRun, $enquiry);
-        $links = $this->option('skip-relink') ? 0 : $this->relinkUnbudgeted($dryRun, $enquiry);
+
+        $links = 0;
+        if (! $this->option('skip-relink')) {
+            $actor = $this->resolveActor();
+
+            if (! $actor) {
+                $this->error('No actor to attribute the re-coding to. Pass --actor=<user id>.');
+
+                return self::FAILURE;
+            }
+
+            $this->line("  Re-coding attributed to {$actor->name} (#{$actor->id})");
+            $links = $this->relinkUnbudgeted($dryRun, $enquiry, $actor);
+        }
 
         $this->newLine();
         $this->table(['Repair', 'Lines'], [
@@ -105,7 +126,23 @@ class RepairCostLineDetailCommand extends Command
      * enquiry. Where several planned lines share a material the match is
      * ambiguous and is left alone for a person to resolve.
      */
-    private function relinkUnbudgeted(bool $dryRun, ?string $enquiry): int
+    /**
+     * Whose decision this is recorded as.
+     *
+     * A re-coding is attributable by design — the ledger keeps who changed it
+     * and why — so this refuses to run anonymously rather than inventing a
+     * system actor that no one can be asked about later.
+     */
+    private function resolveActor(): ?User
+    {
+        if ($id = $this->option('actor')) {
+            return User::find($id);
+        }
+
+        return User::whereHas('roles', fn ($q) => $q->where('name', 'Super Admin'))->orderBy('id')->first();
+    }
+
+    private function relinkUnbudgeted(bool $dryRun, ?string $enquiry, User $actor): int
     {
         $unbudgeted = CostLine::query()
             ->where('nature', '!=', CostLine::NATURE_PLANNED)
@@ -159,7 +196,16 @@ class RepairCostLineDetailCommand extends Command
             $linked++;
 
             if (! $dryRun) {
-                $line->forceFill(['consumes_line_id' => $planned->first()->id])->save();
+                // Through the verification service, not a direct write: it
+                // records who re-coded the line and why, and recomputes the
+                // budget snapshot — which otherwise still describes a draw
+                // against the line this cost no longer claims.
+                $this->verification->reclassify(
+                    $line,
+                    $actor,
+                    $planned->first()->id,
+                    'Budget line was projected after this cost posted; linked by finance:repair-cost-lines on exact material identity.',
+                );
             }
         }
 
