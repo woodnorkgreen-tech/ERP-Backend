@@ -1053,6 +1053,62 @@ class BoardController extends Controller
         ]);
     }
 
+    /**
+     * Confirm the label on one board.
+     *
+     * The batch endpoint releases every quarantined board in an intake at once,
+     * which is right at the print queue but wrong from a single board's detail
+     * view — the client called /boards/{id}/confirm-labels, a route that did not
+     * exist, so the action always failed. A grade is still required: it records
+     * what the board physically looked like when it entered stock.
+     */
+    public function confirmBoardLabel(Request $request, int $id): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can confirm labels.'], 403);
+        }
+
+        $validated = $request->validate([
+            'condition_grade' => 'required|in:A,B,C,D',
+            'condition_notes' => 'nullable|string|max:500',
+        ]);
+
+        try {
+            $board = DB::transaction(function () use ($validated, $id) {
+                $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
+                if ($board->status !== 'Quarantine') {
+                    throw new \InvalidArgumentException(
+                        "Board [{$board->tracking_code}] is {$board->status}, so its label is already confirmed."
+                    );
+                }
+
+                $board->update([
+                    'label_printed' => true,
+                    'label_printed_by' => auth()->id(),
+                    'label_printed_at' => now(),
+                ]);
+
+                $board->transitionTo(
+                    'Available',
+                    auth()->id(),
+                    $validated['condition_notes'] ?? "Grade {$validated['condition_grade']} — label confirmed",
+                    null,
+                    $validated['condition_grade'],
+                    null,
+                );
+
+                return $board->fresh(['movements', 'libraryMaterial']);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => "[{$board->tracking_code}] confirmed — now Available in stores.",
+            'data' => $board,
+        ]);
+    }
+
     // ─── Generic transition ───────────────────────────────────────────────────
 
     public function initiateReturn(Request $request, int $id): JsonResponse

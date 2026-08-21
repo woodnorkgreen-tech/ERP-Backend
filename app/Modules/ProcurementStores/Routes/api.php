@@ -135,6 +135,7 @@ Route::post('/boards/return-batches/{batch}/mark-missing', [BoardController::cla
 
 // Label confirmation
 Route::post('/boards/batch/{batchNumber}/confirm-labels', [BoardController::class, 'confirmLabels']);
+Route::post('/boards/{id}/confirm-label',             [BoardController::class, 'confirmBoardLabel']);
 
 // Reconciliation
 Route::get('/boards/reconciliation/latest',  [BoardController::class, 'latestReconciliation']);
