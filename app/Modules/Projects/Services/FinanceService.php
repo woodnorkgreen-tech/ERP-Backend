@@ -331,7 +331,13 @@ class FinanceService
 
         $clientApprovedQuote = (float) ($enquiry->client_approved_quote ?? 0);
 
-        if ($clientApprovedQuote > 0) {
+        // Only where no approval record exists at all. `client_approved_quote`
+        // is a denormalized compatibility field kept for projects that predate
+        // the approval snapshot; once a project has a snapshot it is governed by
+        // it, and reading the legacy column when that snapshot is pending would
+        // bill against an amount nobody currently stands behind — which is the
+        // stale figure the approval mechanism exists to stop.
+        if ($clientApprovedQuote > 0 && ! $approval) {
             return [
                 'amount' => $clientApprovedQuote,
                 'basis' => 'client_approved_quote',
