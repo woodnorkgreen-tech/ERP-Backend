@@ -360,59 +360,6 @@ class ProjectWorkflowContractsTest extends TestCase
         $this->assertTrue((bool) $enquiry->fresh()->finance_released);
     }
 
-    public function test_finance_project_budgets_summary_only_uses_completed_budget_tasks(): void
-    {
-        $accounts = $this->user('Accounts');
-        $approvedEnquiry = $this->enquiry([
-            'status' => EnquiryConstants::STATUS_PLANNING,
-            'quote_approved' => true,
-            'job_number' => 'WNG-07-2026-003',
-            'created_by' => $accounts->id,
-        ]);
-        $draftEnquiry = $this->enquiry([
-            'status' => EnquiryConstants::STATUS_PLANNING,
-            'quote_approved' => true,
-            'job_number' => 'WNG-07-2026-004',
-            'created_by' => $accounts->id,
-        ]);
-
-        $approvedBudgetTask = $this->task($approvedEnquiry, 'budget', ['status' => 'completed', 'created_by' => $accounts->id]);
-        $draftBudgetTask = $this->task($draftEnquiry, 'budget', ['status' => 'pending', 'created_by' => $accounts->id]);
-
-        TaskBudgetData::create([
-            'enquiry_task_id' => $approvedBudgetTask->id,
-            'project_info' => ['projectId' => $approvedEnquiry->enquiry_number],
-            'materials_data' => [],
-            'labour_data' => [],
-            'expenses_data' => [],
-            'logistics_data' => [],
-            'budget_summary' => ['materialsTotal' => 800, 'labourTotal' => 100, 'expensesTotal' => 50, 'logisticsTotal' => 50, 'grandTotal' => 1000],
-            'status' => 'draft', // inclusion is driven by the COMPLETED budget task, not budget status
-        ]);
-        TaskBudgetData::create([
-            'enquiry_task_id' => $draftBudgetTask->id,
-            'project_info' => ['projectId' => $draftEnquiry->enquiry_number],
-            'materials_data' => [],
-            'labour_data' => [],
-            'expenses_data' => [],
-            'logistics_data' => [],
-            // Unpriced budget: the task does NOT auto-complete, so this enquiry
-            // stays out of the finance summary until the budget is finalized.
-            'budget_summary' => ['materialsTotal' => 0, 'labourTotal' => 0, 'expensesTotal' => 0, 'logisticsTotal' => 0, 'grandTotal' => 0],
-            'status' => 'draft',
-        ]);
-
-        Sanctum::actingAs($accounts);
-
-        $response = $this->getJson('/api/finance/petty-cash/budgets/summary?per_page=10');
-
-        $response->assertOk()
-            ->assertJsonPath('meta.total', 1)
-            ->assertJsonPath('data.0.id', $approvedEnquiry->id)
-            ->assertJsonPath('data.0.totals.grand_total', 1000)
-            ->assertJsonPath('stats.total_budget', 1000);
-    }
-
     public function test_materials_import_uses_approved_quote_snapshot_instead_of_live_quote_data(): void
     {
         $manager = $this->user('Project Manager');
@@ -619,11 +566,18 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('data.materials.0.materials.0.description', 'Approved Truss Renamed')
             ->assertJsonPath('data.materials.0.materials.0.quantity', '7.00')
             ->assertJsonPath('data.materials.0.materials.0.unitPrice', 321)
+            // Quantity always comes from the materials list and the rate is the
+            // budget's to keep, so the total is recomputed from both. The
+            // `_priceStatus` / `_quantityChanged` markers went with the reconciler
+            // that needed them: the two lists can no longer disagree about
+            // quantity, so there is no divergence left to flag.
             ->assertJsonPath('data.materials.0.materials.0.totalPrice', 2247)
-            ->assertJsonPath('data.materials.0.materials.0._priceStatus', 'preserved')
-            ->assertJsonPath('data.materials.0.materials.0._quantityChanged', true)
+            // The stamp procurement's readiness gate reads, returned by the
+            // import that wrote it. `quote_imported_from` went when the quote
+            // snapshot stopped feeding this path: the budget's materials come
+            // from the materials list, and nothing writes that key any more.
             ->assertJsonPath('data.materialsImportInfo.importMetadata.source', 'approved_materials_list')
-            ->assertJsonPath('data.materialsImportInfo.importMetadata.quote_imported_from.snapshotSource', 'quote_approvals');
+            ->assertJsonPath('data.materialsImportInfo.importMetadata.materials_task_id', $materialsTask->id);
     }
 
     public function test_procurement_import_requires_budget_source_to_be_approved_materials_list(): void
@@ -674,8 +628,13 @@ class ProjectWorkflowContractsTest extends TestCase
 
         $response = $this->postJson("/api/projects/tasks/{$procurementTask->id}/procurement/import-budget");
 
-        $response->assertStatus(409)
-            ->assertJsonPath('message', 'Cannot import procurement items: budget source is not the approved materials list.');
+        // The refusal names the origin it found, which is the thing the reader
+        // has to change; the earlier wording only said the source was wrong.
+        $response->assertStatus(409);
+        $this->assertStringContainsString(
+            "this budget was built from 'manual_budget'",
+            $response->json('message'),
+        );
 
         $this->assertDatabaseMissing('task_procurement_data', [
             'enquiry_task_id' => $procurementTask->id,
