@@ -90,6 +90,28 @@ class SpendVoucher extends Model
      * an absent one.
      */
 
+    /**
+     * A voucher belongs to the reporting month its posting date falls in.
+     *
+     * The create endpoint resolves this and refuses when no open period covers
+     * today, which is the right conversation to have with a person. This covers
+     * every other writer: JournalPostingService will not post a voucher with no
+     * period, so one written without it is a row that cannot be paid and says
+     * nothing about why.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $voucher): void {
+            if ($voucher->accounting_period_id !== null) {
+                return;
+            }
+
+            $voucher->accounting_period_id = AccountingPeriod::forDate(
+                $voucher->posting_date ?? $voucher->transacted_at ?? now(),
+            )?->id;
+        });
+    }
+
     public function paymentSource(): BelongsTo
     {
         return $this->belongsTo(PaymentSource::class, 'payment_source_id');
