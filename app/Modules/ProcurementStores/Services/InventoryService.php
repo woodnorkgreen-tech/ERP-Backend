@@ -110,13 +110,13 @@ class InventoryService
                 );
             }
 
-
             // Ensure the row exists before locking; insert has no race risk.
             Stock::firstOrCreate(
                 ['material_id' => $materialId],
                 [
                     'quantity_on_hand' => 0,
                     'warehouse_code' => $meta['warehouse_code'] ?? 'MAIN',
+                    'location_bin' => $meta['location'] ?? null,
                     'tracking_mode' => $material->isBoardTrackable()
                         ? Stock::TRACK_BY_AREA
                         : Stock::TRACK_BY_COUNT,
@@ -132,6 +132,9 @@ class InventoryService
                 : Stock::TRACK_BY_COUNT;
             if ($stock->tracking_mode !== $expectedTrackingMode) {
                 $stock->tracking_mode = $expectedTrackingMode;
+            }
+            if ($quantity > 0 && ! empty($meta['location'])) {
+                $stock->location_bin = $meta['location'];
             }
 
             $previousQuantity = (float) $stock->quantity_on_hand;
