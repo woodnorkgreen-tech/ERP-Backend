@@ -4,6 +4,8 @@ namespace App\Modules\Finance\Controllers;
 
 use App\Constants\Permissions;
 use App\Http\Controllers\Controller;
+use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
+use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\HR\Models\HRAuditLog;
@@ -50,6 +52,59 @@ class SpendVoucherController extends Controller
                 'per_page' => $vouchers->perPage(),
                 'total' => $vouchers->total(),
             ],
+            // Aggregated over every voucher, not the page. The client used to
+            // derive these by reducing whatever rows the first page happened to
+            // contain, so with more than 25 vouchers the headline figures were
+            // simply wrong — and wrong in a way that looked plausible.
+            'summary' => $this->summary(),
+        ]);
+    }
+
+    /**
+     * Headline counts and the posted total, across all vouchers.
+     *
+     * Deliberately unfiltered: these are the totals the tabs are counting, so
+     * they must not move when a tab is selected.
+     */
+    private function summary(): array
+    {
+        $counts = SpendVoucher::query()
+            ->selectRaw('status, COUNT(*) as count, SUM(total_amount) as amount')
+            ->groupBy('status')
+            ->get()
+            ->keyBy('status');
+
+        return [
+            'total' => (int) $counts->sum('count'),
+            'draft' => (int) ($counts['draft']->count ?? 0),
+            'approved' => (int) ($counts['approved']->count ?? 0),
+            'posted' => (int) ($counts['posted']->count ?? 0),
+            'posted_amount' => number_format((float) ($counts['posted']->amount ?? 0), 2, '.', ''),
+        ];
+    }
+
+    /**
+     * Active payment sources for the voucher form.
+     *
+     * `payment_source_id` decides which GL account the credit leg hits
+     * (resolveAccountsForVoucher reads its gl_account_id), yet the only list of
+     * sources anywhere was on the receivables endpoint, gated on a receivables
+     * permission a voucher creator has no reason to hold. So the form omitted
+     * the field, and every voucher fell back to a chart lookup for any asset
+     * account it could find.
+     */
+    public function paymentSources(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_READ), 403);
+
+        $sources = PaymentSource::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'type', 'currency']);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $sources,
         ]);
     }
 

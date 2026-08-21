@@ -930,6 +930,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::prefix('spend-vouchers')->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
             Route::post('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'store']);
+            // Ahead of `{id}` so it is not resolved as a voucher id.
+            Route::get('payment-sources', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'paymentSources']);
             Route::get('/{id}', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'show']);
             Route::post('/{id}/approve', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'approve']);
             Route::post('/{id}/post', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'post']);

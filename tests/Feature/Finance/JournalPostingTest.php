@@ -196,6 +196,79 @@ class JournalPostingTest extends TestCase
             ->assertJsonPath('data.id', $voucher->id);
     }
 
+    public function test_the_index_summary_counts_every_voucher_not_just_the_page(): void
+    {
+        $this->user->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_READ);
+
+        foreach (range(1, 30) as $i) {
+            $this->voucher(['voucher_no' => 'SV-BULK-' . $i, 'payee_name' => 'Supplier ' . $i]);
+        }
+
+        $response = $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/finance/spend-vouchers')
+            ->assertOk();
+
+        // One page of 25 came back...
+        $this->assertCount(25, $response->json('data'));
+        $this->assertSame(30, $response->json('meta.total'));
+
+        // ...but the headline figures describe all 30. The client used to reduce
+        // the page it happened to receive, so this read 25.
+        $this->assertSame(30, $response->json('summary.total'));
+        $this->assertSame(30, $response->json('summary.draft'));
+    }
+
+    public function test_the_index_filters_server_side(): void
+    {
+        $this->user->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_READ);
+
+        $this->voucher(['voucher_no' => 'SV-FIND-ME', 'payee_name' => 'Findable Supplier']);
+        $this->voucher(['voucher_no' => 'SV-OTHER', 'type' => 'advance', 'status' => 'approved']);
+
+        $searched = $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/finance/spend-vouchers?search=FIND-ME')->assertOk();
+        $this->assertSame(1, $searched->json('meta.total'));
+
+        $byStatus = $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/finance/spend-vouchers?status=approved')->assertOk();
+        $this->assertSame(1, $byStatus->json('meta.total'));
+        $this->assertSame('SV-OTHER', $byStatus->json('data.0.voucher_no'));
+    }
+
+    public function test_payment_sources_are_listed_for_the_voucher_form(): void
+    {
+        PaymentSource::create([
+            'name' => 'Main Safe', 'code' => 'SAFE-01', 'type' => 'petty_cash',
+            'gl_account_id' => ChartOfAccount::where('code', '1030')->value('id'),
+            'is_active' => true,
+        ]);
+        PaymentSource::create([
+            'name' => 'Retired Account', 'code' => 'OLD-01', 'type' => 'bank',
+            'gl_account_id' => ChartOfAccount::where('code', '1030')->value('id'),
+            'is_active' => false,
+        ]);
+
+        $this->user->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_READ);
+
+        // Must resolve to its own action rather than being read as a voucher id.
+        $response = $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/finance/spend-vouchers/payment-sources')
+            ->assertOk();
+
+        $names = collect($response->json('data'))->pluck('name');
+        $this->assertContains('Main Safe', $names);
+        $this->assertNotContains('Retired Account', $names);
+    }
+
+    public function test_payment_sources_require_the_voucher_read_permission(): void
+    {
+        $outsider = User::factory()->create(['is_active' => true]);
+
+        $this->actingAs($outsider, 'sanctum')
+            ->getJson('/api/finance/spend-vouchers/payment-sources')
+            ->assertForbidden();
+    }
+
     public function test_a_draft_voucher_cannot_be_posted(): void
     {
         $voucher = SpendVoucher::create([
