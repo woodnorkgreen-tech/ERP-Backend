@@ -79,7 +79,7 @@ class StoresCostProducer
             $log->project_material_id ? (int) $log->project_material_id : null,
         );
 
-        return $this->collector->postFromSource(new CostContext(
+        $line = $this->collector->postFromSource(new CostContext(
             expenseCode: (string) $expenseCode,
             amount: $amount,
             nature: CostLine::NATURE_ACTUAL,
@@ -124,6 +124,48 @@ class StoresCostProducer
                 'valued_at_plan' => $valuedAtPlan ?: null,
             ], fn ($value) => $value !== null),
         ));
+
+        $this->relieveAccrualsFor($line, (int) $log->material_id);
+
+        return $line;
+    }
+
+    /**
+     * Retire the goods-receipt accrual this issue consumes.
+     *
+     * A job's spend is committed + accrued + actual, and each stage is meant to
+     * retire the one before it — a goods receipt already retires its
+     * purchase-order commitment. Nothing retired the accrual, so from the moment
+     * material was received until it was issued the job carried both figures for
+     * the same delivery.
+     *
+     * The whole accrual is retired on the first issue of that material rather
+     * than a proportion of it. Posting a partial balance back would create a
+     * second accrued line, and accrued lines journal — so the stock entry would
+     * be duplicated to fix a reporting figure. Between a part-issue and the rest
+     * this understates what is still sitting in the store, which is the
+     * conservative direction and a great deal better than double-charging.
+     */
+    private function relieveAccrualsFor(CostLine $actual, int $materialId): void
+    {
+        if (! $materialId) {
+            return;
+        }
+
+        CostLine::query()
+            ->where('nature', CostLine::NATURE_ACCRUED)
+            ->where('status', CostLine::STATUS_VERIFIED)
+            ->forProject($actual->project_id, $actual->project_enquiry_id, $actual->job_number)
+            ->whereRaw(
+                "JSON_UNQUOTE(JSON_EXTRACT(details, '$.library_material_id')) = ?",
+                [(string) $materialId],
+            )
+            ->orderBy('id')
+            ->get()
+            ->each(fn (CostLine $accrual) => $this->collector->releaseAccrual(
+                $accrual,
+                "Retired by Stores issue {$actual->ref}: the material has been consumed by the job.",
+            ));
     }
 
     /**

@@ -160,6 +160,37 @@ class CostCollectorService implements CollectsCost
     }
 
     /**
+     * Clear an accrual's project exposure once the material has been issued.
+     *
+     * Unlike a commitment, an accrual carries a journal — Dr Raw-material
+     * Inventory / Cr Accrued Expenses. **That journal is deliberately left
+     * alone.** It records two facts that are still true after the material
+     * leaves the store: the goods exist, and the supplier is still owed for
+     * them. Reversing it would erase a liability nobody has settled.
+     *
+     * What is released here is the project figure. `CostAccountService` sums
+     * committed + accrued + actual, and the chain is a relay in which each
+     * stage retires the one before — a goods receipt already retires its
+     * purchase-order commitment. Nothing retired the accrual, so between
+     * receiving material and issuing it a job was charged for both.
+     */
+    public function releaseAccrual(CostLine $line, string $reason): void
+    {
+        DB::transaction(function () use ($line, $reason) {
+            $line = CostLine::whereKey($line->id)->lockForUpdate()->firstOrFail();
+
+            if ($line->nature === CostLine::NATURE_ACCRUED
+                && $line->status === CostLine::STATUS_VERIFIED) {
+                $line->forceFill([
+                    'status' => CostLine::STATUS_REVERSED,
+                    'query_note' => $reason,
+                    'verified_at' => now(),
+                ])->save();
+            }
+        });
+    }
+
+    /**
      * Post a budget line as `planned`.
      *
      * Kept on this class rather than letting the projector write directly,
