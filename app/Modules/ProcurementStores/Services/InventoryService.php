@@ -6,6 +6,7 @@ use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
 class InventoryService
@@ -86,7 +87,24 @@ class InventoryService
             }
 
             $previousQuantity = (float) $stock->quantity_on_hand;
-            $stock->quantity_on_hand += $quantity;
+            $nextQuantity = $previousQuantity + $quantity;
+
+            // The floor belongs inside the lock, not in the caller. Callers used
+            // to test sufficiency with an unlocked read taken before this
+            // transaction opened, so two concurrent issues of the last unit both
+            // passed their own check and the ledger went negative. Reserved
+            // stock is already spoken for, so it is the floor rather than zero.
+            $floor = (float) $stock->quantity_reserved;
+            if ($quantity < 0 && $nextQuantity < $floor - 0.00001) {
+                $amount = fn (float $value) => rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.') ?: '0';
+                $reservedNote = $floor > 0 ? " ({$amount($previousQuantity)} on hand, {$amount($floor)} reserved)" : '';
+                throw ValidationException::withMessages([
+                    'quantity' => "{$material->material_name} has {$amount(max(0.0, $previousQuantity - $floor))} issuable{$reservedNote}. "
+                        . "{$amount(abs($quantity))} cannot be issued.",
+                ]);
+            }
+
+            $stock->quantity_on_hand = $nextQuantity;
             $stock->save();
 
             // Cost is receipt evidence, not catalogue input. Keep the material's

@@ -505,14 +505,8 @@ class ProcurementStoresController extends Controller
 
         $service = new InventoryService();
 
-        $stock = Stock::where('material_id', $request->material_id)->first();
-        if (!$stock || ($stock->quantity_on_hand - $stock->quantity_reserved) < $request->quantity) {
-            return response()->json([
-                'message' => 'Insufficient stock for this operation',
-                'status' => 'error'
-            ], 422);
-        }
-
+        // Sufficiency is checked inside adjustStock's row lock. Testing it here
+        // with an unlocked read only produced a second, racier answer.
         $log = $service->adjustStock(
             $request->material_id,
             -$request->quantity,
@@ -544,6 +538,10 @@ class ProcurementStoresController extends Controller
             'location_bin'    => 'nullable|string|max:50',
             'warehouse_code'  => 'nullable|string|max:20',
             'stock_quantity' => 'nullable|numeric|min:0',
+            // Required only when the count actually moves the balance — the form
+            // always posts the current figure back, and re-sending it unchanged
+            // is not an adjustment.
+            'stock_adjustment_reason' => 'nullable|string|min:5|max:500',
         ]);
 
         $material = LibraryMaterial::findOrFail($validated['material_id']);
@@ -554,6 +552,11 @@ class ProcurementStoresController extends Controller
             );
             $stock = Stock::whereKey($stock->id)->lockForUpdate()->firstOrFail();
 
+            if ($request->has('min_stock_level')) $stock->min_stock_level = $request->min_stock_level;
+            if ($request->has('location_bin')) $stock->location_bin = $request->location_bin;
+            if ($request->has('warehouse_code')) $stock->warehouse_code = $request->warehouse_code;
+            $stock->save();
+
             if ($request->filled('stock_quantity')) {
                 if ($material->isBoardTrackable() || $material->is_serialized || $material->is_batch_controlled) {
                     throw ValidationException::withMessages([
@@ -561,20 +564,40 @@ class ProcurementStoresController extends Controller
                     ]);
                 }
 
-                $quantity = (float) $validated['stock_quantity'];
-                if ($quantity < (float) $stock->quantity_reserved) {
+                $counted = (float) $validated['stock_quantity'];
+                if ($counted < (float) $stock->quantity_reserved) {
                     throw ValidationException::withMessages([
                         'stock_quantity' => 'Stock quantity cannot be below the currently reserved quantity.',
                     ]);
                 }
-                $stock->quantity_on_hand = $quantity;
+
+                // This used to assign quantity_on_hand directly, which made it a
+                // second stock writer that left no movement behind — the reason
+                // most balances stopped reconciling to their own ledger. The
+                // counted figure is now posted as an adjustment like any other
+                // movement, so the ledger stays the only account of the balance.
+                $difference = round($counted - (float) $stock->quantity_on_hand, 2);
+                if (abs($difference) >= 0.01) {
+                    if (blank($validated['stock_adjustment_reason'] ?? null)) {
+                        throw ValidationException::withMessages([
+                            'stock_adjustment_reason' => 'Say what the new count is based on — this posts a stock adjustment.',
+                        ]);
+                    }
+
+                    app(InventoryService::class)->adjustStock(
+                        $material->id,
+                        $difference,
+                        'adjustment',
+                        [
+                            'warehouse_code' => $stock->warehouse_code,
+                            'notes' => 'Counted balance set to '.$counted.' — '.$validated['stock_adjustment_reason'],
+                            'logged_at' => now(),
+                        ],
+                    );
+                    $stock->refresh();
+                }
             }
 
-            if ($request->has('min_stock_level')) $stock->min_stock_level = $request->min_stock_level;
-            if ($request->has('location_bin')) $stock->location_bin = $request->location_bin;
-            if ($request->has('warehouse_code')) $stock->warehouse_code = $request->warehouse_code;
-
-            $stock->save();
             return $stock;
         });
 
@@ -700,15 +723,7 @@ class ProcurementStoresController extends Controller
 
         $service = new InventoryService();
 
-        // Check if we have enough stock to mark as defective
-        $stock = Stock::where('material_id', $request->material_id)->first();
-        if (!$stock || $stock->quantity_on_hand < $request->quantity) {
-            return response()->json([
-                'message' => 'Insufficient stock on hand to mark as defective',
-                'status' => 'error'
-            ], 422);
-        }
-
+        // Sufficiency is checked inside adjustStock's row lock — see checkOut().
         $log = $service->adjustStock(
             $request->material_id, 
             -$request->quantity, // Negative for defective removal
@@ -846,13 +861,8 @@ class ProcurementStoresController extends Controller
                 ], 422);
             }
 
-            $stock = Stock::where('material_id', $item['material_id'])->first();
-            if (!$stock || ($stock->quantity_on_hand - $stock->quantity_reserved) < $item['quantity']) {
-                return response()->json([
-                    'message' => 'Insufficient stock for material: ' . ($material?->material_name ?? $item['material_id']),
-                    'status' => 'error'
-                ], 422);
-            }
+            // Availability is validated atomically by InventoryService after
+            // converting the entered issue unit to the stock unit.
         }
 
         // All items validated, process the batch
@@ -862,14 +872,8 @@ class ProcurementStoresController extends Controller
         $logs = DB::transaction(function () use ($request, $service, $batchNumber) {
             $posted = [];
             foreach ($request->items as $item) {
-                $material = LibraryMaterial::with('materialCategory.parent')->findOrFail($item['material_id']);
-                $stock = Stock::where('material_id', $item['material_id'])->lockForUpdate()->first();
-                if (! $stock || ((float) $stock->quantity_on_hand - (float) $stock->quantity_reserved) < (float) $item['quantity']) {
-                    throw ValidationException::withMessages([
-                        'items' => "Insufficient stock for {$material->material_name}.",
-                    ]);
-                }
-
+                $material = LibraryMaterial::with(['materialCategory.parent', 'uomConversions'])->findOrFail($item['material_id']);
+                $movementQuantity = $this->quantityInBaseUnit($material, (float) $item['quantity'], $item['entered_uom_id'] ?? null);
                 if (! empty($item['project_material_id'])) {
                     if (! $request->project_id) {
                         throw ValidationException::withMessages(['project_id' => 'A project is required for approved material issues.']);
