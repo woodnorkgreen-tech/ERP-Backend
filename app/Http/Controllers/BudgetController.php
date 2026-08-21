@@ -142,6 +142,11 @@ class BudgetController extends Controller
                     'materialsImportInfo' => [
                         'importedAt' => $budget->materials_imported_at,
                         'importedFromTask' => $budget->materials_imported_from_task,
+                        // The provenance stamp this import just wrote. Procurement
+                        // refuses to import from a budget whose stamp names another
+                        // origin, so a caller that cannot see the stamp cannot tell
+                        // whether what it just did will be accepted downstream.
+                        'importMetadata' => $budget->materials_import_metadata,
                     ],
                 ],
                 'message' => $result['message'],
