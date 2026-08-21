@@ -32,6 +32,10 @@ class MaterialsLibraryServiceProvider extends ServiceProvider
 
         // Publish config (optional)
         if ($this->app->runningInConsole()) {
+            $this->commands([
+                \App\Modules\MaterialsLibrary\Console\AlignMaterialLibraryCommand::class,
+            ]);
+
             $this->publishes([
                 __DIR__.'/../Config/materials-library.php' => config_path('materials-library.php'),
             ], 'materials-library-config');

@@ -43,11 +43,11 @@ Route::get('categories/{id}/schema', [CategoryController::class, 'schema']);
 Route::get('categories/{id}/normalization-preview', [CategoryController::class, 'normalizationPreview']);
 Route::post('categories/{id}/normalize-attributes', [CategoryController::class, 'normalizeAttributes']);
 Route::post('categories/normalization-runs/{runId}/rollback', [CategoryController::class, 'rollbackNormalization']);
+Route::get('categories/suggest-code', [CategoryController::class, 'suggestCode']);
+Route::get('categories',         [CategoryController::class, 'index']);
 Route::post('categories',        [CategoryController::class, 'store']);
 Route::put('categories/{id}',    [CategoryController::class, 'update']);
 Route::post('categories/{id}/merge', [CategoryController::class, 'merge']);
-Route::get('categories/suggest-code', [CategoryController::class, 'suggestCode']);
-Route::get('categories',         [CategoryController::class, 'index']);
 
 // Import
 Route::post('import', [MaterialImportController::class, 'import']);
