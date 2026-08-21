@@ -92,7 +92,15 @@ class CostVerificationService
                 $this->recordSelfVerification($line, $verifier, (string) $overrideReason);
             }
 
-            $this->journalPostingService->postCostLine($line);
+            // Only what has actually happened reaches the ledger. Planned and
+            // committed lines are management figures — a budget and a purchase
+            // order are not economic events, and journalling them would put
+            // money the business has not spent into a tax return. Producers have
+            // always applied this filter; this path did not, so a committed line
+            // routed through verification would have posted.
+            if (in_array($line->nature, [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL], true)) {
+                $this->journalPostingService->postCostLine($line);
+            }
 
             $this->notifier->verified($line);
 
