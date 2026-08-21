@@ -29,7 +29,17 @@ class ExpenseCatalogueTest extends TestCase
     public function test_the_catalogue_seeds(): void
     {
         $this->assertGreaterThanOrEqual(65, ExpenseCode::count());
-        $this->assertSame(ExpenseCode::count(), ExpenseCode::active()->count());
+
+        // Active means postable. A code with no concrete debit account is an
+        // accounting instruction — "the receiving bank account", "the relevant
+        // PPE account" — and the journal service now refuses to guess one, so
+        // the seeder keeps those rows for the workflow that will price them and
+        // holds them out of ordinary cost capture until Finance maps them.
+        $this->assertSame(0, ExpenseCode::active()->whereNull('default_debit_account_id')->count());
+        $this->assertSame(
+            ExpenseCode::whereNotNull('default_debit_account_id')->count(),
+            ExpenseCode::active()->count(),
+        );
     }
 
     public function test_no_code_defaults_to_an_account_a_journal_cannot_post_to(): void
