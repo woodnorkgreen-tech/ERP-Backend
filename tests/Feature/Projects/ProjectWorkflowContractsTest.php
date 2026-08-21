@@ -23,6 +23,8 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
+use App\Constants\Permissions;
+use Spatie\Permission\Models\Permission;
 
 class ProjectWorkflowContractsTest extends TestCase
 {
@@ -1057,6 +1059,25 @@ class ProjectWorkflowContractsTest extends TestCase
         if ($role) {
             Role::findOrCreate($role, 'web');
             $user->assignRole($role);
+        }
+
+        // The finance routes exercised here are gated on `finance.receivables.*`
+        // permissions. Assigning the Accounts role does not grant them —
+        // RoleAndPermissionSeeder gives Accounts petty-cash rights but no
+        // receivables rights at all — so these requests answered 403 and the
+        // assertions beneath them never ran. Granting explicitly keeps the test
+        // about the workflow contract rather than about role configuration.
+        if (in_array($role, ['Accounts', 'Finance'], true)) {
+            $user->givePermissionTo(array_map(
+                fn (string $name) => Permission::findOrCreate($name, 'web'),
+                [
+                    Permissions::FINANCE_RECEIVABLES_READ,
+                    Permissions::FINANCE_RECEIVABLES_RECORD,
+                    Permissions::FINANCE_RECEIVABLES_VERIFY,
+                    Permissions::FINANCE_RECEIVABLES_RELEASE,
+                    Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
+                ],
+            ));
         }
 
         return $user->fresh();

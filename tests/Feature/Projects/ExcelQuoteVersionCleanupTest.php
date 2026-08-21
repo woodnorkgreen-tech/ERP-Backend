@@ -15,6 +15,7 @@ use Laravel\Sanctum\Sanctum;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Tests\TestCase;
+use Spatie\Permission\Models\Role;
 
 class ExcelQuoteVersionCleanupTest extends TestCase
 {
@@ -157,12 +158,20 @@ class ExcelQuoteVersionCleanupTest extends TestCase
 
     private function user(): User
     {
-        return User::create([
+        $user = User::create([
             'name' => uniqid('user_'),
             'email' => uniqid('user_') . '@test.local',
             'password' => bcrypt('secret'),
             'is_active' => true,
         ])->fresh();
+
+        // `quote.access` requires an EnquiryConstants::FINANCIAL_QUOTE_ROLES
+        // role; that middleware post-dates this suite, so every request here
+        // answered 403. Costing satisfies it without being in ROLES_ADMIN,
+        // which would bypass the very guards these tests assert.
+        $user->assignRole(Role::findOrCreate('Costing', 'web'));
+
+        return $user->fresh();
     }
 
     private function client(): Client

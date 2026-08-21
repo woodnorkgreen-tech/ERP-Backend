@@ -15,6 +15,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
+use Spatie\Permission\Models\Role;
 
 class QuoteApprovalIntegrityTest extends TestCase
 {
@@ -145,7 +146,18 @@ class QuoteApprovalIntegrityTest extends TestCase
             'recorded_by' => $this->user()->id,
         ]);
 
-        Sanctum::actingAs($this->user());
+        // The route is gated on `finance.receivables.correct`. Without it the
+        // request stops at 403 and never reaches the scoping check this test
+        // exists to prove — so the guard would look effective while being
+        // untested. Grant the permission, then assert the scoping.
+        $actor = $this->user();
+        $actor->givePermissionTo(
+            \Spatie\Permission\Models\Permission::findOrCreate(
+                \App\Constants\Permissions::FINANCE_RECEIVABLES_CORRECT,
+                'web',
+            ),
+        );
+        Sanctum::actingAs($actor);
 
         // Attempt to edit enquiry B's payment through enquiry A's URL
         $this->putJson("/api/projects/enquiries/{$enquiryA->id}/payments/{$paymentOnB->id}", [
@@ -217,12 +229,20 @@ class QuoteApprovalIntegrityTest extends TestCase
 
     private function user(): User
     {
-        return User::create([
+        $user = User::create([
             'name' => uniqid('user_'),
             'email' => uniqid('user_') . '@test.local',
             'password' => bcrypt('secret'),
             'is_active' => true,
         ])->fresh();
+
+        // `quote.access` requires an EnquiryConstants::FINANCIAL_QUOTE_ROLES
+        // role; that middleware post-dates this suite, so every request here
+        // answered 403. Costing satisfies it without being in ROLES_ADMIN,
+        // which would bypass the very guards these tests assert.
+        $user->assignRole(Role::findOrCreate('Costing', 'web'));
+
+        return $user->fresh();
     }
 
     private function client(): Client
