@@ -27,6 +27,11 @@ class ProcurementStoresController extends Controller
             return response()->json(['message' => 'You are not permitted to view Stores accounting exceptions.'], 403);
         }
 
+        $planRate = fn ($log) => $log?->project_material_id
+            ? app(\App\Modules\Finance\CostCollector\Services\StoresCostProducer::class)
+                ->plannedUnitRate((int) $log->project_material_id)
+            : null;
+
         $postings = StoresFinancePosting::with([
                 'inventoryLog.material:id,material_name,material_code',
                 'inventoryLog.project:id,project_id', 'costLine:id,ref',
@@ -36,23 +41,38 @@ class ProcurementStoresController extends Controller
             ->latest()
             ->limit(100)
             ->get()
-            ->map(function (StoresFinancePosting $posting) {
+            ->map(function (StoresFinancePosting $posting) use ($planRate) {
                 $log = $posting->inventoryLog;
+                $isStale = ($posting->status === 'processing'
+                        && $posting->processing_started_at?->lt(now()->subMinutes(10)))
+                    || ($posting->status === 'pending'
+                        && $posting->updated_at?->lt(now()->subMinutes(15)));
                 return [
                     'id' => $posting->id, 'posting_type' => $posting->posting_type,
                     'status' => $posting->status, 'attempts' => $posting->attempts,
                     'last_error' => $posting->last_error,
                     'next_retry_at' => $posting->next_retry_at?->toIso8601String(),
                     'processing_started_at' => $posting->processing_started_at?->toIso8601String(),
+                    'is_stale' => $isStale,
+                    'action_required' => $posting->status === 'failed' || $isStale,
+                    'status_message' => $posting->status === 'failed'
+                        ? 'Finance posting failed and needs review.'
+                        : ($isStale
+                            ? 'Finance posting has stopped progressing and can be resumed safely.'
+                            : ($posting->status === 'processing' ? 'Finance is currently posting this cost.' : 'Finance posting is queued.')),
                     'needs_valuation' => $posting->posting_type === 'issue_cost'
                         && str_contains(strtolower((string) $posting->last_error), 'unit cost'),
                     // What the approved plan expected this to cost. Offered as a
                     // starting figure only: it is an estimate, and a Stores issue
                     // posts as an actual, so a person still has to accept or
                     // replace it and say what the number is based on.
-                    'planned_unit_cost' => $log?->projectMaterial?->unit_cost !== null
-                        ? (float) $log->projectMaterial->unit_cost
-                        : null,
+                    //
+                    // Read through the same resolver the posting path uses.
+                    // This previously read `element_materials.unit_cost`
+                    // directly — a column populated on 5% of rows — so the panel
+                    // offered a blank hint for almost every exception it raised,
+                    // which is the one moment the figure is actually needed.
+                    'planned_unit_cost' => ($rate = $planRate($log)) !== null ? (float) $rate : null,
                     'created_at' => $posting->created_at?->toIso8601String(),
                     'cost_line' => $posting->costLine,
                     'inventory_log_id' => $log?->id, 'type' => $log?->type,
@@ -70,8 +90,12 @@ class ProcurementStoresController extends Controller
         if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
             return response()->json(['message' => 'You are not permitted to retry Stores accounting.'], 403);
         }
-        if ($inventoryLog->status !== 'failed') {
-            return response()->json(['message' => 'Only a failed Finance posting can be retried.'], 422);
+        $isStale = ($inventoryLog->status === 'processing'
+                && $inventoryLog->processing_started_at?->lt(now()->subMinutes(10)))
+            || ($inventoryLog->status === 'pending'
+                && $inventoryLog->updated_at?->lt(now()->subMinutes(15)));
+        if ($inventoryLog->status !== 'failed' && ! $isStale) {
+            return response()->json(['message' => 'This Finance posting is still progressing normally and does not need to be resumed.'], 422);
         }
 
         $inventoryLog->update([
