@@ -150,6 +150,52 @@ class JournalPostingTest extends TestCase
         ]);
     }
 
+    /** Every column the table requires, so callers name only what they vary. */
+    private function voucher(array $overrides = []): SpendVoucher
+    {
+        return SpendVoucher::create(array_merge([
+            'voucher_no' => 'SV-' . uniqid(),
+            'type' => 'payment',
+            'status' => 'draft',
+            'transacted_at' => now(),
+            'posting_date' => now()->toDateString(),
+            'payee_name' => 'Test Supplier',
+            'requester_user_id' => $this->user->id,
+            'total_amount' => '1000.00',
+            'base_total_amount' => '1000.00',
+            'net_amount' => '1000.00',
+            'net_cash_paid' => '1000.00',
+        ], $overrides));
+    }
+
+    public function test_listing_vouchers_does_not_blow_up_once_one_exists(): void
+    {
+        // The regression this file did not have. index() eager-loaded a
+        // `costLines` relation pointing at `cost_lines.spend_voucher_id`, a
+        // column that does not exist, so the endpoint returned 500 the moment a
+        // voucher was present. Every existing test posted or approved a voucher
+        // by id and never listed them, and the client logged the failure to the
+        // console, so nothing surfaced it.
+        $this->user->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_READ);
+        $this->voucher();
+
+        $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/finance/spend-vouchers')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1);
+    }
+
+    public function test_showing_a_voucher_does_not_blow_up(): void
+    {
+        $this->user->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_READ);
+        $voucher = $this->voucher();
+
+        $this->actingAs($this->user, 'sanctum')
+            ->getJson("/api/finance/spend-vouchers/{$voucher->id}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $voucher->id);
+    }
+
     public function test_a_draft_voucher_cannot_be_posted(): void
     {
         $voucher = SpendVoucher::create([

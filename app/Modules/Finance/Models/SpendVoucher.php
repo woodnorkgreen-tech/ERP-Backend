@@ -3,10 +3,8 @@
 namespace App\Modules\Finance\Models;
 
 use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
-use App\Modules\Finance\CostCollector\Models\CostLine;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SpendVoucher extends Model
 {
@@ -72,10 +70,25 @@ class SpendVoucher extends Model
         'received_at' => 'datetime',
     ];
 
-    public function costLines(): HasMany
-    {
-        return $this->hasMany(CostLine::class, 'spend_voucher_id');
-    }
+    /**
+     * Cost lines settled by this voucher — NOT AVAILABLE.
+     *
+     * Removed rather than left in place: it was declared as
+     * `hasMany(CostLine::class, 'spend_voucher_id')`, and `cost_lines` has no
+     * such column. Any code touching it raised
+     * "Unknown column 'cost_lines.spend_voucher_id'", and both index() and
+     * show() eager-loaded it — so the spend voucher list returned a 500 as soon
+     * as a single voucher existed. The client swallowed that into console.error,
+     * which is why it went unnoticed.
+     *
+     * The linkage itself is the right design and is still missing: a voucher is
+     * meant to settle verified cost lines, which is what would give the module a
+     * payables sub-ledger and a three-way match. Building it means adding the
+     * column, deciding which lines a voucher may settle and what settling does
+     * to their status — a schema and workflow change, not a relation. Until then
+     * there is nothing here to relate to, and a throwing relation is worse than
+     * an absent one.
+     */
 
     public function paymentSource(): BelongsTo
     {

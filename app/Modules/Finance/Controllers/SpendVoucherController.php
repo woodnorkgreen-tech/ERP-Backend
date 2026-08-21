@@ -19,7 +19,7 @@ class SpendVoucherController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_READ), 403);
 
-        $query = SpendVoucher::with(['paymentSource', 'costLines'])
+        $query = SpendVoucher::with('paymentSource')
             ->orderBy('created_at', 'desc');
 
         if ($request->has('status')) {
@@ -57,7 +57,7 @@ class SpendVoucherController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_READ), 403);
 
-        $voucher = SpendVoucher::with(['paymentSource', 'costLines'])->findOrFail($id);
+        $voucher = SpendVoucher::with('paymentSource')->findOrFail($id);
 
         return response()->json([
             'status' => 'success',
