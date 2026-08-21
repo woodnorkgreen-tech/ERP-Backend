@@ -10,6 +10,7 @@ use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
+use App\Modules\Finance\Models\ChartOfAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -45,6 +46,11 @@ class CostCollectorServiceTest extends TestCase
             'expense_type' => 'Test material',
             'job_id_rule' => ExpenseCode::JOB_OPTIONAL,
             'cash_flow_class' => 'operating',
+            // Every seeded code names a debit account, and the journal service
+            // refuses to guess one for a code that does not — that refusal is
+            // what keeps an unmapped code visible instead of posting somewhere
+            // plausible. A fixture without it is not a code the app would accept.
+            'default_debit_account_id' => ChartOfAccount::where('code', '1211')->value('id'),
             'is_active' => true,
         ], $overrides));
     }
