@@ -664,6 +664,13 @@ class PettyCashController extends Controller
      */
     public function clearAll(): JsonResponse
     {
+        if (! app()->environment(['local', 'testing'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Clearing Finance history is disabled outside local development. Use voids and reversals to preserve the audit trail.',
+            ], 403);
+        }
+
         // Routed through the policy like everything else, but the policy keeps
         // this one Super-Admin-only on purpose — see PettyCashPolicy::clearAll().
         if (!Auth::user()?->can('clearAll', PettyCashDisbursement::class)) {
