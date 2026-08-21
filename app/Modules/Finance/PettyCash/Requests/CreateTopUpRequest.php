@@ -13,7 +13,11 @@ class CreateTopUpRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return true; // Authorization will be handled by middleware/permissions
+        // Gated in PettyCashTopUpController::store with an explicit
+        // `finance.petty_cash.create_top_up` check, alongside the identical
+        // checks on update and destroy. Leaving this `true` is deliberate, not
+        // an oversight — but it is only safe while that check stays there.
+        return true;
     }
 
     /**

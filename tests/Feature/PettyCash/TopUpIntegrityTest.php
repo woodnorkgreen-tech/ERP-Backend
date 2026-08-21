@@ -31,6 +31,7 @@ class TopUpIntegrityTest extends TestCase
         parent::setUp();
 
         foreach ([
+            Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
             Permissions::FINANCE_PETTY_CASH_EDIT_TOP_UP,
             Permissions::FINANCE_PETTY_CASH_DELETE_TOP_UP,
         ] as $name) {
@@ -39,6 +40,7 @@ class TopUpIntegrityTest extends TestCase
 
         $this->custodian = User::factory()->create(['is_active' => true]);
         $this->custodian->givePermissionTo([
+            Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
             Permissions::FINANCE_PETTY_CASH_EDIT_TOP_UP,
             Permissions::FINANCE_PETTY_CASH_DELETE_TOP_UP,
         ]);
@@ -120,10 +122,6 @@ class TopUpIntegrityTest extends TestCase
 
     public function test_creating_a_top_up_validates_and_keeps_every_field(): void
     {
-        $this->custodian->givePermissionTo(
-            \Spatie\Permission\Models\Permission::findOrCreate('finance.petty_cash.create_top_up', 'web'),
-        );
-
         $response = $this->actingAs($this->custodian, 'sanctum')
             ->postJson('/api/finance/petty-cash/top-ups', [
                 'amount' => 25000,
@@ -180,6 +178,23 @@ class TopUpIntegrityTest extends TestCase
             ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['date_topped_up']);
+    }
+
+    public function test_creating_a_top_up_requires_permission(): void
+    {
+        // The third top-up write endpoint. Editing and deleting were gated by
+        // audit BE1/BE2; creating was left open, so any authenticated user could
+        // credit the ledger and raise the float at will.
+        $this->actingAs($this->outsider, 'sanctum')
+            ->postJson('/api/finance/petty-cash/top-ups', [
+                'amount' => 500000,
+                'payment_method' => 'cash',
+                'date_topped_up' => now()->toDateString(),
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('petty_cash_top_ups', 0);
+        $this->assertSame('0.00', $this->derivedBalance());
     }
 
     public function test_editing_a_top_up_requires_permission(): void

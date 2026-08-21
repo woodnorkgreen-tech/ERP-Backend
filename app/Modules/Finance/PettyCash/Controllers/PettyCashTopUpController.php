@@ -68,6 +68,20 @@ class PettyCashTopUpController extends Controller
      */
     public function store(CreateTopUpRequest $request): JsonResponse
     {
+        // Creating a top-up credits the ledger and raises the cash balance —
+        // the same class of act as editing or deleting one, both of which were
+        // gated by audit BE1/BE2. `store` was missed: the route carries no
+        // permission middleware and CreateTopUpRequest::authorize() returns
+        // true, so until now any authenticated user could inject cash into the
+        // float. `create_top_up` is already held by Admin and Accounts (and by
+        // Super Admin, who holds everything), so this closes the hole without
+        // taking the right away from anyone who was legitimately using it.
+        abort_unless(
+            $request->user()?->can(Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP),
+            403,
+            'You do not have permission to create a top-up.',
+        );
+
         // CreateTopUpRequest replaces the inline validator it never got wired
         // ahead of: it adds an upper amount bound, checks the payment method
         // against the one canonical list, requires a reference for non-cash, and
