@@ -69,6 +69,8 @@ class JournalPostingService
             return JournalEntry::find($line->journal_entry_id);
         }
 
+        $this->assertOpenPeriod($line->accounting_period_id, "cost line {$line->ref}");
+
         return DB::transaction(function () use ($line) {
             $rule = $this->resolveRuleForCostLine($line);
             [$debitAccountId, $creditAccountId] = $this->resolveAccountsForCostLine($line, $rule);
@@ -294,6 +296,8 @@ class JournalPostingService
         if ($existing) {
             return $existing;
         }
+
+        $this->assertOpenPeriod($voucher->accounting_period_id, "spend voucher {$voucher->voucher_no}");
 
         return DB::transaction(function () use ($voucher) {
             $amount = (string) ($voucher->net_cash_paid ?? $voucher->total_amount);
@@ -547,6 +551,26 @@ class JournalPostingService
     private function accountByCode(string $code): ?int
     {
         return ChartOfAccount::postable()->where('code', $code)->value('id');
+    }
+
+    /** No financial fact may enter an unassigned or closed reporting month. */
+    private function assertOpenPeriod(?int $periodId, string $source): void
+    {
+        $period = $periodId ? AccountingPeriod::find($periodId) : null;
+
+        if (! $period) {
+            throw new InvalidArgumentException("No accounting period is assigned to {$source}.");
+        }
+
+        if (! $period->isOpen()) {
+            throw new InvalidArgumentException(sprintf(
+                'The accounting period %04d-%02d is %s, so %s cannot be posted.',
+                $period->year,
+                $period->month,
+                $period->status,
+                $source,
+            ));
+        }
     }
 
     /** @return array{0: int|null, 1: int|null} */

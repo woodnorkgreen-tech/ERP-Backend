@@ -124,6 +124,15 @@ class SpendVoucherController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_CREATE), 403);
 
+        $period = AccountingPeriod::forDate(now());
+        if (! $period || ! $period->isOpen()) {
+            return response()->json([
+                'message' => $period
+                    ? sprintf('The %s %d accounting period is %s. Finance must open a valid period before a voucher can be created.', $period->starts_on->format('F'), $period->year, $period->status)
+                    : 'No accounting period covers today. Complete Finance setup before creating a voucher.',
+            ], 422);
+        }
+
         $validated = $request->validate([
             'type' => 'required|string|in:advance,payment,retirement,reimbursement',
             'payee_name' => 'required|string|max:255',
@@ -140,12 +149,18 @@ class SpendVoucherController extends Controller
 
         // The primary key supplies the sequence. count()+1 races under two
         // simultaneous requests and can issue the same voucher number twice.
-        $voucher = DB::transaction(function () use ($validated) {
+        $voucher = DB::transaction(function () use ($validated, $period) {
             $voucher = SpendVoucher::create(array_merge($validated, [
                 'voucher_no' => 'PENDING-' . bin2hex(random_bytes(8)),
                 'status' => 'draft',
                 'transacted_at' => now(),
                 'posting_date' => now()->toDateString(),
+                // Resolved from the posting date exactly as CostContextResolver
+                // does for a cost line. Left null until now, so every voucher
+                // journal posted with no period: they could not be included in a
+                // period close, and the locked-period guard below had nothing to
+                // test against.
+                'accounting_period_id' => $period->id,
                 'requester_user_id' => auth()->id(),
                 'currency' => 'KES',
                 'fx_rate' => 1,
@@ -236,6 +251,25 @@ class SpendVoucherController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'The requester and approver cannot post this voucher.',
+            ], 422);
+        }
+
+        // The same guard CostVerificationService applies before posting a cost.
+        // A closed period that still accepts vouchers is not closed, and the
+        // asymmetry was invisible while vouchers carried no period at all.
+        $period = $voucher->accounting_period_id
+            ? AccountingPeriod::find($voucher->accounting_period_id)
+            : null;
+
+        if (! $period || ! $period->isOpen()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $period ? sprintf(
+                    'The accounting period %04d-%02d is %s, so this voucher cannot be posted into it.',
+                    $period->year,
+                    $period->month,
+                    $period->status,
+                ) : 'This voucher has no accounting period. Finance must correct its period before posting.',
             ], 422);
         }
 

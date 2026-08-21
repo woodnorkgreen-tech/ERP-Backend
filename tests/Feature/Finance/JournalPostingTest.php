@@ -69,6 +69,7 @@ class JournalPostingTest extends TestCase
             'net_amount' => '5000.00',
             'base_net_amount' => '5000.00',
             'fx_rate' => '1.00',
+            'accounting_period_id' => AccountingPeriod::forDate(now())->id,
             'submitted_by_user_id' => $this->user->id,
         ]);
 
@@ -267,6 +268,54 @@ class JournalPostingTest extends TestCase
         $this->actingAs($outsider, 'sanctum')
             ->getJson('/api/finance/spend-vouchers/payment-sources')
             ->assertForbidden();
+    }
+
+    public function test_a_voucher_carries_the_period_of_its_posting_date(): void
+    {
+        // Left null on every voucher until now, which meant voucher journals
+        // belonged to no period and could not be swept up by a period close.
+        $this->actingAs($this->user, 'sanctum');
+
+        $response = $this->postJson('/api/finance/spend-vouchers', [
+            'type' => 'payment',
+            'payee_name' => 'Test Supplier',
+            'total_amount' => 1000.00,
+        ]);
+
+        $response->assertStatus(201);
+
+        $period = AccountingPeriod::forDate(now());
+        $this->assertNotNull($period);
+        $this->assertDatabaseHas('spend_vouchers', [
+            'id' => $response->json('data.id'),
+            'accounting_period_id' => $period->id,
+        ]);
+    }
+
+    public function test_a_voucher_cannot_be_posted_into_a_locked_period(): void
+    {
+        $this->actingAs($this->user, 'sanctum');
+
+        $voucherId = $this->postJson('/api/finance/spend-vouchers', [
+            'type' => 'payment',
+            'payee_name' => 'Test Supplier',
+            'total_amount' => 1000.00,
+        ])->assertStatus(201)->json('data.id');
+
+        $this->actingAs($this->approver, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucherId}/approve")
+            ->assertOk();
+
+        AccountingPeriod::forDate(now())->update(['status' => AccountingPeriod::STATUS_LOCKED]);
+
+        $this->actingAs($this->poster, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucherId}/post")
+            ->assertStatus(422);
+
+        // Nothing reached the ledger, and the voucher is still postable once the
+        // period is reopened.
+        $this->assertDatabaseMissing('journal_entries', ['spend_voucher_id' => $voucherId]);
+        $this->assertDatabaseHas('spend_vouchers', ['id' => $voucherId, 'status' => 'approved']);
     }
 
     public function test_a_draft_voucher_cannot_be_posted(): void
