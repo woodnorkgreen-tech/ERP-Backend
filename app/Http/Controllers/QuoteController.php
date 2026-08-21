@@ -190,12 +190,7 @@ class QuoteController extends Controller
 
              \Log::info("Found budget data, transforming to quote format");
 
-             // Get approved budget additions for this budget
-             $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
-                 ->where('status', 'approved')
-                 ->get();
-
-             // Transform budget data to quote format including approved additions
+             // Transform budget data to quote format.
              // Default margins for initial import should match frontend defaults (60%)
              $defaultMargins = [
                  'materials' => 60,
@@ -203,7 +198,7 @@ class QuoteController extends Controller
                  'expenses' => 60,
                  'logistics' => 60
              ];
-             $quoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions, $defaultMargins);
+             $quoteData = $this->transformBudgetToQuote($budgetData, $defaultMargins);
 
              \Log::info("Transformed budget data, creating/updating quote");
 
@@ -379,11 +374,7 @@ class QuoteController extends Controller
                 return response()->json(['message' => 'No budget data found'], 404);
             }
 
-            $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
-                ->where('status', 'approved')
-                ->get();
-
-            $newQuoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions);
+            $newQuoteData = $this->transformBudgetToQuote($budgetData);
 
             $changes = ['new_items' => [], 'price_changes' => [], 'removed_items' => [], 'total_impact' => []];
 
@@ -461,8 +452,6 @@ class QuoteController extends Controller
                 return response()->json(['message' => 'No budget data found'], 404);
             }
 
-            // Get fresh data from budget
-            $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)->where('status', 'approved')->get();
             // Get current margins to use as baseline for new items
             $currentMargins = $quoteData->margins ?? [
                 'materials' => 60,
@@ -472,8 +461,7 @@ class QuoteController extends Controller
             ];
 
             // Get fresh data from budget, initialized with current margins
-            $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)->where('status', 'approved')->get();
-            $newQuoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions, $currentMargins);
+            $newQuoteData = $this->transformBudgetToQuote($budgetData, $currentMargins);
 
             // MERGE LOGIC:
             // We want to keep the NEW budget structure (items, quantities, costs)
@@ -746,87 +734,9 @@ class QuoteController extends Controller
     }
 
     /**
-     * Get unit price for a material from budget data or approved additions
-     */
-    private function getBudgetMaterialPrice(TaskBudgetData $budgetData, $materialId): float
-    {
-        \Log::info("getBudgetMaterialPrice called", [
-            'materialId' => $materialId,
-            'budgetDataId' => $budgetData->id
-        ]);
-
-        // First check the main budget materials data
-        if ($budgetData->materials_data) {
-            foreach ($budgetData->materials_data as $element) {
-                foreach ($element['materials'] ?? [] as $material) {
-                    if (isset($material['id']) && $material['id'] == $materialId) {
-                        \Log::info("Found material in main budget data", [
-                            'materialId' => $materialId,
-                            'unitPrice' => $material['unitPrice'] ?? 0
-                        ]);
-                        return (float) ($material['unitPrice'] ?? 0);
-                    }
-                }
-            }
-        }
-
-        // If not found in main budget, check APPROVED budget additions only.
-        // Draft additions are unapproved cost data and must not price a quote.
-        $additions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
-            ->where('source_type', 'materials_additional')
-            ->where('status', 'approved')
-            ->orderBy('updated_at', 'desc') // Get most recent first
-            ->get();
-
-        \Log::info("Checking budget additions for material price", [
-            'materialId' => $materialId,
-            'additionsCount' => $additions->count()
-        ]);
-
-        foreach ($additions as $addition) {
-            // Check if this addition is for the material we're looking for
-            if ($addition->source_material_id == $materialId) {
-                if ($addition->materials) {
-                    foreach ($addition->materials as $material) {
-                        // Prioritize non-zero values, check both camelCase and snake_case
-                        $unitPrice = ($material['unitPrice'] ?? 0) > 0
-                            ? (float) $material['unitPrice']
-                            : (float) ($material['unit_price'] ?? 0);
-
-                        \Log::info("Checking material in addition", [
-                            'additionId' => $addition->id,
-                            'additionStatus' => $addition->status,
-                            'materialId' => $materialId,
-                            'material_unitPrice' => $material['unitPrice'] ?? null,
-                            'material_unit_price' => $material['unit_price'] ?? null,
-                            'calculated_unitPrice' => $unitPrice
-                        ]);
-
-                        if ($unitPrice > 0) {
-                            \Log::info("Found material price in budget addition", [
-                                'additionId' => $addition->id,
-                                'additionStatus' => $addition->status,
-                                'materialId' => $materialId,
-                                'unitPrice' => $unitPrice
-                            ]);
-                            return $unitPrice;
-                        }
-                    }
-                }
-            }
-        }
-
-        \Log::warning("No unit price found for material", [
-            'materialId' => $materialId
-        ]);
-
-        return 0.0;
-    }
-
-    /**
      * Transform budget data to quote format
      */
-    private function transformBudgetToQuote(TaskBudgetData $budgetData, $approvedAdditions = null, ?array $preferredMargins = null): array
+    private function transformBudgetToQuote(TaskBudgetData $budgetData, ?array $preferredMargins = null): array
     {
         \Log::info("Starting budget data transformation");
 
@@ -881,171 +791,6 @@ class QuoteController extends Controller
             }
         }
 
-        // Add approved budget additions to materials, labour, expenses, logistics
-        if ($approvedAdditions) {
-            \Log::info("Including " . $approvedAdditions->count() . " approved budget additions");
-
-            foreach ($approvedAdditions as $addition) {
-                // Add materials from approved additions
-                if ($addition->materials) {
-                    foreach ($addition->materials as $material) {
-                        // Calculate totals for this material
-                        // Support both camelCase and snake_case field names
-                        // Prioritize non-zero values
-                        $quantity = $material['quantity'] ?? 0;
-                        $unitPrice = ($material['unitPrice'] ?? 0) > 0
-                            ? $material['unitPrice']
-                            : ($material['unit_price'] ?? 0);
-                        $totalPrice = ($material['totalPrice'] ?? 0) > 0
-                            ? $material['totalPrice']
-                            : (($material['total_price'] ?? 0) > 0
-                                ? $material['total_price']
-                                : ($quantity * $unitPrice));
-
-                        \Log::info("Processing addition material", [
-                            'addition_id' => $addition->id,
-                            'addition_status' => $addition->status,
-                            'material_id' => $material['id'] ?? null,
-                            'quantity' => $quantity,
-                            'unitPrice' => $unitPrice,
-                            'totalPrice' => $totalPrice,
-                            'source_type' => $addition->source_type,
-                            'source_material_id' => $addition->source_material_id,
-                            'material_data' => $material
-                        ]);
-
-                        // For materials_additional type, always get the latest price from the addition itself
-                        // (which was updated when the user edited the virtual addition)
-                        if ($addition->source_type === 'materials_additional' && $addition->source_material_id) {
-                            \Log::info("Getting latest unit price for materials_additional type", [
-                                'addition_id' => $addition->id,
-                                'source_material_id' => $addition->source_material_id,
-                                'current_unitPrice' => $unitPrice
-                            ]);
-
-                            // Get the latest price from budget additions (including draft updates)
-                            $latestPrice = $this->getBudgetMaterialPrice($budgetData, $addition->source_material_id);
-                            if ($latestPrice > 0) {
-                                \Log::info("Using latest unit price from budget addition", [
-                                    'source_material_id' => $addition->source_material_id,
-                                    'latest_price' => $latestPrice,
-                                    'original_price' => $unitPrice
-                                ]);
-                                $unitPrice = $latestPrice;
-                            } else {
-                                \Log::info("No updated price found, using addition's stored price", [
-                                    'source_material_id' => $addition->source_material_id,
-                                    'stored_price' => $unitPrice
-                                ]);
-                            }
-                        }
-
-                        // Recalculate totals with final unit price
-                        $totalPrice = $quantity * $unitPrice;
-                        $marginAmount = $totalPrice * ($m_margin / 100);
-                        $finalPrice = $totalPrice + $marginAmount;
-
-                        \Log::info("Final addition material calculations", [
-                            'addition_id' => $addition->id,
-                            'material_id' => $material['id'] ?? null,
-                            'final_unitPrice' => $unitPrice,
-                            'final_totalPrice' => $totalPrice,
-                            'final_marginAmount' => $marginAmount,
-                            'final_finalPrice' => $finalPrice
-                        ]);
-
-                        $materials[] = [
-                            'id' => 'addition_' . $addition->id . '_material_' . $material['id'],
-                            'templateId' => null,
-                            'name' => 'Budget Addition: ' . $addition->title,
-                            'description' => '',
-                            'quantity' => 1,
-                            'materials' => [
-                                [
-                                    'id' => $material['id'],
-                                    'description' => $material['description'],
-                                    'unitOfMeasurement' => $material['unitOfMeasurement'] ?? $material['unit_of_measurement'] ?? '',
-                                    'quantity' => $quantity,
-                                    'days' => 1,
-                                    'unitPrice' => $unitPrice,
-                                    'totalPrice' => $totalPrice,
-                                    'isAddition' => true,
-                                    'marginPercentage' => $m_margin,
-                                    'marginAmount' => $marginAmount,
-                                    'finalPrice' => $finalPrice
-                                ]
-                            ],
-                            'baseTotal' => $totalPrice,
-                            'marginPercentage' => $m_margin,
-                            'marginAmount' => $marginAmount,
-                            'finalTotal' => $finalPrice
-                        ];
-                    }
-                }
-
-                // Add labour from approved additions
-                if ($addition->labour) {
-                    $labour = array_merge($labour, array_map(function ($item) use ($l_margin) {
-                        $amount = $item['amount'] ?? (($item['quantity'] ?? 1) * ($item['unitRate'] ?? 0));
-                        $marginAmount = $amount * ($l_margin / 100);
-                        return [
-                            'id' => $item['id'],
-                            'type' => $item['type'] ?? 'Labour',
-                            'unit' => $item['unit'] ?? 'Hours',
-                            'quantity' => $item['quantity'] ?? 1,
-                            'unitRate' => $item['unitRate'] ?? $amount,
-                            'amount' => $amount,
-                            'isAddition' => true,
-                            'category' => $item['category'] ?? 'Additional Labour',
-                            'marginPercentage' => $l_margin,
-                            'marginAmount' => $marginAmount,
-                            'finalPrice' => $amount + $marginAmount
-                        ];
-                    }, $addition->labour));
-                }
-
-                // Add expenses from approved additions
-                if ($addition->expenses) {
-                    $expenses = array_merge($expenses, array_map(function ($item) use ($e_margin) {
-                        $amount = $item['amount'] ?? 0;
-                        $marginAmount = $amount * ($e_margin / 100);
-                        $finalPrice = $amount + $marginAmount;
-                        return [
-                            'id' => $item['id'],
-                            'description' => $item['description'],
-                            'category' => $item['category'] ?? 'Additional Expense',
-                            'amount' => $amount,
-                            'isAddition' => true,
-                            'marginPercentage' => $e_margin,
-                            'marginAmount' => $marginAmount,
-                            'finalPrice' => $finalPrice
-                        ];
-                    }, $addition->expenses));
-                }
-
-                // Add logistics from approved additions
-                if ($addition->logistics) {
-                    $logistics = array_merge($logistics, array_map(function ($item) use ($lo_margin) {
-                        $amount = $item['amount'] ?? (($item['quantity'] ?? 1) * ($item['unitRate'] ?? 0));
-                        $marginAmount = $amount * ($lo_margin / 100);
-                        $finalPrice = $amount + $marginAmount;
-                        return [
-                            'id' => $item['id'],
-                            'vehicleReg' => $item['vehicleReg'] ?? '',
-                            'description' => $item['description'],
-                            'unit' => $item['unit'] ?? 'Trip',
-                            'quantity' => $item['quantity'] ?? 1,
-                            'unitRate' => $item['unitRate'] ?? $amount,
-                            'amount' => $amount,
-                            'isAddition' => true,
-                            'marginPercentage' => $lo_margin,
-                            'marginAmount' => $marginAmount,
-                            'finalPrice' => $finalPrice
-                        ];
-                    }, $addition->logistics));
-                }
-            }
-        }
 
         // Transform labour (no individual margins)
         if ($budgetData->labour_data) {

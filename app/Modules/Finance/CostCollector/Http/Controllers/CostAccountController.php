@@ -54,35 +54,10 @@ class CostAccountController extends Controller
         $user = request()->user();
         abort_unless($this->access->canReadAccount($user, $enquiry), 403);
 
+        // Budget additions are gone: unplanned spend is captured directly on the
+        // cost account through "Record a project cost", where it lands as an
+        // unbudgeted actual line rather than a pending change awaiting approval.
         $data = $this->accounts->forEnquiry($enquiry);
-        $budgetTask = $enquiry->enquiryTasks()->where('type', 'budget')->first();
-        $budgetData = $budgetTask
-            ? TaskBudgetData::query()->where('enquiry_task_id', $budgetTask->id)->first()
-            : null;
-        $pending = $budgetData
-            ? $budgetData->budgetAdditions()->where('status', 'pending_approval')
-                ->with('creator:id,name')->latest()->get()
-            : collect();
-
-        $data['budget_change'] = [
-            'task_id' => $budgetTask?->id,
-            'pending_total' => number_format((float) $pending->sum('total_amount'), 2, '.', ''),
-            'forecast_budget' => number_format(
-                (float) $data['totals']['planned'] + (float) $pending->sum('total_amount'),
-                2, '.', ''
-            ),
-            'pending' => $pending->map(fn ($addition) => [
-                'id' => $addition->id,
-                'title' => $addition->title,
-                'description' => $addition->description,
-                'total_amount' => $addition->total_amount,
-                'created_at' => $addition->created_at,
-                'creator' => $addition->creator?->name,
-            ])->values(),
-            'can_create' => $budgetTask ? $this->access->canCreateAddition($user, $budgetTask) : false,
-            'can_decide' => $user->can(Permissions::FINANCE_BUDGET_ADDITIONS_APPROVE)
-                || $user->can(Permissions::FINANCE_BUDGET_ADDITIONS_REJECT),
-        ];
 
         return response()->json(['data' => $data]);
     }

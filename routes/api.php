@@ -559,14 +559,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('/versions/{versionId}', [App\Http\Controllers\BudgetController::class, 'getBudgetVersion']);
         Route::post('/versions/{versionId}/restore', [App\Http\Controllers\BudgetController::class, 'restoreBudgetVersion']);
 
-        // Budget additions management
-        Route::get('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'index']);
-        Route::post('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'store']);
-        Route::post('/additions/from-material', [App\Http\Controllers\BudgetAdditionController::class, 'createFromMaterial']);
-        Route::get('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'show']);
-        Route::put('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'update']);
-        Route::post('/additions/{additionId}/approve', [App\Http\Controllers\BudgetAdditionController::class, 'approve']);
-        Route::delete('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'destroy']);
     });
 
     // Quote management routes

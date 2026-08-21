@@ -41,20 +41,4 @@ class ProjectFinancialAccess
             || ($user->can(Permissions::PROJECT_COSTS_READ_ASSIGNED) && $this->isAssigned($user, $enquiry));
     }
 
-    public function canReadAdditions(User $user, EnquiryTask $task): bool
-    {
-        return $user->can(Permissions::FINANCE_BUDGET_ADDITIONS_READ)
-            || ($task->enquiry && $this->canReadAccount($user, $task->enquiry));
-    }
-
-    public function canCreateAddition(User $user, EnquiryTask $task): bool
-    {
-        if ($user->can(Permissions::FINANCE_BUDGET_UPDATE)) {
-            return true;
-        }
-
-        return $user->can(Permissions::PROJECT_BUDGET_ADDITIONS_CREATE)
-            && $task->enquiry
-            && $this->isAssigned($user, $task->enquiry);
-    }
 }

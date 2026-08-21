@@ -46,14 +46,6 @@ class EventServiceProvider extends ServiceProvider
             \App\Listeners\ProjectBudgetLines::class,
         ],
 
-        // An approved addition is a budget revision, so it has to move the
-        // ceiling every "budget vs actual" figure is measured against. Before
-        // this, approval changed a status and nothing else, and the project went
-        // on being judged against its pre-addition budget.
-        \App\Events\BudgetAdditionApproved::class => [
-            \App\Listeners\ProjectApprovedBudgetAddition::class,
-        ],
-
         // Petty cash actuals into the project's cost account. Queued, so the
         // cost ledger can never stop somebody paying out of the tin — and the
         // void listener keeps a backed-out payment from overstating a project.

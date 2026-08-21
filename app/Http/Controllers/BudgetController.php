@@ -171,9 +171,7 @@ class BudgetController extends Controller
         \Log::info("createBudgetVersion called for task ID: {$taskId}");
         
         try {
-            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)
-                ->with('budgetAdditions')
-                ->first();
+            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
 
             if (!$budgetData) {
                 return response()->json(['message' => 'Budget data not found'], 404);
@@ -215,18 +213,6 @@ class BudgetController extends Controller
                     'manuallyModified' => $budgetData->materials_manually_modified ?? false,
                     'importMetadata' => $budgetData->materials_import_metadata
                 ],
-                'budget_additions' => $budgetData->budgetAdditions->map(function ($addition) {
-                    return [
-                        'id' => $addition->id,
-                        'title' => $addition->title,
-                        'description' => $addition->description,
-                        'materials' => $addition->materials,
-                        'labour' => $addition->labour,
-                        'expenses' => $addition->expenses,
-                        'logistics' => $addition->logistics,
-                        'status' => $addition->status,
-                    ];
-                })->toArray()
             ];
 
             // Create version
@@ -412,25 +398,7 @@ class BudgetController extends Controller
 
             $restoredData = $version->data;
 
-            // Delete existing budget additions and restore from snapshot
             \DB::transaction(function () use ($budgetData, $restoredData) {
-                // Delete existing budget additions
-                $budgetData->budgetAdditions()->delete();
-
-                // Recreate budget additions from snapshot
-                foreach ($restoredData['budget_additions'] ?? [] as $additionData) {
-                    $budgetData->budgetAdditions()->create([
-                        'title' => $additionData['title'],
-                        'description' => $additionData['description'],
-                        'materials' => $additionData['materials'] ?? [],
-                        'labour' => $additionData['labour'] ?? [],
-                        'expenses' => $additionData['expenses'] ?? [],
-                        'logistics' => $additionData['logistics'] ?? [],
-                        'status' => 'pending_approval', // Reset to pending
-                        'created_by' => auth()->id() ?? 1,
-                    ]);
-                }
-
                 // Update budget data, reset status to draft
                 $budgetData->update([
                     'project_info' => $restoredData['project_info'],
@@ -485,7 +453,7 @@ class BudgetController extends Controller
     {
         try {
             $task = \App\Modules\Projects\Models\EnquiryTask::with('enquiry.client')->findOrFail($taskId);
-            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->with('budgetAdditions')->first();
+            $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
             
             if (!$budgetData) {
                 return response()->json(['message' => 'Budget data not found'], 404);
@@ -507,7 +475,6 @@ class BudgetController extends Controller
                 'enquiry' => $task->enquiry,
                 'comparisonData' => $comparisonData,
                 'comparisonVersion' => $comparisonVersion,
-                'approvedAdditions' => $budgetData->budgetAdditions()->where('status', 'approved')->get()
             ]);
 
             $fileName = 'budget-' . ($task->enquiry->job_number ?? $task->enquiry->enquiry_number ?? $taskId) . '.pdf';

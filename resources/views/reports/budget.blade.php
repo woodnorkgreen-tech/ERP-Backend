@@ -320,36 +320,6 @@
     @endif
 
 
-    <!-- Approved Additions Section -->
-    @if(isset($approvedAdditions) && $approvedAdditions->count() > 0)
-    <div class="category-title" style="color: #059669; border-left-color: #10b981; background-color: #ecfdf5;">05. APPROVED ADDITIONS & BCRs</div>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th style="width: 40%;">Title / Description</th>
-                <th style="width: 15%; text-align: right;">Amount</th>
-                <th style="width: 15%; text-align: center;">Status</th>
-                <th style="width: 30%;">Notes</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach($approvedAdditions as $addition)
-            <tr>
-                <td class="font-bold">{{ $addition->title }}</td>
-                <td class="text-right font-bold text-emerald-600">{{ number_format($addition->total_amount, 2) }}</td>
-                <td class="text-center">APPROVED</td>
-                <td>{{ $addition->description ?? 'Supplemental budget addition' }}</td>
-            </tr>
-            @endforeach
-            <tr class="total-row" style="background-color: #ecfdf5;">
-                <td class="text-right uppercase">Total Approved Additions</td>
-                <td class="text-right">{{ number_format($approvedAdditions->sum('total_amount'), 2) }}</td>
-                <td colspan="2"></td>
-            </tr>
-        </tbody>
-    </table>
-    @endif
-
     <div class="footer">
         <p class="font-bold text-gray-900">Woodnork Green Ltd</p>
         <p>Tel: +254 780 397 798 | Email: admin@woodnorkgreen.co.ke</p>

@@ -8,13 +8,17 @@ use Spatie\Permission\PermissionRegistrar;
 
 return new class extends Migration
 {
+    // Historical migration. The budget-addition permissions it grants were
+    // retired with the feature itself; their names are pinned as literals here
+    // so this file stays runnable against a fresh database. A later migration
+    // revokes them.
     private const ALL = [
         Permissions::PROJECT_COSTS_READ_ASSIGNED,
-        Permissions::PROJECT_BUDGET_ADDITIONS_CREATE,
-        Permissions::FINANCE_BUDGET_ADDITIONS_READ,
-        Permissions::FINANCE_BUDGET_ADDITIONS_APPROVE,
-        Permissions::FINANCE_BUDGET_ADDITIONS_REJECT,
-        Permissions::FINANCE_BUDGET_ADDITIONS_REVERSE,
+        'project.budget_additions.create',
+        'finance.budget_additions.read',
+        'finance.budget_additions.approve',
+        'finance.budget_additions.reject',
+        'finance.budget_additions.reverse',
     ];
 
     public function up(): void
@@ -26,7 +30,7 @@ return new class extends Migration
         Role::query()->whereIn('name', ['Project Officer', 'Project Manager'])
             ->get()->each(fn (Role $role) => $role->givePermissionTo($permissions->only([
                 Permissions::PROJECT_COSTS_READ_ASSIGNED,
-                Permissions::PROJECT_BUDGET_ADDITIONS_CREATE,
+                'project.budget_additions.create',
             ])->values()));
 
         Role::query()->whereIn('name', ['Accounts', 'Accountant', 'Costing', 'Finance', 'Finance Manager'])

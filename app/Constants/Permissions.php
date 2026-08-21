@@ -75,7 +75,6 @@ class Permissions
     const PROJECT_VIEW_REPORTS = 'project.view_reports';
     const PROJECT_CLOSE = 'project.close';
     const PROJECT_COSTS_READ_ASSIGNED = 'project.costs.read_assigned';
-    const PROJECT_BUDGET_ADDITIONS_CREATE = 'project.budget_additions.create';
 
     // ===========================================
     // ENQUIRY MANAGEMENT PERMISSIONS
@@ -117,10 +116,6 @@ class Permissions
     const FINANCE_COSTS_REVERSE = 'finance.costs.reverse';
     const FINANCE_EXPENSE_CODES_MANAGE = 'finance.expense_codes.manage';
 
-    const FINANCE_BUDGET_ADDITIONS_READ = 'finance.budget_additions.read';
-    const FINANCE_BUDGET_ADDITIONS_APPROVE = 'finance.budget_additions.approve';
-    const FINANCE_BUDGET_ADDITIONS_REJECT = 'finance.budget_additions.reject';
-    const FINANCE_BUDGET_ADDITIONS_REVERSE = 'finance.budget_additions.reverse';
 
     // Spend vouchers deliberately split maker, checker and poster. A single
     // broad Finance permission would let the person requesting cash approve and
