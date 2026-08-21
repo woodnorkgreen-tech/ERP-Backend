@@ -59,6 +59,166 @@ class CostAccountTest extends TestCase
         ], $overrides));
     }
 
+    /** Materials priced against the element that consumes them. */
+    private function materialLine(string $nature, string $net, ?string $element, array $overrides = []): CostLine
+    {
+        return $this->line($nature, $net, array_merge([
+            'details' => array_filter([
+                'budget_category' => 'materials',
+                'element' => $element,
+            ], fn ($value) => $value !== null),
+        ], $overrides));
+    }
+
+    public function test_materials_are_reported_per_element(): void
+    {
+        // A category total says materials cost 90,000. It cannot say that one
+        // stand is on budget and another has doubled — which is the only version
+        // of the question anyone actually asks.
+        $booth = $this->materialLine(CostLine::NATURE_PLANNED, '60000.00', 'BOOTH1');
+        $this->materialLine(CostLine::NATURE_ACTUAL, '20000.00', 'BOOTH1', ['consumes_line_id' => $booth->id]);
+
+        $counter = $this->materialLine(CostLine::NATURE_PLANNED, '30000.00', 'COUNTER');
+        $this->materialLine(CostLine::NATURE_ACTUAL, '45000.00', 'COUNTER', ['consumes_line_id' => $counter->id]);
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk();
+
+        // Ordered by budget size, so the biggest commitment reads first.
+        $response->assertJsonPath('data.elements.0.element', 'BOOTH1');
+        $response->assertJsonPath('data.elements.0.planned', '60000.00');
+        $response->assertJsonPath('data.elements.0.spent', '20000.00');
+        $response->assertJsonPath('data.elements.0.remaining', '40000.00');
+
+        $response->assertJsonPath('data.elements.1.element', 'COUNTER');
+        $response->assertJsonPath('data.elements.1.planned', '30000.00');
+        $response->assertJsonPath('data.elements.1.remaining', '-15000.00');
+    }
+
+    public function test_an_element_breaks_down_into_the_materials_that_built_it(): void
+    {
+        // "BOOTH1 is 40% over" is where the question starts, not where it ends.
+        // The budget line and the issue that fulfils it must land on one row, or
+        // the same board reads as two unrelated costs.
+        $board = $this->materialLine(CostLine::NATURE_PLANNED, '40000.00', 'BOOTH1', [
+            'details' => ['budget_category' => 'materials', 'element' => 'BOOTH1',
+                'material' => 'MDF 9mm Sheet', 'library_material_id' => 7],
+        ]);
+        $this->line(CostLine::NATURE_ACTUAL, '52000.00', [
+            'consumes_line_id' => $board->id,
+            'details' => ['budget_category' => 'materials', 'element' => 'BOOTH1',
+                'material' => 'MDF 9mm Sheet', 'library_material_id' => 7],
+        ]);
+        $this->line(CostLine::NATURE_PLANNED, '6000.00', [
+            'details' => ['budget_category' => 'materials', 'element' => 'BOOTH1',
+                'material' => 'Flat Washers M6', 'library_material_id' => 9],
+        ]);
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk();
+
+        $materials = collect($response->json('data.elements.0.materials'));
+
+        // Ordered by budget, so the material carrying the element leads.
+        $this->assertSame(['MDF 9mm Sheet', 'Flat Washers M6'], $materials->pluck('material')->all());
+
+        $board = $materials->firstWhere('material', 'MDF 9mm Sheet');
+        $this->assertSame('40000.00', $board['planned']);
+        $this->assertSame('52000.00', $board['spent']);
+        $this->assertSame('-12000.00', $board['remaining']);
+
+        // And the materials still reconcile to the element above them.
+        $this->assertSame(
+            $response->json('data.elements.0.planned'),
+            number_format((float) $materials->sum(fn ($row) => (float) $row['planned']), 2, '.', ''),
+        );
+    }
+
+    public function test_the_same_catalogue_item_is_one_row_even_when_worded_differently(): void
+    {
+        // Stores describes a movement, the budget describes a plan. Grouping on
+        // the catalogue id keeps them together; grouping on wording would not.
+        $this->line(CostLine::NATURE_PLANNED, '40000.00', [
+            'details' => ['budget_category' => 'materials', 'element' => 'BOOTH1',
+                'material' => 'MDF 9mm Sheet', 'library_material_id' => 7],
+        ]);
+        $this->line(CostLine::NATURE_ACTUAL, '15000.00', [
+            'details' => ['budget_category' => 'materials', 'element' => 'BOOTH1',
+                'material' => 'MDF 9mm sheet (board)', 'library_material_id' => 7],
+        ]);
+
+        $materials = collect(
+            $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk()
+                ->json('data.elements.0.materials')
+        );
+
+        $this->assertCount(1, $materials);
+        $this->assertSame('40000.00', $materials[0]['planned']);
+        $this->assertSame('15000.00', $materials[0]['spent']);
+    }
+
+    public function test_material_spend_without_an_element_is_labelled_not_hidden(): void
+    {
+        // Direct purchases and lines predating the element carry none. Dropping
+        // them would make the element figures quietly disagree with the category
+        // total they are meant to explain.
+        $this->materialLine(CostLine::NATURE_PLANNED, '10000.00', 'BOOTH1');
+        $this->materialLine(CostLine::NATURE_ACTUAL, '2500.00', null);
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk();
+
+        $elements = collect($response->json('data.elements'));
+
+        $this->assertEqualsCanonicalizing(
+            ['BOOTH1', 'Unassigned'],
+            $elements->pluck('element')->all(),
+        );
+        $this->assertSame('2500.00', $elements->firstWhere('element', 'Unassigned')['spent']);
+
+        // And the parts still add up to the category they came from.
+        $this->assertSame(
+            $response->json('data.categories.0.spent'),
+            number_format((float) $elements->sum(fn ($row) => (float) $row['spent']), 2, '.', ''),
+        );
+    }
+
+    public function test_only_materials_are_grouped_by_element(): void
+    {
+        // Labour, expenses and logistics are flat by nature; there is no element
+        // to group them on, so they must not appear in the element breakdown.
+        $this->line(CostLine::NATURE_PLANNED, '15000.00');           // logistics
+        $this->materialLine(CostLine::NATURE_PLANNED, '5000.00', 'BOOTH1');
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk();
+
+        $this->assertSame(['BOOTH1'], collect($response->json('data.elements'))->pluck('element')->all());
+    }
+
+    public function test_the_materials_drilldown_groups_its_lines_by_element(): void
+    {
+        $booth = $this->materialLine(CostLine::NATURE_PLANNED, '60000.00', 'BOOTH1');
+        $this->materialLine(CostLine::NATURE_ACTUAL, '20000.00', 'BOOTH1', ['consumes_line_id' => $booth->id]);
+        $this->materialLine(CostLine::NATURE_PLANNED, '30000.00', 'COUNTER');
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}/category-lines?category=materials")
+            ->assertOk();
+
+        $this->assertSame(
+            ['BOOTH1', 'COUNTER'],
+            collect($response->json('elements'))->pluck('element')->all(),
+        );
+        $response->assertJsonPath('elements.0.planned_total', '60000.00');
+        $response->assertJsonPath('elements.0.spend_total', '20000.00');
+        $response->assertJsonPath('elements.1.spend_total', '0.00');
+    }
+
+    public function test_a_flat_category_drilldown_is_not_grouped(): void
+    {
+        $this->line(CostLine::NATURE_PLANNED, '15000.00');  // logistics
+
+        $this->getJson("/api/costs/account/{$this->enquiryId}/category-lines?category=logistics")
+            ->assertOk()
+            ->assertJsonPath('elements', []);
+    }
+
     public function test_it_reports_planned_against_spend_by_category(): void
     {
         $planned = $this->line(CostLine::NATURE_PLANNED, '60000.00');

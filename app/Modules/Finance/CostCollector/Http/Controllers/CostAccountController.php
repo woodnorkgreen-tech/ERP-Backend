@@ -82,6 +82,16 @@ class CostAccountController extends Controller
             'category' => $result['category'],
             'planned' => CostLineResource::collection($result['planned']),
             'spend' => CostLineResource::collection($result['spend']),
+            // The same lines, grouped the way materials are planned and built.
+            // Served alongside the flat lists rather than instead of them so a
+            // caller that wants the whole category still has it.
+            'elements' => collect($result['elements'])->map(fn (array $group) => [
+                'element' => $group['element'],
+                'planned' => CostLineResource::collection($group['planned']),
+                'spend' => CostLineResource::collection($group['spend']),
+                'planned_total' => $group['planned_total'],
+                'spend_total' => $group['spend_total'],
+            ])->values(),
         ]);
     }
 }

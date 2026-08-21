@@ -73,6 +73,13 @@ class StoresCostProducer
             description: 'Stores Issue: ' . ($material?->material_name ?? "Item #{$log->material_id}") . " (x{$quantity})",
             details: array_filter([
                 'budget_category' => $planned?->details['budget_category'] ?? 'materials',
+                // Inherited from the plan where there is one, resolved from the
+                // project material line where there is not — an unbudgeted issue
+                // still belongs to an element, and dropping it there would put
+                // exactly the spend worth grouping outside the grouping.
+                'element' => $planned?->details['element']
+                    ?? $this->elementNameFor($log->project_material_id ? (int) $log->project_material_id : null),
+                'material' => $material?->material_name,
                 'inventory_log_id' => $log->id,
                 'library_material_id' => $log->material_id,
                 'project_material_id' => $log->project_material_id,
@@ -90,6 +97,25 @@ class StoresCostProducer
                 'unmapped_expense_code' => $this->usesDefaultExpenseCode($material, (string) $expenseCode) ?: null,
             ], fn ($value) => $value !== null),
         ));
+    }
+
+    /**
+     * The element a project material line belongs to.
+     *
+     * Read from the operational record rather than parsed back out of the cost
+     * line's description: the description is a sentence built for a human, and
+     * re-deriving structure from it is how the element got lost in the first
+     * place.
+     */
+    public function elementNameFor(?int $projectMaterialId): ?string
+    {
+        if (! $projectMaterialId) {
+            return null;
+        }
+
+        $name = ElementMaterial::with('element:id,name')->find($projectMaterialId)?->element?->name;
+
+        return filled($name) ? (string) $name : null;
     }
 
     /**
@@ -156,6 +182,8 @@ class StoresCostProducer
             description: 'Stores Return: ' . ($return->material?->material_name ?? "Item #{$return->material_id}") . " (x{$returnedQuantity})",
             details: [
                 'budget_category' => $originalCost->details['budget_category'] ?? 'materials',
+                'element' => $originalCost->details['element'] ?? null,
+                'material' => $originalCost->details['material'] ?? null,
                 'inventory_log_id' => $return->id,
                 'original_issue_log_id' => $issue->id,
                 'original_cost_line_id' => $originalCost->id,
@@ -163,6 +191,16 @@ class StoresCostProducer
                 'project_material_id' => $return->project_material_id,
                 'quantity' => (string) $returnedQuantity,
                 'movement' => 'return_credit',
+                // Which kind of credit this is. A whole item came back unused —
+                // the project no longer needs it and its requirement reopens. A
+                // recovered offcut is the usable remnant of a board the project
+                // did consume: it reduces cost without meaning another board is
+                // owed. Both used to post as an unlabelled negative, so a board
+                // that came back in part and a board that came back whole were
+                // the same figure on the account, and neither explained why the
+                // material had cost less than it was issued at.
+                'return_kind' => $return->return_kind
+                    ?: (str_starts_with((string) $return->notes, 'Offcut ') ? 'recovered_offcut' : 'whole_item'),
             ],
         ), [
             'amount' => $negative,

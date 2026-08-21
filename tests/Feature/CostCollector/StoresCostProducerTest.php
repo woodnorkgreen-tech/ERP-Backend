@@ -35,6 +35,69 @@ class StoresCostProducerTest extends TestCase
         $this->user = User::factory()->create();
     }
 
+    /**
+     * A budget-priced project material line: the approved plan for one material,
+     * with its total carried on a verified planned cost line.
+     *
+     * This mirrors production, where prices live in the budget rather than the
+     * catalogue — 93% of budgets carry a unit price against 2% of catalogue
+     * materials.
+     */
+    private function budgetPricedLine(int $enquiryId, float $quantity, string $plannedTotal): int
+    {
+        // project_elements hangs off a materials task, so the plan has the same
+        // shape production builds: materials task → element → material line.
+        $taskId = DB::table('enquiry_tasks')->insertGetId([
+            'project_enquiry_id' => $enquiryId, 'type' => 'materials',
+            'title' => 'Materials', 'status' => 'completed',
+            'created_by' => $this->user->id,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $materialsDataId = DB::table('task_materials_data')->insertGetId([
+            'enquiry_task_id' => $taskId,
+            'project_info' => json_encode(['projectId' => 'ENQ-' . $enquiryId]),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $elementId = DB::table('project_elements')->insertGetId([
+            'persistent_id' => (string) \Illuminate\Support\Str::uuid(),
+            'task_materials_data_id' => $materialsDataId,
+            'element_type' => 'stand',
+            'name' => 'Stand',
+            'category' => 'production',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $persistentId = (string) \Illuminate\Support\Str::uuid();
+
+        $materialLineId = DB::table('element_materials')->insertGetId([
+            'persistent_id' => $persistentId,
+            'project_element_id' => $elementId,
+            'description' => 'Budget-priced board',
+            'unit_of_measurement' => 'sheet',
+            'quantity' => $quantity,
+            'unit_cost' => 0,           // unpriced on the line, as in production
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        CostLine::create([
+            'ref' => 'CL-PLAN-' . uniqid(),
+            'nature' => CostLine::NATURE_PLANNED,
+            'status' => CostLine::STATUS_VERIFIED,
+            'amount' => $plannedTotal,
+            'tax_amount' => '0.00',
+            'net_amount' => $plannedTotal,
+            'base_net_amount' => $plannedTotal,
+            'fx_rate' => '1.00',
+            'project_enquiry_id' => $enquiryId,
+            'submitted_by_user_id' => $this->user->id,
+            'details' => ['budget_category' => 'materials', 'project_material_id' => $persistentId],
+        ]);
+
+        return $materialLineId;
+    }
+
     /** A real project row, so tests exercise the identity path production uses. */
     private function createProject(int $enquiryId, string $projectCode): int
     {
@@ -378,4 +441,66 @@ class StoresCostProducerTest extends TestCase
         $this->assertSame('8000.00', $original?->net_amount);
         $this->assertSame('-3000.00', $credit?->net_amount);
     }
+
+    public function test_a_stores_issue_records_the_element_it_served(): void
+    {
+        $enquiryId = $this->createEnquiry('WNG-08-2026-095');
+        $this->createProject($enquiryId, 'WNG-08-2026-095');
+
+        $material = $this->createMaterial('MDF 9mm Sheet', 1500.0);
+        $materialLineId = $this->budgetPricedLine($enquiryId, 4.0, '6000.00');
+
+        $log = InventoryLog::create([
+            'material_id' => $material->id,
+            'user_id' => $this->user->id,
+            'type' => 'check_out',
+            'batch_number' => 'ISS-ELEM-0001',
+            'quantity' => -1.00,
+            'balance_after' => 9.00,
+            'project_id' => $enquiryId,
+            'project_material_id' => $materialLineId,
+            'reference_no' => 'WNG-08-2026-095',
+            'recipient_name' => 'Site Worker',
+            'logged_at' => now(),
+        ]);
+
+        $line = $this->producer->postStockIssue($log);
+
+        // Without this the cost account can total materials but cannot say which
+        // part of the job consumed them — which is the question it is opened for.
+        $this->assertSame('Stand', $line?->details['element'] ?? null);
+    }
+
+    public function test_an_unbudgeted_issue_still_records_its_element(): void
+    {
+        $enquiryId = $this->createEnquiry('WNG-08-2026-096');
+        $this->createProject($enquiryId, 'WNG-08-2026-096');
+
+        $material = $this->createMaterial('Contingency Ply', 900.0);
+        $materialLineId = $this->budgetPricedLine($enquiryId, 4.0, '6000.00');
+
+        // A different material against the same project material line finds no
+        // planned counterpart, so it posts unbudgeted. That is exactly the spend
+        // worth grouping, so the element must be resolved directly rather than
+        // inherited — otherwise unplanned cost is the one thing that escapes the
+        // breakdown meant to catch it.
+        $log = InventoryLog::create([
+            'material_id' => $material->id,
+            'user_id' => $this->user->id,
+            'type' => 'check_out',
+            'batch_number' => 'ISS-ELEM-0002',
+            'quantity' => -2.00,
+            'balance_after' => 4.00,
+            'project_id' => $enquiryId,
+            'project_material_id' => $materialLineId,
+            'reference_no' => 'WNG-08-2026-096',
+            'recipient_name' => 'Site Worker',
+            'logged_at' => now(),
+        ]);
+
+        $line = $this->producer->postStockIssue($log);
+
+        $this->assertSame('Stand', $line?->details['element'] ?? null);
+    }
+
 }

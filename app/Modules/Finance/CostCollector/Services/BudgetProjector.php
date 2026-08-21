@@ -138,6 +138,19 @@ class BudgetProjector
                     details: array_filter([
                         'library_material_id' => $material['libraryMaterialId'] ?? $material['library_material_id'] ?? null,
                         'project_material_id' => $material['persistent_id'] ?? $material['persistentId'] ?? $material['id'] ?? null,
+                        // The element the material builds, kept as its own fact
+                        // rather than only as a prefix on the description. Cost
+                        // is read per element — "what did the stage cost?" — and
+                        // a name buried in free text cannot be grouped on.
+                        // Every downstream producer inherits it from here, the
+                        // same way `budget_category` travels.
+                        'element' => $elementName,
+                        // The material on its own, without the element prefix the
+                        // description carries for readability. Stored for the
+                        // same reason the element is: the account is read down to
+                        // "which material", and a name inside a sentence cannot
+                        // be grouped or totalled.
+                        'material' => $material['description'] ?? null,
                     ], fn ($value) => $value !== null && $value !== ''),
                 );
             })

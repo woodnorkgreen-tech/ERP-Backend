@@ -16,6 +16,49 @@ use Illuminate\Support\Facades\DB;
  */
 class CostAccountService
 {
+    /**
+     * Materials spend that names no element. Not an error — direct project
+     * purchases and older lines predate the element being carried — but it is
+     * labelled rather than hidden, because a growing bucket here means the
+     * element grouping is drifting away from what is actually being spent.
+     */
+    public const ELEMENT_UNASSIGNED = 'Unassigned';
+
+    /**
+     * How a material cost line is classified for grouping.
+     *
+     * Spend takes its element and material from the budget line it consumes, and
+     * only falls back to its own when it consumes none. That is what makes a
+     * rename work: correcting "BOOTH1" to "Booth 1" on the specification
+     * re-projects the budget line, and every cost already charged against it
+     * follows — where a snapshot taken at posting time would split one stand's
+     * history into two elements that never reconcile again.
+     */
+    private const ELEMENT_EXPR = "COALESCE(
+        JSON_UNQUOTE(JSON_EXTRACT(plan.details, '$.element')),
+        JSON_UNQUOTE(JSON_EXTRACT(cost_lines.details, '$.element')),
+        ?
+    )";
+
+    private const MATERIAL_EXPR = "COALESCE(
+        JSON_UNQUOTE(JSON_EXTRACT(plan.details, '$.material')),
+        JSON_UNQUOTE(JSON_EXTRACT(cost_lines.details, '$.material'))
+    )";
+
+    /**
+     * A cost's own movement and return kind. Never inherited from the budget
+     * line: the plan says what was intended, and whether a board came back is a
+     * fact about the movement, not the plan.
+     */
+    private const MOVEMENT_EXPR = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(cost_lines.details, '$.movement')), '')";
+
+    private const RETURN_KIND_EXPR = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(cost_lines.details, '$.return_kind')), 'whole_item')";
+
+    private const LIBRARY_ID_EXPR = "COALESCE(
+        JSON_UNQUOTE(JSON_EXTRACT(plan.details, '$.library_material_id')),
+        JSON_UNQUOTE(JSON_EXTRACT(cost_lines.details, '$.library_material_id'))
+    )";
+
     private const NATURE_SUMS = '
         SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS planned,
         SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS committed,
@@ -245,10 +288,128 @@ class CostAccountService
             ],
             'totals' => $this->totals($categories),
             'categories' => $categories,
+            'elements' => $this->elementBreakdown($enquiry),
             'unbudgeted' => $this->unbudgeted($enquiry),
             'exceptions' => $this->exceptionSpend($enquiry),
             'coverage' => $this->coverage($enquiry),
         ];
+    }
+
+    /**
+     * Every verified material line on a project, joined to the budget line it
+     * consumes so classification can be read from the plan first.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<CostLine>
+     */
+    private function materialLinesWithClassification(ProjectEnquiry $enquiry)
+    {
+        return CostLine::query()
+            ->leftJoin('cost_lines AS plan', 'plan.id', '=', 'cost_lines.consumes_line_id')
+            ->where('cost_lines.project_enquiry_id', $enquiry->id)
+            ->where('cost_lines.status', CostLine::STATUS_VERIFIED)
+            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(cost_lines.details, '$.budget_category')) = 'materials'");
+    }
+
+    /**
+     * Materials budget against materials spend, per project element.
+     *
+     * A category total answers "what did materials cost?" — useful, but nobody
+     * builds a category. They build a reception desk, a stage, a backdrop, and
+     * that is the unit a project manager plans, buys and is asked about. The
+     * element was already the shape of the materials list and the budget; it was
+     * only the cost account that flattened it away.
+     *
+     * Materials only: labour, expenses and logistics are flat by nature and have
+     * no element to group on.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function elementBreakdown(ProjectEnquiry $enquiry): array
+    {
+        $rows = $this->materialLinesWithClassification($enquiry)
+            ->selectRaw(
+                self::ELEMENT_EXPR . ' AS element, '
+                . self::MATERIAL_EXPR . ' AS material, '
+                . self::LIBRARY_ID_EXPR . ' AS library_material_id, '
+                . 'cost_lines.nature, '
+                . 'SUM(cost_lines.net_amount) AS total, '
+                . 'SUM(CASE WHEN cost_lines.nature <> ? AND cost_lines.consumes_line_id IS NULL '
+                . '    THEN cost_lines.net_amount ELSE 0 END) AS unbudgeted, '
+                // What went out to the project, before anything came back. The
+                // net alone cannot say whether a material cost less because it
+                // was bought well or because half of it came back.
+                . 'SUM(CASE WHEN ' . self::MOVEMENT_EXPR . " <> 'return_credit' "
+                . '    THEN cost_lines.net_amount ELSE 0 END) AS issued, '
+                // Unused stock handed straight back: the project no longer needs
+                // it and its requirement reopens.
+                . 'SUM(CASE WHEN ' . self::MOVEMENT_EXPR . " = 'return_credit' "
+                . '    AND ' . self::RETURN_KIND_EXPR . " <> 'recovered_offcut' "
+                . '    THEN cost_lines.net_amount ELSE 0 END) AS returned, '
+                // The usable remnant of a board the project did consume. It
+                // reduces cost but owes the project nothing, which is exactly why
+                // it must not be read as a return.
+                . 'SUM(CASE WHEN ' . self::MOVEMENT_EXPR . " = 'return_credit' "
+                . '    AND ' . self::RETURN_KIND_EXPR . " = 'recovered_offcut' "
+                . '    THEN cost_lines.net_amount ELSE 0 END) AS offcut_recovered, '
+                . 'COUNT(*) AS line_count',
+                [self::ELEMENT_UNASSIGNED, CostLine::NATURE_PLANNED],
+            )
+            ->groupBy('element', 'material', 'library_material_id', 'cost_lines.nature')
+            ->get();
+
+        // A catalogue id is the stronger identity — two elements can order the
+        // same board under slightly different wording — but plenty of lines carry
+        // only a name, so the name keys those.
+        $keyOf = fn ($row) => filled($row->library_material_id)
+            ? 'lib:' . $row->library_material_id
+            : 'name:' . mb_strtolower(trim((string) ($row->material ?? '')));
+
+        return $rows->groupBy('element')->map(function ($elementRows) use ($keyOf) {
+            return $elementRows->groupBy($keyOf)->map(function ($group) {
+                $of = fn (string $nature) => (string) number_format(
+                    (float) $group->where('nature', $nature)->sum('total'), 2, '.', ''
+                );
+
+                $planned = $of(CostLine::NATURE_PLANNED);
+                $spent = bcadd(
+                    bcadd($of(CostLine::NATURE_ACTUAL), $of(CostLine::NATURE_ACCRUED), 2),
+                    $of(CostLine::NATURE_COMMITTED),
+                    2,
+                );
+
+                $named = $group->first(fn ($row) => filled($row->material));
+                $sum = fn (string $column) => (string) number_format(
+                    (float) $group->sum(fn ($row) => (float) $row->{$column}), 2, '.', ''
+                );
+
+                // Credits are stored negative. Reported as the positive amounts
+                // they represent, because "returned −1,500" reads as a deduction
+                // from a deduction and nobody parses it correctly at a glance.
+                $returned = bcmul($sum('returned'), '-1', 2);
+                $offcut = bcmul($sum('offcut_recovered'), '-1', 2);
+
+                return [
+                    'material' => $named->material ?? 'Unnamed material',
+                    'library_material_id' => filled($group->first()->library_material_id)
+                        ? (int) $group->first()->library_material_id
+                        : null,
+                    'planned' => $planned,
+                    // issued − returned − offcut === spent, so the row shows its
+                    // own arithmetic rather than a net figure the reader has to
+                    // take on trust.
+                    'issued' => $sum('issued'),
+                    'returned' => $returned,
+                    'offcut_recovered' => $offcut,
+                    'has_offcut' => bccomp($offcut, '0.00', 2) !== 0,
+                    'spent' => $spent,
+                    'unbudgeted' => $sum('unbudgeted'),
+                    'remaining' => bcsub($planned, $spent, 2),
+                    'utilisation_percent' => bccomp($planned, '0.00', 2) === 1
+                        ? round((float) bcdiv($spent, $planned, 4) * 100, 1)
+                        : null,
+                ];
+            })->sortByDesc(fn ($row) => (float) $row['planned'])->values()->all();
+        })->all();
     }
 
     /**
@@ -282,11 +443,64 @@ class CostAccountService
             ->orderByDesc('net_amount')
             ->get();
 
+        $planned = $lines->where('nature', CostLine::NATURE_PLANNED)->values();
+        $spend = $lines->where('nature', '!=', CostLine::NATURE_PLANNED)->values();
+
         return [
             'category' => $category,
-            'planned' => $lines->where('nature', CostLine::NATURE_PLANNED)->values(),
-            'spend' => $lines->where('nature', '!=', CostLine::NATURE_PLANNED)->values(),
+            'planned' => $planned,
+            'spend' => $spend,
+            // Materials are read per element, so the drill-down offers the same
+            // shape as the summary above it rather than one long flat list the
+            // reader has to re-group in their head. Other categories are flat by
+            // nature and get no grouping.
+            'elements' => $category === 'materials'
+                ? $this->groupLinesByElement($planned, $spend)
+                : [],
         ];
+    }
+
+    /**
+     * Pair each element's budget lines with the spend that claimed them.
+     *
+     * @param  \Illuminate\Support\Collection<int, CostLine>  $planned
+     * @param  \Illuminate\Support\Collection<int, CostLine>  $spend
+     * @return array<int, array<string, mixed>>
+     */
+    private function groupLinesByElement($planned, $spend): array
+    {
+        // Same rule as the summary above: the budget line's classification wins,
+        // so a renamed element does not split into two.
+        $plannedElements = $planned->pluck('details.element', 'id');
+
+        $elementOf = function (CostLine $line) use ($plannedElements) {
+            $fromPlan = $line->consumes_line_id
+                ? $plannedElements->get($line->consumes_line_id)
+                : null;
+
+            return filled($fromPlan)
+                ? (string) $fromPlan
+                : (filled($line->details['element'] ?? null)
+                    ? (string) $line->details['element']
+                    : self::ELEMENT_UNASSIGNED);
+        };
+
+        $plannedByElement = $planned->groupBy($elementOf);
+        $spendByElement = $spend->groupBy($elementOf);
+
+        return $plannedByElement->keys()
+            ->merge($spendByElement->keys())
+            ->unique()
+            ->sort()
+            ->map(fn (string $element) => [
+                'element' => $element,
+                'planned' => $plannedByElement->get($element, collect())->values(),
+                'spend' => $spendByElement->get($element, collect())->values(),
+                'planned_total' => $this->money($plannedByElement->get($element, collect())->sum('net_amount')),
+                'spend_total' => $this->money($spendByElement->get($element, collect())->sum('net_amount')),
+            ])
+            ->values()
+            ->all();
     }
 
     /** @return array<int, array<string, mixed>> */

@@ -48,6 +48,7 @@ class FinanceServiceProvider extends ServiceProvider
                 \App\Modules\Finance\CostCollector\Console\BackfillPettyCashCostsCommand::class,
                 \App\Modules\Finance\CostCollector\Console\AuditCostIdentityCommand::class,
                 \App\Modules\Finance\CostCollector\Console\RepairCostLineDetailCommand::class,
+                \App\Modules\Finance\CostCollector\Console\BackfillCostLineElementCommand::class,
                 \App\Modules\Finance\CostCollector\Console\RepostMisattributedStoresCostsCommand::class,
                 \App\Modules\Finance\Console\ClosePeriodCommand::class,
                 \App\Modules\Finance\Console\BackfillTaxDocumentCommand::class,

@@ -242,8 +242,69 @@ class CostCollectorService implements CollectsCost
 
             $created->forceFill(['ref' => 'CL-' . str_pad((string) $created->id, 7, '0', STR_PAD_LEFT)])->save();
 
+            $this->reclassifyLineage($created);
+
             return $created;
         });
+    }
+
+    /**
+     * Carry a revised budget line's classification back over its own history.
+     *
+     * A cost stays linked to the exact budget version it was approved against —
+     * that link is the audit trail and is deliberately not moved. But the
+     * element and material on it are labels, not financial facts, and leaving
+     * them frozen meant correcting an element's name split one stand into two on
+     * the cost account: the new budget under "Booth 1", every shilling already
+     * spent under "BOOTH1", reconciling to nothing. The correction looked like
+     * it had caused a problem.
+     *
+     * Keyed on the project material line, which is stable across every revision,
+     * so a material re-priced three times still has one history.
+     */
+    private function reclassifyLineage(CostLine $line): void
+    {
+        $projectMaterialId = $line->details['project_material_id'] ?? null;
+
+        $classification = array_filter([
+            'element' => $line->details['element'] ?? null,
+            'material' => $line->details['material'] ?? null,
+        ], fn ($value) => $value !== null && $value !== '');
+
+        if (blank($projectMaterialId) || $classification === []) {
+            return;
+        }
+
+        $lineage = CostLine::query()
+            ->where('project_enquiry_id', $line->project_enquiry_id)
+            ->where('nature', CostLine::NATURE_PLANNED)
+            ->whereRaw(
+                "JSON_UNQUOTE(JSON_EXTRACT(details, '$.project_material_id')) = ?",
+                [(string) $projectMaterialId],
+            )
+            ->pluck('id');
+
+        if ($lineage->isEmpty()) {
+            return;
+        }
+
+        $stale = CostLine::query()
+            ->where(fn ($q) => $q->whereIn('id', $lineage)->orWhereIn('consumes_line_id', $lineage))
+            ->where('id', '!=', $line->id)
+            ->get();
+
+        foreach ($stale as $row) {
+            $details = $row->details ?? [];
+
+            $unchanged = collect($classification)
+                ->every(fn ($value, $key) => ($details[$key] ?? null) === $value);
+
+            if ($unchanged) {
+                continue;
+            }
+
+            $row->forceFill(['details' => [...$details, ...$classification]])->save();
+        }
     }
 
     /** @param array<string, mixed> $resolved */

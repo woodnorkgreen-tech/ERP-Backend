@@ -104,6 +104,12 @@ class CostLineResource extends JsonResource
                 'budgeted' => $this->consumes_line_budgeted,
             ]),
             'unbudgeted_reason' => $this->details['unbudgeted_reason'] ?? null,
+            // The project element this cost belongs to, published as its own
+            // field. Clients used to recover it by splitting the description on
+            // an em dash, which only ever worked for budget lines — spend lines
+            // describe a movement, not an element, so all actual cost showed as
+            // belonging to nothing.
+            'element' => $this->details['element'] ?? null,
             'budget_remaining_before' => $this->budget_remaining_before,
             'budget_remaining_after' => $this->budget_remaining_after,
 
