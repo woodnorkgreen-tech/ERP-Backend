@@ -24,6 +24,7 @@ use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 use App\Constants\Permissions;
+use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use Spatie\Permission\Models\Permission;
 
 class ProjectWorkflowContractsTest extends TestCase
@@ -46,7 +47,19 @@ class ProjectWorkflowContractsTest extends TestCase
         ]);
         $task = $this->task($enquiry, 'procurement');
 
-        $result = app(ProjectGovernanceService::class)->evaluateTask($task);
+        // The deposit gate moved off individual tasks and onto completing the
+        // project: work may start on an under-funded job, it may not be closed
+        // out as delivered. Evaluating the task therefore authorizes.
+        $this->assertTrue(
+            app(ProjectGovernanceService::class)->evaluateTask($task)->isAuthorized(),
+            'Task-level evaluation should no longer apply the finance gate.',
+        );
+
+        // The gate itself still refuses, where CompleteProjectAction consults it.
+        $result = app(ProjectGovernanceService::class)->checkGate($enquiry, 'financial', [
+            'task_id' => $task->id,
+            'task_type' => $task->type,
+        ]);
 
         $this->assertFalse($result->isAuthorized());
         $this->assertStringContainsString('Financial Gate Locked', $result->getMessage());
@@ -63,11 +76,12 @@ class ProjectWorkflowContractsTest extends TestCase
                 'workflow_preset_type' => $preset,
                 'client_approved_quote' => 1000,
             ]);
-            $task = $this->task($enquiry, 'production');
-
-            $result = app(ProjectGovernanceService::class)->evaluateTask($task);
+            $result = app(ProjectGovernanceService::class)->checkGate($enquiry, 'financial');
 
             $this->assertTrue($result->isAuthorized(), "Expected {$preset} to bypass finance gate.");
+            // Named, not merely allowed: a project that passes because nobody
+            // owes anything must be distinguishable from one that passed because
+            // the deposit landed.
             $this->assertSame('Internal/Sponsorship Bypass', $result->context['exemption']);
         }
     }
@@ -803,6 +817,7 @@ class ProjectWorkflowContractsTest extends TestCase
                     'budget_item_id' => 'material-v2',
                     'budget_item_persistent_id' => 'material-persistent',
                     'material_id' => null,
+                    'expense_code_id' => $this->expenseCode()->id,
                     'custom_description' => 'Approved Truss',
                     'quantity' => 5,
                     'unit_price' => 100,
@@ -903,6 +918,7 @@ class ProjectWorkflowContractsTest extends TestCase
                     'budget_item_id' => 'material-v2',
                     'budget_item_persistent_id' => 'material-persistent',
                     'material_id' => null,
+                    'expense_code_id' => $this->expenseCode()->id,
                     'custom_description' => 'Approved Truss',
                     'quantity' => 5,
                     'unit_price' => 100,
@@ -1004,6 +1020,28 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('data.procurementItems.0.procurementLinks.0.receiptStatus', 'received')
             ->assertJsonPath('data.procurementItems.0.operationalSync.receivedQuantity', 5)
             ->assertJsonPath('data.budgetSummary.operationalSync.receivedQuantity', 5);
+    }
+
+    /**
+     * A code to charge a project requisition to.
+     *
+     * Project requisitions must name an expense code — that is what puts the
+     * spend in the cost ledger under something rather than nowhere — so a
+     * payload without one is not a requisition the app would accept.
+     */
+    private function expenseCode(): ExpenseCode
+    {
+        return ExpenseCode::firstOrCreate(
+            ['code' => 'WFC-001'],
+            [
+                'accounting_class' => 'Direct project cost',
+                'expense_family' => 'Direct materials',
+                'expense_type' => 'Project material',
+                'job_id_rule' => ExpenseCode::JOB_OPTIONAL,
+                'cash_flow_class' => 'operating',
+                'is_active' => true,
+            ],
+        );
     }
 
     private function user(?string $role = null): User
