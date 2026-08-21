@@ -364,8 +364,8 @@ class CostAccountService
             ? 'lib:' . $row->library_material_id
             : 'name:' . mb_strtolower(trim((string) ($row->material ?? '')));
 
-        return $rows->groupBy('element')->map(function ($elementRows) use ($keyOf) {
-            return $elementRows->groupBy($keyOf)->map(function ($group) {
+        return $rows->groupBy('element')->map(function ($elementRows, $element) use ($keyOf) {
+            $materials = $elementRows->groupBy($keyOf)->map(function ($group) {
                 $of = fn (string $nature) => (string) number_format(
                     (float) $group->where('nature', $nature)->sum('total'), 2, '.', ''
                 );
@@ -409,7 +409,39 @@ class CostAccountService
                         : null,
                 ];
             })->sortByDesc(fn ($row) => (float) $row['planned'])->values()->all();
-        })->all();
+
+            // The element's own figures come from its rows, not from summing the
+            // material rows above: the materials are grouped by catalogue
+            // identity, and a nature split has to survive that grouping to be
+            // reported here at all.
+            $of = fn (string $nature) => (string) number_format(
+                (float) $elementRows->where('nature', $nature)->sum('total'), 2, '.', ''
+            );
+
+            $planned = $of(CostLine::NATURE_PLANNED);
+            $committed = $of(CostLine::NATURE_COMMITTED);
+            $accrued = $of(CostLine::NATURE_ACCRUED);
+            $actual = $of(CostLine::NATURE_ACTUAL);
+            $spent = bcadd(bcadd($actual, $accrued, 2), $committed, 2);
+
+            return [
+                'element' => (string) $element,
+                'planned' => $planned,
+                'committed' => $committed,
+                'accrued' => $accrued,
+                'actual' => $actual,
+                'spent' => $spent,
+                'unbudgeted' => (string) number_format(
+                    (float) $elementRows->sum(fn ($row) => (float) $row->unbudgeted), 2, '.', ''
+                ),
+                'remaining' => bcsub($planned, $spent, 2),
+                'utilisation_percent' => bccomp($planned, '0.00', 2) === 1
+                    ? round((float) bcdiv($spent, $planned, 4) * 100, 1)
+                    : null,
+                'line_count' => (int) $elementRows->sum(fn ($row) => (int) $row->line_count),
+                'materials' => $materials,
+            ];
+        })->sortByDesc(fn (array $row) => (float) $row['planned'])->values()->all();
     }
 
     /**
