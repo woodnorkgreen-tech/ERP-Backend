@@ -35,6 +35,10 @@ Route::apiResource('materials', MaterialController::class);
 
 // Categories
 Route::get('categories/tree',    [CategoryController::class, 'tree']);
+Route::get('categories/{id}/schema', [CategoryController::class, 'schema']);
+Route::post('categories',        [CategoryController::class, 'store']);
+Route::put('categories/{id}',    [CategoryController::class, 'update']);
+Route::post('categories/{id}/merge', [CategoryController::class, 'merge']);
 Route::get('categories/suggest-code', [CategoryController::class, 'suggestCode']);
 Route::get('categories',         [CategoryController::class, 'index']);
 
