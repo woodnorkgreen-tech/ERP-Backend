@@ -26,20 +26,27 @@ class StoreMaterialRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'workstation_id' => 'required|exists:workstations,id',
-            'item_type_id' => 'required|integer|exists:material_item_types,id',
-            'material_code' => 'required|string|max:100|unique:library_materials,material_code',
+            // Two answers are genuinely required to name a thing: what it is
+            // called, and what kind of thing it is. Everything below was
+            // mandatory here until the governance set moved to activation —
+            // where it is checked by MaterialCompleteness, at the only moment
+            // being wrong actually costs anything.
             'material_name' => 'required|string|max:255',
+            'material_category_id' => 'required|integer|exists:material_categories,id',
+
+            'workstation_id' => 'nullable|exists:workstations,id',
+            'item_type_id' => 'nullable|integer|exists:material_item_types,id',
+            // Generated from the category when left blank.
+            'material_code' => 'nullable|string|max:100|unique:library_materials,material_code',
             'brand_manufacturer' => 'nullable|string|max:150',
             'manufacturer_part_number' => 'nullable|string|max:150',
             'alternative_item_name' => 'nullable|string|max:255',
             'category' => 'nullable|string|max:100',
             'subcategory' => 'nullable|string|max:100',
             'material_type'       => 'nullable|in:consumable,reusable',
-            'material_category_id'=> 'required|integer|exists:material_categories,id',
             'item_status' => ['sometimes', Rule::in(MaterialControl::STATUSES)],
-            'issue_disposition' => ['required', Rule::in(MaterialControl::DISPOSITIONS)],
-            'tracking_mode' => ['required', Rule::in(MaterialControl::TRACKING_MODES)],
+            'issue_disposition' => ['nullable', Rule::in(MaterialControl::DISPOSITIONS)],
+            'tracking_mode' => ['nullable', Rule::in(MaterialControl::TRACKING_MODES)],
             'is_hazardous' => 'sometimes|boolean',
             'is_serialized' => 'sometimes|boolean',
             'is_batch_controlled' => 'sometimes|boolean',
@@ -48,10 +55,13 @@ class StoreMaterialRequest extends FormRequest
             'minimum_reusable_length_mm' => 'nullable|numeric|min:0',
             'minimum_reusable_width_mm' => 'nullable|numeric|min:0',
             'minimum_reusable_area_m2' => 'nullable|numeric|min:0',
-            'unit_of_measure' => 'required|string|max:50',
-            'base_uom_id' => 'required|integer|exists:units_of_measure,id',
+            'unit_of_measure' => 'nullable|string|max:50',
+            'base_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'purchase_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'issue_uom_id' => 'required|integer|exists:units_of_measure,id',
+            'issue_uom_id' => 'nullable|integer|exists:units_of_measure,id',
+            'uom_conversions' => 'nullable|array|max:2',
+            'uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
+            'uom_conversions.*.factor' => 'required|numeric|gt:0',
             'valuation_method' => 'sometimes|in:FIFO,Landed Cost,Weighted Average',
             'revision_version' => 'sometimes|string|max:20',
             'effective_date' => 'nullable|date',

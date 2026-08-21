@@ -27,6 +27,10 @@ Route::get('reference/item-types', [ReferenceDataController::class, 'itemTypes']
 Route::get('reference/units-of-measure', [ReferenceDataController::class, 'unitsOfMeasure']);
 
 // Materials
+// Specific routes before apiResource so /materials/{id} never swallows them.
+Route::get('materials/incomplete', [MaterialController::class, 'incomplete']);
+Route::post('materials/bulk-controls', [MaterialController::class, 'bulkControls']);
+Route::post('materials/{id}/activate', [MaterialController::class, 'activate']);
 Route::get('materials/trashed', [MaterialController::class, 'trashed']);
 Route::post('materials/{id}/restore', [MaterialController::class, 'restore']);
 Route::delete('materials/{id}/force', [MaterialController::class, 'forceDelete']);

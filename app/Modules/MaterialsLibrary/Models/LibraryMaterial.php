@@ -94,11 +94,59 @@ class LibraryMaterial extends Model
      * of materials is serialized — the category fallback path would otherwise
      * lazy-load once per row.
      */
-    protected $appends = ['board_trackable'];
+    protected $appends = ['board_trackable', 'stock_handling', 'handling_label'];
 
     public function getBoardTrackableAttribute(): bool
     {
         return $this->isBoardTrackable();
+    }
+
+    /**
+     * How Stores physically handles this item.
+     *
+     * This used to be computed independently in LibraryMaterialResource and in
+     * ProcurementStoresController::inventory — and the two disagreed: one keyed
+     * off issue_disposition, the other off the legacy material_type projection,
+     * which reads 'reusable' for both returnable and recoverable_remainder. The
+     * same item could therefore be a "reusable item" in Stores and a plain
+     * quantity in the library. One definition, appended, ends that.
+     */
+    public function getStockHandlingAttribute(): string
+    {
+        if ($this->isBoardTrackable()) {
+            return 'individual_board';
+        }
+
+        return match ($this->effectiveDisposition()) {
+            'returnable' => 'reusable_item',
+            'recoverable_remainder' => 'recoverable_item',
+            default => 'quantity',
+        };
+    }
+
+    /**
+     * The same answer in the words the registration form uses, so the library
+     * table, the Stores inventory and the form never describe one item three
+     * different ways.
+     */
+    public function getHandlingLabelAttribute(): string
+    {
+        return match ($this->stock_handling) {
+            'individual_board' => 'Board — tracked individually',
+            'reusable_item' => 'Comes back',
+            'recoverable_item' => 'Offcut is kept',
+            default => 'Used up',
+        };
+    }
+
+    /**
+     * Disposition with the legacy fallback applied, so rows predating the
+     * control columns still classify the way the rest of the system reads them.
+     */
+    public function effectiveDisposition(): string
+    {
+        return $this->issue_disposition
+            ?: ($this->material_type === 'reusable' ? 'returnable' : 'consumed');
     }
 
     /**
@@ -234,6 +282,44 @@ class LibraryMaterial extends Model
     }
 
     /**
+     * The SQL form of isBoardTrackable(), with the same precedence.
+     *
+     * MaterialController filtered on `material_type = reusable` AND an eligible
+     * category name, which is only the *fallback* half of the rule. An item
+     * configured through the form as a measured, recoverable piece is board
+     * tracked whatever its category is called — so the list and the behaviour
+     * would have disagreed the first time someone created a board outside the
+     * three seeded category names.
+     */
+    public function scopeBoardTrackable($query, bool $trackable = true)
+    {
+        $eligible = config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']);
+
+        $matches = function ($scope) use ($eligible) {
+            $scope->where(function ($governed) {
+                $governed->whereNotNull('tracking_mode')
+                    ->where('tracking_mode', 'dimension_piece')
+                    ->where('issue_disposition', 'recoverable_remainder');
+            })->orWhere(function ($legacy) use ($eligible) {
+                // Only rows with no tracking_mode fall back to category names.
+                $legacy->whereNull('tracking_mode')
+                    ->where('material_type', 'reusable')
+                    ->where(function ($category) use ($eligible) {
+                        $category->whereIn('category', $eligible)
+                            ->orWhereHas('materialCategory', function ($node) use ($eligible) {
+                                $node->whereIn('name', $eligible)
+                                    ->orWhereHas('parent', fn ($parent) => $parent->whereIn('name', $eligible));
+                            });
+                    });
+            });
+        };
+
+        return $trackable
+            ? $query->where($matches)
+            : $query->whereNot($matches);
+    }
+
+    /**
      * Whether this catalogue item must use the individual board lifecycle.
      *
      * `material_type = reusable` only describes whether an item is expected back;
@@ -267,7 +353,6 @@ class LibraryMaterial extends Model
 
     public function expectedUsageType(): string
     {
-        return MaterialControl::legacyUsageType($this->issue_disposition
-            ?: ($this->material_type === 'reusable' ? 'returnable' : 'consumed'));
+        return MaterialControl::legacyUsageType($this->effectiveDisposition());
     }
 }
