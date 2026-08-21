@@ -49,6 +49,11 @@ class GoodsReceiptNoteItem extends Model
         return $this->belongsTo(PurchaseOrderItem::class);
     }
 
+    public function inspection()
+    {
+        return $this->hasOne(GoodsReceiptInspection::class);
+    }
+
     // No need for direct material relationship
     // Access material through: $grnItem->purchaseOrderItem->material
 }

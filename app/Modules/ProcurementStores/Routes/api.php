@@ -9,6 +9,7 @@ use App\Modules\ProcurementStores\Controllers\BillController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
 use App\Modules\ProcurementStores\Controllers\BoardController;
 use App\Modules\ProcurementStores\Controllers\BoardRequestController;
+use App\Modules\ProcurementStores\Controllers\GoodsReceiptInspectionController;
 
 // apiResource, not resource: `create` and `edit` return HTML form scaffolding,
 // which no controller here implements and no client asks for. Registering them
@@ -31,6 +32,8 @@ Route::get('/finance-sync-exceptions', [ProcurementStoresController::class, 'fin
 Route::post('/finance-sync-exceptions/{inventoryLog}/retry', [ProcurementStoresController::class, 'retryFinanceSync']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [ProcurementStoresController::class, 'resolveFinanceValuation']);
 Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'destroyLog']);
+Route::get('/goods-receipt-inspections', [GoodsReceiptInspectionController::class, 'index']);
+Route::post('/goods-receipt-inspections/{item}/resolve', [GoodsReceiptInspectionController::class, 'resolve']);
 
 // Suppliers
 Route::post('/search/suppliers', [SupplierController::class, 'search']);

@@ -52,6 +52,7 @@ class ProcurementCostProducer
                 description: $description,
                 details: array_filter([
                     'budget_category' => $planned?->details['budget_category'] ?? null,
+                    'element' => $planned?->details['element'] ?? null,
                     'po_number' => $po->po_number,
                     'quantity' => $item->quantity,
                     'unit_price' => $item->unit_price,
@@ -71,6 +72,7 @@ class ProcurementCostProducer
             'purchaseOrder.supplier',
             'purchaseOrder.requisition',
             'items.purchaseOrderItem.requisitionItem.expenseCode',
+            'items.inspection',
         ])->findOrFail($goodsReceiptNoteId);
         $posted = 0;
 
@@ -78,7 +80,11 @@ class ProcurementCostProducer
             $poItem = $receiptItem->purchaseOrderItem;
             $reqItem = $poItem?->requisitionItem;
             $code = $reqItem?->expenseCode?->code;
-            if (! $poItem || ! $code || (float) $receiptItem->received_quantity <= 0) continue;
+            if ($receiptItem->stock_status === 'awaiting_inspection') continue;
+            $effectiveQuantity = $receiptItem->inspection
+                ? (float) $receiptItem->inspection->accepted_quantity
+                : (float) $receiptItem->received_quantity;
+            if (! $poItem || ! $code || $effectiveQuantity <= 0) continue;
 
             // An event retry is a no-op before it touches the active commitment.
             if (CostLine::where('source_type', GoodsReceiptNoteItem::class)
@@ -95,7 +101,7 @@ class ProcurementCostProducer
             }
 
             $planned = $this->plannedLine($reqItem);
-            $quantity = (string) $receiptItem->received_quantity;
+            $quantity = (string) $effectiveQuantity;
             $amount = bcmul($quantity, (string) $poItem->unit_price, 2);
             $this->collector->postFromSource(new CostContext(
                 expenseCode: $code, amount: $amount, nature: CostLine::NATURE_ACCRUED,
@@ -107,17 +113,25 @@ class ProcurementCostProducer
                 payeeName: $grn->purchaseOrder?->supplier?->supplier_name,
                 consumesLineId: $planned?->id,
                 description: $poItem->custom_description ?: "Accepted goods: {$grn->grn_number}",
-                details: [
+                details: array_filter([
                     'budget_category' => $planned?->details['budget_category'] ?? 'materials',
+                    'element' => $planned?->details['element'] ?? null,
                     'purchase_order_item_id' => $poItem->id,
                     'grn_number' => $grn->grn_number,
                     'quantity' => $quantity,
                     'unit_price' => $poItem->unit_price,
-                ],
+                    // Recorded so a later Stores issue of the same material can
+                    // find this accrual and relieve it. Without it the two
+                    // halves of the same delivery cannot be matched, and the job
+                    // carries both the receipt and the issue.
+                    'library_material_id' => $poItem->material_id,
+                ], fn ($value) => $value !== null),
             ));
 
-            $acceptedToDate = (string) GoodsReceiptNoteItem::where('purchase_order_item_id', $poItem->id)
-                ->where('accepted', true)->sum('received_quantity');
+            $acceptedToDate = (string) GoodsReceiptNoteItem::with('inspection')
+                ->where('purchase_order_item_id', $poItem->id)->where('accepted', true)->get()
+                ->sum(fn ($line) => $line->stock_status === 'awaiting_inspection' ? 0 : ($line->inspection
+                    ? (float) $line->inspection->accepted_quantity : (float) $line->received_quantity));
             $remaining = bcsub((string) $poItem->quantity, $acceptedToDate, 3);
             if (bccomp($remaining, '0', 3) === 1) {
                 $this->collector->postFromSource(new CostContext(
@@ -132,12 +146,13 @@ class ProcurementCostProducer
                     payeeName: $grn->purchaseOrder?->supplier?->supplier_name,
                     consumesLineId: $planned?->id,
                     description: "Unreceived balance after {$grn->grn_number}",
-                    details: [
+                    details: array_filter([
                         'budget_category' => $planned?->details['budget_category'] ?? 'materials',
+                        'element' => $planned?->details['element'] ?? null,
                         'purchase_order_item_id' => $poItem->id,
                         'quantity' => $remaining,
                         'unit_price' => $poItem->unit_price,
-                    ],
+                    ], fn ($value) => $value !== null),
                 ));
             }
             $posted++;

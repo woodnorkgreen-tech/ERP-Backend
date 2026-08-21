@@ -465,18 +465,19 @@ class ProcurementService
         // budget continuously.
         //
         // The provenance check below is the real gate: procurement only ever
-        // mirrors a budget built from an approved materials list, never an
+        // mirrors a budget built from the project's materials list, never an
         // ad-hoc one.
         //
         // `materials_imported_at` is the whole proof. It is written in exactly
-        // one place — BudgetService::syncFromApprovedMaterials — and only after
-        // ensureMaterialsApproved() has confirmed both Project Officer and
-        // Production sign-off. A budget cannot carry that timestamp without
-        // having come from an approved list.
+        // one place — BudgetService::syncFromMaterialsList — so a budget cannot
+        // carry that timestamp without having come from the materials list.
+        // Departmental sign-off is no longer part of this: it is recorded on the
+        // materials task for audit, and gating the chain on it only meant one
+        // added line stopped procurement until two people re-approved.
         if (!$budgetData->materials_imported_at) {
             throw new \DomainException(
-                'Cannot import procurement items: this project\'s budget has not pulled in the approved materials list yet. '
-                . 'Get the materials list approved by both the Project Officer and Production, then open the Budget task — '
+                'Cannot import procurement items: this project\'s budget has not pulled in the materials list yet. '
+                . 'Add the materials on the Materials task, then open the Budget task — '
                 . 'it imports on its own, and procurement follows within the same save.'
             );
         }
