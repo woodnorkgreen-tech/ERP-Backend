@@ -1382,10 +1382,11 @@ class MaterialsController extends Controller
             // point in the materials workflow that requires a reason — plain
             // saves are always free.
             $baseVersion = $materialsData->versions()->where('is_base', true)->latest('version_number')->first();
+            $changedSinceBase = $baseVersion && $this->materialsChangedSinceVersion($materialsData, $baseVersion);
+
             if (
                 $department === 'project_officer'
-                && $baseVersion
-                && $this->materialsChangedSinceVersion($materialsData, $baseVersion)
+                && $changedSinceBase
                 && !$request->filled('editReason')
             ) {
                 return response()->json([
@@ -1459,6 +1460,31 @@ class MaterialsController extends Controller
 
             // NEW: Handle Base Snapshot on First Approval
             $this->handleBaseSnapshotOnApproval($taskId);
+
+            // A re-approval that needed a reason is a revision, so record one.
+            // The reason was being written into the approval JSON and nowhere
+            // else: the audit trail said somebody explained a change, without
+            // holding the list they were explaining. The snapshot is taken after
+            // the approval is stored, so the version and the approval it belongs
+            // to describe the same moment.
+            if ($department === 'project_officer' && $changedSinceBase && $request->filled('editReason')) {
+                try {
+                    $this->internalCreateVersion(
+                        $taskId,
+                        'Revision - Re-approved after edits',
+                        $request->input('editReason'),
+                        false,
+                    );
+                } catch (\Exception $e) {
+                    // Never fail an approval over its own audit copy: the reason
+                    // is already recorded on the approval, and a missing snapshot
+                    // is visible in the version list.
+                    \Log::warning('Approval recorded but its revision snapshot failed', [
+                        'taskId' => $taskId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
 
             // Complete only after both approvals and all final synchronization
             // work have succeeded. A single approval must never close the task.
