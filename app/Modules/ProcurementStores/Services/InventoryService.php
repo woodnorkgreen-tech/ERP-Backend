@@ -188,7 +188,13 @@ class InventoryService
                 'entered_quantity' => $enteredUomId ? $enteredQuantity : null,
                 'entered_uom_id' => $enteredUomId,
                 'uom_conversion_factor' => $enteredUomId ? $conversionFactor : null,
-                'receipt_unit_cost' => $type === 'check_in' ? ($meta['receipt_unit_cost'] ?? null) : null,
+                // Freeze the value used when stock leaves Stores. Finance posts
+                // asynchronously, so reading the material's future average cost
+                // inside the queue would rewrite the economics of this issue.
+                'receipt_unit_cost' => $type === 'check_in'
+                    ? ($meta['receipt_unit_cost'] ?? null)
+                    : (in_array($type, ['check_out', 'issue', 'consumption', 'defective'], true)
+                        ? (float) $material->unit_cost : null),
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,
                 'project_material_id' => $meta['project_material_id'] ?? null,
