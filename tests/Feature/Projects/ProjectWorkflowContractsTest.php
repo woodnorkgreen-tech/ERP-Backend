@@ -36,6 +36,13 @@ class ProjectWorkflowContractsTest extends TestCase
         parent::setUp();
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        // Approving a purchase order posts a commitment, and a cost cannot be
+        // recorded into a month that does not exist. Production seeds a generous
+        // calendar; without it here the workflow this suite walks fails inside a
+        // listener, several layers from the endpoint under test.
+        $this->seed(\App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class);
+        $this->seed(\App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class);
     }
 
     public function test_external_financial_task_is_blocked_without_required_deposit(): void
@@ -1039,6 +1046,9 @@ class ProjectWorkflowContractsTest extends TestCase
                 'expense_type' => 'Project material',
                 'job_id_rule' => ExpenseCode::JOB_OPTIONAL,
                 'cash_flow_class' => 'operating',
+                // Receiving against the order accrues a cost, and the journal
+                // service refuses to guess a destination for a named code.
+                'default_debit_account_id' => \App\Modules\Finance\Models\ChartOfAccount::where('code', '1211')->value('id'),
                 'is_active' => true,
             ],
         );
