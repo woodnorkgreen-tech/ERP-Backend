@@ -9,6 +9,7 @@ use App\Modules\ProcurementStores\Controllers\BillController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
 use App\Modules\ProcurementStores\Controllers\BoardController;
 use App\Modules\ProcurementStores\Controllers\BoardRequestController;
+use App\Modules\ProcurementStores\Controllers\StockCountController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptInspectionController;
 
 // apiResource, not resource: `create` and `edit` return HTML form scaffolding,
@@ -32,6 +33,13 @@ Route::get('/finance-sync-exceptions', [ProcurementStoresController::class, 'fin
 Route::post('/finance-sync-exceptions/{inventoryLog}/retry', [ProcurementStoresController::class, 'retryFinanceSync']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [ProcurementStoresController::class, 'resolveFinanceValuation']);
 Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'destroyLog']);
+Route::get('/stock-counts', [StockCountController::class, 'index']);
+Route::post('/stock-counts', [StockCountController::class, 'store']);
+Route::get('/stock-counts/{stockCount}', [StockCountController::class, 'show']);
+Route::put('/stock-counts/{stockCount}', [StockCountController::class, 'update']);
+Route::post('/stock-counts/{stockCount}/submit', [StockCountController::class, 'submit']);
+Route::post('/stock-counts/{stockCount}/approve', [StockCountController::class, 'approve']);
+Route::post('/stock-counts/{stockCount}/reject', [StockCountController::class, 'reject']);
 Route::get('/goods-receipt-inspections', [GoodsReceiptInspectionController::class, 'index']);
 Route::post('/goods-receipt-inspections/{item}/resolve', [GoodsReceiptInspectionController::class, 'resolve']);
 
