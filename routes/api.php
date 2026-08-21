@@ -29,6 +29,7 @@ use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
+use App\Modules\Finance\PettyCash\Controllers\PettyCashReportController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashRequisitionController;
 use App\Modules\Teams\Controllers\TeamsTaskController;
 use App\Modules\Teams\Controllers\TeamMemberController;
@@ -982,6 +983,14 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('search', [PettyCashController::class, 'search']);
             Route::get('voucher', [PettyCashController::class, 'voucher']);
             Route::get('voucher/pdf', [PettyCashController::class, 'downloadVoucherPdf']);
+
+            // Reporting. PettyCashReportService carried seven report generators
+            // with no route reaching any of them, while the client's ReportsPanel
+            // called these two paths and got a 404 from both. Authorization is
+            // the `viewReports` ability, applied inside the controller.
+            Route::get('analytics', [PettyCashReportController::class, 'analytics']);
+            Route::get('reports/projects', [PettyCashReportController::class, 'projects']);
+            Route::get('export', [PettyCashReportController::class, 'export']);
 
             // Excel upload route
             Route::post('upload-excel', [PettyCashController::class, 'uploadExcel'])
