@@ -72,16 +72,21 @@ class ProjectElement extends Model
         'name',
         'persistent_id',
         'category',
+        'required_quantity',
+        'unit_of_measurement',
         'dimensions',
         'is_included',
         'notes',
+        'source_metadata',
         'sort_order'
     ];
 
     protected $casts = [
         'dimensions' => 'array',
         'is_included' => 'boolean',
-        'sort_order' => 'integer'
+        'required_quantity' => 'decimal:4',
+        'sort_order' => 'integer',
+        'source_metadata' => 'array'
     ];
 
     public function taskMaterialsData(): BelongsTo

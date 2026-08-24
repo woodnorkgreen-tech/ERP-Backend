@@ -14,6 +14,7 @@ use App\Modules\Finance\Services\JournalPostingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 class JournalPostingTest extends TestCase
@@ -102,16 +103,50 @@ class JournalPostingTest extends TestCase
 
         $this->actingAs($this->user, 'sanctum');
 
+        $liability = CostLine::create([
+            'ref' => 'CL-PAY-001',
+            'nature' => CostLine::NATURE_ACTUAL,
+            'status' => CostLine::STATUS_VERIFIED,
+            'amount' => '15000.00',
+            'tax_amount' => '0.00',
+            'net_amount' => '15000.00',
+            'base_net_amount' => '15000.00',
+            'fx_rate' => '1.00',
+            'accounting_period_id' => AccountingPeriod::forDate(now())->id,
+            'submitted_by_user_id' => $this->user->id,
+        ]);
+        $this->postingService->postCostLine($liability);
+
+        $this->getJson('/api/finance/spend-vouchers/eligible-liabilities')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $liability->id)
+            ->assertJsonPath('data.0.payable_amount', '15000.00');
+
         // Create Voucher
         $response = $this->postJson('/api/finance/spend-vouchers', [
             'type' => 'payment',
             'payee_name' => 'Test Supplier',
-            'total_amount' => 15000.00,
+            'total_amount' => 6000.00,
             'payment_source_id' => $source->id,
+            'allocations' => [['cost_line_id' => $liability->id, 'amount' => 6000.00]],
         ]);
 
         $response->assertStatus(201);
         $voucherId = $response->json('data.id');
+
+        $this->getJson('/api/finance/spend-vouchers/eligible-liabilities')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $liability->id)
+            ->assertJsonPath('data.0.allocated_amount', '6000.00')
+            ->assertJsonPath('data.0.remaining_amount', '9000.00');
+
+        $this->postJson('/api/finance/spend-vouchers', [
+            'type' => 'payment',
+            'payee_name' => 'Test Supplier',
+            'total_amount' => 10000.00,
+            'payment_source_id' => $source->id,
+            'allocations' => [['cost_line_id' => $liability->id, 'amount' => 10000.00]],
+        ])->assertStatus(422)->assertJsonPath('message', 'Allocation 10000 exceeds the remaining balance 9000.00 on CL-PAY-001.');
 
         // Approve Voucher
         $response = $this->actingAs($this->approver, 'sanctum')
@@ -128,8 +163,19 @@ class JournalPostingTest extends TestCase
         $this->assertDatabaseHas('journal_entries', [
             'spend_voucher_id' => $voucherId,
             'status' => 'posted',
-            'total_debit' => '15000.00',
-            'total_credit' => '15000.00',
+            'total_debit' => '6000.00',
+            'total_credit' => '6000.00',
+        ]);
+        $this->assertDatabaseHas('spend_voucher_allocations', [
+            'spend_voucher_id' => $voucherId,
+            'cost_line_id' => $liability->id,
+            'amount' => '6000.00',
+        ]);
+        $this->assertDatabaseHas('journal_lines', [
+            'journal_entry_id' => JournalEntry::where('spend_voucher_id', $voucherId)->value('id'),
+            'account_id' => ChartOfAccount::where('code', '2100')->value('id'),
+            'entry_type' => 'debit',
+            'amount' => '6000.00',
         ]);
 
         $this->assertDatabaseHas('hr_audit_logs', [
@@ -156,7 +202,7 @@ class JournalPostingTest extends TestCase
     {
         return SpendVoucher::create(array_merge([
             'voucher_no' => 'SV-' . uniqid(),
-            'type' => 'payment',
+            'type' => 'retirement',
             'status' => 'draft',
             'transacted_at' => now(),
             'posting_date' => now()->toDateString(),
@@ -277,7 +323,7 @@ class JournalPostingTest extends TestCase
         $this->actingAs($this->user, 'sanctum');
 
         $response = $this->postJson('/api/finance/spend-vouchers', [
-            'type' => 'payment',
+            'type' => 'retirement',
             'payee_name' => 'Test Supplier',
             'total_amount' => 1000.00,
         ]);
@@ -297,7 +343,7 @@ class JournalPostingTest extends TestCase
         $this->actingAs($this->user, 'sanctum');
 
         $voucherId = $this->postJson('/api/finance/spend-vouchers', [
-            'type' => 'payment',
+            'type' => 'retirement',
             'payee_name' => 'Test Supplier',
             'total_amount' => 1000.00,
         ])->assertStatus(201)->json('data.id');
@@ -349,7 +395,7 @@ class JournalPostingTest extends TestCase
 
         $voucher = SpendVoucher::create([
             'voucher_no' => 'SV-TEST-NO-GL',
-            'type' => 'payment',
+            'type' => 'advance',
             'status' => 'approved',
             'transacted_at' => now(),
             'posting_date' => now()->toDateString(),
@@ -387,5 +433,40 @@ class JournalPostingTest extends TestCase
                 'total_amount' => 1000,
             ])
             ->assertForbidden();
+    }
+
+    public function test_super_admin_can_post_a_voucher_they_requested_or_approved(): void
+    {
+        Role::findOrCreate('Super Admin', 'web');
+        $superAdmin = User::factory()->create(['is_active' => true]);
+        $superAdmin->assignRole('Super Admin');
+
+        $source = PaymentSource::create([
+            'name' => 'Admin Safe',
+            'code' => 'SAFE-ADMIN',
+            'type' => 'petty_cash',
+            'gl_account_id' => ChartOfAccount::where('code', '1030')->value('id'),
+            'is_active' => true,
+        ]);
+        $voucher = $this->voucher([
+            'voucher_no' => 'SV-SUPER-POST',
+            'type' => 'advance',
+            'status' => 'approved',
+            'payment_source_id' => $source->id,
+            'requester_user_id' => $superAdmin->id,
+            'approved_by' => $superAdmin->id,
+            'approved_at' => now(),
+        ]);
+
+        $this->actingAs($superAdmin, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucher->id}/post")
+            ->assertOk()
+            ->assertJsonPath('data.voucher.status', 'posted');
+
+        $this->assertDatabaseHas('hr_audit_logs', [
+            'action' => 'spend_voucher_posted',
+            'model_id' => $voucher->id,
+            'message' => 'Spend voucher SV-SUPER-POST posted to General Ledger. Separation-of-duties override used.',
+        ]);
     }
 }

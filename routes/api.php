@@ -31,6 +31,7 @@ use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashReportController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashRequisitionController;
+use App\Modules\Finance\PettyCash\Controllers\PettyCashOfflineBatchController;
 use App\Modules\Teams\Controllers\TeamsTaskController;
 use App\Modules\Teams\Controllers\TeamMemberController;
 use App\Constants\Permissions;
@@ -934,7 +935,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'store']);
             // Ahead of `{id}` so it is not resolved as a voucher id.
             Route::get('payment-sources', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'paymentSources']);
+            Route::get('eligible-liabilities', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'eligibleLiabilities']);
             Route::get('/{id}', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'show']);
+            Route::post('/{id}/cancel', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'cancel']);
             Route::post('/{id}/approve', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'approve']);
             Route::post('/{id}/post', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'post']);
         });
@@ -971,9 +974,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('direct-disbursement-requests', [PettyCashController::class, 'directRequests']);
             Route::post('direct-disbursement-requests/{id}/reject', [PettyCashController::class, 'rejectDirectRequest']);
             Route::get('disbursements/{id}', [PettyCashController::class, 'show']);
-            Route::put('disbursements/{id}', [PettyCashController::class, 'update']);
-            Route::delete('disbursements/{id}', [PettyCashController::class, 'destroy']);
-            Route::post('disbursements/bulk-delete', [PettyCashController::class, 'bulkDestroy']);
             Route::post('disbursements/{id}/void', [PettyCashController::class, 'void']);
             Route::post('transactions/{id}/archive', [PettyCashController::class, 'archive']);
             Route::post('transactions/{id}/archive-group', [PettyCashController::class, 'archiveGroup']);
@@ -1016,13 +1016,26 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             // called these two paths and got a 404 from both. Authorization is
             // the `viewReports` ability, applied inside the controller.
             Route::get('analytics', [PettyCashReportController::class, 'analytics']);
+            Route::get('custody', [PettyCashReportController::class, 'custody']);
+            Route::get('custody/statement', [PettyCashReportController::class, 'custodyStatement']);
+            Route::get('custody/top-ups/{id}', [PettyCashReportController::class, 'topUpCustody']);
+            Route::get('custody/top-ups/{id}/statement', [PettyCashReportController::class, 'topUpStatement']);
             Route::get('reports/projects', [PettyCashReportController::class, 'projects']);
             Route::get('export', [PettyCashReportController::class, 'export']);
 
-            // Excel upload route
-            Route::post('upload-excel', [PettyCashController::class, 'uploadExcel'])
+            // Offline capture is staged, validated, independently approved and
+            // only then posted as one transaction. The legacy direct importer
+            // remains unreachable so a spreadsheet can never mutate cash rows.
+            Route::post('upload-excel', [PettyCashOfflineBatchController::class, 'store'])
                 ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
-            Route::get('download-template', [PettyCashController::class, 'downloadTemplate']);
+            Route::get('download-template', [PettyCashOfflineBatchController::class, 'template'])
+                ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
+            Route::get('offline-batches', [PettyCashOfflineBatchController::class, 'index'])
+                ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
+            Route::get('offline-batches/{batch}', [PettyCashOfflineBatchController::class, 'show'])
+                ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
+            Route::post('offline-batches/{batch}/approve', [PettyCashOfflineBatchController::class, 'approve']);
+            Route::post('offline-batches/{batch}/reject', [PettyCashOfflineBatchController::class, 'reject']);
 
             // Statistics and validation routes
             Route::get('statistics', [PettyCashTopUpController::class, 'statistics']);

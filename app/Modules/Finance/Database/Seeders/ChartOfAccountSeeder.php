@@ -87,6 +87,7 @@ class ChartOfAccountSeeder extends Seeder
         ['2130', 'PAYE Payable',                       'liability', 'balance_sheet', 'credit', '2000', true],
         ['2140', 'Statutory Deductions Payable',       'liability', 'balance_sheet', 'credit', '2000', true],
         ['2150', 'Accrued Expenses',                   'liability', 'balance_sheet', 'credit', '2000', true],
+        ['2160', 'Net Payroll Payable',                'liability', 'balance_sheet', 'credit', '2000', true],
         ['2200', 'Client Deposits',                    'liability', 'balance_sheet', 'credit', '2000', true],
         ['2300', 'Loans Payable',                      'liability', 'balance_sheet', 'credit', null,   true],
 
@@ -130,6 +131,7 @@ class ChartOfAccountSeeder extends Seeder
         ['7300', 'Professional Fees – Finance, HR, IT, Legal', 'expense', 'opex', 'debit', '7000', true],
         ['7400', 'Office Transport',                   'expense', 'opex', 'debit', '7000', true],
         ['7500', 'Recruitment & Training',             'expense', 'opex', 'debit', '7000', true],
+        ['7550', 'Salaries & Wages',                   'expense', 'opex', 'debit', '7000', true],
         ['7600', 'Staff Welfare',                      'expense', 'opex', 'debit', '7000', true],
         ['7700', 'Marketing & Business Development',   'expense', 'opex', 'debit', '7000', true],
         ['7800', 'Bank & Mobile-money Charges',        'expense', 'opex', 'debit', '7000', true],

@@ -17,6 +17,7 @@ class PettyCashRequisitionItem extends Model
         'requisition_id',
         'description',
         'remarks',
+        'details',
         'amount',
         'payee_id',
         'payee_name',
@@ -27,6 +28,7 @@ class PettyCashRequisitionItem extends Model
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'details' => 'array',
     ];
 
     /**

@@ -7,6 +7,7 @@ use Carbon\Carbon;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
 use App\Modules\Finance\PettyCash\Exports\PettyCashTransactionsExport;
 use App\Modules\Finance\PettyCash\Services\PettyCashReportService;
+use App\Modules\Finance\PettyCash\Services\FundCustodyService;
 use Maatwebsite\Excel\Facades\Excel;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -31,6 +32,72 @@ use Illuminate\Http\Request;
 class PettyCashReportController extends Controller
 {
     public function __construct(private PettyCashReportService $reports) {}
+
+    public function custody(Request $request, FundCustodyService $custody): JsonResponse
+    {
+        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $validated = $request->validate([
+            'start_date' => ['nullable', 'date'],
+            'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
+        ]);
+        $start = Carbon::parse($validated['start_date'] ?? now()->startOfMonth())->startOfDay();
+        $end = Carbon::parse($validated['end_date'] ?? now())->endOfDay();
+
+        return response()->json(['success' => true, 'data' => $custody->overview($start, $end)]);
+    }
+
+    public function topUpCustody(int $id, FundCustodyService $custody): JsonResponse
+    {
+        $this->authorize('viewReports', PettyCashDisbursement::class);
+        return response()->json(['success' => true, 'data' => $custody->topUp($id)]);
+    }
+
+    public function custodyStatement(Request $request, FundCustodyService $custody)
+    {
+        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $validated = $request->validate([
+            'start_date' => ['nullable', 'date'],
+            'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
+        ]);
+        $start = Carbon::parse($validated['start_date'] ?? now()->startOfMonth())->startOfDay();
+        $end = Carbon::parse($validated['end_date'] ?? now())->endOfDay();
+        $report = $custody->overview($start, $end);
+
+        return response()->streamDownload(function () use ($report) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['PETTY CASH FUND CUSTODY STATEMENT']);
+            fputcsv($out, ['Period', $report['period']['start'].' to '.$report['period']['end']]);
+            foreach ($report['summary'] as $label => $value) fputcsv($out, [str_replace('_', ' ', strtoupper($label)), $value]);
+            fputcsv($out, []);
+            fputcsv($out, ['Funding batch', 'Date', 'Source', 'Reference', 'Description', 'Received', 'Consumed', 'Remaining', 'Utilization %', 'State']);
+            foreach ($report['batches'] as $batch) fputcsv($out, [
+                $batch['reference'], $batch['date'], $batch['source'], $batch['transaction_code'], $batch['description'],
+                $batch['received'], $batch['consumed'], $batch['remaining'], $batch['utilization_percentage'], $batch['state'],
+            ]);
+            fclose($out);
+        }, 'petty-cash-custody-'.$start->toDateString().'-'.$end->toDateString().'.csv', ['Content-Type' => 'text/csv']);
+    }
+
+    public function topUpStatement(int $id, FundCustodyService $custody)
+    {
+        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $report = $custody->topUp($id);
+
+        return response()->streamDownload(function () use ($report) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['TOP-UP CUSTODY STATEMENT', $report['reference']]);
+            fputcsv($out, ['Received', $report['received']]);
+            fputcsv($out, ['Consumed', $report['consumed']]);
+            fputcsv($out, ['Remaining', $report['remaining']]);
+            fputcsv($out, []);
+            fputcsv($out, ['Payment ID', 'Date', 'Receiver', 'Description', 'Classification', 'Project', 'Requisition ID', 'Amount', 'Transaction cost', 'Total consumed']);
+            foreach ($report['payments'] as $payment) fputcsv($out, [
+                $payment['disbursement_id'], $payment['date'], $payment['receiver'], $payment['description'], $payment['classification'],
+                $payment['project_name'], $payment['requisition_id'], $payment['amount'], $payment['transaction_cost'], $payment['total'],
+            ]);
+            fclose($out);
+        }, strtolower($report['reference']).'-statement.csv', ['Content-Type' => 'text/csv']);
+    }
 
     /**
      * Spend split by classification and by payment method.

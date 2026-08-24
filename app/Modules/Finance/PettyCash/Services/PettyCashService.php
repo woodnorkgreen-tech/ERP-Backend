@@ -74,8 +74,27 @@ class PettyCashService
         DB::beginTransaction();
 
         try {
+            $topUp = PettyCashTopUp::query()->lockForUpdate()->findOrFail($topUp->id);
             $oldAmount = (float) $topUp->amount;
             $newAmount = isset($data['amount']) ? (float) $data['amount'] : $oldAmount;
+            $consumed = round($oldAmount - (float) $topUp->remaining_balance, 2);
+
+            if ($newAmount < $consumed) {
+                throw new Exception('A top-up cannot be reduced below the KES '.number_format($consumed, 2).' already consumed.');
+            }
+
+            if ($consumed > 0) {
+                foreach (['payment_method', 'transaction_code'] as $immutableField) {
+                    if (array_key_exists($immutableField, $data)
+                        && (string) $data[$immutableField] !== (string) $topUp->{$immutableField}) {
+                        throw new Exception('Funding date, source and reference are immutable after a top-up has been consumed.');
+                    }
+                }
+                if (array_key_exists('date_topped_up', $data)
+                    && \Carbon\Carbon::parse($data['date_topped_up'])->toDateString() !== $topUp->date_topped_up?->toDateString()) {
+                    throw new Exception('Funding date, source and reference are immutable after a top-up has been consumed.');
+                }
+            }
 
             // Update the top-up
             $this->repository->updateTopUp($topUp, $data);
@@ -376,7 +395,11 @@ class PettyCashService
             // without the payment waiting on it.
             if (($result['success'] ?? false) && isset($result['data']) && ! ($result['replayed'] ?? false)) {
                 try {
-                    PettyCashDisbursementPaid::dispatch($result['data']->id);
+                    $disbursementId = $result['data']->id;
+                    // This service can be nested inside a larger atomic unit
+                    // (notably an offline batch). Defer until the outermost
+                    // transaction commits, not merely this method's savepoint.
+                    DB::afterCommit(fn () => PettyCashDisbursementPaid::dispatch($disbursementId));
                 } catch (Throwable $eventFailure) {
                     // The cash movement has committed. Returning an error here
                     // would encourage a retry and could duplicate payment.

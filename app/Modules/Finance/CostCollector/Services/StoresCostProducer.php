@@ -43,15 +43,24 @@ class StoresCostProducer
         }
 
         // Valuation, in decreasing order of truth: what the goods actually cost
-        // on receipt, then the catalogue's weighted average, then the approved
-        // budget rate.
+        // on receipt, then the catalogue's weighted average, then the default
+        // price someone set on the material, then the approved budget rate.
         //
         // The budget rung matters because it is the only one this business
         // populates — 2% of catalogue materials and 5% of project material lines
         // carry a unit cost, against 93% of budgets. Without it a stores issue
         // valued at nothing, the posting failed, and a person was asked to price
         // it by hand from a field that was itself empty.
+        //
+        // The default rung sits above it because it is material-specific where
+        // the budget rate is project-specific, but below the weighted average:
+        // it is what someone expects the material to cost, not what any
+        // delivery of it was invoiced at.
         $unitCost = (string) ($log->receipt_unit_cost ?? $material?->unit_cost ?? '0.00');
+
+        if (bccomp($unitCost, '0.00', 2) !== 1 && (float) ($material?->default_unit_cost ?? 0) > 0) {
+            $unitCost = (string) $material->default_unit_cost;
+        }
         $valuedAtPlan = false;
 
         if (bccomp($unitCost, '0.00', 2) !== 1) {

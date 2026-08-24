@@ -525,6 +525,66 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('message', 'No approved quote snapshot found. Complete the Quote Approval task before generating the materials list.');
     }
 
+    public function test_materials_preview_recovers_legacy_excel_approval_with_null_snapshot(): void
+    {
+        $manager = $this->user('Project Manager');
+        $enquiry = $this->enquiry([
+            'status' => EnquiryConstants::STATUS_PLANNING,
+            'workflow_preset_type' => 'external_project',
+            'project_officer_id' => $manager->id,
+            'created_by' => $manager->id,
+            'selected_workflow_tasks' => ['quote', 'quote_approval', 'materials'],
+        ]);
+        $quoteTask = $this->task($enquiry, 'quote', ['status' => 'completed', 'task_order' => 1]);
+        $approvalTask = $this->task($enquiry, 'quote_approval', ['status' => 'completed', 'task_order' => 2]);
+        $materialsTask = $this->task($enquiry, 'materials', ['status' => 'pending', 'task_order' => 3]);
+
+        TaskQuoteData::create([
+            'enquiry_task_id' => $quoteTask->id,
+            'quote_mode' => 'excel_upload',
+            'status' => 'approved',
+            'approval_status' => 'approved',
+            'quote_amount' => 25000,
+            'excel_quote_file' => 'quote_excel/test.xlsx',
+            'excel_quote_filename' => 'test.xlsx',
+            'excel_quote_amount' => 25000,
+            'excel_quote_extraction' => [
+                'schemaVersion' => 1,
+                'elements' => [[
+                    'id' => 'excel-stage',
+                    'name' => 'Excel Stage',
+                    'category' => 'production',
+                    'materials' => [[
+                        'id' => 'excel-line',
+                        'description' => 'Excel Carpet',
+                        'unitOfMeasurement' => 'sqm',
+                        'quantity' => 20,
+                        'isVisible' => true,
+                    ]],
+                ]],
+            ],
+        ]);
+
+        DB::table('quote_approvals')->insert([
+            'task_id' => $approvalTask->id,
+            'enquiry_id' => $enquiry->id,
+            'approval_status' => 'approved',
+            'approved_by' => $manager->name,
+            'approval_date' => now()->toDateString(),
+            'quote_amount' => 25000,
+            'quote_data' => 'null',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Sanctum::actingAs($manager);
+        $this->getJson("/api/projects/tasks/{$materialsTask->id}/materials/approved-quote-preview")
+            ->assertOk()
+            ->assertJsonPath('data.materials.0.name', 'Excel Carpet')
+            ->assertJsonPath('data.materials.0.requiredQuantity', 20)
+            ->assertJsonCount(0, 'data.materials.0.materials');
+    }
+
     public function test_budget_import_uses_approved_material_identity_and_preserves_internal_rates(): void
     {
         $manager = $this->user('Project Manager');

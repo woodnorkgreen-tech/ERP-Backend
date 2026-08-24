@@ -39,6 +39,7 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
             Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
             Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
+            Permissions::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
             Permissions::HR_VIEW_EMPLOYEES, Permissions::ADMIN_ACCESS, Permissions::DASHBOARD_ADMIN,
             Permissions::SUPPORT_MANAGE, Permissions::CLIENT_HANDOVER_REVIEW,
             Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE
@@ -112,7 +113,8 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::FINANCE_PETTY_CASH_CREATE,
             Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
             Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
-            Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL
+            Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
+            Permissions::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH
         ]);
 
         $costingRole = Role::firstOrCreate(['name' => 'Costing'], ['description' => 'Cost analysis and budget management']);

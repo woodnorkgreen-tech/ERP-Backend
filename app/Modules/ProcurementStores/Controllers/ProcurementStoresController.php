@@ -468,10 +468,12 @@ class ProcurementStoresController extends Controller
         // delivery note is still in hand, rather than at the materials desk.
         if ($material->isBoardTrackable()
             && ! $request->filled('receipt_unit_cost')
-            && (float) $material->unit_cost <= 0) {
+            && (float) $material->unit_cost <= 0
+            && (float) ($material->default_unit_cost ?? 0) <= 0) {
             return response()->json([
-                'message' => "[{$material->material_name}] has no catalogue cost yet. Enter the receipt price per board — "
-                    . 'boards received without a value cannot be issued to a project.',
+                'message' => "[{$material->material_name}] has no price yet. Enter the receipt price per board, or set a "
+                    . 'default price on the material in the Material Library — boards received without a value cannot be '
+                    . 'issued to a project.',
             ], 422);
         }
 
@@ -923,10 +925,12 @@ class ProcurementStoresController extends Controller
             }
             if ($material?->isBoardTrackable()
                 && ! (isset($item['receipt_unit_cost']) && (float) $item['receipt_unit_cost'] > 0)
-                && (float) $material->unit_cost <= 0) {
+                && (float) $material->unit_cost <= 0
+                && (float) ($material->default_unit_cost ?? 0) <= 0) {
                 return response()->json([
-                    'message' => "'{$material->material_name}' has no catalogue cost yet. Enter the receipt price per board — "
-                        . 'boards received without a value cannot be issued to a project.',
+                    'message' => "'{$material->material_name}' has no price yet. Enter the receipt price per board, or set a "
+                        . 'default price on the material in the Material Library — boards received without a value cannot be '
+                        . 'issued to a project.',
                 ], 422);
             }
         }

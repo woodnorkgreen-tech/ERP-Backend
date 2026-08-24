@@ -175,6 +175,19 @@ class UserController
             $query->where('is_active', $request->boolean('is_active'));
         }
 
+        // `status` was accepted by callers long before it was honoured here, so
+        // every consumer passing status=active was silently served deactivated
+        // users too. 'assignable' additionally excludes people whose employment
+        // has ended, which is the state that matters when picking an owner.
+        $status = $request->get('status');
+        if ($status === 'assignable') {
+            $query->assignable();
+        } elseif ($status === 'active') {
+            $query->where('is_active', true);
+        } elseif ($status === 'inactive') {
+            $query->where('is_active', false);
+        }
+
         if ($request->has('search') && $request->search) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -558,8 +571,9 @@ class UserController
             $q->where('roles.name', 'Project Officer');
         });
 
-        // Apply active filter
-        $query->where('is_active', true);
+        // Same eligibility rule as every other assignment surface: an active
+        // account is not enough if the person has left the company.
+        $query->assignable();
 
         $users = $query->with(['employee', 'department', 'roles'])
             ->orderBy('name', 'asc')

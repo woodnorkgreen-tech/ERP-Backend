@@ -61,9 +61,28 @@ class QuoteController extends Controller
             'projectInfo'            => 'nullable|array',
             'budgetImported'         => 'boolean',
             'materials'              => 'present|array',
+            'materials.*'            => 'array',
+            'materials.*.quantity'   => 'nullable|numeric|min:0',
+            'materials.*.materials'  => 'nullable|array',
+            'materials.*.materials.*'=> 'array',
+            'materials.*.materials.*.quantity' => 'nullable|numeric|min:0',
+            'materials.*.materials.*.days' => 'nullable|numeric|min:0',
+            'materials.*.materials.*.unitPrice' => 'nullable|numeric|min:0',
+            'materials.*.materials.*.marginPercentage' => 'nullable|numeric|min:0|max:1000',
             'labour'                 => 'present|array',
+            'labour.*'               => 'array',
+            'labour.*.quantity'      => 'nullable|numeric|min:0',
+            'labour.*.unitRate'      => 'nullable|numeric|min:0',
+            'labour.*.marginPercentage' => 'nullable|numeric|min:0|max:1000',
             'expenses'               => 'present|array',
+            'expenses.*'             => 'array',
+            'expenses.*.amount'      => 'nullable|numeric|min:0',
+            'expenses.*.marginPercentage' => 'nullable|numeric|min:0|max:1000',
             'logistics'              => 'present|array',
+            'logistics.*'            => 'array',
+            'logistics.*.quantity'   => 'nullable|numeric|min:0',
+            'logistics.*.unitRate'   => 'nullable|numeric|min:0',
+            'logistics.*.marginPercentage' => 'nullable|numeric|min:0|max:1000',
             'margins'                => 'required|array',
             'margins.materials'      => 'numeric|min:0|max:1000',
             'margins.labour'         => 'numeric|min:0|max:1000',
@@ -99,23 +118,38 @@ class QuoteController extends Controller
                 return $locked;
             }
 
-            $status   = $request->status ?? $existing?->status ?? 'draft';
+            $status = $request->status ?? $existing?->status ?? 'draft';
+            $sections = $this->canonicalizeQuoteSections([
+                'materials' => $request->materials,
+                'labour' => $request->labour,
+                'expenses' => $request->expenses,
+                'logistics' => $request->logistics,
+            ]);
+            $totals = $this->recalculateTotals(
+                $sections,
+                $request->margins,
+                (float) ($request->discountAmount ?? 0),
+                $request->vatPercentage !== null ? (float) $request->vatPercentage : null,
+                (bool) ($request->vatEnabled ?? true)
+            );
 
             $quoteData = TaskQuoteData::updateOrCreate(
                 ['enquiry_task_id' => $taskId],
                 [
                     'project_info'          => $request->projectInfo ?? $existing?->project_info ?? [],
                     'budget_imported'        => $request->budgetImported ?? $existing?->budget_imported ?? false,
-                    'materials'              => $request->materials,
-                    'labour'                 => $request->labour,
-                    'expenses'               => $request->expenses,
-                    'logistics'              => $request->logistics,
+                    'materials'              => $sections['materials'],
+                    'labour'                 => $sections['labour'],
+                    'expenses'               => $sections['expenses'],
+                    'logistics'              => $sections['logistics'],
                     'margins'                => $request->margins,
                     'custom_margins'         => $request->customMargins ?? $existing?->custom_margins ?? [],
                     'discount_amount'        => $request->discountAmount ?? 0,
                     'vat_percentage'         => $request->vatPercentage ?? 16,
                     'vat_enabled'            => $request->vatEnabled ?? true,
-                    'totals'                 => $request->totals,
+                    // Browser totals are display-only. Persist the canonical
+                    // server calculation from atomic quantity/rate inputs.
+                    'totals'                 => $totals,
                     'status'                 => $status,
                     'viewer_settings'        => $request->viewerSettings ?? $existing?->viewer_settings ?? [],
                     // Persist governance fields
@@ -677,8 +711,78 @@ class QuoteController extends Controller
     }
 
     /**
-     * Recalculate totals with current margins
+     * Rebuild every derived line value from the quote's atomic inputs.
+     *
+     * A client may send derived fields because the editor needs immediate
+     * feedback, but those values are never financial authority.
      */
+    private function canonicalizeQuoteSections(array $sections): array
+    {
+        $materials = array_map(function (array $element): array {
+            $elementQuantity = max(0, (float) ($element['quantity'] ?? 1));
+            $lines = array_map(function (array $line): array {
+                $quantity = max(0, (float) ($line['quantity'] ?? 0));
+                $days = max(0, (float) ($line['days'] ?? 1));
+                $unitPrice = max(0, (float) ($line['unitPrice'] ?? 0));
+                $marginPercentage = max(0, (float) ($line['marginPercentage'] ?? 0));
+                $base = $quantity * $days * $unitPrice;
+                $margin = $base * ($marginPercentage / 100);
+
+                return array_merge($line, [
+                    'quantity' => $quantity,
+                    'days' => $days,
+                    'unitPrice' => $unitPrice,
+                    'marginPercentage' => $marginPercentage,
+                    'totalPrice' => round($base, 2),
+                    'marginAmount' => round($margin, 2),
+                    'finalPrice' => round($base + $margin, 2),
+                ]);
+            }, array_values(array_filter($element['materials'] ?? [], 'is_array')));
+
+            $visibleLines = array_filter(
+                $lines,
+                fn (array $line): bool => ($line['isVisible'] ?? true) !== false
+            );
+            $base = array_sum(array_column($visibleLines, 'totalPrice')) * $elementQuantity;
+            $margin = array_sum(array_column($visibleLines, 'marginAmount')) * $elementQuantity;
+
+            return array_merge($element, [
+                'quantity' => $elementQuantity,
+                'materials' => $lines,
+                'baseTotal' => round($base, 2),
+                'marginAmount' => round($margin, 2),
+                'marginPercentage' => $base > 0 ? round(($margin / $base) * 100, 4) : 0,
+                'finalTotal' => round($base + $margin, 2),
+            ]);
+        }, array_values(array_filter($sections['materials'] ?? [], 'is_array')));
+
+        $canonicalizeSimpleItems = function (array $items, bool $deriveAmountFromRate): array {
+            return array_map(function (array $item) use ($deriveAmountFromRate): array {
+                $quantity = max(0, (float) ($item['quantity'] ?? 0));
+                $unitRate = max(0, (float) ($item['unitRate'] ?? 0));
+                $base = $deriveAmountFromRate
+                    ? $quantity * $unitRate
+                    : max(0, (float) ($item['amount'] ?? 0));
+                $marginPercentage = max(0, (float) ($item['marginPercentage'] ?? 0));
+                $margin = $base * ($marginPercentage / 100);
+
+                return array_merge($item, [
+                    'amount' => round($base, 2),
+                    'marginPercentage' => $marginPercentage,
+                    'marginAmount' => round($margin, 2),
+                    'finalPrice' => round($base + $margin, 2),
+                ]);
+            }, array_values(array_filter($items, 'is_array')));
+        };
+
+        return [
+            'materials' => $materials,
+            'labour' => $canonicalizeSimpleItems($sections['labour'] ?? [], true),
+            'expenses' => $canonicalizeSimpleItems($sections['expenses'] ?? [], false),
+            'logistics' => $canonicalizeSimpleItems($sections['logistics'] ?? [], true),
+        ];
+    }
+
     private function recalculateTotals(
         array $quoteData,
         array $margins,
@@ -686,21 +790,30 @@ class QuoteController extends Controller
         ?float $vatPercentage = null,
         bool $vatEnabled = true
     ): array {
-        $materialsBase = array_sum(array_column($quoteData['materials'], 'baseTotal'));
-        $materialsMargin = array_sum(array_column($quoteData['materials'], 'marginAmount'));
-        $materialsTotal = array_sum(array_column($quoteData['materials'], 'finalTotal'));
+        $visible = fn (array $items): array => array_values(array_filter(
+            $items,
+            fn ($item): bool => is_array($item) && ($item['isVisible'] ?? true) !== false
+        ));
+        $materials = $visible($quoteData['materials']);
+        $labour = $visible($quoteData['labour']);
+        $expenses = $visible($quoteData['expenses']);
+        $logistics = $visible($quoteData['logistics']);
 
-        $labourBase = array_sum(array_column($quoteData['labour'], 'amount'));
-        $labourMargin = $labourBase * ($margins['labour'] / 100);
-        $labourTotal = $labourBase + $labourMargin;
+        $materialsBase = array_sum(array_column($materials, 'baseTotal'));
+        $materialsMargin = array_sum(array_column($materials, 'marginAmount'));
+        $materialsTotal = array_sum(array_column($materials, 'finalTotal'));
 
-        $expensesBase = array_sum(array_column($quoteData['expenses'], 'amount'));
-        $expensesMargin = array_sum(array_column($quoteData['expenses'], 'marginAmount'));
-        $expensesTotal = array_sum(array_column($quoteData['expenses'], 'finalPrice'));
+        $labourBase = array_sum(array_column($labour, 'amount'));
+        $labourMargin = array_sum(array_column($labour, 'marginAmount'));
+        $labourTotal = array_sum(array_column($labour, 'finalPrice'));
 
-        $logisticsBase = array_sum(array_column($quoteData['logistics'], 'amount'));
-        $logisticsMargin = array_sum(array_column($quoteData['logistics'], 'marginAmount'));
-        $logisticsTotal = array_sum(array_column($quoteData['logistics'], 'finalPrice'));
+        $expensesBase = array_sum(array_column($expenses, 'amount'));
+        $expensesMargin = array_sum(array_column($expenses, 'marginAmount'));
+        $expensesTotal = array_sum(array_column($expenses, 'finalPrice'));
+
+        $logisticsBase = array_sum(array_column($logistics, 'amount'));
+        $logisticsMargin = array_sum(array_column($logistics, 'marginAmount'));
+        $logisticsTotal = array_sum(array_column($logistics, 'finalPrice'));
 
         $subtotal = $materialsTotal + $labourTotal + $expensesTotal + $logisticsTotal;
         $discount = min(max($discountAmount, 0), $subtotal);
@@ -729,7 +842,9 @@ class QuoteController extends Controller
             'vatAmount' => round($vatAmount, 2),
             'grandTotal' => round($grandTotal, 2),
             'totalMargin' => round($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin, 2),
-            'overallMarginPercentage' => $subtotal > 0 ? round(($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin) / ($materialsBase + $labourBase + $expensesBase + $logisticsBase) * 100, 2) : 0
+            'overallMarginPercentage' => ($materialsBase + $labourBase + $expensesBase + $logisticsBase) > 0
+                ? round(($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin - $discount) / ($materialsBase + $labourBase + $expensesBase + $logisticsBase) * 100, 2)
+                : 0
         ];
     }
 
@@ -1547,6 +1662,10 @@ class QuoteController extends Controller
             $task = EnquiryTask::find($originalQuoteTask->id);
 
             // Create or update approval record in quote_approvals table (required for validation)
+            // Snapshot the canonical server record, never the optional browser
+            // payload. Excel approvals can legitimately submit no quote_data;
+            // persisting that as JSON "null" made downstream Materials unreadable.
+            $canonicalApprovalSnapshot = $this->formatQuoteResponse($quoteData->fresh(), $task);
             \DB::table('quote_approvals')->updateOrInsert(
                 ['task_id' => $taskId],
                 [
@@ -1557,7 +1676,7 @@ class QuoteController extends Controller
                     'rejection_reason' => $request->approval_status === 'rejected' ? $request->rejection_reason : null,
                     'comments' => $request->comments,
                     'quote_amount' => $request->quote_amount,
-                    'quote_data' => json_encode($request->quote_data),
+                    'quote_data' => json_encode($canonicalApprovalSnapshot, JSON_THROW_ON_ERROR),
                     'created_at' => now(),
                     'updated_at' => now()
                 ]
@@ -1688,6 +1807,7 @@ class QuoteController extends Controller
             'excel_quote_amount'      => $quoteData->excel_quote_amount ? (float) $quoteData->excel_quote_amount : null,
             'excel_quote_uploaded_at' => $quoteData->excel_quote_uploaded_at,
             'excel_quote_insights'    => $quoteData->excel_quote_insights,
+            'excel_quote_extraction'  => $quoteData->excel_quote_extraction,
             'excel_quote_file_url'    => $quoteData->excel_quote_file ? $this->excelQuoteSignedUrl($quoteData->enquiry_task_id) : null,
             'createdAt'            => $quoteData->created_at,
             'updatedAt'            => $quoteData->updated_at,
@@ -1734,6 +1854,7 @@ class QuoteController extends Controller
             'file'           => 'required|file|max:20480|mimes:xlsx,xls,csv,ods',
             'quote_amount'   => 'required|numeric|min:0',
             'revision_notes' => 'nullable|string|max:500',
+            'extraction'     => 'nullable|json|max:2000000',
         ]);
 
         if ($validator->fails()) {
@@ -1751,7 +1872,15 @@ class QuoteController extends Controller
                 $request->file('file')->getRealPath()
             )
             : null;
+        $extractor = app(\App\Modules\Projects\Services\QuoteWorkbookExtractor::class);
+        $reviewedExtraction = $request->filled('extraction')
+            ? json_decode((string) $request->input('extraction'), true)
+            : null;
+        $extraction = is_array($reviewedExtraction)
+            ? $extractor->normalizeReview($reviewedExtraction)
+            : $extractor->extract($request->file('file')->getRealPath());
 
+        $path = null;
         try {
             $file         = $request->file('file');
             $originalName = $file->getClientOriginalName();
@@ -1774,6 +1903,7 @@ class QuoteController extends Controller
                         'excel_quote_amount'      => (float) $existing->excel_quote_amount,
                         'excel_quote_uploaded_at' => optional($existing->excel_quote_uploaded_at)->toIso8601String(),
                         'excel_quote_uploaded_by' => $existing->excel_quote_uploaded_by,
+                        'excel_quote_extraction'  => $existing->excel_quote_extraction,
                         'revision_notes'          => $request->input('revision_notes'),
                     ],
                     'created_by'     => auth()->id(),
@@ -1806,6 +1936,7 @@ class QuoteController extends Controller
                     'excel_quote_uploaded_by'  => auth()->id(),
                     'excel_quote_uploaded_at'  => now(),
                     'excel_quote_insights'     => $insights,
+                    'excel_quote_extraction'   => $extraction,
                     // Keep quote_amount in sync so downstream approval logic works
                     'quote_amount'             => $request->input('quote_amount'),
                 ]
@@ -1822,10 +1953,17 @@ class QuoteController extends Controller
                     'excel_quote_uploaded_at' => $quoteData->excel_quote_uploaded_at,
                     'quote_amount'            => $quoteData->quote_amount,
                     'insights'                => $insights,
+                    'extraction'              => $extraction,
                     'file_url'                => $this->excelQuoteSignedUrl($taskId),
                 ],
             ]);
         } catch (\Exception $e) {
+            // The file is written before database persistence. If persistence
+            // fails, remove only this newly generated path so retries do not
+            // accumulate unreferenced confidential quote workbooks.
+            if ($path && \Storage::disk('local')->exists($path)) {
+                \Storage::disk('local')->delete($path);
+            }
             \Log::error("Excel quote upload failed for task {$taskId}: " . $e->getMessage());
             return response()->json(['message' => 'Upload failed. Please try again.'], 500);
         }
@@ -1876,6 +2014,8 @@ class QuoteController extends Controller
                 'excel_quote_amount'      => null,
                 'excel_quote_uploaded_by' => null,
                 'excel_quote_uploaded_at' => null,
+                'excel_quote_insights'    => null,
+                'excel_quote_extraction'  => null,
             ]);
 
             return response()->json(['message' => 'Excel quote removed. You can now build the quote in-system.']);
@@ -1904,9 +2044,11 @@ class QuoteController extends Controller
 
         $detected = app(\App\Modules\Projects\Services\QuoteInsightsService::class)
             ->detectWorkbookTotal($request->file('file')->getRealPath());
+        $extraction = app(\App\Modules\Projects\Services\QuoteWorkbookExtractor::class)
+            ->extract($request->file('file')->getRealPath());
 
         return response()->json([
-            'data' => ['detected_total' => $detected],
+            'data' => ['detected_total' => $detected, 'extraction' => $extraction],
         ]);
     }
 

@@ -446,18 +446,24 @@ class PettyCashTopUpController extends Controller
                 ], 404);
             }
 
-            // Check if there are active disbursements linked to this top-up
-            $activeDisbursements = $topUp->activeDisbursements()->get();
-            if ($activeDisbursements->isNotEmpty()) {
-                $details = $activeDisbursements->map(function($d) {
+            // Any historical consumption makes the funding record part of the
+            // audit chain. This includes split allocations where top_up_id may
+            // point at a different primary batch, and includes voided payments.
+            $linkedDisbursements = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::query()
+                ->where(function ($query) use ($topUp) {
+                    $query->where('top_up_id', $topUp->id)
+                        ->orWhereHas('allocations', fn ($allocation) => $allocation->where('top_up_id', $topUp->id));
+                })->get();
+            if ($linkedDisbursements->isNotEmpty()) {
+                $details = $linkedDisbursements->take(5)->map(function($d) {
                     $formattedAmount = number_format((float)$d->amount, 2);
                     return "#{$d->id}: {$d->receiver} (KES {$formattedAmount})";
                 })->implode(', ');
 
                 return response()->json([
                     'success' => false,
-                    'message' => "Cannot delete top-up because it has active disbursements linked to it: {$details}. Please void or delete these disbursements first.",
-                ], 400);
+                    'message' => "This top-up has entered the payment audit chain and cannot be deleted: {$details}. Void payments when necessary; keep their funding history.",
+                ], 409);
             }
 
             // Reverse before removing, in one transaction. Deleting the row on

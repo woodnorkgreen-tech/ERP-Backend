@@ -57,6 +57,50 @@ class QuoteApprovalIntegrityTest extends TestCase
         $this->assertStringContainsString('locked', $response->json('message'));
     }
 
+    public function test_quote_save_recalculates_lines_and_totals_from_atomic_inputs(): void
+    {
+        $task = $this->quoteTask();
+        Sanctum::actingAs($this->user());
+
+        $payload = $this->quotePayload();
+        $payload['materials'] = [[
+            'id' => 'element-1',
+            'name' => 'Counter',
+            'quantity' => 2,
+            'baseTotal' => 999999,
+            'marginAmount' => 999999,
+            'finalTotal' => 999999,
+            'materials' => [[
+                'id' => 'line-1',
+                'description' => 'MDF',
+                'quantity' => 3,
+                'days' => 1,
+                'unitPrice' => 100,
+                'marginPercentage' => 20,
+                'totalPrice' => 999999,
+                'marginAmount' => 999999,
+                'finalPrice' => 999999,
+                'isVisible' => true,
+            ]],
+        ]];
+        $payload['discountAmount'] = 100;
+        $payload['vatPercentage'] = 16;
+        $payload['vatEnabled'] = true;
+        $payload['totals'] = ['grandTotal' => 999999999];
+
+        $this->postJson("/api/projects/tasks/{$task->id}/quote", $payload)
+            ->assertOk()
+            ->assertJsonPath('data.materials.0.materials.0.totalPrice', 300)
+            ->assertJsonPath('data.materials.0.baseTotal', 600)
+            ->assertJsonPath('data.materials.0.marginAmount', 120)
+            ->assertJsonPath('data.totals.subtotal', 720)
+            ->assertJsonPath('data.totals.discountAmount', 100)
+            ->assertJsonPath('data.totals.grandTotal', 719.2);
+
+        $stored = TaskQuoteData::where('enquiry_task_id', $task->id)->firstOrFail();
+        $this->assertSame(719.2, (float) $stored->totals['grandTotal']);
+    }
+
     public function test_approval_decision_requires_finance_permission(): void
     {
         [$quoteTask, $approvalTask] = $this->quoteAndApprovalTasks();

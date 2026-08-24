@@ -152,6 +152,7 @@ class Permissions
     const FINANCE_PETTY_CASH_DELETE_TOP_UP = 'finance.petty_cash.delete_top_up';
     const FINANCE_PETTY_CASH_CREATE_TOP_UP = 'finance.petty_cash.create_top_up';
     const FINANCE_PETTY_CASH_UPLOAD_EXCEL = 'finance.petty_cash.upload_excel';
+    const FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH = 'finance.petty_cash.approve_offline_batch';
     const FINANCE_PETTY_CASH_ADMIN = 'finance.petty_cash.admin';
 
     // ===========================================
@@ -355,6 +356,7 @@ class Permissions
             self::FINANCE_PETTY_CASH_DELETE_TOP_UP,
             self::FINANCE_PETTY_CASH_CREATE_TOP_UP, 
             self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
+            self::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
             self::FINANCE_PETTY_CASH_ADMIN,
 
             // HR Permissions
@@ -463,6 +465,7 @@ class Permissions
                 self::FINANCE_PETTY_CASH_DELETE_TOP_UP,
                 self::FINANCE_PETTY_CASH_CREATE_TOP_UP, 
                 self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
+                self::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
                 self::FINANCE_PETTY_CASH_ADMIN,
             ],
             'hr' => [
@@ -582,6 +585,7 @@ class Permissions
             self::FINANCE_QUOTE_APPROVE => 'Authorize Project Quotes',
             self::FINANCE_INVOICE_CREATE => 'Generate Client Invoices',
             self::FINANCE_PETTY_CASH_ADMIN => 'Full Petty Cash Administration',
+            self::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH => 'Approve and Post Offline Petty Cash Batches',
 
             // Admin
             self::APPROVALS_SELF_APPROVE => 'Approve Your Own Submissions (bypasses separation of duties)',

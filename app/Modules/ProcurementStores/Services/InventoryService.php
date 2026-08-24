@@ -163,7 +163,17 @@ class InventoryService
             if ($type === 'check_in' && array_key_exists('receipt_unit_cost', $meta) && $meta['receipt_unit_cost'] !== null) {
                 $receivedQuantity = abs($quantity);
                 $newQuantity = $previousQuantity + $receivedQuantity;
-                if ($newQuantity > 0) {
+
+                // A zero average means no receipt has ever priced this material,
+                // not that the stock on hand was free. Blending against it drags
+                // the first real invoice down in proportion to whatever is
+                // already racked — stock received on a default price, or under
+                // an older path that recorded no cost at all. Let the first
+                // priced receipt establish the average outright.
+                if ((float) $material->unit_cost <= 0) {
+                    $material->unit_cost = (float) $meta['receipt_unit_cost'];
+                    $material->save();
+                } elseif ($newQuantity > 0) {
                     $material->unit_cost = (
                         ($previousQuantity * (float) $material->unit_cost)
                         + ($receivedQuantity * (float) $meta['receipt_unit_cost'])
@@ -197,7 +207,15 @@ class InventoryService
                 'receipt_unit_cost' => $type === 'check_in'
                     ? ($meta['receipt_unit_cost'] ?? null)
                     : (in_array($type, ['check_out', 'issue', 'consumption', 'defective'], true)
-                        ? (float) $material->unit_cost : null),
+                        // Freeze the effective catalogue value now. Finance is
+                        // asynchronous, so it must not read a default price
+                        // that may have changed after custody left Stores.
+                        ? ((float) $material->unit_cost > 0
+                            ? (float) $material->unit_cost
+                            : ((float) ($material->default_unit_cost ?? 0) > 0
+                                ? (float) $material->default_unit_cost
+                                : 0.0))
+                        : null),
                 'balance_after' => $stock->quantity_on_hand,
                 'project_id' => $meta['project_id'] ?? null,
                 'project_material_id' => $meta['project_material_id'] ?? null,

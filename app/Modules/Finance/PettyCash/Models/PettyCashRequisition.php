@@ -28,7 +28,10 @@ class PettyCashRequisition extends Model
         'user_id',
         'department_id',
         'category',
+        'requisition_type_id',
         'purpose',
+        'custom_fields',
+        'type_snapshot',
         'total_amount',
         'status',
         'approved_by',
@@ -57,6 +60,8 @@ class PettyCashRequisition extends Model
         'received_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'custom_fields' => 'array',
+        'type_snapshot' => 'array',
     ];
 
     /**
@@ -73,6 +78,11 @@ class PettyCashRequisition extends Model
     public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class, 'department_id');
+    }
+
+    public function requisitionType(): BelongsTo
+    {
+        return $this->belongsTo(PettyCashRequisitionType::class, 'requisition_type_id');
     }
 
     /**

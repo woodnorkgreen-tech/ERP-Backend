@@ -11,6 +11,7 @@ use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Requests\StoreBoardRequest;
 use App\Modules\ProcurementStores\Services\BoardIngestionService;
 use App\Modules\ProcurementStores\Services\BoardRegistrationService;
+use App\Modules\ProcurementStores\Services\BoardValuationService;
 use App\Modules\ProcurementStores\Services\BoardWorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +24,7 @@ class BoardController extends Controller
         private readonly BoardIngestionService    $ingestionService,
         private readonly BoardRegistrationService $registrationService,
         private readonly BoardWorkflowService     $workflow,
+        private readonly BoardValuationService    $valuation,
     ) {}
 
     // ─── Ingestion ────────────────────────────────────────────────────────────
@@ -869,6 +871,138 @@ class BoardController extends Controller
             'variance_pct'     => $variancePct,
             'within_tolerance' => $actualArea <= ($expectedArea * $tolerance),
             'tolerance_pct'    => round(($tolerance - 1) * 100, 1),
+        ]);
+    }
+
+    // ─── Receipt valuation ────────────────────────────────────────────────────
+
+    /**
+     * GET /boards/unvalued
+     * Boards that are in Stores but carry no value, grouped the way they were
+     * received: one material, one receipt batch.
+     *
+     * These are the boards `fulfil()` refuses to issue. Grouping matters —
+     * a receipt price applies to a delivery, not to a sheet picked out of one,
+     * so this is the shape the storekeeper actually prices against.
+     */
+    public function unvalued(Request $request): JsonResponse
+    {
+        $query = $this->valuation->unvaluedQuery()->with(['libraryMaterial']);
+
+        if ($request->filled('library_material_id')) {
+            $query->where('library_material_id', $request->library_material_id);
+        }
+
+        $groups = $query->orderBy('library_material_id')->orderBy('id')->get()
+            ->groupBy(fn (Board $board) => $board->library_material_id . '|' . ($board->batch_number ?? ''))
+            ->map(fn ($boards) => [
+                'library_material_id' => $boards->first()->library_material_id,
+                'material_name'       => $boards->first()->libraryMaterial?->material_name ?? '—',
+                'material_code'       => $boards->first()->libraryMaterial?->material_code,
+                // Zero here is why the boards are unvalued in the first place:
+                // registration fell back to a catalogue price that did not exist.
+                'catalogue_unit_cost' => (float) ($boards->first()->libraryMaterial?->unit_cost ?? 0),
+                'batch_number'        => $boards->first()->batch_number,
+                'received_at'         => $boards->first()->created_at,
+                'count'               => $boards->count(),
+                'boards'              => $boards->map(fn (Board $board) => [
+                    'id'            => $board->id,
+                    'tracking_code' => $board->tracking_code,
+                    'status'        => $board->status,
+                    'is_offcut'     => (bool) $board->is_offcut,
+                    'area_m2'       => (float) $board->area_m2,
+                ])->values(),
+            ])
+            ->values();
+
+        return response()->json([
+            'data'  => $groups,
+            'count' => $groups->sum('count'),
+        ]);
+    }
+
+    /**
+     * POST /boards/record-valuation
+     * Record what a delivery cost per sheet, on boards that were received
+     * without a price.
+     *
+     * This is a Stores fact, not a Finance one — the person holding the
+     * delivery note is the person who knows the figure — but Finance carries
+     * the consequence, so both can record it. `reason` is required: a value
+     * typed in months after receipt has to say what it is based on.
+     */
+    public function recordValuation(Request $request): JsonResponse
+    {
+        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to record board valuations.'], 403);
+        }
+
+        $validated = $request->validate([
+            'board_ids'     => 'required_without:batch_number|array|min:1',
+            'board_ids.*'   => 'integer|exists:boards,id',
+            'batch_number'  => 'required_without:board_ids|string|max:100',
+            'library_material_id' => 'required_with:batch_number|integer|exists:library_materials,id',
+            'unit_value'    => 'required|numeric|min:0.01',
+            'reason'        => 'required|string|min:5|max:500',
+        ]);
+
+        // Resolve the target set through the same query that decides what is
+        // unvalued, so this endpoint can never price a board the list did not
+        // offer — an already-priced board, or one that has left Stores.
+        $targets = $this->valuation->unvaluedQuery()
+            ->when(
+                !empty($validated['board_ids']),
+                fn ($q) => $q->whereIn('id', $validated['board_ids']),
+                fn ($q) => $q->where('batch_number', $validated['batch_number'])
+                    ->where('library_material_id', $validated['library_material_id']),
+            )
+            ->get();
+
+        if ($targets->isEmpty()) {
+            return response()->json([
+                'message' => 'These boards already carry a value, or they have left Stores. '
+                    . 'A board that was already issued is repriced from the Stores finance exception, not here.',
+            ], 422);
+        }
+
+
+        $targetBatches = $targets->map(fn (Board $board) => $board->batch_number ?? '__NO_BATCH__')->unique();
+        if ($targetBatches->count() !== 1) {
+            return response()->json([
+                'message' => 'Select one receipt batch at a time. A single price cannot be applied across different deliveries.',
+            ], 422);
+        }
+
+        try {
+            $result = $this->valuation->record(
+                $targets,
+                (float) $validated['unit_value'],
+                auth()->id(),
+                $validated['reason'],
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $priced = $result['priced'];
+        $message = "{$priced->count()} board(s) valued at " . number_format((float) $validated['unit_value'], 2) . ' per sheet.';
+        if ($result['catalogue_updated']) {
+            $message .= ' The material had no catalogue cost, so this figure now seeds it.';
+        }
+        if ($result['skipped']->isNotEmpty()) {
+            $message .= " {$result['skipped']->count()} board(s) were already valued and were left unchanged.";
+        }
+
+        return response()->json([
+            'message' => $message,
+            'priced'  => $priced->map(fn (Board $board) => [
+                'id'            => $board->id,
+                'tracking_code' => $board->tracking_code,
+                'current_value' => (float) $board->current_value,
+                'is_offcut'     => (bool) $board->is_offcut,
+            ])->values(),
+            'skipped_count'     => $result['skipped']->count(),
+            'catalogue_updated' => $result['catalogue_updated'],
         ]);
     }
 

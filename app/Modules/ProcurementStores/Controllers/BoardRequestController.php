@@ -261,9 +261,15 @@ class BoardRequestController extends Controller
                 if ($boards->isEmpty()) {
                     throw new \InvalidArgumentException('No available boards found for this material.');
                 }
-                if ($boards->contains(fn (Board $board) => (float) $board->current_value <= 0)) {
+                // Name the offenders. The storekeeper has to go and record a
+                // receipt valuation on these specific sheets, and on an
+                // auto-selected FIFO issue they never saw which ones they were.
+                $unvalued = $boards->filter(fn (Board $board) => (float) $board->current_value <= 0);
+                if ($unvalued->isNotEmpty()) {
                     throw new \InvalidArgumentException(
-                        'One or more selected boards have no recorded value. Record their receipt valuation before issue.'
+                        $unvalued->count() . ' selected board(s) have no recorded value: '
+                        . $unvalued->pluck('tracking_code')->join(', ')
+                        . '. Record their receipt valuation before issue — issuing them would post a zero cost to this project.'
                     );
                 }
 

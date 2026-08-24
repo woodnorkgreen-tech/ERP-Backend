@@ -64,6 +64,9 @@ class LibraryMaterialResource extends JsonResource
             'revision_version' => $this->revision_version,
             'effective_date' => $this->effective_date?->toDateString(),
             'unit_cost' => (float) $this->unit_cost,
+            // Null means nobody has set one — the receipt screens read this to
+            // decide whether they must ask for a price.
+            'default_unit_cost' => $this->default_unit_cost !== null ? (float) $this->default_unit_cost : null,
             'attributes' => ($this->attributes && isset($this->attributes['attributes'])) ? $this->attributes['attributes'] : [],
             'is_active' => $this->is_active,
             'notes' => $this->notes,

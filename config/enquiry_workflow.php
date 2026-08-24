@@ -233,5 +233,10 @@ return [
     'reminders' => [
         'due_soon_days' => 1,
         'requiring_attention_days' => 2,
+
+        // Days an enquiry may sit without a confirmed delivery date before it is
+        // flagged for attention. Below this it is simply a new enquiry that has
+        // not been chased yet.
+        'tbc_attention_days' => 7,
     ],
 ];

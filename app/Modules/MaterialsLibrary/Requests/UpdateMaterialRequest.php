@@ -62,6 +62,10 @@ class UpdateMaterialRequest extends FormRequest
             'uom_conversions' => 'sometimes|array|max:2',
             'uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
             'uom_conversions.*.factor' => 'required|numeric|gt:0',
+            // What this material is expected to cost when no delivery has
+            // priced it yet. A fallback, not the valuation — `unit_cost` stays
+            // derived from actual receipts.
+            'default_unit_cost' => 'nullable|numeric|min:0',
             'valuation_method' => 'sometimes|in:FIFO,Landed Cost,Weighted Average',
             'revision_version' => 'sometimes|string|max:20',
             'effective_date' => 'nullable|date',

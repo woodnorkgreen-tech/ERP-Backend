@@ -118,6 +118,10 @@ Route::get('/boards/quarantine-returns',             [BoardController::class, 'q
 Route::post('/boards/{id}/review-quarantine-return', [BoardController::class, 'reviewQuarantineReturn']);
 Route::get('/boards/consumption-details',            [BoardController::class, 'consumptionDetails']);
 
+// Receipt valuation — repairs boards received without a price so they can be issued
+Route::get('/boards/unvalued',                       [BoardController::class, 'unvalued']);
+Route::post('/boards/record-valuation',              [BoardController::class, 'recordValuation']);
+
 // QR scan lookup — must be before /{id} to avoid conflict
 Route::get('/boards/by-code/{trackingCode}',         [BoardController::class, 'showByCode']);
 

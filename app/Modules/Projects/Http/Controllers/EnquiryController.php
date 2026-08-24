@@ -189,6 +189,7 @@ class EnquiryController extends Controller
                 \App\Modules\Projects\Filters\Enquiry\DateRangeFilter::class,
                 \App\Modules\Projects\Filters\Enquiry\ClientFilter::class,
                 \App\Modules\Projects\Filters\Enquiry\OfficerFilter::class,
+                \App\Modules\Projects\Filters\Enquiry\DeliveryDateStatusFilter::class,
             ])
             ->thenReturn();
 
@@ -1363,7 +1364,7 @@ class EnquiryController extends Controller
      */
     public function getFinanceProgress(ProjectEnquiry $enquiry): JsonResponse
     {
-        abort_unless($this->projectFinancialAccess->canReadAccount(request()->user(), $enquiry), 403);
+        abort_unless($this->projectFinancialAccess->canReadReceivables(request()->user(), $enquiry), 403);
 
         try {
             $progress = $this->financeService->getPaymentProgress($enquiry);
@@ -1469,21 +1470,40 @@ class EnquiryController extends Controller
     {
         $data = $request->validate(['invoice_date'=>'required|date','due_date'=>'required|date|after_or_equal:invoice_date','subtotal'=>'required|numeric|gt:0','tax_amount'=>'nullable|numeric|min:0','notes'=>'nullable|string|max:1000']);
         $total = (float) $data['subtotal'] + (float) ($data['tax_amount'] ?? 0);
-        $basis = $this->financeService->getPaymentProgress($enquiry)['total_quote'];
-        $existing = (float) \App\Modules\Finance\Models\ProjectInvoice::where('project_enquiry_id',$enquiry->id)->whereNot('status','void')->sum('total_amount');
-        if ($basis <= 0) return response()->json(['message'=>'This project has no agreed price yet, so it cannot be invoiced. Set the agreed price first.'],422);
-        if ($existing + $total > $basis) return response()->json(['message'=>'That would bill the client more than the agreed price. Invoices so far come to '.number_format($existing,2).' and the agreed price is '.number_format($basis,2).', so this invoice cannot exceed '.number_format($basis-$existing,2).'.'],422);
-        $invoice = DB::transaction(function () use ($enquiry,$data,$total) {
-            $invoice = \App\Modules\Finance\Models\ProjectInvoice::create([...$data,'tax_amount'=>$data['tax_amount']??0,'total_amount'=>$total,'invoice_number'=>'TMP-'.\Illuminate\Support\Str::uuid(),'project_enquiry_id'=>$enquiry->id,'created_by'=>Auth::id()]);
-            $invoice->update(['invoice_number'=>'INV-'.now()->format('Ym').'-'.str_pad((string)$invoice->id,6,'0',STR_PAD_LEFT)]); return $invoice;
-        });
+        try {
+            $invoice = DB::transaction(function () use ($enquiry,$data,$total) {
+                // Serialise the aggregate invariant on the parent. Without this
+                // lock, two individually valid invoices could both observe the
+                // same remaining balance and overbill the agreed price.
+                $lockedEnquiry = ProjectEnquiry::query()->lockForUpdate()->findOrFail($enquiry->id);
+                $basis = (float) $this->financeService->getPaymentProgress($lockedEnquiry)['total_quote'];
+                $existing = (float) \App\Modules\Finance\Models\ProjectInvoice::where('project_enquiry_id',$lockedEnquiry->id)->whereNot('status','void')->sum('total_amount');
+
+                if ($basis <= 0) {
+                    throw new \DomainException('This project has no agreed price yet, so it cannot be invoiced. Set the agreed price first.');
+                }
+                if ($existing + $total > $basis) {
+                    throw new \DomainException('That would bill the client more than the agreed price. Invoices so far come to '.number_format($existing,2).' and the agreed price is '.number_format($basis,2).', so this invoice cannot exceed '.number_format($basis-$existing,2).'.');
+                }
+
+                $invoice = \App\Modules\Finance\Models\ProjectInvoice::create([...$data,'tax_amount'=>$data['tax_amount']??0,'total_amount'=>$total,'invoice_number'=>'TMP-'.\Illuminate\Support\Str::uuid(),'project_enquiry_id'=>$lockedEnquiry->id,'created_by'=>Auth::id()]);
+                $invoice->update(['invoice_number'=>'INV-'.now()->format('Ym').'-'.str_pad((string)$invoice->id,6,'0',STR_PAD_LEFT)]); return $invoice;
+            });
+        } catch (\DomainException $exception) {
+            return response()->json(['message'=>$exception->getMessage()],422);
+        }
         return response()->json(['message'=>'Draft invoice created.','data'=>$invoice],201);
     }
 
     public function issueProjectInvoice(ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
     {
-        abort_unless((int)$invoice->project_enquiry_id===(int)$enquiry->id,404); abort_unless($invoice->status==='draft',422,'Only draft invoices can be issued.');
-        $invoice->update(['status'=>'issued','issued_by'=>Auth::id(),'issued_at'=>now()]);
+        abort_unless((int)$invoice->project_enquiry_id===(int)$enquiry->id,404);
+        $invoice = DB::transaction(function () use ($invoice) {
+            $lockedInvoice = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
+            abort_unless($lockedInvoice->status==='draft',422,'Only draft invoices can be issued.');
+            $lockedInvoice->update(['status'=>'issued','issued_by'=>Auth::id(),'issued_at'=>now()]);
+            return $lockedInvoice;
+        });
         return response()->json(['message'=>'Invoice issued.','data'=>$invoice]);
     }
 
@@ -1494,12 +1514,12 @@ class EnquiryController extends Controller
         $payment=$enquiry->payments()->whereKey($data['payment_id'])->where('status','verified')->whereNull('reversed_at')->firstOrFail();
         try {
             DB::transaction(function () use ($invoice,$payment,$data) {
-                $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id); $payment->newQuery()->lockForUpdate()->findOrFail($payment->id);
-                $paymentUsed=(float)DB::table('project_invoice_allocations')->where('enquiry_payment_id',$payment->id)->sum('amount');
-                $invoicePaid=(float)DB::table('project_invoice_allocations')->where('project_invoice_id',$invoice->id)->sum('amount');
-                if ((float)$data['amount']>(float)$payment->amount-$paymentUsed || (float)$data['amount']>(float)$invoice->total_amount-$invoicePaid) throw new \DomainException('Allocation exceeds the available payment or invoice balance.');
-                DB::table('project_invoice_allocations')->insert(['project_invoice_id'=>$invoice->id,'enquiry_payment_id'=>$payment->id,'amount'=>$data['amount'],'allocated_by'=>Auth::id(),'created_at'=>now(),'updated_at'=>now()]);
-                if ($invoicePaid+(float)$data['amount'] >= (float)$invoice->total_amount) $invoice->update(['status'=>'paid']);
+                $lockedInvoice=$invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id); $lockedPayment=$payment->newQuery()->lockForUpdate()->findOrFail($payment->id);
+                $paymentUsed=(float)DB::table('project_invoice_allocations')->where('enquiry_payment_id',$lockedPayment->id)->sum('amount');
+                $invoicePaid=(float)DB::table('project_invoice_allocations')->where('project_invoice_id',$lockedInvoice->id)->sum('amount');
+                if ((float)$data['amount']>(float)$lockedPayment->amount-$paymentUsed || (float)$data['amount']>(float)$lockedInvoice->total_amount-$invoicePaid) throw new \DomainException('Allocation exceeds the available payment or invoice balance.');
+                DB::table('project_invoice_allocations')->insert(['project_invoice_id'=>$lockedInvoice->id,'enquiry_payment_id'=>$lockedPayment->id,'amount'=>$data['amount'],'allocated_by'=>Auth::id(),'created_at'=>now(),'updated_at'=>now()]);
+                if ($invoicePaid+(float)$data['amount'] >= (float)$lockedInvoice->total_amount) $lockedInvoice->update(['status'=>'paid']);
             });
         } catch (\DomainException $e) {
             return response()->json(['message'=>$e->getMessage()],422);
@@ -1555,7 +1575,7 @@ class EnquiryController extends Controller
      */
     public function getGovernanceTrace(ProjectEnquiry $enquiry): JsonResponse
     {
-        abort_unless($this->projectFinancialAccess->canReadAccount(request()->user(), $enquiry), 403);
+        abort_unless($this->projectFinancialAccess->canReadReceivables(request()->user(), $enquiry), 403);
 
         try {
             $logs = \App\Models\GovernanceAuditLog::with('user')

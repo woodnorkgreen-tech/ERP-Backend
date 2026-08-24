@@ -56,6 +56,7 @@ class TaskQuoteData extends Model
         'excel_quote_uploaded_by',
         'excel_quote_uploaded_at',
         'excel_quote_insights',
+        'excel_quote_extraction',
         'created_at',
         'updated_at'
     ];
@@ -82,6 +83,7 @@ class TaskQuoteData extends Model
         'excel_quote_amount'       => 'decimal:2',
         'excel_quote_uploaded_at'  => 'datetime',
         'excel_quote_insights'     => 'array',
+        'excel_quote_extraction'   => 'array',
         'created_at'               => 'datetime',
         'updated_at'               => 'datetime',
     ];

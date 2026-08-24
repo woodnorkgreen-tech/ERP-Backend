@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PettyCashDisbursement extends Model
 {
@@ -82,6 +83,11 @@ class PettyCashDisbursement extends Model
     public function topUp(): BelongsTo
     {
         return $this->belongsTo(PettyCashTopUp::class, 'top_up_id');
+    }
+
+    public function allocations(): HasMany
+    {
+        return $this->hasMany(PettyCashDisbursementAllocation::class, 'disbursement_id');
     }
 
     public function expenseCode(): BelongsTo

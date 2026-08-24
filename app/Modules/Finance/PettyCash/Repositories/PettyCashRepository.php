@@ -234,9 +234,11 @@ class PettyCashRepository
             })
             ->groupBy('d.top_up_id');
 
-        $allocations = DB::table('petty_cash_disbursement_allocations')
-            ->select('top_up_id', DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total'))
-            ->groupBy('top_up_id');
+        $allocations = DB::table('petty_cash_disbursement_allocations as a')
+            ->join('petty_cash_disbursements as d', 'd.id', '=', 'a.disbursement_id')
+            ->select('a.top_up_id', DB::raw('SUM(a.amount + COALESCE(a.transaction_cost, 0)) as total'))
+            ->where('d.status', 'active')
+            ->groupBy('a.top_up_id');
 
         return PettyCashTopUp::with('creator')
             ->leftJoinSub($directDisbursements, 'direct_disbursements', function ($join) {

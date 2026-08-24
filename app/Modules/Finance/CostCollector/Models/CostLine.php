@@ -6,6 +6,8 @@ use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\Finance\Models\VatTreatment;
 use App\Modules\Finance\Models\WhtCategory;
+use App\Modules\Finance\Models\JournalEntry;
+use App\Modules\Finance\Models\SpendVoucherAllocation;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -134,6 +136,16 @@ class CostLine extends Model
     public function whtCategory(): BelongsTo
     {
         return $this->belongsTo(WhtCategory::class);
+    }
+
+    public function journalEntry(): BelongsTo
+    {
+        return $this->belongsTo(JournalEntry::class, 'journal_entry_id');
+    }
+
+    public function voucherAllocations(): HasMany
+    {
+        return $this->hasMany(SpendVoucherAllocation::class, 'cost_line_id');
     }
 
     /** The planned line this fulfils. Null means unbudgeted spend. */

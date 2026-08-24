@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisitionItem;
+use App\Modules\Finance\PettyCash\Models\PettyCashRequisitionType;
 use App\Modules\HR\Models\Department;
 use App\Modules\HR\Models\Employee;
 use Illuminate\Http\Request;
@@ -21,6 +22,7 @@ use App\Modules\HR\Models\TechnicalLabour;
 use Exception;
 use App\Exceptions\GovernanceException;
 use App\Services\Governance\ProjectGovernanceService;
+use App\Modules\Finance\PettyCash\Services\RequisitionSchemaService;
 
 class PettyCashRequisitionController extends Controller
 {
@@ -31,7 +33,7 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $user = Auth::user();
-            $query = PettyCashRequisition::with(['requester.employee', 'department', 'approver', 'payee', 'project.enquiry', 'enquiry', 'items.payee'])
+            $query = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'approver', 'payee', 'project.enquiry', 'enquiry', 'items.payee'])
                 ->withCount('items');
 
             // If not admin/finance, only show their own
@@ -168,7 +170,9 @@ class PettyCashRequisitionController extends Controller
         $validator = Validator::make($request->all(), [
             'department_id' => 'required|exists:departments,id',
             'category' => 'required|string',
+            'requisition_type_id' => 'nullable|exists:petty_cash_requisition_types,id',
             'purpose' => 'required|string',
+            'custom_fields' => 'nullable|array',
             'payee_id' => 'nullable|exists:employees,id',
             'payee_name' => 'nullable|string',
             'payee_phone' => 'nullable|string|max:255',
@@ -180,6 +184,7 @@ class PettyCashRequisitionController extends Controller
             'items' => 'required|array|min:1',
             'items.*.description' => 'required|string',
             'items.*.remarks' => 'nullable|string',
+            'items.*.details' => 'nullable|array',
             'items.*.amount' => 'required|numeric|min:0.01',
             'items.*.payee_id' => 'nullable|exists:employees,id',
             'items.*.payee_name' => 'nullable|string',
@@ -193,12 +198,8 @@ class PettyCashRequisitionController extends Controller
             ], 422);
         }
 
-        if ($request->category === 'Projects' && !$request->filled('project_id') && !$request->filled('enquiry_id') && !$request->filled('project_name')) {
-            return response()->json([
-                'success' => false,
-                'errors' => ['project_id' => ['Project requisitions must be linked to a project, enquiry, or named project.']],
-            ], 422);
-        }
+        $type = $this->resolveType($request);
+        $typed = app(RequisitionSchemaService::class)->validate($type, $request->all());
 
         try {
             DB::beginTransaction();
@@ -207,8 +208,11 @@ class PettyCashRequisitionController extends Controller
             $commonData = [
                 'user_id' => Auth::id(),
                 'department_id' => $request->department_id,
-                'category' => $request->category,
+                'category' => $type->name,
+                'requisition_type_id' => $type->id,
                 'purpose' => $request->purpose,
+                'custom_fields' => $typed['custom_fields'],
+                'type_snapshot' => $type->definition(),
                 'project_id' => $request->project_id,
                 'project_name' => $request->project_name,
                 'venue' => $request->venue,
@@ -225,10 +229,11 @@ class PettyCashRequisitionController extends Controller
                 'total_amount' => collect($request->items)->sum('amount'),
             ]));
 
-            foreach ($request->items as $item) {
+            foreach ($request->items as $index => $item) {
                 $requisition->items()->create([
                     'description' => $item['description'],
                     'remarks' => $item['remarks'] ?? null,
+                    'details' => $typed['item_details'][$index] ?? [],
                     'amount' => $item['amount'],
                     'payee_id' => $item['payee_id'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
@@ -270,7 +275,7 @@ class PettyCashRequisitionController extends Controller
     public function show(int $id): JsonResponse
     {
         try {
-            $requisition = PettyCashRequisition::with(['requester.employee', 'department', 'items.payee', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
+            $requisition = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'items.payee', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
                 ->findOrFail($id);
 
             if (!$this->mayView($requisition)) {
@@ -307,11 +312,20 @@ class PettyCashRequisitionController extends Controller
             return response()->json(['success' => false, 'message' => 'This requisition cannot be edited by this user or in its current state'], 403);
         }
 
+        if (in_array($requisition->status, ['disbursed', 'received'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Paid or received requisitions are immutable. Create a correcting transaction instead.',
+            ], 409);
+        }
+
         // Validation rules based on status
         $rules = [
             'department_id' => 'required|exists:departments,id',
             'category' => 'required|string',
+            'requisition_type_id' => 'nullable|exists:petty_cash_requisition_types,id',
             'purpose' => 'required|string',
+            'custom_fields' => 'nullable|array',
             'project_id' => 'nullable|exists:projects,id',
             'project_name' => 'nullable|string|max:255',
             'venue' => 'nullable|string|max:255',
@@ -322,16 +336,14 @@ class PettyCashRequisitionController extends Controller
             'payee_phone' => 'nullable|string|max:255',
         ];
 
-        // If not disbursed, allow updating items/amount
-        if ($requisition->status !== 'disbursed') {
-            $rules['items'] = 'required|array|min:1';
-            $rules['items.*.description'] = 'required|string';
-            $rules['items.*.remarks'] = 'nullable|string';
-            $rules['items.*.amount'] = 'required|numeric|min:0.01';
-            $rules['items.*.payee_id'] = 'nullable|exists:employees,id';
-            $rules['items.*.payee_name'] = 'nullable|string';
-            $rules['items.*.payee_phone'] = 'nullable|string|max:255';
-        }
+        $rules['items'] = 'required|array|min:1';
+        $rules['items.*.description'] = 'required|string';
+        $rules['items.*.remarks'] = 'nullable|string';
+        $rules['items.*.details'] = 'nullable|array';
+        $rules['items.*.amount'] = 'required|numeric|min:0.01';
+        $rules['items.*.payee_id'] = 'nullable|exists:employees,id';
+        $rules['items.*.payee_name'] = 'nullable|string';
+        $rules['items.*.payee_phone'] = 'nullable|string|max:255';
 
         $validator = Validator::make($request->all(), $rules);
 
@@ -342,45 +354,20 @@ class PettyCashRequisitionController extends Controller
             ], 422);
         }
 
-        if ($request->category === 'Projects' && !$request->filled('project_id') && !$request->filled('enquiry_id') && !$request->filled('project_name')) {
-            return response()->json([
-                'success' => false,
-                'errors' => ['project_id' => ['Project requisitions must be linked to a project, enquiry, or named project.']],
-            ], 422);
-        }
+        $type = $this->resolveType($request);
+        $typed = app(RequisitionSchemaService::class)->validate($type, $request->all());
 
         try {
             DB::beginTransaction();
 
-            // Handling Disbursed Requisitions
-            if ($requisition->status === 'disbursed') {
-                // Restricted update: Only non-financial fields
-                $requisition->update([
-                    'department_id' => $request->department_id,
-                    'category' => $request->category,
-                    'purpose' => $request->purpose,
-                    'project_id' => $request->project_id,
-                    'project_name' => $request->project_name,
-                    'venue' => $request->venue,
-                    'enquiry_id' => $request->enquiry_id,
-                    'bill_id' => $request->bill_id,
-                    // DO NOT update amount, items, or payee causing financial discrepancies
-                ]);
-
-                DB::commit();
-
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Requisition details updated successfully (Financials locked)',
-                    'data' => $requisition
-                ]);
-            }
-
             // Handling Pending/Approved/Rejected
             $commonData = [
                 'department_id' => $request->department_id,
-                'category' => $request->category,
+                'category' => $type->name,
+                'requisition_type_id' => $type->id,
                 'purpose' => $request->purpose,
+                'custom_fields' => $typed['custom_fields'],
+                'type_snapshot' => $type->definition(),
                 'project_id' => $request->project_id,
                 'project_name' => $request->project_name,
                 'venue' => $request->venue,
@@ -405,10 +392,11 @@ class PettyCashRequisitionController extends Controller
             // A smarter sync could update existing IDs, but replace is safer for integrity here
             $requisition->items()->delete();
 
-            foreach ($request->items as $item) {
+            foreach ($request->items as $index => $item) {
                 $requisition->items()->create([
                     'description' => $item['description'],
                     'remarks' => $item['remarks'] ?? null,
+                    'details' => $typed['item_details'][$index] ?? [],
                     'amount' => $item['amount'],
                     'payee_id' => $item['payee_id'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
@@ -843,22 +831,14 @@ class PettyCashRequisitionController extends Controller
                 ];
             });
 
-        $categories = [
-            'Projects',
-            'Office Supplies',
-            'Transport',
-            'Meals',
-            'Repair & Maintenance',
-            'Fuel & Lubricants',
-            'Communication & Airtime',
-            'Miscellaneous'
-        ];
+        $types = $this->requisitionTypes();
 
         return response()->json([
             'success' => true,
             'departments' => $departments,
             'employees' => $employees,
-            'categories' => $categories,
+            'categories' => $types->pluck('name')->values(),
+            'requisition_types' => $types,
             'projects' => $projects,
             'enquiries' => $enquiries
         ]);
@@ -1203,21 +1183,13 @@ class PettyCashRequisitionController extends Controller
                 ];
             });
 
-        $categories = [
-            'Projects',
-            'Office Supplies',
-            'Transport',
-            'Meals',
-            'Repair & Maintenance',
-            'Fuel & Lubricants',
-            'Communication & Airtime',
-            'Miscellaneous'
-        ];
+        $types = $this->requisitionTypes();
 
         return response()->json([
             'success' => true,
             'departments' => $departments,
-            'categories' => $categories,
+            'categories' => $types->pluck('name')->values(),
+            'requisition_types' => $types,
             'projects' => $projects,
             'enquiries' => $enquiries
         ]);
@@ -1231,7 +1203,11 @@ class PettyCashRequisitionController extends Controller
         $validator = Validator::make($request->all(), [
             'department_id' => 'required|exists:departments,id',
             'category' => 'required|string',
+            'requisition_type_id' => 'nullable|exists:petty_cash_requisition_types,id',
             'purpose' => 'required|string',
+            'custom_fields' => 'nullable|array',
+            'payee_name' => 'nullable|string|max:255',
+            'payee_phone' => 'nullable|string|max:255',
             'project_id' => 'nullable|exists:projects,id',
             'project_name' => 'nullable|string|max:255',
             'venue' => 'nullable|string|max:255',
@@ -1239,6 +1215,7 @@ class PettyCashRequisitionController extends Controller
             'items' => 'required|array|min:1',
             'items.*.description' => 'required|string',
             'items.*.remarks' => 'nullable|string',
+            'items.*.details' => 'nullable|array',
             'items.*.amount' => 'required|numeric|min:0.01',
             'items.*.payee_name' => 'nullable|string',
             'items.*.payee_phone' => 'nullable|string|max:255',
@@ -1251,6 +1228,9 @@ class PettyCashRequisitionController extends Controller
             ], 422);
         }
 
+        $type = $this->resolveType($request);
+        $typed = app(RequisitionSchemaService::class)->validate($type, $request->all());
+
         try {
             DB::beginTransaction();
 
@@ -1259,8 +1239,13 @@ class PettyCashRequisitionController extends Controller
                 'user_id' => null,
                 'is_public' => true,
                 'department_id' => $request->department_id,
-                'category' => $request->category,
+                'category' => $type->name,
+                'requisition_type_id' => $type->id,
                 'purpose' => $request->purpose,
+                'custom_fields' => $typed['custom_fields'],
+                'type_snapshot' => $type->definition(),
+                'payee_name' => $request->payee_name,
+                'payee_phone' => $request->payee_phone,
                 'project_id' => $request->project_id,
                 'project_name' => $request->project_name,
                 'venue' => $request->venue,
@@ -1269,10 +1254,11 @@ class PettyCashRequisitionController extends Controller
                 'total_amount' => collect($request->items)->sum('amount'),
             ]);
 
-            foreach ($request->items as $item) {
+            foreach ($request->items as $index => $item) {
                 $requisition->items()->create([
                     'description' => $item['description'],
                     'remarks' => $item['remarks'] ?? null,
+                    'details' => $typed['item_details'][$index] ?? [],
                     'amount' => $item['amount'],
                     'payee_name' => $item['payee_name'] ?? null,
                     'payee_phone' => $item['payee_phone'] ?? null,
@@ -1366,6 +1352,32 @@ class PettyCashRequisitionController extends Controller
     {
         return $requisition->user_id === Auth::id()
             || (Auth::user()?->can('viewAllRequisitions', PettyCashDisbursement::class) ?? false);
+    }
+
+    private function resolveType(Request $request): PettyCashRequisitionType
+    {
+        $query = PettyCashRequisitionType::query()->where('is_active', true);
+        $type = $request->filled('requisition_type_id')
+            ? $query->whereKey($request->integer('requisition_type_id'))->first()
+            : $query->where('name', $request->string('category')->toString())->first();
+
+        if (! $type) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'category' => ['Select an active requisition type.'],
+            ]);
+        }
+
+        return $type;
+    }
+
+    private function requisitionTypes()
+    {
+        return PettyCashRequisitionType::query()
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (PettyCashRequisitionType $type) => $type->definition());
     }
 
     private function mayEdit(PettyCashRequisition $requisition): bool

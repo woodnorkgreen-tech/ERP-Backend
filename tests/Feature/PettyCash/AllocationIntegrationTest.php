@@ -73,5 +73,13 @@ class AllocationIntegrationTest extends TestCase
 
         // New top-up should have remaining 27.00 (100 - 73)
         $this->assertEquals(27.00, round($t2->remaining_balance, 2));
+
+        // A voided split payment no longer consumes any funding batch. The
+        // global ledger and per-top-up custody view must tell the same story.
+        $disbursement->update(['status' => 'voided']);
+        $t1->refresh();
+        $t2->refresh();
+        $this->assertEquals(50.00, round($t1->remaining_balance, 2));
+        $this->assertEquals(100.00, round($t2->remaining_balance, 2));
     }
 }

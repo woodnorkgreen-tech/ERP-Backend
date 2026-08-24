@@ -41,4 +41,22 @@ class ProjectFinancialAccess
             || ($user->can(Permissions::PROJECT_COSTS_READ_ASSIGNED) && $this->isAssigned($user, $enquiry));
     }
 
+    /**
+     * Read access to a project's *receivables* — money in, and the governance
+     * trail behind it.
+     *
+     * Deliberately separate from canReadAccount(). The cost account exposes
+     * internal spend and margin; receivables exposes what the client has paid.
+     * Accounts, Costing and Project Manager carry finance.receivables.read but
+     * not finance.costs.read, so gating the receivables modal on the cost
+     * permission locked out exactly the roles the screen is built for, while
+     * folding receivables into canReadAccount() would have handed those roles
+     * the cost account too.
+     */
+    public function canReadReceivables(User $user, ProjectEnquiry $enquiry): bool
+    {
+        return $user->can(Permissions::FINANCE_RECEIVABLES_READ)
+            || $this->canReadAccount($user, $enquiry);
+    }
+
 }

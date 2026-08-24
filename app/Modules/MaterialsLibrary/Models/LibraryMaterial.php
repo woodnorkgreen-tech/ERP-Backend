@@ -48,6 +48,7 @@ class LibraryMaterial extends Model
         'purchase_uom_id',
         'issue_uom_id',
         'unit_cost',
+        'default_unit_cost',
         'valuation_method',
         'revision_version',
         'effective_date',
@@ -66,6 +67,7 @@ class LibraryMaterial extends Model
     protected $casts = [
         'attributes' => 'array',
         'unit_cost' => 'decimal:2',
+        'default_unit_cost' => 'decimal:2',
         'is_active' => 'boolean',
         'is_hazardous' => 'boolean',
         'is_serialized' => 'boolean',

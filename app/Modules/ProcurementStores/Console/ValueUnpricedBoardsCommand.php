@@ -3,10 +3,8 @@
 namespace App\Modules\ProcurementStores\Console;
 
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
-use App\Modules\ProcurementStores\Models\Board;
-use App\Modules\ProcurementStores\Models\BoardMovement;
+use App\Modules\ProcurementStores\Services\BoardValuationService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Prices boards that were registered without a value.
@@ -21,9 +19,13 @@ use Illuminate\Support\Facades\DB;
  * already recorded, using the material's current catalogue cost, which after at
  * least one priced receipt holds the weighted average.
  *
- * Every change writes a BoardMovement so the valuation has an audit trail.
- * Boards that are Consumed or Scrapped are left alone: their cost is already
- * history and repricing them would restate closed project cost.
+ * This is the bulk operator's door onto the same act Stores performs from
+ * POST /boards/record-valuation. Both go through BoardValuationService, so the
+ * rules are identical: only a board still in Stores and still unpriced is
+ * touched, an offcut takes its area share of the sheet price, and every change
+ * writes a BoardMovement. A board that has already been issued is repriced from
+ * the Stores finance exception instead — its posting is what needs correcting,
+ * and repricing the board would not restate it.
  */
 class ValueUnpricedBoardsCommand extends Command
 {
@@ -34,7 +36,7 @@ class ValueUnpricedBoardsCommand extends Command
 
     protected $description = 'Give a value to boards that were registered unpriced, so they can be issued';
 
-    public function handle(): int
+    public function handle(BoardValuationService $valuation): int
     {
         $dryRun = (bool) $this->option('dry-run');
         $override = $this->option('value') !== null ? (float) $this->option('value') : null;
@@ -45,9 +47,7 @@ class ValueUnpricedBoardsCommand extends Command
             return self::FAILURE;
         }
 
-        $boards = Board::query()
-            ->where(fn ($q) => $q->whereNull('current_value')->orWhere('current_value', '<=', 0))
-            ->whereNotIn('status', ['Consumed', 'Scrapped'])
+        $boards = $valuation->unvaluedQuery()
             ->when($this->option('material'), fn ($q, $id) => $q->where('library_material_id', $id))
             ->orderBy('library_material_id')
             ->orderBy('id')
@@ -59,8 +59,15 @@ class ValueUnpricedBoardsCommand extends Command
             return self::SUCCESS;
         }
 
-        $costs = LibraryMaterial::whereIn('id', $boards->pluck('library_material_id')->unique())
-            ->pluck('unit_cost', 'id');
+        // Weighted average first, then the material's default price. Both are
+        // catalogue figures, but the average is built from real receipts.
+        $catalogue = LibraryMaterial::whereIn('id', $boards->pluck('library_material_id')->unique())
+            ->get(['id', 'unit_cost', 'default_unit_cost']);
+        $costs = $catalogue->mapWithKeys(fn ($material) => [
+            $material->id => (float) $material->unit_cost > 0
+                ? (float) $material->unit_cost
+                : (float) ($material->default_unit_cost ?? 0),
+        ]);
 
         $this->newLine();
         $this->line($dryRun ? 'DRY RUN — nothing will be written.' : 'Applying board valuations.');
@@ -91,32 +98,19 @@ class ValueUnpricedBoardsCommand extends Command
                 continue;
             }
 
-            DB::transaction(function () use ($group, $value, &$priced) {
-                foreach ($group as $board) {
-                    $locked = Board::whereKey($board->id)->lockForUpdate()->first();
-                    if (! $locked || (float) $locked->current_value > 0) {
-                        continue;
-                    }
+            $result = $valuation->record($group, $value, null, 'Applied by boards:value-unpriced.');
+            $priced += $result['priced']->count();
 
-                    $locked->update(['current_value' => $value]);
-                    BoardMovement::create([
-                        'board_id' => $locked->id,
-                        'from_status' => $locked->status,
-                        'to_status' => $locked->status,
-                        'performed_by' => null,
-                        'notes' => 'Receipt valuation recorded by boards:value-unpriced — ' . number_format($value, 2),
-                        'job_ref' => $locked->assigned_job_ref,
-                    ]);
-                    $priced++;
-                }
-            });
+            if ($result['catalogue_updated']) {
+                $this->line("    {$name} had no catalogue cost — seeded from this figure.");
+            }
         }
 
         if ($unpriceable) {
             $this->newLine();
-            $this->warn('These materials have no catalogue cost either, so their boards cannot be priced automatically:');
+            $this->warn('These materials have neither a catalogue cost nor a default price, so their boards cannot be priced automatically:');
             $this->table(['Material id', 'Material', 'Unpriced boards', 'Tracking codes'], $unpriceable);
-            $this->line('Supply the receipt price per board:');
+            $this->line('Set a default price on the material in the Material Library, or supply the receipt price per board:');
             foreach ($unpriceable as [$id, $name]) {
                 $this->line("  php artisan boards:value-unpriced --material={$id} --value=<price>   # {$name}");
             }

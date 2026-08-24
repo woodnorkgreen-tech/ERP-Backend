@@ -21,6 +21,8 @@ class ProjectEnquiry extends Model
     protected $fillable = [
         'date_received',
         'expected_delivery_date',
+        'delivery_date_status',
+        'delivery_date_tbc_since',
         'client_id',
         'title',
         'description',
@@ -37,6 +39,9 @@ class ProjectEnquiry extends Model
         'enquiry_number',
         'job_number',
         'venue',
+        'venue_lat',
+        'venue_lng',
+        'venue_place_id',
         'site_survey_skipped',
         'site_survey_skip_reason',
         'selected_workflow_tasks',
@@ -64,12 +69,15 @@ class ProjectEnquiry extends Model
     protected $casts = [
         'date_received' => 'date',
         'expected_delivery_date' => 'date',
+        'delivery_date_tbc_since' => 'date',
         'site_survey_skipped' => 'boolean',
         'assigned_po' => 'integer',
         'project_officer_id' => 'integer',
         'quote_approved' => 'boolean',
         'quote_approved_at' => 'datetime',
         'estimated_budget' => 'decimal:2',
+        'venue_lat' => 'decimal:7',
+        'venue_lng' => 'decimal:7',
         'start_date' => 'date',
         'end_date' => 'date',
         'budget' => 'decimal:2',
@@ -136,6 +144,35 @@ class ProjectEnquiry extends Model
      */
     protected static function booted()
     {
+        // Keep the delivery-date pair coherent no matter who writes it — the two
+        // enquiry controllers, UpdateEnquiryAction, or an inline edit from the
+        // list. Doing it here rather than in each caller means a writer added
+        // later cannot leave a "confirmed" enquiry with no date, or a TBC one
+        // with no clock.
+        static::saving(function ($enquiry) {
+            if ($enquiry->expected_delivery_date) {
+                $enquiry->delivery_date_status    = 'confirmed';
+                $enquiry->delivery_date_tbc_since = null;
+                return;
+            }
+
+            $enquiry->delivery_date_status = 'tbc';
+
+            // A date that gets withdrawn restarts the clock at today: the enquiry
+            // became uncertain now, not when it was logged. Only an enquiry that
+            // has been TBC all along dates from date_received, and an existing
+            // clock is never overwritten by an unrelated edit.
+            $lostAConfirmedDate = $enquiry->exists && $enquiry->getOriginal('expected_delivery_date');
+
+            if ($lostAConfirmedDate) {
+                $enquiry->delivery_date_tbc_since = now()->toDateString();
+            } elseif (!$enquiry->delivery_date_tbc_since) {
+                $enquiry->delivery_date_tbc_since = $enquiry->date_received
+                    ?? $enquiry->created_at
+                    ?? now();
+            }
+        });
+
         static::saved(function ($enquiry) {
             if (!$enquiry->wasRecentlyCreated && !$enquiry->wasChanged('project_scope')) {
                 return;

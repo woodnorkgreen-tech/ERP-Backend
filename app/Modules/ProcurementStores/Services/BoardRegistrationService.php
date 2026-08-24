@@ -218,7 +218,16 @@ class BoardRegistrationService
             throw new \InvalidArgumentException('The remainder is below this material’s minimum reusable dimensions and must be recorded as consumed or waste.');
         }
         $proportion    = $parentAreaM2 > 0 ? $offcutAreaM2 / $parentAreaM2 : 0;
-        $offcutValue   = round($parentBoard->current_value * $proportion, 2);
+
+        // A remainder off a priced board must itself be priced. Rounding a
+        // small offcut's share to 0.00 would hand Stores a sheet that fulfil()
+        // then refuses to issue — an unvaluable board created by the system
+        // rather than by a gap in a delivery note. Floor it at one cent; the
+        // figure is a rounding artefact either way, and this one is issuable.
+        $offcutValue   = round((float) $parentBoard->current_value * $proportion, 2);
+        if ($offcutValue <= 0 && (float) $parentBoard->current_value > 0) {
+            $offcutValue = 0.01;
+        }
 
         return DB::transaction(function () use ($parentBoard, $length, $width, $thickness, $offcutValue, $userId) {
             $offcut = $this->registerBoard(
@@ -281,20 +290,32 @@ class BoardRegistrationService
             return $unitValue;
         }
 
-        $catalogue = (float) ($material->newQuery()->whereKey($material->getKey())->value('unit_cost') ?? 0);
+        $prices = $material->newQuery()->whereKey($material->getKey())
+            ->first(['unit_cost', 'default_unit_cost']);
+
+        $catalogue = (float) ($prices?->unit_cost ?? 0);
+        if ($catalogue > 0) {
+            return $catalogue;
+        }
+
+        // Then the catalogue's default. It is a standing figure rather than
+        // this delivery's, so it never outranks either the receipt price or a
+        // weighted average built from real receipts — but it is a real answer
+        // to "what does this cost", and it keeps a first delivery from being
+        // refused outright.
+        $default = (float) ($prices?->default_unit_cost ?? 0);
+        if ($default > 0) {
+            return $default;
+        }
 
         // A board with no value cannot be issued: fulfil() rejects it rather than
         // post a zero-cost line to a project. Refusing the receipt here surfaces
         // that while the storekeeper still holds the delivery note, instead of
         // days later at the materials desk with the boards already on the rack.
-        if ($catalogue <= 0) {
-            throw new \InvalidArgumentException(
-                "[{$material->material_name}] has no catalogue cost, so every board received would be unissuable. "
-                . 'Record the receipt price per board.'
-            );
-        }
-
-        return $catalogue;
+        throw new \InvalidArgumentException(
+            "[{$material->material_name}] has no price, so every board received would be unissuable. "
+            . 'Record the receipt price per board, or set a default price on the material in the Material Library.'
+        );
     }
 
     // ─── Private core ─────────────────────────────────────────────────────────
