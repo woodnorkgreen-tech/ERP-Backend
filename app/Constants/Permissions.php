@@ -200,6 +200,14 @@ class Permissions
     const PROCUREMENT_VENDORS_MANAGE = 'procurement.vendors.manage';
     const PROCUREMENT_QUOTATIONS_MANAGE = 'procurement.quotations.manage';
 
+    // Materials master and physical Stores custody
+    const MATERIALS_LIBRARY_VIEW = 'materials_library.view';
+    const MATERIALS_LIBRARY_MANAGE = 'materials_library.manage';
+    const MATERIALS_LIBRARY_IMPORT = 'materials_library.import';
+    const STORES_VIEW = 'stores.view';
+    const STORES_MANAGE = 'stores.manage';
+    const STORES_REVIEW = 'stores.review';
+
     // ===========================================
     // LOGISTICS MANAGEMENT PERMISSIONS
     // ===========================================
@@ -375,6 +383,8 @@ class Permissions
             // Procurement Permissions
             self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
             self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
+            self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
+            self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW,
 
             // System Admin Permissions
             self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
@@ -484,6 +494,10 @@ class Permissions
             'procurement' => [
                 self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
                 self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
+            ],
+            'materials_stores' => [
+                self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
+                self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW,
             ],
             'admin' => [
                 self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,

@@ -44,7 +44,8 @@ class AlignMaterialLibraryCommand extends Command
 
         $summary = [
             'groups_created' => 0, 'categories_created' => 0, 'materials_linked' => 0,
-            'uoms_resolved' => 0, 'controls_derived' => 0, 'activated' => 0, 'unresolved' => [],
+            'uoms_resolved' => 0, 'controls_derived' => 0, 'demoted' => 0,
+            'activated' => 0, 'unresolved' => [],
         ];
 
         // A dry run does the real work and then throws it away, so the report
@@ -68,6 +69,7 @@ class AlignMaterialLibraryCommand extends Command
             ['Materials linked to a category', $summary['materials_linked']],
             ['Units of measure resolved', $summary['uoms_resolved']],
             ['Disposition / tracking derived', $summary['controls_derived']],
+            ['Incomplete Active rows demoted', $summary['demoted']],
             ['Promoted to Active', $summary['activated']],
         ]);
 
@@ -185,11 +187,15 @@ class AlignMaterialLibraryCommand extends Command
                         }
                     }
 
-                    if (! $material->isDirty()) {
-                        continue;
+                    if ($material->item_status === 'Active' && ! MaterialCompleteness::isComplete($material)) {
+                        $material->item_status = 'Under Review';
+                        $material->is_active = false;
+                        $summary['demoted']++;
                     }
 
-                    $material->save();
+                    if ($material->isDirty()) {
+                        $material->save();
+                    }
 
                     if ($this->option('activate') && $material->item_status !== 'Active'
                         && MaterialCompleteness::isComplete($material)) {

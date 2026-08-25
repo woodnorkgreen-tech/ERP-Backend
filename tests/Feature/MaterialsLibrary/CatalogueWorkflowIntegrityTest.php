@@ -15,6 +15,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
+use App\Constants\Permissions;
 
 /**
  * Draft-first creation only works if every module downstream agrees on what a
@@ -41,6 +42,9 @@ class CatalogueWorkflowIntegrityTest extends TestCase
         foreach (['Stores', 'Production', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);
         }
+        Role::findByName('Stores')->givePermissionTo([
+            Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE,
+        ]);
 
         $this->stockType = MaterialItemType::create([
             'code' => 'ST'.random_int(1000, 9999), 'name' => 'Stock Material',

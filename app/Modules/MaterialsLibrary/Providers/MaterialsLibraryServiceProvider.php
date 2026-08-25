@@ -48,7 +48,7 @@ class MaterialsLibraryServiceProvider extends ServiceProvider
     protected function registerRoutes(): void
     {
         Route::group([
-            'middleware' => ['api', 'auth:sanctum'],
+            'middleware' => ['api', 'auth:sanctum', 'active'],
             'prefix' => 'api/materials-library',
         ], function () {
             $this->loadRoutesFrom(__DIR__.'/../Routes/api.php');

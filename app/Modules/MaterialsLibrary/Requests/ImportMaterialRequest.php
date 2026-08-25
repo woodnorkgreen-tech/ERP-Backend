@@ -3,6 +3,7 @@
 namespace App\Modules\MaterialsLibrary\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use App\Constants\Permissions;
 
 class ImportMaterialRequest extends FormRequest
 {
@@ -11,7 +12,7 @@ class ImportMaterialRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return true;
+        return $this->user()?->can(Permissions::MATERIALS_LIBRARY_IMPORT) ?? false;
     }
 
     /**

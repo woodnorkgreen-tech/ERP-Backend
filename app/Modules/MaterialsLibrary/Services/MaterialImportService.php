@@ -4,6 +4,8 @@ namespace App\Modules\MaterialsLibrary\Services;
 
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Models\Workstation;
+use App\Modules\MaterialsLibrary\Models\MaterialCategory;
+use App\Modules\MaterialsLibrary\Support\MaterialCompleteness;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -11,6 +13,8 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class MaterialImportService
 {
+    public function __construct(private readonly MaterialDefaultsService $defaults) {}
+
     /**
      * Standard columns that map directly to database fields.
      */
@@ -147,7 +151,6 @@ class MaterialImportService
     {
         $materialData = [
             'workstation_id' => $workstationId,
-            'is_active' => true,
             'attributes' => ['attributes' => []], // Initialize JSON structure
         ];
 
@@ -180,9 +183,6 @@ class MaterialImportService
         $materialData['attributes']['attributes'] = $attributes;
 
         // Validation: Required fields
-        if (empty($materialData['unit_of_measure'])) {
-            $materialData['unit_of_measure'] = '-';
-        }
         if (empty($materialData['material_code'])) {
             throw new \Exception("Missing SKU/Material Code");
         }
@@ -193,17 +193,60 @@ class MaterialImportService
         // Update or Create
         $material = LibraryMaterial::where('material_code', $materialData['material_code'])->first();
 
+        $category = $this->resolveCategory(
+            $materialData['category'] ?? null,
+            $materialData['subcategory'] ?? null,
+        );
+        if ($category) {
+            $materialData['material_category_id'] = $category->id;
+        }
+
+        if (empty($materialData['base_uom_id'])) {
+            $materialData['base_uom_id'] = $this->defaults->resolveUomId($materialData['unit_of_measure'] ?? null);
+        }
+        if (! empty($materialData['base_uom_id'])) {
+            $materialData['issue_uom_id'] = $materialData['base_uom_id'];
+        }
+
+        $materialData = $this->defaults->apply($materialData, $material);
+        $candidate = $material ?: new LibraryMaterial();
+        $candidate->fill($materialData);
+        if ($category) {
+            $candidate->setRelation('materialCategory', $category);
+        }
+        $materialData['item_status'] = MaterialCompleteness::resolveStatus($candidate, $candidate->item_status);
+        $materialData['is_active'] = $materialData['item_status'] === 'Active';
+        $materialData['updated_by'] = auth()->id();
+
         if ($material) {
-            $materialData['updated_by'] = auth()->id();
             $material->update($materialData);
             $results['updated']++;
         } else {
             $materialData['created_by'] = auth()->id();
-            $materialData['updated_by'] = auth()->id();
             LibraryMaterial::create($materialData);
             $results['created']++;
         }
         
         $results['success']++;
+    }
+
+    private function resolveCategory(?string $groupName, ?string $leafName): ?MaterialCategory
+    {
+        if (blank($groupName)) {
+            return null;
+        }
+
+        $group = MaterialCategory::whereNull('parent_id')
+            ->whereRaw('LOWER(name) = ?', [Str::lower(trim($groupName))])
+            ->first();
+        if (! $group) {
+            return null;
+        }
+
+        $leaf = filled($leafName) ? trim($leafName) : trim($groupName);
+
+        return MaterialCategory::where('parent_id', $group->id)
+            ->whereRaw('LOWER(name) = ?', [Str::lower($leaf)])
+            ->first();
     }
 }

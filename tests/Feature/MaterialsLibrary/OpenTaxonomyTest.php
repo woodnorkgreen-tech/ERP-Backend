@@ -14,6 +14,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
+use App\Constants\Permissions;
 
 /**
  * The people who know what a material is are the people typing the list, so the
@@ -34,6 +35,11 @@ class OpenTaxonomyTest extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         foreach (['Stores', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);
+        }
+        foreach (['Stores', 'Manager'] as $role) {
+            Role::findByName($role)->givePermissionTo([
+                Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE,
+            ]);
         }
 
         $this->stockType = MaterialItemType::create([

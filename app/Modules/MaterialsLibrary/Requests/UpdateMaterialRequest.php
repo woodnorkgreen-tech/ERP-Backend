@@ -6,6 +6,7 @@ use App\Modules\MaterialsLibrary\Requests\Concerns\ValidatesMaterialControls;
 use App\Modules\MaterialsLibrary\Support\MaterialControl;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use App\Constants\Permissions;
 
 class UpdateMaterialRequest extends FormRequest
 {
@@ -15,7 +16,7 @@ class UpdateMaterialRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return true;
+        return $this->user()?->can(Permissions::MATERIALS_LIBRARY_MANAGE) ?? false;
     }
 
     /**

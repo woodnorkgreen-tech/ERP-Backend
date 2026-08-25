@@ -89,7 +89,9 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::FINANCE_PETTY_CASH_CREATE,
             Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
             Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
-            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_SUPERVISOR, Permissions::COMPENSATION_READ
+            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_SUPERVISOR, Permissions::COMPENSATION_READ,
+            Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE, Permissions::MATERIALS_LIBRARY_IMPORT,
+            Permissions::STORES_VIEW, Permissions::STORES_MANAGE, Permissions::STORES_REVIEW
         ]);
 
         $employeeRole = Role::firstOrCreate(['name' => 'Employee'], ['description' => 'Basic employee access']);
@@ -169,7 +171,7 @@ class RoleAndPermissionSeeder extends Seeder
         $productionRole->givePermissionTo([
             Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
             Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
-            Permissions::FINANCE_BUDGET_READ
+            Permissions::FINANCE_BUDGET_READ, Permissions::MATERIALS_LIBRARY_VIEW, Permissions::STORES_VIEW
         ]);
 
         $logisticsRole = Role::firstOrCreate(['name' => 'Logistics'], ['description' => 'Logistics and delivery coordination']);
@@ -184,13 +186,17 @@ class RoleAndPermissionSeeder extends Seeder
         $storesRole = Role::firstOrCreate(['name' => 'Stores'], ['description' => 'Inventory and stores management']);
         $storesRole->givePermissionTo([
             Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW
+            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
+            Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE, Permissions::MATERIALS_LIBRARY_IMPORT,
+            Permissions::STORES_VIEW, Permissions::STORES_MANAGE
         ]);
 
         $procurementRole = Role::firstOrCreate(['name' => 'Procurement'], ['description' => 'Procurement and sourcing operations']);
         $procurementRole->givePermissionTo([
             Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW
+            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
+            Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE, Permissions::MATERIALS_LIBRARY_IMPORT,
+            Permissions::STORES_VIEW
         ]);
     }
 }

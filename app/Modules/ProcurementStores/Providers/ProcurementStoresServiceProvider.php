@@ -48,7 +48,7 @@ class ProcurementStoresServiceProvider extends ServiceProvider
     protected function registerRoutes(): void
     {
         Route::group([
-            'middleware' => ['api', 'auth:sanctum'],
+            'middleware' => ['api', 'auth:sanctum', 'active'],
             'prefix' => 'api/procurement-stores',
         ], function () {
             $this->loadRoutesFrom(__DIR__.'/../Routes/api.php');
