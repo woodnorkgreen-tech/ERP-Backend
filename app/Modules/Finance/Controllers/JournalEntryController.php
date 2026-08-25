@@ -89,7 +89,7 @@ class JournalEntryController extends Controller
 
         // accountingPeriod is eager-loaded because the resource exposes it and
         // the list is where "which period did this land in" is actually asked.
-        $query = JournalEntry::with('accountingPeriod')
+        $query = JournalEntry::with(['accountingPeriod', 'costLine.projectEnquiry'])
             ->orderByDesc('posting_date')
             ->orderByDesc('id');
 

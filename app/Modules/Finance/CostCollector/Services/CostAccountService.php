@@ -24,6 +24,9 @@ class CostAccountService
      */
     public const ELEMENT_UNASSIGNED = 'Unassigned';
 
+    /** Reporting label for spend with no budget category or planned-line link. */
+    public const CATEGORY_UNBUDGETED = 'Unbudgeted costs';
+
     /**
      * How a material cost line is classified for grouping.
      *
@@ -269,12 +272,19 @@ class CostAccountService
             ->where('project_enquiry_id', $enquiry->id)
             ->counting()
             ->selectRaw("
-                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(details, '$.budget_category')), 'uncategorised') AS category,
+                COALESCE(
+                    JSON_UNQUOTE(JSON_EXTRACT(details, '$.budget_category')),
+                    JSON_UNQUOTE(JSON_EXTRACT(
+                        (SELECT planned.details FROM cost_lines AS planned WHERE planned.id = cost_lines.consumes_line_id),
+                        '$.budget_category'
+                    )),
+                    CASE WHEN consumes_line_id IS NULL THEN ? ELSE 'Other project costs' END
+                ) AS category,
                 nature,
                 SUM(net_amount) AS total,
                 SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) AS unbudgeted,
                 COUNT(*) AS line_count
-            ", [CostLine::NATURE_PLANNED])
+            ", [self::CATEGORY_UNBUDGETED, CostLine::NATURE_PLANNED])
             ->groupBy('category', 'nature')
             ->get();
 
@@ -462,14 +472,22 @@ class CostAccountService
             ->where('project_enquiry_id', $enquiry->id)
             ->counting()
             ->where(function ($q) use ($category) {
-                // 'uncategorised' is the label `forEnquiry` gives rows with no
+                // The unbudgeted label is what `forEnquiry` gives rows with no
                 // budget_category, so the drill-down has to match that absence
                 // rather than look for the literal string.
                 $extract = "JSON_UNQUOTE(JSON_EXTRACT(details, '$.budget_category'))";
+                $plannedExtract = "JSON_UNQUOTE(JSON_EXTRACT(
+                    (SELECT planned.details FROM cost_lines AS planned WHERE planned.id = cost_lines.consumes_line_id),
+                    '$.budget_category'
+                ))";
 
-                $category === 'uncategorised'
-                    ? $q->whereRaw("COALESCE({$extract}, 'uncategorised') = 'uncategorised'")
-                    : $q->whereRaw("{$extract} = ?", [$category]);
+                if ($category === self::CATEGORY_UNBUDGETED) {
+                    $q->whereNull('consumes_line_id')->whereRaw("{$extract} IS NULL");
+                } elseif ($category === 'Other project costs') {
+                    $q->whereNotNull('consumes_line_id')->whereRaw("COALESCE({$extract}, {$plannedExtract}) IS NULL");
+                } else {
+                    $q->whereRaw("COALESCE({$extract}, {$plannedExtract}) = ?", [$category]);
+                }
             })
             ->orderBy('nature')
             ->orderByDesc('net_amount')
@@ -620,7 +638,16 @@ class CostAccountService
                 'id' => $line->id,
                 'ref' => $line->ref,
                 'description' => $line->description,
+                'expense_family' => $line->expenseCode?->expense_family,
                 'expense_type' => $line->expenseCode?->expense_type,
+                'nature' => $line->nature,
+                'nature_label' => match ($line->nature) {
+                    CostLine::NATURE_COMMITTED => 'Ordered / approved',
+                    CostLine::NATURE_ACCRUED => 'Received, not invoiced',
+                    CostLine::NATURE_ACTUAL => 'Posted actual',
+                    default => ucfirst($line->nature),
+                },
+                'unbudgeted_reason' => $line->details['unbudgeted_reason'] ?? null,
                 'net_amount' => $line->net_amount,
                 'incurred_at' => $line->incurred_at?->toDateString(),
             ])->all(),

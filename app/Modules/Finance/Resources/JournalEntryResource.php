@@ -33,6 +33,41 @@ class JournalEntryResource extends JsonResource
             'cost_line_id' => $this->cost_line_id,
             'spend_voucher_id' => $this->spend_voucher_id,
 
+            // Stores posts one atomic cost line per material movement. Publish
+            // the shared issue identity so the ledger can present the business
+            // transaction once while retaining every material journal beneath
+            // it for valuation, return and audit traceability.
+            'project_cost' => $this->whenLoaded('costLine', function () {
+                $details = $this->costLine?->details ?? [];
+                if (! $this->costLine?->project_enquiry_id && ! $this->costLine?->project_id && blank($this->costLine?->job_number)) {
+                    return null;
+                }
+
+                $projectKey = $this->costLine->project_enquiry_id
+                    ?? $this->costLine->project_id
+                    ?? $this->costLine->job_number
+                    ?? 'no-project';
+
+                return [
+                    // Finance reads material cost at project level. Batch and
+                    // material stay on the child row for Stores traceability.
+                    'group_key' => "project-costs:{$projectKey}",
+                    'batch_number' => $details['batch_number'] ?? null,
+                    'stores_reference' => $details['stores_reference'] ?? null,
+                    'job_number' => $this->costLine->projectEnquiry?->job_number
+                        ?? $this->costLine->job_number,
+                    'project_title' => $this->costLine->projectEnquiry?->title,
+                    'material' => $details['material'] ?? $this->costLine->description,
+                    'quantity' => $this->costLine->quantity ?? ($details['quantity'] ?? null),
+                    'unit' => $this->costLine->unit ?? ($details['uom'] ?? null),
+                    'unit_cost' => $this->costLine->unit_rate ?? ($details['unit_cost'] ?? null),
+                    'element' => $details['element'] ?? null,
+                    'is_material' => isset($details['inventory_log_id']),
+                    'is_unbudgeted' => $this->costLine->consumes_line_id === null,
+                    'unbudgeted_reason' => $details['unbudgeted_reason'] ?? null,
+                ];
+            }),
+
             'total_debit' => (string) $this->total_debit,
             'total_credit' => (string) $this->total_credit,
             // Surfaced rather than left for the client to recompute: an

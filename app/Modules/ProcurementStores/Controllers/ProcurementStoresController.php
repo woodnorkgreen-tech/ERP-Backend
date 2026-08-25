@@ -39,7 +39,6 @@ class ProcurementStoresController extends Controller
             ])
             ->whereIn('status', ['pending', 'processing', 'failed'])
             ->latest()
-            ->limit(100)
             ->get()
             ->map(function (StoresFinancePosting $posting) use ($planRate) {
                 $log = $posting->inventoryLog;
