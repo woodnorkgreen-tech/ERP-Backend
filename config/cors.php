@@ -18,7 +18,7 @@ return [
 'paths' => ['api/*', 'sanctum/csrf-cookie'],
 'allowed_methods' => ['*'],
 'allowed_origins' => [
-    // 'https://erp.woodnorkgreen.co.ke',
+    'https://erp.woodnorkgreen.co.ke',
     'https://woodnorkgreen.co.ke',
 
 ],
