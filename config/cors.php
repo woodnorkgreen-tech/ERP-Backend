@@ -19,6 +19,8 @@ return [
 'allowed_methods' => ['*'],
 'allowed_origins' => [
     'https://erp.woodnorkgreen.co.ke',
+    'https://staging.woodnorkgreen.co.ke',
+
 ],
 'allowed_origins_patterns' => [],
 'allowed_headers' => ['*'],
