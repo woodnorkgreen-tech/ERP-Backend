@@ -37,7 +37,7 @@ class JournalPostingTest extends TestCase
         $this->seed(\App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class);
 
         $this->user = User::factory()->create(['is_active' => true]);
-        
+
         foreach ([
             Permissions::FINANCE_COSTS_VERIFY,
             Permissions::FINANCE_COSTS_READ,

@@ -481,7 +481,10 @@ class CostAccountService
                     '$.budget_category'
                 ))";
 
-                if ($category === self::CATEGORY_UNBUDGETED) {
+                if (in_array(mb_strtolower($category), [
+                    mb_strtolower(self::CATEGORY_UNBUDGETED),
+                    'uncategorised',
+                ], true)) {
                     $q->whereNull('consumes_line_id')->whereRaw("{$extract} IS NULL");
                 } elseif ($category === 'Other project costs') {
                     $q->whereNotNull('consumes_line_id')->whereRaw("COALESCE({$extract}, {$plannedExtract}) IS NULL");

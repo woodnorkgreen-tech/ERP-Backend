@@ -337,6 +337,46 @@ class BoardLifecycleTest extends TestCase
 
     // ── Receiving a returned board ───────────────────────────────────────────
 
+    public function test_an_untouched_wip_board_can_be_returned_to_stock_as_a_whole_item(): void
+    {
+        $this->actAs('Stores');
+        $issue = InventoryLog::create([
+            'material_id' => $this->material->id, 'user_id' => auth()->id(),
+            'type' => 'check_out', 'usage_type' => 'reusable', 'quantity' => -1,
+            'balance_after' => 0, 'reference_no' => 'WNG-01-2026-RETURN', 'logged_at' => now(),
+        ]);
+        $board = $this->makeBoard([
+            'status' => 'WIP', 'assigned_job_ref' => 'WNG-01-2026-RETURN',
+            'original_issue_log_id' => $issue->id,
+        ]);
+        $before = $this->onHand();
+
+        $this->postJson("/api/procurement-stores/boards/{$board->id}/initiate-return", [
+            'confirmed_untouched' => true,
+            'notes' => 'Full board was never cut.',
+        ])->assertOk();
+
+        $this->assertSame('Return Initiated', $board->fresh()->status);
+
+        // Finance posting is covered by its own suite and requires a verified
+        // project-cost fixture. This test owns the physical board lifecycle.
+        Event::fake([\App\Events\Stores\StockReturned::class]);
+
+        $this->postJson("/api/procurement-stores/boards/{$board->id}/receive-return", [
+            'condition_grade' => 'A',
+            'notes' => 'Inspected and returned unused.',
+        ])->assertOk();
+
+        $this->assertSame('Available', $board->fresh()->status);
+        $this->assertSame($before + 1, $this->onHand());
+        $this->assertDatabaseHas('inventory_logs', [
+            'type' => 'return',
+            'return_kind' => 'whole_item',
+            'original_issue_log_id' => $issue->id,
+            'material_id' => $this->material->id,
+        ]);
+    }
+
     public function test_receiving_a_grade_c_return_adds_stock_but_holds_it_in_quarantine(): void
     {
         $this->actAs('Stores');
