@@ -24,6 +24,7 @@ class RequisitionItem extends Model
         'budget_item_persistent_id',
         'material_id',
         'expense_code_id',
+        'supplier_id',
         'custom_description',
         'quantity',
         'uom_id',
@@ -70,5 +71,10 @@ class RequisitionItem extends Model
     public function expenseCode()
     {
         return $this->belongsTo(\App\Modules\Finance\CostCollector\Models\ExpenseCode::class);
+    }
+
+    public function supplier()
+    {
+        return $this->belongsTo(Supplier::class);
     }
 }

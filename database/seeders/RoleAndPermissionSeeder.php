@@ -42,7 +42,8 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
             Permissions::HR_VIEW_EMPLOYEES, Permissions::ADMIN_ACCESS, Permissions::DASHBOARD_ADMIN,
             Permissions::SUPPORT_MANAGE, Permissions::CLIENT_HANDOVER_REVIEW,
-            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE
+            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE,
+            Permissions::LEAVE_BALANCE_VIEW
         ]);
 
         $hrRole = Role::firstOrCreate(['name' => 'HR'], ['description' => 'Human Resources access']);
@@ -56,7 +57,8 @@ class RoleAndPermissionSeeder extends Seeder
             Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::OVERTIME_MANAGE_FLAGS,
             Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE,
             Permissions::OFFBOARDING_VIEW, Permissions::OFFBOARDING_CREATE, Permissions::OFFBOARDING_MANAGE,
-            Permissions::OFFBOARDING_APPROVE, Permissions::OFFBOARDING_CLEARANCE, Permissions::OFFBOARDING_SETTLEMENT
+            Permissions::OFFBOARDING_APPROVE, Permissions::OFFBOARDING_CLEARANCE, Permissions::OFFBOARDING_SETTLEMENT,
+            Permissions::LEAVE_BALANCE_VIEW
         ]);
 
         $clientServiceRole = Role::firstOrCreate(['name' => 'Client Service'], ['description' => 'Client acquisition and enquiry management']);

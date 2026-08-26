@@ -83,7 +83,18 @@ class GoodsReceiptInspectionController extends Controller
                         'location' => $locked->goodsReceiptNote?->store_location, 'reference_no' => $locked->goodsReceiptNote?->grn_number,
                         'notes' => "Accepted after inspection #{$inspection->id}", 'logged_at' => now(),
                     ]);
-                    $locked->update(['entered_uom_id' => $uomId, 'stock_quantity' => abs((float) $log->quantity), 'inventory_log_id' => $log->id, 'stock_status' => 'posted']);
+                    // Posting after inspection is also a store confirmation —
+                    // see the note in GoodsReceiptNoteController::store().
+                    $locked->update([
+                        'entered_uom_id' => $uomId,
+                        'stock_quantity' => abs((float) $log->quantity),
+                        'inventory_log_id' => $log->id,
+                        'stock_status' => 'posted',
+                        'unit_price' => (float) $locked->receipt_unit_cost,
+                        'store_status' => 'confirmed',
+                        'confirmed_by' => auth()->id(),
+                        'confirmed_at' => now(),
+                    ]);
                 }
             } else {
                 $status = (float) $validated['quarantined_quantity'] > 0 ? 'quarantined' : ($validated['outcome'] === 'replacement_requested' ? 'replacement_requested' : 'return_to_supplier');

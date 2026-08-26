@@ -549,12 +549,18 @@ class ProcurementStoresController extends Controller
             }
 
             if ($grnItem) {
+                // Manually checking a GRN line into Stock is a store
+                // confirmation too — see GoodsReceiptNoteController::store().
                 $grnItem->update([
                     'entered_uom_id' => $request->entered_uom_id ?: $material->base_uom_id,
                     'stock_quantity' => abs((float) $log->quantity),
                     'receipt_unit_cost' => $request->receipt_unit_cost,
                     'stock_status' => 'posted',
                     'inventory_log_id' => $log->id,
+                    'unit_price' => $request->receipt_unit_cost,
+                    'store_status' => 'confirmed',
+                    'confirmed_by' => auth()->id(),
+                    'confirmed_at' => now(),
                 ]);
             }
         });

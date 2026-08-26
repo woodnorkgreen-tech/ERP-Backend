@@ -4,6 +4,7 @@ namespace App\Modules\ProcurementStores\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\User;
 
 class GoodsReceiptNoteItem extends Model
 {
@@ -22,6 +23,10 @@ class GoodsReceiptNoteItem extends Model
         'inventory_log_id',
         'condition',
         'accepted',
+        'store_status',
+        'unit_price',
+        'confirmed_by',
+        'confirmed_at',
     ];
 
     protected $casts = [
@@ -31,6 +36,8 @@ class GoodsReceiptNoteItem extends Model
         'received_quantity' => 'decimal:6',
         'stock_quantity' => 'decimal:6',
         'receipt_unit_cost' => 'decimal:4',
+        'unit_price' => 'decimal:2',
+        'confirmed_at' => 'datetime',
     ];
 
     /**
@@ -54,6 +61,14 @@ class GoodsReceiptNoteItem extends Model
         return $this->hasOne(GoodsReceiptInspection::class);
     }
 
-    // No need for direct material relationship
-    // Access material through: $grnItem->purchaseOrderItem->material
+    /**
+     * Who on the Stores side confirmed this item into inventory.
+     */
+    public function confirmedBy()
+    {
+        return $this->belongsTo(User::class, 'confirmed_by');
+    }
+
+    // Access material through: $grnItem->purchaseOrderItem->material,
+    // or directly via material_id once Stores has confirmed it.
 }

@@ -17,6 +17,7 @@ use App\Modules\ProcurementStores\Controllers\GoodsReceiptInspectionController;
 // published eight routes that would fatal on a method-not-found if anything ever
 // reached them.
 Route::get('/test', [ProcurementStoresController::class, 'test']);
+Route::post('/inventory/check-availability', [ProcurementStoresController::class, 'checkAvailability']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
 Route::get('/inventory/{material}/control-options', [ProcurementStoresController::class, 'controlOptions']);
 Route::post('/check-in', [ProcurementStoresController::class, 'checkIn']);
@@ -85,6 +86,9 @@ Route::get('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'index'])
 Route::get('/goods-receipt-notes/search', [GoodsReceiptNoteController::class, 'search']);
 Route::get('/goods-receipt-notes/available-purchase-orders', [GoodsReceiptNoteController::class, 'getAvailablePurchaseOrders']);
 Route::get('/goods-receipt-notes/receiving-queue', [GoodsReceiptNoteController::class, 'receivingQueue']);
+Route::get('/goods-receipt-notes/pending-confirmations', [GoodsReceiptNoteController::class, 'pendingConfirmations']);
+Route::get('/goods-receipt-notes/pending-confirmations-count', [GoodsReceiptNoteController::class, 'pendingConfirmationsCount']);
+Route::post('/goods-receipt-note-items/{grnItem}/confirm', [GoodsReceiptNoteController::class, 'confirmItem']);
 Route::get('/goods-receipt-notes/{id}/download', [GoodsReceiptNoteController::class, 'downloadPdf']);
 Route::get('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'show']);
 Route::post('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'store']);

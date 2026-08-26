@@ -36,6 +36,7 @@ class InventoryLog extends Model
         'return_kind',
         'supplier_id',
         'reference_no',
+        'unit_price',
         'recipient_name',
         'notes',
         'finance_sync_status',
@@ -55,6 +56,7 @@ class InventoryLog extends Model
         'logged_at' => 'datetime',
         'expiry_date' => 'date',
         'finance_synced_at' => 'datetime',
+        'unit_price' => 'decimal:2',
     ];
 
     public function material(): BelongsTo
