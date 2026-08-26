@@ -1456,6 +1456,118 @@ class ProcurementStoresController extends Controller
     }
 
     /**
+     * Aggregate approved, unissued project material demand against stock and
+     * open purchase orders. This is planning information only: it never reserves
+     * stock or silently chooses which project receives a constrained item.
+     */
+    public function materialDemandForecast(): JsonResponse
+    {
+        if (! auth()->user()?->hasAnyRole(['Stores', 'Procurement', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to view material demand forecasts.'], 403);
+        }
+
+        $requirements = \App\Models\ElementMaterial::with([
+                'libraryMaterial.stock',
+                'element.taskMaterialsData.task',
+            ])
+            ->where('is_included', true)
+            ->whereNotNull('library_material_id')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn ($line) => (bool) data_get($line->element?->taskMaterialsData?->project_info, 'approval_status.all_approved', false));
+
+        $enquiryIds = $requirements->map(fn ($line) => $line->element?->taskMaterialsData?->task?->project_enquiry_id)
+            ->filter()->unique()->values();
+        $projects = \App\Models\Project::with('enquiry:id,title,client_id')
+            ->whereIn('enquiry_id', $enquiryIds)->get()->keyBy('enquiry_id');
+        $projectIds = $projects->pluck('id');
+
+        $movements = InventoryLog::query()
+            ->whereIn('project_id', $projectIds)
+            ->whereIn('type', ['check_out', 'issue', 'consumption', 'return'])
+            ->get(['id', 'type', 'quantity', 'material_id', 'project_id', 'project_material_id', 'original_issue_log_id', 'return_kind', 'notes']);
+
+        $issueByLine = $movements->whereIn('type', ['check_out', 'issue', 'consumption'])
+            ->whereNotNull('project_material_id')->groupBy('project_material_id')
+            ->map(fn ($rows) => (float) $rows->sum(fn ($row) => abs((float) $row->quantity)));
+        $reopeningReturnByLine = $movements->where('type', 'return')
+            ->filter(fn ($row) => $row->return_kind !== 'recovered_offcut' && ! str_starts_with((string) $row->notes, 'Offcut '))
+            ->whereNotNull('project_material_id')->groupBy('project_material_id')
+            ->map(fn ($rows) => (float) $rows->sum('quantity'));
+
+        $boardMaterialIds = $requirements->filter(fn ($line) => $line->libraryMaterial?->isBoardTrackable())
+            ->pluck('library_material_id')->unique();
+        $boardAvailable = Board::query()->whereIn('library_material_id', $boardMaterialIds)
+            ->where('status', 'Available')->selectRaw('library_material_id, COUNT(*) AS quantity')
+            ->groupBy('library_material_id')->pluck('quantity', 'library_material_id');
+
+        $incoming = \App\Modules\ProcurementStores\Models\PurchaseOrderItem::query()
+            ->whereNotNull('material_id')
+            ->whereHas('purchaseOrder', fn ($query) => $query->whereNotIn('status', ['cancelled', 'rejected', 'completed']))
+            ->withSum('goodsReceiptNoteItems as received_total', 'received_quantity')
+            ->get(['id', 'material_id', 'quantity'])
+            ->groupBy('material_id')
+            ->map(fn ($rows) => (float) $rows->sum(fn ($row) => max(0, (float) $row->quantity - (float) ($row->received_total ?? 0))));
+
+        $rows = $requirements->groupBy('library_material_id')->map(function ($materialLines, $materialId) use ($projects, $issueByLine, $reopeningReturnByLine, $boardAvailable, $incoming) {
+            $material = $materialLines->first()->libraryMaterial;
+            $projectRows = $materialLines->map(function ($line) use ($projects, $issueByLine, $reopeningReturnByLine) {
+                $task = $line->element?->taskMaterialsData?->task;
+                $project = $projects->get($task?->project_enquiry_id);
+                if (! $project) return null;
+                $approved = (float) $line->quantity;
+                $issued = max(0, (float) ($issueByLine[$line->id] ?? 0) - (float) ($reopeningReturnByLine[$line->id] ?? 0));
+                $pending = max(0, $approved - $issued);
+                return $pending > 0 ? [
+                    'project_id' => $project->id,
+                    'project_code' => $project->project_id,
+                    'project_title' => $project->enquiry?->title ?? 'Project',
+                    'project_material_id' => $line->id,
+                    'element' => $line->element?->name ?? 'Project materials',
+                    'approved' => round($approved, 4),
+                    'issued' => round($issued, 4),
+                    'pending' => round($pending, 4),
+                    'required_by' => $project->start_date?->toDateString(),
+                ] : null;
+            })->filter()->values();
+            if ($projectRows->isEmpty()) return null;
+
+            $pending = (float) $projectRows->sum('pending');
+            $reserved = (float) ($material?->stock?->quantity_reserved ?? 0);
+            $available = $material?->isBoardTrackable()
+                ? max(0, (float) ($boardAvailable[$materialId] ?? 0) - $reserved)
+                : max(0, (float) ($material?->stock?->quantity_on_hand ?? 0) - $reserved);
+            $incomingQuantity = (float) ($incoming[$materialId] ?? 0);
+            $immediateShortage = max(0, $pending - $available);
+            $projectedShortage = max(0, $pending - $available - $incomingQuantity);
+            $status = $immediateShortage <= 0 ? 'fully_covered' : ($projectedShortage <= 0 ? 'covered_by_incoming' : ($available > 0 ? 'partially_covered' : 'shortage'));
+
+            return [
+                'material_id' => (int) $materialId,
+                'material_name' => $material?->material_name ?? 'Material',
+                'material_code' => $material?->material_code,
+                'unit' => $material?->unit_of_measure,
+                'pending_demand' => round($pending, 4),
+                'available' => round($available, 4),
+                'incoming' => round($incomingQuantity, 4),
+                'immediate_shortage' => round($immediateShortage, 4),
+                'projected_shortage' => round($projectedShortage, 4),
+                'coverage_percent' => $pending > 0 ? min(100, round(($available / $pending) * 100, 1)) : 100,
+                'earliest_required_by' => $projectRows->pluck('required_by')->filter()->sort()->first(),
+                'status' => $status,
+                'projects' => $projectRows,
+            ];
+        })->filter()->sortByDesc('projected_shortage')->values();
+
+        return response()->json(['data' => $rows, 'summary' => [
+            'materials' => $rows->count(),
+            'fully_covered' => $rows->where('status', 'fully_covered')->count(),
+            'at_risk' => $rows->whereIn('status', ['partially_covered', 'shortage'])->count(),
+            'covered_by_incoming' => $rows->where('status', 'covered_by_incoming')->count(),
+        ]]);
+    }
+
+    /**
      * Get outstanding reusable items grouped by job/project.
      *
      * Two sub-categories:

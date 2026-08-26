@@ -31,6 +31,7 @@ Route::get('/inventory-logs', [ProcurementStoresController::class, 'inventoryLog
 Route::get('/inventory-logs/pdf', [ProcurementStoresController::class, 'inventoryLogsPdf']);
 Route::get('/material-ledger', [ProcurementStoresController::class, 'materialLedger']);
 Route::get('/outstanding-reusables', [ProcurementStoresController::class, 'outstandingReusables']);
+Route::get('/material-demand-forecast', [ProcurementStoresController::class, 'materialDemandForecast']);
 Route::get('/finance-sync-exceptions', [ProcurementStoresController::class, 'financeSyncExceptions']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/retry', [ProcurementStoresController::class, 'retryFinanceSync']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [ProcurementStoresController::class, 'resolveFinanceValuation']);
