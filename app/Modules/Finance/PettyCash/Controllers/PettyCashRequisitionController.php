@@ -23,6 +23,7 @@ use Exception;
 use App\Exceptions\GovernanceException;
 use App\Services\Governance\ProjectGovernanceService;
 use App\Modules\Finance\PettyCash\Services\RequisitionSchemaService;
+use Illuminate\Validation\ValidationException;
 
 class PettyCashRequisitionController extends Controller
 {
@@ -167,39 +168,7 @@ class PettyCashRequisitionController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'department_id' => 'required|exists:departments,id',
-            'category' => 'required|string',
-            'requisition_type_id' => 'nullable|exists:petty_cash_requisition_types,id',
-            'purpose' => 'required|string',
-            'custom_fields' => 'nullable|array',
-            'payee_id' => 'nullable|exists:employees,id',
-            'payee_name' => 'nullable|string',
-            'payee_phone' => 'nullable|string|max:255',
-            'project_id' => 'nullable|exists:projects,id',
-            'project_name' => 'nullable|string|max:255',
-            'venue' => 'nullable|string|max:255',
-            'enquiry_id' => 'nullable|exists:project_enquiries,id',
-            'bill_id' => 'nullable|exists:bills,id',
-            'items' => 'required|array|min:1',
-            'items.*.description' => 'required|string',
-            'items.*.remarks' => 'nullable|string',
-            'items.*.details' => 'nullable|array',
-            'items.*.amount' => 'required|numeric|min:0.01',
-            'items.*.payee_id' => 'nullable|exists:employees,id',
-            'items.*.payee_name' => 'nullable|string',
-            'items.*.payee_phone' => 'nullable|string|max:255',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $type = $this->resolveType($request);
-        $typed = app(RequisitionSchemaService::class)->validate($type, $request->all());
+        [$type, $typed, $typeSnapshot] = $this->validateSubmission($request);
 
         try {
             DB::beginTransaction();
@@ -212,7 +181,7 @@ class PettyCashRequisitionController extends Controller
                 'requisition_type_id' => $type->id,
                 'purpose' => $request->purpose,
                 'custom_fields' => $typed['custom_fields'],
-                'type_snapshot' => $type->definition(),
+                'type_snapshot' => $typeSnapshot,
                 'project_id' => $request->project_id,
                 'project_name' => $request->project_name,
                 'venue' => $request->venue,
@@ -319,43 +288,11 @@ class PettyCashRequisitionController extends Controller
             ], 409);
         }
 
-        // Validation rules based on status
-        $rules = [
-            'department_id' => 'required|exists:departments,id',
-            'category' => 'required|string',
-            'requisition_type_id' => 'nullable|exists:petty_cash_requisition_types,id',
-            'purpose' => 'required|string',
-            'custom_fields' => 'nullable|array',
-            'project_id' => 'nullable|exists:projects,id',
-            'project_name' => 'nullable|string|max:255',
-            'venue' => 'nullable|string|max:255',
-            'enquiry_id' => 'nullable|exists:project_enquiries,id',
-            'bill_id' => 'nullable|exists:bills,id',
-            'payee_id' => 'nullable|exists:employees,id',
-            'payee_name' => 'nullable|string',
-            'payee_phone' => 'nullable|string|max:255',
-        ];
-
-        $rules['items'] = 'required|array|min:1';
-        $rules['items.*.description'] = 'required|string';
-        $rules['items.*.remarks'] = 'nullable|string';
-        $rules['items.*.details'] = 'nullable|array';
-        $rules['items.*.amount'] = 'required|numeric|min:0.01';
-        $rules['items.*.payee_id'] = 'nullable|exists:employees,id';
-        $rules['items.*.payee_name'] = 'nullable|string';
-        $rules['items.*.payee_phone'] = 'nullable|string|max:255';
-
-        $validator = Validator::make($request->all(), $rules);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $type = $this->resolveType($request);
-        $typed = app(RequisitionSchemaService::class)->validate($type, $request->all());
+        [$type, $typed, $typeSnapshot] = $this->validateSubmission(
+            $request,
+            $requisition->requisition_type_id,
+            $requisition,
+        );
 
         try {
             DB::beginTransaction();
@@ -367,7 +304,7 @@ class PettyCashRequisitionController extends Controller
                 'requisition_type_id' => $type->id,
                 'purpose' => $request->purpose,
                 'custom_fields' => $typed['custom_fields'],
-                'type_snapshot' => $type->definition(),
+                'type_snapshot' => $typeSnapshot,
                 'project_id' => $request->project_id,
                 'project_name' => $request->project_name,
                 'venue' => $request->venue,
@@ -1354,15 +1291,105 @@ class PettyCashRequisitionController extends Controller
             || (Auth::user()?->can('viewAllRequisitions', PettyCashDisbursement::class) ?? false);
     }
 
-    private function resolveType(Request $request): PettyCashRequisitionType
+    /**
+     * Validate the stable requisition envelope and then the selected type's
+     * dynamic schema. Keeping the two layers together gives store and update
+     * one write contract while still validating schema fields from raw input.
+     *
+     * @return array{0: PettyCashRequisitionType, 1: array{custom_fields: array, item_details: array}, 2: array}
+     */
+    private function validateSubmission(
+        Request $request,
+        ?int $editableTypeId = null,
+        ?PettyCashRequisition $editing = null,
+    ): array
     {
-        $query = PettyCashRequisitionType::query()->where('is_active', true);
+        $payload = $request->all();
+        $validator = Validator::make($payload, $this->submissionRules());
+
+        if ($validator->fails()) {
+            throw new ValidationException(
+                $validator,
+                response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors(),
+                ], 422),
+            );
+        }
+
+        $type = $this->resolveType($request, $editableTypeId);
+        $sameHistoricalType = $editing
+            && $type->id === $editing->requisition_type_id
+            && is_array($editing->type_snapshot)
+            && filled($editing->type_snapshot['schema'] ?? null);
+
+        if ($sameHistoricalType) {
+            $snapshot = $editing->type_snapshot;
+            $contract = new PettyCashRequisitionType([
+                'code' => $snapshot['code'] ?? $type->code,
+                'name' => $snapshot['name'] ?? $editing->category,
+                'recipient_mode' => $snapshot['recipient_mode'] ?? $type->recipient_mode,
+                'requires_project' => $snapshot['requires_project'] ?? $type->requires_project,
+                'request_fields' => $snapshot['request_fields'] ?? [],
+                'item_fields' => $snapshot['item_fields'] ?? [],
+                'schema' => $snapshot['schema'],
+                'schema_version' => $snapshot['schema_version'] ?? 1,
+                'instructions' => $snapshot['instructions'] ?? [],
+            ]);
+        } else {
+            $contract = $type;
+            $snapshot = $type->definition();
+        }
+
+        $typed = app(RequisitionSchemaService::class)->validate($contract, $payload);
+
+        return [$type, $typed, $snapshot];
+    }
+
+    /** @return array<string, string> */
+    private function submissionRules(): array
+    {
+        return [
+            'department_id' => 'required|exists:departments,id',
+            'category' => 'required|string',
+            'requisition_type_id' => 'nullable|exists:petty_cash_requisition_types,id',
+            'purpose' => 'required|string',
+            'custom_fields' => 'nullable|array',
+            'payee_id' => 'nullable|exists:employees,id',
+            'payee_name' => 'nullable|string',
+            'payee_phone' => 'nullable|string|max:255',
+            'project_id' => 'nullable|exists:projects,id',
+            'project_name' => 'nullable|string|max:255',
+            'venue' => 'nullable|string|max:255',
+            'enquiry_id' => 'nullable|exists:project_enquiries,id',
+            'bill_id' => 'nullable|exists:bills,id',
+            'items' => 'required|array|min:1',
+            'items.*.description' => 'required|string',
+            'items.*.remarks' => 'nullable|string',
+            'items.*.details' => 'nullable|array',
+            'items.*.amount' => 'required|numeric|min:0.01',
+            'items.*.payee_id' => 'nullable|exists:employees,id',
+            'items.*.payee_name' => 'nullable|string',
+            'items.*.payee_phone' => 'nullable|string|max:255',
+        ];
+    }
+
+    private function resolveType(Request $request, ?int $editableTypeId = null): PettyCashRequisitionType
+    {
+        $query = PettyCashRequisitionType::query()->where(function ($types) use ($editableTypeId) {
+            $types->where('is_active', true);
+            if ($editableTypeId) {
+                // A retired type remains valid only for the requisition that
+                // already owns it. It never returns to the new-request picker.
+                $types->orWhere('id', $editableTypeId);
+            }
+        });
         $type = $request->filled('requisition_type_id')
             ? $query->whereKey($request->integer('requisition_type_id'))->first()
             : $query->where('name', $request->string('category')->toString())->first();
 
         if (! $type) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'category' => ['Select an active requisition type.'],
             ]);
         }

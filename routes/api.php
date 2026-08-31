@@ -31,6 +31,7 @@ use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashReportController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashRequisitionController;
+use App\Modules\Finance\PettyCash\Controllers\PettyCashRequisitionTypeController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashOfflineBatchController;
 use App\Modules\Teams\Controllers\TeamsTaskController;
 use App\Modules\Teams\Controllers\TeamMemberController;
@@ -967,6 +968,15 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
         // Petty Cash Module Routes
         Route::prefix('petty-cash')->group(function () {
+            /*
+             * Requisition types. Guarded inside the controller by
+             * finance.requisition_types.manage — configuring what the form asks
+             * is a different authority from raising or approving a requisition.
+             */
+            Route::apiResource('requisition-types', PettyCashRequisitionTypeController::class)
+                ->parameters(['requisition-types' => 'requisitionType'])
+                ->except(['show']);
+
             // Disbursement management routes
             Route::get('disbursements', [PettyCashController::class, 'index']);
             Route::post('disbursements', [PettyCashController::class, 'store']);
