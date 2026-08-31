@@ -207,10 +207,10 @@ class CatalogueWorkflowIntegrityTest extends TestCase
 
         // The library resource and the Stores inventory both read this one value.
         $this->assertSame('quantity', $material->stock_handling);
-        $this->assertSame('Used up', $material->handling_label);
+        $this->assertSame('Consumed', $material->handling_label);
 
         $material->update(['issue_disposition' => 'returnable', 'tracking_mode' => 'bulk_quantity']);
         $this->assertSame('reusable_item', $material->fresh()->stock_handling);
-        $this->assertSame('Comes back', $material->fresh()->handling_label);
+        $this->assertSame('Returnable', $material->fresh()->handling_label);
     }
 }
