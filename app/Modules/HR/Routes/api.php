@@ -59,6 +59,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Employee management
         Route::get('employees/profile', [EmployeeController::class, 'profile']);
         Route::get('employees/compact', [EmployeeController::class, 'compact']);
+        // Name-only staff directory for people-pickers in other modules.
+        Route::get('employees/directory', [EmployeeController::class, 'directory']);
         Route::get('employees/stats', [EmployeeController::class, 'stats'])->middleware('permission:' . Permissions::EMPLOYEE_READ);
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'uploadPhoto']);
 
