@@ -2,203 +2,50 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Seeder;
-use Spatie\Permission\Models\Role;
-use Spatie\Permission\Models\Permission;
 use App\Constants\Permissions;
+use App\Constants\RolePermissions;
+use Illuminate\Database\Seeder;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 
+/**
+ * Create every role and permission, then allocate from the matrix.
+ *
+ * This used to hold fifteen hand-written per-role lists, which is why a seeded
+ * database and a migrated one could disagree about who could do what: a
+ * permission added by a one-off migration was never added here, so it existed
+ * on a live system and nowhere on a fresh one. The lists now come from
+ * RolePermissions, the same source `permissions:sync` reconciles against, so
+ * the two cannot drift apart again.
+ *
+ * @see \App\Constants\RolePermissions
+ * @see \App\Console\Commands\SyncPermissionsCommand
+ */
 class RoleAndPermissionSeeder extends Seeder
 {
-    /**
-     * Run the database seeds.
-     */
     public function run(): void
     {
-        // Create all permissions from constants
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        // Every constant becomes a row first. Granting a permission that has no
+        // row throws, so this ordering is what lets the matrix name anything the
+        // registry declares without depending on some migration having run.
         foreach (Permissions::all() as $permission) {
-            Permission::firstOrCreate(['name' => $permission]);
+            Permission::findOrCreate($permission, 'web');
         }
 
-        // Create roles and assign permissions using constants
-        $superAdminRole = Role::firstOrCreate(['name' => 'Super Admin'], ['description' => 'Full system access']);
-        $superAdminRole->givePermissionTo(Permission::all());
+        foreach (RolePermissions::matrix() as $name => $permissions) {
+            $role = Role::firstOrCreate(
+                ['name' => $name],
+                ['description' => RolePermissions::DESCRIPTIONS[$name] ?? null],
+            );
 
-        $adminRole = Role::firstOrCreate(['name' => 'Admin'], ['description' => 'Administrative access']);
-        $adminRole->givePermissionTo([
-            Permissions::USER_CREATE, Permissions::USER_READ, Permissions::USER_UPDATE,
-            Permissions::USER_ASSIGN_ROLE,
-            Permissions::ROLE_READ, Permissions::DEPARTMENT_READ, Permissions::DEPARTMENT_UPDATE,
-            Permissions::EMPLOYEE_READ, Permissions::PROJECT_READ, Permissions::FINANCE_VIEW,
-            Permissions::LEAVE_TYPE_CREATE, Permissions::LEAVE_TYPE_READ, Permissions::LEAVE_TYPE_UPDATE,
-            Permissions::LEAVE_TYPE_DELETE, Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ,
-            Permissions::LEAVE_REQUEST_UPDATE, Permissions::LEAVE_REQUEST_APPROVE, Permissions::LEAVE_REQUEST_DELETE,
-            Permissions::FINANCE_PETTY_CASH_VIEW,
-            Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE,
-            Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
-            Permissions::FINANCE_PETTY_CASH_CREATE,
-            Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
-            Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
-            Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
-            Permissions::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
-            Permissions::HR_VIEW_EMPLOYEES, Permissions::ADMIN_ACCESS, Permissions::DASHBOARD_ADMIN,
-            Permissions::SUPPORT_MANAGE, Permissions::CLIENT_HANDOVER_REVIEW,
-            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE,
-            Permissions::LEAVE_BALANCE_VIEW
-        ]);
+            // Additive, like permissions:sync — seeding an existing database
+            // must not silently strip an authority somebody depends on.
+            $role->givePermissionTo($permissions);
+        }
 
-        $hrRole = Role::firstOrCreate(['name' => 'HR'], ['description' => 'Human Resources access']);
-        $hrRole->givePermissionTo([
-            Permissions::EMPLOYEE_CREATE, Permissions::EMPLOYEE_READ, Permissions::EMPLOYEE_UPDATE,
-            Permissions::EMPLOYEE_DELETE, Permissions::USER_READ, Permissions::USER_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::HR_VIEW_EMPLOYEES, Permissions::DASHBOARD_HR,
-            Permissions::LEAVE_TYPE_CREATE, Permissions::LEAVE_TYPE_READ, Permissions::LEAVE_TYPE_UPDATE,
-            Permissions::LEAVE_TYPE_DELETE, Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ,
-            Permissions::LEAVE_REQUEST_UPDATE, Permissions::LEAVE_REQUEST_APPROVE, Permissions::LEAVE_REQUEST_DELETE,
-            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_HR, Permissions::OVERTIME_MANAGE_FLAGS,
-            Permissions::COMPENSATION_READ, Permissions::COMPENSATION_APPROVE,
-            Permissions::OFFBOARDING_VIEW, Permissions::OFFBOARDING_CREATE, Permissions::OFFBOARDING_MANAGE,
-            Permissions::OFFBOARDING_APPROVE, Permissions::OFFBOARDING_CLEARANCE, Permissions::OFFBOARDING_SETTLEMENT,
-            Permissions::LEAVE_BALANCE_VIEW
-        ]);
-
-        $clientServiceRole = Role::firstOrCreate(['name' => 'Client Service'], ['description' => 'Client acquisition and enquiry management']);
-        $clientServiceRole->givePermissionTo([
-            // User & Department
-            Permissions::USER_READ, Permissions::DEPARTMENT_READ,
-            // Client Management
-            Permissions::CLIENT_CREATE, Permissions::CLIENT_READ,
-            // Enquiry Management
-            Permissions::ENQUIRY_CREATE, Permissions::ENQUIRY_READ, Permissions::ENQUIRY_UPDATE,
-            // Project & Task Access (same as Project Officer)
-            Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS,
-            Permissions::TASK_READ, Permissions::TASK_UPDATE, Permissions::TASK_ASSIGN,
-            // Handover Review (CS Lead action — approve or trigger NCR)
-            Permissions::CLIENT_HANDOVER_REVIEW,
-            // Dashboard
-            Permissions::DASHBOARD_VIEW, Permissions::DASHBOARD_PROJECTS
-        ]);
-
-        $managerRole = Role::firstOrCreate(['name' => 'Manager'], ['description' => 'Department management']);
-        $managerRole->givePermissionTo([
-            Permissions::USER_READ, Permissions::USER_UPDATE, Permissions::DEPARTMENT_READ,
-            Permissions::DEPARTMENT_ACCESS, Permissions::EMPLOYEE_READ, Permissions::PROJECT_READ,
-            Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS, Permissions::TASK_READ,
-            Permissions::TASK_UPDATE, Permissions::TASK_ASSIGN, Permissions::DASHBOARD_VIEW,
-            Permissions::LEAVE_REQUEST_READ, Permissions::LEAVE_REQUEST_APPROVE,
-            Permissions::FINANCE_PETTY_CASH_VIEW,
-            Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE,
-            Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
-            Permissions::FINANCE_PETTY_CASH_CREATE,
-            Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
-            Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
-            Permissions::OVERTIME_READ, Permissions::OVERTIME_APPROVE_SUPERVISOR, Permissions::COMPENSATION_READ,
-            Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE, Permissions::MATERIALS_LIBRARY_IMPORT,
-            Permissions::STORES_VIEW, Permissions::STORES_MANAGE, Permissions::STORES_REVIEW
-        ]);
-
-        $employeeRole = Role::firstOrCreate(['name' => 'Employee'], ['description' => 'Basic employee access']);
-        $employeeRole->givePermissionTo([
-            Permissions::USER_READ, Permissions::PROJECT_READ, Permissions::TASK_READ,
-            Permissions::TASK_UPDATE, Permissions::DASHBOARD_VIEW,
-            Permissions::LEAVE_REQUEST_CREATE, Permissions::LEAVE_REQUEST_READ, Permissions::LEAVE_REQUEST_UPDATE,
-            Permissions::OVERTIME_CREATE, Permissions::OVERTIME_READ, Permissions::COMPENSATION_CREATE, Permissions::COMPENSATION_READ
-        ]);
-
-        // Finance Roles
-        $accountsRole = Role::firstOrCreate(['name' => 'Accounts'], ['description' => 'Financial accounting and invoicing']);
-        $accountsRole->givePermissionTo([
-            Permissions::FINANCE_VIEW, Permissions::FINANCE_BUDGET_READ,
-            Permissions::FINANCE_QUOTE_APPROVE,
-            Permissions::PROJECT_READ, Permissions::USER_READ,
-            Permissions::DASHBOARD_FINANCE,
-            Permissions::FINANCE_PETTY_CASH_VIEW,
-            Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE,
-            Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
-            Permissions::FINANCE_PETTY_CASH_CREATE,
-            Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_VOID,
-            Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
-            Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL,
-            Permissions::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH
-        ]);
-
-        $costingRole = Role::firstOrCreate(['name' => 'Costing'], ['description' => 'Cost analysis and budget management']);
-        $costingRole->givePermissionTo([
-            Permissions::FINANCE_VIEW, Permissions::FINANCE_BUDGET_READ, Permissions::FINANCE_BUDGET_UPDATE,
-            Permissions::FINANCE_EXPENSE_CODES_MANAGE,
-            Permissions::FINANCE_QUOTE_APPROVE,
-            Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE,
-            Permissions::USER_READ, Permissions::DASHBOARD_FINANCE
-        ]);
-
-        // Creatives/Design Roles
-        $designerRole = Role::firstOrCreate(['name' => 'Designer'], ['description' => 'Creative design and development']);
-        $designerRole->givePermissionTo([
-            Permissions::CREATIVES_VIEW,
-            Permissions::DEPARTMENT_READ, Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DASHBOARD_VIEW
-        ]);
-
-        // Procurement Roles (Future - commented out until implemented)
-        // $procurementRole = Role::firstOrCreate(['name' => 'Procurement Officer'], ['description' => 'Material sourcing and supplier management']);
-        // $procurementRole->givePermissionTo([
-        //     Permissions::PROCUREMENT_VIEW, Permissions::PROCUREMENT_MATERIALS_REQUEST,
-        //     Permissions::PROCUREMENT_ORDERS_CREATE, Permissions::PROCUREMENT_VENDORS_MANAGE,
-        //     Permissions::PROCUREMENT_QUOTATIONS_MANAGE, Permissions::DEPARTMENT_READ, Permissions::PROJECT_READ,
-        //     Permissions::TASK_READ, Permissions::TASK_UPDATE,
-        //     Permissions::DASHBOARD_VIEW
-        // ]);
-
-        // Project Roles
-        $projectManagerRole = Role::firstOrCreate(['name' => 'Project Manager'], ['description' => 'Project management and coordination']);
-        $projectManagerRole->givePermissionTo([
-            Permissions::PROJECT_CREATE, Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE,
-            Permissions::PROJECT_DELETE, Permissions::PROJECT_ASSIGN_USERS,
-            Permissions::ENQUIRY_READ, Permissions::ENQUIRY_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::TASK_CREATE, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::TASK_ASSIGN, Permissions::USER_READ,
-            Permissions::DASHBOARD_PROJECTS, Permissions::PROJECT_COSTS_READ_ASSIGNED
-        ]);
-
-        $projectOfficerRole = Role::firstOrCreate(['name' => 'Project Officer'], ['description' => 'Project coordination support']);
-        $projectOfficerRole->givePermissionTo([
-            Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::PROJECT_ASSIGN_USERS,
-            Permissions::ENQUIRY_READ, Permissions::DEPARTMENT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::TASK_ASSIGN, Permissions::USER_READ, Permissions::DASHBOARD_PROJECTS,
-            Permissions::PROJECT_COSTS_READ_ASSIGNED
-        ]);
-
-        // Operational Roles (Production, Logistics, Stores, Procurement)
-        // These roles have access to projects module until their dedicated modules are developed
-        $productionRole = Role::firstOrCreate(['name' => 'Production'], ['description' => 'Production and manufacturing operations']);
-        $productionRole->givePermissionTo([
-            Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
-            Permissions::FINANCE_BUDGET_READ, Permissions::MATERIALS_LIBRARY_VIEW, Permissions::STORES_VIEW
-        ]);
-
-        $logisticsRole = Role::firstOrCreate(['name' => 'Logistics'], ['description' => 'Logistics and delivery coordination']);
-        $logisticsRole->givePermissionTo([
-            Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
-            Permissions::LOGISTICS_VIEW, Permissions::LOGISTICS_DELIVERIES_MANAGE,
-            Permissions::LOGISTICS_DRIVERS_MANAGE, Permissions::LOGISTICS_FLEET_MANAGE,
-            Permissions::LOGISTICS_ROUTES_MANAGE, Permissions::LOGISTICS_TRACKING_VIEW
-        ]);
-
-        $storesRole = Role::firstOrCreate(['name' => 'Stores'], ['description' => 'Inventory and stores management']);
-        $storesRole->givePermissionTo([
-            Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
-            Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE, Permissions::MATERIALS_LIBRARY_IMPORT,
-            Permissions::STORES_VIEW, Permissions::STORES_MANAGE
-        ]);
-
-        $procurementRole = Role::firstOrCreate(['name' => 'Procurement'], ['description' => 'Procurement and sourcing operations']);
-        $procurementRole->givePermissionTo([
-            Permissions::PROJECT_READ, Permissions::TASK_READ, Permissions::TASK_UPDATE,
-            Permissions::DEPARTMENT_READ, Permissions::USER_READ, Permissions::DASHBOARD_VIEW,
-            Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE, Permissions::MATERIALS_LIBRARY_IMPORT,
-            Permissions::STORES_VIEW
-        ]);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 }
