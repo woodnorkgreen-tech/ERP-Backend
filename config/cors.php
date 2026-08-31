@@ -18,12 +18,9 @@ return [
 'paths' => ['api/*', 'sanctum/csrf-cookie'],
 'allowed_methods' => ['*'],
 'allowed_origins' => [
-    'http://localhost:5173',
-    'http://localhost:5175',
-    'https://erp-frontend.ddev.site:5173',
-    'https://www.woodnorkgreen.co.ke',
-    'https://woodnorkgreen.co.ke',  // Without www
-    'http://127.0.0.1:5173', // Alternative localhost format
+    'https://erp.woodnorkgreen.co.ke',
+    'https://woodnorkgreen.co.ke',
+
 ],
 'allowed_origins_patterns' => [],
 'allowed_headers' => ['*'],
