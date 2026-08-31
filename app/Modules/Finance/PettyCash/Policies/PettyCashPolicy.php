@@ -99,11 +99,15 @@ class PettyCashPolicy
      * and this decides who additionally sees everybody's. The role list it
      * replaces named a "Finance Manager" role that does not exist in the roles
      * table, so that arm had never matched anyone.
+     *
+     * The surviving `hasRole(['Admin', 'Accounts'])` arm went the same way: both
+     * roles are granted finance.petty_cash.view_reports by the role matrix, so
+     * the permission above already admitted them and the role check decided
+     * nothing. Naming roles here would only let the two drift apart again.
      */
     public function viewAllRequisitions(User $user): bool
     {
-        return $user->can(Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS)
-            || $user->hasRole(['Admin', 'Accounts']);
+        return $user->can(Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS);
     }
 
     /**
