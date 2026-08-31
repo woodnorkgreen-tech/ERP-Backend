@@ -116,6 +116,13 @@ class Permissions
     const FINANCE_COSTS_REVERSE = 'finance.costs.reverse';
     const FINANCE_EXPENSE_CODES_MANAGE = 'finance.expense_codes.manage';
 
+    // Requisition types define what every requester is asked for and what
+    // Finance is shown when approving, so configuring them is a finance control
+    // rather than a system-administration one. Held separately from raising or
+    // approving a requisition: the person who decides what the form asks should
+    // not need the authority to release cash through it.
+    const FINANCE_REQUISITION_TYPES_MANAGE = 'finance.requisition_types.manage';
+
 
     // Spend vouchers deliberately split maker, checker and poster. A single
     // broad Finance permission would let the person requesting cash approve and
@@ -154,6 +161,29 @@ class Permissions
     const FINANCE_PETTY_CASH_UPLOAD_EXCEL = 'finance.petty_cash.upload_excel';
     const FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH = 'finance.petty_cash.approve_offline_batch';
     const FINANCE_PETTY_CASH_ADMIN = 'finance.petty_cash.admin';
+
+    // Petty cash operations that existed as permission rows before they had
+    // constants. They were created by 2026_08_09_000011 and are checked as raw
+    // strings in the resources and on the client, so they are real authorities
+    // that the registry simply never knew about — which is why a freshly seeded
+    // database did not have them at all.
+    const FINANCE_PETTY_CASH_EXPORT_DATA = 'finance.petty_cash.export_data';
+    const FINANCE_PETTY_CASH_MANAGE_SETTINGS = 'finance.petty_cash.manage_settings';
+    const FINANCE_PETTY_CASH_RECALCULATE_BALANCE = 'finance.petty_cash.recalculate_balance';
+
+    /**
+     * Legacy short forms, kept only so nobody loses access.
+     *
+     * These name the same authority as CREATE / UPDATE / VOID above, from an
+     * earlier generation of the naming. Both spellings are granted together by
+     * the role matrix, because a user holding only the short form would
+     * otherwise be locked out the moment the call sites move to the canonical
+     * name. Retire them by migrating the remaining call sites — the resources
+     * and the petty-cash client — then dropping the rows.
+     */
+    const FINANCE_PETTY_CASH_CREATE_LEGACY = 'finance.petty_cash.create';
+    const FINANCE_PETTY_CASH_UPDATE_LEGACY = 'finance.petty_cash.update';
+    const FINANCE_PETTY_CASH_VOID_LEGACY = 'finance.petty_cash.void';
 
     // ===========================================
     // HR PERMISSIONS
@@ -330,6 +360,7 @@ class Permissions
             // Project Management
             self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
             self::PROJECT_ASSIGN_USERS, self::PROJECT_VIEW_REPORTS, self::PROJECT_CLOSE,
+            self::PROJECT_COSTS_READ_ASSIGNED,
 
             // Enquiry Management
             self::ENQUIRY_CREATE, self::ENQUIRY_READ, self::ENQUIRY_UPDATE, self::ENQUIRY_DELETE,
@@ -366,6 +397,15 @@ class Permissions
             self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
             self::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
             self::FINANCE_PETTY_CASH_ADMIN,
+            self::FINANCE_PETTY_CASH_EDIT_TOP_UP,
+            self::FINANCE_EXPENSE_CODES_MANAGE,
+            self::FINANCE_REQUISITION_TYPES_MANAGE,
+            self::FINANCE_PETTY_CASH_EXPORT_DATA,
+            self::FINANCE_PETTY_CASH_MANAGE_SETTINGS,
+            self::FINANCE_PETTY_CASH_RECALCULATE_BALANCE,
+            self::FINANCE_PETTY_CASH_CREATE_LEGACY,
+            self::FINANCE_PETTY_CASH_UPDATE_LEGACY,
+            self::FINANCE_PETTY_CASH_VOID_LEGACY,
 
             // HR Permissions
             self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
@@ -445,6 +485,7 @@ class Permissions
             'project_management' => [
                 self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
                 self::PROJECT_ASSIGN_USERS, self::PROJECT_VIEW_REPORTS, self::PROJECT_CLOSE,
+                self::PROJECT_COSTS_READ_ASSIGNED,
             ],
             'enquiry_management' => [
                 self::ENQUIRY_CREATE, self::ENQUIRY_READ, self::ENQUIRY_UPDATE, self::ENQUIRY_DELETE,
@@ -477,6 +518,15 @@ class Permissions
                 self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
                 self::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
                 self::FINANCE_PETTY_CASH_ADMIN,
+                self::FINANCE_PETTY_CASH_EDIT_TOP_UP,
+                self::FINANCE_EXPENSE_CODES_MANAGE,
+                self::FINANCE_REQUISITION_TYPES_MANAGE,
+                self::FINANCE_PETTY_CASH_EXPORT_DATA,
+                self::FINANCE_PETTY_CASH_MANAGE_SETTINGS,
+                self::FINANCE_PETTY_CASH_RECALCULATE_BALANCE,
+                self::FINANCE_PETTY_CASH_CREATE_LEGACY,
+                self::FINANCE_PETTY_CASH_UPDATE_LEGACY,
+                self::FINANCE_PETTY_CASH_VOID_LEGACY,
             ],
             'hr' => [
                 self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
