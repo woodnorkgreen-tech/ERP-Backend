@@ -237,6 +237,17 @@ class ProcurementStoresController extends Controller
             $query->whereHas('stock');
         }
 
+        // Pickers behind an action that DECREMENTS stock (issue, damage) ask for
+        // issuable only, so an item at zero cannot be selected in the first
+        // place. Deliberately not applied to receive or return: both increase
+        // stock, and a fully-issued item sits at zero exactly when it is being
+        // returned. Board-tracked items are ranked here on the stock row alone,
+        // which counts ungraded Quarantine boards; the board-aware figures are
+        // derived further down, and adjustStock() remains the binding check.
+        if ($request->input('availability') === 'issuable') {
+            $query->issuable();
+        }
+
         // Filter by Search Query
         if ($request->filled('search')) {
             $query->search($request->search);
@@ -369,11 +380,15 @@ class ProcurementStoresController extends Controller
 
         $summary = [
             'total_items' => $summaryRows->count(),
+            'stocked_item_count' => $summaryRows->where('is_stocked', true)->count(),
+            'unstocked_item_count' => $summaryRows->where('is_stocked', false)->count(),
             'total_value' => round((float) $summaryRows->sum('_stock_value'), 2),
             'low_stock_count' => $summaryRows->filter(fn ($row) =>
                 $row['min_stock_level'] > 0 && $row['available'] <= $row['min_stock_level']
             )->count(),
-            'out_of_stock_count' => $summaryRows->where('available', '<=', 0)->count(),
+            'out_of_stock_count' => $summaryRows->filter(fn ($row) =>
+                $row['is_stocked'] && $row['available'] <= 0
+            )->count(),
             'board_item_count' => $summaryRows->where('board_trackable', true)->count(),
             'reusable_item_count' => $summaryRows->filter(fn ($row) =>
                 $row['issue_disposition'] === 'returnable' && !$row['board_trackable']

@@ -160,7 +160,12 @@ class InventoryService
 
             // Cost is receipt evidence, not catalogue input. Keep the material's
             // valuation cost derived from posted receipts using weighted average.
-            if ($type === 'check_in' && array_key_exists('receipt_unit_cost', $meta) && $meta['receipt_unit_cost'] !== null) {
+            $isOpeningIncrease = $type === 'adjustment'
+                && ($meta['opening_inventory'] ?? false)
+                && $quantity > 0;
+            if (($type === 'check_in' || $isOpeningIncrease)
+                && array_key_exists('receipt_unit_cost', $meta)
+                && $meta['receipt_unit_cost'] !== null) {
                 $receivedQuantity = abs($quantity);
                 $newQuantity = $previousQuantity + $receivedQuantity;
 
@@ -204,7 +209,7 @@ class InventoryService
                 // Freeze the value used when stock leaves Stores. Finance posts
                 // asynchronously, so reading the material's future average cost
                 // inside the queue would rewrite the economics of this issue.
-                'receipt_unit_cost' => $type === 'check_in'
+                'receipt_unit_cost' => ($type === 'check_in' || $isOpeningIncrease)
                     ? ($meta['receipt_unit_cost'] ?? null)
                     : (in_array($type, ['check_out', 'issue', 'consumption', 'defective'], true)
                         // Freeze the effective catalogue value now. Finance is

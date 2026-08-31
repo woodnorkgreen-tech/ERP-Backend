@@ -10,6 +10,7 @@ use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
 use App\Modules\ProcurementStores\Controllers\BoardController;
 use App\Modules\ProcurementStores\Controllers\BoardRequestController;
 use App\Modules\ProcurementStores\Controllers\StockCountController;
+use App\Modules\ProcurementStores\Controllers\StoresResetController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptInspectionController;
 
 // apiResource, not resource: `create` and `edit` return HTML form scaffolding,
@@ -44,6 +45,9 @@ Route::put('/stock-counts/{stockCount}', [StockCountController::class, 'update']
 Route::post('/stock-counts/{stockCount}/submit', [StockCountController::class, 'submit']);
 Route::post('/stock-counts/{stockCount}/approve', [StockCountController::class, 'approve']);
 Route::post('/stock-counts/{stockCount}/reject', [StockCountController::class, 'reject']);
+Route::delete('/stock-counts/{stockCount}', [StockCountController::class, 'destroy']);
+Route::get('/stores-reset/preview', [StoresResetController::class, 'preview']);
+Route::post('/stores-reset', [StoresResetController::class, 'store']);
 Route::get('/goods-receipt-inspections', [GoodsReceiptInspectionController::class, 'index']);
 Route::post('/goods-receipt-inspections/{item}/resolve', [GoodsReceiptInspectionController::class, 'resolve']);
 
