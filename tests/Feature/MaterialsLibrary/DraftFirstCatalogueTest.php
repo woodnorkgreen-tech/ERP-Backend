@@ -90,6 +90,24 @@ class DraftFirstCatalogueTest extends TestCase
         $this->assertNull($material->workstation_id, 'Workstation is routing, not identity.');
     }
 
+    public function test_an_alternative_name_is_stored_returned_and_searchable(): void
+    {
+        $this->createMaterial([
+            'material_name' => 'Polyvinyl Acetate Adhesive',
+            'alternative_item_name' => 'Workshop white glue',
+        ])->assertCreated()
+            ->assertJsonPath('data.alternative_item_name', 'Workshop white glue');
+
+        $material = LibraryMaterial::sole();
+        $this->assertSame('Workshop white glue', $material->alternative_item_name);
+
+        $this->getJson('/api/materials-library/materials?search=white%20glue')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $material->id)
+            ->assertJsonPath('data.0.alternative_item_name', 'Workshop white glue');
+    }
+
     public function test_behaviour_is_derived_from_the_category_item_type(): void
     {
         $this->createMaterial()->assertStatus(201);

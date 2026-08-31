@@ -122,6 +122,15 @@ class MaterialController extends Controller
             $query->search((string) $request->search);
         }
 
+        // Availability intent. "issuable" is for pickers behind an action that
+        // consumes stock; every other picker (planning, requisitions, purchase
+        // orders, receiving, opening inventory) must keep seeing the whole
+        // governed catalogue, or a material can never be bought into stock.
+        // This is UX only - InventoryService::adjustStock() holds the real line.
+        if ($request->input('availability') === 'issuable') {
+            $query->issuable();
+        }
+
         // Advanced Filters
         if ($request->filled('stock_status')) {
             $status = $request->stock_status;

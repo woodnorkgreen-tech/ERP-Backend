@@ -135,9 +135,9 @@ class LibraryMaterial extends Model
     {
         return match ($this->stock_handling) {
             'individual_board' => 'Board — tracked individually',
-            'reusable_item' => 'Comes back',
+            'reusable_item' => 'Returnable',
             'recoverable_item' => 'Offcut is kept',
-            default => 'Used up',
+            default => 'Consumed',
         };
     }
 
@@ -224,6 +224,39 @@ class LibraryMaterial extends Model
     }
 
     /**
+     * Catalogue-governed items: approved for use anywhere in the system.
+     *
+     * This is the canonical definition, matching the opening inventory's
+     * seed query — item_status is authoritative, with the legacy is_active
+     * flag honoured only for rows registered before item_status existed.
+     * scopeActive() above predates it and is kept for existing callers.
+     */
+    public function scopeGoverned($query)
+    {
+        return $query->where(function ($governed) {
+            $governed->where('item_status', 'Active')
+                ->orWhere(fn ($legacy) => $legacy->whereNull('item_status')->where('is_active', true));
+        });
+    }
+
+    /**
+     * Governed items Stores can actually issue right now: a stock row with a
+     * free balance once reserved quantity is set aside. Use this for actions
+     * that CONSUME stock (issue, transfer, return, board allocation).
+     *
+     * Never use it for actions that CREATE demand — planning, requisitions,
+     * purchase orders and receiving must be able to name a material precisely
+     * because there is none in stock. This is a UX filter only; the binding
+     * check lives inside the row lock in InventoryService::adjustStock().
+     */
+    public function scopeIssuable($query)
+    {
+        return $query->governed()->whereHas('stock', function ($stock) {
+            $stock->whereRaw('(quantity_on_hand - COALESCE(quantity_reserved, 0)) > 0.00001');
+        });
+    }
+
+    /**
      * Scope a query by workstation.
      */
     public function scopeByWorkstation($query, $workstationId)
@@ -249,13 +282,16 @@ class LibraryMaterial extends Model
     }
 
     /**
-     * Search materials by name or code.
+     * Search every human-facing material identity, including the workshop's
+     * alternate name. Keeping this in the shared scope makes aliases work in
+     * the catalogue, workstation lists, trash and the completion queue.
      */
     public function scopeSearch($query, ?string $searchTerm)
     {
         return $query->where(function ($q) use ($searchTerm) {
             $q->where('material_name', 'like', "%{$searchTerm}%")
               ->orWhere('material_code', 'like', "%{$searchTerm}%")
+              ->orWhere('alternative_item_name', 'like', "%{$searchTerm}%")
               ->orWhere('category', 'like', "%{$searchTerm}%")
               ->orWhere('subcategory', 'like', "%{$searchTerm}%");
         });
