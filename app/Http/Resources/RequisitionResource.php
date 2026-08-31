@@ -79,6 +79,7 @@ class RequisitionResource extends JsonResource
                         'budget_item_id' => $item->budget_item_id,
                         'budget_item_persistent_id' => $item->budget_item_persistent_id,
                         'material_id' => $item->material_id,
+                        'expense_code_id' => $item->expense_code_id,
                         'supplier_id' => $item->supplier_id,
                         'supplier' => $item->supplier ? [
                             'id' => $item->supplier->id,
@@ -92,6 +93,8 @@ class RequisitionResource extends JsonResource
                             'material_name' => $item->material->material_name,
                         ] : null,
                         'quantity' => $item->quantity,
+                        'uom_id' => $item->uom_id,
+                        'uom' => $item->uom ? ['id' => $item->uom->id, 'code' => $item->uom->code, 'name' => $item->uom->name] : null,
                         'unit_price' => (float) $item->unit_price,
                         'internal_budget_unit_price' => $item->internal_budget_unit_price !== null ? (float) $item->internal_budget_unit_price : null,
                         'total' => (float) $item->total,

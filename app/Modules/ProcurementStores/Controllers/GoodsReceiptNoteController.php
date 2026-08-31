@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Events\GoodsReceiptRecorded;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
@@ -19,6 +20,97 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class GoodsReceiptNoteController extends Controller
 {
+    /**
+     * One Stores-facing list of GRN lines that still need attention, plus recent
+     * completed lines for confirmation. A line is the useful unit of work here:
+     * one GRN can contain both automatically stocked and controlled materials.
+     */
+    public function receivingQueue()
+    {
+        if (! auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can view the receiving queue.'], 403);
+        }
+
+        $pendingStatuses = [
+            'awaiting_stores_details', 'awaiting_inspection', 'awaiting_material_setup',
+            'awaiting_unit_setup', 'not_stocked',
+        ];
+
+        $baseQuery = GoodsReceiptNoteItem::query()
+            ->where('accepted', true)
+            ->where('received_quantity', '>', 0);
+
+        $counts = (clone $baseQuery)
+            ->selectRaw('stock_status, COUNT(*) as total')
+            ->groupBy('stock_status')
+            ->pluck('total', 'stock_status');
+
+        $items = (clone $baseQuery)
+            ->where(function ($query) use ($pendingStatuses) {
+                $query->whereIn('stock_status', $pendingStatuses)
+                    ->orWhere(function ($posted) {
+                        $posted->where('stock_status', 'posted')->where('updated_at', '>=', now()->subDays(14));
+                    });
+            })
+            ->with([
+                'goodsReceiptNote:id,grn_number,date,purchase_order_id,store_location',
+                'goodsReceiptNote.purchaseOrder:id,po_number,supplier_id',
+                'goodsReceiptNote.purchaseOrder.supplier:id,supplier_name',
+                'purchaseOrderItem:id,material_id,uom_id,unit_price',
+                'purchaseOrderItem.uom:id,code,name',
+                'purchaseOrderItem.material:id,material_code,material_name,item_status,base_uom_id,purchase_uom_id',
+                'purchaseOrderItem.material.baseUom:id,code,name',
+                'purchaseOrderItem.material.purchaseUom:id,code,name',
+            ])
+            ->orderByRaw("CASE WHEN stock_status = 'awaiting_stores_details' THEN 0 WHEN stock_status = 'posted' THEN 2 ELSE 1 END")
+            ->latest('updated_at')
+            ->limit(100)
+            ->get()
+            ->map(function (GoodsReceiptNoteItem $item) {
+                $material = $item->purchaseOrderItem?->material;
+                $uom = $item->purchaseOrderItem?->uom ?: $material?->purchaseUom ?: $material?->baseUom;
+
+                return [
+                    'id' => $item->id,
+                    'stock_status' => $item->stock_status,
+                    'received_quantity' => (float) $item->received_quantity,
+                    'stock_quantity' => $item->stock_quantity !== null ? (float) $item->stock_quantity : null,
+                    'receipt_unit_cost' => $item->receipt_unit_cost !== null ? (float) $item->receipt_unit_cost : null,
+                    'condition' => $item->condition,
+                    'inventory_log_id' => $item->inventory_log_id,
+                    'updated_at' => $item->updated_at?->toIso8601String(),
+                    'material' => $material ? [
+                        'id' => $material->id,
+                        'code' => $material->material_code,
+                        'name' => $material->material_name,
+                        'item_status' => $material->item_status,
+                    ] : null,
+                    'buying_uom' => $uom ? ['id' => $uom->id, 'code' => $uom->code, 'name' => $uom->name] : null,
+                    'grn' => $item->goodsReceiptNote ? [
+                        'id' => $item->goodsReceiptNote->id,
+                        'number' => $item->goodsReceiptNote->grn_number,
+                        'date' => $item->goodsReceiptNote->date?->toDateString(),
+                        'store_location' => $item->goodsReceiptNote->store_location,
+                    ] : null,
+                    'purchase_order' => $item->goodsReceiptNote?->purchaseOrder ? [
+                        'id' => $item->goodsReceiptNote->purchaseOrder->id,
+                        'number' => $item->goodsReceiptNote->purchaseOrder->po_number,
+                        'supplier' => $item->goodsReceiptNote->purchaseOrder->supplier?->supplier_name,
+                    ] : null,
+                ];
+            });
+
+        return response()->json([
+            'data' => $items,
+            'summary' => [
+                'needs_stores_details' => (int) ($counts['awaiting_stores_details'] ?? 0),
+                'needs_attention' => collect(['awaiting_inspection', 'awaiting_material_setup', 'awaiting_unit_setup', 'not_stocked'])
+                    ->sum(fn ($status) => (int) ($counts[$status] ?? 0)),
+                'recently_completed' => $items->where('stock_status', 'posted')->count(),
+            ],
+        ]);
+    }
+
     /**
      * Credits Stock for a GRN item once Stores has confirmed it — matched
      * (or created) the material and priced it. This is the ONLY place stock
@@ -198,8 +290,8 @@ class GoodsReceiptNoteController extends Controller
             'items' => 'required|array|min:1',
             'items.*.purchase_order_item_id' => 'required|exists:purchase_order_items,id',
             'items.*.material_id' => 'nullable|integer',
-            'items.*.ordered_quantity' => 'required|integer|min:1',
-            'items.*.received_quantity' => 'required|integer|min:0',
+            'items.*.ordered_quantity' => 'required|numeric|gt:0',
+            'items.*.received_quantity' => 'required|numeric|min:0',
             'items.*.condition' => 'required|in:good,fair,damaged,for_repair',
             'items.*.accepted' => 'required|boolean',
         ]);
@@ -211,13 +303,24 @@ class GoodsReceiptNoteController extends Controller
         try {
             DB::beginTransaction();
 
-            // Check if this PO already has a GRN
-            $existingGrn = GoodsReceiptNote::where('purchase_order_id', $request->purchase_order_id)->first();
-            if ($existingGrn) {
-                DB::rollBack();
-                return response()->json([
-                    'message' => 'This Purchase Order already has a Goods Receipt Note.'
-                ], 422);
+            $purchaseOrder = PurchaseOrder::with(['items.material.materialCategory.parent', 'items.material.baseUom', 'items.material.purchaseUom', 'items.material.uomConversions'])->lockForUpdate()
+                ->findOrFail($request->purchase_order_id);
+            foreach ($request->items as $item) {
+                $poItem = $purchaseOrder->items->firstWhere('id', (int) $item['purchase_order_item_id']);
+                if (! $poItem) {
+                    DB::rollBack();
+                    return response()->json(['message' => 'A receipt item does not belong to this purchase order.'], 422);
+                }
+                $accepted = DB::table('goods_receipt_note_items')
+                    ->where('purchase_order_item_id', $poItem->id)->where('accepted', true)
+                    ->sum('received_quantity');
+                $remaining = (float) $poItem->quantity - (float) $accepted;
+                if (($item['accepted'] ?? false) && (float) $item['received_quantity'] > $remaining) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => "Received quantity exceeds the {$remaining} remaining on PO item {$poItem->id}.",
+                    ], 422);
+                }
             }
 
             $grn = GoodsReceiptNote::create([
@@ -232,21 +335,93 @@ class GoodsReceiptNoteController extends Controller
             ]);
 
             foreach ($request->items as $item) {
-                // store_status defaults to 'pending' — Stock is NOT touched
-                // here. It only moves once Stores confirms the item via
-                // confirmItem() below, with a material match/create and a
-                // price. This just records what physically arrived.
-                $grn->items()->create([
+                $poItem = $purchaseOrder->items->firstWhere('id', (int) $item['purchase_order_item_id']);
+                $grnItem = $grn->items()->create([
                     'purchase_order_item_id' => $item['purchase_order_item_id'],
-                    'material_id' => $item['material_id'] ?? null,
-                    'ordered_quantity' => $item['ordered_quantity'],
+                    'material_id' => $poItem->material_id,
+                    'ordered_quantity' => $poItem->quantity,
                     'received_quantity' => $item['received_quantity'],
+                    'receipt_unit_cost' => $poItem->unit_price,
                     'condition' => $item['condition'],
                     'accepted' => $item['accepted'],
                 ]);
+
+                $material = $poItem->material;
+                $stockStatus = 'not_received';
+                if ($item['accepted'] && (float) $item['received_quantity'] > 0) {
+                    if (! $material) {
+                        $stockStatus = 'not_stocked';
+                    } elseif ($request->quality_check !== 'pass' || ! in_array($item['condition'], ['good', 'fair'], true)) {
+                        $stockStatus = 'awaiting_inspection';
+                    } elseif (($material->item_status ?? 'Active') !== 'Active' || ! $material->base_uom_id) {
+                        $stockStatus = 'awaiting_material_setup';
+                    } elseif ($material->isBoardTrackable() || $material->is_serialized || $material->is_batch_controlled || $material->is_expiry_controlled) {
+                        $stockStatus = 'awaiting_stores_details';
+                    } else {
+                        $enteredUomId = (int) ($material->purchase_uom_id ?: $material->base_uom_id);
+                        $factor = 1.0;
+                        if ($enteredUomId !== (int) $material->base_uom_id) {
+                            $factor = (float) ($material->uomConversions
+                                ->first(fn ($row) => (int) $row->from_uom_id === $enteredUomId
+                                    && (int) $row->to_uom_id === (int) $material->base_uom_id)?->factor ?? 0);
+                        }
+
+                        if ($factor <= 0) {
+                            $stockStatus = 'awaiting_unit_setup';
+                        } else {
+                            $log = app(InventoryService::class)->adjustStock(
+                                $material->id,
+                                (float) $item['received_quantity'],
+                                'check_in',
+                                [
+                                    'entered_uom_id' => $enteredUomId,
+                                    'receipt_unit_cost' => (float) $poItem->unit_price,
+                                    'batch_number' => $grn->batch_number,
+                                    'warehouse_code' => 'MAIN',
+                                    'location' => $request->store_location,
+                                    'reference_no' => $grn->grn_number,
+                                    'notes' => "Accepted through GRN {$grn->grn_number}",
+                                    'logged_at' => $grn->date,
+                                ],
+                            );
+                            // Posting to Stock here IS the store confirmation
+                            // for this line, so mark it confirmed too. Without
+                            // this it would stay store_status='pending' and
+                            // Stores could confirm it a second time through
+                            // confirmItem(), crediting the same stock twice.
+                            $grnItem->update([
+                                'entered_uom_id' => $enteredUomId,
+                                'stock_quantity' => abs((float) $log->quantity),
+                                'stock_status' => 'posted',
+                                'inventory_log_id' => $log->id,
+                                'unit_price' => (float) $poItem->unit_price,
+                                'store_status' => 'confirmed',
+                                'confirmed_by' => auth()->id(),
+                                'confirmed_at' => now(),
+                            ]);
+                            continue;
+                        }
+                    }
+                }
+
+                $grnItem->update(['stock_status' => $stockStatus]);
+            }
+
+            // If every accepted line went straight to Stock, there is nothing
+            // left for Stores to confirm — close the GRN out rather than
+            // leaving it sitting at 'pending_confirmation'.
+            $stillPending = $grn->items()
+                ->where('accepted', true)
+                ->where('store_status', 'pending')
+                ->exists();
+
+            if (! $stillPending) {
+                $grn->update(['store_status' => 'confirmed']);
             }
 
             DB::commit();
+
+            GoodsReceiptRecorded::dispatch($grn->id);
 
             $this->syncProjectProcurement($grn);
 
@@ -263,74 +438,26 @@ class GoodsReceiptNoteController extends Controller
 
     public function update(Request $request, $id)
     {
-        $grn = GoodsReceiptNote::findOrFail($id);
+        GoodsReceiptNote::findOrFail($id);
 
-        $validator = Validator::make($request->all(), [
-            'store_location' => 'required|in:Karen Village Store,Matasia Store,Mombasa Store,Gichagi Store',
-            'quality_check' => 'required|in:pass,fail',
-            'notes' => 'nullable|string',
-            'items' => 'required|array|min:1',
-            'items.*.id' => 'sometimes|exists:goods_receipt_note_items,id',
-            'items.*.purchase_order_item_id' => 'required|exists:purchase_order_items,id',
-            'items.*.material_id' => 'nullable|integer',
-            'items.*.ordered_quantity' => 'required|integer|min:1',
-            'items.*.received_quantity' => 'required|integer|min:0',
-            'items.*.condition' => 'required|in:good,fair,damaged,for_repair',
-            'items.*.accepted' => 'required|boolean',
-        ]);
+        return response()->json([
+            'message' => 'Posted goods receipts are immutable. Record a return or a new receipt instead of rewriting receipt history.',
+        ], 422);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        try {
-            DB::beginTransaction();
-
-            $grn->update([
-                'store_location' => $request->store_location,
-                'quality_check' => $request->quality_check,
-                'notes' => $request->notes,
-            ]);
-
-            // Delete existing items and create new ones.
-            // NOTE: stock is intentionally NOT re-credited here — it was
-            // already credited once when the GRN was first created (see
-            // creditStockForAcceptedItem in store()). Re-crediting on every
-            // edit would double-count received quantities. If a correction
-            // needs to change what's on the shelf, adjust Stock directly via
-            // Check-In/Check-Out instead of editing an already-received GRN.
-            $grn->items()->delete();
-
-            foreach ($request->items as $item) {
-                $grn->items()->create([
-                    'purchase_order_item_id' => $item['purchase_order_item_id'],
-                    'material_id' => $item['material_id'] ?? null,
-                    'ordered_quantity' => $item['ordered_quantity'],
-                    'received_quantity' => $item['received_quantity'],
-                    'condition' => $item['condition'],
-                    'accepted' => $item['accepted'],
-                ]);
-            }
-
-            DB::commit();
-
-            $this->syncProjectProcurement($grn);
-
-            return new GoodsReceiptNoteResource($grn->load([
-                'items.purchaseOrderItem.material',
-                'purchaseOrder.supplier',
-                'receivedByUser'
-            ]));
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['message' => 'Error updating GRN: ' . $e->getMessage()], 500);
-        }
     }
 
     public function destroy($id)
     {
         try {
             $grn = GoodsReceiptNote::findOrFail($id);
+            $itemIds = $grn->items()->pluck('id');
+            if (\App\Modules\Finance\CostCollector\Models\CostLine::where(
+                'source_type', \App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem::class
+            )->whereIn('source_id', $itemIds)->exists()) {
+                return response()->json([
+                    'message' => 'This receipt has entered the cost ledger and cannot be deleted. Use a return or reversal.',
+                ], 422);
+            }
             $purchaseOrderId = $grn->purchase_order_id;
             $grn->delete();
 
@@ -349,11 +476,16 @@ class GoodsReceiptNoteController extends Controller
      */
     public function getAvailablePurchaseOrders()
     {
-        $purchaseOrders = PurchaseOrder::with(['items.material', 'supplier'])
-            ->whereDoesntHave('goodsReceiptNote')
+        $purchaseOrders = PurchaseOrder::with([
+                'items.material.baseUom', 'items.material.purchaseUom', 'items.material.uomConversions', 'items.material.materialCategory.parent', 'items.goodsReceiptNoteItems', 'supplier'
+            ])
             ->where('status', 'approved')
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->filter(fn (PurchaseOrder $po) => $po->items->contains(fn ($item) =>
+                (float) $item->goodsReceiptNoteItems->where('accepted', true)->sum('received_quantity')
+                    < (float) $item->quantity
+            ))->values();
 
         return PurchaseOrderResource::collection($purchaseOrders);
     }

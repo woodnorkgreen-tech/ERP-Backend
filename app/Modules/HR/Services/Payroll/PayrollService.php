@@ -7,6 +7,8 @@ use App\Modules\HR\Models\PayrollRun;
 use App\Modules\HR\Models\PayrollVariable;
 use App\Modules\HR\Models\PayrollTaxBand;
 use App\Modules\HR\Models\Payslip;
+use Illuminate\Support\Facades\DB;
+
 class PayrollService
 {
     protected CalculationPipeline $pipeline;
@@ -21,16 +23,25 @@ class PayrollService
      */
     public function initializeRun(string $month): PayrollRun
     {
-        return PayrollRun::firstOrCreate(
-            ['payroll_month' => $month, 'status' => 'draft'],
-            [
-                'snapshot_settings' => [
-                    'variables' => PayrollVariable::all()->pluck('value', 'name')->toArray(),
-                    'tax_bands' => PayrollTaxBand::all()->toArray(),
-                ],
-                'created_by' => auth()->id()
-            ]
-        );
+        $existing = PayrollRun::where('payroll_month', $month)->first();
+
+        if ($existing) {
+            if ($existing->status !== 'draft') {
+                throw new \DomainException("Payroll for {$month} already exists and is {$existing->status}.");
+            }
+
+            return $existing;
+        }
+
+        return PayrollRun::create([
+            'payroll_month' => $month,
+            'status' => 'draft',
+            'snapshot_settings' => [
+                'variables' => PayrollVariable::where('is_active', true)->pluck('value', 'name')->toArray(),
+                'tax_bands' => PayrollTaxBand::where('is_active', true)->orderBy('sort_order')->get()->toArray(),
+            ],
+            'created_by' => auth()->id(),
+        ]);
     }
 
     /**
@@ -38,6 +49,19 @@ class PayrollService
      */
     public function processEmployee(Employee $employee, PayrollRun $run): Payslip
     {
+        if (!in_array($run->status, ['draft', 'processing'], true)) {
+            throw new \DomainException("Payroll run {$run->id} is {$run->status} and cannot be recalculated.");
+        }
+
+        $belongsToAnotherRun = Payslip::where('employee_id', $employee->id)
+            ->where('payroll_month', $run->payroll_month)
+            ->where('payroll_run_id', '!=', $run->id)
+            ->exists();
+
+        if ($belongsToAnotherRun) {
+            throw new \DomainException('This employee already has a payslip in another run for the same month.');
+        }
+
         $dto = PayrollEmployeeDTO::fromModel($employee, $run->payroll_month, $run->snapshot_settings);
         
         $this->pipeline->calculate($dto);
@@ -50,11 +74,11 @@ class PayrollService
         return DB::transaction(function () use ($dto, $run, $employee, $taxBreakdown) {
             $payslip = Payslip::updateOrCreate(
                 [
+                    'payroll_run_id' => $run->id,
                     'employee_id' => $employee->id,
-                    'payroll_month' => $run->payroll_month,
                 ],
                 [
-                    'payroll_run_id' => $run->id,
+                    'payroll_month' => $run->payroll_month,
                     'basic_salary' => $dto->computedBasic,
                     'gross_pay' => $dto->grossPay,
                     'net_pay' => $dto->netPay,

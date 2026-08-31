@@ -100,6 +100,46 @@ class User extends Authenticatable
     }
 
     /**
+     * Employee statuses that make someone ineligible for new work.
+     *
+     * 'on-leave' is deliberately absent: someone on leave still holds their
+     * projects and comes back to them. 'suspended' is likewise left assignable
+     * so a disciplinary hold does not silently rewrite project ownership —
+     * add it here if the business wants suspension to block new assignment.
+     */
+    public const NON_ASSIGNABLE_EMPLOYEE_STATUSES = ['terminated', 'inactive'];
+
+    /**
+     * Scope to users who may be given new work.
+     *
+     * Deactivation lives in two independent places — the user account
+     * (is_active / soft delete) and the employee record (status) — and a person
+     * can be shut off in one without the other, so both must be checked. This
+     * scope is the single definition; callers should not re-implement it.
+     *
+     * Note this governs *new* assignment only. Existing assignments to someone
+     * who has since left are left alone rather than silently cleared, so they
+     * stay visible and can be reassigned deliberately.
+     */
+    public function scopeAssignable($query)
+    {
+        return $query
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->where(function ($q) {
+                // Users without an employee record (system/admin accounts) stay
+                // assignable — there is no employment status to disqualify them.
+                $q->whereNull('employee_id')
+                  ->orWhereHas('employee', function ($e) {
+                      $e->where(function ($inner) {
+                          $inner->whereNull('status')
+                                ->orWhereNotIn('status', self::NON_ASSIGNABLE_EMPLOYEE_STATUSES);
+                      });
+                  });
+            });
+    }
+
+    /**
      * Scope to filter users by department.
      */
     public function scopeInDepartment($query, $departmentId)

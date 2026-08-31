@@ -106,7 +106,10 @@ class TeamTypesSeeder extends Seeder
         ];
 
         foreach ($teamTypes as $teamType) {
-            \App\Modules\Teams\Models\TeamType::create($teamType);
+            \App\Modules\Teams\Models\TeamType::updateOrCreate(
+                ['type_key' => $teamType['type_key']],
+                $teamType
+            );
         }
     }
 }

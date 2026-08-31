@@ -9,6 +9,8 @@ class PurchaseOrderItem extends Model
 {
     use HasFactory;
 
+    protected $with = ['uom'];
+
     protected $connection = 'mysql';
 
     protected $fillable = [
@@ -17,12 +19,13 @@ class PurchaseOrderItem extends Model
         'material_id',
         'custom_description',
         'quantity',
+        'uom_id',
         'unit_price',
         'total',
     ];
 
     protected $casts = [
-        'quantity' => 'integer',
+        'quantity' => 'decimal:6',
         'unit_price' => 'decimal:2',
         'total' => 'decimal:2',
     ];
@@ -48,5 +51,10 @@ class PurchaseOrderItem extends Model
     public function material()
     {
         return $this->belongsTo('App\Modules\MaterialsLibrary\Models\LibraryMaterial', 'material_id');
+    }
+
+    public function uom()
+    {
+        return $this->belongsTo(\App\Modules\MaterialsLibrary\Models\UnitOfMeasure::class, 'uom_id');
     }
 }

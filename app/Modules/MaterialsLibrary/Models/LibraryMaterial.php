@@ -48,6 +48,7 @@ class LibraryMaterial extends Model
         'purchase_uom_id',
         'issue_uom_id',
         'unit_cost',
+        'default_unit_cost',
         'valuation_method',
         'revision_version',
         'effective_date',
@@ -66,6 +67,7 @@ class LibraryMaterial extends Model
     protected $casts = [
         'attributes' => 'array',
         'unit_cost' => 'decimal:2',
+        'default_unit_cost' => 'decimal:2',
         'is_active' => 'boolean',
         'is_hazardous' => 'boolean',
         'is_serialized' => 'boolean',
@@ -83,6 +85,71 @@ class LibraryMaterial extends Model
      * The attributes that should be hidden for serialization.
      */
     protected $hidden = [];
+
+    /**
+     * Board classification is a server-owned rule. Appending it means every
+     * serialization of a material carries the authoritative answer, so clients
+     * never have to re-derive it from tracking_mode and disposition and drift
+     * out of step with isBoardTrackable().
+     *
+     * Eager-load materialCategory.parent alongside this wherever a collection
+     * of materials is serialized — the category fallback path would otherwise
+     * lazy-load once per row.
+     */
+    protected $appends = ['board_trackable', 'stock_handling', 'handling_label'];
+
+    public function getBoardTrackableAttribute(): bool
+    {
+        return $this->isBoardTrackable();
+    }
+
+    /**
+     * How Stores physically handles this item.
+     *
+     * This used to be computed independently in LibraryMaterialResource and in
+     * ProcurementStoresController::inventory — and the two disagreed: one keyed
+     * off issue_disposition, the other off the legacy material_type projection,
+     * which reads 'reusable' for both returnable and recoverable_remainder. The
+     * same item could therefore be a "reusable item" in Stores and a plain
+     * quantity in the library. One definition, appended, ends that.
+     */
+    public function getStockHandlingAttribute(): string
+    {
+        if ($this->isBoardTrackable()) {
+            return 'individual_board';
+        }
+
+        return match ($this->effectiveDisposition()) {
+            'returnable' => 'reusable_item',
+            'recoverable_remainder' => 'recoverable_item',
+            default => 'quantity',
+        };
+    }
+
+    /**
+     * The same answer in the words the registration form uses, so the library
+     * table, the Stores inventory and the form never describe one item three
+     * different ways.
+     */
+    public function getHandlingLabelAttribute(): string
+    {
+        return match ($this->stock_handling) {
+            'individual_board' => 'Board — tracked individually',
+            'reusable_item' => 'Returnable',
+            'recoverable_item' => 'Offcut is kept',
+            default => 'Consumed',
+        };
+    }
+
+    /**
+     * Disposition with the legacy fallback applied, so rows predating the
+     * control columns still classify the way the rest of the system reads them.
+     */
+    public function effectiveDisposition(): string
+    {
+        return $this->issue_disposition
+            ?: ($this->material_type === 'reusable' ? 'returnable' : 'consumed');
+    }
 
     /**
      * Get the workstation that owns the material.
@@ -157,6 +224,39 @@ class LibraryMaterial extends Model
     }
 
     /**
+     * Catalogue-governed items: approved for use anywhere in the system.
+     *
+     * This is the canonical definition, matching the opening inventory's
+     * seed query — item_status is authoritative, with the legacy is_active
+     * flag honoured only for rows registered before item_status existed.
+     * scopeActive() above predates it and is kept for existing callers.
+     */
+    public function scopeGoverned($query)
+    {
+        return $query->where(function ($governed) {
+            $governed->where('item_status', 'Active')
+                ->orWhere(fn ($legacy) => $legacy->whereNull('item_status')->where('is_active', true));
+        });
+    }
+
+    /**
+     * Governed items Stores can actually issue right now: a stock row with a
+     * free balance once reserved quantity is set aside. Use this for actions
+     * that CONSUME stock (issue, transfer, return, board allocation).
+     *
+     * Never use it for actions that CREATE demand — planning, requisitions,
+     * purchase orders and receiving must be able to name a material precisely
+     * because there is none in stock. This is a UX filter only; the binding
+     * check lives inside the row lock in InventoryService::adjustStock().
+     */
+    public function scopeIssuable($query)
+    {
+        return $query->governed()->whereHas('stock', function ($stock) {
+            $stock->whereRaw('(quantity_on_hand - COALESCE(quantity_reserved, 0)) > 0.00001');
+        });
+    }
+
+    /**
      * Scope a query by workstation.
      */
     public function scopeByWorkstation($query, $workstationId)
@@ -182,13 +282,16 @@ class LibraryMaterial extends Model
     }
 
     /**
-     * Search materials by name or code.
+     * Search every human-facing material identity, including the workshop's
+     * alternate name. Keeping this in the shared scope makes aliases work in
+     * the catalogue, workstation lists, trash and the completion queue.
      */
     public function scopeSearch($query, ?string $searchTerm)
     {
         return $query->where(function ($q) use ($searchTerm) {
             $q->where('material_name', 'like', "%{$searchTerm}%")
               ->orWhere('material_code', 'like', "%{$searchTerm}%")
+              ->orWhere('alternative_item_name', 'like', "%{$searchTerm}%")
               ->orWhere('category', 'like', "%{$searchTerm}%")
               ->orWhere('subcategory', 'like', "%{$searchTerm}%");
         });
@@ -204,6 +307,54 @@ class LibraryMaterial extends Model
     public function stock(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(\App\Modules\ProcurementStores\Models\Stock::class, 'material_id');
+    }
+
+    public function inventoryLogs(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Modules\ProcurementStores\Models\InventoryLog::class, 'material_id');
+    }
+
+    public function projectSpecifications(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Models\ElementMaterial::class, 'library_material_id');
+    }
+
+    /**
+     * The SQL form of isBoardTrackable(), with the same precedence.
+     *
+     * MaterialController filtered on `material_type = reusable` AND an eligible
+     * category name, which is only the *fallback* half of the rule. An item
+     * configured through the form as a measured, recoverable piece is board
+     * tracked whatever its category is called — so the list and the behaviour
+     * would have disagreed the first time someone created a board outside the
+     * three seeded category names.
+     */
+    public function scopeBoardTrackable($query, bool $trackable = true)
+    {
+        $eligible = config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']);
+
+        $matches = function ($scope) use ($eligible) {
+            $scope->where(function ($governed) {
+                $governed->whereNotNull('tracking_mode')
+                    ->where('tracking_mode', 'dimension_piece')
+                    ->where('issue_disposition', 'recoverable_remainder');
+            })->orWhere(function ($legacy) use ($eligible) {
+                // Only rows with no tracking_mode fall back to category names.
+                $legacy->whereNull('tracking_mode')
+                    ->where('material_type', 'reusable')
+                    ->where(function ($category) use ($eligible) {
+                        $category->whereIn('category', $eligible)
+                            ->orWhereHas('materialCategory', function ($node) use ($eligible) {
+                                $node->whereIn('name', $eligible)
+                                    ->orWhereHas('parent', fn ($parent) => $parent->whereIn('name', $eligible));
+                            });
+                    });
+            });
+        };
+
+        return $trackable
+            ? $query->where($matches)
+            : $query->whereNot($matches);
     }
 
     /**
@@ -240,7 +391,6 @@ class LibraryMaterial extends Model
 
     public function expectedUsageType(): string
     {
-        return MaterialControl::legacyUsageType($this->issue_disposition
-            ?: ($this->material_type === 'reusable' ? 'returnable' : 'consumed'));
+        return MaterialControl::legacyUsageType($this->effectiveDisposition());
     }
 }

@@ -3,11 +3,17 @@
 namespace App\Modules\Finance\PettyCash\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Constants\Permissions;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
+use App\Modules\Finance\PettyCash\Services\LedgerEntry;
+use App\Modules\Finance\PettyCash\Services\LedgerService;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
+use App\Modules\Finance\PettyCash\Requests\CreateTopUpRequest;
+use App\Modules\Finance\PettyCash\Support\PaymentMethods;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use App\Modules\Finance\PettyCash\Resources\PettyCashBalanceResource;
 use Exception;
 
@@ -15,11 +21,13 @@ class PettyCashTopUpController extends Controller
 {
     protected $service;
     protected $repository;
+    protected LedgerService $ledger;
 
-    public function __construct(PettyCashService $service, PettyCashRepository $repository)
+    public function __construct(PettyCashService $service, PettyCashRepository $repository, LedgerService $ledger)
     {
         $this->service = $service;
         $this->repository = $repository;
+        $this->ledger = $ledger;
     }
 
     /**
@@ -58,20 +66,29 @@ class PettyCashTopUpController extends Controller
     /**
      * Store a newly created top-up.
      */
-    public function store(Request $request): JsonResponse
+    public function store(CreateTopUpRequest $request): JsonResponse
     {
-        try {
-            // Validate the request data
-            $validationErrors = $this->service->validateTopUpData($request->all());
-            if (!empty($validationErrors)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validationErrors,
-                ], 422);
-            }
+        // Creating a top-up credits the ledger and raises the cash balance —
+        // the same class of act as editing or deleting one, both of which were
+        // gated by audit BE1/BE2. `store` was missed: the route carries no
+        // permission middleware and CreateTopUpRequest::authorize() returns
+        // true, so until now any authenticated user could inject cash into the
+        // float. `create_top_up` is already held by Admin and Accounts (and by
+        // Super Admin, who holds everything), so this closes the hole without
+        // taking the right away from anyone who was legitimately using it.
+        abort_unless(
+            $request->user()?->can(Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP),
+            403,
+            'You do not have permission to create a top-up.',
+        );
 
-            $topUp = $this->service->createTopUp($request->all());
+        // CreateTopUpRequest replaces the inline validator it never got wired
+        // ahead of: it adds an upper amount bound, checks the payment method
+        // against the one canonical list, requires a reference for non-cash, and
+        // enforces the M-Pesa code format. It also returns Laravel's own 422
+        // shape, which the form already reads.
+        try {
+            $topUp = $this->service->createTopUp($request->validated());
 
             return response()->json([
                 'success' => true,
@@ -92,6 +109,15 @@ class PettyCashTopUpController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
+        // Editing a top-up posts an adjustment entry for the amount delta, i.e.
+        // it moves the cash balance. This endpoint previously had no
+        // authorization of any kind (audit BE2).
+        abort_unless(
+            $request->user()?->can(Permissions::FINANCE_PETTY_CASH_EDIT_TOP_UP),
+            403,
+            'You do not have permission to edit a top-up.',
+        );
+
         try {
             $topUp = $this->repository->findTopUp($id);
 
@@ -391,32 +417,25 @@ class PettyCashTopUpController extends Controller
      */
     public function paymentMethods(): JsonResponse
     {
-        $methods = [
-            'cash' => 'Cash',
-            'mpesa' => 'M-Pesa',
-            'equity' => 'Equity',
-            'stanbic' => 'Stanbic',
-            'ncba' => 'NCBA',
-            'kcb' => 'KCB',
-            'family' => 'Family Bank',
-            'bank_transfer' => 'Bank Transfer',
-            'other' => 'Other',
-        ];
-
+        // Served from PaymentMethods so the client never keeps its own copy —
+        // the frontend had two, both missing the bank options.
         return response()->json([
             'success' => true,
-            'data' => collect($methods)->map(fn ($label, $value) => [
-                'value' => $value,
-                'label' => $label,
-            ])->values(),
+            'data' => PaymentMethods::options(),
         ]);
     }
 
     /**
      * Remove the specified top-up from storage.
      */
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
+        abort_unless(
+            $request->user()?->can(Permissions::FINANCE_PETTY_CASH_DELETE_TOP_UP),
+            403,
+            'You do not have permission to delete a top-up.',
+        );
+
         try {
             $topUp = $this->repository->findTopUp($id);
 
@@ -427,25 +446,47 @@ class PettyCashTopUpController extends Controller
                 ], 404);
             }
 
-            // Check if there are active disbursements linked to this top-up
-            $activeDisbursements = $topUp->activeDisbursements()->get();
-            if ($activeDisbursements->isNotEmpty()) {
-                $details = $activeDisbursements->map(function($d) {
+            // Any historical consumption makes the funding record part of the
+            // audit chain. This includes split allocations where top_up_id may
+            // point at a different primary batch, and includes voided payments.
+            $linkedDisbursements = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::query()
+                ->where(function ($query) use ($topUp) {
+                    $query->where('top_up_id', $topUp->id)
+                        ->orWhereHas('allocations', fn ($allocation) => $allocation->where('top_up_id', $topUp->id));
+                })->get();
+            if ($linkedDisbursements->isNotEmpty()) {
+                $details = $linkedDisbursements->take(5)->map(function($d) {
                     $formattedAmount = number_format((float)$d->amount, 2);
                     return "#{$d->id}: {$d->receiver} (KES {$formattedAmount})";
                 })->implode(', ');
 
                 return response()->json([
                     'success' => false,
-                    'message' => "Cannot delete top-up because it has active disbursements linked to it: {$details}. Please void or delete these disbursements first.",
-                ], 400);
+                    'message' => "This top-up has entered the payment audit chain and cannot be deleted: {$details}. Void payments when necessary; keep their funding history.",
+                ], 409);
             }
 
-            $topUp->delete();
+            // Reverse before removing, in one transaction. Deleting the row on
+            // its own left the original TOP-xxxxxx credit in the ledger and the
+            // cached balance permanently overstated (audit BE1) — the ledger is
+            // the source of truth, so it must be told.
+            $balance = DB::transaction(function () use ($topUp, $request) {
+                $balance = $this->ledger->post(
+                    LedgerEntry::reversalForTopUp($topUp, $request->user()?->id),
+                );
+
+                $topUp->delete();
+
+                return $balance;
+            });
 
             return response()->json([
                 'success' => true,
-                'message' => 'Top-up deleted successfully',
+                'message' => 'Top-up deleted and its ledger entry reversed.',
+                // The plain figure, not the full balance resource: this response
+                // only needs to confirm where the balance landed, and building
+                // the richer payload here would couple deletion to it.
+                'data' => ['current_balance' => (float) $balance->current_balance],
             ]);
         } catch (Exception $e) {
             return response()->json([

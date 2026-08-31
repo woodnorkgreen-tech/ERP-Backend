@@ -16,6 +16,7 @@ class StoreEnquiryRequest extends FormRequest
         return [
             'date_received'           => 'required|date',
             'expected_delivery_date'  => 'nullable|date|after_or_equal:date_received',
+            'delivery_date_status'    => 'nullable|in:confirmed,tbc',
             'client_id'               => 'required|exists:clients,id',
             'title'                   => 'required|string|max:255',
             'description'             => 'nullable|string',
@@ -29,6 +30,9 @@ class StoreEnquiryRequest extends FormRequest
             'estimated_budget'        => 'nullable|numeric|min:0',
             'project_officer_id'      => 'nullable|exists:users,id',
             'venue'                   => 'nullable|string|max:255',
+            'venue_lat'               => 'nullable|numeric|between:-90,90|required_with:venue_lng',
+            'venue_lng'               => 'nullable|numeric|between:-180,180|required_with:venue_lat',
+            'venue_place_id'          => 'nullable|string|max:255',
             'assigned_po'             => 'nullable|exists:users,id',
             'follow_up_notes'         => 'nullable|string',
             // Workflow fields — these determine internal vs external pipeline

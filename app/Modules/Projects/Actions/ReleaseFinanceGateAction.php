@@ -42,7 +42,7 @@ class ReleaseFinanceGateAction
         
         // Enforce justification if threshold not met
         if (!$progress['is_70_percent_met'] && empty(trim($notes ?? ''))) {
-            throw new Exception("Justification is mandatory when releasing a project with less than 70% mobilization deposit.");
+            throw new Exception("Justification is mandatory when releasing a project below its {$progress['threshold_percentage']}% mobilization target.");
         }
 
         return DB::transaction(function () use ($enquiry, $userId, $notes, $progress) {

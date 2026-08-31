@@ -60,6 +60,7 @@ class ElementMaterial extends Model
         'is_included',
         'is_additional',
         'notes',
+        'source_metadata',
         'sort_order'
     ];
 
@@ -69,7 +70,8 @@ class ElementMaterial extends Model
         'unit_cost' => 'decimal:2',
         'is_included' => 'boolean',
         'is_additional' => 'boolean',
-        'sort_order' => 'integer'
+        'sort_order' => 'integer',
+        'source_metadata' => 'array'
     ];
 
     public function element(): BelongsTo

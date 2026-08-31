@@ -247,6 +247,31 @@ return [
             'default_channels' => ['database', 'push'], 'urgency' => 'warning',
         ],
 
+        // Cost collector. `cost_queried` is the one that matters most: without
+        // it a query is sent back to nobody, and the reporter would have to
+        // remember to go looking. Push as well as database, because the person
+        // who reported the cost is usually on site rather than at a desk.
+        'cost_submitted' => [
+            'module' => 'finance', 'label' => 'Cost Reported',
+            'default_channels' => ['database'], 'urgency' => 'info',
+        ],
+        'cost_queried' => [
+            'module' => 'finance', 'label' => 'Cost Query Raised',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
+        'cost_verified' => [
+            'module' => 'finance', 'label' => 'Cost Verified',
+            'default_channels' => ['database'], 'urgency' => 'success',
+        ],
+        'cost_rejected' => [
+            'module' => 'finance', 'label' => 'Cost Rejected',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
+        'cost_reversed' => [
+            'module' => 'finance', 'label' => 'Cost Reversed',
+            'default_channels' => ['database'], 'urgency' => 'warning',
+        ],
+
         // ICT support
         'support_ticket_received' => [
             'module' => 'support', 'label' => 'Support Ticket Received',

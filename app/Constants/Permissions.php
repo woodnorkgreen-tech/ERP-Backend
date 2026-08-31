@@ -74,6 +74,7 @@ class Permissions
     const PROJECT_ASSIGN_USERS = 'project.assign_users';
     const PROJECT_VIEW_REPORTS = 'project.view_reports';
     const PROJECT_CLOSE = 'project.close';
+    const PROJECT_COSTS_READ_ASSIGNED = 'project.costs.read_assigned';
 
     // ===========================================
     // ENQUIRY MANAGEMENT PERMISSIONS
@@ -101,6 +102,45 @@ class Permissions
     const FINANCE_QUOTE_APPROVE = 'finance.quote.approve';
     const FINANCE_QUOTE_DELETE = 'finance.quote.delete';
 
+    // Editing a top-up moves the cash balance. FINANCE_PETTY_CASH_DELETE_TOP_UP
+    // already existed; there was no counterpart for editing, which is part of
+    // why that endpoint ended up with no check at all rather than the wrong one.
+    const FINANCE_PETTY_CASH_EDIT_TOP_UP = 'finance.petty_cash.edit_top_up';
+
+    // Cost collector. Separated from petty cash on purpose: reporting a cost and
+    // paying for one are different jobs held by different people, and the brief
+    // requires requester, approver and poster to be separable.
+    const FINANCE_COSTS_CREATE = 'finance.costs.create';
+    const FINANCE_COSTS_READ = 'finance.costs.read';
+    const FINANCE_COSTS_VERIFY = 'finance.costs.verify';
+    const FINANCE_COSTS_REVERSE = 'finance.costs.reverse';
+    const FINANCE_EXPENSE_CODES_MANAGE = 'finance.expense_codes.manage';
+
+    // Requisition types define what every requester is asked for and what
+    // Finance is shown when approving, so configuring them is a finance control
+    // rather than a system-administration one. Held separately from raising or
+    // approving a requisition: the person who decides what the form asks should
+    // not need the authority to release cash through it.
+    const FINANCE_REQUISITION_TYPES_MANAGE = 'finance.requisition_types.manage';
+
+
+    // Spend vouchers deliberately split maker, checker and poster. A single
+    // broad Finance permission would let the person requesting cash approve and
+    // post their own document, defeating the control the workflow represents.
+    const FINANCE_SPEND_VOUCHERS_READ = 'finance.spend_vouchers.read';
+    const FINANCE_SPEND_VOUCHERS_CREATE = 'finance.spend_vouchers.create';
+    const FINANCE_SPEND_VOUCHERS_APPROVE = 'finance.spend_vouchers.approve';
+    const FINANCE_SPEND_VOUCHERS_POST = 'finance.spend_vouchers.post';
+
+    const FINANCE_RECEIVABLES_READ = 'finance.receivables.read';
+    const FINANCE_RECEIVABLES_RECORD = 'finance.receivables.record';
+    const FINANCE_RECEIVABLES_VERIFY = 'finance.receivables.verify';
+    const FINANCE_RECEIVABLES_CORRECT = 'finance.receivables.correct';
+    const FINANCE_RECEIVABLES_REVERSE = 'finance.receivables.reverse';
+    const FINANCE_RECEIVABLES_BILLING_BASIS = 'finance.receivables.billing_basis';
+    const FINANCE_RECEIVABLES_RELEASE = 'finance.receivables.release';
+    const FINANCE_RECEIVABLES_OVERRIDE = 'finance.receivables.override';
+
     const FINANCE_INVOICE_CREATE = 'finance.invoice.create';
     const FINANCE_INVOICE_READ = 'finance.invoice.read';
     const FINANCE_INVOICE_UPDATE = 'finance.invoice.update';
@@ -119,7 +159,31 @@ class Permissions
     const FINANCE_PETTY_CASH_DELETE_TOP_UP = 'finance.petty_cash.delete_top_up';
     const FINANCE_PETTY_CASH_CREATE_TOP_UP = 'finance.petty_cash.create_top_up';
     const FINANCE_PETTY_CASH_UPLOAD_EXCEL = 'finance.petty_cash.upload_excel';
+    const FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH = 'finance.petty_cash.approve_offline_batch';
     const FINANCE_PETTY_CASH_ADMIN = 'finance.petty_cash.admin';
+
+    // Petty cash operations that existed as permission rows before they had
+    // constants. They were created by 2026_08_09_000011 and are checked as raw
+    // strings in the resources and on the client, so they are real authorities
+    // that the registry simply never knew about — which is why a freshly seeded
+    // database did not have them at all.
+    const FINANCE_PETTY_CASH_EXPORT_DATA = 'finance.petty_cash.export_data';
+    const FINANCE_PETTY_CASH_MANAGE_SETTINGS = 'finance.petty_cash.manage_settings';
+    const FINANCE_PETTY_CASH_RECALCULATE_BALANCE = 'finance.petty_cash.recalculate_balance';
+
+    /**
+     * Legacy short forms, kept only so nobody loses access.
+     *
+     * These name the same authority as CREATE / UPDATE / VOID above, from an
+     * earlier generation of the naming. Both spellings are granted together by
+     * the role matrix, because a user holding only the short form would
+     * otherwise be locked out the moment the call sites move to the canonical
+     * name. Retire them by migrating the remaining call sites — the resources
+     * and the petty-cash client — then dropping the rows.
+     */
+    const FINANCE_PETTY_CASH_CREATE_LEGACY = 'finance.petty_cash.create';
+    const FINANCE_PETTY_CASH_UPDATE_LEGACY = 'finance.petty_cash.update';
+    const FINANCE_PETTY_CASH_VOID_LEGACY = 'finance.petty_cash.void';
 
     // ===========================================
     // HR PERMISSIONS
@@ -165,6 +229,14 @@ class Permissions
     const PROCUREMENT_ORDERS_CREATE = 'procurement.orders.create';
     const PROCUREMENT_VENDORS_MANAGE = 'procurement.vendors.manage';
     const PROCUREMENT_QUOTATIONS_MANAGE = 'procurement.quotations.manage';
+
+    // Materials master and physical Stores custody
+    const MATERIALS_LIBRARY_VIEW = 'materials_library.view';
+    const MATERIALS_LIBRARY_MANAGE = 'materials_library.manage';
+    const MATERIALS_LIBRARY_IMPORT = 'materials_library.import';
+    const STORES_VIEW = 'stores.view';
+    const STORES_MANAGE = 'stores.manage';
+    const STORES_REVIEW = 'stores.review';
 
     // ===========================================
     // LOGISTICS MANAGEMENT PERMISSIONS
@@ -238,6 +310,28 @@ class Permissions
     const DASHBOARD_FINANCE = 'dashboard.finance';
     const DASHBOARD_PROJECTS = 'dashboard.projects';
 
+    // ===========================================
+    // CROSS-CUTTING APPROVAL PERMISSIONS
+    // ===========================================
+    /**
+     * Approve, verify or disburse against your own submission.
+     *
+     * Separation of duties is the default everywhere in this system: whoever
+     * raises a requisition, records a receipt, reports a cost or creates a
+     * budget addition may not be the person who signs it off. That is the
+     * control that stops one person inventing and approving a payment on their
+     * own, so this permission should sit with very few people — it is the
+     * documented exception for a one-person finance function or an
+     * out-of-hours close, not a default for approvers.
+     *
+     * Super Admin holds this implicitly through the global Gate::before bypass
+     * in AppServiceProvider; it never needs to be granted to them explicitly.
+     *
+     * Every self-approval that actually happens is still written to the audit
+     * trail, marked as such — the permission removes the block, not the record.
+     */
+    const APPROVALS_SELF_APPROVE = 'approvals.self_approve';
+
     /**
      * Get all permission constants as an array
      */
@@ -266,6 +360,7 @@ class Permissions
             // Project Management
             self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
             self::PROJECT_ASSIGN_USERS, self::PROJECT_VIEW_REPORTS, self::PROJECT_CLOSE,
+            self::PROJECT_COSTS_READ_ASSIGNED,
 
             // Enquiry Management
             self::ENQUIRY_CREATE, self::ENQUIRY_READ, self::ENQUIRY_UPDATE, self::ENQUIRY_DELETE,
@@ -278,6 +373,18 @@ class Permissions
             self::FINANCE_QUOTE_APPROVE, self::FINANCE_QUOTE_DELETE, self::FINANCE_INVOICE_CREATE,
             self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
             self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
+            self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
+            self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
+            self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
+            self::FINANCE_SPEND_VOUCHERS_APPROVE, self::FINANCE_SPEND_VOUCHERS_POST,
+            self::FINANCE_RECEIVABLES_READ, self::FINANCE_RECEIVABLES_RECORD, self::FINANCE_RECEIVABLES_VERIFY,
+            self::FINANCE_RECEIVABLES_CORRECT, self::FINANCE_RECEIVABLES_REVERSE,
+            self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
+            self::FINANCE_RECEIVABLES_OVERRIDE,
+
+            // Cross-cutting approvals
+            self::APPROVALS_SELF_APPROVE,
+
             self::FINANCE_PETTY_CASH_VIEW,
             self::FINANCE_PETTY_CASH_VIEW_BALANCE,
             self::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -288,7 +395,17 @@ class Permissions
             self::FINANCE_PETTY_CASH_DELETE_TOP_UP,
             self::FINANCE_PETTY_CASH_CREATE_TOP_UP, 
             self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
+            self::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
             self::FINANCE_PETTY_CASH_ADMIN,
+            self::FINANCE_PETTY_CASH_EDIT_TOP_UP,
+            self::FINANCE_EXPENSE_CODES_MANAGE,
+            self::FINANCE_REQUISITION_TYPES_MANAGE,
+            self::FINANCE_PETTY_CASH_EXPORT_DATA,
+            self::FINANCE_PETTY_CASH_MANAGE_SETTINGS,
+            self::FINANCE_PETTY_CASH_RECALCULATE_BALANCE,
+            self::FINANCE_PETTY_CASH_CREATE_LEGACY,
+            self::FINANCE_PETTY_CASH_UPDATE_LEGACY,
+            self::FINANCE_PETTY_CASH_VOID_LEGACY,
 
             // HR Permissions
             self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
@@ -306,6 +423,8 @@ class Permissions
             // Procurement Permissions
             self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
             self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
+            self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
+            self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW,
 
             // System Admin Permissions
             self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
@@ -366,6 +485,7 @@ class Permissions
             'project_management' => [
                 self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
                 self::PROJECT_ASSIGN_USERS, self::PROJECT_VIEW_REPORTS, self::PROJECT_CLOSE,
+                self::PROJECT_COSTS_READ_ASSIGNED,
             ],
             'enquiry_management' => [
                 self::ENQUIRY_CREATE, self::ENQUIRY_READ, self::ENQUIRY_UPDATE, self::ENQUIRY_DELETE,
@@ -378,6 +498,14 @@ class Permissions
                 self::FINANCE_QUOTE_APPROVE, self::FINANCE_QUOTE_DELETE, self::FINANCE_INVOICE_CREATE,
                 self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
                 self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
+                self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
+                self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
+                self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
+                self::FINANCE_SPEND_VOUCHERS_APPROVE, self::FINANCE_SPEND_VOUCHERS_POST,
+                self::FINANCE_RECEIVABLES_READ, self::FINANCE_RECEIVABLES_RECORD, self::FINANCE_RECEIVABLES_VERIFY,
+                self::FINANCE_RECEIVABLES_CORRECT, self::FINANCE_RECEIVABLES_REVERSE,
+                self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
+                self::FINANCE_RECEIVABLES_OVERRIDE,
                 self::FINANCE_PETTY_CASH_VIEW,
                 self::FINANCE_PETTY_CASH_VIEW_BALANCE,
                 self::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -388,7 +516,17 @@ class Permissions
                 self::FINANCE_PETTY_CASH_DELETE_TOP_UP,
                 self::FINANCE_PETTY_CASH_CREATE_TOP_UP, 
                 self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
+                self::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
                 self::FINANCE_PETTY_CASH_ADMIN,
+                self::FINANCE_PETTY_CASH_EDIT_TOP_UP,
+                self::FINANCE_EXPENSE_CODES_MANAGE,
+                self::FINANCE_REQUISITION_TYPES_MANAGE,
+                self::FINANCE_PETTY_CASH_EXPORT_DATA,
+                self::FINANCE_PETTY_CASH_MANAGE_SETTINGS,
+                self::FINANCE_PETTY_CASH_RECALCULATE_BALANCE,
+                self::FINANCE_PETTY_CASH_CREATE_LEGACY,
+                self::FINANCE_PETTY_CASH_UPDATE_LEGACY,
+                self::FINANCE_PETTY_CASH_VOID_LEGACY,
             ],
             'hr' => [
                 self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
@@ -407,8 +545,15 @@ class Permissions
                 self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
                 self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
             ],
+            'materials_stores' => [
+                self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
+                self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW,
+            ],
             'admin' => [
                 self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
+            ],
+            'approvals' => [
+                self::APPROVALS_SELF_APPROVE,
             ],
             'tasks' => [
                 self::TASK_CREATE, self::TASK_READ, self::TASK_UPDATE, self::TASK_DELETE,
@@ -504,8 +649,11 @@ class Permissions
             self::FINANCE_QUOTE_APPROVE => 'Authorize Project Quotes',
             self::FINANCE_INVOICE_CREATE => 'Generate Client Invoices',
             self::FINANCE_PETTY_CASH_ADMIN => 'Full Petty Cash Administration',
+            self::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH => 'Approve and Post Offline Petty Cash Batches',
 
             // Admin
+            self::APPROVALS_SELF_APPROVE => 'Approve Your Own Submissions (bypasses separation of duties)',
+
             self::ADMIN_ACCESS => 'Access System Control Panel',
             self::ADMIN_SETTINGS => 'Modify Global System Config',
             self::ADMIN_LOGS_VIEW => 'Audit System Activity Logs',

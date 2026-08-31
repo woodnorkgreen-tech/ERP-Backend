@@ -29,6 +29,20 @@ class Board extends Model
         'label_printed_by',
         'label_printed_at',
         'assigned_job_ref',
+        'original_issue_log_id',
+        'board_request_id',
+        'project_id',
+        'project_material_id',
+        'return_initiated_at',
+        'return_initiated_by',
+        'return_received_at',
+        'return_received_by',
+        'return_log_id',
+        'quarantine_review_status',
+        'accepted_recoverable_value',
+        'quarantine_review_notes',
+        'quarantine_reviewed_at',
+        'quarantine_reviewed_by',
         'created_by',
     ];
 
@@ -41,6 +55,10 @@ class Board extends Model
         'is_offcut'        => 'boolean',
         'label_printed'    => 'boolean',
         'label_printed_at' => 'datetime',
+        'return_initiated_at' => 'datetime',
+        'return_received_at' => 'datetime',
+        'accepted_recoverable_value' => 'float',
+        'quarantine_reviewed_at' => 'datetime',
     ];
 
     // ─── Relationships ────────────────────────────────────────────────────────

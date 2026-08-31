@@ -14,9 +14,12 @@ class BoardRequest extends Model
 
     protected $fillable = [
         'job_ref',
+        'project_id',
         'job_name',
         'material_id',
+        'project_material_id',
         'qty_requested',
+        'recipient_name',
         'qty_fulfilled',
         'status',
         'requested_by',

@@ -16,6 +16,11 @@ class GoodsReceiptNoteItem extends Model
         'material_id',
         'ordered_quantity',
         'received_quantity',
+        'entered_uom_id',
+        'stock_quantity',
+        'receipt_unit_cost',
+        'stock_status',
+        'inventory_log_id',
         'condition',
         'accepted',
         'store_status',
@@ -27,6 +32,10 @@ class GoodsReceiptNoteItem extends Model
     protected $casts = [
         'accepted' => 'boolean',
         'material_id' => 'integer',
+        'ordered_quantity' => 'decimal:6',
+        'received_quantity' => 'decimal:6',
+        'stock_quantity' => 'decimal:6',
+        'receipt_unit_cost' => 'decimal:4',
         'unit_price' => 'decimal:2',
         'confirmed_at' => 'datetime',
     ];
@@ -45,6 +54,11 @@ class GoodsReceiptNoteItem extends Model
     public function purchaseOrderItem()
     {
         return $this->belongsTo(PurchaseOrderItem::class);
+    }
+
+    public function inspection()
+    {
+        return $this->hasOne(GoodsReceiptInspection::class);
     }
 
     /**

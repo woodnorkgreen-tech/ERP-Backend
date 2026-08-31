@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MaterialsListChanged;
+
 use App\Models\TaskMaterialsData;
 use App\Models\MaterialVersion;
 use App\Models\ProjectElement;
@@ -285,6 +287,8 @@ class MaterialsController extends Controller
      */
     public function importApprovedQuote(Request $request, int $taskId): JsonResponse
     {
+        $this->authorizeMaterialsMutation($taskId);
+
         $validator = Validator::make($request->all(), [
             'selected_element_ids' => 'sometimes|array',
             'selected_element_ids.*' => 'nullable',
@@ -443,19 +447,31 @@ class MaterialsController extends Controller
      */
     public function saveMaterialsData(Request $request, int $taskId): JsonResponse
     {
+        $this->authorizeMaterialsMutation($taskId);
+
         $validator = Validator::make($request->all(), [
             'projectInfo' => 'required|array',
             'projectElements' => 'required|array',
             'projectElements.*.id' => 'required|string',
-            'projectElements.*.elementType' => 'required|string',
-            'projectElements.*.name' => 'nullable|string',
+            'projectElements.*.elementType' => 'required|string|max:500',
+            'projectElements.*.name' => 'nullable|string|max:500',
             'projectElements.*.category' => 'required|in:production,hire,outsourced',
-            'projectElements.*.materials' => 'required|array',
+            'projectElements.*.requiredQuantity' => 'sometimes|numeric|min:0.0001',
+            'projectElements.*.unitOfMeasurement' => 'sometimes|string|max:100',
+            // An element with no BOM yet is a legitimate work-in-progress: quote
+            // import creates one shell element per quote line with 'materials' => [],
+            // and hire/outsourced elements never get a raw-material BOM at all.
+            // 'required' would reject an empty array (count($value) < 1), making a
+            // partially-specified list unsaveable. Completeness is enforced where it
+            // belongs — approveMaterials(), which checks only included production
+            // elements. Plain saves stay recoverable.
+            'projectElements.*.materials' => 'nullable|array',
             'projectElements.*.materials.*.description' => 'required|string',
             'projectElements.*.materials.*.unitOfMeasurement' => 'required|string',
             'projectElements.*.materials.*.quantity' => 'required|numeric|min:0',
             'availableElements' => 'sometimes|array',
             'editReason' => 'nullable|string',
+            'sourceUpdatedAt' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -475,7 +491,18 @@ class MaterialsController extends Controller
             \DB::beginTransaction();
 
             // Get existing materials data to compare for changes
-            $existingMaterialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+            $existingMaterialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->lockForUpdate()->first();
+            if ($existingMaterialsData && $request->filled('sourceUpdatedAt')) {
+                $clientVersion = \Carbon\Carbon::parse($request->input('sourceUpdatedAt'));
+                if (! $existingMaterialsData->updated_at->equalTo($clientVersion)) {
+                    \DB::rollBack();
+                    return response()->json([
+                        'message' => 'This materials list changed after you opened it. Reload to review the newer list before saving; your browser draft is still available.',
+                        'code' => 'MATERIALS_VERSION_CONFLICT',
+                        'currentUpdatedAt' => $existingMaterialsData->updated_at->toISOString(),
+                    ], 409);
+                }
+            }
             $existingProjectInfo = $existingMaterialsData ? $existingMaterialsData->project_info : [];
             $existingApprovalStatus = $existingProjectInfo['approval_status'] ?? null;
             
@@ -535,7 +562,21 @@ class MaterialsController extends Controller
                 ]
             );
 
-            // Delete existing elements and materials (cascade delete will handle materials)
+            // Delete the materials explicitly, then their elements.
+            //
+            // The create migration declared `onDelete('cascade')` on
+            // element_materials.project_element_id, but no such constraint
+            // exists in the database, so deleting an element silently orphaned
+            // every material under it. Two things then broke: the orphan kept
+            // the unique `persistent_id`, which forced a fresh UUID for the same
+            // material line on every save — destroying the stable identity that
+            // cost lines and stock movements point at — and the orphan itself
+            // stayed behind forever. Deleting children first frees the id so the
+            // line below can keep it.
+            ElementMaterial::whereIn(
+                'project_element_id',
+                $materialsData->elements()->pluck('id'),
+            )->delete();
             $materialsData->elements()->delete();
 
             $idMapping = [];
@@ -564,15 +605,18 @@ class MaterialsController extends Controller
                     'name' => $elementData['name'] ?? null,
                     'persistent_id' => $persistentId,
                     'category' => $elementData['category'],
+                    'required_quantity' => $elementData['requiredQuantity'] ?? 1,
+                    'unit_of_measurement' => $elementData['unitOfMeasurement'] ?? 'Pcs',
                     'dimensions' => $elementData['dimensions'] ?? [],
                     'is_included' => $elementData['isIncluded'] ?? true,
                     'notes' => $elementData['notes'] ?? null,
+                    'source_metadata' => $elementData['sourceMetadata'] ?? $elementData['source_metadata'] ?? null,
                     'sort_order' => $elementData['sortOrder'] ?? 0,
                 ]);
 
                 $materialMapping = [];
 
-                foreach ($elementData['materials'] as $matIndex => $materialData) {
+                foreach (($elementData['materials'] ?? []) as $matIndex => $materialData) {
                     // Ensure ElementMaterial persistent_id is unique and not duplicate
                     $matPersistentId = $materialData['persistent_id'] ?? $materialData['persistentId'] ?? null;
                     if (empty($matPersistentId) || in_array($matPersistentId, $usedPersistentIds) || ElementMaterial::where('persistent_id', $matPersistentId)->exists()) {
@@ -591,6 +635,7 @@ class MaterialsController extends Controller
                         'is_included' => $materialData['isIncluded'] ?? true,
                         'is_additional' => $materialData['isAdditional'] ?? false,
                         'notes' => $materialData['notes'] ?? null,
+                        'source_metadata' => $materialData['sourceMetadata'] ?? $materialData['source_metadata'] ?? null,
                         'sort_order' => $materialData['sortOrder'] ?? 0,
                     ]);
 
@@ -615,31 +660,12 @@ class MaterialsController extends Controller
             // revision is now only created when the Project Officer re-approves
             // edited materials (see approveMaterials()).
 
-            // Check for additional materials and create budget additions automatically
-            $this->createBudgetAdditionsForAdditionalMaterials($taskId, $request->projectElements);
-
-            // Saving alone must not move the budget — the budget only follows a
-            // materials list that both departments have approved, which is done
-            // in approveMaterials(). Until then the budget shows the "materials
-            // changed" banner (BudgetController::checkMaterialsUpdate) and can
-            // be synced manually.
-            // $this->syncMaterialsToBudget($taskId, $idMapping);
-            
-            /* 
-            // Trigger Procurement Sync immediately using the ID Mapping
-            // This ensures meaningful Procurement data is preserved even if Budget IDs changed
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($taskId);
-            if ($materialsTask) {
-                $procurementTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
-                    ->where('type', 'procurement')
-                    ->first();
-                
-                if ($procurementTask) {
-                    \Log::info("Triggering Procurement Sync from Materials Save", ['procurementTaskId' => $procurementTask->id]);
-                    $this->procurementService->syncWithBudget($procurementTask->id, $idMapping);
-                }
-            }
-            */
+            // The budget follows the list on every save, not on approval. Waiting
+            // for two sign-offs meant a single added line stalled the budget, the
+            // Material Desk and procurement all at once, and left three copies of
+            // the same list disagreeing until somebody re-approved. Announced
+            // rather than done here: the listener owns the merge.
+            MaterialsListChanged::dispatch($taskId);
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData->fresh(['elements.materials'])),
@@ -928,7 +954,8 @@ class MaterialsController extends Controller
                     'setDownDate' => 'TBC'
                 ],
                 'projectElements' => [],
-                'availableElements' => $this->getElementTemplates()->getData()->data ?? []
+                'availableElements' => $this->getElementTemplates()->getData()->data ?? [],
+                'sourceUpdatedAt' => $materialsData->updated_at?->toISOString(),
             ];
         } catch (\Exception $e) {
             \Log::error('Failed to get default materials structure', [
@@ -968,7 +995,7 @@ class MaterialsController extends Controller
         $materials = $this->normalizeQuoteMaterialsForImport($quoteSnapshot, $selectedElementIds);
 
         if (empty($materials) && $selectedElementIds === null) {
-            throw $this->clientError('The approved quote snapshot has no material lines available for import.', 422);
+            throw $this->clientError('The approved quote snapshot has no element lines available for Materials preparation.', 422);
         }
 
         return [
@@ -1004,7 +1031,36 @@ class MaterialsController extends Controller
             $quoteData = json_decode((string) $approval->quote_data, true);
 
             if (!is_array($quoteData)) {
-                throw $this->clientError('The approved quote snapshot is unreadable. Please re-approve the quote to create a valid snapshot.', 409);
+                // Legacy Excel approvals sometimes persisted the literal JSON
+                // value `null`. Recover from the server-owned approved baseline
+                // rather than asking users to repeat a valid approval decision.
+                $approvedQuote = TaskQuoteData::where('enquiry_task_id', $quoteTask->id)->first();
+                $approvedVersion = $approvedQuote?->versions()
+                    ->where(function ($query) {
+                        $query->where('label', 'Baseline Approved')
+                            ->orWhere('label', 'like', 'Baseline Approved%');
+                    })
+                    ->orderByDesc('version_number')
+                    ->orderByDesc('id')
+                    ->first();
+
+                if ($approvedVersion && is_array($approvedVersion->data)) {
+                    $quoteData = $approvedVersion->data;
+                } elseif ($approvedQuote && in_array($approvedQuote->approval_status ?? $approvedQuote->status, ['approved'], true)) {
+                    $quoteData = $approvedQuote->toArray();
+                } else {
+                    throw $this->clientError('The approved quote snapshot is unreadable and no approved server baseline is available. Please re-approve the quote.', 409);
+                }
+            }
+
+            // Excel approvals historically froze the uploaded file and amount
+            // while quote_data.materials remained empty. Attach the extraction
+            // belonging to the still-approved upload so Materials can consume
+            // the exact revision without manufacturing rows from the file later.
+            $uploadedQuote = TaskQuoteData::where('enquiry_task_id', $quoteTask->id)->first();
+            if ($uploadedQuote?->quote_mode === 'excel_upload' && !empty($uploadedQuote->excel_quote_extraction['elements'])) {
+                $quoteData['quote_mode'] = 'excel_upload';
+                $quoteData['excel_quote_extraction'] = $uploadedQuote->excel_quote_extraction;
             }
 
             return [
@@ -1059,6 +1115,53 @@ class MaterialsController extends Controller
     private function normalizeQuoteMaterialsForImport(array $quoteSnapshot, ?array $selectedElementIds = null): array
     {
         $quoteElements = $quoteSnapshot['materials'] ?? [];
+        $extractedElements = $quoteSnapshot['excel_quote_extraction']['elements']
+            ?? $quoteSnapshot['excelQuoteExtraction']['elements']
+            ?? [];
+        // Compatibility for uploads extracted before quote rows were correctly
+        // modelled as elements. Those snapshots grouped rows under a sheet and
+        // placed each commercial line in `materials`; flatten them without
+        // requiring a new upload or approval.
+        if (!empty($extractedElements)) {
+            $correctedElements = [];
+            foreach ($extractedElements as $legacyElement) {
+                $legacyLines = is_array($legacyElement) ? ($legacyElement['materials'] ?? []) : [];
+                $alreadyElement = is_array($legacyElement) && array_key_exists('quotedQuantity', $legacyElement);
+                if ($alreadyElement || empty($legacyLines)) {
+                    $correctedElements[] = $legacyElement;
+                    continue;
+                }
+                foreach ($legacyLines as $lineIndex => $line) {
+                    if (!is_array($line) || trim((string) ($line['description'] ?? '')) === '') continue;
+                    $correctedElements[] = [
+                        'id' => (string) ($line['id'] ?? ($legacyElement['id'] . '-line-' . $lineIndex)),
+                        'sourceKey' => $line['sourceKey'] ?? null,
+                        'sourceSheet' => $line['sourceSheet'] ?? null,
+                        'sourceRow' => $line['sourceRow'] ?? null,
+                        'section' => $legacyElement['name'] ?? null,
+                        'elementType' => $line['description'],
+                        'name' => $line['description'],
+                        'category' => $legacyElement['category'] ?? 'production',
+                        'quotedQuantity' => $line['quantity'] ?? 0,
+                        'quotedUnit' => $line['unitOfMeasurement'] ?? 'Pcs',
+                        'quotedUnitPrice' => $line['quotedUnitPrice'] ?? null,
+                        'quotedLineTotal' => $line['quotedLineTotal'] ?? null,
+                        'isIncluded' => $line['isIncluded'] ?? true,
+                        'isVisible' => $line['isVisible'] ?? true,
+                        'materials' => [],
+                    ];
+                }
+            }
+            $extractedElements = $correctedElements;
+        }
+        $isExcelSnapshot = ($quoteSnapshot['quote_mode'] ?? $quoteSnapshot['quoteMode'] ?? null) === 'excel_upload';
+        $hasStructuredQuoteLines = collect($quoteElements)->contains(
+            fn ($element) => is_array($element) && !empty($element['materials'])
+        );
+
+        if (!empty($extractedElements) && ($isExcelSnapshot || !$hasStructuredQuoteLines)) {
+            $quoteElements = $extractedElements;
+        }
 
         if (!is_array($quoteElements)) {
             return [];
@@ -1087,7 +1190,8 @@ class MaterialsController extends Controller
 
             $materials = $this->normalizeQuoteMaterialLines($quoteElement['materials'] ?? [], $sourceId);
 
-            if (empty($materials)) {
+            $isExtractedElement = isset($quoteElement['sourceKey']) || array_key_exists('quotedQuantity', $quoteElement);
+            if (empty($materials) && !$isExtractedElement) {
                 continue;
             }
 
@@ -1102,9 +1206,23 @@ class MaterialsController extends Controller
                 'elementType' => $elementType !== '' ? $elementType : 'General',
                 'name' => trim((string) ($quoteElement['name'] ?? $quoteElement['description'] ?? 'Quote Element ' . ($index + 1))),
                 'category' => $category,
+                'requiredQuantity' => max(0.0001, $this->numberValue($quoteElement['quotedQuantity'] ?? 1)),
+                'unitOfMeasurement' => trim((string) ($quoteElement['quotedUnit'] ?? 'Pcs')) ?: 'Pcs',
                 'dimensions' => $quoteElement['dimensions'] ?? ['length' => '', 'width' => '', 'height' => ''],
                 'isIncluded' => $this->importFlag($quoteElement['isIncluded'] ?? $quoteElement['is_included'] ?? true),
                 'notes' => $quoteElement['description'] ?? null,
+                'sourceMetadata' => [
+                    'source' => 'approved_quote',
+                    'sourceKey' => $quoteElement['sourceKey'] ?? $sourceId,
+                    'sourceSheet' => $quoteElement['sourceSheet'] ?? null,
+                    'sourceRow' => $quoteElement['sourceRow'] ?? null,
+                    'section' => $quoteElement['section'] ?? null,
+                    'quotedQuantity' => $this->numberValue($quoteElement['quotedQuantity'] ?? 0),
+                    'quotedUnit' => $quoteElement['quotedUnit'] ?? 'Pcs',
+                    'quotedUnitPrice' => $this->optionalNumber($quoteElement['quotedUnitPrice'] ?? null),
+                    'quotedLineTotal' => $this->optionalNumber($quoteElement['quotedLineTotal'] ?? null),
+                    'itemCode' => $quoteElement['itemCode'] ?? null,
+                ],
                 'sortOrder' => $index,
                 'finalTotal' => $this->numberValue($quoteElement['finalTotal'] ?? $quoteElement['final_total'] ?? 0),
                 'materials' => $materials,
@@ -1151,6 +1269,15 @@ class MaterialsController extends Controller
                 'isIncluded' => $this->importFlag($quoteMaterial['isIncluded'] ?? $quoteMaterial['is_included'] ?? true),
                 'isAdditional' => false,
                 'notes' => null,
+                'sourceMetadata' => [
+                    'source' => 'approved_quote',
+                    'sourceKey' => $quoteMaterial['sourceKey'] ?? ($sourceElementId . '_material_' . ($index + 1)),
+                    'sourceSheet' => $quoteMaterial['sourceSheet'] ?? null,
+                    'sourceRow' => $quoteMaterial['sourceRow'] ?? null,
+                    'quotedUnitPrice' => $this->optionalNumber($quoteMaterial['quotedUnitPrice'] ?? null),
+                    'quotedLineTotal' => $this->optionalNumber($quoteMaterial['quotedLineTotal'] ?? null),
+                    'matchStatus' => $quoteMaterial['matchStatus'] ?? 'unmatched',
+                ],
                 'sortOrder' => $index,
             ];
         }
@@ -1171,13 +1298,16 @@ class MaterialsController extends Controller
                 'name' => $elementData['name'],
                 'persistent_id' => (string) Str::uuid(),
                 'category' => $elementData['category'],
+                'required_quantity' => $elementData['requiredQuantity'] ?? 1,
+                'unit_of_measurement' => $elementData['unitOfMeasurement'] ?? 'Pcs',
                 'dimensions' => $elementData['dimensions'] ?? [],
                 'is_included' => $elementData['isIncluded'] ?? true,
                 'notes' => $elementData['notes'] ?? null,
+                'source_metadata' => $elementData['sourceMetadata'] ?? $elementData['source_metadata'] ?? null,
                 'sort_order' => $elementData['sortOrder'] ?? 0,
             ]);
 
-            foreach ($elementData['materials'] as $materialData) {
+            foreach (($elementData['materials'] ?? []) as $materialData) {
                 ElementMaterial::create([
                     'project_element_id' => $element->id,
                     'library_material_id' => $materialData['libraryMaterialId'] ?? null,
@@ -1189,6 +1319,7 @@ class MaterialsController extends Controller
                     'is_included' => $materialData['isIncluded'] ?? true,
                     'is_additional' => $materialData['isAdditional'] ?? false,
                     'notes' => $materialData['notes'] ?? null,
+                    'source_metadata' => $materialData['sourceMetadata'] ?? $materialData['source_metadata'] ?? null,
                     'sort_order' => $materialData['sortOrder'] ?? 0,
                 ]);
             }
@@ -1268,445 +1399,6 @@ class MaterialsController extends Controller
     }
 
     /**
-     * Sync materials data to budget whenever materials are updated
-     */
-    private function syncMaterialsToBudget(int $materialsTaskId, array $idMapping = []): array
-    {
-        try {
-            // Find the budget task for this enquiry
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($materialsTaskId);
-            if (!$materialsTask) {
-                \Log::warning('Materials task not found for budget sync', ['taskId' => $materialsTaskId]);
-                return ['synced' => false, 'reason' => 'materials_task_not_found'];
-            }
-
-            $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
-                ->where('type', 'budget')
-                ->first();
-
-            if (!$budgetTask) {
-                \Log::info('No budget task found for enquiry - skipping materials sync', [
-                    'enquiryId' => $materialsTask->project_enquiry_id
-                ]);
-                return ['synced' => false, 'reason' => 'no_budget_task'];
-            }
-
-            // Get budget data
-            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
-            if (!$budgetData) {
-                \Log::info('No budget data found - skipping materials sync', [
-                    'budgetTaskId' => $budgetTask->id
-                ]);
-                return ['synced' => false, 'reason' => 'no_budget_data'];
-            }
-
-            // The budget was already signed off, so the approved figures are
-            // about to change underneath whoever relies on that status
-            // (Finance/procurement gates, etc). Reopen it so the change is
-            // visible and audited, then sync — dual approval is the authority
-            // on what the materials cost, and leaving the budget showing stale
-            // numbers behind a "completed" badge is the worse failure.
-            $reopened = false;
-            if ($budgetTask->status === 'completed') {
-                $budgetTask->update(['status' => 'in_progress', 'completed_at' => null]);
-                $budgetTask->recordCustomAction('status_transition', [
-                    'from' => 'completed',
-                    'to' => 'in_progress',
-                    'actor_type' => 'system',
-                    'reason' => 'Materials list was updated and re-approved after this budget was marked complete. Reopened and re-synced with the approved materials — review the updated totals.',
-                ]);
-                $reopened = true;
-                \Log::info('Budget task reopened: materials re-approved after budget completion', [
-                    'budgetTaskId' => $budgetTask->id,
-                    'materialsTaskId' => $materialsTaskId,
-                ]);
-            }
-
-            // Get materials data to sync
-            $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)
-                ->with(['elements.materials.libraryMaterial'])
-                ->first();
-
-            if (!$materialsData) {
-                \Log::info('No materials data found - skipping materials sync', [
-                    'materialsTaskId' => $materialsTaskId
-                ]);
-                return ['synced' => false, 'reason' => 'no_materials_data', 'budgetReopened' => $reopened];
-            }
-
-            // --- BUILD INDEXES OF EXISTING BUDGET DATA ---
-            $existingMaterials = $budgetData->materials_data ?? [];
-            $budgetElementsById = []; // Key: IDString -> ElementData
-            $budgetMaterialsById = []; // Key: IDString -> MaterialData
-            $budgetMaterialsByPersistentId = []; // Key: UUID -> MaterialData
-            $budgetElementsByPersistentId = []; // Key: UUID -> ElementData
-            
-            // Fallbacks for content matching (if IDs fail)
-            $budgetElementsByKey = []; // Key: Name|Type -> ElementData
-            $budgetMaterialsByKey = []; // Key: ElemKey|MatDesc -> MaterialData
-
-            foreach ($existingMaterials as $existingElem) {
-                if (isset($existingElem['id'])) {
-                    $budgetElementsById[(string)$existingElem['id']] = $existingElem;
-                }
-                if (isset($existingElem['persistent_id'])) {
-                    $budgetElementsByPersistentId[(string)$existingElem['persistent_id']] = $existingElem;
-                }
-                
-                // Fallback Key for Element
-                $elemKey = strtolower(trim($existingElem['name'] ?? '')) . '|' . strtolower($existingElem['elementType'] ?? 'custom');
-                $budgetElementsByKey[$elemKey] = $existingElem;
-
-                foreach ($existingElem['materials'] ?? [] as $existingMat) {
-                    if (isset($existingMat['id'])) {
-                        $budgetMaterialsById[(string)$existingMat['id']] = $existingMat;
-                    }
-                    if (isset($existingMat['persistent_id'])) {
-                        $budgetMaterialsByPersistentId[(string)$existingMat['persistent_id']] = $existingMat;
-                    }
-                    
-                    // Fallback Key for Material
-                    $matKey = $elemKey . '|' . strtolower(trim($existingMat['description'] ?? ''));
-                    $budgetMaterialsByKey[$matKey] = $existingMat;
-                }
-            }
-
-            // --- TRANSFORM MATERIALS FOR BUDGET ---
-            $budgetMaterials = [];
-            foreach ($materialsData->elements as $element) {
-                // Skip elements that are not included
-                if (!$element->is_included) {
-                    continue;
-                }
-
-                // Resolve matching budget element
-                $matchingBudgetElem = null;
-
-                // 0. Try Persistent ID Mapping
-                if (!empty($element->persistent_id)) {
-                    $matchingBudgetElem = $budgetElementsByPersistentId[(string)$element->persistent_id] ?? null;
-                }
-
-                // A. Try ID Mapping (New ID -> Old ID -> Budget Lookup)
-                $oldElementId = null;
-                if (isset($idMapping[(string)$element->id])) {
-                    $oldElementId = $idMapping[(string)$element->id]['old_id'];
-                }
-                
-                if ($oldElementId) {
-                    $matchingBudgetElem = $budgetElementsById[(string)$oldElementId] ?? null;
-                    if (!$matchingBudgetElem) {
-                        \Log::warning("Materials Sync: Element ID match failed", ['new' => $element->id, 'old' => $oldElementId]);
-                    }
-                }
-
-                // B. Try Fallback Key (if ID match failed)
-                if (!$matchingBudgetElem) {
-                    $newElemKey = strtolower(trim($element->name)) . '|' . strtolower($element->element_type);
-                    $matchingBudgetElem = $budgetElementsByKey[$newElemKey] ?? null;
-                }
-
-                $elementMaterials = [];
-                foreach ($element->materials as $material) {
-                    // Skip materials that are not included or marked additional
-                    if (!$material->is_included || $material->is_additional) {
-                        continue;
-                    }
-
-                    // Resolve price and existing data
-                    $unitPrice = 0.0;
-                    $hasCustomPrice = false;
-                    $oldQty = 0.0;
-                    
-                    // Resolve matching budget material
-                    $matchingBudgetMat = null;
-
-                    // 0. Try Persistent ID Mapping (Highest Reliability)
-                    if (!empty($material->persistent_id)) {
-                        $matchingBudgetMat = $budgetMaterialsByPersistentId[(string)$material->persistent_id] ?? null;
-                    }
-                    
-                    // A. Try ID Mapping
-                    $oldMaterialId = null;
-                    if (isset($idMapping[(string)$element->id]['materials'][(string)$material->id])) {
-                        $oldMaterialId = $idMapping[(string)$element->id]['materials'][(string)$material->id];
-                    }
-
-                    if ($oldMaterialId) {
-                        $matchingBudgetMat = $budgetMaterialsById[(string)$oldMaterialId] ?? null;
-                        if (!$matchingBudgetMat) {
-                             \Log::warning("Materials Sync: Material ID match failed", ['new' => $material->id, 'old' => $oldMaterialId]);
-                        }
-                    }
-
-                    // B. Try Fallback Key
-                    if (!$matchingBudgetMat) {
-                         // Construct key using CURRENT element details + Material Description
-                         $currentElemKey = strtolower(trim($element->name)) . '|' . strtolower($element->element_type);
-                         $newMatKey = $currentElemKey . '|' . strtolower(trim($material->description));
-                         $matchingBudgetMat = $budgetMaterialsByKey[$newMatKey] ?? null;
-                    }
-
-                    if ($matchingBudgetMat) {
-                         $unitPrice = (float)($matchingBudgetMat['unitPrice'] ?? 0);
-                         $hasCustomPrice = true;
-                         $oldQty = (float)($matchingBudgetMat['quantity'] ?? 0);
-
-                         \Log::info('Preserved budget price during sync', [
-                             'material' => $material->description,
-                             'price' => $unitPrice
-                         ]);
-                    }
-
-                    // If no custom price found/preserved, use library/default
-                    if (!$hasCustomPrice) {
-                        $unitPrice = (float)($material->unit_cost ?: ($material->libraryMaterial->unit_cost ?? 0.0));
-                    }
-
-                    $newMaterialData = [
-                        'id' => (string) $material->id, // Use NEW ID to keep budget fresh
-                        'persistent_id' => $material->persistent_id,
-                        'description' => $material->description,
-                        'unitOfMeasurement' => $material->unit_of_measurement,
-                        'quantity' => (float) $material->quantity,
-                        'isIncluded' => true,
-                        'unitPrice' => $unitPrice,
-                        'totalPrice' => $unitPrice * (float) $material->quantity,
-                        'isAddition' => false,
-                        'notes' => $material->notes,
-                        'category' => $element->category
-                    ];
-
-                    // Track quantity changes for user awareness
-                    if ($hasCustomPrice && abs($oldQty - (float)$material->quantity) > 0.001) {
-                         $newMaterialData['_quantityChanged'] = true;
-                         $newMaterialData['_oldQuantity'] = $oldQty;
-                    }
-
-                    $elementMaterials[] = $newMaterialData;
-                }
-
-                if (!empty($elementMaterials)) {
-                    $budgetMaterials[] = [
-                        'id' => (string) $element->id, // Use NEW ID
-                        'elementType' => $element->element_type,
-                        'name' => $element->name,
-                        'persistent_id' => $element->persistent_id,
-                        'category' => $element->category,
-                        'materials' => $elementMaterials,
-                        'isIncluded' => true,
-                        'notes' => $element->notes
-                    ];
-                }
-            }
-
-            // Recalculate materials total
-            $materialsTotal = 0;
-            foreach ($budgetMaterials as $element) {
-                foreach ($element['materials'] ?? [] as $material) {
-                    $materialsTotal += (float) ($material['totalPrice'] ?? 0);
-                }
-            }
-
-            // Update budget
-            $currentSummary = $budgetData->budget_summary ?? [
-                'materialsTotal' => 0,
-                'labourTotal' => 0,
-                'expensesTotal' => 0,
-                'logisticsTotal' => 0,
-                'grandTotal' => 0
-            ];
-            
-            $currentSummary['materialsTotal'] = $materialsTotal;
-            $currentSummary['grandTotal'] = $materialsTotal + 
-                                          ($currentSummary['labourTotal'] ?? 0) + 
-                                          ($currentSummary['expensesTotal'] ?? 0) + 
-                                          ($currentSummary['logisticsTotal'] ?? 0);
-
-            $budgetData->update([
-                'materials_data' => $budgetMaterials,
-                'budget_summary' => $currentSummary,
-                'materials_imported_at' => now(),
-                'materials_imported_from_task' => $materialsTaskId,
-                'materials_manually_modified' => false,
-                'materials_import_metadata' => [
-                    // Procurement refuses to sync from a budget whose metadata
-                    // doesn't name the approved materials list as its source
-                    // (ProcurementService::ensureBudgetReadyForProcurement).
-                    // This path *is* that source — both departments just
-                    // approved it — so it has to say so, exactly as
-                    // BudgetService::buildMaterialsImportMetadata() does.
-                    'source' => 'approved_materials_list',
-                    'imported_at' => now()->toISOString(),
-                    'materials_task_id' => $materialsTaskId,
-                    'materials_task_title' => $materialsTask->title,
-                    'total_elements' => count($budgetMaterials),
-                    'total_materials' => array_sum(array_map(function ($element) {
-                        return count($element['materials']);
-                    }, $budgetMaterials))
-                ],
-                'updated_at' => now()
-            ]);
-
-            \Log::info("Materials synced to budget successfully (ID Mapping Active)", [
-                'taskId' => $materialsTaskId,
-                'idMappingCount' => count($idMapping)
-            ]);
-
-            // This path writes TaskBudgetData directly rather than going through
-            // BudgetService, so it has to carry the budget -> procurement push
-            // itself. Without it, approving materials updates the budget and
-            // leaves procurement on the previous figures.
-            $procurementTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
-                ->where('type', 'procurement')
-                ->first();
-
-            if ($procurementTask) {
-                app(\App\Services\ProcurementService::class)->syncWithBudget($procurementTask->id, $idMapping);
-            }
-
-            return [
-                'synced' => true,
-                'budgetTaskId' => $budgetTask->id,
-                'budgetReopened' => $reopened,
-                'materialsTotal' => $materialsTotal,
-                'grandTotal' => $currentSummary['grandTotal'],
-            ];
-
-        } catch (\Exception $e) {
-            \Log::error('Failed to sync materials to budget', [
-                'materialsTaskId' => $materialsTaskId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return [
-                'synced' => false,
-                'reason' => 'error',
-                'error' => $e->getMessage(),
-            ];
-        }
-    }
-
-    /**
-     * Create budget additions for materials marked as additional
-     */
-    private function createBudgetAdditionsForAdditionalMaterials(int $materialsTaskId, array $projectElements): void
-    {
-        try {
-            // Find the budget task for this enquiry
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::find($materialsTaskId);
-            if (!$materialsTask) {
-                \Log::warning('Materials task not found for budget addition creation', ['taskId' => $materialsTaskId]);
-                return;
-            }
-
-            // Check approval status - ONLY create additions if fully approved
-            $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTaskId)->first();
-            if ($materialsData) {
-                $projectInfo = $materialsData->project_info ?? [];
-                $approvalStatus = $projectInfo['approval_status'] ?? [];
-                $isApproved = $approvalStatus['all_approved'] ?? false;
-
-                if (!$isApproved) {
-                    \Log::info('Materials not fully approved - skipping automatic budget additions', [
-                        'materialsTaskId' => $materialsTaskId
-                    ]);
-                    return;
-                }
-            }
-
-            $budgetTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
-                ->where('type', 'budget')
-                ->first();
-
-            if (!$budgetTask) {
-                \Log::info('No budget task found for enquiry - skipping automatic budget additions', [
-                    'enquiryId' => $materialsTask->project_enquiry_id
-                ]);
-                return;
-            }
-
-            // Check if budget task is completed - if so, all new materials should be additions
-            $isBudgetCompleted = $budgetTask->status === 'completed';
-
-            // Get budget data
-            $budgetData = \App\Models\TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
-            if (!$budgetData) {
-                \Log::info('No budget data found - skipping automatic budget additions', [
-                    'budgetTaskId' => $budgetTask->id
-                ]);
-                return;
-            }
-
-            // Process each element and its materials
-            foreach ($projectElements as $elementData) {
-                foreach ($elementData['materials'] as $materialData) {
-                    // If budget is completed, ALL new materials should be treated as additions
-                    // Otherwise, only materials explicitly marked as "additional"
-                    $shouldCreateAddition = $isBudgetCompleted ||
-                        (isset($materialData['isAdditional']) && $materialData['isAdditional']);
-
-                    if ($shouldCreateAddition) {
-                        // Check if this material already has a budget addition
-                        $existingAddition = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
-                            ->where('title', 'Additional: ' . $materialData['description'])
-                            ->where('status', '!=', 'rejected')
-                            ->first();
-
-                        if (!$existingAddition) {
-                            // Create new budget addition
-                            $additionTitle = $isBudgetCompleted
-                                ? 'Post-Budget Addition: ' . $materialData['description']
-                                : 'Additional: ' . $materialData['description'];
-
-                            $additionDescription = $isBudgetCompleted
-                                ? 'Automatically created from Materials Task after budget completion - Element: ' . ($elementData['name'] ?? 'Unnamed')
-                                : 'Automatically created from Materials Task - Element: ' . ($elementData['name'] ?? 'Unnamed');
-
-                            \App\Models\BudgetAddition::create([
-                                'task_budget_data_id' => $budgetData->id,
-                                'title' => $additionTitle,
-                                'description' => $additionDescription,
-                                'materials' => [
-                                    [
-                                        'id' => 'auto_' . uniqid(),
-                                        'description' => $materialData['description'],
-                                        'unitOfMeasurement' => $materialData['unitOfMeasurement'],
-                                        'quantity' => $materialData['quantity'],
-                                        'unitPrice' => (float) ($materialData['unitCost'] ?? 0),
-                                        'totalPrice' => (float) (($materialData['unitCost'] ?? 0) * $materialData['quantity']),
-                                        'isAddition' => true
-                                    ]
-                                ],
-                                'labour' => [],
-                                'expenses' => [],
-                                'logistics' => [],
-                                'status' => 'pending_approval',
-                                'created_by' => auth()->id() ?? 1, // System or current user
-                            ]);
-
-                            \Log::info('Created automatic budget addition for material', [
-                                'material' => $materialData['description'],
-                                'budgetId' => $budgetData->id,
-                                'isPostBudgetAddition' => $isBudgetCompleted,
-                                'budgetStatus' => $budgetTask->status
-                            ]);
-                        }
-                    }
-                }
-            }
-
-        } catch (\Exception $e) {
-            \Log::error('Failed to create automatic budget additions', [
-                'materialsTaskId' => $materialsTaskId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-        }
-    }
-
-    /**
      * Format materials data for frontend
      */
     private function formatMaterialsData(TaskMaterialsData $materialsData): array
@@ -1723,6 +1415,8 @@ class MaterialsController extends Controller
                         'name' => $element->name,
                         'persistent_id' => $element->persistent_id,
                         'category' => $element->category,
+                        'requiredQuantity' => (float) $element->required_quantity,
+                        'unitOfMeasurement' => $element->unit_of_measurement,
                         'dimensions' => $element->dimensions ?? ['length' => '', 'width' => '', 'height' => ''],
                         'isIncluded' => (bool) $element->is_included,
                         'materials' => $element->materials->map(function ($material) {
@@ -1737,11 +1431,13 @@ class MaterialsController extends Controller
                                 'isIncluded' => (bool) $material->is_included,
                                 'isAdditional' => (bool) $material->is_additional,
                                 'notes' => $material->notes,
+                                'sourceMetadata' => $material->source_metadata,
                                 'createdAt' => $material->created_at?->toISOString(),
                                 'updatedAt' => $material->updated_at?->toISOString(),
                             ];
                         })->toArray(),
                         'notes' => $element->notes,
+                        'sourceMetadata' => $element->source_metadata,
                         'addedAt' => $element->created_at?->toISOString(),
                     ];
                 })->toArray(),
@@ -1770,6 +1466,9 @@ class MaterialsController extends Controller
      */
     public function approveMaterials(Request $request, int $taskId, string $department): JsonResponse
     {
+        $task = EnquiryTask::findOrFail($taskId);
+        abort_unless($task->type === 'materials', 422, 'This action is only valid for a materials task.');
+
         $user = auth()->user();
         $userRoles = $user->roles->pluck('name')->toArray();
         $isSuperAdmin = in_array('Super Admin', $userRoles);
@@ -1800,24 +1499,48 @@ class MaterialsController extends Controller
             ], 422);
         }
 
-        $budgetSync = null;
-
         try {
+            DB::beginTransaction();
+
             // Check Design Gate before proceeding
             $gate = $this->checkDesignApprovalGate($taskId);
             if ($gate['is_gated']) {
+                DB::rollBack();
                 return response()->json([
                     'message' => 'Unauthorized: ' . $gate['message'],
                     'designGate' => $gate
                 ], 403);
             }
 
-            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->lockForUpdate()->first();
 
             if (!$materialsData) {
+                DB::rollBack();
                 return response()->json([
                     'message' => 'Materials data not found for this task'
                 ], 404);
+            }
+
+            // Imported quote elements are valid planning shells, but an
+            // included in-house production element cannot be approved until
+            // its execution BOM has at least one active line. Hire and
+            // outsourced elements may legitimately have no raw-material BOM.
+            $materialsData->loadMissing('elements.materials');
+            $incompleteProductionElements = $materialsData->elements
+                ->filter(fn ($element) => $element->is_included && $element->category === 'production')
+                ->filter(fn ($element) => !$element->materials->contains(fn ($material) => $material->is_included))
+                ->values();
+
+            if ($incompleteProductionElements->isNotEmpty()) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'Complete the BOM for all included production elements before approval.',
+                    'code' => 'MATERIALS_BOM_INCOMPLETE',
+                    'incompleteElements' => $incompleteProductionElements->map(fn ($element) => [
+                        'id' => (string) $element->id,
+                        'name' => $element->name ?: $element->element_type,
+                    ])->all(),
+                ], 422);
             }
 
             // Project Officer re-approval gate: if a base snapshot exists and the
@@ -1826,12 +1549,14 @@ class MaterialsController extends Controller
             // point in the materials workflow that requires a reason — plain
             // saves are always free.
             $baseVersion = $materialsData->versions()->where('is_base', true)->latest('version_number')->first();
+            $changedSinceBase = $baseVersion && $this->materialsChangedSinceVersion($materialsData, $baseVersion);
+
             if (
                 $department === 'project_officer'
-                && $baseVersion
-                && $this->materialsChangedSinceVersion($materialsData, $baseVersion)
+                && $changedSinceBase
                 && !$request->filled('editReason')
             ) {
+                DB::rollBack();
                 return response()->json([
                     'message' => 'Validation failed',
                     'errors' => [
@@ -1894,15 +1619,40 @@ class MaterialsController extends Controller
                     ];
                 })->toArray();
 
-                $this->createBudgetAdditionsForAdditionalMaterials($taskId, $projectElements);
-
-                // Automatic budget sync on final approval
-                \Log::info('Final approval received - syncing latest materials to budget', ['taskId' => $taskId]);
-                $budgetSync = $this->syncMaterialsToBudget($taskId);
+                // Saving already announced the change and the budget already
+                // followed it, so approval has nothing left to push. Re-announced
+                // only because the listener is idempotent and this closes the gap
+                // if a queued sync failed earlier.
+                DB::afterCommit(fn () => MaterialsListChanged::dispatch($taskId));
             }
 
             // NEW: Handle Base Snapshot on First Approval
             $this->handleBaseSnapshotOnApproval($taskId);
+
+            // A re-approval that needed a reason is a revision, so record one.
+            // The reason was being written into the approval JSON and nowhere
+            // else: the audit trail said somebody explained a change, without
+            // holding the list they were explaining. The snapshot is taken after
+            // the approval is stored, so the version and the approval it belongs
+            // to describe the same moment.
+            if ($department === 'project_officer' && $changedSinceBase && $request->filled('editReason')) {
+                try {
+                    $this->internalCreateVersion(
+                        $taskId,
+                        'Revision - Re-approved after edits',
+                        $request->input('editReason'),
+                        false,
+                    );
+                } catch (\Exception $e) {
+                    // Never fail an approval over its own audit copy: the reason
+                    // is already recorded on the approval, and a missing snapshot
+                    // is visible in the version list.
+                    \Log::warning('Approval recorded but its revision snapshot failed', [
+                        'taskId' => $taskId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
 
             // Complete only after both approvals and all final synchronization
             // work have succeeded. A single approval must never close the task.
@@ -1910,6 +1660,8 @@ class MaterialsController extends Controller
                 $materialsTask = $materialsData->task()->firstOrFail();
                 app(\App\Modules\Projects\Actions\AutoSyncTaskStateAction::class)->execute($materialsTask);
             }
+
+            DB::commit();
 
             return response()->json([
                 'message' => ucfirst($department) . ' approval recorded successfully',
@@ -1919,10 +1671,12 @@ class MaterialsController extends Controller
                 // caller can tell an actual budget update apart from a silent
                 // no-op (no budget task yet, sync error) instead of reading
                 // "approval recorded successfully" as "the budget moved".
-                'budget_sync' => $budgetSync,
             ]);
 
         } catch (\Exception $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
             \Log::error('Failed to approve materials', [
                 'taskId' => $taskId,
                 'department' => $department,
@@ -2332,7 +2086,7 @@ class MaterialsController extends Controller
                     ]);
 
                     // Recreate materials for this element
-                    foreach ($elementData['materials'] as $materialData) {
+                    foreach (($elementData['materials'] ?? []) as $materialData) {
                         $element->materials()->create([
                             'description' => $materialData['description'],
                             'unit_of_measurement' => $materialData['unit_of_measurement'],
@@ -2407,8 +2161,19 @@ class MaterialsController extends Controller
     /**
      * Delete a project element and all its materials
      */
-    public function deleteElement(int $taskId, int $elementId): JsonResponse
+    public function deleteElement(int $taskId, string $elementId): JsonResponse
     {
+        // Elements the user added but has not saved yet still carry a
+        // client-generated id ("custom-1724...", "scope-3"). Those never reach
+        // the database, and an `int` type hint turns them into a 500 TypeError
+        // thrown before this try block exists. Answer them honestly instead.
+        if (! ctype_digit($elementId)) {
+            return response()->json([
+                'message' => 'This element has not been saved yet, so there is nothing to delete on the server.',
+                'code' => 'ELEMENT_NEVER_SAVED',
+            ], 404);
+        }
+
         try {
             // Find the task materials data
             $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
@@ -2457,7 +2222,12 @@ class MaterialsController extends Controller
                 }
             }
 
-            // Delete element (materials will cascade delete due to foreign key)
+            // The element_materials cascade is declared in the create migration but
+            // is absent from the live schema, so deleting the element alone strands
+            // its material rows. Delete them explicitly — the same reason
+            // saveMaterialsData() clears them by project_element_id rather than
+            // trusting the constraint.
+            $element->materials()->delete();
             $element->delete();
 
             return response()->json([
@@ -2590,6 +2360,8 @@ class MaterialsController extends Controller
      */
     public function uploadTemplate(Request $request, int $taskId): JsonResponse
     {
+        $this->authorizeMaterialsMutation($taskId);
+
         $request->validate([
             'file' => 'required|mimes:xlsx,xls|max:5120', // 5MB max
         ]);
@@ -2671,5 +2443,19 @@ class MaterialsController extends Controller
             \Log::error('Design gate check failed', ['error' => $e->getMessage()]);
             return ['is_gated' => false, 'message' => 'Gate check errored. Contact admin.'];
         }
+    }
+
+    /**
+     * Reading project tasks is intentionally transparent, but changing the
+     * bill of materials is not. Frontend `readonly` flags are presentation,
+     * never an authorization boundary.
+     */
+    private function authorizeMaterialsMutation(int $taskId): EnquiryTask
+    {
+        $task = EnquiryTask::findOrFail($taskId);
+        abort_unless($task->type === 'materials', 422, 'This action is only valid for a materials task.');
+        abort_unless(auth()->user() && $task->isUserAuthorized(auth()->user()), 403, 'You can only change a materials task in your assigned work pool.');
+
+        return $task;
     }
 }

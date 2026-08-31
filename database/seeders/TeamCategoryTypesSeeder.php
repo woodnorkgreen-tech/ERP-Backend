@@ -48,7 +48,13 @@ class TeamCategoryTypesSeeder extends Seeder
         ];
 
         foreach ($combinations as $combination) {
-            \App\Modules\Teams\Models\TeamCategoryType::create($combination);
+            \App\Modules\Teams\Models\TeamCategoryType::updateOrCreate(
+                [
+                    'category_id' => $combination['category_id'],
+                    'team_type_id' => $combination['team_type_id']
+                ],
+                $combination
+            );
         }
     }
 }

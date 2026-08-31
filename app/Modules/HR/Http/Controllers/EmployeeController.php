@@ -374,6 +374,35 @@ class EmployeeController
     }
 
     /**
+     * Staff directory for people-pickers outside HR.
+     *
+     * `compact()` is scoped by scopeAccessibleByUser because it carries HR
+     * record data (department, manager chain, overtime balance). Other modules
+     * only need to name a colleague — Stores recording who received material,
+     * Logistics naming a trip requester — and scoping that list to the caller's
+     * HR visibility leaves a storekeeper with an empty picker.
+     *
+     * This returns the name and job title of active staff and nothing else, so
+     * it answers "who works here" without exposing any HR record.
+     */
+    public function directory(Request $request): JsonResponse
+    {
+        $employees = Employee::query()
+            ->where('status', 'active')
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get(['id', 'first_name', 'last_name', 'position'])
+            ->map(fn ($employee) => [
+                'id'        => $employee->id,
+                'name'      => trim("{$employee->first_name} {$employee->last_name}"),
+                'job_title' => $employee->position,
+            ])
+            ->values();
+
+        return response()->json(['data' => $employees]);
+    }
+
+    /**
      * Download the bulk-edit Excel template, pre-filled with every employee the
      * caller may access. Edit the rows and reupload via previewImport/commitImport.
      */

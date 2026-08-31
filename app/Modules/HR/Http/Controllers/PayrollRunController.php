@@ -7,7 +7,10 @@ use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\EmployeeSalaryHistory;
 use App\Modules\HR\Models\HRAuditLog;
 use App\Modules\HR\Models\PayrollRun;
+use App\Modules\HR\Models\Payslip;
 use App\Modules\HR\Services\Payroll\PayrollService;
+use App\Modules\HR\Services\Payroll\PayrollFinancePostingService;
+use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Constants\Permissions;
 use Illuminate\Http\JsonResponse;
@@ -16,7 +19,10 @@ use Illuminate\Support\Facades\DB;
 
 class PayrollRunController extends Controller
 {
-    public function __construct(protected PayrollService $payrollService) {}
+    public function __construct(
+        protected PayrollService $payrollService,
+        protected PayrollFinancePostingService $financePosting,
+    ) {}
 
     /**
      * List all payroll runs.
@@ -70,7 +76,7 @@ class PayrollRunController extends Controller
      */
     public function show(PayrollRun $payrollRun): JsonResponse
     {
-        $payrollRun->load('creator');
+        $payrollRun->load(['creator', 'accrualJournal', 'paymentJournal', 'paymentSource']);
 
         $stats = DB::table('payslips')
             ->where('payroll_run_id', $payrollRun->id)
@@ -89,8 +95,8 @@ class PayrollRunController extends Controller
      */
     public function process(Request $request, PayrollRun $payrollRun, PayrollService $service): JsonResponse
     {
-        if ($payrollRun->status === 'locked') {
-            return response()->json(['success' => false, 'message' => 'This payroll run is locked and cannot be reprocessed.'], 422);
+        if (!in_array($payrollRun->status, ['draft', 'processing'], true)) {
+            return response()->json(['success' => false, 'message' => "This payroll run is {$payrollRun->status} and cannot be reprocessed."], 422);
         }
 
         $query = Employee::where('status', 'active');
@@ -108,25 +114,29 @@ class PayrollRunController extends Controller
         // Increase time limit for synchronous processing of the batch
         set_time_limit(300);
 
-        $payrollRun->update(['status' => 'processing']);
+        DB::transaction(function () use ($employees, $payrollRun, $service) {
+            $payrollRun->update(['status' => 'processing']);
 
-        $processedPayslips = [];
-        foreach ($employees as $employee) {
-            $processedPayslips[] = $service->processEmployee($employee, $payrollRun);
-        }
+            foreach ($employees as $employee) {
+                $service->processEmployee($employee, $payrollRun);
+            }
 
-        $payslipsCollection = collect($processedPayslips);
-        $totalStatutory = $payslipsCollection->sum(function ($p) {
-            $b = $p->tax_breakdown ?? [];
-            return ($b['paye'] ?? 0) + ($b['nssf'] ?? 0) + ($b['shif'] ?? 0) + ($b['housing_levy'] ?? 0);
+            // A filtered batch is only one slice of the run. Reconcile summaries
+            // from every attached payslip so prior batches never disappear from
+            // the figures shown for review.
+            $allRunPayslips = $payrollRun->payslips()->get();
+            $totalStatutory = $allRunPayslips->sum(function ($p) {
+                $b = $p->tax_breakdown ?? [];
+                return ($b['paye'] ?? 0) + ($b['nssf'] ?? 0) + ($b['shif'] ?? 0) + ($b['housing_levy'] ?? 0);
+            });
+
+            $payrollRun->update([
+                'total_gross'     => $allRunPayslips->sum('gross_pay'),
+                'total_net'       => $allRunPayslips->sum('net_pay'),
+                'total_statutory' => $totalStatutory,
+                'status'          => 'processing',
+            ]);
         });
-
-        $payrollRun->update([
-            'total_gross'     => $payslipsCollection->sum('gross_pay'),
-            'total_net'       => $payslipsCollection->sum('net_pay'),
-            'total_statutory' => $totalStatutory,
-            'status'          => 'processing',
-        ]);
 
         NotificationService::send(
             type: 'payroll_run_processed',
@@ -149,11 +159,29 @@ class PayrollRunController extends Controller
      */
     public function lock(PayrollRun $payrollRun): JsonResponse
     {
-        if ($payrollRun->status === 'locked') {
-            return response()->json(['success' => false, 'message' => 'Already locked.'], 422);
+        if ($payrollRun->status !== 'processing') {
+            return response()->json(['success' => false, 'message' => 'Only a processed payroll run can be locked.'], 422);
         }
 
-        $this->payrollService->finalizeRun($payrollRun);
+        $payslips = $payrollRun->payslips()->get();
+        if ($payslips->isEmpty()) {
+            return response()->json(['success' => false, 'message' => 'A payroll run with no payslips cannot be locked.'], 422);
+        }
+
+        $uncovered = $payslips->sum(fn (Payslip $payslip) => (float) data_get($payslip->tax_breakdown, 'uncovered_deductions', 0));
+        if ($uncovered > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Resolve uncovered employee deductions before locking this payroll run.',
+                'uncovered_deductions' => round($uncovered, 2),
+            ], 422);
+        }
+
+        DB::transaction(function () use ($payrollRun) {
+            $this->payrollService->finalizeRun($payrollRun);
+            $this->financePosting->postAccrual($payrollRun->fresh());
+        });
+        $payrollRun->refresh();
 
         HRAuditLog::create([
             'user_id' => auth()->id(),
@@ -184,14 +212,35 @@ class PayrollRunController extends Controller
     /**
      * Mark a locked run as paid.
      */
-    public function markPaid(PayrollRun $payrollRun): JsonResponse
+    public function markPaid(Request $request, PayrollRun $payrollRun): JsonResponse
     {
         if ($payrollRun->status !== 'locked') {
             return response()->json(['success' => false, 'message' => 'Only locked runs can be marked as paid.'], 422);
         }
 
-        $payrollRun->update(['status' => 'paid']);
-        $payrollRun->payslips()->update(['status' => 'paid', 'payment_date' => now()]);
+        $validated = $request->validate([
+            'payment_source_id' => ['required', 'integer', 'exists:payment_sources,id'],
+            'payment_date' => ['required', 'date'],
+            'payment_reference' => ['required', 'string', 'max:100'],
+        ]);
+        $paymentSource = PaymentSource::findOrFail($validated['payment_source_id']);
+
+        DB::transaction(function () use ($payrollRun, $paymentSource, $validated) {
+            $lockedRun = PayrollRun::whereKey($payrollRun->id)->lockForUpdate()->firstOrFail();
+            if ($lockedRun->status !== 'locked') {
+                throw new \DomainException('Only locked runs can be marked as paid.');
+            }
+
+            $this->financePosting->postPayment(
+                $lockedRun,
+                $paymentSource,
+                $validated['payment_date'],
+                $validated['payment_reference'],
+            );
+            $lockedRun->update(['status' => 'paid']);
+            $lockedRun->payslips()->update(['status' => 'paid', 'payment_date' => $validated['payment_date']]);
+        });
+        $payrollRun->refresh();
 
         HRAuditLog::create([
             'user_id' => auth()->id(),
@@ -201,7 +250,9 @@ class PayrollRunController extends Controller
             'message' => "Payroll run for {$payrollRun->payroll_month} marked as PAID.",
             'context' => [
                 'payroll_month' => $payrollRun->payroll_month,
-                'payment_date' => now()->toDateTimeString()
+                'payment_date' => $payrollRun->payment_date?->toDateString(),
+                'payment_reference' => $payrollRun->payment_reference,
+                'payment_journal_entry_id' => $payrollRun->payment_journal_entry_id,
             ],
             'ip_address' => request()->ip()
         ]);
@@ -232,6 +283,24 @@ class PayrollRunController extends Controller
      */
     public function rollback(PayrollRun $payrollRun): JsonResponse
     {
+        if ($payrollRun->status === 'paid') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Paid payroll cannot be rolled back. Record a controlled adjustment or financial reversal instead.',
+            ], 422);
+        }
+
+        if ($payrollRun->status !== 'locked') {
+            return response()->json(['success' => false, 'message' => 'Only a locked unpaid run can be returned to draft.'], 422);
+        }
+
+        if ($payrollRun->accrual_journal_entry_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This payroll is posted to finance and cannot return to draft. Post a controlled reversal instead.',
+            ], 422);
+        }
+
         $payrollRun->update(['status' => 'draft']);
         
         // Also reset payslip statuses

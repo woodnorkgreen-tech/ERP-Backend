@@ -4,6 +4,7 @@ namespace App\Modules\Finance\PettyCash\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PettyCashDisbursementAllocation extends Model
 {
@@ -24,4 +25,14 @@ class PettyCashDisbursementAllocation extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    public function disbursement(): BelongsTo
+    {
+        return $this->belongsTo(PettyCashDisbursement::class, 'disbursement_id');
+    }
+
+    public function topUp(): BelongsTo
+    {
+        return $this->belongsTo(PettyCashTopUp::class, 'top_up_id');
+    }
 }

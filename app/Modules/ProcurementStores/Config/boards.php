@@ -32,6 +32,7 @@ return [
         'Allocated',    // Allocated to a job
         'At Station',   // At processing station
         'WIP',          // Work in progress
+        'Return Initiated', // Project released custody; board is travelling to Stores
         'Consumed',     // Finished processing
         'Scrapped',     // Discarded/waste
     ],
@@ -44,9 +45,10 @@ return [
         'Quarantine' => ['Available', 'Scrapped'],
         'Available'  => ['Allocated', 'Scrapped'],
         // Quarantine added as return destination — Grade C/D boards go back for supervisor review
-        'Allocated'  => ['At Station', 'Available', 'Quarantine', 'Scrapped'],
-        'At Station' => ['WIP', 'Available', 'Quarantine', 'Scrapped'],
-        'WIP'        => ['Consumed', 'Available', 'Quarantine', 'Scrapped'],
+        'Allocated'  => ['At Station', 'Return Initiated', 'Available', 'Quarantine', 'Scrapped'],
+        'At Station' => ['WIP', 'Return Initiated', 'Available', 'Quarantine', 'Scrapped'],
+        'WIP'        => ['Consumed', 'Return Initiated', 'Available', 'Quarantine', 'Scrapped'],
+        'Return Initiated' => ['Available', 'Quarantine'],
         'Consumed'   => [],  // Terminal state
         'Scrapped'   => [],  // Terminal state
     ],

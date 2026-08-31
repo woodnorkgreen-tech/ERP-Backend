@@ -131,10 +131,16 @@
   - *Accept:* import of N rows does not block a concurrent `/balance` read for the full duration
     (staging load test); partial-failure semantics documented.
   - *Dep:* BE-9.
-- [ ] **BE-17 · Fix `getProjectBudgetsSummary` double full-table scan (M3)** *(S)* — Compute overall
-  totals with an aggregate query instead of re-fetching all approved enquiries + relations per page.
-  - *Accept:* one aggregate query for stats; paginated page unchanged in output.
-  - *Dep:* none.
+- [x] **BE-17 · ~~Fix `getProjectBudgetsSummary` double full-table scan (M3)~~ — CLOSED BY DELETION**
+  (2026-08). The method is gone, along with its route, its controller action, the unread
+  `budget_snapshot` in `workspace()`, and the frontend service call. Nothing consumed it: the
+  standalone endpoint had no caller, and the snapshot was computed on every dashboard refresh and
+  discarded.
+  - It was also *wrong*, not merely slow: it split spend four ways by `budget_category`, a column
+    null on every disbursement, so three of its four figures were always zero and the fourth
+    absorbed everything.
+  - Replaced by `GET /api/costs/accounts` (`CostAccountService::index`), which aggregates in SQL
+    and paginates on the aggregate, reading real figures from the cost ledger.
 
 ---
 

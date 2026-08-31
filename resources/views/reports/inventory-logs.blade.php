@@ -139,6 +139,11 @@
                 <td class="text-center font-bold {{ $log->quantity > 0 ? 'text-emerald-600' : 'text-rose-600' }}">
                     {{ $log->quantity > 0 ? '+' : '' }}{{ $log->quantity }}
                     <span style="font-size: 7px; color: #6b7280; margin-left: 2px;">{{ $log->material->unit_of_measure ?? '' }}</span>
+                    @if($log->enteredUom && (float) $log->uom_conversion_factor !== 1.0)
+                        <div style="font-size: 6px; color: #6b7280; font-weight: normal; margin-top: 2px;">
+                            Entered as {{ $log->entered_quantity > 0 ? '+' : '' }}{{ $log->entered_quantity }} {{ $log->enteredUom->code }}
+                        </div>
+                    @endif
                 </td>
                 <td class="text-gray-600">{{ ($log->logged_at ?: $log->created_at)->format('d M Y, H:i') }}</td>
                 <td class="text-right">

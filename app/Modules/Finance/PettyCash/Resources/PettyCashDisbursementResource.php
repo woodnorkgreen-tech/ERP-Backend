@@ -22,6 +22,7 @@ class PettyCashDisbursementResource extends JsonResource
             'top_up_id' => $this->top_up_id,
             'receiver' => $this->receiver,
             'account' => $this->account,
+            'expense_code_id' => $this->expense_code_id,
             'amount' => [
                 'raw' => (float) $this->amount,
                 'formatted' => 'KES ' . number_format($this->amount, 2),
@@ -35,10 +36,18 @@ class PettyCashDisbursementResource extends JsonResource
                 'label' => $this->getClassificationLabel(),
             ],
             'job_number' => $this->job_number,
+            'planned_cost_line_id' => $this->planned_cost_line_id,
+            'budget_category' => $this->budget_category,
             'payment_method' => [
                 'value' => $this->payment_method,
                 'label' => $this->getPaymentMethodLabel(),
             ],
+            'payment_source_id' => $this->payment_source_id,
+            'receipt_type' => $this->receipt_type,
+            'receipt_number' => $this->receipt_number,
+            'tax_amount' => $this->tax_amount,
+            'transaction_cost' => $this->transaction_cost,
+            'direct_payment_reason' => $this->direct_payment_reason,
             'transaction_code' => $this->when(
                 $this->shouldShowTransactionCode($user),
                 $this->transaction_code

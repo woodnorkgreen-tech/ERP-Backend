@@ -178,116 +178,135 @@ class UniversalTaskSeeder extends Seeder
 
             $creator = $users->random();
 
-            // Create main task
-            $task = Task::create([
-                'title' => $taskData['title'],
-                'description' => $taskData['description'],
-                'status' => $taskData['status'],
-                'priority' => $taskData['priority'],
-                'task_type' => 'general',
-                'department_id' => $department->id,
-                'assigned_user_id' => $assignee->id,
-                'created_by' => $creator->id,
-                'estimated_hours' => $taskData['estimated_hours'],
-                'due_date' => $taskData['due_date'],
-                'tags' => $taskData['tags'],
-                'blocked_reason' => $taskData['blocked_reason'] ?? null,
-                'started_at' => in_array($taskData['status'], ['in_progress', 'review', 'completed'])
-                    ? Carbon::now()->subDays(rand(1, 7))
-                    : null,
-                'completed_at' => $taskData['status'] === 'completed'
-                    ? Carbon::now()->subDays(rand(1, 3))
-                    : null,
-            ]);
+            // Create or update main task
+            $task = Task::updateOrCreate(
+                [
+                    'title' => $taskData['title'],
+                    'department_id' => $department->id
+                ],
+                [
+                    'description' => $taskData['description'],
+                    'status' => $taskData['status'],
+                    'priority' => $taskData['priority'],
+                    'task_type' => 'general',
+                    'assigned_user_id' => $assignee->id,
+                    'created_by' => $creator->id,
+                    'estimated_hours' => $taskData['estimated_hours'],
+                    'due_date' => $taskData['due_date'],
+                    'tags' => $taskData['tags'],
+                    'blocked_reason' => $taskData['blocked_reason'] ?? null,
+                    'started_at' => in_array($taskData['status'], ['in_progress', 'review', 'completed'])
+                        ? Carbon::now()->subDays(rand(1, 7))
+                        : null,
+                    'completed_at' => $taskData['status'] === 'completed'
+                        ? Carbon::now()->subDays(rand(1, 3))
+                        : null,
+                ]
+            );
 
-            // Create task assignment record
-            TaskAssignment::create([
-                'task_id' => $task->id,
-                'user_id' => $assignee->id,
-                'assigned_by' => $creator->id,
-                'assigned_at' => now(),
-                'role' => 'assignee',
-                'is_primary' => true,
-            ]);
+            // Create or update task assignment record
+            TaskAssignment::updateOrCreate(
+                [
+                    'task_id' => $task->id,
+                    'user_id' => $assignee->id,
+                ],
+                [
+                    'assigned_by' => $creator->id,
+                    'assigned_at' => now(),
+                    'role' => 'assignee',
+                    'is_primary' => true,
+                ]
+            );
 
             $createdTasks[] = $task;
 
             // Create subtasks if defined
             if (isset($taskData['subtasks'])) {
                 foreach ($taskData['subtasks'] as $index => $subtaskData) {
-                    $subtask = Task::create([
-                        'title' => $subtaskData['title'],
-                        'description' => '',
-                        'status' => $subtaskData['status'],
-                        'priority' => 'medium',
-                        'task_type' => 'subtask',
-                        'parent_task_id' => $task->id,
-                        'department_id' => $department->id,
-                        'assigned_user_id' => $assignee->id,
-                        'created_by' => $creator->id,
-                        'estimated_hours' => $subtaskData['estimated_hours'],
-                        'due_date' => $taskData['due_date'],
-                        'started_at' => $subtaskData['status'] === 'completed'
-                            ? Carbon::now()->subDays(rand(1, 5))
-                            : null,
-                        'completed_at' => $subtaskData['status'] === 'completed'
-                            ? Carbon::now()->subDays(rand(1, 3))
-                            : null,
-                    ]);
+                    $subtask = Task::updateOrCreate(
+                        [
+                            'title' => $subtaskData['title'],
+                            'parent_task_id' => $task->id,
+                        ],
+                        [
+                            'description' => '',
+                            'status' => $subtaskData['status'],
+                            'priority' => 'medium',
+                            'task_type' => 'subtask',
+                            'department_id' => $department->id,
+                            'assigned_user_id' => $assignee->id,
+                            'created_by' => $creator->id,
+                            'estimated_hours' => $subtaskData['estimated_hours'],
+                            'due_date' => $taskData['due_date'],
+                            'started_at' => $subtaskData['status'] === 'completed'
+                                ? Carbon::now()->subDays(rand(1, 5))
+                                : null,
+                            'completed_at' => $subtaskData['status'] === 'completed'
+                                ? Carbon::now()->subDays(rand(1, 3))
+                                : null,
+                        ]
+                    );
 
-                    TaskAssignment::create([
-                        'task_id' => $subtask->id,
-                        'user_id' => $assignee->id,
-                        'assigned_by' => $creator->id,
-                        'assigned_at' => now(),
-                        'role' => 'assignee',
-                        'is_primary' => true,
-                    ]);
+                    TaskAssignment::updateOrCreate(
+                        [
+                            'task_id' => $subtask->id,
+                            'user_id' => $assignee->id,
+                        ],
+                        [
+                            'assigned_by' => $creator->id,
+                            'assigned_at' => now(),
+                            'role' => 'assignee',
+                            'is_primary' => true,
+                        ]
+                    );
                 }
             }
 
-            // Add some comments to tasks
-            if (rand(1, 3) > 1) { // 66% chance of having comments
-                $commentUsers = $users->random(min(3, $users->count()));
-                foreach ($commentUsers as $commentUser) {
-                    TaskComment::create([
+            // Add comments, issues, and experience logs if the task was recently created
+            if ($task->wasRecentlyCreated) {
+                // Add some comments to tasks
+                if (rand(1, 3) > 1) { // 66% chance of having comments
+                    $commentUsers = $users->random(min(3, $users->count()));
+                    foreach ($commentUsers as $commentUser) {
+                        TaskComment::create([
+                            'task_id' => $task->id,
+                            'user_id' => $commentUser->id,
+                            'content' => $this->getRandomComment(),
+                        ]);
+                    }
+                }
+
+                // Add some issues to tasks (especially blocked/overdue ones)
+                if (in_array($taskData['status'], ['blocked', 'overdue']) || rand(1, 4) === 1) {
+                    TaskIssue::create([
                         'task_id' => $task->id,
-                        'user_id' => $commentUser->id,
-                        'content' => $this->getRandomComment(),
+                        'title' => $this->getRandomIssueTitle(),
+                        'description' => $this->getRandomIssueDescription(),
+                        'issue_type' => ['blocker', 'technical', 'resource', 'dependency', 'general'][rand(0, 4)],
+                        'severity' => ['low', 'medium', 'high', 'critical'][rand(0, 3)],
+                        'status' => ['open', 'in_progress', 'resolved'][rand(0, 2)],
+                        'reported_by' => $assignee->id,
+                        'assigned_to' => rand(0, 1) ? $users->random()->id : null,
+                        'reported_at' => Carbon::now()->subDays(rand(1, 7)),
                     ]);
                 }
-            }
 
-            // Add some issues to tasks (especially blocked/overdue ones)
-            if (in_array($taskData['status'], ['blocked', 'overdue']) || rand(1, 4) === 1) {
-                TaskIssue::create([
-                    'task_id' => $task->id,
-                    'title' => $this->getRandomIssueTitle(),
-                    'description' => $this->getRandomIssueDescription(),
-                    'issue_type' => ['blocker', 'technical', 'resource', 'dependency', 'general'][rand(0, 4)],
-                    'severity' => ['low', 'medium', 'high', 'critical'][rand(0, 3)],
-                    'status' => ['open', 'in_progress', 'resolved'][rand(0, 2)],
-                    'reported_by' => $assignee->id,
-                    'assigned_to' => rand(0, 1) ? $users->random()->id : null,
-                    'reported_at' => Carbon::now()->subDays(rand(1, 7)),
-                ]);
-            }
-
-            // Add experience logs to completed tasks
-            if ($taskData['status'] === 'completed' && rand(1, 2) === 1) {
-                TaskExperienceLog::create([
-                    'task_id' => $task->id,
-                    'user_id' => $assignee->id,
-                    'title' => 'Task Completion Notes',
-                    'content' => $this->getRandomExperienceLog(),
-                    'log_type' => 'completion_notes',
-                    'is_public' => rand(0, 1),
-                    'logged_at' => Carbon::now()->subDays(rand(1, 3)),
-                ]);
+                // Add experience logs to completed tasks
+                if ($taskData['status'] === 'completed' && rand(1, 2) === 1) {
+                    TaskExperienceLog::create([
+                        'task_id' => $task->id,
+                        'user_id' => $assignee->id,
+                        'title' => 'Task Completion Notes',
+                        'content' => $this->getRandomExperienceLog(),
+                        'log_type' => 'completion_notes',
+                        'is_public' => rand(0, 1),
+                        'logged_at' => Carbon::now()->subDays(rand(1, 3)),
+                    ]);
+                }
             }
         }
 
-        // Create some task dependencies
+        // Create some task dependencies for recently created tasks
         if (count($createdTasks) >= 3) {
             $dependencyPairs = [
                 [0, 1], // First task blocks second
@@ -297,11 +316,14 @@ class UniversalTaskSeeder extends Seeder
 
             foreach ($dependencyPairs as $pair) {
                 if (isset($createdTasks[$pair[0]]) && isset($createdTasks[$pair[1]])) {
-                    TaskDependency::create([
-                        'task_id' => $createdTasks[$pair[1]]->id,
-                        'depends_on_task_id' => $createdTasks[$pair[0]]->id,
-                        'dependency_type' => 'blocks',
-                    ]);
+                    if ($createdTasks[$pair[1]]->wasRecentlyCreated) {
+                        TaskDependency::updateOrCreate([
+                            'task_id' => $createdTasks[$pair[1]]->id,
+                            'depends_on_task_id' => $createdTasks[$pair[0]]->id,
+                        ], [
+                            'dependency_type' => 'blocks',
+                        ]);
+                    }
                 }
             }
         }

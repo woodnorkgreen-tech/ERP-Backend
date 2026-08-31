@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Events\BudgetLinesChanged;
+
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Models\TaskBudgetData;
 use App\Models\TaskMaterialsData;
@@ -11,11 +13,43 @@ use Illuminate\Support\Facades\DB;
 class BudgetService
 {
     /**
+     * Provenance stamp written into `materials_import_metadata.source` by the
+     * one importer that exists. Procurement gates on this value.
+     */
+    public const IMPORT_SOURCE_APPROVED_MATERIALS = 'approved_materials_list';
+
+    /**
      * Get budget data for a task
+     */
+    /**
+     * The budget, pulling the approved materials list if it has never had one.
+     *
+     * This closes the second half of the drift problem. Approval pushes into an
+     * existing budget, but on plenty of projects the materials list is approved
+     * before the budget task is ever opened — there was nothing to push into, so
+     * the budget opened empty and somebody had to know to press Sync. Pulling on
+     * first read means a budget is never empty because of ordering.
+     *
+     * Only ever on the FIRST read (`materials_imported_at` is null). After that
+     * the push owns it; pulling again here would silently overwrite whatever the
+     * costing team is part-way through entering.
      */
     public function getBudgetData(int $taskId): ?TaskBudgetData
     {
-        return TaskBudgetData::where('enquiry_task_id', $taskId)->first();
+        $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
+
+        if ($budgetData && $budgetData->materials_imported_at) {
+            return $budgetData;
+        }
+
+        try {
+            return $this->syncFromMaterialsList($taskId)['budget'];
+        } catch (\Throwable $e) {
+            // No materials task, nothing approved yet, no source data — all
+            // ordinary states for a project this early. The budget is returned as
+            // it stands rather than failing a read over it.
+            return $budgetData;
+        }
     }
 
     /**
@@ -43,10 +77,11 @@ class BudgetService
             return $budgetData;
         });
 
-        // Procurement is a downstream consumer, not part of the budget write —
-        // run it after the commit so a procurement problem can never roll back
+        // Procurement and the cost account are downstream consumers, not part of
+        // the budget write — both run after the commit so neither can roll back
         // a saved budget.
         $this->syncProcurementWithBudget($taskId);
+        BudgetLinesChanged::dispatch($taskId);
 
         return $budgetData;
     }
@@ -82,35 +117,54 @@ class BudgetService
     }
 
     /**
-     * Import materials from original Enquiry Task
+     * Bring the budget's material list back in line with the approved one.
+     *
+     * There used to be two implementations of this reconciliation — one here,
+     * driven by a Sync button, and one in `MaterialsController`, driven by
+     * approval — matching rows by six different identity schemes between them.
+     * Two reconcilers over one fact is how the copies came to disagree in the
+     * first place, and a button asking a human to notice the disagreement is not
+     * a fix for it. This is now the only one, and the system calls it rather than
+     * a person pressing it.
+     *
+     * The budget owns exactly one thing the materials list does not: the internal
+     * rate. That is what survives a sync, keyed on `persistent_id` — a stable
+     * identity, not a description that changes the moment somebody fixes a typo.
+     * Everything else (what, how much, whether it is included) belongs to the
+     * approved materials list and is taken from it wholesale, which is what makes
+     * "out of sync" a state this system can no longer be in.
+     *
+     * @return array{budget: TaskBudgetData, reopened: bool, message: string}
      */
-    public function importMaterials(int $taskId, bool $force = false): array
+    public function syncFromMaterialsList(int $budgetTaskId): array
     {
-        $task = EnquiryTask::with('enquiry.client')->findOrFail($taskId);
-        
-        // Find the materials task for this project
+        $task = EnquiryTask::with('enquiry.client')->findOrFail($budgetTaskId);
+
         $materialsTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
             ->where('type', 'materials')
             ->first();
 
-        if (!$materialsTask) {
+        if (! $materialsTask) {
             throw new \Exception('No materials task found for this project enquiry');
         }
 
         $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)
-            ->with(['elements.materials'])
+            ->with(['elements.materials.libraryMaterial'])
             ->first();
 
-        if (!$materialsData) {
+        if (! $materialsData) {
             throw new \Exception('Source materials data not found');
         }
 
-        $this->ensureMaterialsApproved($materialsData);
+        // Materials flow into the budget as they are added. Departmental sign-off
+        // is recorded on the materials task for audit, but blocking the import on
+        // it meant a single new line stalled the whole budget until two people
+        // re-approved a list they had already approved.
+        $budgetData = TaskBudgetData::where('enquiry_task_id', $budgetTaskId)->first();
 
-        // A manual Sync deliberately rewrites the budget's numbers, but if the
-        // task was already marked complete that rewrite must not happen
-        // silently under a "done" status — reopen it so it's visibly back
-        // under review.
+        // The approved figures are about to change under anyone relying on a
+        // "complete" badge — Finance gates, procurement — so reopen it rather than
+        // letting the status assert a sign-off of numbers nobody has seen.
         $wasCompleted = $task->status === 'completed';
         if ($wasCompleted) {
             $task->update(['status' => 'in_progress', 'completed_at' => null]);
@@ -119,189 +173,63 @@ class BudgetService
                 'to' => 'in_progress',
                 'actor_type' => auth()->id() ? 'user' : 'system',
                 'actor_id' => auth()->id(),
-                'reason' => 'Reopened: materials list was manually re-synced into an already-completed budget.',
+                'reason' => 'The approved materials list changed, so this budget was reopened and re-synced. Review the updated totals.',
             ]);
         }
 
-        $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-        
-        // If already imported and not forced, we might want to merge or skip
-        // For simplicity now, we overwrite but preserve existing price if it matches
-        $existingMaterials = $budgetData ? ($budgetData->materials_data ?? []) : [];
-        $newMaterials = $this->transformMaterialsToBudget($materialsData);
+        $materials = $this->transformMaterialsToBudget($materialsData);
+        $this->applyExistingBudgetPrices($budgetData->materials_data ?? [], $materials);
 
-        // Preserve pricing logic (only if not forced). Stable material identity wins;
-        // description is only a legacy fallback for older imported rows.
-        if (!$force) {
-            $pricedMap = [];
-            foreach ($existingMaterials as $elem) {
-                foreach ($elem['materials'] ?? [] as $mat) {
-                    if (($mat['unitPrice'] ?? 0) > 0) {
-                        $key = $this->budgetMaterialKey($elem, $mat);
-                        $pricedMap[$key] = [
-                            'unitPrice' => (float) $mat['unitPrice'],
-                            'library_material_id' => $mat['library_material_id'] ?? null,
-                            'quantity' => (float) ($mat['quantity'] ?? 0),
-                        ];
-                    }
-                }
-            }
-
-            foreach ($newMaterials as &$newElem) {
-                foreach ($newElem['materials'] as &$newMat) {
-                    $key = $this->budgetMaterialKey($newElem, $newMat);
-                    $legacyKey = $this->legacyBudgetMaterialKey($newElem, $newMat);
-                    $match = $pricedMap[$key] ?? $pricedMap[$legacyKey] ?? null;
-
-                    if ($match) {
-                        $newMat['unitPrice'] = $match['unitPrice'];
-                        $newMat['totalPrice'] = $newMat['quantity'] * $newMat['unitPrice'];
-                        $newMat['_priceStatus'] = 'preserved';
-
-                        if ((float) ($match['quantity'] ?? 0) !== (float) ($newMat['quantity'] ?? 0)) {
-                            $newMat['_quantityChanged'] = true;
-                            $newMat['_oldQuantity'] = $match['quantity'];
-                        }
-
-                        if (empty($newMat['library_material_id']) && !empty($match['library_material_id'])) {
-                            $newMat['library_material_id'] = $match['library_material_id'];
-                        }
-                    }
-                }
-            }
-        }
-
-        // Initialize project info if first time
         $projectInfo = $budgetData->project_info ?? [
             'projectId' => $task->enquiry->job_number ?? $task->enquiry->enquiry_number ?? '',
             'enquiryTitle' => $task->enquiry->title ?? '',
             'clientName' => $task->enquiry->client->full_name ?? '',
             'eventVenue' => $task->enquiry->venue ?? '',
-            'setupDate' => $task->enquiry->expected_delivery_date ?? ''
+            'setupDate' => $task->enquiry->expected_delivery_date ?? '',
         ];
 
-        // Recalculate summary with the new materials
         $summary = $this->calculateSummary([
-            'materials' => $newMaterials,
+            'materials' => $materials,
             'labour' => $budgetData->labour_data ?? [],
             'expenses' => $budgetData->expenses_data ?? [],
-            'logistics' => $budgetData->logistics_data ?? []
+            'logistics' => $budgetData->logistics_data ?? [],
         ]);
 
-        $metadata = $this->buildMaterialsImportMetadata($materialsTask, $materialsData, $newMaterials);
+        $budgetData = DB::transaction(fn () => TaskBudgetData::updateOrCreate(
+            ['enquiry_task_id' => $budgetTaskId],
+            [
+                'project_info' => $projectInfo,
+                'materials_data' => $materials,
+                'budget_summary' => $summary,
+                'materials_imported_at' => now(),
+                'last_import_date' => now(),
+                'materials_imported_from_task' => $materialsTask->id,
+                // Stamp where these rows came from. Downstream consumers
+                // (procurement's readiness gate, the budget UI's import banner)
+                // read this to tell an approved-list budget from an ad-hoc one,
+                // and it went unwritten for long enough that every reader had
+                // learned to treat "absent" as "unknown" rather than "bad".
+                'materials_import_metadata' => [
+                    'source' => self::IMPORT_SOURCE_APPROVED_MATERIALS,
+                    'materials_task_id' => $materialsTask->id,
+                    'imported_at' => now()->toISOString(),
+                    'element_count' => count($materials),
+                ],
+            ],
+        ));
 
-        $budgetData = DB::transaction(function () use ($taskId, $projectInfo, $newMaterials, $summary, $materialsTask, $metadata) {
-            return TaskBudgetData::updateOrCreate(
-                ['enquiry_task_id' => $taskId],
-                [
-                    'project_info' => $projectInfo,
-                    'materials_data' => $newMaterials,
-                    'budget_summary' => $summary,
-                    'materials_imported_at' => now(),
-                    'last_import_date' => now(),
-                    'materials_imported_from_task' => $materialsTask->id,
-                    'materials_import_metadata' => $metadata
-                ]
-            );
-        });
-
-        // A materials import rewrites exactly the budget rows procurement
-        // mirrors, so push the result straight through.
-        $this->syncProcurementWithBudget($taskId);
+        // A sync rewrites exactly the rows procurement mirrors, so push it through
+        // rather than leaving a third copy stale. The cost account's planned
+        // lines are the fourth copy and were the one nobody refreshed.
+        $this->syncProcurementWithBudget($budgetTaskId);
+        BudgetLinesChanged::dispatch($budgetTaskId);
 
         return [
             'budget' => $budgetData,
-            'message' => $wasCompleted
-                ? 'Approved materials list imported into internal budget. This budget was reopened for review.'
-                : 'Approved materials list imported into internal budget',
             'reopened' => $wasCompleted,
-        ];
-    }
-
-    /**
-     * Check if materials task has updates compared to what was imported
-     */
-    public function checkMaterialsUpdate(int $taskId): array
-    {
-        $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-        if (!$budgetData || !$budgetData->materials_imported_at) {
-            return ['has_updates' => false, 'hasUpdate' => false, 'message' => 'Ready for initial import'];
-        }
-
-        $task = EnquiryTask::find($taskId);
-        $materialsTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
-            ->where('type', 'materials')
-            ->first();
-
-        if (!$materialsTask) return ['has_updates' => false, 'hasUpdate' => false, 'message' => 'Source not found'];
-
-        $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->first();
-        if (!$materialsData) return ['has_updates' => false, 'hasUpdate' => false, 'message' => 'Approved materials data not found'];
-
-        $lastUpdate = $materialsData->updated_at;
-        $importDate = $budgetData->materials_imported_at;
-
-        $hasUpdates = $lastUpdate->isAfter($importDate);
-
-        // Always provide analysis so frontend can calculate baseline totals
-        $analysis = $this->getSyncAnalysis($taskId);
-
-        return [
-            'has_updates' => $hasUpdates,
-            'hasUpdate' => $hasUpdates,
-            'last_import_at' => $importDate->toDateTimeString(),
-            'materials_updated_at' => $lastUpdate->toDateTimeString(),
-            'materials_task_title' => $materialsTask->title,
-            'materials_import_metadata' => $budgetData->materials_import_metadata,
-            'analysis' => $analysis,
-            'message' => $hasUpdates ? 'Approved materials list has been updated' : 'Budget is in sync with approved materials'
-        ];
-    }
-
-    /**
-     * Get detailed comparison between current approved materials task and budget
-     */
-    public function getSyncAnalysis(int $taskId): array
-    {
-        $task = EnquiryTask::findOrFail($taskId);
-        $materialsTask = EnquiryTask::where('project_enquiry_id', $task->project_enquiry_id)
-            ->where('type', 'materials')
-            ->first();
-        
-        if (!$materialsTask) {
-            return ['hasUpdate' => false, 'message' => 'No materials task found'];
-        }
-
-        $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->with('elements.materials')->first();
-        $budgetData = TaskBudgetData::where('enquiry_task_id', $taskId)->first();
-
-        if (!$materialsData || !$budgetData) {
-            return ['hasUpdate' => false, 'message' => 'Missing data for comparison'];
-        }
-
-        try {
-            $this->ensureMaterialsApproved($materialsData);
-        } catch (\Exception $e) {
-            return ['hasUpdate' => false, 'message' => $e->getMessage()];
-        }
-
-        $incomingMaterials = $this->transformMaterialsToBudget($materialsData);
-        $existingMaterials = $budgetData->materials_data ?? [];
-        $this->applyExistingBudgetPrices($existingMaterials, $incomingMaterials);
-
-        $analysisData = $this->analyzeMaterialVariances($existingMaterials, $incomingMaterials);
-
-        return [
-            'hasUpdate' => !empty($analysisData['variances']),
-            'summary' => [
-                'added' => count(array_filter($analysisData['variances'], fn($v) => !empty($v['isNew']))),
-                'updated' => count(array_filter($analysisData['variances'], fn($v) => empty($v['isNew']) && empty($v['isRemoved']))),
-                'removed' => count(array_filter($analysisData['variances'], fn($v) => !empty($v['isRemoved']))),
-                'no_change' => 0
-            ],
-            'details' => $analysisData['variances'],
-            'analysis_raw_materials' => $incomingMaterials,
-            'obsolete_persistent_ids' => array_map(fn($v) => $v['comparisonKey'], array_filter($analysisData['variances'], fn($v) => !empty($v['isRemoved'])))
+            'message' => $wasCompleted
+                ? 'Budget re-synced with the approved materials list, and reopened for review.'
+                : 'Budget is in line with the approved materials list.',
         ];
     }
 
@@ -418,101 +346,44 @@ class BudgetService
         return $existingBudgetData?->status ?? 'draft';
     }
 
-    private function ensureMaterialsApproved(TaskMaterialsData $materialsData): void
-    {
-        $approvalStatus = $materialsData->project_info['approval_status'] ?? null;
-        if (!empty($approvalStatus['all_approved'])) {
-            return;
-        }
-
-        $missingApprovals = [];
-        if (empty($approvalStatus['project_officer']['approved'])) {
-            $missingApprovals[] = 'Project Officer';
-        }
-        if (empty($approvalStatus['production']['approved'])) {
-            $missingApprovals[] = 'Production';
-        }
-
-        if (count($missingApprovals) === 2) {
-            throw new \Exception('Cannot import materials to budget: BOTH Project Officer AND Production approvals are required. Currently missing both approvals.');
-        }
-
-        if (!empty($missingApprovals)) {
-            throw new \Exception('Cannot import materials to budget: Missing approval from ' . $missingApprovals[0] . '. BOTH Project Officer AND Production approvals are mandatory.');
-        }
-
-        throw new \Exception('Cannot import materials to budget: Materials must be approved by BOTH Project Officer AND Production departments.');
-    }
-
-    private function buildMaterialsImportMetadata(EnquiryTask $materialsTask, TaskMaterialsData $materialsData, array $newMaterials): array
-    {
-        $latestVersion = $materialsData->versions()->orderByDesc('version_number')->first();
-        $projectInfo = $materialsData->project_info ?? [];
-
-        return [
-            'source' => 'approved_materials_list',
-            'imported_at' => now()->toISOString(),
-            'materials_task_id' => $materialsTask->id,
-            'materials_task_title' => $materialsTask->title,
-            'materials_data_id' => $materialsData->id,
-            'materials_updated_at' => optional($materialsData->updated_at)->toISOString(),
-            'materials_version_id' => $latestVersion?->id,
-            'materials_version_number' => $latestVersion?->version_number,
-            'materials_version_label' => $latestVersion?->label,
-            'quote_imported_from' => $projectInfo['quoteImportedFrom'] ?? null,
-            'total_elements' => count($newMaterials),
-            'total_materials' => array_sum(array_map(fn($element) => count($element['materials'] ?? []), $newMaterials)),
-        ];
-    }
-
-    private function budgetMaterialKey(array $element, array $material): string
-    {
-        if (!empty($material['persistent_id'])) {
-            return 'material:' . $material['persistent_id'];
-        }
-
-        return $this->legacyBudgetMaterialKey($element, $material);
-    }
-
-    private function legacyBudgetMaterialKey(array $element, array $material): string
-    {
-        $elementName = strtolower(preg_replace('/\s+/', '', (string) ($element['name'] ?? '')));
-        $materialDescription = strtolower(preg_replace('/\s+/', '', (string) ($material['description'] ?? '')));
-
-        return "legacy_{$elementName}_{$materialDescription}";
-    }
-
+    /**
+     * Carry the budget's own rates across a sync.
+     *
+     * Keyed on `persistent_id` alone. There used to be a fallback that matched on
+     * element name plus material description, from when identity was unstable —
+     * but a description key silently moves a rate onto a different material as
+     * soon as someone fixes a typo, and a wrong rate that looks deliberate is
+     * worse than a blank one somebody has to fill in.
+     *
+     * @param  array<int, mixed>  $existingMaterials
+     * @param  array<int, mixed>  $incomingMaterials
+     */
     private function applyExistingBudgetPrices(array $existingMaterials, array &$incomingMaterials): void
     {
-        $pricingMap = [];
+        $rates = [];
 
         foreach ($existingMaterials as $element) {
             foreach ($element['materials'] ?? [] as $material) {
-                $key = $this->budgetMaterialKey($element, $material);
-                $pricingMap[$key] = [
-                    'unitPrice' => (float) ($material['unitPrice'] ?? 0),
-                    'quantity' => (float) ($material['quantity'] ?? 0),
-                ];
+                if (! empty($material['persistent_id'])) {
+                    $rates[(string) $material['persistent_id']] = (float) ($material['unitPrice'] ?? 0);
+                }
             }
         }
 
         foreach ($incomingMaterials as &$element) {
             foreach ($element['materials'] as &$material) {
-                $key = $this->budgetMaterialKey($element, $material);
-                $legacyKey = $this->legacyBudgetMaterialKey($element, $material);
-                $match = $pricingMap[$key] ?? $pricingMap[$legacyKey] ?? null;
+                $rate = $rates[(string) ($material['persistent_id'] ?? '')] ?? null;
 
-                if (!$match) {
+                if ($rate === null || $rate <= 0) {
                     continue;
                 }
 
-                $material['unitPrice'] = $match['unitPrice'];
-                $material['totalPrice'] = (float) ($material['quantity'] ?? 0) * $material['unitPrice'];
-
-                if ((float) ($match['quantity'] ?? 0) !== (float) ($material['quantity'] ?? 0)) {
-                    $material['_quantityChanged'] = true;
-                    $material['_oldQuantity'] = $match['quantity'];
-                }
+                // Quantity always comes from the approved list; only the rate is
+                // the budget's to keep. So the total is recomputed rather than
+                // carried, and there is no "quantity changed" flag to raise —
+                // the two lists cannot disagree about quantity any more.
+                $material['unitPrice'] = $rate;
+                $material['totalPrice'] = (float) ($material['quantity'] ?? 0) * $rate;
             }
         }
     }
@@ -530,6 +401,15 @@ class BudgetService
             foreach ($element->materials as $material) {
                 if (!$material->is_included) continue;
                 
+                // Seeded from the material's own cost, falling back to the
+                // library's. Starting every row at zero would make a sync look
+                // like it had wiped the budget, and would hand the costing team a
+                // blank sheet when the library already knows what these things
+                // cost. Their own entered rate still wins — that is applied over
+                // the top by applyExistingBudgetPrices().
+                $seedRate = (float) ($material->unit_cost
+                    ?: ($material->libraryMaterial->unit_cost ?? 0));
+
                 $budgetMaterials[] = [
                     'id' => $material->persistent_id ?: uniqid('mat_'),
                     'persistent_id' => $material->persistent_id,
@@ -537,11 +417,10 @@ class BudgetService
                     'description' => $material->description,
                     'unitOfMeasurement' => $material->unit_of_measurement,
                     'quantity' => $material->quantity,
-                    'unitPrice' => 0,
-                    'totalPrice' => 0,
+                    'unitPrice' => $seedRate,
+                    'totalPrice' => $seedRate * (float) $material->quantity,
                     'category' => $element->category,
                     'is_included' => true,
-                    '_priceStatus' => 'missing'
                 ];
             }
 

@@ -105,11 +105,58 @@ Frontend UX is workable for the happy path but has two workflow-breaking gaps fo
 
 ## 5. Priority Order
 
-1. **BE1, BE2** — fix the two unguarded top-up endpoints (delete-with-no-reversal, edit-with-no-auth). Live money-movement bugs, not refactor nice-to-haves.
-2. **BE3** — wire the existing, unused `FormRequest` classes into the controllers. Near-zero risk, closes several validation gaps at once.
-3. **FE1, FE2** — fix the error-transform mismatch and surface Void in the main transaction table.
-4. **X4** — add `GovernanceAuditLog`/notification calls to `BudgetAdditionService`.
-5. **FE3** — collapse the 5 duplicated payment-method label maps into one source (paired with BE7/FE4 permission-key cleanup if touching auth code at the same time).
+> **Status as at 2026-08-09.** Closed items are struck through with how they were closed. Several
+> were closed by *deletion* rather than repair — the surface they lived on no longer exists, which is
+> a better outcome than a fixed version of something nobody should use.
+
+1. ~~**BE1, BE2** — the two unguarded top-up endpoints.~~ **DONE.** `destroy()` now posts a
+   reversing ledger entry (`LedgerEntry::reversalForTopUp`) inside one transaction before removing
+   the row, so the cached balance can no longer be left overstated; both endpoints require an
+   explicit permission (`delete_top_up`, and a new `edit_top_up` that had no counterpart, which is
+   part of why that endpoint ended up with no check at all). Pinned by `TopUpIntegrityTest`, whose
+   central assertion is that the cached balance still equals the ledger it summarises.
+2. ~~**BE3** — wire the unused `FormRequest` classes.~~ **DONE for top-up creation**, and the reason
+   they were never wired turned out to matter: `CreateTopUpRequest` restricted `payment_method` to
+   `cash|mpesa|bank_transfer|other`, a list written before the bank options existed. Wiring it as
+   found would have rejected equity, stanbic, ncba, kcb and family — all valid in the column enum.
+   It now reads `PaymentMethods::values()`.
+   - Also had to declare `date_topped_up`: the request uses `validated()`, which drops anything the
+     rules do not name, so the field the form has always sent would have been silently discarded.
+   - `CreateDisbursementRequest` / `UpdateDisbursementRequest` are **still unwired** — the
+     disbursement create path carries more fields and deserves the same field-by-field check rather
+     than an assumption that the rules are current.
+3. ~~**FE1, FE2**~~ **DONE.** FE1 (error transform) was already fixed by earlier work in the module;
+   FE2 — Void was unreachable from the transaction table. The emit, the local wrapper *and* the
+   parent's modal all already existed; the only missing piece was a button. It now sits **before**
+   Delete, so the reversible action is the nearer one.
+4. ~~**X4** — `GovernanceAuditLog` on `BudgetAdditionService`.~~ **DONE.** Approve and reject now
+   write a `Budget Addition` audit row carrying the enquiry, the decider, the amount and the notes.
+   Both the database path *and* the virtual (materials-task) path are covered — the virtual one
+   returned early into its own method, which is why it was missed alongside the main one.
+   - The audit write is wrapped: a row that cannot be written must not roll back a decision a human
+     has already made. Pinned by a test that drops the table and asserts the approval still stands.
+   - Budget additions additionally project into the cost ledger as `planned` lines carrying
+     `cost_cause = CLIENT-CHANGE`, so scope growth is visible in the project's cost account as well
+     as in the governance log.
+   - Notifications are still not sent on this path.
+5. ~~**FE3 / BE7 / FE4 / FE5** — duplicated label maps and decorative RBAC.~~ **DONE for the RBAC
+   half.** `usePermissions` now checks the granular permission each gate is named after, with a
+   single declared Super Admin bypass; `TransactionList`'s own `isSuperAdmin` and
+   `RequisitionShow`'s inline role array are gone. Four permissions the frontend had always asked
+   for turned out never to have been seeded — the role checks were a workaround for grants that were
+   impossible, not a policy decision.
+   - **FE3 now also DONE.** Payment methods had six definitions — the column enum, an inline map in
+     the top-up controller, a stale `Rule::in`, a `<select>` in `TopUpForm`, and label maps in the
+     service and `ReportsPanel`. Three were wrong in different ways: the select was missing
+     `bank_transfer` so it could never be chosen, and both label maps were missing every bank
+     option, which is why the history filter could not filter by them. All six now resolve to
+     `PettyCash\Support\PaymentMethods`, served over the existing `payment-methods` endpoint and
+     consumed through a `usePaymentMethods` composable. `requires_reference` travels with each
+     option, so adding a method that needs a transaction code is a backend row, not a UI change.
+6. ~~**BE9 / BE17** — `getProjectBudgetsSummary` performance.~~ **CLOSED BY DELETION.** See
+   `REFACTOR_TASKS.md` BE-17. Also removed: `ProjectBudgetsTab.vue`, the `budgets/summary` route and
+   controller action, and the unread `budget_snapshot` in `workspace()`. All of it rendered a
+   four-way category split derived from `budget_category`, which is null on every disbursement.
 6. Everything else in [`REFACTOR_TASKS.md`](../app/Modules/Finance/PettyCash/docs/REFACTOR_TASKS.md) (Phases 1–5) and [`quote-to-cash-redesign.md`](./quote-to-cash-redesign.md) (Phase 1+) stands as previously scoped — this audit doesn't change that sequencing, it adds BE1–BE13/FE1–FE14/X1–X8 as a parallel, narrower-scope worklist focused on what's provably broken today rather than architectural redesign.
 
 ---

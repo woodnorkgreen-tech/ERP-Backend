@@ -22,9 +22,15 @@ class EnquiryResource extends JsonResource
             'priority'               => $this->priority,
             'date_received'          => $this->date_received ? $this->date_received->format('Y-m-d') : null,
             'expected_delivery_date' => $this->expected_delivery_date ? $this->expected_delivery_date->format('Y-m-d') : null,
+            'delivery_date_status'   => $this->delivery_date_status ?? ($this->expected_delivery_date ? 'confirmed' : 'tbc'),
+            'delivery_date_tbc_since'=> $this->delivery_date_tbc_since ? $this->delivery_date_tbc_since->format('Y-m-d') : null,
+            'delivery_date_tbc_days' => $this->deliveryDateTbcDays(),
             'estimated_budget'       => (float) ($this->estimated_budget ?? 0),
             'client_approved_quote'  => $this->client_approved_quote ? (float) $this->client_approved_quote : null,
             'venue'                  => $this->venue,
+            'venue_lat'              => $this->venue_lat !== null ? (float) $this->venue_lat : null,
+            'venue_lng'              => $this->venue_lng !== null ? (float) $this->venue_lng : null,
+            'venue_place_id'         => $this->venue_place_id,
 
             // Structured scope items from the project_deliverables table
             'project_scope'          => $this->project_scope,
@@ -87,7 +93,34 @@ class EnquiryResource extends JsonResource
         if (!$this->project_officer_id && !in_array($this->status, ['completed', 'closed', 'cancelled'])) {
             return true;
         }
+        // Delivery date still unconfirmed well after the enquiry was logged. This
+        // is the case that used to go unnoticed: nothing is overdue, because
+        // nothing has a date to be overdue against.
+        $tbcDays = $this->deliveryDateTbcDays();
+        if ($tbcDays !== null
+            && $tbcDays >= (int) config('enquiry_workflow.reminders.tbc_attention_days', 7)
+            && !in_array($this->status, ['completed', 'closed', 'cancelled'])) {
+            return true;
+        }
         return false;
+    }
+
+    /**
+     * Whole days this enquiry has sat without a confirmed delivery date, or null
+     * when the date is confirmed. Drives both the attention flag and the ageing
+     * badge in the enquiry list.
+     */
+    private function deliveryDateTbcDays(): ?int
+    {
+        if ($this->expected_delivery_date) {
+            return null;
+        }
+
+        $since = $this->delivery_date_tbc_since ?? $this->date_received ?? $this->created_at;
+
+        // Carbon 3 returns a signed float here; cast explicitly so PHP does not
+        // do a deprecated lossy float-to-int coercion on the way out.
+        return $since ? max(0, (int) $since->diffInDays(now())) : null;
     }
 
     /**

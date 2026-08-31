@@ -45,18 +45,28 @@ class LibraryMaterialResource extends JsonResource
             'minimum_reusable_width_mm'  => $this->minimum_reusable_width_mm !== null ? (float) $this->minimum_reusable_width_mm : null,
             'minimum_reusable_area_m2'   => $this->minimum_reusable_area_m2 !== null ? (float) $this->minimum_reusable_area_m2 : null,
             'board_trackable'      => $this->resource->isBoardTrackable(),
-            'stock_handling'       => $this->resource->isBoardTrackable()
-                ? 'individual_board'
-                : ($this->issue_disposition === 'returnable' ? 'reusable_item' : 'quantity'),
+            // Read the model's one definition rather than recomputing it here.
+            'stock_handling'       => $this->resource->stock_handling,
+            'handling_label'       => $this->resource->handling_label,
             'unit_of_measure' => $this->unit_of_measure,
             'base_uom_id' => $this->base_uom_id,
             'purchase_uom_id' => $this->purchase_uom_id,
             'issue_uom_id' => $this->issue_uom_id,
             'base_uom' => $this->whenLoaded('baseUom', fn () => $this->baseUom?->code),
+            'purchase_uom' => $this->whenLoaded('purchaseUom', fn () => $this->purchaseUom ? ['id' => $this->purchaseUom->id, 'code' => $this->purchaseUom->code, 'name' => $this->purchaseUom->name] : null),
+            'issue_uom' => $this->whenLoaded('issueUom', fn () => $this->issueUom ? ['id' => $this->issueUom->id, 'code' => $this->issueUom->code, 'name' => $this->issueUom->name] : null),
+            'uom_conversions' => $this->whenLoaded('uomConversions', fn () => $this->uomConversions->map(fn ($conversion) => [
+                'from_uom_id' => $conversion->from_uom_id,
+                'to_uom_id' => $conversion->to_uom_id,
+                'factor' => (float) $conversion->factor,
+            ])->values()),
             'valuation_method' => $this->valuation_method,
             'revision_version' => $this->revision_version,
             'effective_date' => $this->effective_date?->toDateString(),
             'unit_cost' => (float) $this->unit_cost,
+            // Null means nobody has set one — the receipt screens read this to
+            // decide whether they must ask for a price.
+            'default_unit_cost' => $this->default_unit_cost !== null ? (float) $this->default_unit_cost : null,
             'attributes' => ($this->attributes && isset($this->attributes['attributes'])) ? $this->attributes['attributes'] : [],
             'is_active' => $this->is_active,
             'notes' => $this->notes,

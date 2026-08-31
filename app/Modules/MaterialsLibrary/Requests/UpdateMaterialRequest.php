@@ -6,6 +6,7 @@ use App\Modules\MaterialsLibrary\Requests\Concerns\ValidatesMaterialControls;
 use App\Modules\MaterialsLibrary\Support\MaterialControl;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use App\Constants\Permissions;
 
 class UpdateMaterialRequest extends FormRequest
 {
@@ -15,7 +16,7 @@ class UpdateMaterialRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return true;
+        return $this->user()?->can(Permissions::MATERIALS_LIBRARY_MANAGE) ?? false;
     }
 
     /**
@@ -59,6 +60,13 @@ class UpdateMaterialRequest extends FormRequest
             'base_uom_id' => 'sometimes|required|integer|exists:units_of_measure,id',
             'purchase_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'issue_uom_id' => 'sometimes|required|integer|exists:units_of_measure,id',
+            'uom_conversions' => 'sometimes|array|max:2',
+            'uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
+            'uom_conversions.*.factor' => 'required|numeric|gt:0',
+            // What this material is expected to cost when no delivery has
+            // priced it yet. A fallback, not the valuation — `unit_cost` stays
+            // derived from actual receipts.
+            'default_unit_cost' => 'nullable|numeric|min:0',
             'valuation_method' => 'sometimes|in:FIFO,Landed Cost,Weighted Average',
             'revision_version' => 'sometimes|string|max:20',
             'effective_date' => 'nullable|date',
