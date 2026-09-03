@@ -13,11 +13,13 @@ use App\Modules\HR\Models\Employee;
 
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-use App\Traits\Governed;
-
 class PettyCashRequisition extends Model
 {
-    use HasFactory, SoftDeletes, Governed;
+    // A pending requisition is a request for review, not yet a financial
+    // commitment. Governance is deliberately evaluated when Finance approves
+    // it; running the gate on model creation made it impossible to request a
+    // budget correction through the normal workflow.
+    use HasFactory, SoftDeletes;
 
     protected $table = 'petty_cash_requisitions';
 
@@ -26,7 +28,10 @@ class PettyCashRequisition extends Model
         'user_id',
         'department_id',
         'category',
+        'requisition_type_id',
         'purpose',
+        'custom_fields',
+        'type_snapshot',
         'total_amount',
         'status',
         'approved_by',
@@ -55,6 +60,8 @@ class PettyCashRequisition extends Model
         'received_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'custom_fields' => 'array',
+        'type_snapshot' => 'array',
     ];
 
     /**
@@ -71,6 +78,11 @@ class PettyCashRequisition extends Model
     public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class, 'department_id');
+    }
+
+    public function requisitionType(): BelongsTo
+    {
+        return $this->belongsTo(PettyCashRequisitionType::class, 'requisition_type_id');
     }
 
     /**

@@ -38,6 +38,40 @@ final class LedgerEntry
         return $entry;
     }
 
+    /**
+     * Backs out the credit a top-up posted.
+     *
+     * Kept beside creditForTopUp deliberately: a reversal that does not mirror
+     * the entry it undoes is how a balance drifts. Removing a top-up without one
+     * leaves its credit in the ledger and the cached balance overstated forever.
+     */
+    public static function reversalForTopUp(PettyCashTopUp $topUp, ?int $reversedBy = null): self
+    {
+        $entry = new self(
+            'REV-TOP-' . str_pad((string) $topUp->id, 6, '0', STR_PAD_LEFT),
+            'debit',
+            number_format((float) $topUp->amount, 2, '.', ''),
+            [
+                'reverses' => 'TOP-' . str_pad((string) $topUp->id, 6, '0', STR_PAD_LEFT),
+                'reason' => 'Top-up deleted',
+                'payment_method' => $topUp->payment_method ?? 'cash',
+                'transaction_code' => $topUp->transaction_code ?? null,
+                'original_created_by' => $topUp->created_by ?? null,
+                'reversed_by' => $reversedBy,
+            ],
+        );
+
+        // 'top_up', not 'top_up_reversal': sourceType feeds the balance
+        // projection's last_transaction_type, which is an enum of top_up |
+        // disbursement. A reversal IS top-up-sourced; that it reverses is
+        // carried by the REV- reference and the metadata, which is the honest
+        // place for it rather than widening the enum.
+        $entry->sourceType = 'top_up';
+        $entry->sourceId = $topUp->id;
+
+        return $entry;
+    }
+
     public static function debitForDisbursement(PettyCashDisbursement $d): self
     {
         $amount = bcadd((string)$d->amount, (string)($d->transaction_cost ?? '0'), 2);
@@ -45,11 +79,16 @@ final class LedgerEntry
             'amount' => (float)$d->amount,
             'receiver' => $d->receiver,
             'account' => $d->account,
+            'expense_code_id' => $d->expense_code_id,
             'description' => $d->description,
             'classification' => $d->classification,
             'payment_method' => $d->payment_method,
+            'payment_source_id' => $d->payment_source_id,
             'transaction_code' => $d->transaction_code,
             'transaction_cost' => (float)($d->transaction_cost ?? 0),
+            'receipt_type' => $d->receipt_type,
+            'receipt_number' => $d->receipt_number,
+            'tax_amount' => (float) ($d->tax_amount ?? 0),
             'budget_category' => $d->budget_category ?? null,
             'created_by' => $d->created_by ?? null,
             'project_name' => $d->project_name ?? null,

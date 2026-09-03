@@ -11,6 +11,10 @@ class Client extends Model
 {
     use HasFactory;
 
+    public const CUSTOMER_TYPES = ['individual', 'company', 'organization'];
+    public const CONTACT_CHANNELS = ['email', 'phone', 'sms'];
+    public const STATUSES = ['active', 'inactive'];
+
     protected $fillable = [
         'full_name',
         'company_name',
@@ -38,14 +42,6 @@ class Client extends Model
         'status' => 'string',
         'is_active' => 'boolean',
     ];
-
-    /**
-     * Get the full name attribute (accessor for frontend compatibility)
-     */
-    public function getFullNameAttribute(): ?string
-    {
-        return $this->attributes['full_name'] ?? null;
-    }
 
     /**
      * All project enquiries belonging to this client (past and current).

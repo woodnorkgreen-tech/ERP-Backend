@@ -15,6 +15,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
+use Spatie\Permission\Models\Role;
 
 class QuoteApprovalIntegrityTest extends TestCase
 {
@@ -54,6 +55,50 @@ class QuoteApprovalIntegrityTest extends TestCase
 
         $response->assertStatus(422);
         $this->assertStringContainsString('locked', $response->json('message'));
+    }
+
+    public function test_quote_save_recalculates_lines_and_totals_from_atomic_inputs(): void
+    {
+        $task = $this->quoteTask();
+        Sanctum::actingAs($this->user());
+
+        $payload = $this->quotePayload();
+        $payload['materials'] = [[
+            'id' => 'element-1',
+            'name' => 'Counter',
+            'quantity' => 2,
+            'baseTotal' => 999999,
+            'marginAmount' => 999999,
+            'finalTotal' => 999999,
+            'materials' => [[
+                'id' => 'line-1',
+                'description' => 'MDF',
+                'quantity' => 3,
+                'days' => 1,
+                'unitPrice' => 100,
+                'marginPercentage' => 20,
+                'totalPrice' => 999999,
+                'marginAmount' => 999999,
+                'finalPrice' => 999999,
+                'isVisible' => true,
+            ]],
+        ]];
+        $payload['discountAmount'] = 100;
+        $payload['vatPercentage'] = 16;
+        $payload['vatEnabled'] = true;
+        $payload['totals'] = ['grandTotal' => 999999999];
+
+        $this->postJson("/api/projects/tasks/{$task->id}/quote", $payload)
+            ->assertOk()
+            ->assertJsonPath('data.materials.0.materials.0.totalPrice', 300)
+            ->assertJsonPath('data.materials.0.baseTotal', 600)
+            ->assertJsonPath('data.materials.0.marginAmount', 120)
+            ->assertJsonPath('data.totals.subtotal', 720)
+            ->assertJsonPath('data.totals.discountAmount', 100)
+            ->assertJsonPath('data.totals.grandTotal', 719.2);
+
+        $stored = TaskQuoteData::where('enquiry_task_id', $task->id)->firstOrFail();
+        $this->assertSame(719.2, (float) $stored->totals['grandTotal']);
     }
 
     public function test_approval_decision_requires_finance_permission(): void
@@ -145,7 +190,18 @@ class QuoteApprovalIntegrityTest extends TestCase
             'recorded_by' => $this->user()->id,
         ]);
 
-        Sanctum::actingAs($this->user());
+        // The route is gated on `finance.receivables.correct`. Without it the
+        // request stops at 403 and never reaches the scoping check this test
+        // exists to prove — so the guard would look effective while being
+        // untested. Grant the permission, then assert the scoping.
+        $actor = $this->user();
+        $actor->givePermissionTo(
+            \Spatie\Permission\Models\Permission::findOrCreate(
+                \App\Constants\Permissions::FINANCE_RECEIVABLES_CORRECT,
+                'web',
+            ),
+        );
+        Sanctum::actingAs($actor);
 
         // Attempt to edit enquiry B's payment through enquiry A's URL
         $this->putJson("/api/projects/enquiries/{$enquiryA->id}/payments/{$paymentOnB->id}", [
@@ -217,12 +273,20 @@ class QuoteApprovalIntegrityTest extends TestCase
 
     private function user(): User
     {
-        return User::create([
+        $user = User::create([
             'name' => uniqid('user_'),
             'email' => uniqid('user_') . '@test.local',
             'password' => bcrypt('secret'),
             'is_active' => true,
         ])->fresh();
+
+        // `quote.access` requires an EnquiryConstants::FINANCIAL_QUOTE_ROLES
+        // role; that middleware post-dates this suite, so every request here
+        // answered 403. Costing satisfies it without being in ROLES_ADMIN,
+        // which would bypass the very guards these tests assert.
+        $user->assignRole(Role::findOrCreate('Costing', 'web'));
+
+        return $user->fresh();
     }
 
     private function client(): Client

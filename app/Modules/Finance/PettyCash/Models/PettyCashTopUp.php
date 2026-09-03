@@ -110,9 +110,11 @@ class PettyCashTopUp extends Model
             ->sum(\Illuminate\Support\Facades\DB::raw('d.amount + COALESCE(d.transaction_cost, 0)'));
 
         // Sum allocations that reference this top-up
-        $allocationsSum = (float) \Illuminate\Support\Facades\DB::table('petty_cash_disbursement_allocations')
-            ->where('top_up_id', $this->id)
-            ->sum(\Illuminate\Support\Facades\DB::raw('amount + COALESCE(transaction_cost, 0)'));
+        $allocationsSum = (float) \Illuminate\Support\Facades\DB::table('petty_cash_disbursement_allocations as a')
+            ->join('petty_cash_disbursements as d', 'd.id', '=', 'a.disbursement_id')
+            ->where('a.top_up_id', $this->id)
+            ->where('d.status', 'active')
+            ->sum(\Illuminate\Support\Facades\DB::raw('a.amount + COALESCE(a.transaction_cost, 0)'));
 
         $totalDisbursed = $directDisbursed + $allocationsSum;
 

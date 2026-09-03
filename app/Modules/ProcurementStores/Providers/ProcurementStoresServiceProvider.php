@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Providers;
 
+use App\Modules\ProcurementStores\Console\ValueUnpricedBoardsCommand;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Modules\ProcurementStores\Observers\PurchaseOrderObserver;
@@ -31,6 +32,12 @@ class ProcurementStoresServiceProvider extends ServiceProvider
         // Load migrations
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                ValueUnpricedBoardsCommand::class,
+            ]);
+        }
+
         // Register routes
         $this->registerRoutes();
     }
@@ -41,7 +48,7 @@ class ProcurementStoresServiceProvider extends ServiceProvider
     protected function registerRoutes(): void
     {
         Route::group([
-            'middleware' => ['api', 'auth:sanctum'],
+            'middleware' => ['api', 'auth:sanctum', 'active'],
             'prefix' => 'api/procurement-stores',
         ], function () {
             $this->loadRoutesFrom(__DIR__.'/../Routes/api.php');

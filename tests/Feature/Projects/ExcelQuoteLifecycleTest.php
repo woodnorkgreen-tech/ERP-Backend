@@ -18,6 +18,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
+use Spatie\Permission\Models\Role;
 
 class ExcelQuoteLifecycleTest extends TestCase
 {
@@ -251,12 +252,26 @@ class ExcelQuoteLifecycleTest extends TestCase
 
     private function user(): User
     {
-        return User::create([
+        $user = User::create([
             'name' => uniqid('user_'),
             'email' => uniqid('user_') . '@test.local',
             'password' => bcrypt('secret'),
             'is_active' => true,
         ])->fresh();
+
+        // The quote routes sit behind `quote.access`, which requires one of
+        // EnquiryConstants::FINANCIAL_QUOTE_ROLES. That middleware was added
+        // after this suite was written, so every request here answered 403 and
+        // the file has been red since. Granting the role restores what the tests
+        // were always meant to exercise — the quote lifecycle, not the gate.
+        //
+        // Costing rather than Project Manager: the latter is also in
+        // ROLES_ADMIN, and EnquiryWorkflowService lets an admin complete Quote
+        // Preparation without an approved quote. Using it would have silently
+        // turned the "cannot complete until approved" test into a no-op.
+        $user->assignRole(Role::findOrCreate('Costing', 'web'));
+
+        return $user->fresh();
     }
 
     private function client(): Client

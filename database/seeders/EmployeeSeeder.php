@@ -325,7 +325,10 @@ class EmployeeSeeder extends Seeder
         // Create employees and their user accounts
         foreach ($employees as $employeeData) {
             // Create employee
-            $employee = Employee::create($employeeData);
+            $employee = Employee::updateOrCreate(
+                ['employee_id' => $employeeData['employee_id']],
+                $employeeData
+            );
 
             // Create associated user account
             $user = User::updateOrCreate(

@@ -110,6 +110,7 @@ class ProcurementOperationalSyncService
                 'requisition.purchaseOrder.supplier',
                 'requisition.purchaseOrder.items.material',
                 'requisition.purchaseOrder.items.goodsReceiptNoteItems.goodsReceiptNote',
+                'requisition.purchaseOrder.items.goodsReceiptNoteItems.inspection',
                 'requisition.purchaseOrder.bills.payments',
             ])
             ->get();
@@ -197,6 +198,17 @@ class ProcurementOperationalSyncService
         });
     }
 
+    /**
+     * NOTE: 'accepted' on a GRN item now only means Procurement accepted the
+     * goods at the dock (quality check passed). It does NOT mean the item is
+     * in Stock yet — that only happens once Stores confirms it (matches or
+     * creates the material and prices it), which sets store_status =
+     * 'confirmed'. So acceptedQuantity — and everything downstream that
+     * reads it (operationalSync.receivedQuantity, buildSummary, task
+     * status) — is gated on accepted AND a resolved inspection AND
+     * store_status confirmed, and counts the inspected accepted quantity
+     * rather than the delivered quantity wherever an inspection exists.
+     */
     private function receiptState(?PurchaseOrderItem $purchaseOrderItem): array
     {
         if (!$purchaseOrderItem) {
@@ -211,9 +223,26 @@ class ProcurementOperationalSyncService
 
         $orderedQuantity = (float) $receiptItems->sum('ordered_quantity');
         $receivedQuantity = (float) $receiptItems->sum('received_quantity');
-        $acceptedQuantity = (float) $receiptItems
+
+        // Dock-accept only — arrived and passed quality check, but neither
+        // inspected nor matched/priced into Stock by Stores yet.
+        $dockAcceptedQuantity = (float) $receiptItems
             ->filter(fn ($item) => (bool) $item->accepted)
             ->sum('received_quantity');
+
+        // Store-confirmed — actually landed in Stock. This is what
+        // "acceptedQuantity" means everywhere downstream from here on.
+        // Where an inspection exists it, not the delivered quantity, is the
+        // amount that counts: a short-accepted line must not read as fully
+        // received just because Stores confirmed the GRN item.
+        $acceptedQuantity = (float) $receiptItems
+            ->filter(fn ($item) => (bool) $item->accepted
+                && $item->stock_status !== 'awaiting_inspection'
+                && $item->store_status === 'confirmed')
+            ->sum(fn ($item) => $item->inspection
+                ? (float) $item->inspection->accepted_quantity
+                : (float) $item->received_quantity);
+
         $latestReceipt = $receiptItems->sortByDesc('created_at')->first()?->goodsReceiptNote;
 
         if ($receivedQuantity <= 0) {
@@ -222,6 +251,8 @@ class ProcurementOperationalSyncService
             $status = 'received';
         } elseif ($acceptedQuantity > 0) {
             $status = 'partially_received';
+        } elseif ($dockAcceptedQuantity > 0) {
+            $status = 'pending_store_confirmation';
         } else {
             $status = 'quality_rejected';
         }
@@ -274,7 +305,7 @@ class ProcurementOperationalSyncService
             return 'received';
         }
 
-        if (in_array($receiptStatus, ['partially_received', 'quality_rejected'], true)) {
+        if (in_array($receiptStatus, ['partially_received', 'pending_store_confirmation', 'quality_rejected'], true)) {
             return $receiptStatus;
         }
 

@@ -59,6 +59,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Employee management
         Route::get('employees/profile', [EmployeeController::class, 'profile']);
         Route::get('employees/compact', [EmployeeController::class, 'compact']);
+        // Name-only staff directory for people-pickers in other modules.
+        Route::get('employees/directory', [EmployeeController::class, 'directory']);
         Route::get('employees/stats', [EmployeeController::class, 'stats'])->middleware('permission:' . Permissions::EMPLOYEE_READ);
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'uploadPhoto']);
 
@@ -141,7 +143,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->middleware('permission:' . Permissions::DEPARTMENT_DELETE);
 
         // Payroll management
-        Route::prefix('payroll')->group(function () {
+        Route::prefix('payroll')
+            ->middleware('permission:' . Permissions::HR_MANAGE_PAYROLL)
+            ->group(function () {
             // Variables
             Route::get('variables', [PayrollEngineController::class, 'getVariables']);
             Route::post('variables', [PayrollEngineController::class, 'storeVariable']);
@@ -303,8 +307,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('profile-updates/{id}/reject', [\App\Modules\HR\Http\Controllers\ProfileUpdateApprovalController::class, 'reject']);
 
         // Employee Salary History
-        Route::get('employees/{employee}/salary-history', [PayrollRunController::class, 'salaryHistory']);
-        Route::post('employees/{employee}/salary-history', [PayrollRunController::class, 'storeSalaryHistory']);
+        Route::get('employees/{employee}/salary-history', [PayrollRunController::class, 'salaryHistory'])
+            ->middleware('permission:' . Permissions::HR_MANAGE_PAYROLL);
+        Route::post('employees/{employee}/salary-history', [PayrollRunController::class, 'storeSalaryHistory'])
+            ->middleware('permission:' . Permissions::HR_MANAGE_PAYROLL);
 
         // Employee Documents
         Route::get('employees/{employeeId}/documents', [EmployeeDocumentController::class, 'index']);

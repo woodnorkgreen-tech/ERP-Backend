@@ -11,6 +11,7 @@ use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Controllers\Controller;
 use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
 class PurchaseOrderController extends Controller
 {
@@ -121,23 +122,32 @@ class PurchaseOrderController extends Controller
             return response(['error' => 'Only approved requisitions can be linked to purchase orders'], 403);
         }
 
-        // Check if already linked
-        if ($requisition->purchaseOrder) {
-            return response(['error' => 'This requisition already has a purchase order'], 403);
+        $requisition->load(['items.material', 'items.supplier', 'project', 'employee', 'department']);
+
+        // An item counts as already ordered once it's on ANY purchase order —
+        // a requisition can now spawn several POs (one per supplier), so we
+        // check per item rather than blocking the whole requisition.
+        $alreadyOrderedItemIds = \App\Modules\ProcurementStores\Models\PurchaseOrderItem::whereIn(
+            'requisition_item_id',
+            $requisition->items->pluck('id')
+        )->pluck('requisition_item_id')->all();
+
+        if (count($alreadyOrderedItemIds) === $requisition->items->count()) {
+            return response(['error' => 'Every item on this requisition already has a purchase order'], 403);
         }
 
-        // Return requisition with items
         return response([
-            'requisition' => $requisition->load(['items.material', 'project', 'employee', 'department'])
+            'requisition' => $requisition,
+            'already_ordered_item_ids' => $alreadyOrderedItemIds,
         ]);
     }
 
-    // CREATE PO FROM REQUISITION
+    // CREATE PO(s) FROM REQUISITION — one Purchase Order per supplier, so
+    // items bound for different suppliers don't end up mixed on one order.
     public function storeLinked(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'requisition_id' => 'required|exists:requisitions,id',
-            'supplier_id' => 'required|exists:suppliers,id',
             'due_date' => 'required|date',
             'delivery_address' => 'required|string',
             'description' => 'nullable|string',
@@ -150,65 +160,92 @@ class PurchaseOrderController extends Controller
         try {
             DB::beginTransaction();
 
-            $requisition = Requisition::with('items')->findOrFail($request->requisition_id);
+            $requisition = Requisition::with(['items.supplier', 'items.material'])->findOrFail($request->requisition_id);
 
-            // Check if already linked
-            if ($requisition->purchaseOrder) {
-                DB::rollBack();
-                return response(['error' => 'Purchase order already exists for this requisition'], 422);
-            }
-
-            // Check if approved
             if ($requisition->status !== 'approved') {
                 DB::rollBack();
                 return response(['error' => 'Only approved requisitions can be linked'], 422);
             }
 
-            // Create Purchase Order
-            $purchaseOrder = PurchaseOrder::create([
-                'requisition_id' => $requisition->id,
-                'po_number' => PurchaseOrder::generatePONumber(),
-                'date' => now()->format('Y-m-d'),
-                'supplier_id' => $request->supplier_id,
-                'due_date' => $request->due_date,
-                'delivery_address' => $request->delivery_address,
-                'description' => $request->description,
-                'status' => 'pending',
-                'user_id' => auth()->id(),
-            ]);
+            // Skip items that were already placed on an earlier PO from this
+            // same requisition (supports generating POs in more than one batch).
+            $alreadyOrderedItemIds = \App\Modules\ProcurementStores\Models\PurchaseOrderItem::whereIn(
+                'requisition_item_id',
+                $requisition->items->pluck('id')
+            )->pluck('requisition_item_id')->all();
 
-            // Copy items from requisition
-            $totalAmount = 0;
-            foreach ($requisition->items as $item) {
-                // Use the unit_price already stored on the requisition item
-                // (populated during creation). Fall back to material unit_cost only
-                // if no price was set — handles both library AND custom items safely.
-                $unitPrice = (float) ($item->unit_price ?: ($item->material?->unit_cost ?? 0));
-                $total = $item->quantity * $unitPrice;
+            $pendingItems = $requisition->items->reject(
+                fn ($item) => in_array($item->id, $alreadyOrderedItemIds)
+            );
 
-                $purchaseOrder->items()->create([
-                    'material_id'        => $item->material_id,
-                    'requisition_item_id' => $item->id,
-                    'custom_description' => $item->custom_description,
-                    'quantity'           => $item->quantity,
-                    'unit_price'         => $unitPrice,
-                    'total'              => $total,
-                ]);
-
-                $totalAmount += $total;
+            if ($pendingItems->isEmpty()) {
+                DB::rollBack();
+                return response(['error' => 'Every item on this requisition already has a purchase order'], 422);
             }
 
-            // Update total amount
-            $purchaseOrder->update(['total_amount' => $totalAmount]);
+            // Every remaining item needs a supplier chosen before it can go
+            // on an order — that's decided back on the requisition, not here.
+            $missingSupplier = $pendingItems->filter(fn ($item) => !$item->supplier_id);
+            if ($missingSupplier->isNotEmpty()) {
+                DB::rollBack();
+                $names = $missingSupplier->map(
+                    fn ($item) => $item->material?->material_name ?? $item->custom_description ?? "Item #{$item->id}"
+                )->implode(', ');
+                return response(['error' => "Choose a supplier for these items on the requisition first: {$names}"], 422);
+            }
+
+            $itemsBySupplier = $pendingItems->groupBy('supplier_id');
+            $createdOrders = [];
+
+            foreach ($itemsBySupplier as $supplierId => $items) {
+                $purchaseOrder = PurchaseOrder::create([
+                    'requisition_id' => $requisition->id,
+                    'po_number' => PurchaseOrder::generatePONumber(),
+                    'date' => now()->format('Y-m-d'),
+                    'supplier_id' => $supplierId,
+                    'due_date' => $request->due_date,
+                    'delivery_address' => $request->delivery_address,
+                    'description' => $request->description,
+                    'status' => 'pending',
+                    'user_id' => auth()->id(),
+                ]);
+
+                $totalAmount = 0;
+                foreach ($items as $item) {
+                    $unitPrice = (float) ($item->unit_price ?: ($item->material?->unit_cost ?? 0));
+                    $total = $item->quantity * $unitPrice;
+
+                    $purchaseOrder->items()->create([
+                        'material_id'          => $item->material_id,
+                        'requisition_item_id'  => $item->id,
+                        'custom_description'   => $item->custom_description,
+                        'quantity'             => $item->quantity,
+                        'uom_id'               => $item->uom_id ?: ($item->material?->purchase_uom_id ?: $item->material?->base_uom_id),
+                        'unit_price'           => $unitPrice,
+                        'total'                => $total,
+                    ]);
+
+                    $totalAmount += $total;
+                }
+
+                $purchaseOrder->update(['total_amount' => $totalAmount]);
+                $createdOrders[] = $purchaseOrder;
+            }
 
             DB::commit();
 
-            $this->syncProjectProcurement($purchaseOrder);
+            foreach ($createdOrders as $purchaseOrder) {
+                $this->syncProjectProcurement($purchaseOrder);
+            }
 
-            return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'requisition']));
+            $loaded = collect($createdOrders)->map(
+                fn ($po) => new PurchaseOrderResource($po->load(['items.material', 'supplier', 'createdBy', 'requisition']))
+            );
+
+            return response(['data' => $loaded]);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response(['error' => 'Failed to create purchase order: ' . $e->getMessage()], 500);
+            return response(['error' => 'Failed to create purchase order(s): ' . $e->getMessage()], 500);
         }
     }
 
@@ -223,7 +260,7 @@ class PurchaseOrderController extends Controller
             'delivery_address' => 'required|string',
             'items' => 'required|array|min:1',
             'items.*.material_id' => 'required|exists:library_materials,id',
-            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.quantity' => 'required|numeric|gt:0',
             'items.*.unit_price' => 'required|numeric|min:0',
         ]);
 
@@ -251,6 +288,7 @@ class PurchaseOrderController extends Controller
             $purchaseOrder = PurchaseOrder::create($input);
 
             foreach ($items as $item) {
+                $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null, $item['requisition_item_id'] ?? null);
                 $item['total'] = $item['quantity'] * $item['unit_price'];
                 $purchaseOrder->items()->create($item);
             }
@@ -297,6 +335,7 @@ class PurchaseOrderController extends Controller
 
                 $totalAmount = 0;
                 foreach ($items as $item) {
+                    $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null, $item['requisition_item_id'] ?? null);
                     $item['total'] = $item['quantity'] * $item['unit_price'];
                     $totalAmount += $item['total'];
                     $purchaseOrder->items()->create($item);
@@ -378,6 +417,17 @@ class PurchaseOrderController extends Controller
         $this->syncProjectProcurement($purchaseOrder);
 
         return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
+    }
+
+    private function buyingUomId(mixed $materialId, mixed $requisitionItemId = null): ?int
+    {
+        if ($requisitionItemId) {
+            $saved = \App\Modules\ProcurementStores\Models\RequisitionItem::whereKey((int) $requisitionItemId)->value('uom_id');
+            if ($saved) return (int) $saved;
+        }
+        if (! $materialId) return null;
+        $material = LibraryMaterial::findOrFail((int) $materialId);
+        return $material->purchase_uom_id ?: $material->base_uom_id;
     }
 
     public function getApprovedPurchaseOrders()

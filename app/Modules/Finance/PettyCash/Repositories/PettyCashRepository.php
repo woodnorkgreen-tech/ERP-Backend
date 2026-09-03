@@ -52,7 +52,7 @@ class PettyCashRepository
      */
     public function getDisbursements(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry')
+        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry', 'plannedCostLine')
             ->orderBy('date_disbursed', 'desc')
             ->orderBy('created_at', 'desc');
 
@@ -234,9 +234,11 @@ class PettyCashRepository
             })
             ->groupBy('d.top_up_id');
 
-        $allocations = DB::table('petty_cash_disbursement_allocations')
-            ->select('top_up_id', DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total'))
-            ->groupBy('top_up_id');
+        $allocations = DB::table('petty_cash_disbursement_allocations as a')
+            ->join('petty_cash_disbursements as d', 'd.id', '=', 'a.disbursement_id')
+            ->select('a.top_up_id', DB::raw('SUM(a.amount + COALESCE(a.transaction_cost, 0)) as total'))
+            ->where('d.status', 'active')
+            ->groupBy('a.top_up_id');
 
         return PettyCashTopUp::with('creator')
             ->leftJoinSub($directDisbursements, 'direct_disbursements', function ($join) {
@@ -414,10 +416,60 @@ class PettyCashRepository
             });
         }
 
+        // Everything below reads out of the metadata JSON, which is where the
+        // ledger keeps the disbursement's own fields. These four filters were
+        // collected by the controller and then silently dropped here, so the
+        // panel returned unfiltered rows while reporting itself as active.
+
+        // A top-up entry carries no status key; it is active by construction.
+        if (!empty($filters['status'])) {
+            if ($filters['status'] === 'voided') {
+                $query->where('metadata->status', 'voided');
+            } else {
+                // Deliberately not whereNull('metadata->status'): Laravel expands
+                // that to json_type(...) = 'NULL', and the literal picks up the
+                // connection collation while json_type() returns the server's —
+                // an illegal mix of collations on these utf8mb3 tables.
+                $query->where(function ($q) {
+                    $q->whereRaw("JSON_EXTRACT(metadata, '$.status') IS NULL")
+                      ->orWhere('metadata->status', 'active');
+                });
+            }
+        }
+
+        if (!empty($filters['classification'])) {
+            $query->where('metadata->classification', $filters['classification']);
+        }
+
+        if (!empty($filters['payment_method'])) {
+            $query->where('metadata->payment_method', $filters['payment_method']);
+        }
+
+        if (!empty($filters['creator_id'])) {
+            $query->where('metadata->created_by', (int) $filters['creator_id']);
+        }
+
+        // Archive state lives on the source rows, never on the ledger — a posted
+        // entry is immutable and carries no archive flag. reference_number is the
+        // only link back, and it embeds the zero-padded source id at a fixed
+        // offset, so the join is recoverable without touching the frozen schema.
+        // It is applied in SQL rather than after the fact because pagination has
+        // to count the filtered set, not the whole ledger.
+        $archived = $this->archivedSourceIds();
+        $hasArchived = $archived['disbursement'] || $archived['top_up'];
+
+        if (!empty($filters['show_archived'])) {
+            $hasArchived
+                ? $query->where(fn ($q) => $this->matchArchivedSources($q, $archived))
+                : $query->whereRaw('1 = 0');
+        } elseif ($hasArchived) {
+            $query->whereNot(fn ($q) => $this->matchArchivedSources($q, $archived));
+        }
+
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
         // Transform collection to match old flat transaction format
-        $paginator->getCollection()->transform(function ($item) {
+        $paginator->getCollection()->transform(function ($item) use ($archived) {
             $meta = json_decode($item->metadata, true) ?: [];
             
             // Reconstruct flat transaction columns
@@ -438,7 +490,11 @@ class PettyCashRepository
                 'status' => $meta['status'] ?? 'active',
                 'transaction_code' => $meta['transaction_code'] ?? null,
                 'created_at' => $item->created_at,
-                'is_archived' => false,
+                // The running balance the ledger already stores. Additive field:
+                // it is what makes the transaction list read as a cashbook rather
+                // than an undated pile of payments.
+                'balance_after' => (float) $item->balance_snapshot,
+                'is_archived' => $this->isArchivedEntry($item->reference_number, $archived),
                 'requisition_status' => $meta['requisition_status'] ?? null,
                 'received_at' => $meta['received_at'] ?? null,
                 'signature' => $meta['signature'] ?? null,
@@ -449,6 +505,68 @@ class PettyCashRepository
         });
 
         return $paginator;
+    }
+
+    /**
+     * Ids of the source records an operator has archived, per source type.
+     */
+    private function archivedSourceIds(): array
+    {
+        return [
+            'disbursement' => PettyCashDisbursement::where('is_archived', true)->pluck('id')->all(),
+            'top_up' => PettyCashTopUp::where('is_archived', true)->pluck('id')->all(),
+        ];
+    }
+
+    /**
+     * Constrain a ledger query to entries whose source record is archived.
+     *
+     * Every reference the ledger writes puts the padded source id at a known
+     * offset — PCR-000123 and its PCR-000123-VOID reversal, TOP-000045 and its
+     * TOP-000045-ADJ-… adjustment, REV-TOP-000045 — so one substring per prefix
+     * covers the derivatives too. Archiving a record hides its reversals with it,
+     * which is the behaviour an operator expects.
+     */
+    private function matchArchivedSources($query, array $archived): void
+    {
+        $query->whereRaw('1 = 0');
+
+        if ($archived['disbursement']) {
+            $query->orWhere(fn ($q) => $q
+                ->where('reference_number', 'like', 'PCR-%')
+                ->whereIn(DB::raw('CAST(SUBSTRING(reference_number, 5, 6) AS UNSIGNED)'), $archived['disbursement']));
+        }
+
+        if ($archived['top_up']) {
+            $query->orWhere(fn ($q) => $q
+                ->where('reference_number', 'like', 'TOP-%')
+                ->whereIn(DB::raw('CAST(SUBSTRING(reference_number, 5, 6) AS UNSIGNED)'), $archived['top_up']));
+            $query->orWhere(fn ($q) => $q
+                ->where('reference_number', 'like', 'REV-TOP-%')
+                ->whereIn(DB::raw('CAST(SUBSTRING(reference_number, 9, 6) AS UNSIGNED)'), $archived['top_up']));
+        }
+    }
+
+    /**
+     * The row-level answer to the same question matchArchivedSources() asks in SQL.
+     */
+    private function isArchivedEntry(?string $reference, array $archived): bool
+    {
+        if (! $reference) {
+            return false;
+        }
+
+        if (str_starts_with($reference, 'REV-TOP-')) {
+            return in_array((int) substr($reference, 8, 6), $archived['top_up'], true);
+        }
+        if (str_starts_with($reference, 'TOP-')) {
+            return in_array((int) substr($reference, 4, 6), $archived['top_up'], true);
+        }
+        if (str_starts_with($reference, 'PCR-')) {
+            return in_array((int) substr($reference, 4, 6), $archived['disbursement'], true);
+        }
+
+        return false;
     }
 
     /**
@@ -604,172 +722,4 @@ class PettyCashRepository
         ];
     }
 
-    /**
-     * Get summary of project budgets vs actual petty cash spend with pagination and overall stats.
-     */
-    public function getProjectBudgetsSummary(array $filters = [], int $perPage = 15): array
-    {
-        $perPage = max(1, min($perPage, 100));
-
-        $query = \App\Models\ProjectEnquiry::where("quote_approved", true)
-            ->whereNotNull("job_number")
-            // Internal budget approval was removed (2026-07): a COMPLETED budget
-            // task (auto-completed once a priced budget is saved) is the
-            // finalization signal. Legacy 'approved' budgets also have
-            // completed tasks, so they remain included.
-            ->whereHas("enquiryTasks", function ($q) {
-                $q->where("type", "budget")
-                    ->where("status", "completed")
-                    ->whereHas("budgetData");
-            })
-            ->with([
-                'project:id,enquiry_id,project_id',
-                "enquiryTasks" => function($q) {
-                    $q->where("type", "budget")
-                      ->where("status", "completed")
-                      ->whereHas("budgetData")
-                      ->with("budgetData");
-                }
-            ])
-            ->orderBy('created_at', 'desc');
-
-        $paginator = $query->paginate($perPage);
-        $pageEnquiryIds = $paginator->getCollection()->pluck('id')->filter()->values();
-        $pageJobNumbers = $paginator->getCollection()->pluck('job_number')->filter()->values();
-
-        $totalActualSpentOverall = (float) $this->projectSpendQuery($filters)
-            ->sum(DB::raw('amount + COALESCE(transaction_cost, 0)'));
-
-        $actualSpentRaw = $this->projectSpendQuery($filters)
-            ->where(function ($query) use ($pageEnquiryIds, $pageJobNumbers) {
-                $query->whereIn('project_enquiry_id', $pageEnquiryIds);
-
-                if ($pageJobNumbers->isNotEmpty()) {
-                    $query->orWhere(function ($legacyQuery) use ($pageJobNumbers) {
-                        $legacyQuery->whereNull('project_enquiry_id')
-                            ->whereIn('job_number', $pageJobNumbers);
-                    });
-                }
-            })
-            ->select(
-                'project_enquiry_id',
-                'job_number',
-                'budget_category',
-                DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total_spent')
-            )
-            ->groupBy('project_enquiry_id', 'job_number', 'budget_category')
-            ->get();
-
-        $actualSpent = $this->formatProjectSpendRows($actualSpentRaw);
-        $totalBudgetOverall = $this->getApprovedProjectBudgetTotal();
-
-        $paginator->getCollection()->transform(function ($enquiry) use ($actualSpent) {
-            $budgetTask = $enquiry->enquiryTasks->first();
-            $budgetData = $budgetTask ? $budgetTask->budgetData : null;
-            $summary = $budgetData ? ($budgetData->budget_summary ?? []) : [];
-
-            $projectSpent = $actualSpent['enquiry:' . $enquiry->id]
-                ?? $actualSpent['job:' . $enquiry->job_number]
-                ?? $this->emptyProjectSpend();
-
-            return [
-                "id" => $enquiry->id,
-                "job_number" => $enquiry->job_number,
-                "project_id" => $enquiry->project?->project_id,
-                "title" => $enquiry->title,
-                "budget_summary" => $summary,
-                "actual_spent" => (float) $projectSpent['total'],
-                "actual_spent_breakdown" => $projectSpent['categories'],
-                "totals" => [
-                    "materials" => (float) ($summary["materialsTotal"] ?? 0),
-                    "labour" => (float) ($summary["labourTotal"] ?? 0),
-                    "logistics" => (float) ($summary["logisticsTotal"] ?? 0),
-                    "expenses" => (float) ($summary["expensesTotal"] ?? 0),
-                    "grand_total" => (float) ($summary["grandTotal"] ?? 0),
-                ]
-            ];
-        });
-
-        return [
-            'paginator' => $paginator,
-            'stats' => [
-                'total_budget' => $totalBudgetOverall,
-                'total_spent' => $totalActualSpentOverall,
-                'avg_utilization' => $totalBudgetOverall > 0 ? round(($totalActualSpentOverall / $totalBudgetOverall) * 100) : 0
-            ]
-        ];
-    }
-
-    private function projectSpendQuery(array $filters = [])
-    {
-        $query = PettyCashDisbursement::active()
-            ->notArchived()
-            ->where(function ($query) {
-                $query->whereNotNull('project_enquiry_id')
-                    ->orWhereNotNull('job_number');
-            });
-
-        if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $query->whereBetween('date_disbursed', [$filters['start_date'], $filters['end_date']]);
-        }
-
-        return $query;
-    }
-
-    private function formatProjectSpendRows($actualSpentRaw): array
-    {
-        $actualSpent = [];
-
-        foreach ($actualSpentRaw as $row) {
-            $key = $row->project_enquiry_id ? 'enquiry:' . $row->project_enquiry_id : 'job:' . $row->job_number;
-
-            if (!isset($actualSpent[$key])) {
-                $actualSpent[$key] = $this->emptyProjectSpend();
-            }
-
-            $actualSpent[$key]['total'] += (float) $row->total_spent;
-            $cat = $row->budget_category ?: 'expenses';
-
-            if (isset($actualSpent[$key]['categories'][$cat])) {
-                $actualSpent[$key]['categories'][$cat] += (float) $row->total_spent;
-            } else {
-                $actualSpent[$key]['categories']['expenses'] += (float) $row->total_spent;
-            }
-        }
-
-        return $actualSpent;
-    }
-
-    private function getApprovedProjectBudgetTotal(): float
-    {
-        $totalBudgetOverall = 0;
-
-        $budgetRows = \App\Models\TaskBudgetData::query()
-            ->join('enquiry_tasks', 'task_budget_data.enquiry_task_id', '=', 'enquiry_tasks.id')
-            ->join('project_enquiries', 'enquiry_tasks.project_enquiry_id', '=', 'project_enquiries.id')
-            ->where('project_enquiries.quote_approved', true)
-            ->whereNotNull('project_enquiries.job_number')
-            ->where('enquiry_tasks.type', 'budget')
-            ->where('enquiry_tasks.status', 'completed')
-            ->select('task_budget_data.budget_summary')
-            ->get();
-
-        foreach ($budgetRows as $row) {
-            $summary = is_array($row->budget_summary)
-                ? $row->budget_summary
-                : (json_decode((string) $row->budget_summary, true) ?: []);
-
-            $totalBudgetOverall += (float) ($summary['grandTotal'] ?? $summary['grand_total'] ?? 0);
-        }
-
-        return $totalBudgetOverall;
-    }
-
-    private function emptyProjectSpend(): array
-    {
-        return [
-            'total' => 0,
-            'categories' => ['materials' => 0, 'labour' => 0, 'logistics' => 0, 'expenses' => 0]
-        ];
-    }
 }

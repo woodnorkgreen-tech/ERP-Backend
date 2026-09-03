@@ -61,9 +61,28 @@ class QuoteController extends Controller
             'projectInfo'            => 'nullable|array',
             'budgetImported'         => 'boolean',
             'materials'              => 'present|array',
+            'materials.*'            => 'array',
+            'materials.*.quantity'   => 'nullable|numeric|min:0',
+            'materials.*.materials'  => 'nullable|array',
+            'materials.*.materials.*'=> 'array',
+            'materials.*.materials.*.quantity' => 'nullable|numeric|min:0',
+            'materials.*.materials.*.days' => 'nullable|numeric|min:0',
+            'materials.*.materials.*.unitPrice' => 'nullable|numeric|min:0',
+            'materials.*.materials.*.marginPercentage' => 'nullable|numeric|min:0|max:1000',
             'labour'                 => 'present|array',
+            'labour.*'               => 'array',
+            'labour.*.quantity'      => 'nullable|numeric|min:0',
+            'labour.*.unitRate'      => 'nullable|numeric|min:0',
+            'labour.*.marginPercentage' => 'nullable|numeric|min:0|max:1000',
             'expenses'               => 'present|array',
+            'expenses.*'             => 'array',
+            'expenses.*.amount'      => 'nullable|numeric|min:0',
+            'expenses.*.marginPercentage' => 'nullable|numeric|min:0|max:1000',
             'logistics'              => 'present|array',
+            'logistics.*'            => 'array',
+            'logistics.*.quantity'   => 'nullable|numeric|min:0',
+            'logistics.*.unitRate'   => 'nullable|numeric|min:0',
+            'logistics.*.marginPercentage' => 'nullable|numeric|min:0|max:1000',
             'margins'                => 'required|array',
             'margins.materials'      => 'numeric|min:0|max:1000',
             'margins.labour'         => 'numeric|min:0|max:1000',
@@ -99,23 +118,38 @@ class QuoteController extends Controller
                 return $locked;
             }
 
-            $status   = $request->status ?? $existing?->status ?? 'draft';
+            $status = $request->status ?? $existing?->status ?? 'draft';
+            $sections = $this->canonicalizeQuoteSections([
+                'materials' => $request->materials,
+                'labour' => $request->labour,
+                'expenses' => $request->expenses,
+                'logistics' => $request->logistics,
+            ]);
+            $totals = $this->recalculateTotals(
+                $sections,
+                $request->margins,
+                (float) ($request->discountAmount ?? 0),
+                $request->vatPercentage !== null ? (float) $request->vatPercentage : null,
+                (bool) ($request->vatEnabled ?? true)
+            );
 
             $quoteData = TaskQuoteData::updateOrCreate(
                 ['enquiry_task_id' => $taskId],
                 [
                     'project_info'          => $request->projectInfo ?? $existing?->project_info ?? [],
                     'budget_imported'        => $request->budgetImported ?? $existing?->budget_imported ?? false,
-                    'materials'              => $request->materials,
-                    'labour'                 => $request->labour,
-                    'expenses'               => $request->expenses,
-                    'logistics'              => $request->logistics,
+                    'materials'              => $sections['materials'],
+                    'labour'                 => $sections['labour'],
+                    'expenses'               => $sections['expenses'],
+                    'logistics'              => $sections['logistics'],
                     'margins'                => $request->margins,
                     'custom_margins'         => $request->customMargins ?? $existing?->custom_margins ?? [],
                     'discount_amount'        => $request->discountAmount ?? 0,
                     'vat_percentage'         => $request->vatPercentage ?? 16,
                     'vat_enabled'            => $request->vatEnabled ?? true,
-                    'totals'                 => $request->totals,
+                    // Browser totals are display-only. Persist the canonical
+                    // server calculation from atomic quantity/rate inputs.
+                    'totals'                 => $totals,
                     'status'                 => $status,
                     'viewer_settings'        => $request->viewerSettings ?? $existing?->viewer_settings ?? [],
                     // Persist governance fields
@@ -190,12 +224,7 @@ class QuoteController extends Controller
 
              \Log::info("Found budget data, transforming to quote format");
 
-             // Get approved budget additions for this budget
-             $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
-                 ->where('status', 'approved')
-                 ->get();
-
-             // Transform budget data to quote format including approved additions
+             // Transform budget data to quote format.
              // Default margins for initial import should match frontend defaults (60%)
              $defaultMargins = [
                  'materials' => 60,
@@ -203,7 +232,7 @@ class QuoteController extends Controller
                  'expenses' => 60,
                  'logistics' => 60
              ];
-             $quoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions, $defaultMargins);
+             $quoteData = $this->transformBudgetToQuote($budgetData, $defaultMargins);
 
              \Log::info("Transformed budget data, creating/updating quote");
 
@@ -379,11 +408,7 @@ class QuoteController extends Controller
                 return response()->json(['message' => 'No budget data found'], 404);
             }
 
-            $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
-                ->where('status', 'approved')
-                ->get();
-
-            $newQuoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions);
+            $newQuoteData = $this->transformBudgetToQuote($budgetData);
 
             $changes = ['new_items' => [], 'price_changes' => [], 'removed_items' => [], 'total_impact' => []];
 
@@ -461,8 +486,6 @@ class QuoteController extends Controller
                 return response()->json(['message' => 'No budget data found'], 404);
             }
 
-            // Get fresh data from budget
-            $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)->where('status', 'approved')->get();
             // Get current margins to use as baseline for new items
             $currentMargins = $quoteData->margins ?? [
                 'materials' => 60,
@@ -472,8 +495,7 @@ class QuoteController extends Controller
             ];
 
             // Get fresh data from budget, initialized with current margins
-            $approvedAdditions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)->where('status', 'approved')->get();
-            $newQuoteData = $this->transformBudgetToQuote($budgetData, $approvedAdditions, $currentMargins);
+            $newQuoteData = $this->transformBudgetToQuote($budgetData, $currentMargins);
 
             // MERGE LOGIC:
             // We want to keep the NEW budget structure (items, quantities, costs)
@@ -689,8 +711,78 @@ class QuoteController extends Controller
     }
 
     /**
-     * Recalculate totals with current margins
+     * Rebuild every derived line value from the quote's atomic inputs.
+     *
+     * A client may send derived fields because the editor needs immediate
+     * feedback, but those values are never financial authority.
      */
+    private function canonicalizeQuoteSections(array $sections): array
+    {
+        $materials = array_map(function (array $element): array {
+            $elementQuantity = max(0, (float) ($element['quantity'] ?? 1));
+            $lines = array_map(function (array $line): array {
+                $quantity = max(0, (float) ($line['quantity'] ?? 0));
+                $days = max(0, (float) ($line['days'] ?? 1));
+                $unitPrice = max(0, (float) ($line['unitPrice'] ?? 0));
+                $marginPercentage = max(0, (float) ($line['marginPercentage'] ?? 0));
+                $base = $quantity * $days * $unitPrice;
+                $margin = $base * ($marginPercentage / 100);
+
+                return array_merge($line, [
+                    'quantity' => $quantity,
+                    'days' => $days,
+                    'unitPrice' => $unitPrice,
+                    'marginPercentage' => $marginPercentage,
+                    'totalPrice' => round($base, 2),
+                    'marginAmount' => round($margin, 2),
+                    'finalPrice' => round($base + $margin, 2),
+                ]);
+            }, array_values(array_filter($element['materials'] ?? [], 'is_array')));
+
+            $visibleLines = array_filter(
+                $lines,
+                fn (array $line): bool => ($line['isVisible'] ?? true) !== false
+            );
+            $base = array_sum(array_column($visibleLines, 'totalPrice')) * $elementQuantity;
+            $margin = array_sum(array_column($visibleLines, 'marginAmount')) * $elementQuantity;
+
+            return array_merge($element, [
+                'quantity' => $elementQuantity,
+                'materials' => $lines,
+                'baseTotal' => round($base, 2),
+                'marginAmount' => round($margin, 2),
+                'marginPercentage' => $base > 0 ? round(($margin / $base) * 100, 4) : 0,
+                'finalTotal' => round($base + $margin, 2),
+            ]);
+        }, array_values(array_filter($sections['materials'] ?? [], 'is_array')));
+
+        $canonicalizeSimpleItems = function (array $items, bool $deriveAmountFromRate): array {
+            return array_map(function (array $item) use ($deriveAmountFromRate): array {
+                $quantity = max(0, (float) ($item['quantity'] ?? 0));
+                $unitRate = max(0, (float) ($item['unitRate'] ?? 0));
+                $base = $deriveAmountFromRate
+                    ? $quantity * $unitRate
+                    : max(0, (float) ($item['amount'] ?? 0));
+                $marginPercentage = max(0, (float) ($item['marginPercentage'] ?? 0));
+                $margin = $base * ($marginPercentage / 100);
+
+                return array_merge($item, [
+                    'amount' => round($base, 2),
+                    'marginPercentage' => $marginPercentage,
+                    'marginAmount' => round($margin, 2),
+                    'finalPrice' => round($base + $margin, 2),
+                ]);
+            }, array_values(array_filter($items, 'is_array')));
+        };
+
+        return [
+            'materials' => $materials,
+            'labour' => $canonicalizeSimpleItems($sections['labour'] ?? [], true),
+            'expenses' => $canonicalizeSimpleItems($sections['expenses'] ?? [], false),
+            'logistics' => $canonicalizeSimpleItems($sections['logistics'] ?? [], true),
+        ];
+    }
+
     private function recalculateTotals(
         array $quoteData,
         array $margins,
@@ -698,21 +790,30 @@ class QuoteController extends Controller
         ?float $vatPercentage = null,
         bool $vatEnabled = true
     ): array {
-        $materialsBase = array_sum(array_column($quoteData['materials'], 'baseTotal'));
-        $materialsMargin = array_sum(array_column($quoteData['materials'], 'marginAmount'));
-        $materialsTotal = array_sum(array_column($quoteData['materials'], 'finalTotal'));
+        $visible = fn (array $items): array => array_values(array_filter(
+            $items,
+            fn ($item): bool => is_array($item) && ($item['isVisible'] ?? true) !== false
+        ));
+        $materials = $visible($quoteData['materials']);
+        $labour = $visible($quoteData['labour']);
+        $expenses = $visible($quoteData['expenses']);
+        $logistics = $visible($quoteData['logistics']);
 
-        $labourBase = array_sum(array_column($quoteData['labour'], 'amount'));
-        $labourMargin = $labourBase * ($margins['labour'] / 100);
-        $labourTotal = $labourBase + $labourMargin;
+        $materialsBase = array_sum(array_column($materials, 'baseTotal'));
+        $materialsMargin = array_sum(array_column($materials, 'marginAmount'));
+        $materialsTotal = array_sum(array_column($materials, 'finalTotal'));
 
-        $expensesBase = array_sum(array_column($quoteData['expenses'], 'amount'));
-        $expensesMargin = array_sum(array_column($quoteData['expenses'], 'marginAmount'));
-        $expensesTotal = array_sum(array_column($quoteData['expenses'], 'finalPrice'));
+        $labourBase = array_sum(array_column($labour, 'amount'));
+        $labourMargin = array_sum(array_column($labour, 'marginAmount'));
+        $labourTotal = array_sum(array_column($labour, 'finalPrice'));
 
-        $logisticsBase = array_sum(array_column($quoteData['logistics'], 'amount'));
-        $logisticsMargin = array_sum(array_column($quoteData['logistics'], 'marginAmount'));
-        $logisticsTotal = array_sum(array_column($quoteData['logistics'], 'finalPrice'));
+        $expensesBase = array_sum(array_column($expenses, 'amount'));
+        $expensesMargin = array_sum(array_column($expenses, 'marginAmount'));
+        $expensesTotal = array_sum(array_column($expenses, 'finalPrice'));
+
+        $logisticsBase = array_sum(array_column($logistics, 'amount'));
+        $logisticsMargin = array_sum(array_column($logistics, 'marginAmount'));
+        $logisticsTotal = array_sum(array_column($logistics, 'finalPrice'));
 
         $subtotal = $materialsTotal + $labourTotal + $expensesTotal + $logisticsTotal;
         $discount = min(max($discountAmount, 0), $subtotal);
@@ -741,92 +842,16 @@ class QuoteController extends Controller
             'vatAmount' => round($vatAmount, 2),
             'grandTotal' => round($grandTotal, 2),
             'totalMargin' => round($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin, 2),
-            'overallMarginPercentage' => $subtotal > 0 ? round(($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin) / ($materialsBase + $labourBase + $expensesBase + $logisticsBase) * 100, 2) : 0
+            'overallMarginPercentage' => ($materialsBase + $labourBase + $expensesBase + $logisticsBase) > 0
+                ? round(($materialsMargin + $labourMargin + $expensesMargin + $logisticsMargin - $discount) / ($materialsBase + $labourBase + $expensesBase + $logisticsBase) * 100, 2)
+                : 0
         ];
-    }
-
-    /**
-     * Get unit price for a material from budget data or approved additions
-     */
-    private function getBudgetMaterialPrice(TaskBudgetData $budgetData, $materialId): float
-    {
-        \Log::info("getBudgetMaterialPrice called", [
-            'materialId' => $materialId,
-            'budgetDataId' => $budgetData->id
-        ]);
-
-        // First check the main budget materials data
-        if ($budgetData->materials_data) {
-            foreach ($budgetData->materials_data as $element) {
-                foreach ($element['materials'] ?? [] as $material) {
-                    if (isset($material['id']) && $material['id'] == $materialId) {
-                        \Log::info("Found material in main budget data", [
-                            'materialId' => $materialId,
-                            'unitPrice' => $material['unitPrice'] ?? 0
-                        ]);
-                        return (float) ($material['unitPrice'] ?? 0);
-                    }
-                }
-            }
-        }
-
-        // If not found in main budget, check APPROVED budget additions only.
-        // Draft additions are unapproved cost data and must not price a quote.
-        $additions = \App\Models\BudgetAddition::where('task_budget_data_id', $budgetData->id)
-            ->where('source_type', 'materials_additional')
-            ->where('status', 'approved')
-            ->orderBy('updated_at', 'desc') // Get most recent first
-            ->get();
-
-        \Log::info("Checking budget additions for material price", [
-            'materialId' => $materialId,
-            'additionsCount' => $additions->count()
-        ]);
-
-        foreach ($additions as $addition) {
-            // Check if this addition is for the material we're looking for
-            if ($addition->source_material_id == $materialId) {
-                if ($addition->materials) {
-                    foreach ($addition->materials as $material) {
-                        // Prioritize non-zero values, check both camelCase and snake_case
-                        $unitPrice = ($material['unitPrice'] ?? 0) > 0
-                            ? (float) $material['unitPrice']
-                            : (float) ($material['unit_price'] ?? 0);
-
-                        \Log::info("Checking material in addition", [
-                            'additionId' => $addition->id,
-                            'additionStatus' => $addition->status,
-                            'materialId' => $materialId,
-                            'material_unitPrice' => $material['unitPrice'] ?? null,
-                            'material_unit_price' => $material['unit_price'] ?? null,
-                            'calculated_unitPrice' => $unitPrice
-                        ]);
-
-                        if ($unitPrice > 0) {
-                            \Log::info("Found material price in budget addition", [
-                                'additionId' => $addition->id,
-                                'additionStatus' => $addition->status,
-                                'materialId' => $materialId,
-                                'unitPrice' => $unitPrice
-                            ]);
-                            return $unitPrice;
-                        }
-                    }
-                }
-            }
-        }
-
-        \Log::warning("No unit price found for material", [
-            'materialId' => $materialId
-        ]);
-
-        return 0.0;
     }
 
     /**
      * Transform budget data to quote format
      */
-    private function transformBudgetToQuote(TaskBudgetData $budgetData, $approvedAdditions = null, ?array $preferredMargins = null): array
+    private function transformBudgetToQuote(TaskBudgetData $budgetData, ?array $preferredMargins = null): array
     {
         \Log::info("Starting budget data transformation");
 
@@ -881,171 +906,6 @@ class QuoteController extends Controller
             }
         }
 
-        // Add approved budget additions to materials, labour, expenses, logistics
-        if ($approvedAdditions) {
-            \Log::info("Including " . $approvedAdditions->count() . " approved budget additions");
-
-            foreach ($approvedAdditions as $addition) {
-                // Add materials from approved additions
-                if ($addition->materials) {
-                    foreach ($addition->materials as $material) {
-                        // Calculate totals for this material
-                        // Support both camelCase and snake_case field names
-                        // Prioritize non-zero values
-                        $quantity = $material['quantity'] ?? 0;
-                        $unitPrice = ($material['unitPrice'] ?? 0) > 0
-                            ? $material['unitPrice']
-                            : ($material['unit_price'] ?? 0);
-                        $totalPrice = ($material['totalPrice'] ?? 0) > 0
-                            ? $material['totalPrice']
-                            : (($material['total_price'] ?? 0) > 0
-                                ? $material['total_price']
-                                : ($quantity * $unitPrice));
-
-                        \Log::info("Processing addition material", [
-                            'addition_id' => $addition->id,
-                            'addition_status' => $addition->status,
-                            'material_id' => $material['id'] ?? null,
-                            'quantity' => $quantity,
-                            'unitPrice' => $unitPrice,
-                            'totalPrice' => $totalPrice,
-                            'source_type' => $addition->source_type,
-                            'source_material_id' => $addition->source_material_id,
-                            'material_data' => $material
-                        ]);
-
-                        // For materials_additional type, always get the latest price from the addition itself
-                        // (which was updated when the user edited the virtual addition)
-                        if ($addition->source_type === 'materials_additional' && $addition->source_material_id) {
-                            \Log::info("Getting latest unit price for materials_additional type", [
-                                'addition_id' => $addition->id,
-                                'source_material_id' => $addition->source_material_id,
-                                'current_unitPrice' => $unitPrice
-                            ]);
-
-                            // Get the latest price from budget additions (including draft updates)
-                            $latestPrice = $this->getBudgetMaterialPrice($budgetData, $addition->source_material_id);
-                            if ($latestPrice > 0) {
-                                \Log::info("Using latest unit price from budget addition", [
-                                    'source_material_id' => $addition->source_material_id,
-                                    'latest_price' => $latestPrice,
-                                    'original_price' => $unitPrice
-                                ]);
-                                $unitPrice = $latestPrice;
-                            } else {
-                                \Log::info("No updated price found, using addition's stored price", [
-                                    'source_material_id' => $addition->source_material_id,
-                                    'stored_price' => $unitPrice
-                                ]);
-                            }
-                        }
-
-                        // Recalculate totals with final unit price
-                        $totalPrice = $quantity * $unitPrice;
-                        $marginAmount = $totalPrice * ($m_margin / 100);
-                        $finalPrice = $totalPrice + $marginAmount;
-
-                        \Log::info("Final addition material calculations", [
-                            'addition_id' => $addition->id,
-                            'material_id' => $material['id'] ?? null,
-                            'final_unitPrice' => $unitPrice,
-                            'final_totalPrice' => $totalPrice,
-                            'final_marginAmount' => $marginAmount,
-                            'final_finalPrice' => $finalPrice
-                        ]);
-
-                        $materials[] = [
-                            'id' => 'addition_' . $addition->id . '_material_' . $material['id'],
-                            'templateId' => null,
-                            'name' => 'Budget Addition: ' . $addition->title,
-                            'description' => '',
-                            'quantity' => 1,
-                            'materials' => [
-                                [
-                                    'id' => $material['id'],
-                                    'description' => $material['description'],
-                                    'unitOfMeasurement' => $material['unitOfMeasurement'] ?? $material['unit_of_measurement'] ?? '',
-                                    'quantity' => $quantity,
-                                    'days' => 1,
-                                    'unitPrice' => $unitPrice,
-                                    'totalPrice' => $totalPrice,
-                                    'isAddition' => true,
-                                    'marginPercentage' => $m_margin,
-                                    'marginAmount' => $marginAmount,
-                                    'finalPrice' => $finalPrice
-                                ]
-                            ],
-                            'baseTotal' => $totalPrice,
-                            'marginPercentage' => $m_margin,
-                            'marginAmount' => $marginAmount,
-                            'finalTotal' => $finalPrice
-                        ];
-                    }
-                }
-
-                // Add labour from approved additions
-                if ($addition->labour) {
-                    $labour = array_merge($labour, array_map(function ($item) use ($l_margin) {
-                        $amount = $item['amount'] ?? (($item['quantity'] ?? 1) * ($item['unitRate'] ?? 0));
-                        $marginAmount = $amount * ($l_margin / 100);
-                        return [
-                            'id' => $item['id'],
-                            'type' => $item['type'] ?? 'Labour',
-                            'unit' => $item['unit'] ?? 'Hours',
-                            'quantity' => $item['quantity'] ?? 1,
-                            'unitRate' => $item['unitRate'] ?? $amount,
-                            'amount' => $amount,
-                            'isAddition' => true,
-                            'category' => $item['category'] ?? 'Additional Labour',
-                            'marginPercentage' => $l_margin,
-                            'marginAmount' => $marginAmount,
-                            'finalPrice' => $amount + $marginAmount
-                        ];
-                    }, $addition->labour));
-                }
-
-                // Add expenses from approved additions
-                if ($addition->expenses) {
-                    $expenses = array_merge($expenses, array_map(function ($item) use ($e_margin) {
-                        $amount = $item['amount'] ?? 0;
-                        $marginAmount = $amount * ($e_margin / 100);
-                        $finalPrice = $amount + $marginAmount;
-                        return [
-                            'id' => $item['id'],
-                            'description' => $item['description'],
-                            'category' => $item['category'] ?? 'Additional Expense',
-                            'amount' => $amount,
-                            'isAddition' => true,
-                            'marginPercentage' => $e_margin,
-                            'marginAmount' => $marginAmount,
-                            'finalPrice' => $finalPrice
-                        ];
-                    }, $addition->expenses));
-                }
-
-                // Add logistics from approved additions
-                if ($addition->logistics) {
-                    $logistics = array_merge($logistics, array_map(function ($item) use ($lo_margin) {
-                        $amount = $item['amount'] ?? (($item['quantity'] ?? 1) * ($item['unitRate'] ?? 0));
-                        $marginAmount = $amount * ($lo_margin / 100);
-                        $finalPrice = $amount + $marginAmount;
-                        return [
-                            'id' => $item['id'],
-                            'vehicleReg' => $item['vehicleReg'] ?? '',
-                            'description' => $item['description'],
-                            'unit' => $item['unit'] ?? 'Trip',
-                            'quantity' => $item['quantity'] ?? 1,
-                            'unitRate' => $item['unitRate'] ?? $amount,
-                            'amount' => $amount,
-                            'isAddition' => true,
-                            'marginPercentage' => $lo_margin,
-                            'marginAmount' => $marginAmount,
-                            'finalPrice' => $finalPrice
-                        ];
-                    }, $addition->logistics));
-                }
-            }
-        }
 
         // Transform labour (no individual margins)
         if ($budgetData->labour_data) {
@@ -1802,6 +1662,10 @@ class QuoteController extends Controller
             $task = EnquiryTask::find($originalQuoteTask->id);
 
             // Create or update approval record in quote_approvals table (required for validation)
+            // Snapshot the canonical server record, never the optional browser
+            // payload. Excel approvals can legitimately submit no quote_data;
+            // persisting that as JSON "null" made downstream Materials unreadable.
+            $canonicalApprovalSnapshot = $this->formatQuoteResponse($quoteData->fresh(), $task);
             \DB::table('quote_approvals')->updateOrInsert(
                 ['task_id' => $taskId],
                 [
@@ -1812,7 +1676,7 @@ class QuoteController extends Controller
                     'rejection_reason' => $request->approval_status === 'rejected' ? $request->rejection_reason : null,
                     'comments' => $request->comments,
                     'quote_amount' => $request->quote_amount,
-                    'quote_data' => json_encode($request->quote_data),
+                    'quote_data' => json_encode($canonicalApprovalSnapshot, JSON_THROW_ON_ERROR),
                     'created_at' => now(),
                     'updated_at' => now()
                 ]
@@ -1943,6 +1807,7 @@ class QuoteController extends Controller
             'excel_quote_amount'      => $quoteData->excel_quote_amount ? (float) $quoteData->excel_quote_amount : null,
             'excel_quote_uploaded_at' => $quoteData->excel_quote_uploaded_at,
             'excel_quote_insights'    => $quoteData->excel_quote_insights,
+            'excel_quote_extraction'  => $quoteData->excel_quote_extraction,
             'excel_quote_file_url'    => $quoteData->excel_quote_file ? $this->excelQuoteSignedUrl($quoteData->enquiry_task_id) : null,
             'createdAt'            => $quoteData->created_at,
             'updatedAt'            => $quoteData->updated_at,
@@ -1989,6 +1854,7 @@ class QuoteController extends Controller
             'file'           => 'required|file|max:20480|mimes:xlsx,xls,csv,ods',
             'quote_amount'   => 'required|numeric|min:0',
             'revision_notes' => 'nullable|string|max:500',
+            'extraction'     => 'nullable|json|max:2000000',
         ]);
 
         if ($validator->fails()) {
@@ -2006,7 +1872,15 @@ class QuoteController extends Controller
                 $request->file('file')->getRealPath()
             )
             : null;
+        $extractor = app(\App\Modules\Projects\Services\QuoteWorkbookExtractor::class);
+        $reviewedExtraction = $request->filled('extraction')
+            ? json_decode((string) $request->input('extraction'), true)
+            : null;
+        $extraction = is_array($reviewedExtraction)
+            ? $extractor->normalizeReview($reviewedExtraction)
+            : $extractor->extract($request->file('file')->getRealPath());
 
+        $path = null;
         try {
             $file         = $request->file('file');
             $originalName = $file->getClientOriginalName();
@@ -2029,6 +1903,7 @@ class QuoteController extends Controller
                         'excel_quote_amount'      => (float) $existing->excel_quote_amount,
                         'excel_quote_uploaded_at' => optional($existing->excel_quote_uploaded_at)->toIso8601String(),
                         'excel_quote_uploaded_by' => $existing->excel_quote_uploaded_by,
+                        'excel_quote_extraction'  => $existing->excel_quote_extraction,
                         'revision_notes'          => $request->input('revision_notes'),
                     ],
                     'created_by'     => auth()->id(),
@@ -2061,6 +1936,7 @@ class QuoteController extends Controller
                     'excel_quote_uploaded_by'  => auth()->id(),
                     'excel_quote_uploaded_at'  => now(),
                     'excel_quote_insights'     => $insights,
+                    'excel_quote_extraction'   => $extraction,
                     // Keep quote_amount in sync so downstream approval logic works
                     'quote_amount'             => $request->input('quote_amount'),
                 ]
@@ -2077,10 +1953,17 @@ class QuoteController extends Controller
                     'excel_quote_uploaded_at' => $quoteData->excel_quote_uploaded_at,
                     'quote_amount'            => $quoteData->quote_amount,
                     'insights'                => $insights,
+                    'extraction'              => $extraction,
                     'file_url'                => $this->excelQuoteSignedUrl($taskId),
                 ],
             ]);
         } catch (\Exception $e) {
+            // The file is written before database persistence. If persistence
+            // fails, remove only this newly generated path so retries do not
+            // accumulate unreferenced confidential quote workbooks.
+            if ($path && \Storage::disk('local')->exists($path)) {
+                \Storage::disk('local')->delete($path);
+            }
             \Log::error("Excel quote upload failed for task {$taskId}: " . $e->getMessage());
             return response()->json(['message' => 'Upload failed. Please try again.'], 500);
         }
@@ -2131,6 +2014,8 @@ class QuoteController extends Controller
                 'excel_quote_amount'      => null,
                 'excel_quote_uploaded_by' => null,
                 'excel_quote_uploaded_at' => null,
+                'excel_quote_insights'    => null,
+                'excel_quote_extraction'  => null,
             ]);
 
             return response()->json(['message' => 'Excel quote removed. You can now build the quote in-system.']);
@@ -2159,9 +2044,11 @@ class QuoteController extends Controller
 
         $detected = app(\App\Modules\Projects\Services\QuoteInsightsService::class)
             ->detectWorkbookTotal($request->file('file')->getRealPath());
+        $extraction = app(\App\Modules\Projects\Services\QuoteWorkbookExtractor::class)
+            ->extract($request->file('file')->getRealPath());
 
         return response()->json([
-            'data' => ['detected_total' => $detected],
+            'data' => ['detected_total' => $detected, 'extraction' => $extraction],
         ]);
     }
 

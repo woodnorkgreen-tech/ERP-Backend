@@ -54,11 +54,6 @@ class TaskBudgetData extends Model
         return $this->hasMany(BudgetApproval::class);
     }
 
-    public function budgetAdditions(): HasMany
-    {
-        return $this->hasMany(BudgetAddition::class);
-    }
-
     public function versions(): HasMany
     {
         return $this->hasMany(BudgetVersion::class)->orderBy('version_number', 'desc');

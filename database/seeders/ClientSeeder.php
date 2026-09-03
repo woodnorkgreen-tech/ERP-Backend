@@ -111,7 +111,10 @@ class ClientSeeder extends Seeder
         ];
 
         foreach ($clients as $clientData) {
-            \App\Modules\ClientService\Models\Client::create($clientData);
+            \App\Modules\ClientService\Models\Client::updateOrCreate(
+                ['email' => $clientData['email']],
+                $clientData
+            );
         }
 
         $this->command->info('Sample clients seeded successfully!');

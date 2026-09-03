@@ -9,6 +9,8 @@ class RequisitionItem extends Model
 {
     use HasFactory;
 
+    protected $with = ['uom'];
+
     protected $connection = 'mysql';
 
     protected $fillable = [
@@ -21,8 +23,11 @@ class RequisitionItem extends Model
         'budget_item_id',
         'budget_item_persistent_id',
         'material_id',
+        'expense_code_id',
+        'supplier_id',
         'custom_description',
         'quantity',
+        'uom_id',
         'unit_price',
         'internal_budget_unit_price',
         'total',
@@ -31,6 +36,7 @@ class RequisitionItem extends Model
         'procurement_item_snapshot',
     ];
     protected $casts = [
+        'quantity' => 'decimal:6',
         'unit_price' => 'decimal:2',
         'internal_budget_unit_price' => 'decimal:2',
         'total' => 'decimal:2',
@@ -55,5 +61,20 @@ class RequisitionItem extends Model
     public function material()
     {
         return $this->belongsTo('App\Modules\MaterialsLibrary\Models\LibraryMaterial', 'material_id');
+    }
+
+    public function uom()
+    {
+        return $this->belongsTo(\App\Modules\MaterialsLibrary\Models\UnitOfMeasure::class, 'uom_id');
+    }
+
+    public function expenseCode()
+    {
+        return $this->belongsTo(\App\Modules\Finance\CostCollector\Models\ExpenseCode::class);
+    }
+
+    public function supplier()
+    {
+        return $this->belongsTo(Supplier::class);
     }
 }

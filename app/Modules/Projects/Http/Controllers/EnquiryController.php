@@ -23,6 +23,7 @@ use App\Modules\Projects\Actions\CompleteProjectAction;
 use App\Modules\Projects\Actions\UpdateEnquiryAction;
 use App\Modules\Projects\Services\ProjectWorkflowStateService;
 use App\Services\Governance\ProjectGovernanceService;
+use App\Services\ProjectFinancialAccess;
 
 /**
  * @OA\Schema(
@@ -55,7 +56,8 @@ class EnquiryController extends Controller
         NotificationService $notificationService, 
         FinanceService $financeService,
         ProjectGovernanceService $governanceService,
-        \App\Modules\Projects\Services\SequencingService $sequencingService
+        \App\Modules\Projects\Services\SequencingService $sequencingService,
+        protected ProjectFinancialAccess $projectFinancialAccess,
     ) {
         $this->notificationService = $notificationService;
         $this->financeService = $financeService;
@@ -153,6 +155,14 @@ class EnquiryController extends Controller
     {
         $view = $request->input('view', 'enquiries');
 
+        if ($view === 'receivables') {
+            abort_unless(
+                $request->user()?->can(\App\Constants\Permissions::FINANCE_RECEIVABLES_READ),
+                403,
+                'You do not have access to project receivables.'
+            );
+        }
+
         // Billing needs only identity and finance-basis relationships. Loading the
         // full project graph here previously serialized every task, assignee and
         // deliverable for as many as 500 rows.
@@ -179,6 +189,7 @@ class EnquiryController extends Controller
                 \App\Modules\Projects\Filters\Enquiry\DateRangeFilter::class,
                 \App\Modules\Projects\Filters\Enquiry\ClientFilter::class,
                 \App\Modules\Projects\Filters\Enquiry\OfficerFilter::class,
+                \App\Modules\Projects\Filters\Enquiry\DeliveryDateStatusFilter::class,
             ])
             ->thenReturn();
 
@@ -1037,42 +1048,46 @@ class EnquiryController extends Controller
      */
     public function logPayment(
         Request $request,
-        ProjectEnquiry $enquiry,
-        ReleaseFinanceGateAction $releaseAction
+        ProjectEnquiry $enquiry
     ): JsonResponse
     {
         $validated = $request->validate([
             'amount' => 'required|numeric|gt:0',
+            'received_amount' => 'required|numeric|gte:amount',
             'payment_date' => 'nullable|date',
             'payment_method' => 'required|in:bank_transfer,mpesa,cash,cheque',
+            'payment_source_id' => 'required|integer|exists:payment_sources,id',
             'transaction_reference' => [
+                Rule::requiredIf(fn () => $request->input('payment_method') !== 'cash'),
                 'nullable',
                 'string',
                 'max:100',
-                Rule::unique('enquiry_payments', 'transaction_reference')
-                    ->where(fn ($query) => $query->where('project_enquiry_id', $enquiry->id)),
             ],
             'notes' => 'nullable|string|max:1000',
+            'evidence' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'],
         ]);
 
         try {
+            $source = \App\Modules\Finance\Models\PaymentSource::query()
+                ->whereKey($validated['payment_source_id'])->where('is_active', true)->firstOrFail();
+            $expectedTypes = [
+                'bank_transfer' => ['bank'], 'cheque' => ['bank'],
+                'mpesa' => ['mobile_money'], 'cash' => ['petty_cash'],
+            ];
+            if (!in_array($source->type, $expectedTypes[$validated['payment_method']], true)) {
+                throw new \DomainException('The receiving account does not match the selected payment method.');
+            }
+            if ($request->hasFile('evidence')) {
+                $validated['evidence_path'] = $request->file('evidence')->store('finance/receipts', 'public');
+            }
             $payment = $this->financeService->logPayment($enquiry, $validated);
             $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
-            $autoReleased = false;
-
-            if ($progress['is_threshold_met'] && !$enquiry->finance_released) {
-                $releaseAction->execute($enquiry->fresh(), Auth::id());
-                $autoReleased = true;
-                $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
-            }
 
             return response()->json([
-                'message' => $autoReleased
-                    ? 'Payment recorded and project released automatically.'
-                    : 'Payment recorded successfully.',
+                'message' => 'Receipt recorded and awaiting independent verification.',
                 'data' => $payment->load('recorder'),
                 'progress' => $progress,
-                'auto_released' => $autoReleased,
+                'auto_released' => false,
             ]);
         } catch (\DomainException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -1082,13 +1097,204 @@ class EnquiryController extends Controller
     }
 
     /**
+     * Headline figures and tab counts for the whole receivables book.
+     *
+     * The billing screen used to derive these in the browser, which meant it had
+     * to hold every receivables project to show six numbers — it fetched page
+     * one, read `last_page`, then fired every remaining page in parallel. Two
+     * consequences: an N-request fan-out that grows with the business, and
+     * totals that were only ever right because the client happened to have
+     * loaded everything. Anything that capped or failed a page silently
+     * understated the book.
+     *
+     * Computed with `FinanceService::getPaymentProgress` — the same call that
+     * produces each row's figures — rather than a SQL aggregate. Quote basis,
+     * approval snapshots and waivers decide a project's billable amount, and
+     * none of that is expressible as a sum; a faster aggregate would be a
+     * headline that disagreed with the rows beneath it.
+     *
+     * Chunked, so memory stays flat as the book grows.
+     */
+    public function receivablesSummary(Request $request): JsonResponse
+    {
+        abort_unless(
+            $request->user()?->can(\App\Constants\Permissions::FINANCE_RECEIVABLES_READ),
+            403,
+            'You do not have access to project receivables.'
+        );
+
+        $stats = [
+            'awaiting_release' => 0,
+            'in_production' => 0,
+            'settled' => 0,
+            'total_outstanding' => 0.0,
+            'total_project_value' => 0.0,
+            'total_paid' => 0.0,
+        ];
+
+        // Named for the tabs they drive, so a count and its tab cannot drift.
+        $tabs = ['action' => 0, 'partial' => 0, 'mobilized' => 0, 'settled' => 0, 'all' => 0];
+
+        // Pushed through the same filter pipeline the list uses, with the view
+        // forced to `receivables`. Re-stating the status set here would let the
+        // summary and the list drift onto different populations — and a headline
+        // that counts a different set from the rows below it is worse than no
+        // headline. The internal/external preset separation rides along for free.
+        $request->merge(['view' => 'receivables']);
+
+        $query = app(\Illuminate\Pipeline\Pipeline::class)
+            ->send(ProjectEnquiry::with('payments', 'quoteApprovals', 'enquiryTasks.quoteData'))
+            ->through([
+                \App\Modules\Projects\Filters\Enquiry\ViewTypeFilter::class,
+            ])
+            ->thenReturn();
+
+        $query->chunkById(200, function ($enquiries) use (&$stats, &$tabs) {
+                foreach ($enquiries as $enquiry) {
+                    $p = $this->financeService->getPaymentProgress($enquiry);
+
+                    $quote = (float) $p['total_quote'];
+                    $paid = (float) $p['total_paid'];
+                    $remaining = (float) $p['remaining'];
+                    $settled = $remaining <= 0 && $quote > 0;
+
+                    $stats['total_project_value'] += $quote;
+                    $stats['total_paid'] += $paid;
+                    $stats['total_outstanding'] += $remaining;
+                    $tabs['all']++;
+
+                    if ($settled) {
+                        $stats['settled']++;
+                        $tabs['settled']++;
+                    } elseif (in_array($enquiry->status, ['awaiting_deposit', 'quote_approved'], true)) {
+                        $stats['awaiting_release']++;
+                    } else {
+                        $stats['in_production']++;
+                    }
+
+                    // Mirrors the client predicates exactly; they are the tab
+                    // definitions and moving them must not redefine them.
+                    if (! $p['has_approved_quote']
+                        || ((float) $p['amount_required_for_threshold'] > 0 && empty($p['finance_released']))) {
+                        $tabs['action']++;
+                    }
+                    if ($paid > 0 && $remaining > 0) {
+                        $tabs['partial']++;
+                    }
+                    if ((float) $p['percentage'] >= (float) $p['threshold_percentage'] && $remaining > 0) {
+                        $tabs['mobilized']++;
+                    }
+                }
+        });
+
+        foreach (['total_outstanding', 'total_project_value', 'total_paid'] as $key) {
+            $stats[$key] = round($stats[$key], 2);
+        }
+
+        return response()->json(['data' => ['stats' => $stats, 'tabs' => $tabs]]);
+    }
+
+    public function receivablesPaymentSources(): JsonResponse
+    {
+        $sources = \App\Modules\Finance\Models\PaymentSource::query()
+            ->where('is_active', true)
+            ->whereIn('type', ['bank', 'mobile_money', 'petty_cash'])
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'type', 'currency']);
+
+        return response()->json(['data' => $sources]);
+    }
+
+    public function unallocatedReceipts(): JsonResponse
+    {
+        $receipts = \App\Modules\Finance\Models\ClientReceipt::query()
+            ->with(['paymentSource:id,code,name,type,currency', 'allocations' => fn ($query) => $query
+                ->whereNull('reversed_at')->with('enquiry:id,title,job_number')])
+            ->withSum(['allocations as allocated_amount' => fn ($query) => $query->whereNull('reversed_at')], 'amount')
+            ->orderByDesc('payment_date')
+            ->get()
+            ->filter(fn ($receipt) => (float) $receipt->received_amount > (float) ($receipt->allocated_amount ?? 0))
+            ->values()
+            ->map(function ($receipt) {
+                $allocated = (float) ($receipt->allocated_amount ?? 0);
+                return [
+                    'id' => $receipt->id,
+                    'received_amount' => (float) $receipt->received_amount,
+                    'allocated_amount' => $allocated,
+                    'available_amount' => (float) $receipt->received_amount - $allocated,
+                    'payment_date' => $receipt->payment_date?->toDateString(),
+                    'payment_method' => $receipt->payment_method,
+                    'transaction_reference' => $receipt->transaction_reference,
+                    'evidence_path' => $receipt->evidence_path,
+                    'payment_source' => $receipt->paymentSource,
+                    'allocations' => $receipt->allocations,
+                ];
+            });
+
+        return response()->json(['data' => $receipts]);
+    }
+
+    public function allocateReceipt(
+        Request $request,
+        \App\Modules\Finance\Models\ClientReceipt $receipt
+    ): JsonResponse {
+        $validated = $request->validate([
+            'enquiry_id' => 'required|integer|exists:project_enquiries,id',
+            'amount' => 'required|numeric|gt:0',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        $enquiry = ProjectEnquiry::findOrFail($validated['enquiry_id']);
+        try {
+            $allocation = $this->financeService->allocateReceipt($receipt, $enquiry, $validated);
+            return response()->json([
+                'message' => 'Receipt allocated and awaiting independent verification.',
+                'data' => $allocation->load(['enquiry:id,title,job_number', 'paymentSource']),
+            ], 201);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    public function verifyPayment(
+        Request $request,
+        ProjectEnquiry $enquiry,
+        $paymentId,
+        ReleaseFinanceGateAction $releaseAction
+    ): JsonResponse {
+        $payment = $enquiry->payments()->findOrFail($paymentId);
+
+        try {
+            $verified = $this->financeService->verifyPayment($payment, (int) $request->user()->id);
+            $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
+            $autoReleased = false;
+
+            if ($progress['is_threshold_met'] && !$enquiry->finance_released) {
+                $releaseAction->execute($enquiry->fresh(), (int) $request->user()->id);
+                $autoReleased = true;
+                $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
+            }
+
+            return response()->json([
+                'message' => $autoReleased
+                    ? 'Receipt verified and project released automatically.'
+                    : 'Receipt verified successfully.',
+                'data' => $verified,
+                'progress' => $progress,
+                'auto_released' => $autoReleased,
+            ]);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
      * Update an existing payment
      */
     public function updatePayment(
         Request $request,
         ProjectEnquiry $enquiry,
-        $paymentId,
-        ReleaseFinanceGateAction $releaseAction
+        $paymentId
     ): JsonResponse
     {
         // Scope to the route enquiry so a payment cannot be edited through another project's URL
@@ -1103,7 +1309,9 @@ class EnquiryController extends Controller
                 'string',
                 'max:100',
                 Rule::unique('enquiry_payments', 'transaction_reference')
-                    ->where(fn ($query) => $query->where('project_enquiry_id', $enquiry->id))
+                    ->where(fn ($query) => $query
+                        ->where('payment_source_id', $payment->payment_source_id)
+                        ->whereNull('reversed_at'))
                     ->ignore($payment->id),
             ],
             'reason' => 'required|string|min:5', // Mandatory reason for correction
@@ -1112,22 +1320,15 @@ class EnquiryController extends Controller
         try {
             $updatedPayment = $this->financeService->updatePayment($payment, $validated, $validated['reason']);
             $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
-            $autoReleased = false;
-
-            if ($progress['is_threshold_met'] && !$enquiry->finance_released) {
-                $releaseAction->execute($enquiry->fresh(), Auth::id());
-                $autoReleased = true;
-                $progress = $this->financeService->getPaymentProgress($enquiry->fresh());
-            }
 
             return response()->json([
-                'message' => $autoReleased
-                    ? 'Payment corrected and project released automatically.'
-                    : 'Payment updated successfully',
+                'message' => 'Receipt corrected and returned for independent verification.',
                 'data' => $updatedPayment->load('recorder'),
                 'progress' => $progress,
-                'auto_released' => $autoReleased,
+                'auto_released' => false,
             ]);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to update payment: ' . $e->getMessage()], 500);
         }
@@ -1142,18 +1343,20 @@ class EnquiryController extends Controller
         $payment = $enquiry->payments()->findOrFail($paymentId);
 
         $validated = $request->validate([
-            'reason' => 'required|string|min:5', // Mandatory reason for deletion
+            'reason' => 'required|string|min:5',
         ]);
 
         try {
             $this->financeService->deletePayment($payment, $validated['reason']);
 
             return response()->json([
-                'message' => 'Payment deleted successfully',
+                'message' => 'Receipt reversed successfully',
                 'progress' => $this->financeService->getPaymentProgress($enquiry)
             ]);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Failed to delete payment: ' . $e->getMessage()], 500);
+            return response()->json(['message' => 'Failed to reverse receipt: ' . $e->getMessage()], 500);
         }
     }
 
@@ -1162,9 +1365,11 @@ class EnquiryController extends Controller
      */
     public function getFinanceProgress(ProjectEnquiry $enquiry): JsonResponse
     {
+        abort_unless($this->projectFinancialAccess->canReadReceivables(request()->user(), $enquiry), 403);
+
         try {
             $progress = $this->financeService->getPaymentProgress($enquiry);
-            $payments = $enquiry->payments()->with('recorder')->orderBy('payment_date', 'desc')->get();
+            $payments = $enquiry->payments()->with(['clientReceipt', 'paymentSource', 'recorder', 'verifier', 'reverser'])->orderBy('payment_date', 'desc')->get();
 
             return response()->json([
                 'success' => true,
@@ -1185,6 +1390,8 @@ class EnquiryController extends Controller
     {
         $validated = $request->validate([
             'billing_amount' => 'required|numeric|gt:0',
+            'reason' => 'required|string|min:15|max:1000',
+            'mobilization_threshold_percentage' => 'nullable|numeric|min:0|max:100',
         ]);
 
         if ($this->financeService->getPaymentProgress($enquiry)['has_approved_quote']) {
@@ -1195,7 +1402,8 @@ class EnquiryController extends Controller
             $enquiry->update([
                 'quote_requirement_waived' => true,
                 'quote_waiver_billing_amount' => $validated['billing_amount'] ?? null,
-                'quote_waiver_reason' => 'Quote amount entered directly in Project Billing.',
+                'quote_waiver_reason' => $validated['reason'],
+                'mobilization_threshold_percentage' => $validated['mobilization_threshold_percentage'] ?? 70,
                 'quote_waived_by' => Auth::id(),
                 'quote_waived_at' => now(),
             ]);
@@ -1208,6 +1416,8 @@ class EnquiryController extends Controller
                 'message' => 'Quote amount recorded directly in Project Billing',
                 'context' => [
                     'billing_amount' => $validated['billing_amount'],
+                    'reason' => $validated['reason'],
+                    'mobilization_threshold_percentage' => $validated['mobilization_threshold_percentage'] ?? 70,
                 ],
                 'ip_address' => $request->ip(),
             ]);
@@ -1217,6 +1427,105 @@ class EnquiryController extends Controller
             'message' => 'Quote amount saved in Project Billing.',
             'data' => ['progress' => $this->financeService->getPaymentProgress($enquiry->fresh())],
         ]);
+    }
+
+    public function updateReceivablesTerms(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    {
+        $validated = $request->validate([
+            'mobilization_threshold_percentage' => 'required|numeric|min:0|max:100',
+            'reason' => 'required|string|min:10|max:1000',
+        ]);
+
+        DB::transaction(function () use ($request, $enquiry, $validated) {
+            $oldThreshold = (float) ($enquiry->mobilization_threshold_percentage ?? 70);
+            $enquiry->update(['mobilization_threshold_percentage' => $validated['mobilization_threshold_percentage']]);
+            \App\Models\GovernanceAuditLog::create([
+                'project_enquiry_id' => $enquiry->id,
+                'user_id' => Auth::id(),
+                'gate_type' => 'Receivables Terms',
+                'action_status' => 'authorized',
+                'message' => "Mobilization threshold changed from {$oldThreshold}% to {$validated['mobilization_threshold_percentage']}%",
+                'context' => ['reason' => $validated['reason'], 'old_threshold' => $oldThreshold, 'new_threshold' => $validated['mobilization_threshold_percentage']],
+                'ip_address' => $request->ip(),
+            ]);
+        });
+
+        return response()->json([
+            'message' => 'Receivables terms updated.',
+            'data' => ['progress' => $this->financeService->getPaymentProgress($enquiry->fresh())],
+        ]);
+    }
+
+    public function projectInvoices(ProjectEnquiry $enquiry): JsonResponse
+    {
+        $invoices = \App\Modules\Finance\Models\ProjectInvoice::query()->where('project_enquiry_id', $enquiry->id)
+            ->withSum('payments as paid_amount', 'project_invoice_allocations.amount')->orderByDesc('invoice_date')->get()
+            ->map(function ($invoice) {
+                $paid = (float) ($invoice->paid_amount ?? 0); $balance = max(0, (float) $invoice->total_amount - $paid);
+                return array_merge($invoice->toArray(), ['paid_amount'=>$paid,'balance'=>$balance,'days_overdue'=>$invoice->status==='issued' && $balance>0 && $invoice->due_date->isPast() ? $invoice->due_date->diffInDays(now()) : 0]);
+            });
+        return response()->json(['data'=>$invoices]);
+    }
+
+    public function createProjectInvoice(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    {
+        $data = $request->validate(['invoice_date'=>'required|date','due_date'=>'required|date|after_or_equal:invoice_date','subtotal'=>'required|numeric|gt:0','tax_amount'=>'nullable|numeric|min:0','notes'=>'nullable|string|max:1000']);
+        $total = (float) $data['subtotal'] + (float) ($data['tax_amount'] ?? 0);
+        try {
+            $invoice = DB::transaction(function () use ($enquiry,$data,$total) {
+                // Serialise the aggregate invariant on the parent. Without this
+                // lock, two individually valid invoices could both observe the
+                // same remaining balance and overbill the agreed price.
+                $lockedEnquiry = ProjectEnquiry::query()->lockForUpdate()->findOrFail($enquiry->id);
+                $basis = (float) $this->financeService->getPaymentProgress($lockedEnquiry)['total_quote'];
+                $existing = (float) \App\Modules\Finance\Models\ProjectInvoice::where('project_enquiry_id',$lockedEnquiry->id)->whereNot('status','void')->sum('total_amount');
+
+                if ($basis <= 0) {
+                    throw new \DomainException('This project has no agreed price yet, so it cannot be invoiced. Set the agreed price first.');
+                }
+                if ($existing + $total > $basis) {
+                    throw new \DomainException('That would bill the client more than the agreed price. Invoices so far come to '.number_format($existing,2).' and the agreed price is '.number_format($basis,2).', so this invoice cannot exceed '.number_format($basis-$existing,2).'.');
+                }
+
+                $invoice = \App\Modules\Finance\Models\ProjectInvoice::create([...$data,'tax_amount'=>$data['tax_amount']??0,'total_amount'=>$total,'invoice_number'=>'TMP-'.\Illuminate\Support\Str::uuid(),'project_enquiry_id'=>$lockedEnquiry->id,'created_by'=>Auth::id()]);
+                $invoice->update(['invoice_number'=>'INV-'.now()->format('Ym').'-'.str_pad((string)$invoice->id,6,'0',STR_PAD_LEFT)]); return $invoice;
+            });
+        } catch (\DomainException $exception) {
+            return response()->json(['message'=>$exception->getMessage()],422);
+        }
+        return response()->json(['message'=>'Draft invoice created.','data'=>$invoice],201);
+    }
+
+    public function issueProjectInvoice(ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
+    {
+        abort_unless((int)$invoice->project_enquiry_id===(int)$enquiry->id,404);
+        $invoice = DB::transaction(function () use ($invoice) {
+            $lockedInvoice = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
+            abort_unless($lockedInvoice->status==='draft',422,'Only draft invoices can be issued.');
+            $lockedInvoice->update(['status'=>'issued','issued_by'=>Auth::id(),'issued_at'=>now()]);
+            return $lockedInvoice;
+        });
+        return response()->json(['message'=>'Invoice issued.','data'=>$invoice]);
+    }
+
+    public function allocatePaymentToInvoice(Request $request, ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
+    {
+        abort_unless((int)$invoice->project_enquiry_id===(int)$enquiry->id,404);
+        $data=$request->validate(['payment_id'=>'required|integer|exists:enquiry_payments,id','amount'=>'required|numeric|gt:0']);
+        $payment=$enquiry->payments()->whereKey($data['payment_id'])->where('status','verified')->whereNull('reversed_at')->firstOrFail();
+        try {
+            DB::transaction(function () use ($invoice,$payment,$data) {
+                $lockedInvoice=$invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id); $lockedPayment=$payment->newQuery()->lockForUpdate()->findOrFail($payment->id);
+                $paymentUsed=(float)DB::table('project_invoice_allocations')->where('enquiry_payment_id',$lockedPayment->id)->sum('amount');
+                $invoicePaid=(float)DB::table('project_invoice_allocations')->where('project_invoice_id',$lockedInvoice->id)->sum('amount');
+                if ((float)$data['amount']>(float)$lockedPayment->amount-$paymentUsed || (float)$data['amount']>(float)$lockedInvoice->total_amount-$invoicePaid) throw new \DomainException('Allocation exceeds the available payment or invoice balance.');
+                DB::table('project_invoice_allocations')->insert(['project_invoice_id'=>$lockedInvoice->id,'enquiry_payment_id'=>$lockedPayment->id,'amount'=>$data['amount'],'allocated_by'=>Auth::id(),'created_at'=>now(),'updated_at'=>now()]);
+                if ($invoicePaid+(float)$data['amount'] >= (float)$lockedInvoice->total_amount) $lockedInvoice->update(['status'=>'paid']);
+            });
+        } catch (\DomainException $e) {
+            return response()->json(['message'=>$e->getMessage()],422);
+        }
+        return response()->json(['message'=>'Payment allocated to invoice.']);
     }
 
     /**
@@ -1241,6 +1550,15 @@ class EnquiryController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        $progress = $this->financeService->getPaymentProgress($enquiry);
+        if (!$progress['is_threshold_met']) {
+            abort_unless(
+                $request->user()?->can(\App\Constants\Permissions::FINANCE_RECEIVABLES_OVERRIDE),
+                403,
+                'Early release requires the receivables override permission.'
+            );
+        }
+
         try {
             $action->execute($enquiry, Auth::id(), $validated['notes'] ?? null);
 
@@ -1258,6 +1576,8 @@ class EnquiryController extends Controller
      */
     public function getGovernanceTrace(ProjectEnquiry $enquiry): JsonResponse
     {
+        abort_unless($this->projectFinancialAccess->canReadReceivables(request()->user(), $enquiry), 403);
+
         try {
             $logs = \App\Models\GovernanceAuditLog::with('user')
                 ->where('project_enquiry_id', $enquiry->id)

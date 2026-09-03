@@ -26,11 +26,11 @@ class LeaveManagementService
                 'name' => 'Annual Leave',
                 'code' => 'ANNUAL',
                 'days_per_year' => 21,
-                'monthly_accrual_rate' => null,
+                'monthly_accrual_rate' => 1.75,
                 'allow_advance' => false,
                 'color' => 'emerald',
                 'icon' => 'mdi-palm-tree',
-                'description' => 'Annual leave entitlement: 21 working days per calendar year.',
+                'description' => 'Kenya statutory minimum annual leave: 21 working days, earned at 1.75 days per completed month.',
                 'is_active' => true,
                 'requires_attachment' => false,
             ],
@@ -339,7 +339,11 @@ class LeaveManagementService
                 $carryForwardDays = $this->calculateCarryForwardDays($employee, $leaveType, $year);
                 $adjustmentDays = $this->sumAdjustmentDays($employee->id, $leaveType->id, $year);
 
-                $totalAvailable = $metrics['earned_days'] + $carryForwardDays;
+                // Available is based on the full year ceiling (prorated by hire date for
+                // partial-year employees), not gated by month-by-month accrual progress —
+                // a new joiner sees their whole prorated allowance up front, not a fraction
+                // that grows monthly.
+                $totalAvailable = $metrics['year_entitlement_days'] + $carryForwardDays;
                 // Available is the employee's actual balance after approved leave and manual adjustments.
                 // Pending requests are shown separately and only reserve requestable days.
                 $accruedRemaining = max($totalAvailable - $usedDays - $adjustmentDays, 0);
@@ -349,6 +353,10 @@ class LeaveManagementService
                 $advanceAvailableDays = $leaveType->allow_advance
                     ? max($requestableDays - $accruedRemaining, 0)
                     : 0;
+                // Displayed "used" folds in manual adjustments (e.g. a balance correction for
+                // leave taken outside the system) so it stays consistent with "available" —
+                // otherwise the two figures visibly stop adding up to the allocation.
+                $displayedUsedDays = $usedDays + $adjustmentDays;
 
                 return [
                     'leave_type_id' => $leaveType->id,
@@ -359,7 +367,7 @@ class LeaveManagementService
                     'allocated_days' => $metrics['year_entitlement_days'],
                     'earned_days' => $metrics['earned_days'],
                     'carry_forward_days' => $carryForwardDays,
-                    'used_days' => $usedDays,
+                    'used_days' => $displayedUsedDays,
                     'pending_days' => $pendingDays,
                     'adjustment_days' => $adjustmentDays,
                     'available_days' => $accruedRemaining,
@@ -561,9 +569,9 @@ class LeaveManagementService
         $metrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $year, $asOfDate);
         $carryForwardDays = $this->calculateCarryForwardDays($employee, $leaveType, $year);
         $adjustmentDays = $this->sumAdjustmentDays($employee->id, $leaveType->id, $year);
-        $remaining = $leaveType->allow_advance
-            ? ($metrics['year_entitlement_days'] + $carryForwardDays) - ($approved + $pending + $adjustmentDays)
-            : ($metrics['earned_days'] + $carryForwardDays) - ($approved + $pending + $adjustmentDays);
+        // Bookable against the full year ceiling (prorated by hire date), matching what's
+        // shown as "remaining" — not gated by month-by-month accrual progress.
+        $remaining = ($metrics['year_entitlement_days'] + $carryForwardDays) - ($approved + $pending + $adjustmentDays);
 
         if ($daysRequested > $remaining) {
             throw new \InvalidArgumentException(sprintf(
@@ -733,25 +741,8 @@ class LeaveManagementService
 
     public function calculateCarryForwardDays(Employee $employee, LeaveType $leaveType, int $year): float
     {
-        // Only calculate carry-forward for leave types with monthly accrual
-        if (!$leaveType->monthly_accrual_rate) {
-            return 0;
-        }
-
-        $previousYear = $year - 1;
-        
-        // Get metrics for the previous year
-        $previousYearMetrics = $this->getLeaveEntitlementMetrics($employee, $leaveType, $previousYear);
-        $previousYearUsed = $this->sumRequestedDays($employee->id, $leaveType->id, $previousYear, [LeaveRequest::STATUS_APPROVED, LeaveRequest::STATUS_RECALLED])
-            + $this->sumAdjustmentDays($employee->id, $leaveType->id, $previousYear);
-
-        $unusedPreviousYear = $previousYearMetrics['earned_days'] - $previousYearUsed;
-        
-        // Maximum carry-forward allowed (typically cannot carry more than annual entitlement)
-        $maxCarryForward = min((float) $leaveType->days_per_year, $previousYearMetrics['earned_days']);
-        
-        // Only carry forward up to the max allowed, and only if there are unused days
-        return min(max($unusedPreviousYear, 0), $maxCarryForward);
+        // Policy: unused leave lapses at year-end, it never rolls into the next year.
+        return 0.0;
     }
 
     public function restoreLeaveBalance(LeaveRequest $leaveRequest, ?float $daysToRestore = null): void

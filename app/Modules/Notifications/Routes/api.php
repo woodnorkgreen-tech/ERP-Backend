@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Notifications\Http\Controllers\NotificationController;
+use App\Modules\Notifications\Http\Controllers\PushRegistrationController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);
@@ -16,3 +17,4 @@ Route::post('notifications/{id}/read', [NotificationController::class, 'markAsRe
 Route::post('notifications/{id}/star', [NotificationController::class, 'toggleStar']);
 
 Route::post('user/device-token', [NotificationController::class, 'registerDeviceToken']);
+Route::post('push/register', [PushRegistrationController::class, 'register']);

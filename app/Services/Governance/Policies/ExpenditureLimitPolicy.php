@@ -30,7 +30,7 @@ class ExpenditureLimitPolicy extends BasePolicy
         
         // If budget is still zero, and it's not a special case, we block.
         if ($budget <= 0) {
-            return GateResult::blocked("Expenditure Gate: The project budget is set to 0.00. Please finalize the budget before committing funds.");
+            return GateResult::blocked("Project budget is KES 0.00. Finalize the project budget before approving this financial commitment.");
         }
 
         // Calculate total commitments (POs + Requisitions)
@@ -54,7 +54,7 @@ class ExpenditureLimitPolicy extends BasePolicy
         if ($newTotal > $budget) {
             $overage = $newTotal - $budget;
             return GateResult::blocked(
-                "Expenditure Gate: This commitment (GHS {$proposedAmount}) would exceed the project budget by GHS {$overage}. Total Limit: GHS {$budget}.",
+                "This commitment (KES ".number_format($proposedAmount, 2).") would exceed the project budget by KES ".number_format($overage, 2).". Budget: KES ".number_format($budget, 2).".",
                 [
                     'budget' => $budget,
                     'current_commitment' => $totalCommitment,

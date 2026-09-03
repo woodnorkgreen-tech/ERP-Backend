@@ -5,14 +5,18 @@ namespace App\Modules\ProcurementStores\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\BoardMovement;
+use App\Modules\ProcurementStores\Models\BoardReturnBatch;
+use App\Modules\ProcurementStores\Models\BoardWorkflowTask;
 use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Requests\StoreBoardRequest;
 use App\Modules\ProcurementStores\Services\BoardIngestionService;
 use App\Modules\ProcurementStores\Services\BoardRegistrationService;
+use App\Modules\ProcurementStores\Services\BoardValuationService;
 use App\Modules\ProcurementStores\Services\BoardWorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class BoardController extends Controller
 {
@@ -20,6 +24,7 @@ class BoardController extends Controller
         private readonly BoardIngestionService    $ingestionService,
         private readonly BoardRegistrationService $registrationService,
         private readonly BoardWorkflowService     $workflow,
+        private readonly BoardValuationService    $valuation,
     ) {}
 
     // ─── Ingestion ────────────────────────────────────────────────────────────
@@ -200,70 +205,49 @@ class BoardController extends Controller
         ]);
     }
 
-    // ─── Lifecycle transitions ────────────────────────────────────────────────
-
     /**
-     * POST /boards/{id}/allocate
-     * Allocate a board to a production job.
-     *
-     * This is the direct-allocation path (used from the board detail UI).
-     * It must decrement stock and write a check_out log here — the same work
-     * that BoardRequestController::fulfil() does on the board-request path.
-     * Without this, a board allocated directly never has its stock decremented,
-     * so any subsequent offcut creation (which adds +1 for the offcut returning
-     * to stores) results in a net stock increase when a board is consumed.
+     * GET /boards/job/{jobRef}/history
+     * Every tracked board that has moved against a job, including boards already
+     * returned to Stores. The lifecycle status is relative to this job rather
+     * than the board's current status (a returned board may later serve another job).
      */
-    public function allocate(Request $request, int $id): JsonResponse
+    public function jobHistory(string $jobRef): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
-            return response()->json(['message' => 'You are not permitted to allocate boards.'], 403);
-        }
+        $boards = Board::query()
+            ->whereHas('movements', fn ($query) => $query->where('job_ref', $jobRef))
+            ->with([
+                'libraryMaterial.workstation',
+                'movements' => fn ($query) => $query
+                    ->where('job_ref', $jobRef)
+                    ->with('performer')
+                    ->orderBy('ts'),
+            ])
+            ->get();
 
-        $request->validate(['job_ref' => 'required|string|max:100']);
+        $data = $boards->map(function (Board $board) {
+            $lastMovement = $board->movements->last();
+            $returned = $lastMovement
+                && in_array($lastMovement->to_status, ['Available', 'Quarantine'], true);
+            $projectStatus = $returned
+                ? 'Returned'
+                : (in_array($lastMovement?->to_status, ['Consumed', 'Scrapped'], true)
+                    ? $lastMovement->to_status
+                    : 'Issued');
 
-        $board = Board::findOrFail($id);
-
-        try {
-            DB::transaction(function () use ($board, $request) {
-                $board->transitionTo('Allocated', auth()->id(), $request->notes, $request->job_ref);
-
-                $stock = Stock::where('material_id', $board->library_material_id)->first();
-                if ($stock) {
-                    $stock->decrement('quantity_on_hand', 1);
-
-                    // Direct allocation bypasses the board-request reservation flow.
-                    // If a pending request had soft-reserved this material, the board we
-                    // just issued may have been one of the reserved units — clamp reserved
-                    // down to on-hand so available_quantity (on_hand − reserved) can't go
-                    // negative and the later fulfil() can't over-issue.
-                    $fresh = $stock->fresh();
-                    if ($fresh->quantity_reserved > $fresh->quantity_on_hand) {
-                        $fresh->update(['quantity_reserved' => $fresh->quantity_on_hand]);
-                    }
-                }
-
-                \App\Modules\ProcurementStores\Models\InventoryLog::create([
-                    'material_id'  => $board->library_material_id,
-                    'user_id'      => auth()->id(),
-                    'type'         => 'check_out',
-                    'usage_type'   => 'reusable',
-                    'batch_number' => $board->batch_number,
-                    'quantity'     => -1,
-                    'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
-                    'reference_no' => $request->job_ref,
-                    'notes'        => "Board [{$board->tracking_code}] issued directly to job [{$request->job_ref}].",
-                    'logged_at'    => now(),
-                ]);
-            });
-        } catch (\InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
+            return array_merge($this->formatBoardDetail($board), [
+                'project_status' => $projectStatus,
+                'project_last_movement_at' => $lastMovement?->ts,
+            ]);
+        })->sortByDesc('project_last_movement_at')->values();
 
         return response()->json([
-            'message' => "Board [{$board->tracking_code}] reserved for job [{$request->job_ref}].",
-            'board'   => $this->formatBoardDetail($board->fresh(['movements', 'libraryMaterial'])),
+            'data' => $data,
+            'job_ref' => $jobRef,
+            'count' => $data->count(),
         ]);
     }
+
+    // ─── Lifecycle transitions ────────────────────────────────────────────────
 
     /**
      * POST /boards/{id}/start-processing
@@ -343,15 +327,42 @@ class BoardController extends Controller
         ]);
     }
 
+    /** Append an operational observation without changing lifecycle state. */
+    public function addNote(Request $request, int $id): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to add board notes.'], 403);
+        }
+        $validated = $request->validate(['notes' => 'required|string|min:3|max:1000']);
+
+        $board = DB::transaction(function () use ($validated, $id) {
+            $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
+            BoardMovement::create([
+                'board_id' => $board->id,
+                'from_status' => $board->status,
+                'to_status' => $board->status,
+                'performed_by' => auth()->id(),
+                'notes' => $validated['notes'],
+                'job_ref' => $board->assigned_job_ref,
+            ]);
+            return $board->fresh(['movements', 'libraryMaterial']);
+        });
+
+        return response()->json(['message' => 'Board observation recorded.', 'board' => $this->formatBoardDetail($board)]);
+    }
+
     /**
      * GET /boards/workflow-tasks
      * Returns pending workflow tasks for the authenticated user's role.
      */
     public function workflowTasks(): JsonResponse
     {
-        $role = auth()->user()->getRoleNames()->first() ?? '';
+        $roles = auth()->user()->getRoleNames();
+        if ($roles->contains(fn ($role) => in_array($role, ['Manager', 'Super Admin'], true))) {
+            $roles = $roles->merge(['Stores'])->unique();
+        }
 
-        $tasks = $this->workflow->pendingTasksForRole($role);
+        $tasks = $this->workflow->pendingTasksForRoles($roles->all());
 
         return response()->json(['data' => $tasks]);
     }
@@ -378,15 +389,29 @@ class BoardController extends Controller
      */
     public function returnOffcut(int $taskId): JsonResponse
     {
+        $workflowTask = BoardWorkflowTask::findOrFail($taskId);
+        $isOffcut = $workflowTask->task_type === BoardWorkflowTask::TYPE_OFFCUT_TO_RETURN;
+        request()->validate([
+            'condition_grade' => ($isOffcut ? 'required' : 'nullable') . '|string|in:A,B,C,D',
+            'notes' => 'nullable|string|max:500',
+        ]);
+        if ($isOffcut && in_array(request('condition_grade'), ['C', 'D'], true) && !trim((string) request('notes'))) {
+            return response()->json(['message' => 'Describe the damage before receiving a Grade C or D offcut.'], 422);
+        }
         try {
-            $task = $this->workflow->returnOffcut($taskId, auth()->user());
+            $task = $this->workflow->returnOffcut(
+                $taskId,
+                auth()->user(),
+                request('condition_grade'),
+                request('notes'),
+            );
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
             return response()->json(['message' => 'Task not found or already completed.'], 404);
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response()->json(['message' => 'Offcut returned to stores rack.', 'data' => $task]);
+        return response()->json(['message' => 'Offcut physically received and reconciled in Stores.', 'data' => $task]);
     }
 
     /**
@@ -455,63 +480,59 @@ class BoardController extends Controller
             'notes'            => 'nullable|string',
         ]);
 
-        $board = Board::findOrFail($id);
-
-        // Must be WIP before consuming
-        if (!$board->hasStatus('WIP')) {
-            try {
-                $board->transitionTo('WIP', auth()->id(), 'Auto-advanced to WIP for consumption');
-            } catch (\InvalidArgumentException $e) {
-                return response()->json(['message' => $e->getMessage()], 422);
-            }
-        }
-
-        $offcut    = null;
         $hasOffcut = $request->filled('offcut_length') && $request->filled('offcut_width');
 
-        // Offcut dimensions must be physically possible — reject anything that exceeds the parent.
-        if ($hasOffcut) {
-            $errors = [];
-            if ((int) $request->offcut_length > $board->length) {
-                $errors[] = "Offcut length ({$request->offcut_length}mm) exceeds parent board length ({$board->length}mm).";
-            }
-            if ((int) $request->offcut_width > $board->width) {
-                $errors[] = "Offcut width ({$request->offcut_width}mm) exceeds parent board width ({$board->width}mm).";
-            }
-            if ($request->filled('offcut_thickness') && (int) $request->offcut_thickness > $board->thickness) {
-                $errors[] = "Offcut thickness ({$request->offcut_thickness}mm) exceeds parent board thickness ({$board->thickness}mm).";
-            }
-            if ($errors) {
-                return response()->json([
-                    'message' => implode(' ', $errors),
-                    'parent'  => ['length' => $board->length, 'width' => $board->width, 'thickness' => $board->thickness],
-                ], 422);
-            }
-        }
-
         try {
-            if ($hasOffcut) {
-                $offcut = $this->registrationService->registerOffcut(
-                    parentBoard: $board,
-                    length:      (int) $request->offcut_length,
-                    width:       (int) $request->offcut_width,
-                    thickness:   (int) ($request->offcut_thickness ?? $board->thickness),
-                    userId:      auth()->id(),
-                );
-            } else {
+            [$board, $offcut] = DB::transaction(function () use ($request, $id, $hasOffcut) {
+                $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
+
+                // Consumption is only meaningful for a board that is out on a
+                // job. Say so plainly rather than letting the caller decode a
+                // raw transition error for a board that is racked or terminal.
+                if (! in_array($board->status, ['Allocated', 'At Station', 'WIP'], true)) {
+                    throw new \InvalidArgumentException(
+                        "Board [{$board->tracking_code}] is [{$board->status}] and is not out on a job, so its use cannot be recorded."
+                    );
+                }
+
+                // There is deliberately no Allocated → WIP edge: reaching a
+                // station is a real physical step the map tracks. Walk that path
+                // instead of assuming a single hop, so a board that was issued
+                // but never formally dispatched can still be reconciled.
+                if ($board->hasStatus('Allocated')) {
+                    $board->transitionTo('At Station', auth()->id(), 'Auto-advanced: use recorded without an explicit dispatch step');
+                }
+                if (!$board->hasStatus('WIP')) {
+                    $board->transitionTo('WIP', auth()->id(), 'Auto-advanced to WIP for consumption');
+                }
+
+                if ($hasOffcut) {
+                    $errors = [];
+                    if ((int) $request->offcut_length > $board->length) $errors[] = "Offcut length exceeds the parent board length of {$board->length}mm.";
+                    if ((int) $request->offcut_width > $board->width) $errors[] = "Offcut width exceeds the parent board width of {$board->width}mm.";
+                    if ($request->filled('offcut_thickness') && (int) $request->offcut_thickness > $board->thickness) $errors[] = "Offcut thickness exceeds the parent thickness of {$board->thickness}mm.";
+                    if ($errors) throw new \InvalidArgumentException(implode(' ', $errors));
+
+                    $offcut = $this->registrationService->registerOffcut(
+                        parentBoard: $board,
+                        length: (int) $request->offcut_length,
+                        width: (int) $request->offcut_width,
+                        thickness: (int) ($request->offcut_thickness ?? $board->thickness),
+                        userId: auth()->id(),
+                    );
+                    $this->workflow->onOffcutRegistered($offcut);
+                    return [$board->fresh(), $offcut];
+                }
+
                 $board->transitionTo('Consumed', auth()->id(), $request->notes ?? 'Fully consumed');
-            }
+                return [$board->fresh(), null];
+            });
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
         // Stock was already decremented when the board was issued to the job (fulfil endpoint).
         // We only write a production note to the activity log — no stock movement here.
-
-        // If an offcut was created, fire the return-to-rack workflow task for Stores
-        if ($offcut) {
-            $this->workflow->onOffcutRegistered($offcut);
-        }
 
         return response()->json([
             'message' => "Board [{$board->tracking_code}] recorded as used." . ($offcut ? " Remaining piece [{$offcut->tracking_code}] created." : ''),
@@ -853,6 +874,138 @@ class BoardController extends Controller
         ]);
     }
 
+    // ─── Receipt valuation ────────────────────────────────────────────────────
+
+    /**
+     * GET /boards/unvalued
+     * Boards that are in Stores but carry no value, grouped the way they were
+     * received: one material, one receipt batch.
+     *
+     * These are the boards `fulfil()` refuses to issue. Grouping matters —
+     * a receipt price applies to a delivery, not to a sheet picked out of one,
+     * so this is the shape the storekeeper actually prices against.
+     */
+    public function unvalued(Request $request): JsonResponse
+    {
+        $query = $this->valuation->unvaluedQuery()->with(['libraryMaterial']);
+
+        if ($request->filled('library_material_id')) {
+            $query->where('library_material_id', $request->library_material_id);
+        }
+
+        $groups = $query->orderBy('library_material_id')->orderBy('id')->get()
+            ->groupBy(fn (Board $board) => $board->library_material_id . '|' . ($board->batch_number ?? ''))
+            ->map(fn ($boards) => [
+                'library_material_id' => $boards->first()->library_material_id,
+                'material_name'       => $boards->first()->libraryMaterial?->material_name ?? '—',
+                'material_code'       => $boards->first()->libraryMaterial?->material_code,
+                // Zero here is why the boards are unvalued in the first place:
+                // registration fell back to a catalogue price that did not exist.
+                'catalogue_unit_cost' => (float) ($boards->first()->libraryMaterial?->unit_cost ?? 0),
+                'batch_number'        => $boards->first()->batch_number,
+                'received_at'         => $boards->first()->created_at,
+                'count'               => $boards->count(),
+                'boards'              => $boards->map(fn (Board $board) => [
+                    'id'            => $board->id,
+                    'tracking_code' => $board->tracking_code,
+                    'status'        => $board->status,
+                    'is_offcut'     => (bool) $board->is_offcut,
+                    'area_m2'       => (float) $board->area_m2,
+                ])->values(),
+            ])
+            ->values();
+
+        return response()->json([
+            'data'  => $groups,
+            'count' => $groups->sum('count'),
+        ]);
+    }
+
+    /**
+     * POST /boards/record-valuation
+     * Record what a delivery cost per sheet, on boards that were received
+     * without a price.
+     *
+     * This is a Stores fact, not a Finance one — the person holding the
+     * delivery note is the person who knows the figure — but Finance carries
+     * the consequence, so both can record it. `reason` is required: a value
+     * typed in months after receipt has to say what it is based on.
+     */
+    public function recordValuation(Request $request): JsonResponse
+    {
+        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to record board valuations.'], 403);
+        }
+
+        $validated = $request->validate([
+            'board_ids'     => 'required_without:batch_number|array|min:1',
+            'board_ids.*'   => 'integer|exists:boards,id',
+            'batch_number'  => 'required_without:board_ids|string|max:100',
+            'library_material_id' => 'required_with:batch_number|integer|exists:library_materials,id',
+            'unit_value'    => 'required|numeric|min:0.01',
+            'reason'        => 'required|string|min:5|max:500',
+        ]);
+
+        // Resolve the target set through the same query that decides what is
+        // unvalued, so this endpoint can never price a board the list did not
+        // offer — an already-priced board, or one that has left Stores.
+        $targets = $this->valuation->unvaluedQuery()
+            ->when(
+                !empty($validated['board_ids']),
+                fn ($q) => $q->whereIn('id', $validated['board_ids']),
+                fn ($q) => $q->where('batch_number', $validated['batch_number'])
+                    ->where('library_material_id', $validated['library_material_id']),
+            )
+            ->get();
+
+        if ($targets->isEmpty()) {
+            return response()->json([
+                'message' => 'These boards already carry a value, or they have left Stores. '
+                    . 'A board that was already issued is repriced from the Stores finance exception, not here.',
+            ], 422);
+        }
+
+
+        $targetBatches = $targets->map(fn (Board $board) => $board->batch_number ?? '__NO_BATCH__')->unique();
+        if ($targetBatches->count() !== 1) {
+            return response()->json([
+                'message' => 'Select one receipt batch at a time. A single price cannot be applied across different deliveries.',
+            ], 422);
+        }
+
+        try {
+            $result = $this->valuation->record(
+                $targets,
+                (float) $validated['unit_value'],
+                auth()->id(),
+                $validated['reason'],
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $priced = $result['priced'];
+        $message = "{$priced->count()} board(s) valued at " . number_format((float) $validated['unit_value'], 2) . ' per sheet.';
+        if ($result['catalogue_updated']) {
+            $message .= ' The material had no catalogue cost, so this figure now seeds it.';
+        }
+        if ($result['skipped']->isNotEmpty()) {
+            $message .= " {$result['skipped']->count()} board(s) were already valued and were left unchanged.";
+        }
+
+        return response()->json([
+            'message' => $message,
+            'priced'  => $priced->map(fn (Board $board) => [
+                'id'            => $board->id,
+                'tracking_code' => $board->tracking_code,
+                'current_value' => (float) $board->current_value,
+                'is_offcut'     => (bool) $board->is_offcut,
+            ])->values(),
+            'skipped_count'     => $result['skipped']->count(),
+            'catalogue_updated' => $result['catalogue_updated'],
+        ]);
+    }
+
     // ─── Update (super admin only, Quarantine status only) ───────────────────
 
     /**
@@ -1034,13 +1187,503 @@ class BoardController extends Controller
         ]);
     }
 
+    /**
+     * Confirm the label on one board.
+     *
+     * The batch endpoint releases every quarantined board in an intake at once,
+     * which is right at the print queue but wrong from a single board's detail
+     * view — the client called /boards/{id}/confirm-labels, a route that did not
+     * exist, so the action always failed. A grade is still required: it records
+     * what the board physically looked like when it entered stock.
+     */
+    public function confirmBoardLabel(Request $request, int $id): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can confirm labels.'], 403);
+        }
+
+        $validated = $request->validate([
+            'condition_grade' => 'required|in:A,B,C,D',
+            'condition_notes' => 'nullable|string|max:500',
+        ]);
+
+        try {
+            $board = DB::transaction(function () use ($validated, $id) {
+                $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
+                if ($board->status !== 'Quarantine') {
+                    throw new \InvalidArgumentException(
+                        "Board [{$board->tracking_code}] is {$board->status}, so its label is already confirmed."
+                    );
+                }
+
+                $board->update([
+                    'label_printed' => true,
+                    'label_printed_by' => auth()->id(),
+                    'label_printed_at' => now(),
+                ]);
+
+                $board->transitionTo(
+                    'Available',
+                    auth()->id(),
+                    $validated['condition_notes'] ?? "Grade {$validated['condition_grade']} — label confirmed",
+                    null,
+                    $validated['condition_grade'],
+                    null,
+                );
+
+                return $board->fresh(['movements', 'libraryMaterial']);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => "[{$board->tracking_code}] confirmed — now Available in stores.",
+            'data' => $board,
+        ]);
+    }
+
     // ─── Generic transition ───────────────────────────────────────────────────
+
+    public function initiateReturn(Request $request, int $id): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to initiate board returns.'], 403);
+        }
+
+        $request->validate([
+            'notes' => 'nullable|string|max:500',
+            'confirmed_untouched' => 'nullable|boolean',
+        ]);
+
+        try {
+            $board = DB::transaction(function () use ($request, $id) {
+                $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
+                if (!in_array($board->status, ['Allocated', 'At Station', 'WIP'], true)) {
+                    throw new \InvalidArgumentException("Board [{$board->tracking_code}] is not in project custody and cannot start a return.");
+                }
+                if ($board->status === 'WIP' && !$request->boolean('confirmed_untouched')) {
+                    throw new \InvalidArgumentException('Confirm that this WIP board was not cut, or reconcile its consumption and offcuts instead.');
+                }
+                $board->transitionTo('Return Initiated', auth()->id(), $request->notes ?: 'Return initiated to Stores');
+                $board->update([
+                    'return_initiated_at' => now(),
+                    'return_initiated_by' => auth()->id(),
+                ]);
+                return $board->fresh(['movements', 'libraryMaterial']);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => "Return initiated for [{$board->tracking_code}]. Stock will change only after Stores receives it.",
+            'board' => $this->formatBoardDetail($board),
+        ]);
+    }
+
+    public function receiveReturn(Request $request, int $id): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores can receive a returned board.'], 403);
+        }
+
+        $request->validate([
+            'condition_grade' => 'required|string|in:A,B,C,D',
+            'notes' => 'nullable|string|max:500',
+        ]);
+        if (in_array($request->condition_grade, ['C', 'D'], true) && !trim((string) $request->notes)) {
+            return response()->json(['message' => 'Describe the damage before receiving a Grade C or D board.'], 422);
+        }
+
+        $returnLog = null;
+        try {
+            $board = DB::transaction(function () use ($request, $id, &$returnLog) {
+                $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
+                if ($board->status !== 'Return Initiated') {
+                    throw new \InvalidArgumentException("Board [{$board->tracking_code}] must have an initiated return before Stores can receive it.");
+                }
+
+                $jobRef = $board->assigned_job_ref;
+                $issue = $this->resolveReturnIssue($board, $jobRef);
+                if (!$issue) {
+                    throw new \InvalidArgumentException('The exact original board issue could not be found. Reconcile this board before receiving it.');
+                }
+                $alreadyReturned = (float) \App\Modules\ProcurementStores\Models\InventoryLog::where('original_issue_log_id', $issue->id)
+                    ->where('type', 'return')->sum('quantity');
+                if ($alreadyReturned >= abs((float) $issue->quantity)) {
+                    throw new \InvalidArgumentException('This original issue has no unreturned board balance.');
+                }
+
+                $destination = in_array($request->condition_grade, ['C', 'D'], true) ? 'Quarantine' : 'Available';
+                $board->transitionTo($destination, auth()->id(), $request->notes ?: "Returned — Grade {$request->condition_grade}", null, $request->condition_grade);
+                $board->update(['return_received_at' => now(), 'return_received_by' => auth()->id()]);
+
+                $stock = Stock::where('material_id', $board->library_material_id)->lockForUpdate()->first();
+                if ($stock) $stock->increment('quantity_on_hand', 1);
+                $returnLog = \App\Modules\ProcurementStores\Models\InventoryLog::create([
+                    'material_id' => $board->library_material_id, 'user_id' => auth()->id(),
+                    'type' => 'return', 'usage_type' => 'reusable', 'return_kind' => 'whole_item', 'batch_number' => $board->batch_number,
+                    'quantity' => 1, 'balance_after' => $stock?->fresh()->quantity_on_hand ?? 0,
+                    'reference_no' => $jobRef, 'original_issue_log_id' => $issue->id,
+                    'project_id' => $board->project_id ?? $issue->project_id,
+                    'project_material_id' => $board->project_material_id ?? $issue->project_material_id,
+                    'notes' => "Board received by Stores: {$board->tracking_code}. " . ($request->notes ?: "Grade {$request->condition_grade}"),
+                    'logged_at' => now(),
+                ]);
+                $board->update([
+                    'return_log_id' => $returnLog->id,
+                    'quarantine_review_status' => $destination === 'Quarantine' ? 'pending' : null,
+                ]);
+                $this->workflow->onBoardReturned($board, $jobRef);
+                return $board->fresh(['movements', 'libraryMaterial']);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        if ($board->status === 'Available') \App\Events\Stores\StockReturned::dispatch($returnLog);
+        return response()->json([
+            'message' => "Board [{$board->tracking_code}] received into {$board->status} stock.",
+            'board' => $this->formatBoardDetail($board),
+        ]);
+    }
+
+    public function bulkReturn(Request $request, string $jobRef): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores can receive board returns.'], 403);
+        }
+
+        $validated = $request->validate([
+            'boards' => 'required|array|min:1|max:100',
+            'boards.*.board_id' => 'required|integer|distinct|exists:boards,id',
+            'boards.*.condition_grade' => 'required|string|in:A,B,C,D',
+            'boards.*.notes' => 'nullable|string|max:500',
+            'return_batch_id' => 'nullable|integer|exists:board_return_batches,id',
+        ]);
+
+        foreach ($validated['boards'] as $item) {
+            if (in_array($item['condition_grade'], ['C', 'D'], true) && !trim((string) ($item['notes'] ?? ''))) {
+                return response()->json(['message' => 'Every Grade C or D board requires damage notes.'], 422);
+            }
+        }
+
+        $returnLogs = [];
+        try {
+            $result = DB::transaction(function () use ($validated, $jobRef, &$returnLogs) {
+                $ids = collect($validated['boards'])->pluck('board_id');
+                $boards = Board::whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+                $items = collect($validated['boards'])->keyBy('board_id');
+                $batch = !empty($validated['return_batch_id'])
+                    ? BoardReturnBatch::whereKey($validated['return_batch_id'])->lockForUpdate()->firstOrFail()
+                    : BoardReturnBatch::create([
+                        'reference' => 'BRR-' . now()->format('Ymd') . '-' . Str::upper(Str::random(6)),
+                        'job_ref' => $jobRef, 'project_id' => $boards->first()?->project_id,
+                        'status' => 'in_transit', 'expected_count' => $ids->count(),
+                        'initiated_by' => auth()->id(), 'initiated_at' => now(),
+                    ]);
+                if ($batch->job_ref !== $jobRef || !in_array($batch->status, ['in_transit', 'partially_received'], true)) {
+                    throw new \InvalidArgumentException('This return batch is not open for the selected project.');
+                }
+                if (empty($validated['return_batch_id'])) {
+                    foreach ($ids as $id) $batch->items()->create(['board_id' => $id, 'status' => 'expected']);
+                } elseif ($batch->items()->whereIn('board_id', $ids)->where('status', 'expected')->count() !== $ids->count()) {
+                    throw new \InvalidArgumentException('Every selected board must be an outstanding expected item in this return batch.');
+                }
+
+                foreach ($ids as $id) {
+                    $board = $boards->get($id);
+                    if (!$board || $board->assigned_job_ref !== $jobRef) {
+                        throw new \InvalidArgumentException('Every selected board must belong to this project.');
+                    }
+                    if (!in_array($board->status, ['Allocated', 'At Station', 'Return Initiated'], true)) {
+                        $reason = $board->status === 'WIP'
+                            ? 'WIP boards require consumption and offcut reconciliation before return.'
+                            : "Board [{$board->tracking_code}] is not eligible for return.";
+                        throw new \InvalidArgumentException($reason);
+                    }
+                    if (!$board->original_issue_log_id) {
+                        throw new \InvalidArgumentException("Board [{$board->tracking_code}] has no exact issue link and must be reconciled first.");
+                    }
+                }
+
+                $outcomes = [];
+                foreach ($ids as $id) {
+                    $board = $boards->get($id);
+                    $item = $items->get($id);
+                    if ($board->status !== 'Return Initiated') {
+                        $board->transitionTo('Return Initiated', auth()->id(), 'Bulk return initiated to Stores');
+                        $board->update(['return_initiated_at' => now(), 'return_initiated_by' => auth()->id()]);
+                    }
+
+                    $issue = $this->resolveReturnIssue($board, $jobRef);
+                    if (!$issue) {
+                        throw new \InvalidArgumentException("The exact issue for [{$board->tracking_code}] could not be resolved from its custody history.");
+                    }
+                    $alreadyReturned = (float) \App\Modules\ProcurementStores\Models\InventoryLog::where('original_issue_log_id', $issue->id)->where('type', 'return')->sum('quantity');
+                    if ($alreadyReturned >= abs((float) $issue->quantity)) {
+                        throw new \InvalidArgumentException("The issue linked to [{$board->tracking_code}] has no returnable balance.");
+                    }
+
+                    $grade = $item['condition_grade'];
+                    $destination = in_array($grade, ['C', 'D'], true) ? 'Quarantine' : 'Available';
+                    $notes = trim((string) ($item['notes'] ?? '')) ?: "Returned — Grade {$grade}";
+                    $board->transitionTo($destination, auth()->id(), $notes, null, $grade);
+                    $board->update(['return_received_at' => now(), 'return_received_by' => auth()->id()]);
+
+                    $stock = Stock::where('material_id', $board->library_material_id)->lockForUpdate()->first();
+                    if ($stock) $stock->increment('quantity_on_hand', 1);
+                    $log = \App\Modules\ProcurementStores\Models\InventoryLog::create([
+                        'material_id' => $board->library_material_id, 'user_id' => auth()->id(), 'type' => 'return', 'return_kind' => 'whole_item',
+                        'usage_type' => 'reusable', 'batch_number' => $board->batch_number, 'quantity' => 1,
+                        'balance_after' => $stock?->fresh()->quantity_on_hand ?? 0, 'reference_no' => $jobRef,
+                        'original_issue_log_id' => $issue->id, 'project_id' => $board->project_id ?? $issue->project_id,
+                        'project_material_id' => $board->project_material_id ?? $issue->project_material_id,
+                        'notes' => "Bulk board return: {$board->tracking_code}. {$notes}", 'logged_at' => now(),
+                    ]);
+                    $board->update([
+                        'return_log_id' => $log->id,
+                        'quarantine_review_status' => $destination === 'Quarantine' ? 'pending' : null,
+                    ]);
+                    if ($destination === 'Available') $returnLogs[] = $log;
+                    $this->workflow->onBoardReturned($board, $jobRef);
+                    $outcomes[] = ['id' => $board->id, 'tracking_code' => $board->tracking_code, 'status' => $destination, 'condition_grade' => $grade];
+                    $batch->items()->where('board_id', $board->id)->update([
+                        'status' => 'received', 'condition_grade' => $grade, 'outcome' => $destination,
+                        'notes' => $notes, 'received_at' => now(),
+                    ]);
+                }
+                $received = $batch->items()->where('status', 'received')->count();
+                $missing = $batch->items()->where('status', 'missing')->count();
+                $batch->update([
+                    'received_count' => $received, 'missing_count' => $missing,
+                    'status' => $received + $missing >= $batch->expected_count ? ($missing ? 'completed_with_missing' : 'completed') : 'partially_received',
+                    'received_by' => auth()->id(), 'received_at' => now(),
+                ]);
+                return ['boards' => $outcomes, 'batch' => $batch->fresh('items')];
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        foreach ($returnLogs as $returnLog) \App\Events\Stores\StockReturned::dispatch($returnLog);
+        return response()->json([
+            'message' => count($result['boards']) . ' boards received under ' . $result['batch']->reference . '.',
+            'data' => $result['boards'],
+            'return_batch' => $result['batch'],
+            'summary' => [
+                'available' => collect($result['boards'])->where('status', 'Available')->count(),
+                'quarantined' => collect($result['boards'])->where('status', 'Quarantine')->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * Resolve the physical board's exact issue. Legacy data was initially
+     * backfilled FIFO, but the original issue note retained the board codes.
+     * If a stale link is exhausted, repair only this board from that explicit
+     * evidence and only to an issue that still has returnable quantity.
+     */
+    private function resolveReturnIssue(Board $board, ?string $jobRef): ?\App\Modules\ProcurementStores\Models\InventoryLog
+    {
+        $issueModel = \App\Modules\ProcurementStores\Models\InventoryLog::class;
+        $linked = $board->original_issue_log_id
+            ? $issueModel::whereKey($board->original_issue_log_id)->lockForUpdate()->first()
+            : null;
+
+        $hasBalance = static function ($issue) use ($issueModel): bool {
+            if (!$issue) return false;
+            $returned = (float) $issueModel::where('original_issue_log_id', $issue->id)
+                ->where('type', 'return')->sum('quantity');
+            return $returned < abs((float) $issue->quantity);
+        };
+        if ($hasBalance($linked)) return $linked;
+
+        $candidates = $issueModel::query()
+            ->where('material_id', $board->library_material_id)
+            ->where('reference_no', $jobRef)
+            ->whereIn('type', ['check_out', 'issue'])
+            ->where('notes', 'like', '%Codes:%')
+            ->latest('id')->lockForUpdate()->get();
+
+        foreach ($candidates as $candidate) {
+            $codesText = trim((string) preg_replace('/^.*?Codes:\s*/s', '', (string) $candidate->notes));
+            $codes = collect(preg_split('/\s*,\s*/', $codesText, -1, PREG_SPLIT_NO_EMPTY))
+                ->map(fn ($code) => trim($code, " \t\n\r\0\x0B.;"));
+            if ($codes->contains($board->tracking_code) && $hasBalance($candidate)) {
+                $board->update([
+                    'original_issue_log_id' => $candidate->id,
+                    'project_id' => $board->project_id ?? $candidate->project_id,
+                    'project_material_id' => $board->project_material_id ?? $candidate->project_material_id,
+                ]);
+                return $candidate;
+            }
+        }
+
+        return $linked;
+    }
+
+    public function initiateReturnBatch(Request $request, string $jobRef): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'You are not permitted to initiate board returns.'], 403);
+        }
+        $validated = $request->validate([
+            'board_ids' => 'required|array|min:1|max:100', 'board_ids.*' => 'integer|distinct|exists:boards,id',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        try {
+            $batch = DB::transaction(function () use ($validated, $jobRef) {
+                $boards = Board::whereIn('id', $validated['board_ids'])->orderBy('id')->lockForUpdate()->get();
+                if ($boards->count() !== count($validated['board_ids']) || $boards->contains(fn ($board) => $board->assigned_job_ref !== $jobRef || !in_array($board->status, ['Allocated', 'At Station'], true))) {
+                    throw new \InvalidArgumentException('Every board must belong to this project and be issued but not yet in WIP.');
+                }
+                $batch = BoardReturnBatch::create([
+                    'reference' => 'BRR-' . now()->format('Ymd') . '-' . Str::upper(Str::random(6)),
+                    'job_ref' => $jobRef, 'project_id' => $boards->first()?->project_id,
+                    'status' => 'in_transit', 'expected_count' => $boards->count(),
+                    'initiated_by' => auth()->id(), 'initiated_at' => now(), 'notes' => $validated['notes'] ?? null,
+                ]);
+                foreach ($boards as $board) {
+                    $board->transitionTo('Return Initiated', auth()->id(), "Return batch {$batch->reference} initiated");
+                    $board->update(['return_initiated_at' => now(), 'return_initiated_by' => auth()->id()]);
+                    $batch->items()->create(['board_id' => $board->id, 'status' => 'expected']);
+                }
+                return $batch->fresh(['items.board']);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+        return response()->json(['message' => "Return batch {$batch->reference} initiated. Stores stock is unchanged until receipt.", 'data' => $batch], 201);
+    }
+
+    public function returnBatches(Request $request): JsonResponse
+    {
+        $batches = BoardReturnBatch::with(['items.board.libraryMaterial', 'initiator', 'receiver'])
+            ->when($request->filled('status'), fn ($query) => $query->where('status', $request->status))
+            ->orderByRaw("FIELD(status, 'in_transit', 'partially_received', 'completed_with_missing', 'completed')")
+            ->latest('initiated_at')->limit(100)->get();
+        return response()->json(['data' => $batches]);
+    }
+
+    public function markReturnBatchMissing(Request $request, BoardReturnBatch $batch): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores can record missing return items.'], 403);
+        }
+        $validated = $request->validate([
+            'board_ids' => 'required|array|min:1', 'board_ids.*' => 'integer|distinct|exists:boards,id',
+            'reason' => 'required|string|min:5|max:1000',
+        ]);
+
+        try {
+            DB::transaction(function () use ($batch, $validated) {
+                $locked = BoardReturnBatch::whereKey($batch->id)->lockForUpdate()->firstOrFail();
+                if (!in_array($locked->status, ['in_transit', 'partially_received'], true)) {
+                    throw new \InvalidArgumentException('This return batch is already closed.');
+                }
+                $updated = $locked->items()->whereIn('board_id', $validated['board_ids'])->where('status', 'expected')->update([
+                    'status' => 'missing', 'notes' => $validated['reason'], 'updated_at' => now(),
+                ]);
+                if ($updated !== count($validated['board_ids'])) {
+                    throw new \InvalidArgumentException('Every selected board must still be expected in this batch.');
+                }
+                $received = $locked->items()->where('status', 'received')->count();
+                $missing = $locked->items()->where('status', 'missing')->count();
+                $locked->update([
+                    'received_count' => $received, 'missing_count' => $missing,
+                    'status' => $received + $missing >= $locked->expected_count ? 'completed_with_missing' : 'partially_received',
+                ]);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+        return response()->json(['message' => count($validated['board_ids']) . ' board(s) recorded missing. Their project custody remains unresolved.', 'data' => $batch->fresh('items')]);
+    }
+
+    public function quarantineReturns(): JsonResponse
+    {
+        $boards = Board::query()
+            ->where('status', 'Quarantine')
+            ->where('quarantine_review_status', 'pending')
+            ->whereNotNull('return_received_at')
+            ->with(['libraryMaterial.workstation', 'movements' => fn ($query) => $query->latest('ts')->limit(3)])
+            ->orderBy('return_received_at')
+            ->get()
+            ->map(fn (Board $board) => $this->formatBoardDetail($board));
+
+        return response()->json(['data' => $boards, 'count' => $boards->count()]);
+    }
+
+    public function reviewQuarantineReturn(Request $request, int $id): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'A Stores manager must decide quarantined board returns.'], 403);
+        }
+        $validated = $request->validate([
+            'decision' => 'required|string|in:release,scrap',
+            'accepted_recoverable_value' => 'required_if:decision,release|nullable|numeric|min:0.01',
+            'notes' => 'required|string|min:5|max:1000',
+            'scrap_reason_code' => 'required_if:decision,scrap|nullable|string|max:80',
+        ]);
+
+        $creditLog = null;
+        try {
+            $board = DB::transaction(function () use ($validated, $id, &$creditLog) {
+                $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
+                if ($board->status !== 'Quarantine' || $board->quarantine_review_status !== 'pending' || !$board->return_log_id) {
+                    throw new \InvalidArgumentException('This board is not awaiting quarantine return review.');
+                }
+
+                if ($validated['decision'] === 'release') {
+                    $accepted = (float) $validated['accepted_recoverable_value'];
+                    if ($accepted > (float) $board->current_value) {
+                        throw new \InvalidArgumentException('Accepted recoverable value cannot exceed the board value before return.');
+                    }
+                    $board->transitionTo('Available', auth()->id(), $validated['notes'], null, $board->condition_grade);
+                    $board->update(['current_value' => $accepted, 'accepted_recoverable_value' => $accepted]);
+                    $creditLog = \App\Modules\ProcurementStores\Models\InventoryLog::whereKey($board->return_log_id)->lockForUpdate()->firstOrFail();
+                    $creditLog->update(['receipt_unit_cost' => $accepted]);
+                    $status = 'released';
+                } else {
+                    $board->transitionTo('Scrapped', auth()->id(), $validated['notes'], null, $board->condition_grade, $validated['scrap_reason_code']);
+                    $stock = Stock::where('material_id', $board->library_material_id)->lockForUpdate()->first();
+                    if ($stock) $stock->decrement('quantity_on_hand', 1);
+                    \App\Modules\ProcurementStores\Models\InventoryLog::create([
+                        'material_id' => $board->library_material_id, 'user_id' => auth()->id(),
+                        'type' => 'defective', 'usage_type' => 'reusable', 'batch_number' => $board->batch_number,
+                        'quantity' => -1, 'balance_after' => $stock?->fresh()->quantity_on_hand ?? 0,
+                        'reference_no' => $board->assigned_job_ref, 'project_id' => $board->project_id,
+                        'project_material_id' => $board->project_material_id,
+                        'notes' => "Quarantine return scrapped: {$board->tracking_code}. {$validated['notes']}", 'logged_at' => now(),
+                    ]);
+                    $status = 'scrapped';
+                }
+                $board->update([
+                    'quarantine_review_status' => $status,
+                    'quarantine_review_notes' => $validated['notes'],
+                    'quarantine_reviewed_at' => now(),
+                    'quarantine_reviewed_by' => auth()->id(),
+                ]);
+                return $board->fresh(['movements', 'libraryMaterial']);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        if ($creditLog) \App\Events\Stores\StockReturned::dispatch($creditLog);
+        return response()->json([
+            'message' => $board->status === 'Available' ? 'Board released with approved recoverable value.' : 'Board scrapped with no project return credit.',
+            'board' => $this->formatBoardDetail($board),
+        ]);
+    }
 
     /**
      * POST /boards/{id}/transition
      * Apply any valid status transition. Used by the frontend lifecycle manager
-     * for transitions not covered by a dedicated endpoint (e.g. Scrap, At Station,
-     * return to Available).
+     * for transitions not covered by a dedicated endpoint (e.g. Scrap, At Station).
      */
     public function transition(Request $request, int $id): JsonResponse
     {
@@ -1048,10 +1691,9 @@ class BoardController extends Controller
             return response()->json(['message' => 'You are not permitted to change board status.'], 403);
         }
 
-        // Allocated is excluded — callers must use POST /boards/{id}/allocate so that
-        // quantity_on_hand is decremented and an inventory log entry is written.
-        // This endpoint handles everything else: Scrap, Quarantine returns, At Station, WIP.
-        $allowedStatuses = array_diff(config('boards.statuses', []), ['Allocated']);
+        // Allocation and every return destination have dedicated transactional
+        // workflows. Keeping them out here prevents a second stock/accounting path.
+        $allowedStatuses = array_diff(config('boards.statuses', []), ['Allocated', 'Available', 'Quarantine']);
 
         $request->validate([
             'status'            => ['required', 'string', 'in:' . implode(',', $allowedStatuses)],
@@ -1061,13 +1703,10 @@ class BoardController extends Controller
             'scrap_reason_code' => 'nullable|string|max:80',
         ]);
 
-        $board          = Board::findOrFail($id);
-        $previousStatus = $board->status;
-        // Capture before transitionTo() clears assigned_job_ref on → Available / Quarantine
-        $previousJobRef = $board->assigned_job_ref;
-
         try {
-            DB::transaction(function () use ($request, $board, $previousStatus, $previousJobRef) {
+            $board = DB::transaction(function () use ($request, $id) {
+                $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
+                $previousStatus = $board->status;
                 $board->transitionTo(
                     $request->status,
                     auth()->id(),
@@ -1077,36 +1716,7 @@ class BoardController extends Controller
                     $request->scrap_reason_code,
                 );
 
-                $stock = Stock::where('material_id', $board->library_material_id)->first();
-
-        // Return to stores — board came back from a job (Available = intact, Quarantine = Grade C/D for review)
-        // Triggered from: Allocated, At Station, or WIP → Available or Quarantine
-        if (in_array($request->status, ['Available', 'Quarantine']) && in_array($previousStatus, ['Allocated', 'At Station', 'WIP'])) {
-            if ($stock) {
-                $stock->increment('quantity_on_hand', 1);
-            }
-            \App\Modules\ProcurementStores\Models\InventoryLog::create([
-                'material_id'  => $board->library_material_id,
-                'user_id'      => auth()->id(),
-                'type'         => 'return',
-                'usage_type'   => 'reusable',
-                'batch_number' => $board->batch_number,
-                'quantity'     => 1,
-                'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
-                // reference_no ties this return to its check_out so outstandingReusables()
-                // can net the two off and stop showing the board as still outstanding.
-                'reference_no' => $previousJobRef,
-                'notes'        => "Board returned to stores: {$board->tracking_code}. "
-                    . ($request->notes ?? 'Returned intact from job.'),
-                'logged_at'    => now(),
-            ]);
-
-            // If the board was on the production floor, prompt Stores to physically rack it.
-            if (in_array($previousStatus, ['At Station', 'WIP'])) {
-                app(\App\Modules\ProcurementStores\Services\BoardWorkflowService::class)
-                    ->onBoardReturned($board, $previousJobRef);
-            }
-        }
+                $stock = Stock::where('material_id', $board->library_material_id)->lockForUpdate()->first();
 
         // Scrap: stock handling depends on where the board was in its lifecycle.
         //
@@ -1152,6 +1762,7 @@ class BoardController extends Controller
                 'logged_at'    => now(),
             ]);
                 }
+                return $board->fresh(['movements', 'libraryMaterial']);
             });
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -1159,7 +1770,7 @@ class BoardController extends Controller
 
         return response()->json([
             'message' => "Board [{$board->tracking_code}] updated successfully.",
-            'board'   => $this->formatBoardDetail($board->fresh(['movements', 'libraryMaterial'])),
+            'board'   => $this->formatBoardDetail($board),
         ]);
     }
 
@@ -1196,6 +1807,20 @@ class BoardController extends Controller
             'is_offcut'       => $board->is_offcut,
             'parent_board_id' => $board->parent_board_id,
             'assigned_job_ref'=> $board->assigned_job_ref,
+            'original_issue_log_id' => $board->original_issue_log_id,
+            'board_request_id' => $board->board_request_id,
+            'project_id' => $board->project_id,
+            'project_material_id' => $board->project_material_id,
+            'return_initiated_at' => $board->return_initiated_at,
+            'return_initiated_by' => $board->return_initiated_by,
+            'return_received_at' => $board->return_received_at,
+            'return_received_by' => $board->return_received_by,
+            'return_log_id' => $board->return_log_id,
+            'quarantine_review_status' => $board->quarantine_review_status,
+            'accepted_recoverable_value' => $board->accepted_recoverable_value,
+            'quarantine_review_notes' => $board->quarantine_review_notes,
+            'quarantine_reviewed_at' => $board->quarantine_reviewed_at,
+            'quarantine_reviewed_by' => $board->quarantine_reviewed_by,
             'material'        => $board->relationLoaded('libraryMaterial') ? [
                 'id'            => $board->libraryMaterial?->id,
                 'name'          => $board->libraryMaterial?->material_name,

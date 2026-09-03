@@ -27,12 +27,13 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script: |
-            cd ~/public_html/erp-backend-master
+            cd ~/erp-backend-master
             git pull origin master
             composer install --no-dev --optimize-autoloader
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
+            php artisan key:generate
 
       - name: Deploy to staging
         if: github.ref == 'refs/heads/staging'
@@ -43,9 +44,10 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script: |
-            cd ~/public_html/erp-backend-staging
+            cd ~/erp-backend-staging
             git pull origin staging
             composer install --no-dev --optimize-autoloader
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
+            php artisan key:generate

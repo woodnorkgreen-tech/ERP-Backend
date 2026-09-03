@@ -48,6 +48,20 @@ return Application::configure(basePath: dirname(__DIR__))
             return null;
         });
 
+        // A DomainException is a business rule saying no — the caller sent a
+        // request the domain refuses, which is 422, not a server fault. Without
+        // this the same refusal surfaced as 422 from a controller that checked
+        // first and 500 from one that let the service decide.
+        $exceptions->renderable(function (\DomainException $e, \Illuminate\Http\Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'error' => class_basename($e),
+                ], 422);
+            }
+            return null;
+        });
+
         // Handle generic exceptions for API to ensure JSON response
         $exceptions->renderable(function (\Throwable $e, \Illuminate\Http\Request $request) {
             if ($request->is('api/*') || $request->expectsJson()) {

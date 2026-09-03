@@ -168,11 +168,11 @@ class Employee extends Model
             return null;
         }
         $timestamp = $this->updated_at ? $this->updated_at->timestamp : time();
-        // Return an ABSOLUTE url (resolved against the request/APP_URL host) rather than a
-        // bare relative path. In dev the SPA proxies /api so a relative path works, but in
-        // production the SPA is a separate origin and a relative <img src="/api/..."> resolves
-        // against the frontend host -> broken image. Matches the project's url('api/...') convention.
-        return url("/api/hr/employees/{$this->id}/photo") . "?t={$timestamp}";
+        // Use the configured backend origin. Requests proxied through the Vite
+        // dev server can otherwise make Laravel infer HTTP and emit mixed-content
+        // image URLs even though APP_URL and both browser origins are HTTPS.
+        $backendOrigin = rtrim((string) config('app.url'), '/');
+        return "{$backendOrigin}/api/hr/employees/{$this->id}/photo?t={$timestamp}";
     }
 
     /**

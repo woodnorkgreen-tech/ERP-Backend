@@ -32,6 +32,10 @@ class MaterialsLibraryServiceProvider extends ServiceProvider
 
         // Publish config (optional)
         if ($this->app->runningInConsole()) {
+            $this->commands([
+                \App\Modules\MaterialsLibrary\Console\AlignMaterialLibraryCommand::class,
+            ]);
+
             $this->publishes([
                 __DIR__.'/../Config/materials-library.php' => config_path('materials-library.php'),
             ], 'materials-library-config');
@@ -44,7 +48,7 @@ class MaterialsLibraryServiceProvider extends ServiceProvider
     protected function registerRoutes(): void
     {
         Route::group([
-            'middleware' => ['api', 'auth:sanctum'],
+            'middleware' => ['api', 'auth:sanctum', 'active'],
             'prefix' => 'api/materials-library',
         ], function () {
             $this->loadRoutesFrom(__DIR__.'/../Routes/api.php');

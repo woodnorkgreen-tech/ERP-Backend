@@ -83,10 +83,16 @@ class PurchaseOrder extends Model
             'approved_by' => $userId
         ]);
     }
-public function goodsReceiptNote()
-{
-    return $this->hasOne(GoodsReceiptNote::class);
-}
+    /** Backwards-compatible latest receipt for older resources. */
+    public function goodsReceiptNote()
+    {
+        return $this->hasOne(GoodsReceiptNote::class)->latestOfMany();
+    }
+
+    public function goodsReceiptNotes()
+    {
+        return $this->hasMany(GoodsReceiptNote::class);
+    }
     public static function generatePONumber()
     {
         $year = date('Y');

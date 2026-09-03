@@ -11,6 +11,10 @@ use App\Modules\HR\Models\PayrollRun;
 use App\Modules\HR\Models\Payslip;
 use App\Modules\HR\Models\SalaryAdvanceRequest;
 use App\Modules\HR\Services\OvertimeService;
+use App\Modules\HR\Services\Payroll\PayrollFinancePostingService;
+use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
+use App\Modules\Finance\Models\ChartOfAccount;
+use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Notifications\Models\AppNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -199,7 +203,36 @@ class HrModuleNotificationWiringTest extends TestCase
             'status' => 'locked',
         ]);
 
-        $this->postJson("/api/hr/payroll/runs/{$run->id}/mark-paid")->assertOk();
+        foreach ([
+            ['1010', 'Bank', 'asset', 'balance_sheet', 'debit'],
+            ['2130', 'PAYE Payable', 'liability', 'balance_sheet', 'credit'],
+            ['2140', 'Statutory Deductions Payable', 'liability', 'balance_sheet', 'credit'],
+            ['2160', 'Net Payroll Payable', 'liability', 'balance_sheet', 'credit'],
+            ['7550', 'Salaries & Wages', 'expense', 'opex', 'debit'],
+        ] as [$code, $name, $category, $type, $balance]) {
+            ChartOfAccount::updateOrCreate(['code' => $code], [
+                'name' => $name, 'category' => $category, 'account_type' => $type,
+                'normal_balance' => $balance, 'is_postable' => true, 'is_active' => true,
+            ]);
+        }
+        $date = now()->endOfMonth();
+        AccountingPeriod::create([
+            'year' => $date->year, 'month' => $date->month,
+            'starts_on' => $date->copy()->startOfMonth()->toDateString(),
+            'ends_on' => $date->toDateString(), 'status' => AccountingPeriod::STATUS_OPEN,
+        ]);
+        $source = PaymentSource::create([
+            'code' => 'BANK-PAYROLL', 'name' => 'Payroll bank', 'type' => 'bank',
+            'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'),
+            'currency' => 'KES', 'is_active' => true,
+        ]);
+        app(PayrollFinancePostingService::class)->postAccrual($run);
+
+        $this->postJson("/api/hr/payroll/runs/{$run->id}/mark-paid", [
+            'payment_source_id' => $source->id,
+            'payment_date' => $date->toDateString(),
+            'payment_reference' => 'TEST-PAYROLL-PAYMENT',
+        ])->assertOk();
 
         $this->assertTrue(
             AppNotification::where('user_id', $employeeUser->id)

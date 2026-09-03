@@ -29,7 +29,10 @@ use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
+use App\Modules\Finance\PettyCash\Controllers\PettyCashReportController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashRequisitionController;
+use App\Modules\Finance\PettyCash\Controllers\PettyCashRequisitionTypeController;
+use App\Modules\Finance\PettyCash\Controllers\PettyCashOfflineBatchController;
 use App\Modules\Teams\Controllers\TeamsTaskController;
 use App\Modules\Teams\Controllers\TeamMemberController;
 use App\Constants\Permissions;
@@ -136,6 +139,59 @@ Route::prefix('projects')->group(function () {
 
 // Protected Project & Task Routes - 'active' middleware ensures deactivated users are blocked instantly
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
+    // Cost collector — the single intake for spend from anywhere in the ERP.
+    // Reached over the authenticated mobile API rather than a tokenised public
+    // link: casual workers and vendors have no account, so a named staff member
+    // captures on their behalf and `payee` stays separate from `submitted_by`.
+    Route::prefix('costs')->group(function () {
+        Route::get('expense-codes', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'index']);
+        Route::get('expense-codes/families', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'families']);
+        // Declared ahead of {code} so "recent" is not resolved as a code.
+        Route::get('expense-codes/recent', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'recent']);
+        Route::post('expense-codes', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'store'])
+            ->middleware('throttle:20,1');
+        Route::get('expense-codes/{code}', [App\Modules\Finance\CostCollector\Http\Controllers\ExpenseCodeController::class, 'show']);
+
+        // Throttled: this writes to the cost ledger, and the July audit found no
+        // rate limiting on any money-moving endpoint in Finance.
+        Route::post('evidence', [App\Modules\Finance\CostCollector\Http\Controllers\CostEvidenceController::class, 'store'])
+            ->middleware('throttle:60,1');
+        Route::post('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'store'])
+            ->middleware('throttle:60,1');
+        Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'index']);
+        Route::put('{cost}/correction', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'correct']);
+        Route::get('my-projects', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'myProjects']);
+        Route::get('budget-lines/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'budgetLines']);
+
+        // The project cost account: budget vs committed vs actual, the
+        // unbudgeted panel, exception spend and how much of the budget has been
+        // answered at all.
+        Route::get('accounts', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'index']);
+        Route::get('account/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'show']);
+        Route::get('account/{enquiry}/category-lines', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'categoryLines']);
+
+        // Verification. Policy-gated, and the service additionally refuses to let
+        // anyone verify a cost they reported themselves.
+        Route::prefix('verification')->group(function () {
+            Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'index']);
+            Route::get('{cost}', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'show']);
+            Route::get('{cost}/tax-preview', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'taxPreview']);
+
+            // Throttled like `store` and `evidence` already were. These five
+            // write the cost ledger and post journals; leaving them unlimited
+            // while rate-limiting capture protected the cheap end of the module
+            // and left the expensive end open.
+            Route::middleware('throttle:60,1')->group(function () {
+                Route::post('{cost}/verify', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'verify']);
+                Route::post('{cost}/query', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'query']);
+                Route::post('{cost}/reject', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reject']);
+                Route::post('{cost}/reverse', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reverse']);
+                Route::post('{cost}/resubmit', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'resubmit']);
+                Route::post('{cost}/reclassify', [App\Modules\Finance\CostCollector\Http\Controllers\CostVerificationController::class, 'reclassify']);
+            });
+        });
+    });
+
     Route::prefix('support')->group(function () {
         Route::get('tickets/assignees', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'assignees']);
         Route::get('tickets/metrics', [App\Modules\Support\Http\Controllers\SupportTicketController::class, 'metrics']);
@@ -258,8 +314,35 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             $query->where('enquiry_id', request()->enquiry_id);
         }
 
+        $projects = $query->get();
+        $materialsByEnquiry = \App\Models\TaskMaterialsData::query()
+            ->with('task:id,project_enquiry_id')
+            ->withCount('elements')
+            ->whereHas('task', fn ($task) => $task->whereIn('project_enquiry_id', $projects->pluck('enquiry_id')))
+            ->get()
+            ->keyBy(fn ($materials) => $materials->task?->project_enquiry_id);
+
+        $projects->each(function ($project) use ($materialsByEnquiry) {
+            $materials = $materialsByEnquiry->get($project->enquiry_id);
+            $approval = data_get($materials?->project_info, 'approval_status', []);
+            $provided = $materials !== null && (int) $materials->elements_count > 0;
+            $project->setAttribute('materials_status', [
+                'provided' => $provided,
+                'all_approved' => $provided && (bool) ($approval['all_approved'] ?? false),
+                // The materials task records exactly two sign-offs, keyed
+                // 'project_officer' and 'production'. This counted 'design' and
+                // 'finance' instead, which never exist, so the badge could not
+                // reach its own required total.
+                'approved_count' => collect(['project_officer', 'production'])
+                    ->filter(fn ($department) => (bool) data_get($approval, "{$department}.approved", false))
+                    ->count(),
+                'required_approvals' => 2,
+                'element_count' => (int) ($materials?->elements_count ?? 0),
+            ]);
+        });
+
         return response()->json([
-            'data' => $query->get(),
+            'data' => $projects,
             'message' => 'Projects retrieved successfully'
         ]);
     }); // No permission for debugging
@@ -475,7 +558,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('/', [App\Http\Controllers\BudgetController::class, 'getBudgetData']);;
         Route::post('/', [App\Http\Controllers\BudgetController::class, 'saveBudgetData']);
         Route::post('/import-materials', [App\Http\Controllers\BudgetController::class, 'importMaterials']);
-        Route::get('/check-materials-update', [App\Http\Controllers\BudgetController::class, 'checkMaterialsUpdate']);
         Route::get('/pdf', [App\Http\Controllers\BudgetController::class, 'downloadPdf']);
 
         // Budget versioning routes
@@ -484,14 +566,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('/versions/{versionId}', [App\Http\Controllers\BudgetController::class, 'getBudgetVersion']);
         Route::post('/versions/{versionId}/restore', [App\Http\Controllers\BudgetController::class, 'restoreBudgetVersion']);
 
-        // Budget additions management
-        Route::get('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'index']);
-        Route::post('/additions', [App\Http\Controllers\BudgetAdditionController::class, 'store']);
-        Route::post('/additions/from-material', [App\Http\Controllers\BudgetAdditionController::class, 'createFromMaterial']);
-        Route::get('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'show']);
-        Route::put('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'update']);
-        Route::post('/additions/{additionId}/approve', [App\Http\Controllers\BudgetAdditionController::class, 'approve']);
-        Route::delete('/additions/{additionId}', [App\Http\Controllers\BudgetAdditionController::class, 'destroy']);
     });
 
     // Quote management routes
@@ -705,8 +779,33 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
                 $query->where('enquiry_id', request()->enquiry_id);
             }
 
+            $projects = $query->get();
+            $materialsByEnquiry = \App\Models\TaskMaterialsData::query()
+                ->with('task:id,project_enquiry_id')
+                ->withCount('elements')
+                ->whereHas('task', fn ($task) => $task->whereIn('project_enquiry_id', $projects->pluck('enquiry_id')))
+                ->get()
+                ->keyBy(fn ($materials) => $materials->task?->project_enquiry_id);
+
+            $projects->each(function ($project) use ($materialsByEnquiry) {
+                $materials = $materialsByEnquiry->get($project->enquiry_id);
+                $approval = data_get($materials?->project_info, 'approval_status', []);
+                $provided = $materials !== null && (int) $materials->elements_count > 0;
+                $project->setAttribute('materials_status', [
+                    'provided' => $provided,
+                    'all_approved' => $provided && (bool) ($approval['all_approved'] ?? false),
+                    // Two sign-offs exist, keyed 'project_officer' and
+                    // 'production'; 'design' and 'finance' never do.
+                    'approved_count' => collect(['project_officer', 'production'])
+                        ->filter(fn ($department) => (bool) data_get($approval, "{$department}.approved", false))
+                        ->count(),
+                    'required_approvals' => 2,
+                    'element_count' => (int) ($materials?->elements_count ?? 0),
+                ]);
+            });
+
             return response()->json([
-                'data' => $query->get(),
+                'data' => $projects,
                 'message' => 'Projects retrieved successfully'
             ]);
         }); // No permission for debugging
@@ -723,15 +822,34 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote'])
             ->middleware('quote.access');
         Route::get('enquiries/{enquiry}/workflow-state', [EnquiryController::class, 'workflowState']);
-        Route::middleware('quote.access')->group(function () {
-            Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
-            Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
-            Route::post('enquiries/{enquiry}/quote-waiver', [EnquiryController::class, 'waiveQuoteRequirement']);
-            Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment']);
-            Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment']);
-            Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment']);
-            Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject']);
-        });
+        Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
+        Route::get('receivables/summary', [EnquiryController::class, 'receivablesSummary'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::get('receivables/payment-sources', [EnquiryController::class, 'receivablesPaymentSources'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::get('receivables/receipts/unallocated', [EnquiryController::class, 'unallocatedReceipts'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::post('receivables/receipts/{receipt}/allocations', [EnquiryController::class, 'allocateReceipt'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
+        Route::get('enquiries/{enquiry}/governance-trace', [EnquiryController::class, 'getGovernanceTrace']);
+        Route::post('enquiries/{enquiry}/quote-waiver', [EnquiryController::class, 'waiveQuoteRequirement'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::put('enquiries/{enquiry}/receivables-terms', [EnquiryController::class, 'updateReceivablesTerms'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::get('enquiries/{enquiry}/invoices', [EnquiryController::class, 'projectInvoices'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::post('enquiries/{enquiry}/invoices', [EnquiryController::class, 'createProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/issue', [EnquiryController::class, 'issueProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/allocate', [EnquiryController::class, 'allocatePaymentToInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
+        Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
+        Route::post('enquiries/{enquiry}/payments/{payment}/verify', [EnquiryController::class, 'verifyPayment'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_VERIFY);
+        Route::put('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'updatePayment'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_CORRECT);
+        Route::delete('enquiries/{enquiry}/payments/{payment}', [EnquiryController::class, 'deletePayment'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_REVERSE);
+        Route::post('enquiries/{enquiry}/release', [EnquiryController::class, 'releaseProject'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RELEASE);
         Route::get('enquiries/{enquiry}/completion-readiness', [EnquiryController::class, 'completionReadiness']);
         Route::post('enquiries/{enquiry}/complete', [EnquiryController::class, 'completeProject']);
         Route::get('enquiries/{enquiry}/closure-readiness', [EnquiryController::class, 'closureReadiness']);
@@ -811,15 +929,62 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Finance Module Routes
     Route::prefix('finance')->group(function () {
+        Route::get('readiness', [\App\Modules\Finance\Controllers\FinanceReadinessController::class, 'show']);
+
+        // Spend Vouchers Routes
+        Route::prefix('spend-vouchers')->group(function () {
+            Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
+            Route::post('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'store']);
+            // Ahead of `{id}` so it is not resolved as a voucher id.
+            Route::get('payment-sources', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'paymentSources']);
+            Route::get('eligible-liabilities', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'eligibleLiabilities']);
+            Route::get('/{id}', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'show']);
+            Route::post('/{id}/cancel', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'cancel']);
+            Route::post('/{id}/approve', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'approve']);
+            Route::post('/{id}/post', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'post']);
+        });
+
+        // General ledger, read-only. Journals are written by JournalPostingService
+        // as a consequence of verifying a cost or posting a voucher; a write
+        // endpoint here would be a second, unreconciled way to move the ledger.
+        // `trial-balance` is declared ahead of `{journal}` so it is not resolved
+        // as an entry id.
+        Route::prefix('journals')->group(function () {
+            Route::get('/', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'index']);
+            Route::get('trial-balance', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'trialBalance']);
+            // Document-batched journals for WNG's external accounting package.
+            // Also ahead of `{journal}`.
+            Route::get('export', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'export']);
+            Route::get('{journal}', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'show']);
+        });
+
+        // KRA filing schedules. Read-only and download-shaped: Finance files
+        // from these, so each answers as JSON for the screen and CSV for the
+        // filing pack off one computation.
+        Route::prefix('tax')->group(function () {
+            Route::get('vat-input-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'vatInput']);
+            Route::get('etims-gap', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'etimsGap']);
+            Route::get('wht-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'wht']);
+        });
+
         // Petty Cash Module Routes
         Route::prefix('petty-cash')->group(function () {
+            /*
+             * Requisition types. Guarded inside the controller by
+             * finance.requisition_types.manage — configuring what the form asks
+             * is a different authority from raising or approving a requisition.
+             */
+            Route::apiResource('requisition-types', PettyCashRequisitionTypeController::class)
+                ->parameters(['requisition-types' => 'requisitionType'])
+                ->except(['show']);
+
             // Disbursement management routes
             Route::get('disbursements', [PettyCashController::class, 'index']);
             Route::post('disbursements', [PettyCashController::class, 'store']);
+            Route::post('direct-disbursement-requests/{id}/approve', [PettyCashController::class, 'approveDirectRequest']);
+            Route::get('direct-disbursement-requests', [PettyCashController::class, 'directRequests']);
+            Route::post('direct-disbursement-requests/{id}/reject', [PettyCashController::class, 'rejectDirectRequest']);
             Route::get('disbursements/{id}', [PettyCashController::class, 'show']);
-            Route::put('disbursements/{id}', [PettyCashController::class, 'update']);
-            Route::delete('disbursements/{id}', [PettyCashController::class, 'destroy']);
-            Route::post('disbursements/bulk-delete', [PettyCashController::class, 'bulkDestroy']);
             Route::post('disbursements/{id}/void', [PettyCashController::class, 'void']);
             Route::post('transactions/{id}/archive', [PettyCashController::class, 'archive']);
             Route::post('transactions/{id}/archive-group', [PettyCashController::class, 'archiveGroup']);
@@ -830,7 +995,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
             // Projects reference for job numbers
             Route::get('projects', [PettyCashController::class, 'getProjects']);
-            Route::get('budgets/summary', [PettyCashController::class, 'getProjectBudgetsSummary']);
+            Route::get('disbursement-references', [PettyCashController::class, 'disbursementReferences']);
             Route::get('projects/{jobNumber}/budget-items', [PettyCashController::class, 'getProjectBudgetItems']);
             Route::get('accounts', [PettyCashController::class, 'accounts']);
 
@@ -857,10 +1022,31 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('voucher', [PettyCashController::class, 'voucher']);
             Route::get('voucher/pdf', [PettyCashController::class, 'downloadVoucherPdf']);
 
-            // Excel upload route
-            Route::post('upload-excel', [PettyCashController::class, 'uploadExcel'])
+            // Reporting. PettyCashReportService carried seven report generators
+            // with no route reaching any of them, while the client's ReportsPanel
+            // called these two paths and got a 404 from both. Authorization is
+            // the `viewReports` ability, applied inside the controller.
+            Route::get('analytics', [PettyCashReportController::class, 'analytics']);
+            Route::get('custody', [PettyCashReportController::class, 'custody']);
+            Route::get('custody/statement', [PettyCashReportController::class, 'custodyStatement']);
+            Route::get('custody/top-ups/{id}', [PettyCashReportController::class, 'topUpCustody']);
+            Route::get('custody/top-ups/{id}/statement', [PettyCashReportController::class, 'topUpStatement']);
+            Route::get('reports/projects', [PettyCashReportController::class, 'projects']);
+            Route::get('export', [PettyCashReportController::class, 'export']);
+
+            // Offline capture is staged, validated, independently approved and
+            // only then posted as one transaction. The legacy direct importer
+            // remains unreachable so a spreadsheet can never mutate cash rows.
+            Route::post('upload-excel', [PettyCashOfflineBatchController::class, 'store'])
                 ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
-            Route::get('download-template', [PettyCashController::class, 'downloadTemplate']);
+            Route::get('download-template', [PettyCashOfflineBatchController::class, 'template'])
+                ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
+            Route::get('offline-batches', [PettyCashOfflineBatchController::class, 'index'])
+                ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
+            Route::get('offline-batches/{batch}', [PettyCashOfflineBatchController::class, 'show'])
+                ->middleware('permission:' . Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL);
+            Route::post('offline-batches/{batch}/approve', [PettyCashOfflineBatchController::class, 'approve']);
+            Route::post('offline-batches/{batch}/reject', [PettyCashOfflineBatchController::class, 'reject']);
 
             // Statistics and validation routes
             Route::get('statistics', [PettyCashTopUpController::class, 'statistics']);

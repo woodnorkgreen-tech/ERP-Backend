@@ -171,7 +171,7 @@ class ProcurementService
                     'budgetElementPersistentId' => $element['persistent_id'] ?? $element['id'] ?? null,
                     'budgetItemPersistentId' => $material['persistent_id'] ?? $material['id'] ?? null,
                     'budgetDataId' => $budgetData->id,
-                    'libraryMaterialId' => $material['library_material_id'] ?? null
+                    'libraryMaterialId' => $material['library_material_id'] ?? $material['libraryMaterialId'] ?? null
                 ];
             }
         }
@@ -304,9 +304,12 @@ class ProcurementService
             $budgetData = TaskBudgetData::where('enquiry_task_id', $budgetTask->id)->first();
             if (!$budgetData || empty($budgetData->materials_data)) return;
 
+            // Gate before transforming — an unready budget makes the transform
+            // wasted work, and it is the normal state for most of a project.
+            $this->ensureBudgetReadyForProcurement($budgetData);
+
             // Transform current budget data to fresh procurement items
             $freshItems = $this->transformBudgetToProcurement($budgetData);
-            $this->ensureBudgetReadyForProcurement($budgetData);
             
             // Index existing items by budgetItemId for easy lookup
             $existingItemsMap = collect($procurementData->procurement_items ?? [])
@@ -461,18 +464,37 @@ class ProcurementService
         // procurement on figures it knew were stale. Procurement now follows the
         // budget continuously.
         //
-        // The provenance checks below are the real gate, and they are unchanged:
-        // procurement only ever mirrors a budget built from an approved
-        // materials list, never an ad-hoc one.
+        // The provenance check below is the real gate: procurement only ever
+        // mirrors a budget built from the project's materials list, never an
+        // ad-hoc one.
+        //
+        // `materials_imported_at` is the whole proof. It is written in exactly
+        // one place — BudgetService::syncFromMaterialsList — so a budget cannot
+        // carry that timestamp without having come from the materials list.
+        // Departmental sign-off is no longer part of this: it is recorded on the
+        // materials task for audit, and gating the chain on it only meant one
+        // added line stopped procurement until two people re-approved.
         if (!$budgetData->materials_imported_at) {
-            throw new \DomainException('Cannot import procurement items: budget has not imported the approved materials list.');
+            throw new \DomainException(
+                'Cannot import procurement items: this project\'s budget has not pulled in the materials list yet. '
+                . 'Add the materials on the Materials task, then open the Budget task — '
+                . 'it imports on its own, and procurement follows within the same save.'
+            );
         }
 
-        $metadata = $budgetData->materials_import_metadata ?? [];
-        $source = $metadata['source'] ?? null;
+        // The metadata stamp is corroborating detail, not the gate. Budgets
+        // imported before the stamp existed have no `source` and are perfectly
+        // valid, so absent metadata reads as "unknown", never as "wrong" — this
+        // check previously demanded a value that no code path had ever written,
+        // which blocked every procurement import outright. Only a stamp that
+        // positively names some *other* origin is grounds to refuse.
+        $source = $budgetData->materials_import_metadata['source'] ?? null;
 
-        if ($source !== 'approved_materials_list') {
-            throw new \DomainException('Cannot import procurement items: budget source is not the approved materials list.');
+        if ($source !== null && $source !== BudgetService::IMPORT_SOURCE_APPROVED_MATERIALS) {
+            throw new \DomainException(
+                "Cannot import procurement items: this budget was built from '{$source}', not the approved materials list. "
+                . 'Re-sync the Budget task against the approved materials list before procuring from it.'
+            );
         }
     }
 

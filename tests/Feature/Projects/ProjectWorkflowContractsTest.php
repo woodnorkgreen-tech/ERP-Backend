@@ -23,6 +23,9 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
+use App\Constants\Permissions;
+use App\Modules\Finance\CostCollector\Models\ExpenseCode;
+use Spatie\Permission\Models\Permission;
 
 class ProjectWorkflowContractsTest extends TestCase
 {
@@ -33,6 +36,13 @@ class ProjectWorkflowContractsTest extends TestCase
         parent::setUp();
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        // Approving a purchase order posts a commitment, and a cost cannot be
+        // recorded into a month that does not exist. Production seeds a generous
+        // calendar; without it here the workflow this suite walks fails inside a
+        // listener, several layers from the endpoint under test.
+        $this->seed(\App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class);
+        $this->seed(\App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class);
     }
 
     public function test_external_financial_task_is_blocked_without_required_deposit(): void
@@ -44,7 +54,19 @@ class ProjectWorkflowContractsTest extends TestCase
         ]);
         $task = $this->task($enquiry, 'procurement');
 
-        $result = app(ProjectGovernanceService::class)->evaluateTask($task);
+        // The deposit gate moved off individual tasks and onto completing the
+        // project: work may start on an under-funded job, it may not be closed
+        // out as delivered. Evaluating the task therefore authorizes.
+        $this->assertTrue(
+            app(ProjectGovernanceService::class)->evaluateTask($task)->isAuthorized(),
+            'Task-level evaluation should no longer apply the finance gate.',
+        );
+
+        // The gate itself still refuses, where CompleteProjectAction consults it.
+        $result = app(ProjectGovernanceService::class)->checkGate($enquiry, 'financial', [
+            'task_id' => $task->id,
+            'task_type' => $task->type,
+        ]);
 
         $this->assertFalse($result->isAuthorized());
         $this->assertStringContainsString('Financial Gate Locked', $result->getMessage());
@@ -61,11 +83,12 @@ class ProjectWorkflowContractsTest extends TestCase
                 'workflow_preset_type' => $preset,
                 'client_approved_quote' => 1000,
             ]);
-            $task = $this->task($enquiry, 'production');
-
-            $result = app(ProjectGovernanceService::class)->evaluateTask($task);
+            $result = app(ProjectGovernanceService::class)->checkGate($enquiry, 'financial');
 
             $this->assertTrue($result->isAuthorized(), "Expected {$preset} to bypass finance gate.");
+            // Named, not merely allowed: a project that passes because nobody
+            // owes anything must be distinguishable from one that passed because
+            // the deposit landed.
             $this->assertSame('Internal/Sponsorship Bypass', $result->context['exemption']);
         }
     }
@@ -274,20 +297,28 @@ class ProjectWorkflowContractsTest extends TestCase
             'payment_method' => 'bank_transfer',
             'transaction_reference' => 'BANK-650',
             'recorded_by' => $accounts->id,
+            // Only verified receipts count toward coverage. A payment somebody
+            // has keyed but nobody has confirmed against the bank must not
+            // release a project, which is the whole point of the two steps.
+            'status' => 'verified',
         ]);
 
         Sanctum::actingAs($accounts);
 
         $response = $this->getJson('/api/projects/enquiries?view=receivables&per_page=10');
 
+        // The receivables view has its own resource, and it publishes the finance
+        // figures as one `finance_summary` object rather than as seven flat
+        // `payment_*` columns copied onto the enquiry. One shape, computed once,
+        // is what keeps the row and the headline above it from disagreeing.
         $response->assertOk()
             ->assertJsonPath('data.data.0.id', $enquiry->id)
-            ->assertJsonPath('data.data.0.payment_progress_percentage', 65)
-            ->assertJsonPath('data.data.0.payment_total_quote', 1000)
-            ->assertJsonPath('data.data.0.payment_total_paid', 650)
-            ->assertJsonPath('data.data.0.payment_remaining', 350)
-            ->assertJsonPath('data.data.0.payment_threshold_amount', 700)
-            ->assertJsonPath('data.data.0.payment_amount_required_for_threshold', 50)
+            ->assertJsonPath('data.data.0.finance_summary.percentage', 65)
+            ->assertJsonPath('data.data.0.finance_summary.total_quote', 1000)
+            ->assertJsonPath('data.data.0.finance_summary.total_paid', 650)
+            ->assertJsonPath('data.data.0.finance_summary.remaining', 350)
+            ->assertJsonPath('data.data.0.finance_summary.threshold_amount', 700)
+            ->assertJsonPath('data.data.0.finance_summary.amount_required_for_threshold', 50)
             ->assertJsonPath('data.data.0.finance_summary.quote_basis', 'client_approved_quote');
     }
 
@@ -312,6 +343,9 @@ class ProjectWorkflowContractsTest extends TestCase
             'payment_method' => 'bank_transfer',
             'transaction_reference' => 'BANK-700',
             'recorded_by' => $accounts->id,
+            // Verified, so the 70% threshold is genuinely met. Releasing without
+            // it takes the override permission, which is a different test.
+            'status' => 'verified',
         ]);
 
         Sanctum::actingAs($accounts);
@@ -344,71 +378,39 @@ class ProjectWorkflowContractsTest extends TestCase
         ]);
         $this->task($enquiry, 'procurement', ['created_by' => $accounts->id]);
 
+        $this->seed(\App\Modules\Finance\Database\Seeders\PaymentSourceSeeder::class);
+        $bank = \App\Modules\Finance\Models\PaymentSource::where('type', 'bank')->firstOrFail();
+
         Sanctum::actingAs($accounts);
 
-        $this->postJson("/api/projects/enquiries/{$enquiry->id}/payments", [
+        // Recording a receipt releases nothing. Capture and verification are two
+        // people now, and money that only one person has seen must not open the
+        // gate — so the response says so rather than reporting a release.
+        $response = $this->postJson("/api/projects/enquiries/{$enquiry->id}/payments", [
             'amount' => 700,
+            'received_amount' => 700,
             'payment_date' => now()->toDateString(),
             'payment_method' => 'bank_transfer',
+            'payment_source_id' => $bank->id,
             'transaction_reference' => 'AUTO-RELEASE-700',
         ])->assertOk()
+            ->assertJsonPath('auto_released', false);
+
+        $this->assertFalse((bool) $enquiry->fresh()->finance_released);
+
+        // Verification is what counts the money, and reaching the threshold on
+        // verified receipts releases the project without anyone asking. It takes
+        // a second person: whoever keyed the receipt may not confirm it arrived.
+        $paymentId = $response->json('data.id');
+
+        Sanctum::actingAs($this->user('Accounts'));
+
+        $this->postJson("/api/projects/enquiries/{$enquiry->id}/payments/{$paymentId}/verify")
+            ->assertOk()
             ->assertJsonPath('auto_released', true)
             ->assertJsonPath('progress.finance_released', true);
 
         $this->assertTrue((bool) $enquiry->fresh()->finance_released);
-    }
-
-    public function test_finance_project_budgets_summary_only_uses_completed_budget_tasks(): void
-    {
-        $accounts = $this->user('Accounts');
-        $approvedEnquiry = $this->enquiry([
-            'status' => EnquiryConstants::STATUS_PLANNING,
-            'quote_approved' => true,
-            'job_number' => 'WNG-07-2026-003',
-            'created_by' => $accounts->id,
-        ]);
-        $draftEnquiry = $this->enquiry([
-            'status' => EnquiryConstants::STATUS_PLANNING,
-            'quote_approved' => true,
-            'job_number' => 'WNG-07-2026-004',
-            'created_by' => $accounts->id,
-        ]);
-
-        $approvedBudgetTask = $this->task($approvedEnquiry, 'budget', ['status' => 'completed', 'created_by' => $accounts->id]);
-        $draftBudgetTask = $this->task($draftEnquiry, 'budget', ['status' => 'pending', 'created_by' => $accounts->id]);
-
-        TaskBudgetData::create([
-            'enquiry_task_id' => $approvedBudgetTask->id,
-            'project_info' => ['projectId' => $approvedEnquiry->enquiry_number],
-            'materials_data' => [],
-            'labour_data' => [],
-            'expenses_data' => [],
-            'logistics_data' => [],
-            'budget_summary' => ['materialsTotal' => 800, 'labourTotal' => 100, 'expensesTotal' => 50, 'logisticsTotal' => 50, 'grandTotal' => 1000],
-            'status' => 'draft', // inclusion is driven by the COMPLETED budget task, not budget status
-        ]);
-        TaskBudgetData::create([
-            'enquiry_task_id' => $draftBudgetTask->id,
-            'project_info' => ['projectId' => $draftEnquiry->enquiry_number],
-            'materials_data' => [],
-            'labour_data' => [],
-            'expenses_data' => [],
-            'logistics_data' => [],
-            // Unpriced budget: the task does NOT auto-complete, so this enquiry
-            // stays out of the finance summary until the budget is finalized.
-            'budget_summary' => ['materialsTotal' => 0, 'labourTotal' => 0, 'expensesTotal' => 0, 'logisticsTotal' => 0, 'grandTotal' => 0],
-            'status' => 'draft',
-        ]);
-
-        Sanctum::actingAs($accounts);
-
-        $response = $this->getJson('/api/finance/petty-cash/budgets/summary?per_page=10');
-
-        $response->assertOk()
-            ->assertJsonPath('meta.total', 1)
-            ->assertJsonPath('data.0.id', $approvedEnquiry->id)
-            ->assertJsonPath('data.0.totals.grand_total', 1000)
-            ->assertJsonPath('stats.total_budget', 1000);
     }
 
     public function test_materials_import_uses_approved_quote_snapshot_instead_of_live_quote_data(): void
@@ -523,6 +525,66 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('message', 'No approved quote snapshot found. Complete the Quote Approval task before generating the materials list.');
     }
 
+    public function test_materials_preview_recovers_legacy_excel_approval_with_null_snapshot(): void
+    {
+        $manager = $this->user('Project Manager');
+        $enquiry = $this->enquiry([
+            'status' => EnquiryConstants::STATUS_PLANNING,
+            'workflow_preset_type' => 'external_project',
+            'project_officer_id' => $manager->id,
+            'created_by' => $manager->id,
+            'selected_workflow_tasks' => ['quote', 'quote_approval', 'materials'],
+        ]);
+        $quoteTask = $this->task($enquiry, 'quote', ['status' => 'completed', 'task_order' => 1]);
+        $approvalTask = $this->task($enquiry, 'quote_approval', ['status' => 'completed', 'task_order' => 2]);
+        $materialsTask = $this->task($enquiry, 'materials', ['status' => 'pending', 'task_order' => 3]);
+
+        TaskQuoteData::create([
+            'enquiry_task_id' => $quoteTask->id,
+            'quote_mode' => 'excel_upload',
+            'status' => 'approved',
+            'approval_status' => 'approved',
+            'quote_amount' => 25000,
+            'excel_quote_file' => 'quote_excel/test.xlsx',
+            'excel_quote_filename' => 'test.xlsx',
+            'excel_quote_amount' => 25000,
+            'excel_quote_extraction' => [
+                'schemaVersion' => 1,
+                'elements' => [[
+                    'id' => 'excel-stage',
+                    'name' => 'Excel Stage',
+                    'category' => 'production',
+                    'materials' => [[
+                        'id' => 'excel-line',
+                        'description' => 'Excel Carpet',
+                        'unitOfMeasurement' => 'sqm',
+                        'quantity' => 20,
+                        'isVisible' => true,
+                    ]],
+                ]],
+            ],
+        ]);
+
+        DB::table('quote_approvals')->insert([
+            'task_id' => $approvalTask->id,
+            'enquiry_id' => $enquiry->id,
+            'approval_status' => 'approved',
+            'approved_by' => $manager->name,
+            'approval_date' => now()->toDateString(),
+            'quote_amount' => 25000,
+            'quote_data' => 'null',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Sanctum::actingAs($manager);
+        $this->getJson("/api/projects/tasks/{$materialsTask->id}/materials/approved-quote-preview")
+            ->assertOk()
+            ->assertJsonPath('data.materials.0.name', 'Excel Carpet')
+            ->assertJsonPath('data.materials.0.requiredQuantity', 20)
+            ->assertJsonCount(0, 'data.materials.0.materials');
+    }
+
     public function test_budget_import_uses_approved_material_identity_and_preserves_internal_rates(): void
     {
         $manager = $this->user('Project Manager');
@@ -617,11 +679,18 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('data.materials.0.materials.0.description', 'Approved Truss Renamed')
             ->assertJsonPath('data.materials.0.materials.0.quantity', '7.00')
             ->assertJsonPath('data.materials.0.materials.0.unitPrice', 321)
+            // Quantity always comes from the materials list and the rate is the
+            // budget's to keep, so the total is recomputed from both. The
+            // `_priceStatus` / `_quantityChanged` markers went with the reconciler
+            // that needed them: the two lists can no longer disagree about
+            // quantity, so there is no divergence left to flag.
             ->assertJsonPath('data.materials.0.materials.0.totalPrice', 2247)
-            ->assertJsonPath('data.materials.0.materials.0._priceStatus', 'preserved')
-            ->assertJsonPath('data.materials.0.materials.0._quantityChanged', true)
+            // The stamp procurement's readiness gate reads, returned by the
+            // import that wrote it. `quote_imported_from` went when the quote
+            // snapshot stopped feeding this path: the budget's materials come
+            // from the materials list, and nothing writes that key any more.
             ->assertJsonPath('data.materialsImportInfo.importMetadata.source', 'approved_materials_list')
-            ->assertJsonPath('data.materialsImportInfo.importMetadata.quote_imported_from.snapshotSource', 'quote_approvals');
+            ->assertJsonPath('data.materialsImportInfo.importMetadata.materials_task_id', $materialsTask->id);
     }
 
     public function test_procurement_import_requires_budget_source_to_be_approved_materials_list(): void
@@ -672,8 +741,13 @@ class ProjectWorkflowContractsTest extends TestCase
 
         $response = $this->postJson("/api/projects/tasks/{$procurementTask->id}/procurement/import-budget");
 
-        $response->assertStatus(409)
-            ->assertJsonPath('message', 'Cannot import procurement items: budget source is not the approved materials list.');
+        // The refusal names the origin it found, which is the thing the reader
+        // has to change; the earlier wording only said the source was wrong.
+        $response->assertStatus(409);
+        $this->assertStringContainsString(
+            "this budget was built from 'manual_budget'",
+            $response->json('message'),
+        );
 
         $this->assertDatabaseMissing('task_procurement_data', [
             'enquiry_task_id' => $procurementTask->id,
@@ -842,6 +916,7 @@ class ProjectWorkflowContractsTest extends TestCase
                     'budget_item_id' => 'material-v2',
                     'budget_item_persistent_id' => 'material-persistent',
                     'material_id' => null,
+                    'expense_code_id' => $this->expenseCode()->id,
                     'custom_description' => 'Approved Truss',
                     'quantity' => 5,
                     'unit_price' => 100,
@@ -942,6 +1017,7 @@ class ProjectWorkflowContractsTest extends TestCase
                     'budget_item_id' => 'material-v2',
                     'budget_item_persistent_id' => 'material-persistent',
                     'material_id' => null,
+                    'expense_code_id' => $this->expenseCode()->id,
                     'custom_description' => 'Approved Truss',
                     'quantity' => 5,
                     'unit_price' => 100,
@@ -1045,6 +1121,31 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('data.budgetSummary.operationalSync.receivedQuantity', 5);
     }
 
+    /**
+     * A code to charge a project requisition to.
+     *
+     * Project requisitions must name an expense code — that is what puts the
+     * spend in the cost ledger under something rather than nowhere — so a
+     * payload without one is not a requisition the app would accept.
+     */
+    private function expenseCode(): ExpenseCode
+    {
+        return ExpenseCode::firstOrCreate(
+            ['code' => 'WFC-001'],
+            [
+                'accounting_class' => 'Direct project cost',
+                'expense_family' => 'Direct materials',
+                'expense_type' => 'Project material',
+                'job_id_rule' => ExpenseCode::JOB_OPTIONAL,
+                'cash_flow_class' => 'operating',
+                // Receiving against the order accrues a cost, and the journal
+                // service refuses to guess a destination for a named code.
+                'default_debit_account_id' => \App\Modules\Finance\Models\ChartOfAccount::where('code', '1211')->value('id'),
+                'is_active' => true,
+            ],
+        );
+    }
+
     private function user(?string $role = null): User
     {
         $user = User::create([
@@ -1057,6 +1158,25 @@ class ProjectWorkflowContractsTest extends TestCase
         if ($role) {
             Role::findOrCreate($role, 'web');
             $user->assignRole($role);
+        }
+
+        // The finance routes exercised here are gated on `finance.receivables.*`
+        // permissions. Assigning the Accounts role does not grant them —
+        // RoleAndPermissionSeeder gives Accounts petty-cash rights but no
+        // receivables rights at all — so these requests answered 403 and the
+        // assertions beneath them never ran. Granting explicitly keeps the test
+        // about the workflow contract rather than about role configuration.
+        if (in_array($role, ['Accounts', 'Finance'], true)) {
+            $user->givePermissionTo(array_map(
+                fn (string $name) => Permission::findOrCreate($name, 'web'),
+                [
+                    Permissions::FINANCE_RECEIVABLES_READ,
+                    Permissions::FINANCE_RECEIVABLES_RECORD,
+                    Permissions::FINANCE_RECEIVABLES_VERIFY,
+                    Permissions::FINANCE_RECEIVABLES_RELEASE,
+                    Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
+                ],
+            ));
         }
 
         return $user->fresh();

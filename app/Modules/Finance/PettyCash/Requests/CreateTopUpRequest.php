@@ -2,6 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Requests;
 
+use App\Modules\Finance\PettyCash\Support\PaymentMethods;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -12,7 +13,11 @@ class CreateTopUpRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return true; // Authorization will be handled by middleware/permissions
+        // Gated in PettyCashTopUpController::store with an explicit
+        // `finance.petty_cash.create_top_up` check, alongside the identical
+        // checks on update and destroy. Leaving this `true` is deliberate, not
+        // an oversight — but it is only safe while that check stays there.
+        return true;
     }
 
     /**
@@ -32,7 +37,11 @@ class CreateTopUpRequest extends FormRequest
             'payment_method' => [
                 'required',
                 'string',
-                Rule::in(['cash', 'mpesa', 'bank_transfer', 'other']),
+                // Read from PaymentMethods, not a literal list. The literal here
+                // predated the bank options, so this rule would have rejected
+                // equity, stanbic, ncba, kcb and family — all valid in the
+                // column enum and offered by the API.
+                Rule::in(PaymentMethods::values()),
             ],
             'transaction_code' => [
                 'nullable',
@@ -44,6 +53,14 @@ class CreateTopUpRequest extends FormRequest
                 'nullable',
                 'string',
                 'max:1000',
+            ],
+            // The form has always sent this and the service persists it. It has
+            // to be declared here or validated() would silently drop it — the
+            // top-up would save with no date at all.
+            'date_topped_up' => [
+                'required',
+                'date',
+                'before_or_equal:today',
             ],
         ];
     }
@@ -60,6 +77,8 @@ class CreateTopUpRequest extends FormRequest
             'amount.numeric' => 'The amount must be a valid number.',
             'amount.min' => 'The amount must be at least 0.01.',
             'amount.max' => 'The amount cannot exceed 999,999.99.',
+            'date_topped_up.required' => 'Please give the date the float was topped up.',
+            'date_topped_up.before_or_equal' => 'A top-up cannot be dated in the future.',
             'payment_method.required' => 'Please select a payment method.',
             'payment_method.in' => 'The selected payment method is invalid.',
             'transaction_code.required_unless' => 'Transaction code is required for non-cash payments.',

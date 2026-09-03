@@ -17,6 +17,7 @@ class GoodsReceiptNote extends Model
         'batch_number',
         'store_location',
         'quality_check',
+        'store_status',
         'received_by',
         'notes',
     ];

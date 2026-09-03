@@ -82,6 +82,7 @@ class EnquiryController extends Controller
         $validator = Validator::make($request->all(), [
             'date_received' => 'required|date',
             'expected_delivery_date' => 'nullable|date|after_or_equal:date_received',
+            'delivery_date_status' => 'nullable|in:confirmed,tbc',
             'client_id' => 'required|integer|exists:clients,id',
             'title' => 'required|string|max:255',
             'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias
@@ -96,6 +97,9 @@ class EnquiryController extends Controller
             'assigned_po' => 'nullable|integer|exists:users,id',
             'follow_up_notes' => 'nullable|string',
             'venue' => 'nullable|string|max:255',
+            'venue_lat' => 'nullable|numeric|between:-90,90|required_with:venue_lng',
+            'venue_lng' => 'nullable|numeric|between:-180,180|required_with:venue_lat',
+            'venue_place_id' => 'nullable|string|max:255',
             'site_survey_skipped' => 'nullable|boolean',
             'site_survey_skip_reason' => 'nullable|string|required_if:site_survey_skipped,true',
         ]);
@@ -134,6 +138,7 @@ class EnquiryController extends Controller
         $validator = Validator::make($request->all(), [
             'date_received' => 'sometimes|required|date',
             'expected_delivery_date' => 'nullable|date|after_or_equal:date_received',
+            'delivery_date_status' => 'nullable|in:confirmed,tbc',
             'client_id' => 'sometimes|required|integer|exists:clients,id',
             'title' => 'sometimes|required|string|max:255',
             'enquiry_title' => 'nullable|string|max:255', // Allow enquiry_title as alias
@@ -148,6 +153,9 @@ class EnquiryController extends Controller
             'assigned_po' => 'nullable|integer|exists:users,id',
             'follow_up_notes' => 'nullable|string',
             'venue' => 'nullable|string|max:255',
+            'venue_lat' => 'nullable|numeric|between:-90,90|required_with:venue_lng',
+            'venue_lng' => 'nullable|numeric|between:-180,180|required_with:venue_lat',
+            'venue_place_id' => 'nullable|string|max:255',
             'site_survey_skipped' => 'boolean',
             'site_survey_skip_reason' => 'nullable|string|required_if:site_survey_skipped,true',
         ]);

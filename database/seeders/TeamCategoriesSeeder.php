@@ -40,7 +40,10 @@ class TeamCategoriesSeeder extends Seeder
         ];
 
         foreach ($categories as $category) {
-            \App\Modules\Teams\Models\TeamCategory::create($category);
+            \App\Modules\Teams\Models\TeamCategory::updateOrCreate(
+                ['category_key' => $category['category_key']],
+                $category
+            );
         }
     }
 }

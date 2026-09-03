@@ -4,6 +4,7 @@ namespace App\Modules\ProcurementStores\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\User;
 
 class GoodsReceiptNoteItem extends Model
 {
@@ -15,13 +16,28 @@ class GoodsReceiptNoteItem extends Model
         'material_id',
         'ordered_quantity',
         'received_quantity',
+        'entered_uom_id',
+        'stock_quantity',
+        'receipt_unit_cost',
+        'stock_status',
+        'inventory_log_id',
         'condition',
         'accepted',
+        'store_status',
+        'unit_price',
+        'confirmed_by',
+        'confirmed_at',
     ];
 
     protected $casts = [
         'accepted' => 'boolean',
         'material_id' => 'integer',
+        'ordered_quantity' => 'decimal:6',
+        'received_quantity' => 'decimal:6',
+        'stock_quantity' => 'decimal:6',
+        'receipt_unit_cost' => 'decimal:4',
+        'unit_price' => 'decimal:2',
+        'confirmed_at' => 'datetime',
     ];
 
     /**
@@ -40,6 +56,19 @@ class GoodsReceiptNoteItem extends Model
         return $this->belongsTo(PurchaseOrderItem::class);
     }
 
-    // No need for direct material relationship
-    // Access material through: $grnItem->purchaseOrderItem->material
+    public function inspection()
+    {
+        return $this->hasOne(GoodsReceiptInspection::class);
+    }
+
+    /**
+     * Who on the Stores side confirmed this item into inventory.
+     */
+    public function confirmedBy()
+    {
+        return $this->belongsTo(User::class, 'confirmed_by');
+    }
+
+    // Access material through: $grnItem->purchaseOrderItem->material,
+    // or directly via material_id once Stores has confirmed it.
 }

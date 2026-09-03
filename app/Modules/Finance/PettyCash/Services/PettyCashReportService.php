@@ -2,6 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Services;
 
+use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -101,32 +102,45 @@ class PettyCashReportService
      */
     public function generateProjectReport(array $filters = []): array
     {
-        $query = DB::table('petty_cash_disbursements')
-            ->select('project_name', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
-            ->where('status', 'active')
+        // Built on the model scopes rather than a raw DB::table query so this
+        // agrees with generateSummaryReport figure for figure. The raw version
+        // it replaces diverged three ways: it counted archived rows, it summed
+        // `amount` while the summary sums `amount + transaction_cost`, and it
+        // filtered on `created_at` while every other report filters on
+        // `date_disbursed`. A project total that disagreed with the summary
+        // total on the same screen is worse than no project total.
+        $query = PettyCashDisbursement::active()
+            ->notArchived()
             ->whereNotNull('project_name')
             ->where('project_name', '!=', '')
+            ->select(
+                'project_name',
+                DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total_amount'),
+                DB::raw('COUNT(*) as transaction_count'),
+            )
             ->groupBy('project_name')
-            ->orderBy('total_amount', 'desc');
+            ->orderByDesc('total_amount');
 
-        // Apply date filters
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-            $query->whereBetween('created_at', [$filters['start_date'], $filters['end_date']]);
+            $query->whereBetween('date_disbursed', [$filters['start_date'], $filters['end_date']]);
         }
 
-        // Apply classification filter
         if (!empty($filters['classification'])) {
-            $query->where('classification', $filters['classification']);
+            $query->byClassification($filters['classification']);
+        }
+
+        if (!empty($filters['project_name'])) {
+            $query->byProject($filters['project_name']);
         }
 
         $projectData = $query->get();
-        $totalAmount = $projectData->sum('total_amount');
+        $totalAmount = (float) $projectData->sum('total_amount');
 
         $projects = $projectData->map(function ($item) use ($totalAmount) {
             return [
                 'project_name' => $item->project_name,
                 'total_amount' => (float) $item->total_amount,
-                'transaction_count' => $item->transaction_count,
+                'transaction_count' => (int) $item->transaction_count,
                 'percentage' => $totalAmount > 0 ? round(($item->total_amount / $totalAmount) * 100, 2) : 0,
             ];
         });
@@ -136,8 +150,8 @@ class PettyCashReportService
             'projects' => $projects,
             'summary' => [
                 'total_projects' => $projects->count(),
-                'total_amount' => (float) $totalAmount,
-                'total_transactions' => $projectData->sum('transaction_count'),
+                'total_amount' => $totalAmount,
+                'total_transactions' => (int) $projectData->sum('transaction_count'),
             ],
             'generated_at' => now(),
         ];

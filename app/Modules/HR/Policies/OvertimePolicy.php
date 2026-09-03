@@ -36,8 +36,10 @@ class OvertimePolicy
             return true;
         }
 
-        // No self-approval for anyone else.
-        if ($this->isOwn($user, $entry)) {
+        // No self-approval for anyone else, unless they hold the shared
+        // self-approve right (App\Support\SelfApproval). Super Admin already
+        // short-circuits in before().
+        if ($this->isOwn($user, $entry) && ! \App\Support\SelfApproval::allowedFor($user)) {
             return false;
         }
 
@@ -62,7 +64,7 @@ class OvertimePolicy
             return false;
         }
 
-        return ! $this->isOwn($user, $entry);
+        return ! $this->isOwn($user, $entry) || \App\Support\SelfApproval::allowedFor($user);
     }
 
     /** Reject / re-open: global HR, or the entry owner's direct manager / department lead. */

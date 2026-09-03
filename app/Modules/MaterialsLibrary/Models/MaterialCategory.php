@@ -85,4 +85,62 @@ class MaterialCategory extends Model
     {
         return $this->parent?->name ?? $this->name;
     }
+
+    /**
+     * The specification fields that describe a material in this category.
+     *
+     * Schema is data, not code: it lives on the category and is inherited down
+     * the tree, so shared facts sit on the root ("Boards" carries thickness and
+     * sheet size) and a leaf only adds what is special to it. A leaf redefining
+     * a key wins over its parent's version of the same key.
+     *
+     * Each entry is ['key' => ..., 'label' => ..., 'type' => ..., 'required' => bool].
+     * A bare list of strings is accepted too, so an administrator can name three
+     * fields quickly and refine them later.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function resolvedAttributeSchema(): array
+    {
+        $chain = [];
+        for ($node = $this; $node !== null; $node = $node->parent) {
+            array_unshift($chain, $node);
+        }
+
+        $resolved = [];
+        foreach ($chain as $node) {
+            foreach (self::normaliseSchema($node->required_attributes) as $field) {
+                $resolved[$field['key']] = $field;
+            }
+        }
+
+        return array_values($resolved);
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    public static function normaliseSchema(mixed $schema): array
+    {
+        if (! is_array($schema)) {
+            return [];
+        }
+
+        $fields = [];
+        foreach ($schema as $entry) {
+            $field = is_string($entry) ? ['key' => $entry] : $entry;
+            if (! is_array($field) || blank($field['key'] ?? null)) {
+                continue;
+            }
+
+            $fields[] = [
+                'key' => $field['key'],
+                'label' => $field['label'] ?? \Illuminate\Support\Str::headline($field['key']),
+                'type' => $field['type'] ?? 'text',
+                'unit' => $field['unit'] ?? null,
+                'options' => $field['options'] ?? null,
+                'required' => (bool) ($field['required'] ?? false),
+            ];
+        }
+
+        return $fields;
+    }
 }
