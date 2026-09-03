@@ -29,19 +29,33 @@ class PrintIntakeService
             $isRedesignReprint = $reprintOfJobId !== null;
             $artworkVersion = $this->artworkVersion($artwork['version'] ?? null, $isRedesignReprint, $reprintOfJobId);
 
-            $existing = PrintJob::query()
-                ->when($handoff->target_record_id, fn ($query) => $query->whereKey($handoff->target_record_id))
-                ->when(!$handoff->target_record_id, fn ($query) => $query
+            $existing = $handoff->target_record_id
+                ? PrintJob::query()->whereKey($handoff->target_record_id)->first()
+                : null;
+
+            if (!$existing && !$isRedesignReprint) {
+                $existing = PrintJob::query()
+                    ->where('original_design_handoff_id', $handoff->id)
+                    ->oldest()
+                    ->first();
+            }
+
+            if (!$existing) {
+                $existing = PrintJob::query()
                     ->whereNotIn('status', ['completed', 'cancelled'])
-                    ->where('design_handoff_id', $handoff->id)
-                    ->when(!$isRedesignReprint, fn ($inner) => $inner
-                        ->orWhere(fn ($candidate) => $candidate
-                            ->whereNotIn('status', ['completed', 'cancelled'])
-                            ->where('design_item_id', $handoff->design_item_id)
-                            ->where('order_type', 'original')
-                            ->whereNull('reprint_of_job_id'))))
-                ->oldest()
-                ->first();
+                    ->where(function ($query) use ($handoff, $isRedesignReprint) {
+                        $query->where('design_handoff_id', $handoff->id);
+
+                        if (!$isRedesignReprint) {
+                            $query->orWhere(fn ($candidate) => $candidate
+                                ->where('design_item_id', $handoff->design_item_id)
+                                ->where('order_type', 'original')
+                                ->whereNull('reprint_of_job_id'));
+                        }
+                    })
+                    ->oldest()
+                    ->first();
+            }
 
             if ($existing) {
                 if ($existing->isLocked()) {
