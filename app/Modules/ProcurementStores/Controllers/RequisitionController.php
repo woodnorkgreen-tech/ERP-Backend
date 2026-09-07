@@ -2,6 +2,8 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Models\Project;
+use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Resources\RequisitionResource;
 use App\Services\RequisitionNotificationService;
@@ -125,7 +127,7 @@ class RequisitionController extends Controller
     public function index(Request $request)
     {
         $query = Requisition::with([
-            'items.material', 'items.supplier',
+            'items.material', 'items.supplier', 'items.expenseCode',
             'project.enquiry',
             'project',
             'projectEnquiry',
@@ -184,7 +186,7 @@ class RequisitionController extends Controller
         $searchTerm = $request->input('searchTerm', '');
 
         $query = Requisition::with([
-            'items.material', 'items.supplier',
+            'items.material', 'items.supplier', 'items.expenseCode',
             'project.enquiry',
             'project',
             'projectEnquiry',
@@ -280,7 +282,7 @@ class RequisitionController extends Controller
             'items.*.budget_item_id'     => 'nullable|string',
             'items.*.budget_item_persistent_id' => 'nullable|string',
             'items.*.material_id'        => 'nullable|exists:library_materials,id',
-            'items.*.expense_code_id'    => 'required_if:requested_by_type,project|integer|exists:expense_codes,id',
+            'items.*.expense_code_id'    => 'nullable|integer|exists:expense_codes,id',
             // Either material_id must be present OR custom_description must be provided
             'items.*.custom_description' => 'nullable|string',
             'items.*.quantity'           => 'required|numeric|gt:0',
@@ -329,7 +331,9 @@ class RequisitionController extends Controller
                 $item['total'] = $item['quantity'] * $item['unit_price'];
                 $item['custom_description'] = $item['custom_description'] ?? null;
                 $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
-                    $input['requested_by_type'] === 'project' ? $input['project_id'] : null
+                    $input['requested_by_type'] === 'project'
+                        ? $this->enquiryIdForProject($input['project_id'] ?? null)
+                        : null
                 );
                 $requisition->items()->create($item);
             }
@@ -355,7 +359,7 @@ class RequisitionController extends Controller
             $this->syncProjectProcurement($requisition);
 
             return new RequisitionResource(
-                $requisition->load(['items.material', 'items.supplier', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
+                $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
             );
 
         } catch (\Exception $e) {
@@ -367,7 +371,7 @@ class RequisitionController extends Controller
     public function show(Requisition $requisition)
     {
         return new RequisitionResource(
-            $requisition->load(['items.material', 'items.supplier', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
+            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
         );
     }
 
@@ -441,7 +445,7 @@ class RequisitionController extends Controller
                     $totalAmount  += $item['total'];
                     $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
                         ($input['requested_by_type'] ?? $requisition->requested_by_type) === 'project'
-                            ? ($input['project_id'] ?? $requisition->project_id)
+                            ? $this->enquiryIdForProject($input['project_id'] ?? $requisition->project_id)
                             : null
                     );
                     // purpose is required in the DB — if it wasn't provided
@@ -469,7 +473,7 @@ class RequisitionController extends Controller
             $this->syncProjectProcurement($requisition);
 
             return new RequisitionResource(
-                $requisition->load(['items.material', 'items.supplier', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy', 'approvedBy'])
+                $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy', 'approvedBy'])
             );
 
         } catch (\Exception $e) {
@@ -509,7 +513,7 @@ class RequisitionController extends Controller
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'items.supplier', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
     }
 
@@ -525,12 +529,96 @@ class RequisitionController extends Controller
             return response(['error' => 'Only pending requisitions can be approved'], 422);
         }
 
+        // Requesters may save without a category. Finance must complete it
+        // before authorising the purchase. Receipt accrual remains independent
+        // so legacy deliveries are still recorded even when unclassified.
+        $uncoded = $requisition->items()->whereNull('expense_code_id')->count();
+
+        if ($uncoded > 0) {
+            return response([
+                'error' => "{$uncoded} item(s) need a purchase category. "
+                    .'Finance must select one on every line before approval.',
+                'code' => 'EXPENSE_CODE_REQUIRED',
+            ], 422);
+        }
+
+        // Before the job rule, the blunter question: is this a purchase at all?
+        //
+        // The catalogue has to carry codes that are not — stores issues, VAT
+        // remitted, a petty-cash float top-up — because the cost collector posts
+        // all of them. A purchase order cannot. `is_procurable` is the catalogue's
+        // own answer, so this reads it rather than re-deciding it here.
+        $unbuyable = $requisition->items()->with('expenseCode')->get()
+            ->filter(fn ($item) => $item->expenseCode && ! $item->expenseCode->is_procurable)
+            ->map(fn ($item) => $item->expenseCode->expense_type)
+            ->unique()
+            ->values();
+
+        if ($unbuyable->isNotEmpty()) {
+            return response([
+                'error' => 'These categories cannot be used on a purchase order: '
+                    .$unbuyable->implode(', ').'. Choose a category for goods or supplier services. '
+                    .'Staff payments belong in fund requisitions or payroll.',
+                'code' => 'EXPENSE_CODE_NOT_PROCURABLE',
+            ], 422);
+        }
+
+        // ...and the code it carries must be legal for this requisition's job
+        // context, which nothing checked at all. The picker was the only gate,
+        // and it derived the context from a job number filled in *after* lines
+        // can already be coded. The collector enforces the same rule when it
+        // posts the receipt — far too late, the order has been placed by then.
+        $hasJob = $requisition->requested_by_type === 'project';
+        $illegalRule = $hasJob ? ExpenseCode::JOB_NOT_ALLOWED : ExpenseCode::JOB_REQUIRED;
+
+        $mismatched = $requisition->items()->with('expenseCode')->get()
+            ->filter(fn ($item) => $item->expenseCode?->job_id_rule === $illegalRule)
+            ->map(fn ($item) => $item->expenseCode->expense_type)
+            ->unique()
+            ->values();
+
+        if ($mismatched->isNotEmpty()) {
+            return response([
+                'error' => $hasJob
+                    ? 'These expense types cannot be charged to a job: '.$mismatched->implode(', ')
+                        .'. Re-classify those lines before approving.'
+                    : 'These expense types require a job number, and this requisition has none: '
+                        .$mismatched->implode(', ').'. Re-classify those lines, or raise the '
+                        .'requisition against the project instead.',
+                'code' => 'EXPENSE_CODE_JOB_RULE',
+            ], 422);
+        }
+
         $requisition->approve(auth()->id());
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'items.supplier', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
+    }
+
+    /**
+     * The enquiry a project requisition's lines belong to.
+     *
+     * Both save paths used to fill `project_enquiry_id` with the requisition's
+     * `project_id` — a Projects primary key written into a column that means an
+     * enquiry id. That is how requisition items came to carry id 196, which is a
+     * project and not an enquiry, and why every purchase-order commitment raised
+     * from them died with "Enquiry #196 does not exist, so this cost has no
+     * owner", leaving the whole order unrecorded.
+     *
+     * The project is the authority — the same rule StoresCostProducer and
+     * ProcurementCostProducer resolve identity by. Its enquiry is looked up
+     * rather than its own key passed along, and a project with no enquiry yields
+     * null instead of a plausible-looking wrong number.
+     */
+    private function enquiryIdForProject(mixed $projectId): ?int
+    {
+        if (! $projectId) {
+            return null;
+        }
+
+        return Project::whereKey($projectId)->value('enquiry_id') ?: null;
     }
 
     private function buyingUomId(mixed $materialId): ?int
@@ -564,7 +652,7 @@ class RequisitionController extends Controller
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'items.supplier', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
     }
 }

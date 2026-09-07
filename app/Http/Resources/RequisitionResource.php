@@ -80,6 +80,18 @@ class RequisitionResource extends JsonResource
                         'budget_item_persistent_id' => $item->budget_item_persistent_id,
                         'material_id' => $item->material_id,
                         'expense_code_id' => $item->expense_code_id,
+                        // The id alone cannot be rendered. Every screen that
+                        // shows a coded line had to either re-fetch the
+                        // catalogue or show nothing, and the edit form showed
+                        // an empty picker over a line that was in fact coded.
+                        'expense_code' => $item->expenseCode ? [
+                            'id' => $item->expenseCode->id,
+                            'code' => $item->expenseCode->code,
+                            'expense_type' => $item->expenseCode->expense_type,
+                            'expense_family' => $item->expenseCode->expense_family,
+                            'simple_meaning' => $item->expenseCode->simple_meaning,
+                            'job_id_rule' => $item->expenseCode->job_id_rule,
+                        ] : null,
                         'supplier_id' => $item->supplier_id,
                         'supplier' => $item->supplier ? [
                             'id' => $item->supplier->id,
