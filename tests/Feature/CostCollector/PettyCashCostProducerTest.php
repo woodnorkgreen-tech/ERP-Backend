@@ -74,6 +74,55 @@ class PettyCashCostProducerTest extends TestCase
         ], $overrides));
     }
 
+    /**
+     * Paying a supplier invoice out of the tin settles a cost; it does not create one.
+     *
+     * The procurement relay already charged the job for these goods — accrued
+     * when Stores accepted the delivery, actual when Stores issued the material.
+     * Cash leaving afterwards discharges the liability the accrual recorded.
+     * Posting here as well would charge the job twice, and CostAccountService
+     * sums actual + accrued + committed, so both would land in one total.
+     *
+     * Only reachable since supplier invoices could be paid from petty cash, so
+     * nothing had needed to say it before.
+     */
+    public function test_settling_a_supplier_invoice_posts_no_project_cost(): void
+    {
+        $this->enquiry('WNG-01-2026-009');
+
+        $requisitionId = DB::table('petty_cash_requisitions')->insertGetId([
+            'requisition_number' => 'REQ-' . uniqid(),
+            'department_id' => DB::table('departments')->insertGetId([
+                'name' => 'Ops ' . uniqid(), 'created_at' => now(), 'updated_at' => now(),
+            ]),
+            'category' => 'Other',
+            'purpose' => 'Settle supplier invoice',
+            'total_amount' => 4500.00,
+            'status' => 'approved',
+            'bill_id' => 4242,   // the link is what matters, not a live invoice
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $disbursement = $this->disbursement([
+            'job_number' => 'WNG-01-2026-009',
+            'requisition_id' => $requisitionId,
+        ]);
+
+        $before = CostLine::count();
+
+        $this->assertSame('skipped_supplier_settlement', $this->producer->postFor($disbursement));
+        $this->assertSame($before, CostLine::count(), 'A settlement must not add a cost line.');
+    }
+
+    /** The same disbursement with no invoice behind it is ordinary spend, and still posts. */
+    public function test_an_unlinked_disbursement_is_unaffected_by_the_settlement_guard(): void
+    {
+        $this->enquiry('WNG-01-2026-010');
+        $disbursement = $this->disbursement(['job_number' => 'WNG-01-2026-010']);
+
+        $this->assertSame('posted', $this->producer->postFor($disbursement));
+    }
+
     public function test_a_paid_disbursement_becomes_a_verified_project_cost(): void
     {
         $enquiryId = $this->enquiry('WNG-01-2026-004');

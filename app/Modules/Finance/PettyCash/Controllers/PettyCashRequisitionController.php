@@ -20,6 +20,8 @@ use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\HR\Models\TechnicalLabour;
 use Exception;
+use App\Events\PettyCashRequisitionApproved;
+use App\Events\PettyCashRequisitionReturnedToPending;
 use App\Exceptions\GovernanceException;
 use App\Services\Governance\ProjectGovernanceService;
 use App\Modules\Finance\PettyCash\Services\RequisitionSchemaService;
@@ -317,10 +319,17 @@ class PettyCashRequisitionController extends Controller
             ];
 
             // If it was approved, revert to pending for re-approval because details changed
-            if ($requisition->status === 'approved') {
+            $approvalWithdrawn = $requisition->status === 'approved';
+
+            if ($approvalWithdrawn) {
                 $commonData['status'] = 'pending';
                 $commonData['approved_by'] = null;
                 $commonData['approved_at'] = null;
+
+                // The project stopped being committed to this money the moment
+                // the approval was withdrawn. Released out-of-band, mirroring
+                // the approval path, so the cost ledger can never block an edit.
+                DB::afterCommit(fn () => PettyCashRequisitionReturnedToPending::dispatch($requisition->id));
             }
 
             $requisition->update($commonData);
@@ -447,6 +456,10 @@ class PettyCashRequisitionController extends Controller
                 'approved_by' => Auth::id(),
                 'approved_at' => now(),
             ]);
+
+            // The project's money is now spoken for. Recorded as a commitment
+            // out-of-band, so the cost ledger can never stop an approval.
+            DB::afterCommit(fn () => PettyCashRequisitionApproved::dispatch($requisition->id));
 
             if ($selfApproval) {
                 app(PettyCashService::class)->logActivity(
