@@ -37,6 +37,19 @@ class BillPayment extends Model
             if (empty($payment->payment_code)) {
                 $payment->payment_code = self::generatePaymentCode();
             }
+
+            /*
+             * The three-way match is enforced here rather than in each caller
+             * so that no payment path — screen, batch run, or petty cash
+             * disbursement — can create cash movement against an unverified
+             * supplier invoice.
+             */
+            $bill = $payment->bill ?: Bill::find($payment->bill_id);
+            if (! $bill) {
+                throw new \RuntimeException('A supplier payment must belong to a bill.');
+            }
+            app(\App\Modules\ProcurementStores\Services\SupplierPaymentGuard::class)
+                ->assertPayable($bill, (string) $payment->amount_paid);
         });
 
         // Update bill payment status after payment is created

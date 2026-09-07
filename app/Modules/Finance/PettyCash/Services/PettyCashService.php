@@ -399,6 +399,29 @@ class PettyCashService
                     }
                 }
 
+                /*
+                 * A petty cash disbursement against a supplier invoice is a
+                 * supplier payment, and answers to the same three-way match as
+                 * one made from the bank. Checked before the cash moves, so a
+                 * blocked invoice is refused with a reason rather than leaving
+                 * cash out of the tin and no payment recorded against the bill.
+                 */
+                if (! empty($data['requisition_id'])) {
+                    $linkedRequisition = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::find($data['requisition_id']);
+                    $linkedBill = $linkedRequisition?->bill_id
+                        ? \App\Modules\ProcurementStores\Models\Bill::find($linkedRequisition->bill_id)
+                        : null;
+
+                    if ($linkedBill) {
+                        try {
+                            app(\App\Modules\ProcurementStores\Services\SupplierPaymentGuard::class)
+                                ->assertPayable($linkedBill, (string) $data['amount']);
+                        } catch (\RuntimeException $blocked) {
+                            return ['success' => false, 'errors' => ['bill_id' => [$blocked->getMessage()]]];
+                        }
+                    }
+                }
+
                 $disbursement = $this->repository->createDisbursement($data);
 
                 // If we planned a split across multiple top-ups, persist allocation records
@@ -963,7 +986,13 @@ class PettyCashService
             
             \Log::info("Automated BillPayment created for Bill #{$requisition->bill_id} from Requisition #{$requisition->id}");
         } catch (\Exception $e) {
+            /*
+             * Rethrown, not logged: this runs inside the disbursement's
+             * transaction, and swallowing it would leave cash disbursed with
+             * nothing recorded against the supplier's invoice.
+             */
             \Log::error("Failed to auto-create BillPayment for Requisition #{$requisition->id}: " . $e->getMessage());
+            throw $e;
         }
     }
 

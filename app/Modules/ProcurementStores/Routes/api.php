@@ -69,6 +69,8 @@ Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController:
 Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
 Route::get('/purchase-orders/{purchaseOrder}/download', [PurchaseOrderController::class, 'downloadPdf']);
+Route::get('/purchase-orders/{purchaseOrder}/workflow', [PurchaseOrderController::class, 'workflow']);
+Route::post('/purchase-orders/workflow-summary', [PurchaseOrderController::class, 'workflowSummary']);
 Route::apiResource('/purchase-orders', PurchaseOrderController::class);
 Route::get('/purchase-orders/link/{requisition}', [PurchaseOrderController::class, 'link'])->name('purchase-orders.link');
 Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 'storeLinked'])->name('purchase-orders.storeLinked');
@@ -80,6 +82,8 @@ Route::get('/payment-methods', [BillController::class, 'getPaymentMethods']);
 Route::post('/payment-methods', [BillController::class, 'storePaymentMethod']);
 Route::post('/search/bills', [BillController::class, 'search']);
 Route::post('/bills/{bill}/record-payment', [BillController::class, 'recordPayment']);
+Route::get('/bills/{bill}/verification', [BillController::class, 'verification']);
+Route::post('/bills/{bill}/verify', [BillController::class, 'verify']);
 Route::get('/bills/{bill}/download', [BillController::class, 'downloadPdf']);
 Route::post('/multi-payment', [BillController::class, 'recordMultiBillPayment']);
 
