@@ -31,6 +31,12 @@ class LedgerServiceTest extends TestCase
         Schema::create('petty_cash_ledger_entries', function ($table) {
             $table->id();
             $table->string('reference_number');
+            // Mirrors the real table. The entry has always known which document
+            // it came from; persisting it is what lets a void ask whether this
+            // disbursement ever debited the float, now that one paid from a bank
+            // does not.
+            $table->string('source_type', 32)->nullable();
+            $table->unsignedBigInteger('source_id')->nullable();
             $table->string('type');
             $table->decimal('amount', 10, 2)->default(0.00);
             $table->decimal('balance_snapshot', 10, 2)->default(0.00);
@@ -62,7 +68,13 @@ class LedgerServiceTest extends TestCase
         $balance = $service->post($entry);
 
         $this->assertSame('100.00', number_format($balance->current_balance, 2, '.', ''));
-        $this->assertDatabaseHas('petty_cash_ledger_entries', ['reference_number' => $entry->reference_number, 'type' => 'credit']);
+        $this->assertDatabaseHas('petty_cash_ledger_entries', [
+            'reference_number' => $entry->reference_number,
+            'type' => 'credit',
+            // Persisted, not merely carried on the entry object.
+            'source_type' => 'top_up',
+            'source_id' => 1,
+        ]);
     }
 
     public function test_debit_posts_and_updates_balance()
@@ -84,7 +96,12 @@ class LedgerServiceTest extends TestCase
         $balance = $service->post($entry);
 
         $this->assertSame('150.00', number_format($balance->current_balance, 2, '.', ''));
-        $this->assertDatabaseHas('petty_cash_ledger_entries', ['reference_number' => $entry->reference_number, 'type' => 'debit']);
+        $this->assertDatabaseHas('petty_cash_ledger_entries', [
+            'reference_number' => $entry->reference_number,
+            'type' => 'debit',
+            'source_type' => 'disbursement',
+            'source_id' => 1,
+        ]);
     }
 
     public function test_rebuild_from_ledger_resets_balance()

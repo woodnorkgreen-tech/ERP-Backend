@@ -74,6 +74,8 @@ class BillResource extends JsonResource
                     return [
                         'id' => $payment->id,
                         'payment_code' => $payment->payment_code,
+                        'payment_source' => $payment->paymentSource?->only(['id', 'code', 'name', 'type']),
+                        'disbursement_id' => $payment->disbursement_id,
                         'amount_paid' => (float) $payment->amount_paid,
                         'payment_date' => $payment->payment_date->format('Y-m-d'),
                         'payment_method' => $payment->paymentMethod ? [

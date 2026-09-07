@@ -332,7 +332,7 @@ class PettyCashService
                 $totalToDeduct = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
 
                 // Validate balance before creating disbursement (unless skipped)
-                if (!($data['skip_balance_check'] ?? false)) {
+                if ($paymentSource->type === 'petty_cash' && !($data['skip_balance_check'] ?? false)) {
                     if ($balance->current_balance < $totalToDeduct) {
                         return [
                             'success' => false,
@@ -354,7 +354,9 @@ class PettyCashService
                 $plannedAllocations = [];
 
                 // Auto-assign top_up_id if not provided using FIFO allocator (may split across top-ups)
-                if (empty($data['top_up_id'])) {
+                if ($paymentSource->type !== 'petty_cash') {
+                    $data['top_up_id'] = null;
+                } elseif (empty($data['top_up_id'])) {
                     $allocator = new TopUpAllocator($this->repository);
                     try {
                         $allocations = $allocator->plan((float)$data['amount'], (float)($data['transaction_cost'] ?? 0));
@@ -437,7 +439,9 @@ class PettyCashService
                 }
 
                 $ledger = new LedgerService();
-                $ledger->post(LedgerEntry::debitForDisbursement($disbursement));
+                if ($paymentSource->type === 'petty_cash') {
+                    $ledger->post(LedgerEntry::debitForDisbursement($disbursement));
+                }
 
                 // Refresh balance
                 $balance->refresh();
@@ -534,6 +538,7 @@ class PettyCashService
         DB::beginTransaction();
 
         try {
+            $disbursement = PettyCashDisbursement::whereKey($disbursement->id)->lockForUpdate()->firstOrFail();
             if ($disbursement->is_voided) {
                 throw new Exception('Disbursement is already voided.');
             }
@@ -559,7 +564,13 @@ class PettyCashService
             ]);
             $entry->sourceType = 'disbursement';
             $entry->sourceId = $disbursement->id;
-            $ledger->post($entry);
+            // Historical transactions may predate payment sources. Refund only
+            // a payment that actually debited this cashbook.
+            if (DB::table('petty_cash_ledger_entries')->where('source_type', 'disbursement')
+                ->where('source_id', $disbursement->id)->where('type', 'debit')->exists()) {
+                $ledger->post($entry);
+            }
+            $disbursement->billPayment?->delete();
 
             // Refresh balance
             $balance->refresh();
@@ -767,7 +778,7 @@ class PettyCashService
         $errors = [];
 
         // Validate required fields (top_up_id is now optional as service can auto-allocate)
-        $requiredFields = ['receiver', 'account', 'amount', 'description', 'classification', 'payment_method'];
+        $requiredFields = ['receiver', 'expense_code_id', 'payment_source_id', 'amount', 'description'];
         foreach ($requiredFields as $field) {
             // Only require fields if not updating, or if they are explicitly provided in the update
             if (!$isUpdate && empty($data[$field])) {
@@ -971,15 +982,19 @@ class PettyCashService
     private function createBillPaymentFromDisbursement($requisition, $disbursement): void
     {
         try {
-            $paymentMethodId = \App\Modules\ProcurementStores\Models\PaymentMethod::where('name', 'Petty Cash')
-                ->orWhere('name', 'like', '%Cash%')
-                ->value('id') ?? 1; // Fallback to 1
+            $source = $disbursement->paymentSource;
+            $method = \App\Modules\ProcurementStores\Models\PaymentMethod::where('payment_source_id', $source->id)->where('is_active', true)->first()
+                ?? \App\Modules\ProcurementStores\Models\PaymentMethod::create([
+                    'method_name' => $source->name, 'payment_source_id' => $source->id, 'is_active' => true,
+                ]);
 
             \App\Modules\ProcurementStores\Models\BillPayment::create([
                 'bill_id' => $requisition->bill_id,
                 'amount_paid' => $disbursement->amount,
                 'payment_date' => $disbursement->date_disbursed ?? now(),
-                'payment_method_id' => $paymentMethodId,
+                'payment_method_id' => $method->id,
+                'payment_source_id' => $source->id,
+                'disbursement_id' => $disbursement->id,
                 'reference_number' => "Paid via Petty Cash Req #{$requisition->requisition_number} (Disb #{$disbursement->id})",
                 'user_id' => $disbursement->created_by ?? Auth::id(),
             ]);

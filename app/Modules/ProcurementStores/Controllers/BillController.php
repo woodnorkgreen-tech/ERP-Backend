@@ -9,6 +9,7 @@ use App\Modules\ProcurementStores\Models\PaymentMethod;
 use App\Http\Resources\BillResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Modules\ProcurementStores\Services\PurchaseOrderWorkflow;
@@ -320,7 +321,16 @@ class BillController extends Controller
         $validator = Validator::make($request->all(), [
             'amount_paid' => 'required|numeric|min:0.01|max:' . $bill->balance,
             'payment_date' => 'required|date',
-            'payment_method_id' => 'required|exists:payment_methods,id',
+            // Rule::exists scoped to settleable methods rather than a bare
+            // exists: a method with no payment source cannot say which account
+            // the cash left, so a payment through it is unpostable.
+            'payment_method_id' => [
+                'nullable', 'required_without:payment_source_id',
+                Rule::exists('payment_methods', 'id')
+                    ->where('is_active', true)
+                    ->whereNotNull('payment_source_id'),
+            ],
+            'payment_source_id' => ['nullable', 'required_without:payment_method_id', Rule::exists('payment_sources', 'id')->where('is_active', true)],
             'reference_number' => 'required|string|max:255',
         ]);
 
@@ -337,12 +347,13 @@ class BillController extends Controller
         try {
             $paymentCode = 'PAY-' . str_pad((BillPayment::max('id') ?? 0) + 1, 6, '0', STR_PAD_LEFT);
 
-            BillPayment::create([
+            app(\App\Modules\ProcurementStores\Services\SupplierPaymentService::class)->record($bill, [
                 'bill_id' => $bill->id,
                 'payment_code' => $paymentCode,
                 'amount_paid' => $request->amount_paid,
                 'payment_date' => $request->payment_date,
                 'payment_method_id' => $request->payment_method_id,
+                'payment_source_id' => $request->payment_source_id,
                 'reference_number' => $request->reference_number,
                 'user_id' => auth()->id(),
             ]);
@@ -350,6 +361,10 @@ class BillController extends Controller
             $this->syncProjectProcurementFromBill($bill->id);
 
             return new BillResource($bill->fresh()->load(['purchaseOrder', 'supplier', 'createdBy', 'verifiedBy', 'payments.paymentMethod', 'payments.createdBy']));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['error' => $e->getMessage(), 'errors' => $e->errors()], 422);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             return response(['error' => 'Failed to record payment: ' . $e->getMessage()], 500);
         }
@@ -359,10 +374,19 @@ class BillController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'bill_ids' => 'required|array|min:1',
-            'bill_ids.*' => 'exists:bills,id',
+            'bill_ids.*' => 'integer|distinct|exists:bills,id',
             'amount_paid' => 'required|numeric|min:0.01',
             'payment_date' => 'required|date',
-            'payment_method_id' => 'required|exists:payment_methods,id',
+            // Same gate as the single-bill path above. A batch payment is the
+            // one place a control is most likely to be missed, and this one was:
+            // it validated only that the method row existed.
+            'payment_method_id' => [
+                'nullable', 'required_without:payment_source_id',
+                Rule::exists('payment_methods', 'id')
+                    ->where('is_active', true)
+                    ->whereNotNull('payment_source_id'),
+            ],
+            'payment_source_id' => ['nullable', 'required_without:payment_method_id', Rule::exists('payment_sources', 'id')->where('is_active', true)],
             'reference_number' => 'required|string|max:255',
         ]);
 
@@ -376,7 +400,7 @@ class BillController extends Controller
             $bills = Bill::whereIn('id', $request->bill_ids)
                         ->where('balance', '>', 0)
                         ->orderBy('due_date', 'asc')
-                        ->get();
+                        ->lockForUpdate()->get();
 
             if ($bills->isEmpty()) {
                 DB::rollBack();
@@ -424,12 +448,13 @@ class BillController extends Controller
 
                 $amountForThisBill = min($remainingPayment, $bill->balance);
                 
-                BillPayment::create([
+                app(\App\Modules\ProcurementStores\Services\SupplierPaymentService::class)->record($bill, [
                     'bill_id' => $bill->id,
                     'payment_code' => $paymentCode,
                     'amount_paid' => $amountForThisBill,
                     'payment_date' => $request->payment_date,
                     'payment_method_id' => $request->payment_method_id,
+                'payment_source_id' => $request->payment_source_id,
                     'reference_number' => $request->reference_number,
                     'user_id' => auth()->id(),
                 ]);
@@ -459,6 +484,12 @@ class BillController extends Controller
                 'bills_updated' => $billsUpdated,
             ]);
 
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage(), 'errors' => $e->errors()], 422);
+        } catch (\RuntimeException $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             DB::rollBack();
             return response(['error' => 'Failed to record payment: ' . $e->getMessage()], 500);
@@ -506,9 +537,51 @@ class BillController extends Controller
         }
     }
 
+    /**
+     * The ways a bill can be settled.
+     *
+     * Only methods that resolve to a Finance payment source. A method without
+     * one names no ledger account, so a payment recorded through it appears on
+     * the bill and nowhere in the books — which is what every row in this table
+     * used to be, since procurement kept its own GL-less copy of the list
+     * Finance already maintained in `payment_sources`.
+     */
+    /**
+     * Where a supplier invoice can be paid from.
+     *
+     * Petty cash sources carry the float balance. Procurement staff do not
+     * generally hold `finance.petty_cash.view`, so asking the client to fetch it
+     * from the petty cash module would either 403 or force that permission to be
+     * widened — and somebody about to spend the tin needs to know what is in it.
+     * One number, on the source they are choosing, is the whole of what this
+     * screen needs.
+     */
+    public function getPaymentSources()
+    {
+        $sources = \App\Modules\Finance\Models\PaymentSource::where('is_active', true)
+            ->orderBy('name')->get(['id', 'name', 'code', 'type', 'currency']);
+
+        $float = \App\Modules\Finance\PettyCash\Models\PettyCashBalance::query()
+            ->where('id', \App\Modules\Finance\PettyCash\Services\LedgerService::BALANCE_ID)
+            ->value('current_balance');
+
+        return response()->json([
+            'data' => $sources->map(fn ($source) => array_merge($source->toArray(), [
+                // Null on everything else, and deliberately so: a bank or
+                // mobile-money balance is not held in this system, and showing a
+                // zero there would read as "no money" rather than "not tracked".
+                'available_balance' => $source->type === 'petty_cash' ? (float) ($float ?? 0) : null,
+            ])),
+        ]);
+    }
+
     public function getPaymentMethods()
     {
-        $methods = PaymentMethod::where('is_active', true)->orderBy('method_name')->get();
+        $methods = PaymentMethod::settleable()
+            ->with('paymentSource:id,code,name,type')
+            ->orderBy('method_name')
+            ->get();
+
         return response()->json(['data' => $methods]);
     }
 
@@ -516,6 +589,11 @@ class BillController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'method_name' => 'required|string|max:255|unique:payment_methods,method_name',
+            // Required, not optional. This endpoint is how the second payment
+            // vocabulary grew in the first place: anyone could add a name, and
+            // the name was all there was. A new way of paying is a new place the
+            // money comes from, and Finance owns those.
+            'payment_source_id' => 'required|integer|exists:payment_sources,id',
         ]);
 
         if ($validator->fails()) {
@@ -524,6 +602,7 @@ class BillController extends Controller
 
         $method = PaymentMethod::create([
             'method_name' => $request->method_name,
+            'payment_source_id' => $request->payment_source_id,
             'is_active' => true,
         ]);
 

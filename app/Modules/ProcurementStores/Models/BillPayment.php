@@ -16,6 +16,8 @@ class BillPayment extends Model
         'amount_paid',
         'payment_date',
         'payment_method_id',
+        'payment_source_id',
+        'disbursement_id',
         'reference_number', // CHANGED from 'notes'
         'user_id'
     ];
@@ -94,6 +96,16 @@ class BillPayment extends Model
     /**
      * Get the user who created this payment
      */
+    public function paymentSource()
+    {
+        return $this->belongsTo(\App\Modules\Finance\Models\PaymentSource::class);
+    }
+
+    public function disbursement()
+    {
+        return $this->belongsTo(\App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::class);
+    }
+
     public function createdBy()
     {
         return $this->belongsTo(User::class, 'user_id');

@@ -7,9 +7,21 @@ use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
+use App\Modules\Finance\CostCollector\Models\ExpenseCode;
+use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
+use App\Modules\Finance\PettyCash\Services\PettyCashService;
+use App\Modules\HR\Models\Department;
+use Illuminate\Support\Str;
+use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
+use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
+use App\Modules\Finance\PettyCash\Services\LedgerEntry;
+use App\Modules\Finance\PettyCash\Services\LedgerService;
+use Illuminate\Support\Facades\DB;
 use App\Modules\ProcurementStores\Models\PaymentMethod;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
+use App\Modules\ProcurementStores\Models\Requisition;
 use App\Modules\ProcurementStores\Models\Supplier;
 use App\Modules\ProcurementStores\Services\PurchaseOrderWorkflow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -122,9 +134,29 @@ class SupplierPaymentGateTest extends TestCase
         ]);
     }
 
+    /**
+     * A payment method that can actually settle a bill.
+     *
+     * The payment source is not incidental to the fixture: a method without one
+     * names no ledger account, so the controller now refuses it. Creating the
+     * method bare made this suite pass while exercising a payment that could
+     * never have been posted.
+     */
     private function paymentMethod(): PaymentMethod
     {
-        return PaymentMethod::firstOrCreate(['method_name' => 'Bank Transfer']);
+        $source = PaymentSource::firstOrCreate(
+            ['code' => 'BANK-MAIN'],
+            ['name' => 'Bank – Main Account', 'type' => 'bank', 'currency' => 'KES', 'is_active' => true],
+        );
+
+        // updateOrCreate, not firstOrCreate: a seeded "Bank Transfer" already
+        // exists in some databases with no source, and firstOrCreate would hand
+        // it back unchanged — leaving the fixture testing exactly the unpostable
+        // payment this gate now refuses.
+        return PaymentMethod::updateOrCreate(
+            ['method_name' => 'Bank Transfer'],
+            ['payment_source_id' => $source->id, 'is_active' => true],
+        );
     }
 
     public function test_an_approved_order_awaits_delivery_not_payment(): void
@@ -410,5 +442,311 @@ class SupplierPaymentGateTest extends TestCase
             'payment_method_id' => $this->paymentMethod()->id,
             'reference_number' => 'FT-0003',
         ])->assertStatus(422);
+    }
+
+    /*
+     * ── Where the money came from ────────────────────────────────────────
+     *
+     * Petty cash is a payment source, not a kind of expense, and at WNG it is
+     * the source most money leaves through — including money that settles
+     * supplier invoices. That payment used to write a `bill_payments` row and
+     * nothing else: the invoice showed as paid, the float did not move, and the
+     * payment appeared nowhere in the petty cash transaction list, which reads
+     * `petty_cash_ledger_entries` directly.
+     */
+
+    public function test_paying_an_invoice_from_petty_cash_takes_it_out_of_the_float(): void
+    {
+        $bill = $this->payableBill();
+        $this->topUpFloat('80000');
+        $opening = (string) PettyCashBalance::current()->current_balance;
+
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'reference_number' => 'PC-0001',
+        ])->assertSuccessful();
+
+        $payment = BillPayment::where('bill_id', $bill->id)->sole();
+
+        $this->assertNotNull(
+            $payment->disbursement_id,
+            'An invoice paid from the tin is a petty cash disbursement like any other.'
+        );
+        $this->assertSame(
+            0,
+            bccomp(bcsub($opening, '50000', 2), (string) PettyCashBalance::current()->current_balance, 2),
+            'The float must fall by the amount paid.'
+        );
+
+        // The petty cash transaction list reads the ledger, so this is also the
+        // assertion that the payment shows up where a custodian looks for it.
+        $this->assertSame(1, DB::table('petty_cash_ledger_entries')
+            ->where('source_type', 'disbursement')
+            ->where('source_id', $payment->disbursement_id)
+            ->where('type', 'debit')
+            ->count(), 'One cash movement, one ledger entry — never two.');
+    }
+
+    public function test_paying_an_invoice_from_the_bank_leaves_the_float_alone(): void
+    {
+        $bill = $this->payableBill();
+        $this->topUpFloat('80000');
+        $opening = (string) PettyCashBalance::current()->current_balance;
+
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('BANK-MAIN')->id,
+            'reference_number' => 'FT-9001',
+        ])->assertSuccessful();
+
+        $payment = BillPayment::where('bill_id', $bill->id)->sole();
+
+        $this->assertNull($payment->disbursement_id);
+        $this->assertSame(
+            $this->source('BANK-MAIN')->id,
+            $payment->payment_source_id,
+            'The payment records where it was actually paid from, not where its method usually draws.'
+        );
+        $this->assertSame(
+            0,
+            bccomp($opening, (string) PettyCashBalance::current()->current_balance, 2),
+            'Money that never came out of the tin must not be deducted from it.'
+        );
+    }
+
+    public function test_a_payment_the_float_cannot_cover_is_refused(): void
+    {
+        $bill = $this->payableBill();
+        $this->topUpFloat('10000');
+        $opening = (string) PettyCashBalance::current()->current_balance;
+
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'reference_number' => 'PC-0002',
+        ])->assertStatus(422);
+
+        $this->assertSame(0, BillPayment::where('bill_id', $bill->id)->count(),
+            'A refused payment must not record the invoice as paid.');
+        $this->assertSame(
+            0,
+            bccomp($opening, (string) PettyCashBalance::current()->current_balance, 2),
+            'and must leave the float untouched.'
+        );
+    }
+
+    /** A delivered, verified invoice the gate will let through. */
+    private function payableBill(): Bill
+    {
+        $this->deliver(received: 10, confirmed: true);
+        $bill = $this->bill(50000);
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
+
+        return $bill->fresh();
+    }
+
+    private function source(string $code): PaymentSource
+    {
+        return PaymentSource::firstOrCreate(
+            ['code' => $code],
+            [
+                'name' => $code === 'PC-MAIN' ? 'Main Petty Cash Float' : 'Bank – Main Account',
+                'type' => $code === 'PC-MAIN' ? 'petty_cash' : 'bank',
+                'currency' => 'KES',
+                'is_active' => true,
+            ],
+        );
+    }
+
+    /**
+     * A real top-up, not a hand-written balance row.
+     *
+     * The payment path allocates the disbursement against top-ups, so a float
+     * conjured straight into `petty_cash_balances` would leave it nothing to
+     * draw on and the allocation would fail for a reason unrelated to the test.
+     */
+    private function topUpFloat(string $amount): void
+    {
+        $topUp = PettyCashTopUp::create([
+            'amount' => $amount,
+            'date_topped_up' => now()->toDateString(),
+            'description' => 'Opening float for test',
+            'payment_method' => 'cash',
+            'created_by' => $this->accounts->id,
+        ]);
+
+        app(LedgerService::class)->post(LedgerEntry::creditForTopUp($topUp));
+    }
+
+    public function test_a_purchase_requisition_says_which_float_settled_it(): void
+    {
+        $requisition = Requisition::create([
+            'requisition_number' => 'PR-TEST-'.uniqid(),
+            'date' => now()->toDateString(),
+            'requested_by_type' => 'office',
+            'urgency' => 'normal',
+            'total_amount' => 50000,
+            'status' => 'approved',
+            'user_id' => $this->accounts->id,
+        ]);
+        $this->order->update(['requisition_id' => $requisition->id]);
+
+        $bill = $this->payableBill();
+        $this->topUpFloat('80000');
+
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'reference_number' => 'PC-0003',
+        ])->assertSuccessful();
+
+        // Four hops from the request to its money — requisition, order, invoice,
+        // payment — which is why nothing ever showed it.
+        $settlements = $requisition->fresh()->settlements();
+
+        $this->assertCount(1, $settlements);
+        $this->assertSame('petty_cash', $settlements->first()['type']);
+        $this->assertSame('50000.00', $settlements->first()['amount']);
+        $this->assertNotNull(
+            $settlements->first()['disbursement_id'],
+            'A request settled from the tin names the cash record that paid it.'
+        );
+    }
+
+    /*
+     * ── Drawing cash to pay an invoice ───────────────────────────────────
+     *
+     * The other direction: instead of recording a payment on the invoice, raise
+     * a fund requisition against it, collect the cash, and let paying it out
+     * settle the invoice. Every piece of this existed and had no way in — the
+     * form reads `bill_id` off the query, PettyCashService runs the same
+     * three-way match before the cash moves, and the disbursement creates the
+     * BillPayment — but no screen linked to it, so the path had never run.
+     */
+
+    public function test_cash_drawn_against_an_invoice_settles_it(): void
+    {
+        $bill = $this->payableBill();
+        $this->topUpFloat('80000');
+        $opening = (string) PettyCashBalance::current()->current_balance;
+
+        $requisition = $this->fundRequisitionFor($bill, '50000');
+
+        $result = app(PettyCashService::class)->createDisbursement($this->payout($requisition, '50000'));
+
+        $this->assertTrue($result['success'], json_encode($result['errors'] ?? []));
+
+        $payment = BillPayment::where('bill_id', $bill->id)->sole();
+
+        $this->assertSame(
+            $result['data']->id,
+            $payment->disbursement_id,
+            'The invoice is settled by the very disbursement that paid the cash out.'
+        );
+        $this->assertSame('0.00', (string) $bill->fresh()->balance);
+
+        // Debited once. The disbursement posts the cash entry; the BillPayment it
+        // creates must not post a second one.
+        $this->assertSame(
+            0,
+            bccomp(bcsub($opening, '50000', 2), (string) PettyCashBalance::current()->current_balance, 2),
+            'The float falls by the amount once, not twice.'
+        );
+        $this->assertSame(1, DB::table('petty_cash_ledger_entries')
+            ->where('source_type', 'disbursement')
+            ->where('source_id', $result['data']->id)
+            ->where('type', 'debit')
+            ->count());
+    }
+
+    public function test_cash_cannot_be_drawn_against_an_unverified_invoice(): void
+    {
+        $this->deliver(received: 10, confirmed: true);
+        $bill = $this->bill(50000);          // deliberately not verified
+        $this->topUpFloat('80000');
+        $opening = (string) PettyCashBalance::current()->current_balance;
+
+        $requisition = $this->fundRequisitionFor($bill, '50000');
+
+        $result = app(PettyCashService::class)->createDisbursement($this->payout($requisition, '50000'));
+
+        $this->assertFalse($result['success'], 'A disbursement is a supplier payment and answers to the same match.');
+        $this->assertArrayHasKey('bill_id', $result['errors']);
+        $this->assertSame(0, BillPayment::where('bill_id', $bill->id)->count());
+        $this->assertSame(
+            0,
+            bccomp($opening, (string) PettyCashBalance::current()->current_balance, 2),
+            'Refused before the cash moves, not after.'
+        );
+    }
+
+    /**
+     * A fund requisition raised against an invoice.
+     *
+     * Raised by somebody other than the payer: paying out your own request is
+     * refused, which is the separation of duties and not something this test
+     * should be quietly working around.
+     */
+    private function fundRequisitionFor(Bill $bill, string $amount): PettyCashRequisition
+    {
+        $requester = User::create([
+            'name' => 'Site Supervisor',
+            'email' => uniqid('requester_').'@test.local',
+            'password' => bcrypt('secret'),
+            'is_active' => true,
+        ]);
+
+        return PettyCashRequisition::create([
+            'requisition_number' => 'FR-'.uniqid(),
+            'user_id' => $requester->id,
+            'department_id' => Department::firstOrCreate(['name' => 'Procurement'])->id,
+            'bill_id' => $bill->id,
+            'category' => 'Supplier invoice',
+            'purpose' => "Settle invoice {$bill->bill_number}",
+            'total_amount' => $amount,
+            'status' => 'approved',
+            'requester_name' => 'Site Supervisor',
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function payout(PettyCashRequisition $requisition, string $amount): array
+    {
+        return [
+            'idempotency_key' => (string) Str::uuid(),
+            'requisition_id' => $requisition->id,
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'expense_code_id' => $this->cashExpenseCode()->id,
+            'receiver' => 'Timber & Board Ltd',
+            'account' => 'Supplier invoice payment',
+            'classification' => 'operations',
+            'amount' => $amount,
+            'transaction_cost' => 0,
+            'description' => $requisition->purpose,
+            'date_disbursed' => now()->toDateString(),
+            'payment_method' => 'cash',
+            'status' => 'active',
+            'created_by' => $this->accounts->id,
+        ];
+    }
+
+    private function cashExpenseCode(): ExpenseCode
+    {
+        return ExpenseCode::firstOrCreate(
+            ['code' => 'TST-SUP-001'],
+            [
+                'accounting_class' => 'Direct project cost',
+                'expense_family' => 'Direct materials',
+                'expense_type' => 'Boards and panels',
+                'job_id_rule' => ExpenseCode::JOB_OPTIONAL,
+                'cash_flow_class' => 'operating',
+                'is_active' => true,
+            ],
+        );
     }
 }

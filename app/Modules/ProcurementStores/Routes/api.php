@@ -87,6 +87,7 @@ Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 's
 // Bills - Specific routes FIRST (before resource)
 Route::get('/bills-stats', [BillController::class, 'stats']);
 Route::get('/pending-bills', [BillController::class, 'getPendingBills']);
+Route::get('/payment-sources', [BillController::class, 'getPaymentSources']);
 Route::get('/payment-methods', [BillController::class, 'getPaymentMethods']);
 Route::post('/payment-methods', [BillController::class, 'storePaymentMethod']);
 Route::post('/search/bills', [BillController::class, 'search']);
