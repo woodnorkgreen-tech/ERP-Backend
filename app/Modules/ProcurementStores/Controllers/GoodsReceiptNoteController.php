@@ -446,11 +446,43 @@ class GoodsReceiptNoteController extends Controller
 
     }
 
+    /**
+     * Delete a goods receipt note. Super Admin only.
+     *
+     * Receiving is normally immutable — `update()` says so outright, and a
+     * mistake is corrected with a return or a further receipt. This exists for
+     * the one case that cannot be corrected that way: clearing test receiving
+     * before an opening inventory, which StoresResetService blocks on until the
+     * receipts are gone.
+     *
+     * It was previously reachable by any authenticated user, which is a large
+     * amount of authority for an endpoint that hard-deletes receiving history.
+     *
+     * Three things make a receipt undeletable, in increasing order of how much
+     * they would cost to unpick:
+     *
+     *  1. It has entered the cost ledger. Those journals are immutable by
+     *     design and corrections are reversals, so deleting the receipt would
+     *     strand a posted accrual.
+     *  2. Its stock reached the shelf. Removing the receipt then leaves
+     *     inventory that arrived from nowhere — the mirror of the orphaning
+     *     this endpoint exists to prevent.
+     *  3. A supplier bill has been verified against it. The three-way match is
+     *     evidence for a payment; deleting its receipt half retrospectively
+     *     removes the grounds on which someone was paid.
+     */
     public function destroy($id)
     {
+        abort_unless(
+            auth()->user()?->hasRole('Super Admin'),
+            403,
+            'Only a Super Admin can delete a goods receipt note.'
+        );
+
         try {
-            $grn = GoodsReceiptNote::findOrFail($id);
-            $itemIds = $grn->items()->pluck('id');
+            $grn = GoodsReceiptNote::with('items')->findOrFail($id);
+            $itemIds = $grn->items->pluck('id');
+
             if (\App\Modules\Finance\CostCollector\Models\CostLine::where(
                 'source_type', \App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem::class
             )->whereIn('source_id', $itemIds)->exists()) {
@@ -458,14 +490,67 @@ class GoodsReceiptNoteController extends Controller
                     'message' => 'This receipt has entered the cost ledger and cannot be deleted. Use a return or reversal.',
                 ], 422);
             }
+
+            // A posted line blocks deletion only while its stock is still on the
+            // shelf.
+            //
+            // `stock_status` records that a receipt was posted once; nothing
+            // sets it back when the stock is later adjusted out, issued or
+            // returned. Reading the flag alone refuses a receipt whose inventory
+            // has already been reversed — which is exactly the state somebody
+            // who followed this message's own advice will have put it in, and
+            // there is then nothing left to strand.
+            $stranded = $grn->items
+                ->filter(fn ($item) => $item->stock_status === 'posted' && $item->material_id)
+                ->filter(fn ($item) => \App\Modules\ProcurementStores\Models\Stock::query()
+                    ->where('material_id', $item->material_id)
+                    ->where('quantity_on_hand', '>', 0)
+                    ->exists());
+
+            if ($stranded->isNotEmpty()) {
+                return response()->json([
+                    'message' => 'This receipt still has stock on the shelf. Reverse or issue it first, '
+                        .'or the inventory it created will have no receipt behind it.',
+                ], 422);
+            }
+
+            $matchedBill = \App\Modules\ProcurementStores\Models\Bill::where('purchase_order_id', $grn->purchase_order_id)
+                ->where(fn ($query) => $query->whereNotNull('verified_at')->orWhere('paid_amount', '>', 0))
+                ->first();
+
+            if ($matchedBill) {
+                return response()->json([
+                    'message' => "Bill {$matchedBill->bill_number} was matched or paid against this order. "
+                        .'Deleting the receipt would remove the evidence that payment rests on.',
+                ], 422);
+            }
+
             $purchaseOrderId = $grn->purchase_order_id;
-            $grn->delete();
+            $grnNumber = $grn->grn_number;
+            $itemCount = $itemIds->count();
+
+            // Nothing references these rows — no foreign key, no soft delete —
+            // so the children have to be removed explicitly or they outlive
+            // their note as unreachable rows.
+            \Illuminate\Support\Facades\DB::transaction(function () use ($grn, $itemIds, $grnNumber, $itemCount) {
+                \App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem::whereIn('id', $itemIds)->delete();
+                $grn->delete();
+
+                \App\Models\GovernanceAuditLog::create([
+                    'user_id' => auth()->id(),
+                    'gate_type' => 'goods_receipt_deleted',
+                    'action_status' => 'completed',
+                    'message' => "Goods receipt {$grnNumber} deleted with {$itemCount} line(s).",
+                    'context' => ['grn_number' => $grnNumber, 'item_ids' => $itemIds->all()],
+                    'ip_address' => request()->ip(),
+                ]);
+            });
 
             if ($purchaseOrderId) {
                 $this->syncProjectProcurementFromPurchaseOrder((int) $purchaseOrderId);
             }
 
-            return response()->json(['message' => 'GRN deleted successfully']);
+            return response()->json(['message' => "Goods receipt {$grnNumber} deleted."]);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Error deleting GRN: ' . $e->getMessage()], 500);
         }

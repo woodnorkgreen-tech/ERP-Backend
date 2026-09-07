@@ -49,7 +49,9 @@ class InventoryService
     public function adjustStock(int $materialId, float $quantity, string $type, array $meta = [])
     {
         return DB::transaction(function () use ($materialId, $quantity, $type, $meta) {
-            $material = LibraryMaterial::with('uomConversions')->findOrFail($materialId);
+            // Serialize valuation as well as quantity: a waiting receipt must
+            // read the preceding receipt's average, not a stale catalogue price.
+            $material = LibraryMaterial::with('uomConversions')->lockForUpdate()->findOrFail($materialId);
             $enteredQuantity = $quantity;
             $conversionFactor = 1.0;
             $enteredUomId = isset($meta['entered_uom_id']) ? (int) $meta['entered_uom_id'] : null;
@@ -101,7 +103,7 @@ class InventoryService
             // corrections to movements that already happened, and trapping
             // stock inside a reclassified item would be worse than the
             // inconsistency it prevents.
-            $status = $material->item_status ?? 'Active';
+            $status = $material->item_status ?? ($material->is_active ? 'Active' : 'Inactive');
             if ($status !== 'Active' && ! in_array($type, ['return', 'defective'], true)) {
                 $verb = $quantity < 0 ? 'issued' : 'received';
                 throw new \DomainException(
@@ -258,10 +260,19 @@ class InventoryService
      */
     public function reserveStock(int $materialId, float $quantity)
     {
-        $stock = Stock::where('material_id', $materialId)->first();
-        if (!$stock) return false;
+        return DB::transaction(function () use ($materialId, $quantity) {
+            $stock = Stock::where('material_id', $materialId)->lockForUpdate()->first();
+            if (! $stock) return false;
 
-        $stock->quantity_reserved += $quantity;
-        return $stock->save();
+            $reserved = (float) $stock->quantity_reserved + $quantity;
+            if (! is_finite($quantity) || $reserved < 0 || $reserved > (float) $stock->quantity_on_hand) {
+                throw ValidationException::withMessages([
+                    'quantity' => 'Reserved quantity must stay between zero and the stock on hand.',
+                ]);
+            }
+
+            $stock->quantity_reserved = $reserved;
+            return $stock->save();
+        });
     }
 }
