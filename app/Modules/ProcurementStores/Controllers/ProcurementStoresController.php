@@ -177,17 +177,6 @@ class ProcurementStoresController extends Controller
     }
 
     /**
-     * Diagnostic test endpoint.
-     */
-    public function test(): JsonResponse
-    {
-        return response()->json([
-            'message' => 'Procurement and Stores Module is active',
-            'status' => 'success'
-        ]);
-    }
-
-    /**
      * Fetch the Master Inventory (Library Materials + Stock Quantities)
      */
     public function inventory(Request $request): JsonResponse

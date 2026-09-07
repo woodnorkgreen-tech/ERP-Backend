@@ -13,12 +13,14 @@ use App\Modules\ProcurementStores\Controllers\BoardRequestController;
 use App\Modules\ProcurementStores\Controllers\StockCountController;
 use App\Modules\ProcurementStores\Controllers\StoresResetController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptInspectionController;
+use App\Modules\ProcurementStores\Controllers\OperationsReadinessController;
+
+Route::get('/readiness', [OperationsReadinessController::class, 'show']);
 
 // apiResource, not resource: `create` and `edit` return HTML form scaffolding,
 // which no controller here implements and no client asks for. Registering them
 // published eight routes that would fatal on a method-not-found if anything ever
 // reached them.
-Route::get('/test', [ProcurementStoresController::class, 'test']);
 Route::post('/inventory/check-availability', [ProcurementStoresController::class, 'checkAvailability']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
 Route::get('/inventory/{material}/control-options', [ProcurementStoresController::class, 'controlOptions']);
