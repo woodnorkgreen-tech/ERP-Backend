@@ -4,6 +4,7 @@ namespace App\Modules\Finance\Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * The four classification dimensions.
@@ -19,29 +20,52 @@ use Illuminate\Support\Facades\DB;
  */
 class FinanceDimensionSeeder extends Seeder
 {
-    /** [code, name, parent, sort] */
+    /**
+     * [code, name, parent, sort, hr_department_name]
+     *
+     * The fifth element is what makes a cost centre reachable from anything the
+     * rest of the ERP knows. `cost_centres.hr_department_id` has existed since
+     * the dimension tables were created, documented as the thing that "lets the
+     * collector default a cost centre from the submitting user's HR department"
+     * — and it was never populated by anything, so every cost line ever recorded
+     * carried a null cost centre while eighteen cost centres sat unreferenced.
+     *
+     * Matched by department NAME rather than id: ids are assigned by whatever
+     * order DepartmentSeeder happened to run in, and this file must stay
+     * meaningful in a database seeded in a different order. A name that does not
+     * resolve leaves the link null rather than failing — Finance can still run
+     * without the HR module present, which is why the column is unconstrained.
+     *
+     * Every one of WNG's thirteen departments now has exactly one cost centre.
+     * The rows with no department are the roll-up parents (ADMIN/OPS/COMM) and
+     * the cost pools that are not anybody's department — a hire fleet and a
+     * building are spent on, not staffed.
+     */
     private const COST_CENTRES = [
-        ['ADMIN',  'Administration',            null,    10],
-        ['HR',     'Human Resources',           'ADMIN', 11],
-        ['FIN',    'Finance',                   'ADMIN', 12],
-        ['IT',     'Information Technology',    'ADMIN', 13],
+        ['ADMIN',  'Administration',            null,    10, null],
+        ['HR',     'Human Resources',           'ADMIN', 11, 'Human Resource'],
+        ['FIN',    'Finance',                   'ADMIN', 12, 'Accounts/Finance'],
+        ['IT',     'Information Technology',    'ADMIN', 13, 'ICT'],
 
-        ['OPS',    'Operations',                null,    20],
-        ['PROD',   'Production',                'OPS',   21],
-        ['PRINT',  'Printing',                  'OPS',   22],
-        ['TECH',   'Technical',                 'OPS',   23],
-        ['STORES', 'Stores',                    'OPS',   24],
-        ['PROC',   'Procurement',               'OPS',   25],
-        ['LOG',    'Logistics & Transport',     'OPS',   26],
-        ['SANIT',  'Sanitation',                'OPS',   27],
+        ['OPS',    'Operations',                null,    20, null],
+        ['PROD',   'Production',                'OPS',   21, 'Production'],
+        ['PRINT',  'Printing',                  'OPS',   22, null],
+        ['BRAND',  'Branding',                  'OPS',   23, 'Branding'],
+        ['TECH',   'Technical',                 'OPS',   24, null],
+        ['STORES', 'Stores',                    'OPS',   25, 'Stores'],
+        ['PROC',   'Procurement',               'OPS',   26, 'Procurement'],
+        ['LOG',    'Logistics & Transport',     'OPS',   27, 'Logistics'],
+        ['CREW',   'Teams & Crew',              'OPS',   28, 'Teams'],
+        ['SANIT',  'Sanitation',                'OPS',   29, null],
 
-        ['COMM',   'Commercial',                null,    30],
-        ['PROJ',   'Projects',                  'COMM',  31],
-        ['CREA',   'Creatives & Design',        'COMM',  32],
-        ['CS',     'Client Service',            'COMM',  33],
+        ['COMM',   'Commercial',                null,    30, null],
+        ['PROJ',   'Projects',                  'COMM',  31, 'Projects'],
+        ['CREA',   'Creatives & Design',        'COMM',  32, 'Design/Creatives'],
+        ['CS',     'Client Service',            'COMM',  33, 'Client Service'],
+        ['COST',   'Costing & Estimation',      'COMM',  34, 'Costing'],
 
-        ['FAC',    'Facilities',                null,    40],
-        ['HIRE',   'Hire Assets',               null,    50],
+        ['FAC',    'Facilities',                null,    40, null],
+        ['HIRE',   'Hire Assets',               null,    50, null],
     ];
 
     /**
@@ -134,10 +158,24 @@ class FinanceDimensionSeeder extends Seeder
         DB::transaction(function () {
             $now = now();
 
-            foreach (self::COST_CENTRES as [$code, $name, , $sort]) {
+            // Departments keyed by name. Absent entirely when Finance is seeded
+            // without the HR module, which leaves every link null and is a
+            // supported state rather than a failure.
+            $departments = Schema::hasTable('departments')
+                ? DB::table('departments')->pluck('id', 'name')
+                : collect();
+
+            foreach (self::COST_CENTRES as [$code, $name, , $sort, $department]) {
                 DB::table('cost_centres')->updateOrInsert(
                     ['code' => $code],
-                    ['name' => $name, 'sort_order' => $sort, 'is_active' => true, 'updated_at' => $now, 'created_at' => $now],
+                    [
+                        'name' => $name,
+                        'hr_department_id' => $department ? ($departments[$department] ?? null) : null,
+                        'sort_order' => $sort,
+                        'is_active' => true,
+                        'updated_at' => $now,
+                        'created_at' => $now,
+                    ],
                 );
             }
 

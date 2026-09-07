@@ -43,7 +43,7 @@ class CostContextResolver
             'job_number' => $identity['job_number'] ?? null,
 
             'expense_code_id' => $code->id,
-            'cost_centre_id' => $code->default_cost_centre_id,
+            'cost_centre_id' => $this->resolveCostCentre($context, $code),
             'activity_id' => $this->resolveActivity($context, $code),
             'cost_cause_id' => $this->resolveCostCause($context),
 
@@ -190,6 +190,52 @@ class CostContextResolver
         }
 
         return $code->default_activity_id;
+    }
+
+    /**
+     * Which department carries the cost, most specific answer first.
+     *
+     * This used to read `$code->default_cost_centre_id` and nothing else — a
+     * column no seeder ever populated, so it was null on every catalogue row and
+     * therefore on every cost line the collector has ever produced.
+     *
+     * The order matters and is not arbitrary:
+     *
+     * 1. What the producer states outright. Stores knows a movement is Stores'.
+     * 2. The department that asked for the spend. A requisition carries one, and
+     *    for office and overhead purchases it is the ONLY cost object there is —
+     *    those have no job to belong to.
+     * 3. The catalogue default, which says which department usually buys this
+     *    kind of thing. A reasonable guess, and explicitly the weakest one.
+     *
+     * A cost that reaches the end unclassified is still recorded. Refusing it
+     * would lose real spend over a reporting attribute.
+     */
+    private function resolveCostCentre(CostContext $context, ExpenseCode $code): ?int
+    {
+        if (filled($context->costCentre)) {
+            $explicit = DB::table('cost_centres')
+                ->where('code', $context->costCentre)
+                ->where('is_active', true)
+                ->value('id');
+
+            if ($explicit) {
+                return (int) $explicit;
+            }
+        }
+
+        if ($context->departmentId) {
+            $byDepartment = DB::table('cost_centres')
+                ->where('hr_department_id', $context->departmentId)
+                ->where('is_active', true)
+                ->value('id');
+
+            if ($byDepartment) {
+                return (int) $byDepartment;
+            }
+        }
+
+        return $code->default_cost_centre_id;
     }
 
     private function resolveCostCause(CostContext $context): ?int

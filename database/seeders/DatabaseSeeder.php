@@ -46,17 +46,18 @@ class DatabaseSeeder extends Seeder
         $this->call(WorkstationSeeder::class);
         $this->call(MaterialCategorySeeder::class);
 
-        // Finance Module Seeds
-        $this->call([
-            \App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class,
-            \App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder::class,
-            \App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class,
-            \App\Modules\Finance\Database\Seeders\FinanceTaxSeeder::class,
-            \App\Modules\Finance\Database\Seeders\FinanceSettingsSeeder::class,
-            \App\Modules\Finance\Database\Seeders\ExpenseCodeSeeder::class,
-            \App\Modules\Finance\Database\Seeders\PaymentSourceSeeder::class,
-            \App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class,
-        ]);
+        // Finance reference data.
+        //
+        // One call, not nine. This block used to list the seven finance seeders
+        // individually AND then call the aggregate below, which re-ran all seven
+        // in a different order — expense codes before payment sources here,
+        // after them there. Nothing corrupted, because every one of them upserts
+        // on a natural key, but neither list was authoritative: a seeder added
+        // to one and not the other would have run in only half the environments.
+        //
+        // FinanceReferenceSeeder owns the order and documents why it is what it
+        // is. Add new finance reference data there.
+        $this->call(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
 
         // Seed Universal Task System data
         $this->call(UniversalTaskSeeder::class);

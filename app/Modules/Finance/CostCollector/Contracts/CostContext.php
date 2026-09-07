@@ -8,7 +8,8 @@ namespace App\Modules\Finance\CostCollector\Contracts;
  * Every field except the expense code and the amount is optional: a caller
  * supplies whatever it happens to have, and CostContextResolver fills the rest
  * (project identity via ProjectIdentityResolver, activity from the task's
- * workflow stage, cost centre / GL / VAT / WHT from the expense catalogue).
+ * workflow stage, cost centre from the caller's department or the catalogue,
+ * GL / VAT / WHT from the expense catalogue).
  *
  * This is the whole integration surface. Stores, Procurement, HR, Logistics and
  * the mobile capture screen all build one of these and hand it to CollectsCost.
@@ -38,6 +39,28 @@ final class CostContext
 
         /** Enquiry task, when known — activity/stage is derived from it. */
         public readonly ?int $taskId = null,
+
+        /**
+         * Which department the cost belongs to, as a `cost_centres.code`.
+         *
+         * Supply this when the calling module knows it directly. It outranks
+         * everything else, because a producer holding a real department is a
+         * better authority than a catalogue default that only says which
+         * department usually buys this kind of thing.
+         */
+        public readonly ?string $costCentre = null,
+
+        /**
+         * The HR department the spend was requested by, when that is what the
+         * caller has instead — a requisition carries `department_id`, not a
+         * finance code. Resolved through `cost_centres.hr_department_id`.
+         *
+         * This is what gives NON-PROJECT spend a cost object at all. Project
+         * spend is owned by its job; office and overhead spend is owned by the
+         * department that asked for it, and without this it was owned by
+         * nothing and could not be reported on.
+         */
+        public readonly ?int $departmentId = null,
 
         // ── Provenance: set by automated producers, null for manual capture.
         // Together these are the idempotency key, so a producer that retries

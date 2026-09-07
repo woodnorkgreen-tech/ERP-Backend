@@ -8,6 +8,7 @@ use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Modules\Finance\Support\CatalogueDimensionMap;
 use App\Modules\Finance\Support\ChartAccountMap;
 use Illuminate\Support\Facades\DB;
 
@@ -44,6 +45,27 @@ class FinanceReadinessController extends Controller
             ->whereNull('default_debit_account_id')
             ->where('default_debit_gl', 'REGEXP', '[0-9]{4}')
             ->count();
+        // Active codes that name a department or a stage the catalogue map does
+        // not turn into a real dimension row. Counted only where the catalogue
+        // states one: "Asset-owning department" genuinely names no single centre
+        // and is not a configuration error.
+        $codesWithoutCostCentre = DB::table('expense_codes')
+            ->where('is_active', true)
+            ->whereNotNull('default_cost_centre')
+            ->whereNull('default_cost_centre_id')
+            ->count();
+        $codesWithoutActivity = DB::table('expense_codes')
+            ->where('is_active', true)
+            ->whereNotNull('project_activity')
+            ->whereNull('default_activity_id')
+            ->count();
+        $unmappedCostCentres = CatalogueDimensionMap::unmappedCostCentres(
+            DB::table('expense_codes')->where('is_active', true)->distinct()->pluck('default_cost_centre')
+        );
+        $unmappedActivities = CatalogueDimensionMap::unmappedActivities(
+            DB::table('expense_codes')->where('is_active', true)->distinct()->pluck('project_activity')
+        );
+
         $invalidPaymentSources = DB::table('payment_sources as ps')
             ->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ps.gl_account_id')
             ->where('ps.is_active', true)
@@ -91,12 +113,25 @@ class FinanceReadinessController extends Controller
             $this->countCheck('wht_categories', 'Withholding tax categories',
                 DB::table('wht_categories')->where('is_active', true)->count(),
                 'No active withholding-tax categories are configured.'),
-            $this->countCheck('cost_centres', 'Cost centres',
-                DB::table('cost_centres')->where('is_active', true)->count(),
-                'No active cost centres are configured.'),
-            $this->countCheck('activities', 'Project activities',
-                DB::table('activities')->where('is_active', true)->count(),
-                'No active Finance activities are configured.'),
+            // Linkage, not row count.
+            //
+            // This pair used to count rows in `cost_centres` and `activities`
+            // and pass on any number above zero. Both passed for months while
+            // NOTHING referenced either table: no expense code carried a
+            // dimension key and no cost line carried a cost centre. A check that
+            // reports a dimension as configured when every posting against it is
+            // null is worse than no check, because it is what stops anybody
+            // looking. Count what the catalogue actually resolves instead.
+            $this->check('cost_centres', 'Cost centres',
+                DB::table('cost_centres')->where('is_active', true)->exists()
+                    && $unmappedCostCentres === [] && $codesWithoutCostCentre === 0,
+                $this->dimensionSummary('cost centre', $codesWithoutCostCentre, $unmappedCostCentres),
+                'Map every catalogue department phrase in CatalogueDimensionMap, then re-run the expense code seeder.'),
+            $this->check('activities', 'Project activities',
+                DB::table('activities')->where('is_active', true)->exists()
+                    && $unmappedActivities === [] && $codesWithoutActivity === 0,
+                $this->dimensionSummary('activity', $codesWithoutActivity, $unmappedActivities),
+                'Map every catalogue stage phrase in CatalogueDimensionMap, then re-run the expense code seeder.'),
         ]);
 
         $lineTotals = DB::table('journal_entries as je')
@@ -159,6 +194,37 @@ class FinanceReadinessController extends Controller
                 'note' => 'This ledger covers verified costs, spend vouchers and payroll explicitly posted from HR. Revenue, opening balances and other bank movements remain in the statutory accounting package.',
             ],
         ]]);
+    }
+
+    /**
+     * How much of the catalogue resolves to a real dimension row.
+     *
+     * Says which phrases are unrecognised, not merely how many codes failed —
+     * the fix is always to teach the map one more phrase, and naming it is the
+     * difference between an actionable check and a number.
+     *
+     * @param  list<string>  $unmapped
+     */
+    private function dimensionSummary(string $dimension, int $unresolved, array $unmapped): string
+    {
+        if ($unresolved === 0 && $unmapped === []) {
+            return sprintf('Every active expense code naming a %s resolves to one.', $dimension);
+        }
+
+        $parts = [];
+
+        if ($unresolved > 0) {
+            $parts[] = sprintf(
+                '%s active expense code(s) name a %s that does not resolve.',
+                number_format($unresolved), $dimension
+            );
+        }
+
+        if ($unmapped !== []) {
+            $parts[] = 'Unrecognised wording: '.implode('; ', $unmapped).'.';
+        }
+
+        return implode(' ', $parts);
     }
 
     private function countCheck(string $key, string $label, int $count, string $missing): array

@@ -12,7 +12,28 @@ use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use Illuminate\Support\Facades\Log;
 
-/** Approved purchase orders reserve budget; they do not create a GL journal. */
+/**
+ * Approved purchase orders reserve budget; they do not create a GL journal.
+ *
+ * ## Non-project purchases
+ *
+ * The commitment path used to skip any order line with no job — "departmental
+ * procurement has no project cost object" — while the receipt path below had no
+ * such guard and accrued the same line anyway. So an office purchase committed
+ * nothing, then produced an accrual out of nowhere when it arrived: four
+ * approved orders had generated zero commitments while the one delivery on
+ * record posted an unattributed accrual with no code, no job and no department.
+ * Five of six requisitions in the system are non-project, so that was the
+ * ordinary case rather than an edge.
+ *
+ * The premise was wrong rather than the handling. Departmental procurement does
+ * have a cost object — the department that requested it, which every requisition
+ * carries as `department_id` and which `cost_centres.hr_department_id` now maps
+ * to a finance cost centre. Both paths pass it, so a purchase is committed when
+ * it is ordered and accrued when it arrives whether or not it belongs to a job,
+ * and office spend is reportable by department instead of being invisible until
+ * it turned up in the ledger unexplained.
+ */
 class ProcurementCostProducer
 {
     public function __construct(private CostCollectorService $collector) {}
@@ -28,14 +49,12 @@ class ProcurementCostProducer
         }
 
         $posted = 0;
+        $departmentId = $po->requisition?->department_id;
+
         foreach ($po->items as $item) {
             $requisitionItem = $item->requisitionItem;
             ['project_enquiry_id' => $enquiryId, 'job_number' => $jobNumber] =
                 $this->identityFor($requisitionItem, $po->requisition);
-
-            if (! $enquiryId && blank($jobNumber)) {
-                continue; // Departmental procurement has no project cost object.
-            }
 
             $planned = $this->plannedLine($requisitionItem);
             $description = $item->custom_description ?: $item->material?->name ?: "PO item {$item->id}";
@@ -46,6 +65,7 @@ class ProcurementCostProducer
                 nature: CostLine::NATURE_COMMITTED,
                 enquiryId: $enquiryId ? (int) $enquiryId : null,
                 jobNumber: $jobNumber,
+                departmentId: $departmentId ? (int) $departmentId : null,
                 sourceType: PurchaseOrderItem::class, sourceId: $item->id,
                 sourceRef: 'commitment',
                 incurredAt: (string) ($po->approved_at ?? $po->date),
@@ -78,6 +98,9 @@ class ProcurementCostProducer
             'items.inspection',
         ])->findOrFail($goodsReceiptNoteId);
         $posted = 0;
+        // Same cost object the commitment used, so a departmental purchase is
+        // owned by the same cost centre from order through to receipt.
+        $departmentId = $grn->purchaseOrder?->requisition?->department_id;
 
         foreach ($grn->items->where('accepted', true) as $receiptItem) {
             $poItem = $receiptItem->purchaseOrderItem;
@@ -146,6 +169,7 @@ class ProcurementCostProducer
                 expenseCode: (string) ($code ?? ''), amount: $amount, nature: CostLine::NATURE_ACCRUED,
                 enquiryId: $enquiryId,
                 jobNumber: $jobNumber,
+                departmentId: $departmentId ? (int) $departmentId : null,
                 sourceType: GoodsReceiptNoteItem::class, sourceId: $receiptItem->id,
                 sourceRef: 'accrual', incurredAt: (string) $grn->date,
                 payeeType: 'SUPPLIER', payeeId: $grn->purchaseOrder?->supplier_id,
@@ -182,6 +206,7 @@ class ProcurementCostProducer
                     nature: CostLine::NATURE_COMMITTED,
                     enquiryId: $enquiryId,
                     jobNumber: $jobNumber,
+                    departmentId: $departmentId ? (int) $departmentId : null,
                     sourceType: GoodsReceiptNoteItem::class, sourceId: $receiptItem->id,
                     sourceRef: 'remaining-commitment', incurredAt: (string) $grn->date,
                     payeeType: 'SUPPLIER', payeeId: $grn->purchaseOrder?->supplier_id,
