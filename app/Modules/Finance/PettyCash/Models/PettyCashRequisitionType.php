@@ -3,6 +3,7 @@
 namespace App\Modules\Finance\PettyCash\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
@@ -69,6 +70,19 @@ class PettyCashRequisitionType extends Model
      * touching the template.
      */
     public const BUILTINS = ['request', 'project', 'items'];
+
+    /**
+     * The accounting classification this kind of request resolves to.
+     *
+     * The type names the form — what to ask for fuel, for a permit, for a site
+     * allowance. The expense code names the treatment. Keeping the link here
+     * means a commitment raised from a requisition and the payment that settles
+     * it are classified by the same catalogue entry.
+     */
+    public function defaultExpenseCode(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Finance\CostCollector\Models\ExpenseCode::class, 'default_expense_code_id');
+    }
 
     public function requisitions(): HasMany
     {

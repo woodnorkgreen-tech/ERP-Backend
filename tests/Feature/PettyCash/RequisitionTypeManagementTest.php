@@ -36,6 +36,14 @@ class RequisitionTypeManagementTest extends TestCase
     /** RefreshDatabase leaves no reference data, so the test provides its own. */
     private function expenseCodeId(): int
     {
+        // Every payload now carries a code, so this is called repeatedly within
+        // one test. Reuse rather than insert, or the unique code collides.
+        $existing = DB::table('expense_codes')->where('code', 'TEST-001')->value('id');
+
+        if ($existing) {
+            return $existing;
+        }
+
         return DB::table('expense_codes')->insertGetId([
             'code' => 'TEST-001',
             'accounting_class' => 'Operating cost',
@@ -65,6 +73,9 @@ class RequisitionTypeManagementTest extends TestCase
         return array_merge([
             'name' => 'Site Accommodation',
             'description' => 'Overnight stay for site crew.',
+            // A category exists to classify what it is raised for, so it cannot
+            // be saved without the code that says how to account for it.
+            'default_expense_code_id' => $this->expenseCodeId(),
             'icon' => 'mdi-bed-outline',
             'recipient_mode' => 'per_item',
             'requires_project' => true,
@@ -363,6 +374,21 @@ class RequisitionTypeManagementTest extends TestCase
 
         $this->assertNotEmpty($response->json('meta.expense_codes'));
         $this->assertNotEmpty($response->json('meta.payment_sources'));
+    }
+
+    public function test_a_category_without_an_accounting_code_is_refused(): void
+    {
+        // The column existed for a year and was set on none of the eight live
+        // types, which is why a fund requisition carried no accounting meaning
+        // until somebody picked a code at the till. Required now, so the gap
+        // cannot reopen.
+        $payload = $this->payload();
+        unset($payload['default_expense_code_id']);
+
+        $this->actingAs($this->manager())
+            ->postJson('/api/finance/petty-cash/requisition-types', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('default_expense_code_id');
     }
 
     public function test_an_unknown_expense_code_is_refused(): void

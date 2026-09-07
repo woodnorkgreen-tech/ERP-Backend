@@ -187,6 +187,57 @@ class PettyCashService
                             'amount' => ['Payment must equal the approved requisition total. Edit and re-approve the request to change it.'],
                         ]];
                     }
+
+                    // The expense type is part of what was approved, not a
+                    // choice left to whoever pays.
+                    //
+                    // Everything else the approval fixed is already inherited or
+                    // enforced here: the payee, the description, the project, and
+                    // the amount to the cent. Classification was the exception —
+                    // validated only as "some active code", so a request
+                    // committed under Crew transport could be settled under any
+                    // of the other ninety-three. Nothing double-counts, because
+                    // the commitment is released by source document rather than
+                    // by code; but the project's cost account would then carry
+                    // the promise on one expense line and the money on another,
+                    // reading as an overspend and an underspend on a single
+                    // expense nobody misfiled on purpose.
+                    //
+                    // Pinned rather than rejected, deliberately. The commitment
+                    // was posted from the live type's default, so reading that
+                    // same source is what makes the two agree; rejecting would
+                    // only complain about a mismatch it could not prevent, and
+                    // would block a payment the payer has no way to fix.
+                    //
+                    // One window remains open: an administrator re-coding the
+                    // type between approval and payment moves this without
+                    // moving the commitment already posted. Closing it properly
+                    // means storing the resolved code on the requisition at
+                    // approval, which is a migration rather than a guard.
+                    $approvedCode = $requisition->requisitionType?->defaultExpenseCode;
+
+                    // A type carrying no default is left to the payer. The
+                    // retired folk categories have none, and refusing to pay
+                    // their approved requisitions would be worse than letting
+                    // whoever pays classify them.
+                    if ($approvedCode?->is_active && (int) $approvedCode->id !== (int) $expenseCode->id) {
+                        $this->logActivity(
+                            'expense_code_pinned_to_requisition',
+                            'requisition',
+                            $requisition->id,
+                            "Payment classified as {$approvedCode->code} to match approved requisition {$requisition->requisition_number}",
+                            [
+                                'submitted_expense_code_id' => $expenseCode->id,
+                                'submitted_expense_code' => $expenseCode->code,
+                                'approved_expense_code_id' => $approvedCode->id,
+                                'approved_expense_code' => $approvedCode->code,
+                            ],
+                        );
+
+                        $data['expense_code_id'] = $approvedCode->id;
+                        $expenseCode = $approvedCode;
+                    }
+
                     $data['receiver'] = $requisition->payee_name ?: $data['receiver'];
                     $data['description'] = $requisition->purpose ?: $data['description'];
                     $data['project_id'] ??= $requisition->project_id;
