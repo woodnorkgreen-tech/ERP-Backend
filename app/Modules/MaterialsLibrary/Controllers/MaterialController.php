@@ -36,15 +36,15 @@ class MaterialController extends Controller
         );
         
         $stats = [
-            'total_value' => (float) LibraryMaterial::active()
+            'total_value' => (float) LibraryMaterial::governed()
                 ->join('stocks', 'library_materials.id', '=', 'stocks.material_id')
                 ->sum(DB::raw('stocks.quantity_on_hand * library_materials.unit_cost')),
-            'low_stock_count' => (int) LibraryMaterial::active()
+            'low_stock_count' => (int) LibraryMaterial::governed()
                 ->whereHas('stock', function ($q) {
                     $q->where('min_stock_level', '>', 0)
                       ->whereRaw('(quantity_on_hand - quantity_reserved) <= min_stock_level');
                 })->count(),
-            'out_of_stock_count' => (int) LibraryMaterial::active()
+            'out_of_stock_count' => (int) LibraryMaterial::governed()
                 ->where(function ($q) {
                     $q->whereHas('stock', function ($sq) {
                         $sq->where('quantity_on_hand', '<=', 0);
@@ -83,7 +83,7 @@ class MaterialController extends Controller
         if ($request->boolean('with_trashed')) {
             $query->withTrashed();
         } else {
-            $query->active();
+            $query->governed();
         }
 
         if ($workstationId) {

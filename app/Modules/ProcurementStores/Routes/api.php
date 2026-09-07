@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Modules\ProcurementStores\Controllers\ProcurementStoresController;
+use App\Modules\ProcurementStores\Controllers\MaterialOptionsController;
 use App\Modules\ProcurementStores\Controllers\SupplierController;
 use App\Modules\ProcurementStores\Controllers\RequisitionController;
 use App\Modules\ProcurementStores\Controllers\PurchaseOrderController;
@@ -52,7 +53,13 @@ Route::get('/goods-receipt-inspections', [GoodsReceiptInspectionController::clas
 Route::post('/goods-receipt-inspections/{item}/resolve', [GoodsReceiptInspectionController::class, 'resolve']);
 
 // Suppliers
+// The catalogue lookup behind the requisition and order pickers. Authorised
+// like the requisition it feeds, not like the material library itself.
+Route::get('/material-options', [MaterialOptionsController::class, 'index']);
+
 Route::post('/search/suppliers', [SupplierController::class, 'search']);
+// Before the resource route, so /suppliers/options is never read as an id.
+Route::get('/suppliers/options', [SupplierController::class, 'options']);
 Route::apiResource('/suppliers', SupplierController::class);
 
 // Requisitions
