@@ -4,6 +4,8 @@ namespace App\Modules\Finance\Database\Seeders;
 
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use Illuminate\Database\Seeder;
+use App\Modules\Finance\Support\CatalogueDimensionMap;
+use App\Modules\Finance\Support\ChartAccountMap;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -18,10 +20,15 @@ use Illuminate\Support\Facades\DB;
  *   WIP child the chart of accounts already carries for it;
  * - NE-001…NE-023 non-expense cash movements, in {@see NonExpenseCodes}.
  *
- * Still absent: production overhead (6xxx) and the remaining capex codes.
- * Neither has a capture path yet — production overhead is absorbed rather than
- * captured, and capex needs the asset register in the loop — so seeding them
- * would add codes nothing can currently post.
+ * Production overhead (6xxx) is now partly here. The six workshop, safety,
+ * cleaning and utilities codes in {@see OperationalExpenseCodes} were added
+ * because they are bought — a requisition for detergent or drill bits had
+ * nothing to classify itself as — and each names a postable 6xxx account. What
+ * is still absent is overhead *absorption*: spreading those costs across jobs
+ * is a period-end calculation, not a capture choice, so no code describes it.
+ *
+ * Still absent entirely: the remaining capex codes. Those need the asset
+ * register in the loop, so seeding them would add codes nothing can post.
  *
  * `default_debit_gl` is stored verbatim from the catalogue and the account FK is
  * resolved by reading the leading four-digit code out of it. Several rows name
@@ -126,9 +133,25 @@ class ExpenseCodeSeeder extends Seeder
             ->where('is_postable', true)
             ->pluck('id', 'code');
 
-        DB::transaction(function () use ($accounts) {
+        // The dimension keys beside the catalogue's own wording. Both columns
+        // have existed since the table was created and only the wording was ever
+        // filled, so every cost line the collector produced carried a null cost
+        // centre — see CatalogueDimensionMap for why the two cannot be joined on
+        // text. Resolved here rather than in the resolver so the catalogue is
+        // self-describing: a code either names a dimension this installation has
+        // or it does not, and that is visible in the row.
+        $costCentres = DB::table('cost_centres')->where('is_active', true)->pluck('id', 'code');
+        $activities = DB::table('activities')->where('is_active', true)->pluck('id', 'code');
+
+        DB::transaction(function () use ($accounts, $costCentres, $activities) {
             foreach ($this->rows() as $row) {
                 $row['default_debit_account_id'] = $this->resolveAccount($row['default_debit_gl'] ?? null, $accounts);
+                $row['default_cost_centre_id'] = $this->resolveDimension(
+                    CatalogueDimensionMap::costCentreCode($row['default_cost_centre'] ?? null), $costCentres
+                );
+                $row['default_activity_id'] = $this->resolveDimension(
+                    CatalogueDimensionMap::activityCode($row['project_activity'] ?? null), $activities
+                );
 
                 // A code without a concrete debit account is an accounting
                 // instruction, not yet a postable capture choice (for example
@@ -146,16 +169,33 @@ class ExpenseCodeSeeder extends Seeder
     }
 
     /**
-     * Reads the leading four-digit account code out of the catalogue's GL text.
-     * Rows that name an account indirectly resolve to null and keep the text.
+     * Reads the account out of the catalogue's GL text, through this
+     * installation's chart map.
+     *
+     * The four-digit code in that text is a reference, not an instruction: a
+     * company keeping its books under other codes says so in
+     * config/finance_accounts.php rather than by editing the catalogue. Rows
+     * that name an account indirectly still resolve to null and keep the text.
      */
     private function resolveAccount(?string $gl, $accounts): ?int
     {
-        if (blank($gl) || ! preg_match('/\b(\d{4})\b/', $gl, $matches)) {
-            return null;
-        }
+        $code = ChartAccountMap::localFromGl($gl);
 
-        return $accounts[$matches[1]] ?? null;
+        return $code === null ? null : ($accounts[$code] ?? null);
+    }
+
+    /**
+     * A dimension row id from its code, or null.
+     *
+     * Unlike the debit account, a missing dimension does NOT deactivate the
+     * code. A cost with no cost centre is still a cost that happened and is
+     * still claimable; it is only less analysable. Switching the code off would
+     * remove it from the pickers and lose the spend altogether, which is a
+     * worse answer than an unclassified but recorded one.
+     */
+    private function resolveDimension(?string $code, $rows): ?int
+    {
+        return $code === null ? null : ($rows[$code] ?? null);
     }
 
     /** @return iterable<array<string, mixed>> */
@@ -172,6 +212,8 @@ class ExpenseCodeSeeder extends Seeder
 
         yield [
             'code' => 'OE-FIN-001',
+            // Posted automatically from the payment itself; nobody requests one.
+            'is_procurable' => false,
             'accounting_class' => 'Operating expense',
             'expense_family' => 'Finance costs',
             'expense_type' => 'Bank and mobile-money transaction charges',

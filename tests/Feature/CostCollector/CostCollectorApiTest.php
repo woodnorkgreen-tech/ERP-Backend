@@ -54,10 +54,21 @@ class CostCollectorApiTest extends TestCase
         ]);
     }
 
+    /** This test's own expense code, chosen to sit outside the seeded catalogue. */
+    private const CODE = 'TS-API-001';
+
     private function code(array $overrides = []): ExpenseCode
     {
-        return ExpenseCode::create(array_merge([
-            'code' => 'DM-WD-001',
+        // A code of this test's own, deliberately outside the catalogue.
+        //
+        // The catalogue is seeded by migration now, so borrowing a real code
+        // such as DM-WD-001 meant this fixture collided with the seeded row and
+        // then, once keyed past that, silently inherited whatever the real
+        // entry required — evidence attachments, an item code — and failed
+        // every test that posts a plain cost. A fixture has to decide its own
+        // behaviour, so it does not share an identity with catalogue data.
+        $attributes = array_merge([
+            'code' => self::CODE,
             'accounting_class' => 'Direct project cost',
             'expense_family' => 'Direct materials',
             'expense_type' => 'MDF boards',
@@ -65,7 +76,17 @@ class CostCollectorApiTest extends TestCase
             'job_id_rule' => ExpenseCode::JOB_REQUIRED,
             'cash_flow_class' => 'operating',
             'is_active' => true,
-        ], $overrides));
+            'minimum_evidence' => [],
+            'extra_operational_data' => [],
+            'requires_supplier' => false,
+            'requires_asset_record' => false,
+            'is_capex_review' => false,
+        ], $overrides);
+
+        // Keyed on the merged code, not the default: a caller overriding `code`
+        // wants a second fixture, and keying on the default would rename the
+        // first one instead of creating it.
+        return ExpenseCode::updateOrCreate(['code' => $attributes['code']], $attributes);
     }
 
     public function test_the_picker_searches_and_filters_by_family(): void
@@ -80,11 +101,19 @@ class CostCollectorApiTest extends TestCase
 
         $this->getJson('/api/costs/expense-codes?family=Direct+materials')
             ->assertOk()
-            ->assertJsonPath('data.0.code', 'DM-WD-001');
+            ->assertJsonPath('data.0.code', self::CODE);
 
-        $this->getJson('/api/costs/expense-codes/families')
+        // The families this test created are present. Not an exact count: the
+        // catalogue is seeded by migration, and the migration that seeds it also
+        // creates the one account two of those codes resolve against, so every
+        // database carries a third family this test never made.
+        $families = $this->getJson('/api/costs/expense-codes/families')
             ->assertOk()
-            ->assertJsonCount(2, 'data');
+            ->json('data');
+
+        $names = array_column($families, 'expense_family');
+        $this->assertContains('Direct materials', $names);
+        $this->assertContains('Transport', $names);
     }
 
     public function test_it_returns_the_form_definition_for_a_code(): void
@@ -95,7 +124,7 @@ class CostCollectorApiTest extends TestCase
             ['key' => 'etims_invoice', 'label' => 'eTIMS invoice', 'required' => true],
         ]]);
 
-        $response = $this->getJson('/api/costs/expense-codes/DM-WD-001')->assertOk();
+        $response = $this->getJson('/api/costs/expense-codes/'.self::CODE)->assertOk();
 
         $response->assertJsonPath('data.fields.0.key', 'item_code');
         $response->assertJsonPath('data.evidence.0.key', 'etims_invoice');
@@ -111,7 +140,7 @@ class CostCollectorApiTest extends TestCase
         $this->code(['job_id_rule' => ExpenseCode::JOB_OPTIONAL]);
 
         $this->postJson('/api/costs', [
-            'expense_code' => 'DM-WD-001',
+            'expense_code' => self::CODE,
             'amount' => 25000,
             'job_number' => 'WNG-TEST-001',
             'description' => 'MDF for reception counter',
@@ -161,7 +190,7 @@ class CostCollectorApiTest extends TestCase
 
         $this->actingAs($stranger, 'sanctum')
             ->postJson('/api/costs', [
-                'expense_code' => 'DM-WD-001', 'amount' => 5000, 'job_number' => 'WNG-TEST-001',
+                'expense_code' => self::CODE, 'amount' => 5000, 'job_number' => 'WNG-TEST-001',
             ])
             ->assertForbidden();
 
@@ -173,7 +202,7 @@ class CostCollectorApiTest extends TestCase
         $this->code();   // job_id_rule = required
 
         $this->postJson('/api/costs', [
-            'expense_code' => 'DM-WD-001',
+            'expense_code' => self::CODE,
             'amount' => 25000,
         ])
             ->assertStatus(422)
@@ -186,7 +215,7 @@ class CostCollectorApiTest extends TestCase
 
         // Even if the client sends producer-only fields, they must be ignored.
         $this->postJson('/api/costs', [
-            'expense_code' => 'DM-WD-001',
+            'expense_code' => self::CODE,
             'amount' => 5000,
             'job_number' => 'WNG-TEST-001',
             'sourceApproved' => true,
@@ -208,13 +237,13 @@ class CostCollectorApiTest extends TestCase
         $this->code(['job_id_rule' => ExpenseCode::JOB_OPTIONAL]);
 
         $this->postJson('/api/costs', [
-            'expense_code' => 'DM-WD-001', 'amount' => 100,
+            'expense_code' => self::CODE, 'amount' => 100,
             'job_number' => 'WNG-TEST-001',
             'incurred_at' => now()->addWeek()->toIso8601String(),
         ])->assertStatus(422)->assertJsonValidationErrors(['incurred_at']);
 
         $this->postJson('/api/costs', [
-            'expense_code' => 'DM-WD-001', 'amount' => 100, 'tax_amount' => 500,
+            'expense_code' => self::CODE, 'amount' => 100, 'tax_amount' => 500,
             'job_number' => 'WNG-TEST-001',
         ])->assertStatus(422)->assertJsonValidationErrors(['tax_amount']);
     }
@@ -279,7 +308,7 @@ class CostCollectorApiTest extends TestCase
         $this->code(['job_id_rule' => ExpenseCode::JOB_OPTIONAL]);
 
         $this->postJson('/api/costs', [
-            'expense_code' => 'DM-WD-001', 'amount' => 100, 'job_number' => 'WNG-TEST-001',
+            'expense_code' => self::CODE, 'amount' => 100, 'job_number' => 'WNG-TEST-001',
         ])->assertCreated();
 
         CostLine::create([

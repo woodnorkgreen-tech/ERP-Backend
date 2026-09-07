@@ -107,6 +107,15 @@ final class LedgerEntry
     {
         return [
             'reference_number' => $this->reference_number,
+            // Persisted, not just carried. These have always been set by the
+            // factories and read by LedgerService to stamp the balance
+            // projection, but were dropped on the way to the row — so the only
+            // way to ask "did this disbursement debit the float?" was to match
+            // the shape of a reference string. Now that a disbursement paid from
+            // a bank posts nothing here, that question decides whether a void
+            // refunds the tin, and it needs a real answer.
+            'source_type' => $this->sourceType,
+            'source_id' => $this->sourceId,
             'type' => $this->type,
             'amount' => $this->amount,
             'balance_snapshot' => $balanceSnapshot,

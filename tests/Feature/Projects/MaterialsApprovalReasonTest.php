@@ -38,7 +38,10 @@ class MaterialsApprovalReasonTest extends TestCase
         [$element, $material] = $this->seedElement($task);
         $this->approveAsProjectOfficer($task)->assertOk(); // creates the base snapshot
 
-        Sanctum::actingAs($this->user());
+        // The saver has to be in the task's work pool — saving materials is
+        // gated on that, quite apart from the reason rule this test is about.
+        // A role-less actor answers 403 before the reason logic is ever reached.
+        Sanctum::actingAs($this->user('Project Officer'));
 
         $payload = $this->buildSavePayload($element->id, $material->id, quantity: 12);
         $this->postJson("/api/projects/tasks/{$task->id}/materials", $payload)

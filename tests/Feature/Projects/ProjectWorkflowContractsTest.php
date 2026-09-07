@@ -1001,6 +1001,17 @@ class ProjectWorkflowContractsTest extends TestCase
 
         Sanctum::actingAs($procurement);
 
+        $supplier = Supplier::create([
+            'supplier_name' => 'Sync Supplier Ltd',
+            'contact_person' => 'Sam Supplier',
+            'phone' => '0700000001',
+            'email' => uniqid('supplier_') . '@test.local',
+            'address' => 'Industrial Area',
+            'payment_terms' => '30 days',
+            'status' => 'Active',
+            'user_id' => $accounts->id,
+        ]);
+
         $requisitionResponse = $this->postJson('/api/procurement-stores/requisitions', [
             'date' => now()->toDateString(),
             'requested_by_type' => 'project',
@@ -1017,6 +1028,7 @@ class ProjectWorkflowContractsTest extends TestCase
                     'budget_item_id' => 'material-v2',
                     'budget_item_persistent_id' => 'material-persistent',
                     'material_id' => null,
+                    'supplier_id' => $supplier->id,
                     'expense_code_id' => $this->expenseCode()->id,
                     'custom_description' => 'Approved Truss',
                     'quantity' => 5,
@@ -1051,31 +1063,19 @@ class ProjectWorkflowContractsTest extends TestCase
         $this->postJson("/api/procurement-stores/requisitions/{$requisitionId}/approve")
             ->assertSuccessful();
 
-        $supplier = Supplier::create([
-            'supplier_name' => 'Sync Supplier Ltd',
-            'contact_person' => 'Sam Supplier',
-            'phone' => '0700000001',
-            'email' => uniqid('supplier_') . '@test.local',
-            'address' => 'Industrial Area',
-            'payment_terms' => '30 days',
-            'status' => 'Active',
-            'user_id' => $accounts->id,
-        ]);
-
         $purchaseOrderResponse = $this->postJson('/api/procurement-stores/purchase-orders/store-linked', [
             'requisition_id' => $requisitionId,
-            'supplier_id' => $supplier->id,
             'due_date' => now()->addDays(5)->toDateString(),
             'delivery_address' => 'Project site',
             'description' => 'Linked procurement order',
         ]);
 
         $purchaseOrderResponse->assertSuccessful()
-            ->assertJsonPath('data.items.0.requisition_item_id', $requisitionItemId);
+            ->assertJsonPath('data.0.items.0.requisition_item_id', $requisitionItemId);
 
-        $purchaseOrderId = $purchaseOrderResponse->json('data.id');
-        $purchaseOrderNumber = $purchaseOrderResponse->json('data.po_number');
-        $purchaseOrderItemId = $purchaseOrderResponse->json('data.items.0.id');
+        $purchaseOrderId = $purchaseOrderResponse->json('data.0.id');
+        $purchaseOrderNumber = $purchaseOrderResponse->json('data.0.po_number');
+        $purchaseOrderItemId = $purchaseOrderResponse->json('data.0.items.0.id');
 
         $this->postJson("/api/procurement-stores/purchase-orders/{$purchaseOrderId}/submit")
             ->assertSuccessful();
@@ -1095,7 +1095,7 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('data.budgetSummary.operationalSync.linkedPurchaseOrderCount', 1)
             ->assertJsonPath('data.budgetSummary.operationalSync.committedAmount', 500);
 
-        $this->postJson('/api/procurement-stores/goods-receipt-notes', [
+        $receipt = $this->postJson('/api/procurement-stores/goods-receipt-notes', [
             'purchase_order_id' => $purchaseOrderId,
             'store_location' => 'Karen Village Store',
             'quality_check' => 'pass',
@@ -1111,6 +1111,27 @@ class ProjectWorkflowContractsTest extends TestCase
                 ],
             ],
         ])->assertSuccessful();
+
+        // Dock acceptance does not make stock available: Stores must confirm it.
+        $this->getJson("/api/projects/tasks/{$procurementTask->id}/procurement")
+            ->assertOk()
+            ->assertJsonPath('data.procurementItems.0.procurementStatus', 'ordered')
+            ->assertJsonPath('data.procurementItems.0.procurementLinks.0.receiptStatus', 'pending_store_confirmation')
+            ->assertJsonPath('data.procurementItems.0.operationalSync.receivedQuantity', 0);
+
+        $grnItemId = $receipt->json('data.items.0.id');
+        $material = \App\Modules\MaterialsLibrary\Models\LibraryMaterial::create([
+            'material_name' => 'Approved Truss',
+            'material_code' => 'TEST-TRUSS',
+            'unit_of_measure' => 'm',
+            'material_type' => 'consumable',
+            'item_status' => 'Active',
+        ]);
+        $confirmation = $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$grnItemId}/confirm", [
+            'material_id' => $material->id,
+            'unit_price' => 100,
+        ]);
+        $this->assertTrue($confirmation->isSuccessful(), $confirmation->getContent());
 
         $this->getJson("/api/projects/tasks/{$procurementTask->id}/procurement")
             ->assertOk()

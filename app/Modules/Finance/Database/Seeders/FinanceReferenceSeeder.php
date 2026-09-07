@@ -25,9 +25,17 @@ class FinanceReferenceSeeder extends Seeder
             PaymentSourceSeeder::class,
             FinanceSettingsSeeder::class,
             AccountingPeriodSeeder::class,
-            // Last: expense codes resolve GL accounts, cost centres, activities
-            // and tax treatments that the seeders above create.
+            // Expense codes resolve GL accounts, cost centres, activities and
+            // tax treatments that the seeders above create.
             ExpenseCodeSeeder::class,
+            // Last: a fund-requisition category IS an expense code, wearing the
+            // name a requester would use, so the catalogue has to exist first.
+            //
+            // This list used to be defined by four migrations instead. That made
+            // it the one piece of Finance reference data nothing re-asserted:
+            // seeding refreshed the catalogue these categories derive from and
+            // left the categories frozen wherever the last migration put them.
+            PettyCashRequisitionTypeSeeder::class,
         ]);
     }
 }

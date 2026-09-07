@@ -86,6 +86,13 @@ class JournalPostingService
                 return null;
             }
 
+            $accountIds = array_unique(array_column($legs, 'account_id'));
+            if (ChartOfAccount::postable()->whereIn('id', $accountIds)->count() !== count($accountIds)) {
+                throw new InvalidArgumentException(
+                    "Cost line {$line->ref} resolves to an inactive or non-postable account. Finance must correct the account mapping before posting."
+                );
+            }
+
             $total = array_reduce(
                 array_filter($legs, fn (array $leg) => $leg['entry_type'] === 'debit'),
                 fn (string $carry, array $leg) => bcadd($carry, $leg['amount'], 2),

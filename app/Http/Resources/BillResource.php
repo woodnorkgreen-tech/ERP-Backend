@@ -61,11 +61,21 @@ class BillResource extends JsonResource
             'balance' => (float) $this->balance,
             'status' => $this->status,
             'notes' => $this->notes,
+            'supplier_invoice_number' => $this->supplier_invoice_number,
+            'verified_at' => $this->verified_at?->toISOString(),
+            'verification_basis' => $this->verification_basis,
+            'verified_by' => $this->whenLoaded('verifiedBy', fn () => [
+                'id' => $this->verifiedBy?->id,
+                'name' => $this->verifiedBy?->name,
+            ]),
+            'verification_notes' => $this->verification_notes,
             'payments' => $this->whenLoaded('payments', function () {
                 return $this->payments->map(function ($payment) {
                     return [
                         'id' => $payment->id,
                         'payment_code' => $payment->payment_code,
+                        'payment_source' => $payment->paymentSource?->only(['id', 'code', 'name', 'type']),
+                        'disbursement_id' => $payment->disbursement_id,
                         'amount_paid' => (float) $payment->amount_paid,
                         'payment_date' => $payment->payment_date->format('Y-m-d'),
                         'payment_method' => $payment->paymentMethod ? [

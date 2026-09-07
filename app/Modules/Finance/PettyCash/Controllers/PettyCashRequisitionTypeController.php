@@ -173,7 +173,11 @@ class PettyCashRequisitionTypeController extends Controller
             'icon' => ['nullable', 'string', 'max:64'],
             'recipient_mode' => ['required', Rule::in(['single', 'per_item'])],
             'requires_project' => ['boolean'],
-            'default_expense_code_id' => ['nullable', 'integer', 'exists:expense_codes,id'],
+            // Required, so the gap that made this column useless cannot reopen.
+            // A category with no code cannot classify what it is raised for:
+            // the commitment posted on approval lands unclassified, and whoever
+            // pays it out has to pick a code cold at the till.
+            'default_expense_code_id' => ['required', 'integer', 'exists:expense_codes,id'],
             'default_payment_source_id' => ['nullable', 'integer', 'exists:payment_sources,id'],
             'is_active' => ['boolean'],
             'sort_order' => ['nullable', 'integer', 'min:0', 'max:9999'],
@@ -189,7 +193,10 @@ class PettyCashRequisitionTypeController extends Controller
             'line_fields' => ['nullable', 'array'],
             'line_fields.*.key' => ['required', 'string', 'max:64'],
             'line_fields.*.type' => ['required', Rule::in(PettyCashRequisitionType::FIELD_TYPES)],
-        ], $fieldRules));
+        ], $fieldRules), [
+            'default_expense_code_id.required' =>
+                'Choose the expense type this category is accounted for as. It decides how spending raised under it is classified.',
+        ]);
 
         /*
          * Normalise from the raw input, not from $validated.

@@ -55,6 +55,21 @@ class EventServiceProvider extends ServiceProvider
         \App\Events\PettyCashDisbursementVoided::class => [
             \App\Listeners\ReversePettyCashCost::class,
         ],
+
+        // The promise, before the payment. An approved requisition commits a
+        // project's money the way an approved purchase order does; the
+        // disbursement above releases that commitment when the cash goes out.
+        \App\Events\PettyCashRequisitionApproved::class => [
+            \App\Listeners\RecordPettyCashCommitment::class,
+        ],
+
+        // ...and the promise withdrawn. Editing an approved requisition sends it
+        // back to pending, which is both a change of terms and the only route by
+        // which an approved requisition can later be rejected. Either way the
+        // commitment it recorded no longer stands.
+        \App\Events\PettyCashRequisitionReturnedToPending::class => [
+            \App\Listeners\ReleasePettyCashCommitment::class,
+        ],
         \App\Events\PurchaseOrderApproved::class => [
             \App\Listeners\RecordPurchaseOrderCommitments::class,
         ],

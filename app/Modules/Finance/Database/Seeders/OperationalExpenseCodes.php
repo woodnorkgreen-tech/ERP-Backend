@@ -220,21 +220,85 @@ class OperationalExpenseCodes
     ];
 
     /**
-     * Overheads people actually requisition for. Kept narrow: only where the
-     * chart already has an account with an unambiguous match. Office supplies
-     * and stationery are deliberately absent — the chart has no account for
-     * them, and forcing them into "Office Rent & Electricity" would be worse
-     * than leaving the gap visible.
+     * The spend that is bought but never charged to a job.
+     *
+     * This block used to hold three codes, and that was the whole non-project
+     * catalogue: an office or stores requisition — one raised with no project
+     * against it — could choose between office transport, airtime and staff
+     * welfare, plus four balance-sheet rows (a stores replenishment, two
+     * prepayments and a leasehold improvement) that the requester reads as
+     * accounting jargon rather than as things to buy. Seven choices, four of
+     * which do not sound like purchases, for every requisition the company
+     * raises that is not against a job.
+     *
+     * So the everyday ones are named. Nothing here is invented either: each row
+     * points at an account the chart already carries and had never referenced —
+     * 6400 small tools, 6200 machinery repairs, 6600 PPE, 6700 cleaning and
+     * waste, 6100 workshop electricity, 7100 office rent. The one exception is
+     * 7150 Office Supplies & Stationery, added to the chart alongside this
+     * because the gap the previous note here left visible ("the chart has no
+     * account for them") is the single most requisitioned thing in the office,
+     * and leaving it visible for another year serves nobody.
+     *
+     * Two gaps stay open rather than get guessed at. General premises repair
+     * has no account of its own — 6200 is machinery by name — and workshop rent
+     * (6110) is met by NE-011 prepaid rent today. Both are a chart decision,
+     * and the September 2026 requisition-type alignment retired the folk
+     * categories "Office Supplies" and "Repair & Maintenance" for exactly this
+     * reason. The first of those two now has its code; the second still does
+     * not, and saying so is better than filing it somewhere plausible.
+     *
+     * PRODUCTION OVERHEAD IS CAPTURED NOW, NOT ABSORBED
+     *
+     * ExpenseCodeSeeder's note that 6xxx codes were absent because "production
+     * overhead is absorbed rather than captured" was about allocation, not
+     * about buying. Absorption decides how a cleaning bill reaches a job's
+     * margin; it does not stop Stores raising a requisition for detergent. The
+     * six 6xxx rows below are purchases with a real postable account, and they
+     * carry `job_id_rule` NOT_ALLOWED, so nothing here can be charged to a job
+     * by mistake — which is the invariant absorption actually depends on.
      *
      * [code, type, meaning, example, gl, family, cost_centre, pl_line, vat]
      */
     private const OVERHEADS = [
+        // Office running costs.
         ['OE-TRP-001', 'Office and admin transport', 'Travel that is not attributable to a client job.', 'Taxi to a bank or statutory office.',
-            '7400 Office Transport', 'Administration', 'Finance / Admin', 'Operating expenses – Office transport', 'STD16-REC'],
+            '7400 Office Transport', 'Staff and administration', 'Finance / Admin', 'Operating expenses – Office transport', 'STD16-REC'],
         ['OE-COM-001', 'Airtime and internet', 'Communications for administration rather than a job.', 'Monthly office internet subscription.',
-            '7200 Administration Airtime & Internet', 'Administration', 'Finance / Admin', 'Operating expenses – Airtime and internet', 'STD16-REC'],
+            '7200 Administration Airtime & Internet', 'Staff and administration', 'Finance / Admin', 'Operating expenses – Airtime and internet', 'STD16-REC'],
         ['OE-WEL-001', 'Staff welfare', 'Provision for staff that is not chargeable to a job.', 'Tea and refreshments for the office.',
-            '7600 Staff Welfare', 'Administration', 'Finance / Admin', 'Operating expenses – Staff welfare', 'OOS'],
+            '7600 Staff Welfare', 'Staff and administration', 'Finance / Admin', 'Operating expenses – Staff welfare', 'OOS'],
+
+        // What the office actually requisitions most often.
+        ['OE-OFF-001', 'Office supplies and stationery', 'Paper, pens, files and general office consumables.', 'Reams of paper and box files restocked for the office.',
+            '7150 Office Supplies & Stationery', 'Office supplies', 'Finance / Admin', 'Operating expenses – Office supplies and stationery', 'STD16-REC'],
+        ['OE-OFF-002', 'Printer and IT consumables', 'Toner, cartridges and small IT items consumed in the office.', 'Replacement toner for the office printer.',
+            '7150 Office Supplies & Stationery', 'Office supplies', 'Finance / Admin', 'Operating expenses – Office supplies and stationery', 'STD16-REC'],
+
+        // Workshop upkeep. The job-costed twins of these are EQ-TOL-001 site
+        // tools and EQ-SAF-001 site safety; these are the stock-for-everyone
+        // versions, which is why they forbid a job number rather than share one
+        // code with a rule that bends.
+        ['OE-WSC-001', 'Workshop consumables and small tools', 'Consumables and small tools restocked for the workshop rather than bought for one job.', 'Blades, drill bits and glue restocked for general workshop use.',
+            '6400 Small Tools & Workshop Consumables', 'Workshop and maintenance', 'Production / Stores', 'Production overhead – Small tools and workshop consumables', 'STD16-REC'],
+        ['OE-MNT-001', 'Machinery repair and servicing', 'Repairs, servicing and spare parts for workshop machinery.', 'Bearing replacement and service on the panel saw.',
+            '6200 Machinery Repairs & Maintenance', 'Workshop and maintenance', 'Production / Workshop', 'Production overhead – Machinery repairs and maintenance', 'STD16-REC'],
+        ['OE-PPE-001', 'Protective equipment and workshop safety', 'Protective gear and safety provision held for staff generally, not issued to one job.', 'Overalls, gloves and safety boots restocked for the workshop.',
+            '6600 PPE & Workshop Safety', 'Safety and protective equipment', 'Production / Stores', 'Production overhead – PPE and workshop safety', 'STD16-REC'],
+
+        // Keeping the premises running. This family deliberately straddles the
+        // 6xxx/7xxx line — the workshop meter is production overhead, the office
+        // one is operating expense — because a requester buying a power token is
+        // not making that distinction, and the account each code posts to makes
+        // it for them. It is the only family that does; see the families endpoint.
+        ['OE-CLN-001', 'Cleaning supplies and services', 'Cleaning materials and contracted cleaning for the workshop or office.', 'Detergent, mops and the monthly office cleaning contract.',
+            '6700 Cleaning & Waste Disposal', 'Cleaning and waste', 'Facilities', 'Production overhead – Cleaning and waste disposal', 'STD16-REC'],
+        ['OE-WST-001', 'Waste collection and disposal', 'Removing general waste from the workshop or office premises.', 'Monthly skip collection from the workshop yard.',
+            '6700 Cleaning & Waste Disposal', 'Cleaning and waste', 'Facilities', 'Production overhead – Cleaning and waste disposal', 'STD16-REC'],
+        ['OE-UTL-001', 'Workshop electricity', 'Power drawn at the workshop, not attributable to one job.', 'Monthly workshop electricity bill or a prepaid token purchase.',
+            '6100 Workshop Electricity', 'Premises and utilities', 'Production / Workshop', 'Production overhead – Workshop electricity', 'STD16-REC'],
+        ['OE-UTL-002', 'Office rent and electricity', 'Rent and power for the office premises.', 'Monthly office rent invoice.',
+            '7100 Office Rent & Electricity', 'Premises and utilities', 'Finance / Admin', 'Operating expenses – Office rent and electricity', 'STD16-REC'],
     ];
 
     /** @return iterable<array<string, mixed>> */
@@ -246,6 +310,8 @@ class OperationalExpenseCodes
             foreach ($family['codes'] as [$code, $type, $meaning, $example]) {
                 yield array_merge(self::PROJECT_DEFAULTS, [
                     'code' => $code,
+                    // Paid to staff through fund requisitions or payroll.
+                    'is_procurable' => ! in_array($code, ['DL-ALW-001', 'PF-PDM-001'], true),
                     'expense_family' => $family['family'],
                     'expense_type' => $type,
                     'simple_meaning' => $meaning,
@@ -270,12 +336,17 @@ class OperationalExpenseCodes
         foreach (self::OVERHEADS as [$code, $type, $meaning, $example, $gl, $familyName, $centre, $plLine, $vat]) {
             yield [
                 'code' => $code,
-                'accounting_class' => 'Operating expense',
+                // Read off the account rather than carried in the tuple: the 6xxx
+                // and 7xxx ranges already draw this line, and a tenth column would
+                // let a row disagree with the account it posts to.
+                'accounting_class' => str_starts_with($gl, '6') ? 'Production overhead' : 'Operating expense',
                 'expense_family' => $familyName,
                 'expense_type' => $type,
                 'simple_meaning' => $meaning,
                 'example' => $example,
-                'recording_rule' => 'Post directly to the operating expense account. Not a project cost.',
+                'recording_rule' => str_starts_with($gl, '6')
+                    ? 'Post to production overhead. Not a project cost — it is absorbed across jobs, never charged to one.'
+                    : 'Post directly to the operating expense account. Not a project cost.',
                 'default_debit_gl' => $gl,
                 'job_id_rule' => ExpenseCode::JOB_NOT_ALLOWED,
                 'job_id_rule_note' => 'Not allowed — this is overhead, not a job cost.',

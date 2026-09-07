@@ -8,6 +8,8 @@ use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Modules\Finance\Support\CatalogueDimensionMap;
+use App\Modules\Finance\Support\ChartAccountMap;
 use Illuminate\Support\Facades\DB;
 
 /** A read-only pre-flight check for the reference data Finance depends on. */
@@ -19,21 +21,56 @@ class FinanceReadinessController extends Controller
 
         $today = now();
         $period = AccountingPeriod::forDate($today);
-        $requiredAccounts = ['1030', '1300', '2100', '2120', '2150'];
+        // Named by reference code, resolved to whatever this installation calls
+        // them. A company on its own chart configures the map rather than being
+        // told its control accounts are missing.
+        $requiredAccounts = ChartAccountMap::localMany(['1030', '1200', '1300', '1330', '2100', '2120', '2150']);
         $availableRequiredAccounts = DB::table('chart_of_accounts')
-            ->whereIn('code', $requiredAccounts)->where('is_postable', true)->pluck('code');
+            ->whereIn('code', $requiredAccounts)->where('is_postable', true)->where('is_active', true)->pluck('code');
         $missingRequiredAccounts = array_values(array_diff($requiredAccounts, $availableRequiredAccounts->all()));
         $unmappedExpenseCodes = DB::table('expense_codes as ec')
             ->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ec.default_debit_account_id')
             ->where('ec.is_active', true)
             ->where(function ($query) {
-                $query->whereNull('ec.default_debit_account_id')->orWhere('coa.is_postable', false);
+                $query->whereNull('coa.id')->orWhere('coa.is_postable', false)->orWhere('coa.is_active', false);
             })->count();
+        // Codes the seeder switched off because their account did not resolve.
+        //
+        // Counted apart from the check below, which only sees ACTIVE codes: a
+        // code deactivated for want of a mapping leaves that check clean while
+        // being exactly the thing that emptied the pickers. Rows naming an
+        // account indirectly ("Relevant 1400 PPE account") carry no four-digit
+        // reference and are meant to stay unresolved, so they are not counted.
+        $unresolvedCatalogue = DB::table('expense_codes')
+            ->whereNull('default_debit_account_id')
+            ->where('default_debit_gl', 'REGEXP', '[0-9]{4}')
+            ->count();
+        // Active codes that name a department or a stage the catalogue map does
+        // not turn into a real dimension row. Counted only where the catalogue
+        // states one: "Asset-owning department" genuinely names no single centre
+        // and is not a configuration error.
+        $codesWithoutCostCentre = DB::table('expense_codes')
+            ->where('is_active', true)
+            ->whereNotNull('default_cost_centre')
+            ->whereNull('default_cost_centre_id')
+            ->count();
+        $codesWithoutActivity = DB::table('expense_codes')
+            ->where('is_active', true)
+            ->whereNotNull('project_activity')
+            ->whereNull('default_activity_id')
+            ->count();
+        $unmappedCostCentres = CatalogueDimensionMap::unmappedCostCentres(
+            DB::table('expense_codes')->where('is_active', true)->distinct()->pluck('default_cost_centre')
+        );
+        $unmappedActivities = CatalogueDimensionMap::unmappedActivities(
+            DB::table('expense_codes')->where('is_active', true)->distinct()->pluck('project_activity')
+        );
+
         $invalidPaymentSources = DB::table('payment_sources as ps')
             ->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ps.gl_account_id')
             ->where('ps.is_active', true)
             ->where(function ($query) {
-                $query->whereNull('ps.gl_account_id')->orWhere('coa.is_postable', false);
+                $query->whereNull('coa.id')->orWhere('coa.is_postable', false)->orWhere('coa.is_active', false);
             })->count();
 
         $checks = collect([
@@ -44,7 +81,7 @@ class FinanceReadinessController extends Controller
                     : 'No accounting period covers today.',
                 'Run the Finance reference seeder, then confirm the current month is open.'),
             $this->countCheck('chart_of_accounts', 'Postable accounts',
-                DB::table('chart_of_accounts')->where('is_postable', true)->count(),
+                DB::table('chart_of_accounts')->where('is_postable', true)->where('is_active', true)->count(),
                 'No postable accounts are configured.'),
             $this->check('required_accounts', 'Required control accounts',
                 $missingRequiredAccounts === [],
@@ -58,6 +95,12 @@ class FinanceReadinessController extends Controller
                     ? 'Every active expense code maps to a postable debit account.'
                     : number_format($unmappedExpenseCodes).' active expense code(s) have no postable debit account.',
                 'Map or deactivate every unusable expense code.'),
+            $this->check('expense_code_mapping', 'Expense catalogue account mapping',
+                $unresolvedCatalogue === 0,
+                $unresolvedCatalogue === 0
+                    ? 'Every catalogue code naming an account resolves to one in this chart.'
+                    : number_format($unresolvedCatalogue).' catalogue code(s) name an account this chart does not have, and are switched off.',
+                'Map the reference codes to this chart in config/finance_accounts.php, then re-run the expense code seeder.'),
             $this->check('payment_sources', 'Payment sources',
                 DB::table('payment_sources')->where('is_active', true)->exists() && $invalidPaymentSources === 0,
                 $invalidPaymentSources === 0
@@ -70,31 +113,50 @@ class FinanceReadinessController extends Controller
             $this->countCheck('wht_categories', 'Withholding tax categories',
                 DB::table('wht_categories')->where('is_active', true)->count(),
                 'No active withholding-tax categories are configured.'),
-            $this->countCheck('cost_centres', 'Cost centres',
-                DB::table('cost_centres')->where('is_active', true)->count(),
-                'No active cost centres are configured.'),
-            $this->countCheck('activities', 'Project activities',
-                DB::table('activities')->where('is_active', true)->count(),
-                'No active Finance activities are configured.'),
+            // Linkage, not row count.
+            //
+            // This pair used to count rows in `cost_centres` and `activities`
+            // and pass on any number above zero. Both passed for months while
+            // NOTHING referenced either table: no expense code carried a
+            // dimension key and no cost line carried a cost centre. A check that
+            // reports a dimension as configured when every posting against it is
+            // null is worse than no check, because it is what stops anybody
+            // looking. Count what the catalogue actually resolves instead.
+            $this->check('cost_centres', 'Cost centres',
+                DB::table('cost_centres')->where('is_active', true)->exists()
+                    && $unmappedCostCentres === [] && $codesWithoutCostCentre === 0,
+                $this->dimensionSummary('cost centre', $codesWithoutCostCentre, $unmappedCostCentres),
+                'Map every catalogue department phrase in CatalogueDimensionMap, then re-run the expense code seeder.'),
+            $this->check('activities', 'Project activities',
+                DB::table('activities')->where('is_active', true)->exists()
+                    && $unmappedActivities === [] && $codesWithoutActivity === 0,
+                $this->dimensionSummary('activity', $codesWithoutActivity, $unmappedActivities),
+                'Map every catalogue stage phrase in CatalogueDimensionMap, then re-run the expense code seeder.'),
         ]);
 
         $lineTotals = DB::table('journal_entries as je')
             ->leftJoin('journal_lines as jl', 'jl.journal_entry_id', '=', 'je.id')
-            ->where('je.status', 'posted')
+            ->whereIn('je.status', ['posted', 'reversed'])
             ->groupBy('je.id', 'je.total_debit', 'je.total_credit')
             ->selectRaw("je.id, je.total_debit, je.total_credit, COALESCE(SUM(CASE WHEN jl.entry_type = 'debit' THEN jl.amount ELSE 0 END), 0) AS line_debit, COALESCE(SUM(CASE WHEN jl.entry_type = 'credit' THEN jl.amount ELSE 0 END), 0) AS line_credit")
             ->get();
 
+        // One statement reads both sides from the same database snapshot, so a
+        // concurrent disbursement cannot manufacture a reconciliation failure.
+        $cash = DB::table('petty_cash_ledger_entries')
+            ->selectRaw("COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE -amount END), 0) AS ledger_balance")
+            ->selectRaw('(SELECT current_balance FROM petty_cash_balances WHERE id = 1) AS cached_balance')
+            ->first();
+
         $integrity = [
-            // Planned lines are budget, not spend, and are never posted to the GL.
-            // They are created already VERIFIED because completing the budget task
-            // is their approval, so counting them as unposted actuals made this
-            // check permanently red — every budget line ever written was a fault
-            // it could never clear. Same predicate CostQueueQuery uses to decide
-            // what is postable, so the two cannot drift apart.
+            'petty_cash_balance_mismatch' => bccomp(
+                (string) $cash->ledger_balance, (string) ($cash->cached_balance ?? '0.00'), 2
+            ) === 0 ? 0 : 1,
+            // Budgets and commitments do not post: only accrued and actual costs
+            // are accounting events. Match the verification service's posting gate.
             'verified_costs_without_journal' => DB::table('cost_lines')
                 ->where('status', 'verified')
-                ->where('nature', '!=', CostLine::NATURE_PLANNED)
+                ->whereIn('nature', [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL])
                 ->whereNull('journal_entry_id')->count(),
             'posted_journals_without_period' => DB::table('journal_entries')
                 ->where('status', 'posted')->whereNull('accounting_period_id')->count(),
@@ -123,14 +185,46 @@ class FinanceReadinessController extends Controller
                 : 'Finance setup needs attention before live posting.',
             'checks' => $checks->values(),
             'integrity' => $integrity,
+            'operations' => app(\App\Modules\ProcurementStores\Services\OperationsReadinessService::class)->report(),
             'setup_command' => app()->environment(['local', 'testing'])
                 ? 'php artisan db:seed --class="App\\Modules\\Finance\\Database\\Seeders\\FinanceReferenceSeeder"'
                 : null,
             'ledger_scope' => [
                 'label' => 'Operational cost ledger',
-                'note' => 'This ledger covers verified costs and spend vouchers. Revenue, payroll, opening balances and ordinary bank movements remain in the statutory accounting package.',
+                'note' => 'This ledger covers verified costs, spend vouchers and payroll explicitly posted from HR. Revenue, opening balances and other bank movements remain in the statutory accounting package.',
             ],
         ]]);
+    }
+
+    /**
+     * How much of the catalogue resolves to a real dimension row.
+     *
+     * Says which phrases are unrecognised, not merely how many codes failed —
+     * the fix is always to teach the map one more phrase, and naming it is the
+     * difference between an actionable check and a number.
+     *
+     * @param  list<string>  $unmapped
+     */
+    private function dimensionSummary(string $dimension, int $unresolved, array $unmapped): string
+    {
+        if ($unresolved === 0 && $unmapped === []) {
+            return sprintf('Every active expense code naming a %s resolves to one.', $dimension);
+        }
+
+        $parts = [];
+
+        if ($unresolved > 0) {
+            $parts[] = sprintf(
+                '%s active expense code(s) name a %s that does not resolve.',
+                number_format($unresolved), $dimension
+            );
+        }
+
+        if ($unmapped !== []) {
+            $parts[] = 'Unrecognised wording: '.implode('; ', $unmapped).'.';
+        }
+
+        return implode(' ', $parts);
     }
 
     private function countCheck(string $key, string $label, int $count, string $missing): array

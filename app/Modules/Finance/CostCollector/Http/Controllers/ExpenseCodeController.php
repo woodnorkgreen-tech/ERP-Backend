@@ -44,20 +44,8 @@ class ExpenseCodeController extends Controller
             $query->where('expense_family', $family);
         }
 
-        // Capturing against a project should not offer codes that forbid a Job
-        // ID, and vice versa — filtering here keeps the picker short rather than
-        // letting the user pick something the collector will then reject.
-        //
-        // Read through boolean() rather than validated as `boolean`: a query
-        // string carries this as the text "true"/"false", and Laravel's boolean
-        // rule accepts only true/false/1/0/"1"/"0" — so every search from the
-        // capture form was answered with a 422 and the picker stayed empty.
-        // has() still separates "not filtering" from "filtering on false".
-        if ($request->has('job_context')) {
-            $query->where('job_id_rule', $request->boolean('job_context')
-                ? '!='
-                : '=', ExpenseCode::JOB_NOT_ALLOWED);
-        }
+        $this->applyJobContext($request, $query);
+        $this->applyProcurable($request, $query);
 
         $codes = $query->orderBy('sort_order')->orderBy('expense_type')
             ->limit($validated['limit'] ?? 50)
@@ -99,13 +87,8 @@ class ExpenseCodeController extends Controller
 
         $query = ExpenseCode::active()->whereIn('id', $ranked);
 
-        // Same rule as index(), and read the same way — see the note there on
-        // why this is not a validated `boolean`.
-        if ($request->has('job_context')) {
-            $query->where('job_id_rule', $request->boolean('job_context')
-                ? '!='
-                : '=', ExpenseCode::JOB_NOT_ALLOWED);
-        }
+        $this->applyJobContext($request, $query);
+        $this->applyProcurable($request, $query);
 
         // Re-sorted in PHP: whereIn returns rows in whatever order the index
         // yields, which would discard the recency ranking the query just built.
@@ -132,23 +115,82 @@ class ExpenseCodeController extends Controller
     public function families(Request $request): JsonResponse
     {
         $query = ExpenseCode::active()
-            // MAX() rather than grouping on the class as well: a family maps to
-            // one class today, and grouping by both would split a family into
-            // two tiles the day that stopped being true.
+            // MAX() rather than grouping on the class as well. A family no longer
+            // maps to exactly one class — "Premises and utilities" holds workshop
+            // electricity (production overhead) beside office rent (operating
+            // expense), because the requester is buying the same kind of thing
+            // either way. Grouping by both would split that into two tiles named
+            // after the ledger, which is the failure this catalogue is moving
+            // away from; so one tile wins, and the class it reports is indicative.
             ->selectRaw('expense_family, MAX(accounting_class) as accounting_class, COUNT(*) as code_count')
             ->groupBy('expense_family')
             ->orderByRaw('COUNT(*) DESC')
             ->orderBy('expense_family');
 
-        // Same contextual filter as index(), read the same way — see the note
-        // there on why this is not a validated `boolean`.
-        if ($request->has('job_context')) {
-            $query->where('job_id_rule', $request->boolean('job_context')
-                ? '!='
-                : '=', ExpenseCode::JOB_NOT_ALLOWED);
-        }
+        $this->applyJobContext($request, $query);
+        $this->applyProcurable($request, $query);
 
         return response()->json(['data' => $query->get()]);
+    }
+
+    /**
+     * Narrow the catalogue to the codes this context may legitimately use.
+     *
+     * With a job in hand the rule is a simple complement: everything except the
+     * codes that forbid a job number.
+     *
+     * Without one it is not the mirror image, and treating it as `= not_allowed`
+     * was the bug. `optional` and `conditional` codes say in their own rule that
+     * a job number is not required, so they belong in the no-job list too.
+     * Excluding them left an office requisition with seven choices — four of
+     * which are not purchases at all — and hid the two codes those screens most
+     * need: NE-008 "Material bought for store", the classification for a stores
+     * replenishment, and OE-FIN-001 "Bank and mobile-money transaction charges",
+     * which a non-project petty-cash spend could therefore never be coded to.
+     *
+     * Read through boolean() rather than validated as `boolean`: a query string
+     * carries this as the text "true"/"false", and Laravel's boolean rule
+     * accepts only true/false/1/0/"1"/"0" — so every search from the capture
+     * form was answered with a 422 and the picker stayed empty. has() still
+     * separates "not filtering" from "filtering on false".
+     */
+    /**
+     * Narrow to what a purchase order can actually carry.
+     *
+     * Asked for by the procurement requisition and nothing else. The catalogue
+     * has to hold codes that are not purchases — a petty-cash float top-up, a
+     * stores issue, VAT remitted — because the cost collector posts all of them,
+     * and the petty-cash capture form legitimately offers several. But a
+     * requisition asks a supplier for something, so offering it "Client refund /
+     * credit note" is offering a wrong answer.
+     *
+     * Opt-in rather than default, so the screens that need the whole catalogue
+     * keep getting it without asking.
+     */
+    private function applyProcurable(Request $request, $query): void
+    {
+        if ($request->boolean('procurable')) {
+            $query->where('is_procurable', true);
+        }
+    }
+
+    private function applyJobContext(Request $request, $query): void
+    {
+        if (! $request->has('job_context')) {
+            return;
+        }
+
+        if ($request->boolean('job_context')) {
+            $query->where('job_id_rule', '!=', ExpenseCode::JOB_NOT_ALLOWED);
+
+            return;
+        }
+
+        $query->whereIn('job_id_rule', [
+            ExpenseCode::JOB_NOT_ALLOWED,
+            ExpenseCode::JOB_OPTIONAL,
+            ExpenseCode::JOB_CONDITIONAL,
+        ]);
     }
 
     public function show(string $code): JsonResponse

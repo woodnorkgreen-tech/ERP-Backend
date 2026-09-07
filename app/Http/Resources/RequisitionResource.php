@@ -55,6 +55,17 @@ class RequisitionResource extends JsonResource
             'urgency' => $this->urgency,
             'status' => $this->status,
             'total_amount' => (float) $this->total_amount,
+
+            /*
+             * Where the money for this request actually came from.
+             *
+             * Only when the items are loaded, which is the detail screen — the
+             * lookup walks requisition → orders → invoices → payments, and doing
+             * that per row of a paginated list would cost more than the answer is
+             * worth there. `whenLoaded('items')` is the existing signal in this
+             * resource for "this is the full view of one requisition".
+             */
+            'settlements' => $this->whenLoaded('items', fn () => $this->settlements()),
             // Add purchase order info
             'purchaseOrder' => $this->when($this->purchaseOrder, function () {
                 return [
@@ -80,6 +91,18 @@ class RequisitionResource extends JsonResource
                         'budget_item_persistent_id' => $item->budget_item_persistent_id,
                         'material_id' => $item->material_id,
                         'expense_code_id' => $item->expense_code_id,
+                        // The id alone cannot be rendered. Every screen that
+                        // shows a coded line had to either re-fetch the
+                        // catalogue or show nothing, and the edit form showed
+                        // an empty picker over a line that was in fact coded.
+                        'expense_code' => $item->expenseCode ? [
+                            'id' => $item->expenseCode->id,
+                            'code' => $item->expenseCode->code,
+                            'expense_type' => $item->expenseCode->expense_type,
+                            'expense_family' => $item->expenseCode->expense_family,
+                            'simple_meaning' => $item->expenseCode->simple_meaning,
+                            'job_id_rule' => $item->expenseCode->job_id_rule,
+                        ] : null,
                         'supplier_id' => $item->supplier_id,
                         'supplier' => $item->supplier ? [
                             'id' => $item->supplier->id,

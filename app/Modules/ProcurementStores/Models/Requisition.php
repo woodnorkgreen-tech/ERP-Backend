@@ -55,6 +55,41 @@ class Requisition extends Model
         return $this->hasMany(PurchaseOrder::class);
     }
 
+    /**
+     * How this request was eventually settled, and out of which float.
+     *
+     * A purchase requisition is four hops from its money — requisition, order,
+     * invoice, payment — which is why nothing ever showed it. The payment source
+     * has been recorded on `bill_payments` all along; the request simply had no
+     * way to reach back to it, so "which purchase requests came out of petty
+     * cash?" was unanswerable from the requisition screen.
+     *
+     * A method rather than a relation, and deliberately not eager-loaded on the
+     * list: a four-level join on every row of a paginated index would cost far
+     * more than the question is worth there. The detail screen asks for one
+     * request and can afford one query.
+     *
+     * @return \Illuminate\Support\Collection<int, array{source: ?string, type: ?string, amount: string, paid_on: ?string}>
+     */
+    public function settlements()
+    {
+        return BillPayment::query()
+            ->whereIn('bill_id', Bill::query()
+                ->whereIn('purchase_order_id', $this->purchaseOrders()->select('id'))
+                ->select('id'))
+            ->with('paymentSource:id,code,name,type')
+            ->orderBy('payment_date')
+            ->get()
+            ->map(fn (BillPayment $payment) => [
+                'source' => $payment->paymentSource?->name,
+                'type' => $payment->paymentSource?->type,
+                'amount' => (string) $payment->amount_paid,
+                'paid_on' => $payment->payment_date?->toDateString(),
+                // Present when the tin paid it, and the link to the cash record.
+                'disbursement_id' => $payment->disbursement_id,
+            ]);
+    }
+
     public function items()
     {
         return $this->hasMany(RequisitionItem::class);

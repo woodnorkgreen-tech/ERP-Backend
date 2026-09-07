@@ -187,6 +187,57 @@ class PettyCashService
                             'amount' => ['Payment must equal the approved requisition total. Edit and re-approve the request to change it.'],
                         ]];
                     }
+
+                    // The expense type is part of what was approved, not a
+                    // choice left to whoever pays.
+                    //
+                    // Everything else the approval fixed is already inherited or
+                    // enforced here: the payee, the description, the project, and
+                    // the amount to the cent. Classification was the exception —
+                    // validated only as "some active code", so a request
+                    // committed under Crew transport could be settled under any
+                    // of the other ninety-three. Nothing double-counts, because
+                    // the commitment is released by source document rather than
+                    // by code; but the project's cost account would then carry
+                    // the promise on one expense line and the money on another,
+                    // reading as an overspend and an underspend on a single
+                    // expense nobody misfiled on purpose.
+                    //
+                    // Pinned rather than rejected, deliberately. The commitment
+                    // was posted from the live type's default, so reading that
+                    // same source is what makes the two agree; rejecting would
+                    // only complain about a mismatch it could not prevent, and
+                    // would block a payment the payer has no way to fix.
+                    //
+                    // One window remains open: an administrator re-coding the
+                    // type between approval and payment moves this without
+                    // moving the commitment already posted. Closing it properly
+                    // means storing the resolved code on the requisition at
+                    // approval, which is a migration rather than a guard.
+                    $approvedCode = $requisition->requisitionType?->defaultExpenseCode;
+
+                    // A type carrying no default is left to the payer. The
+                    // retired folk categories have none, and refusing to pay
+                    // their approved requisitions would be worse than letting
+                    // whoever pays classify them.
+                    if ($approvedCode?->is_active && (int) $approvedCode->id !== (int) $expenseCode->id) {
+                        $this->logActivity(
+                            'expense_code_pinned_to_requisition',
+                            'requisition',
+                            $requisition->id,
+                            "Payment classified as {$approvedCode->code} to match approved requisition {$requisition->requisition_number}",
+                            [
+                                'submitted_expense_code_id' => $expenseCode->id,
+                                'submitted_expense_code' => $expenseCode->code,
+                                'approved_expense_code_id' => $approvedCode->id,
+                                'approved_expense_code' => $approvedCode->code,
+                            ],
+                        );
+
+                        $data['expense_code_id'] = $approvedCode->id;
+                        $expenseCode = $approvedCode;
+                    }
+
                     $data['receiver'] = $requisition->payee_name ?: $data['receiver'];
                     $data['description'] = $requisition->purpose ?: $data['description'];
                     $data['project_id'] ??= $requisition->project_id;
@@ -281,7 +332,7 @@ class PettyCashService
                 $totalToDeduct = (float)$data['amount'] + (float)($data['transaction_cost'] ?? 0);
 
                 // Validate balance before creating disbursement (unless skipped)
-                if (!($data['skip_balance_check'] ?? false)) {
+                if ($paymentSource->type === 'petty_cash' && !($data['skip_balance_check'] ?? false)) {
                     if ($balance->current_balance < $totalToDeduct) {
                         return [
                             'success' => false,
@@ -303,7 +354,9 @@ class PettyCashService
                 $plannedAllocations = [];
 
                 // Auto-assign top_up_id if not provided using FIFO allocator (may split across top-ups)
-                if (empty($data['top_up_id'])) {
+                if ($paymentSource->type !== 'petty_cash') {
+                    $data['top_up_id'] = null;
+                } elseif (empty($data['top_up_id'])) {
                     $allocator = new TopUpAllocator($this->repository);
                     try {
                         $allocations = $allocator->plan((float)$data['amount'], (float)($data['transaction_cost'] ?? 0));
@@ -348,6 +401,29 @@ class PettyCashService
                     }
                 }
 
+                /*
+                 * A petty cash disbursement against a supplier invoice is a
+                 * supplier payment, and answers to the same three-way match as
+                 * one made from the bank. Checked before the cash moves, so a
+                 * blocked invoice is refused with a reason rather than leaving
+                 * cash out of the tin and no payment recorded against the bill.
+                 */
+                if (! empty($data['requisition_id'])) {
+                    $linkedRequisition = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::find($data['requisition_id']);
+                    $linkedBill = $linkedRequisition?->bill_id
+                        ? \App\Modules\ProcurementStores\Models\Bill::find($linkedRequisition->bill_id)
+                        : null;
+
+                    if ($linkedBill) {
+                        try {
+                            app(\App\Modules\ProcurementStores\Services\SupplierPaymentGuard::class)
+                                ->assertPayable($linkedBill, (string) $data['amount']);
+                        } catch (\RuntimeException $blocked) {
+                            return ['success' => false, 'errors' => ['bill_id' => [$blocked->getMessage()]]];
+                        }
+                    }
+                }
+
                 $disbursement = $this->repository->createDisbursement($data);
 
                 // If we planned a split across multiple top-ups, persist allocation records
@@ -363,7 +439,9 @@ class PettyCashService
                 }
 
                 $ledger = new LedgerService();
-                $ledger->post(LedgerEntry::debitForDisbursement($disbursement));
+                if ($paymentSource->type === 'petty_cash') {
+                    $ledger->post(LedgerEntry::debitForDisbursement($disbursement));
+                }
 
                 // Refresh balance
                 $balance->refresh();
@@ -460,6 +538,7 @@ class PettyCashService
         DB::beginTransaction();
 
         try {
+            $disbursement = PettyCashDisbursement::whereKey($disbursement->id)->lockForUpdate()->firstOrFail();
             if ($disbursement->is_voided) {
                 throw new Exception('Disbursement is already voided.');
             }
@@ -485,7 +564,13 @@ class PettyCashService
             ]);
             $entry->sourceType = 'disbursement';
             $entry->sourceId = $disbursement->id;
-            $ledger->post($entry);
+            // Historical transactions may predate payment sources. Refund only
+            // a payment that actually debited this cashbook.
+            if (DB::table('petty_cash_ledger_entries')->where('source_type', 'disbursement')
+                ->where('source_id', $disbursement->id)->where('type', 'debit')->exists()) {
+                $ledger->post($entry);
+            }
+            $disbursement->billPayment?->delete();
 
             // Refresh balance
             $balance->refresh();
@@ -693,7 +778,7 @@ class PettyCashService
         $errors = [];
 
         // Validate required fields (top_up_id is now optional as service can auto-allocate)
-        $requiredFields = ['receiver', 'account', 'amount', 'description', 'classification', 'payment_method'];
+        $requiredFields = ['receiver', 'expense_code_id', 'payment_source_id', 'amount', 'description'];
         foreach ($requiredFields as $field) {
             // Only require fields if not updating, or if they are explicitly provided in the update
             if (!$isUpdate && empty($data[$field])) {
@@ -897,22 +982,32 @@ class PettyCashService
     private function createBillPaymentFromDisbursement($requisition, $disbursement): void
     {
         try {
-            $paymentMethodId = \App\Modules\ProcurementStores\Models\PaymentMethod::where('name', 'Petty Cash')
-                ->orWhere('name', 'like', '%Cash%')
-                ->value('id') ?? 1; // Fallback to 1
+            $source = $disbursement->paymentSource;
+            $method = \App\Modules\ProcurementStores\Models\PaymentMethod::where('payment_source_id', $source->id)->where('is_active', true)->first()
+                ?? \App\Modules\ProcurementStores\Models\PaymentMethod::create([
+                    'method_name' => $source->name, 'payment_source_id' => $source->id, 'is_active' => true,
+                ]);
 
             \App\Modules\ProcurementStores\Models\BillPayment::create([
                 'bill_id' => $requisition->bill_id,
                 'amount_paid' => $disbursement->amount,
                 'payment_date' => $disbursement->date_disbursed ?? now(),
-                'payment_method_id' => $paymentMethodId,
+                'payment_method_id' => $method->id,
+                'payment_source_id' => $source->id,
+                'disbursement_id' => $disbursement->id,
                 'reference_number' => "Paid via Petty Cash Req #{$requisition->requisition_number} (Disb #{$disbursement->id})",
                 'user_id' => $disbursement->created_by ?? Auth::id(),
             ]);
             
             \Log::info("Automated BillPayment created for Bill #{$requisition->bill_id} from Requisition #{$requisition->id}");
         } catch (\Exception $e) {
+            /*
+             * Rethrown, not logged: this runs inside the disbursement's
+             * transaction, and swallowing it would leave cash disbursed with
+             * nothing recorded against the supplier's invoice.
+             */
             \Log::error("Failed to auto-create BillPayment for Requisition #{$requisition->id}: " . $e->getMessage());
+            throw $e;
         }
     }
 

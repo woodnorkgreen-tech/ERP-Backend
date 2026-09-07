@@ -13,7 +13,10 @@ use Illuminate\Support\Facades\DB;
 /** Stock check-outs to projects → actual material cost lines. */
 class StoresCostProducer
 {
-    public function __construct(private CostCollectorService $collector) {}
+    public function __construct(
+        private CostCollectorService $collector,
+        private MaterialExpenseCodeResolver $materialExpenseCodes = new MaterialExpenseCodeResolver(),
+    ) {}
 
     public function postStockIssue(InventoryLog $log): ?CostLine
     {
@@ -79,7 +82,7 @@ class StoresCostProducer
             return null;
         }
 
-        $expenseCode = $this->expenseCodeFor($material);
+        $expenseCode = $this->materialExpenseCodes->resolveOrFail($material);
 
         $planned = $this->plannedLine(
             $identity['project_enquiry_id'],
@@ -125,7 +128,7 @@ class StoresCostProducer
                 'unbudgeted' => $planned ? null : true,
                 // Surfaces the mapping gap instead of letting non-wood spend
                 // disappear into the wood account unremarked.
-                'unmapped_expense_code' => $this->usesDefaultExpenseCode($material, (string) $expenseCode) ?: null,
+                'unmapped_expense_code' => $this->materialExpenseCodes->usesDefault((string) $expenseCode) ?: null,
                 // Recorded, never silent: this posted as an actual but was
                 // priced from the budget, so it cannot be read as evidence of
                 // what the material really cost. Material variance on a job
@@ -430,54 +433,4 @@ class StoresCostProducer
             ->first();
     }
 
-    /**
-     * Resolve the expense code Finance governs for this material, in descending
-     * order of authority: the material's own configured code, then its category's
-     * mapped code, then the configured default for unmapped materials.
-     *
-     * DM-WD-001 is *wood*. Using it for every material — adhesives, fabric,
-     * fixings, print media — classified spend that Finance then has to unpick by
-     * hand. It survives only as the last-resort default, and only because
-     * refusing to post would strand real stock movements outside project cost;
-     * lines that land on it are marked so the mapping gap is visible rather than
-     * silently absorbed into the wood account.
-     */
-    private function expenseCodeFor(?object $material): string
-    {
-        $attributes = $material?->attributes ?? [];
-        $attributes = $attributes['attributes'] ?? $attributes;
-        $configured = $attributes['expense_code'] ?? $attributes['finance_expense_code'] ?? null;
-
-        if ($configured && ExpenseCode::active()->where('code', $configured)->exists()) {
-            return (string) $configured;
-        }
-
-        // Category-level mapping is how Finance governs this at scale: one entry
-        // per material category rather than per catalogue row.
-        $categoryMap = (array) config('cost-collector.material_category_expense_codes', []);
-        $categoryNames = array_values(array_filter([
-            $material?->materialCategory?->name,
-            $material?->materialCategory?->parent?->name,
-            $material?->category,
-        ]));
-
-        foreach ($categoryNames as $name) {
-            $mapped = $categoryMap[$name] ?? null;
-            if ($mapped && ExpenseCode::active()->where('code', $mapped)->exists()) {
-                return (string) $mapped;
-            }
-        }
-
-        $default = (string) config('cost-collector.default_material_expense_code', 'DM-WD-001');
-
-        return (string) (ExpenseCode::active()->where('code', $default)->value('code')
-            ?? ExpenseCode::active()->where('expense_type', 'like', '%material%')->orderBy('code')->value('code')
-            ?? throw new \DomainException('No active direct-material expense code is configured for Stores issues.'));
-    }
-
-    /** True when the material has no governed code and fell through to the default. */
-    private function usesDefaultExpenseCode(?object $material, string $resolved): bool
-    {
-        return $resolved === (string) config('cost-collector.default_material_expense_code', 'DM-WD-001');
-    }
 }

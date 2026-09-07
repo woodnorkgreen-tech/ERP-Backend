@@ -210,15 +210,23 @@ class TaxScheduleTest extends TestCase
     {
         $this->assertSame(
             '2026-04-20',
-            $this->schedules->whtSchedule(2026, 3)['due_date'],
+            $this->schedules->vatInputSchedule('2026-03-01', '2026-03-31')['due_date'],
         );
 
         DB::table('finance_settings')->where('key', 'tax_return_due_day')->update(['value' => '15']);
 
         $this->assertSame(
             '2026-04-15',
-            $this->schedules->whtSchedule(2026, 3)['due_date'],
+            $this->schedules->vatInputSchedule('2026-03-01', '2026-03-31')['due_date'],
         );
+    }
+
+    public function test_wht_does_not_reuse_the_monthly_vat_deadline(): void
+    {
+        $schedule = $this->schedules->whtSchedule(2026, 3);
+        $this->assertNull($schedule['due_date']);
+        $this->assertStringContainsString('five working days after deduction', $schedule['remittance_rule']);
+        $this->assertStringContainsString('kra.go.ke', $schedule['remittance_source']);
     }
 
     public function test_the_schedules_are_closed_to_anyone_without_the_reports_permission(): void

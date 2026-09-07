@@ -18,7 +18,13 @@ class Bill extends Model
         'balance',
         'status',
         'notes',
-        'user_id'
+        'user_id',
+        'supplier_invoice_number',
+        'verified_by',
+        'verified_at',
+        'verification_basis',
+        'verification_fingerprint',
+        'verification_notes',
     ];
 
     protected $casts = [
@@ -27,6 +33,7 @@ class Bill extends Model
         'amount' => 'decimal:2',
         'paid_amount' => 'decimal:2',
         'balance' => 'decimal:2',
+        'verified_at' => 'datetime',
     ];
 
     protected static function boot()
@@ -36,6 +43,10 @@ class Bill extends Model
         static::creating(function ($bill) {
             $bill->balance = $bill->amount;
             $bill->paid_amount = 0;
+        });
+
+        static::updating(function ($bill) {
+            $bill->withdrawVerificationOnChange();
         });
     }
 
@@ -95,5 +106,27 @@ class Bill extends Model
     public function payments()
     {
         return $this->hasMany(BillPayment::class);
+    }
+
+    public function verifiedBy()
+    {
+        return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    /*
+     * Any edit to the invoice's own figures withdraws the verification: a
+     * sign-off is a statement about a particular amount and reference, and the
+     * moment either changes the statement is about something else. Accounts
+     * re-checks and re-signs. The fingerprint in PurchaseOrderWorkflow catches
+     * the same drift coming from the order or the receipt side.
+     */
+    public function withdrawVerificationOnChange(): void
+    {
+        if ($this->isDirty(['amount', 'supplier_invoice_number', 'supplier_id', 'purchase_order_id'])) {
+            $this->verified_at = null;
+            $this->verified_by = null;
+            $this->verification_basis = null;
+            $this->verification_fingerprint = null;
+        }
     }
 }

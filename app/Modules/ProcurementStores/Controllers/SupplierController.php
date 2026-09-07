@@ -21,6 +21,45 @@ class SupplierController extends Controller
         return SupplierResource::collection($suppliers)->preserveQuery();
     }
 
+    /**
+     * Every supplier a picker may offer, in one response.
+     *
+     * The paginated index is a browsing list — twenty at a time, newest first —
+     * and every dropdown fed from it silently showed only the twenty most
+     * recently added suppliers, in the order they were created. A chooser needs
+     * the whole set, alphabetically, and only the ones still traded with.
+     *
+     * Inactive suppliers are kept out, save for one that a record already
+     * points at: a requisition raised against a supplier since retired must
+     * still show who it was raised against, rather than falling back to blank.
+     */
+    public function options(Request $request)
+    {
+        $keep = collect([$request->input('include')])
+            ->filter()
+            ->map(fn ($id) => (int) $id);
+
+        $suppliers = Supplier::query()
+            ->where(function ($query) use ($keep) {
+                $query->where('status', 'Active');
+                if ($keep->isNotEmpty()) {
+                    $query->orWhereIn('id', $keep->all());
+                }
+            })
+            ->orderBy('supplier_name')
+            ->get(['id', 'supplier_name', 'status', 'payment_terms', 'kra_pin']);
+
+        return response()->json([
+            'data' => $suppliers->map(fn ($supplier) => [
+                'id' => $supplier->id,
+                'supplier_name' => $supplier->supplier_name,
+                'payment_terms' => $supplier->payment_terms,
+                'kra_pin' => $supplier->kra_pin,
+                'is_active' => $supplier->status === 'Active',
+            ]),
+        ]);
+    }
+
     public function search(Request $request)
     {
         $searchTerm = $request->input('searchTerm');

@@ -54,10 +54,11 @@ class JournalEntryController extends Controller
             'Verified project and overhead costs',
             'Recoverable input VAT and withholding tax',
             'Stores inventory movements and goods-received accruals',
+            'Payroll accruals and payments explicitly posted from HR',
         ],
         'excludes' => [
             'Revenue, client invoices and receipts',
-            'Payroll',
+            'Payroll not explicitly posted from HR',
             'Bank and cash movements not raised as a spend voucher',
             'Opening balances, equity, depreciation and year-end adjustments',
         ],
@@ -170,8 +171,9 @@ class JournalEntryController extends Controller
      * figure, so a false here means a bug, while a true means only that no bug
      * fired.
      *
-     * Draft and reversed entries are excluded: this states what has been posted
-     * and still stands.
+     * Draft entries are excluded. Reversed originals remain alongside their
+     * compensating entries: removing an original rewrites its historical month
+     * and leaves the reversal as an unsupported negative cost.
      */
     public function trialBalance(Request $request): JsonResponse
     {
@@ -185,7 +187,7 @@ class JournalEntryController extends Controller
         $rows = JournalLine::query()
             ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
             ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'journal_lines.account_id')
-            ->where('journal_entries.status', 'posted')
+            ->whereIn('journal_entries.status', ['posted', 'reversed'])
             ->when($filters['from'] ?? null, fn ($q, $from) => $q->whereDate('journal_entries.posting_date', '>=', $from))
             ->when($filters['to'] ?? null, fn ($q, $to) => $q->whereDate('journal_entries.posting_date', '<=', $to))
             ->groupBy('chart_of_accounts.id', 'chart_of_accounts.code', 'chart_of_accounts.name', 'chart_of_accounts.category')

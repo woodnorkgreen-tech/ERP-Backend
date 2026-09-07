@@ -2,6 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Controllers;
 
+use App\Constants\EnquiryConstants;
 use App\Http\Controllers\Controller;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
@@ -20,6 +21,8 @@ use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\HR\Models\TechnicalLabour;
 use Exception;
+use App\Events\PettyCashRequisitionApproved;
+use App\Events\PettyCashRequisitionReturnedToPending;
 use App\Exceptions\GovernanceException;
 use App\Services\Governance\ProjectGovernanceService;
 use App\Modules\Finance\PettyCash\Services\RequisitionSchemaService;
@@ -34,8 +37,16 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $user = Auth::user();
-            $query = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'approver', 'payee', 'project.enquiry', 'enquiry', 'items.payee'])
-                ->withCount('items');
+            // `disbursement.paymentSource` is what lets a requisition say how it
+            // was actually paid. The source has always been recorded — on the
+            // disbursement, which is the thing that moved the money — but the
+            // list never loaded it, so "which requests came out of the tin?" was
+            // a question the screen could not answer about its own rows.
+            $query = PettyCashRequisition::with([
+                'requisitionType', 'requester.employee', 'department', 'approver', 'payee',
+                'project.enquiry', 'enquiry', 'items.payee',
+                'disbursement.paymentSource',
+            ])->withCount('items');
 
             // If not admin/finance, only show their own
             if ($user && !$user->can('viewAllRequisitions', PettyCashDisbursement::class)) {
@@ -60,6 +71,26 @@ class PettyCashRequisitionController extends Controller
                     $request->start_date . ' 00:00:00',
                     $request->end_date . ' 23:59:59'
                 ]);
+            }
+
+            // Which float or account settled it. Filtered through the
+            // disbursement rather than a column on the requisition: a request is
+            // not paid from anywhere until somebody pays it, and duplicating the
+            // answer onto the request would be a second copy to keep in step.
+            if ($request->filled('payment_source_id')) {
+                $query->whereHas(
+                    'disbursement',
+                    fn ($q) => $q->where('payment_source_id', $request->payment_source_id)
+                        ->where('status', 'active')
+                );
+            }
+
+            // Unpaid is the absence of a disbursement, not a status: a request
+            // can be approved for weeks before the cash goes out.
+            if ($request->filled('settlement')) {
+                $request->settlement === 'unpaid'
+                    ? $query->whereDoesntHave('disbursement', fn ($q) => $q->where('status', 'active'))
+                    : $query->whereHas('disbursement', fn ($q) => $q->where('status', 'active'));
             }
 
             $perPage = $request->get('per_page', 15);
@@ -244,7 +275,7 @@ class PettyCashRequisitionController extends Controller
     public function show(int $id): JsonResponse
     {
         try {
-            $requisition = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'items.payee', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
+            $requisition = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'items.payee', 'approver', 'disbursement.paymentSource', 'payee', 'project.enquiry', 'enquiry'])
                 ->findOrFail($id);
 
             if (!$this->mayView($requisition)) {
@@ -317,10 +348,17 @@ class PettyCashRequisitionController extends Controller
             ];
 
             // If it was approved, revert to pending for re-approval because details changed
-            if ($requisition->status === 'approved') {
+            $approvalWithdrawn = $requisition->status === 'approved';
+
+            if ($approvalWithdrawn) {
                 $commonData['status'] = 'pending';
                 $commonData['approved_by'] = null;
                 $commonData['approved_at'] = null;
+
+                // The project stopped being committed to this money the moment
+                // the approval was withdrawn. Released out-of-band, mirroring
+                // the approval path, so the cost ledger can never block an edit.
+                DB::afterCommit(fn () => PettyCashRequisitionReturnedToPending::dispatch($requisition->id));
             }
 
             $requisition->update($commonData);
@@ -447,6 +485,10 @@ class PettyCashRequisitionController extends Controller
                 'approved_by' => Auth::id(),
                 'approved_at' => now(),
             ]);
+
+            // The project's money is now spoken for. Recorded as a commitment
+            // out-of-band, so the cost ledger can never stop an approval.
+            DB::afterCommit(fn () => PettyCashRequisitionApproved::dispatch($requisition->id));
 
             if ($selfApproval) {
                 app(PettyCashService::class)->logActivity(
@@ -734,6 +776,87 @@ class PettyCashRequisitionController extends Controller
     }
 
     /**
+     * The jobs a requisition can be allocated to, approved work first.
+     *
+     * Two lists rather than one, because they are not the same kind of thing. A
+     * Project row exists only once a quote has been approved and the job
+     * activated — ActivateProjectAction creates it at that moment and nowhere
+     * else — so every project here is committed work with a WNG job number. An
+     * enquiry is a job somebody hopes to win. Spending against the first is
+     * ordinary; against the second it is a judgement call, which is why the form
+     * badges them differently and why they must not be shuffled together.
+     *
+     * Shuffled together is what happened. Both lists came back unordered and the
+     * client merged them with `sort((a, b) => b.id - a.id)` — two independent
+     * auto-increment sequences compared as if they were one, so a stale enquiry
+     * with a high id outranked a project created this morning. There was no
+     * approved-first rule to break; the order was an artefact of which table had
+     * grown faster. Each list is now ordered newest-first here, and the client
+     * concatenates rather than re-sorts.
+     *
+     * THREE FILTER CORRECTIONS
+     *
+     * `cancelled` was not excluded. 130 abandoned enquiries were being offered
+     * as spend targets — the single worst thing in this list, since allocating
+     * cash to a dead job is a cost that no revenue will ever answer for. The
+     * exclusions now name the three terminal states from EnquiryConstants.
+     *
+     * `lost` was excluded and is not a status this system has ever written; the
+     * constant is `cancelled`. It filtered nothing for as long as it existed.
+     *
+     * `quote_approved` was excluded, which hid exactly the jobs this dropdown
+     * most wants to show: a quote approved but not yet activated into a project.
+     * The `whereDoesntHave('project')` clause below already prevents the
+     * double-listing that exclusion appears to have been guarding against, so
+     * the enquiry is offered until the project supersedes it.
+     *
+     * The status filter on projects is left enumerating case variants. Every one
+     * of the 541 rows is `planning`, so nothing is riding on it today, and
+     * narrowing it is a Projects-module decision rather than a Finance one.
+     *
+     * @return array{projects: \Illuminate\Support\Collection<int, array<string, mixed>>, enquiries: \Illuminate\Support\Collection<int, array<string, mixed>>}
+     */
+    private function projectAllocationOptions(): array
+    {
+        $projects = Project::with('enquiry')
+            ->whereIn('status', ['Planning', 'active', 'planning', 'Active', 'In Progress', 'in_progress'])
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (Project $p) => [
+                'id' => $p->id,
+                'label' => "{$p->project_id} - " . ($p->enquiry->title ?? 'No Title'),
+                'type' => 'project',
+                // The WNG job number as its own field. The dropdown has always
+                // rendered `opt.project_id` beside the label and filtered on it
+                // while searching, but the payload never carried it, so both
+                // read undefined — code search worked only because the number
+                // happens to be embedded in the label text.
+                'project_id' => $p->project_id,
+            ]);
+
+        $enquiries = ProjectEnquiry::select('id', 'title', 'enquiry_number')
+            // Superseded by its own project row once activated.
+            ->whereDoesntHave('project')
+            ->whereNotIn('status', [
+                EnquiryConstants::STATUS_COMPLETED,
+                EnquiryConstants::STATUS_CANCELLED,
+                EnquiryConstants::STATUS_CLOSED,
+            ])
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (ProjectEnquiry $e) => [
+                'id' => $e->id,
+                'label' => $e->enquiry_number
+                    ? "Enquiry #{$e->enquiry_number}: {$e->title}"
+                    : "Enquiry: {$e->title}",
+                'type' => 'enquiry',
+                'enquiry_number' => $e->enquiry_number,
+            ]);
+
+        return ['projects' => $projects, 'enquiries' => $enquiries];
+    }
+
+    /**
      * Get categories and departments for the form.
      */
     public function getFormData(): JsonResponse
@@ -741,32 +864,7 @@ class PettyCashRequisitionController extends Controller
         $departments = Department::select('id', 'name')->get();
         $employees = Employee::select('id', 'first_name', 'last_name', 'phone')->where('status', 'active')->orderBy('first_name')->get();
         
-        // Fetch Projects and Enquiries
-        $projects = Project::with('enquiry')
-            ->whereIn('status', ['Planning', 'active', 'planning', 'Active', 'In Progress', 'in_progress'])
-            ->get()
-            ->map(function($p) {
-                $title = $p->enquiry->title ?? 'No Title';
-                $jobNumber = $p->project_id; // This is the WNG- prefix ID
-                return [
-                    'id' => $p->id,
-                    'label' => "{$jobNumber} - {$title}",
-                    'type' => 'project'
-                ];
-            });
-
-        $enquiries = ProjectEnquiry::select('id', 'title', 'enquiry_number')
-            ->whereDoesntHave('project') // Exclude those already converted to projects
-            ->whereNotIn('status', ['lost', 'completed', 'quote_approved'])
-            ->get()
-            ->map(function($e) {
-                $label = $e->enquiry_number ? "Enquiry #{$e->enquiry_number}: {$e->title}" : "Enquiry: {$e->title}";
-                return [
-                    'id' => $e->id,
-                    'label' => $label,
-                    'type' => 'enquiry'
-                ];
-            });
+        ['projects' => $projects, 'enquiries' => $enquiries] = $this->projectAllocationOptions();
 
         $types = $this->requisitionTypes();
 
@@ -776,6 +874,20 @@ class PettyCashRequisitionController extends Controller
             'employees' => $employees,
             'categories' => $types->pluck('name')->values(),
             'requisition_types' => $types,
+            // The few this person actually raises, so the common request is one
+            // click rather than a scan of twenty-two tiles. Most recently used
+            // rather than most often: what somebody raised this morning predicts
+            // what they are raising now better than last quarter's totals do.
+            // The same reasoning, and the same ordering, as the expense code
+            // chips on the cost capture form.
+            'recent_requisition_type_ids' => PettyCashRequisition::query()
+                ->where('user_id', Auth::id())
+                ->whereNotNull('requisition_type_id')
+                ->groupBy('requisition_type_id')
+                ->orderByRaw('MAX(id) DESC')
+                ->limit(4)
+                ->pluck('requisition_type_id')
+                ->values(),
             'projects' => $projects,
             'enquiries' => $enquiries
         ]);
@@ -1093,32 +1205,7 @@ class PettyCashRequisitionController extends Controller
     {
         $departments = Department::select('id', 'name')->get();
         
-        // Fetch Projects and Enquiries (Only active ones for public)
-        $projects = Project::with('enquiry')
-            ->whereIn('status', ['Planning', 'active', 'planning', 'Active', 'In Progress', 'in_progress'])
-            ->get()
-            ->map(function($p) {
-                $title = $p->enquiry->title ?? 'No Title';
-                $jobNumber = $p->project_id;
-                return [
-                    'id' => $p->id,
-                    'label' => "{$jobNumber} - {$title}",
-                    'type' => 'project'
-                ];
-            });
-
-        $enquiries = ProjectEnquiry::select('id', 'title', 'enquiry_number')
-            ->whereDoesntHave('project') // Exclude those already converted to projects
-            ->whereNotIn('status', ['lost', 'completed', 'quote_approved'])
-            ->get()
-            ->map(function($e) {
-                $label = $e->enquiry_number ? "Enquiry #{$e->enquiry_number}: {$e->title}" : "Enquiry: {$e->title}";
-                return [
-                    'id' => $e->id,
-                    'label' => $label,
-                    'type' => 'enquiry'
-                ];
-            });
+        ['projects' => $projects, 'enquiries' => $enquiries] = $this->projectAllocationOptions();
 
         $types = $this->requisitionTypes();
 

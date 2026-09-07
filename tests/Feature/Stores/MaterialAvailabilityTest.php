@@ -95,4 +95,33 @@ class MaterialAvailabilityTest extends TestCase
         $issuable = $this->getJson('/api/materials-library/materials?availability=issuable')->assertOk()->json('data');
         $this->assertNotContains($neverStocked->id, collect($issuable)->pluck('id')->all());
     }
+
+    public function test_catalogue_and_workstation_use_status_instead_of_a_stale_legacy_flag(): void
+    {
+        $active = $this->material('Active stale flag', null);
+        $active->update(['is_active' => false]);
+        $blocked = $this->material('Blocked stale flag', 10);
+        $blocked->update(['item_status' => 'Blocked']);
+
+        $rows = $this->getJson('/api/materials-library/materials')->assertOk()->json('data');
+        $this->assertContains($active->id, collect($rows)->pluck('id')->all());
+        $this->assertNotContains($blocked->id, collect($rows)->pluck('id')->all());
+    }
+
+    public function test_reservations_cannot_exceed_stock_or_be_released_below_zero(): void
+    {
+        $material = $this->material('Reservation control', 5, 2);
+        $inventory = app(\App\Modules\ProcurementStores\Services\InventoryService::class);
+        foreach ([4, -3] as $quantity) {
+            try {
+                $inventory->reserveStock($material->id, $quantity);
+                $this->fail('Invalid reservation was accepted.');
+            } catch (\Illuminate\Validation\ValidationException $exception) {
+                $this->assertArrayHasKey('quantity', $exception->errors());
+            }
+            $this->assertSame(2.0, (float) $material->stock()->first()->quantity_reserved);
+        }
+        $inventory->reserveStock($material->id, 3);
+        $this->assertSame(5.0, (float) $material->stock()->first()->quantity_reserved);
+    }
 }

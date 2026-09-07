@@ -105,6 +105,22 @@ class PayrollFinancePostingService
 
     private function journal(string $number, string $date, AccountingPeriod $period, PayrollRun $run, string $description, string $total, array $legs): JournalEntry
     {
+        $debit = '0.00';
+        $credit = '0.00';
+        foreach ($legs as [$account, $type, $amount]) {
+            if (bccomp($amount, '0.00', 2) < 0 || ! ChartOfAccount::postable()->whereKey($account)->exists()) {
+                throw new InvalidArgumentException('Payroll posting requires non-negative amounts and active postable accounts.');
+            }
+            if ($type === 'debit') {
+                $debit = bcadd($debit, $amount, 2);
+            } else {
+                $credit = bcadd($credit, $amount, 2);
+            }
+        }
+        if (bccomp($debit, $credit, 2) !== 0 || bccomp($debit, $total, 2) !== 0) {
+            throw new InvalidArgumentException('Payroll gross pay, net pay and deductions do not reconcile. Correct the payslips before posting.');
+        }
+
         $entry = JournalEntry::create([
             'entry_no' => $number, 'posting_date' => $date,
             'accounting_period_id' => $period->id,

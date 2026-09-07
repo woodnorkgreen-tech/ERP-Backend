@@ -32,6 +32,8 @@ class ExpenseCodeResource extends JsonResource
             'fields' => $this->detailFields(),
             'evidence' => $this->evidenceRequirements(),
 
+            // Whether a purchase order can carry this at all.
+            'is_procurable' => (bool) $this->is_procurable,
             'requires_supplier' => (bool) $this->requires_supplier,
             'requires_asset_record' => (bool) $this->requires_asset_record,
             'is_capex_review' => (bool) $this->is_capex_review,

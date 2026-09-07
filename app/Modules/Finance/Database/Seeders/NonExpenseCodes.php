@@ -16,6 +16,21 @@ use App\Modules\Finance\CostCollector\Models\ExpenseCode;
  * Held separately from ExpenseCodeSeeder only because each row carries distinct
  * evidence, controls and Job ID rules, unlike the direct-materials family which
  * shares one set.
+ *
+ * FAMILY NAMES ARE THE REQUESTER'S, NOT THE LEDGER'S
+ *
+ * `expense_family` is the tile somebody picks from when raising a requisition,
+ * and four of the seven non-project choices used to be named for the account
+ * they land in rather than the thing being bought — "Inventory purchase",
+ * "Prepayments", "Leasehold improvements". A storeman restocking a shelf does
+ * not look for "Inventory purchase". So the families read as the request
+ * ("Stock replenishment", "Rent and insurance paid in advance", "Premises
+ * improvements") while `accounting_class` keeps the ledger's own words for
+ * Finance. The GL account, posting rule and evidence are untouched — this
+ * renames the label on the door, not the room.
+ *
+ * Safe to rename in place: nothing snapshots `expense_family`, every reader
+ * joins to the code, so a rename reaches history as well as new requisitions.
  */
 final class NonExpenseCodes
 {
@@ -33,6 +48,11 @@ final class NonExpenseCodes
         'cash_flow_note' => 'Operating unless noted',
         'job_id_rule' => ExpenseCode::JOB_NOT_ALLOWED,
         'job_id_rule_note' => 'Not allowed',
+        // Cash movements, stock movements, settlements and journals are not
+        // things a supplier delivers. The six rows in this block that *are*
+        // purchases — material into store, prepaid rent and insurance, the two
+        // asset rows and leasehold improvement — say so individually below.
+        'is_procurable' => false,
         'minimum_evidence' => [
             ['key' => 'voucher', 'label' => 'Approved voucher', 'required' => true],
             ['key' => 'payment_proof', 'label' => 'Payment proof', 'required' => true],
@@ -127,8 +147,8 @@ final class NonExpenseCodes
                 ],
             ],
             [
-                'code' => 'NE-008', 'expense_type' => 'Material bought for store',
-                'accounting_class' => 'Inventory asset', 'expense_family' => 'Inventory purchase',
+                'code' => 'NE-008', 'is_procurable' => true, 'expense_type' => 'Material bought for store',
+                'accounting_class' => 'Inventory asset', 'expense_family' => 'Stock replenishment',
                 'simple_meaning' => 'Material purchased for future use and not yet assigned to a job.',
                 'example' => 'Ten MDF boards purchased and received into the workshop store.',
                 'default_debit_gl' => '1200 Raw-material Inventory',
@@ -202,8 +222,8 @@ final class NonExpenseCodes
                 ],
             ],
             [
-                'code' => 'NE-011', 'expense_type' => 'Prepaid rent',
-                'accounting_class' => 'Prepayment asset', 'expense_family' => 'Prepayments',
+                'code' => 'NE-011', 'is_procurable' => true, 'expense_type' => 'Prepaid rent',
+                'accounting_class' => 'Prepayment asset', 'expense_family' => 'Rent and insurance paid in advance',
                 'simple_meaning' => 'Rent paid now that relates to future months.',
                 'example' => "Three months' workshop rent paid in advance.",
                 'default_debit_gl' => '1340 Prepaid Expenses',
@@ -223,8 +243,8 @@ final class NonExpenseCodes
                 ],
             ],
             [
-                'code' => 'NE-012', 'expense_type' => 'Prepaid insurance',
-                'accounting_class' => 'Prepayment asset', 'expense_family' => 'Prepayments',
+                'code' => 'NE-012', 'is_procurable' => true, 'expense_type' => 'Prepaid insurance',
+                'accounting_class' => 'Prepayment asset', 'expense_family' => 'Rent and insurance paid in advance',
                 'simple_meaning' => 'Insurance paid now that covers future months.',
                 'example' => 'Annual vehicle and workshop insurance premium paid in July.',
                 'default_debit_gl' => '1340 Prepaid Expenses',
@@ -395,7 +415,7 @@ final class NonExpenseCodes
                 ],
             ],
             [
-                'code' => 'NE-020', 'expense_type' => 'Asset purchase pending review',
+                'code' => 'NE-020', 'is_procurable' => true, 'expense_type' => 'Asset purchase pending review',
                 'accounting_class' => 'Capital expenditure', 'expense_family' => 'Property, plant and equipment',
                 'simple_meaning' => 'A durable item that may need to be capitalised instead of expensed.',
                 'example' => 'CNC machine, printer, laptop, truck or spray booth bought for long-term use.',
@@ -424,7 +444,7 @@ final class NonExpenseCodes
                 ],
             ],
             [
-                'code' => 'NE-021', 'expense_type' => 'Reusable hire asset built or bought',
+                'code' => 'NE-021', 'is_procurable' => true, 'expense_type' => 'Reusable hire asset built or bought',
                 'accounting_class' => 'Capital expenditure / hire asset', 'expense_family' => 'Reusable hire assets',
                 'simple_meaning' => 'An item WNG owns and expects to hire out repeatedly.',
                 'example' => 'Stage floor panels, exhibition counters or furniture built for repeated rentals.',
@@ -453,8 +473,8 @@ final class NonExpenseCodes
                 ],
             ],
             [
-                'code' => 'NE-022', 'expense_type' => 'Leasehold improvement',
-                'accounting_class' => 'Capital expenditure', 'expense_family' => 'Leasehold improvements',
+                'code' => 'NE-022', 'is_procurable' => true, 'expense_type' => 'Leasehold improvement',
+                'accounting_class' => 'Capital expenditure', 'expense_family' => 'Premises improvements',
                 'simple_meaning' => 'A major improvement to rented offices or workshop that benefits more than one period.',
                 'example' => 'Permanent electrical upgrade, new mezzanine or fixed office fit-out.',
                 'default_debit_gl' => '1600 Leasehold Improvements',

@@ -154,10 +154,10 @@ class ClosePeriodCommand extends Command
         $wht = $schedules->whtSchedule($period->year, $period->month);
 
         $this->line(sprintf(
-            '  <fg=cyan>i</> WHT to remit: KES %s across %d payee(s), due %s.',
+            '  <fg=cyan>i</> WHT recorded: KES %s across %d payee(s). %s',
             number_format((float) $wht['totals']['wht_remittable'], 2),
             $wht['totals']['payee_count'],
-            $wht['due_date'],
+            $wht['remittance_rule'],
         ));
 
         if (bccomp($wht['totals']['under_withheld'], '0.00', 2) === 1) {
@@ -171,7 +171,7 @@ class ClosePeriodCommand extends Command
         // 5. The ledger's own arithmetic for the month.
         $sides = DB::table('journal_lines as jl')
             ->join('journal_entries as je', 'je.id', '=', 'jl.journal_entry_id')
-            ->where('je.status', 'posted')
+            ->whereIn('je.status', ['posted', 'reversed'])
             ->whereBetween('je.posting_date', [$from, $to])
             ->selectRaw("SUM(CASE WHEN jl.entry_type = 'debit' THEN jl.base_amount ELSE 0 END) as debit")
             ->selectRaw("SUM(CASE WHEN jl.entry_type = 'credit' THEN jl.base_amount ELSE 0 END) as credit")

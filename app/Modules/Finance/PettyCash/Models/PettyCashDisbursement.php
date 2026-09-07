@@ -98,6 +98,11 @@ class PettyCashDisbursement extends Model
         );
     }
 
+    public function billPayment()
+    {
+        return $this->hasOne(\App\Modules\ProcurementStores\Models\BillPayment::class, 'disbursement_id');
+    }
+
     public function paymentSource(): BelongsTo
     {
         return $this->belongsTo(\App\Modules\Finance\Models\PaymentSource::class, 'payment_source_id');

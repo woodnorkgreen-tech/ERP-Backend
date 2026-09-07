@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Modules\ProcurementStores\Controllers\ProcurementStoresController;
+use App\Modules\ProcurementStores\Controllers\MaterialOptionsController;
 use App\Modules\ProcurementStores\Controllers\SupplierController;
 use App\Modules\ProcurementStores\Controllers\RequisitionController;
 use App\Modules\ProcurementStores\Controllers\PurchaseOrderController;
@@ -12,12 +13,14 @@ use App\Modules\ProcurementStores\Controllers\BoardRequestController;
 use App\Modules\ProcurementStores\Controllers\StockCountController;
 use App\Modules\ProcurementStores\Controllers\StoresResetController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptInspectionController;
+use App\Modules\ProcurementStores\Controllers\OperationsReadinessController;
+
+Route::get('/readiness', [OperationsReadinessController::class, 'show']);
 
 // apiResource, not resource: `create` and `edit` return HTML form scaffolding,
 // which no controller here implements and no client asks for. Registering them
 // published eight routes that would fatal on a method-not-found if anything ever
 // reached them.
-Route::get('/test', [ProcurementStoresController::class, 'test']);
 Route::post('/inventory/check-availability', [ProcurementStoresController::class, 'checkAvailability']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
 Route::get('/inventory/{material}/control-options', [ProcurementStoresController::class, 'controlOptions']);
@@ -52,7 +55,13 @@ Route::get('/goods-receipt-inspections', [GoodsReceiptInspectionController::clas
 Route::post('/goods-receipt-inspections/{item}/resolve', [GoodsReceiptInspectionController::class, 'resolve']);
 
 // Suppliers
+// The catalogue lookup behind the requisition and order pickers. Authorised
+// like the requisition it feeds, not like the material library itself.
+Route::get('/material-options', [MaterialOptionsController::class, 'index']);
+
 Route::post('/search/suppliers', [SupplierController::class, 'search']);
+// Before the resource route, so /suppliers/options is never read as an id.
+Route::get('/suppliers/options', [SupplierController::class, 'options']);
 Route::apiResource('/suppliers', SupplierController::class);
 
 // Requisitions
@@ -69,6 +78,8 @@ Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController:
 Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
 Route::get('/purchase-orders/{purchaseOrder}/download', [PurchaseOrderController::class, 'downloadPdf']);
+Route::get('/purchase-orders/{purchaseOrder}/workflow', [PurchaseOrderController::class, 'workflow']);
+Route::post('/purchase-orders/workflow-summary', [PurchaseOrderController::class, 'workflowSummary']);
 Route::apiResource('/purchase-orders', PurchaseOrderController::class);
 Route::get('/purchase-orders/link/{requisition}', [PurchaseOrderController::class, 'link'])->name('purchase-orders.link');
 Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 'storeLinked'])->name('purchase-orders.storeLinked');
@@ -76,10 +87,13 @@ Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 's
 // Bills - Specific routes FIRST (before resource)
 Route::get('/bills-stats', [BillController::class, 'stats']);
 Route::get('/pending-bills', [BillController::class, 'getPendingBills']);
+Route::get('/payment-sources', [BillController::class, 'getPaymentSources']);
 Route::get('/payment-methods', [BillController::class, 'getPaymentMethods']);
 Route::post('/payment-methods', [BillController::class, 'storePaymentMethod']);
 Route::post('/search/bills', [BillController::class, 'search']);
 Route::post('/bills/{bill}/record-payment', [BillController::class, 'recordPayment']);
+Route::get('/bills/{bill}/verification', [BillController::class, 'verification']);
+Route::post('/bills/{bill}/verify', [BillController::class, 'verify']);
 Route::get('/bills/{bill}/download', [BillController::class, 'downloadPdf']);
 Route::post('/multi-payment', [BillController::class, 'recordMultiBillPayment']);
 

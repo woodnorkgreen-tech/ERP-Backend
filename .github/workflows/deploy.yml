@@ -30,10 +30,21 @@ jobs:
             cd ~/erp-backend-master
             git pull origin master
             composer install --no-dev --optimize-autoloader
+            # Schema before caches. Without this the deploy shipped code that
+            # read columns the database had not got, and the failure surfaced
+            # at request time instead of here, where somebody is watching.
+            php artisan migrate --force
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
-            php artisan key:generate
+
+            # No key:generate. It rotates APP_KEY on every deploy, which
+            # invalidates every session and every encrypted value. A key is
+            # provisioned once, by hand, and then left alone.
+
+            # No db:seed. ChartOfAccountSeeder deletes accounts outside its own
+            # list, so seeding is a deliberate act against a known chart, never
+            # a step in shipping code.
 
       - name: Deploy to staging
         if: github.ref == 'refs/heads/staging'
@@ -47,7 +58,7 @@ jobs:
             cd ~/erp-backend-staging
             git pull origin staging
             composer install --no-dev --optimize-autoloader
+            php artisan migrate --force
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
-            php artisan key:generate

@@ -35,6 +35,7 @@ class ProcurementStoresServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 ValueUnpricedBoardsCommand::class,
+                \App\Modules\ProcurementStores\Console\OperationsReadinessCommand::class,
             ]);
         }
 

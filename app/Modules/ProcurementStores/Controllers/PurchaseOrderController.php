@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Controllers\Controller;
+use App\Modules\ProcurementStores\Services\PurchaseOrderWorkflow;
 use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
@@ -307,6 +308,47 @@ class PurchaseOrderController extends Controller
     public function show(PurchaseOrder $purchaseOrder)
     {
         return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
+    }
+
+    /**
+     * The stage this order has reached, who owns the next move, and what that
+     * move is. Approval is the middle of the purchase, not the end of it: the
+     * order still has to reach the supplier, arrive, be accepted into stock,
+     * be invoiced and be paid, and this is the one place that says which of
+     * those has happened.
+     */
+    public function workflow(PurchaseOrder $purchaseOrder, PurchaseOrderWorkflow $workflow)
+    {
+        return response()->json(['data' => $workflow->order($purchaseOrder)]);
+    }
+
+    /**
+     * The same answer for a page of orders, so the list can show a next action
+     * per row without the client fetching each order in turn.
+     */
+    public function workflowSummary(Request $request, PurchaseOrderWorkflow $workflow)
+    {
+        $ids = collect($request->input('ids', []))->filter()->map(fn ($id) => (int) $id)->take(100);
+
+        $orders = PurchaseOrder::with(['items.goodsReceiptNoteItems.inspection', 'goodsReceiptNotes', 'bills', 'supplier'])
+            ->whereIn('id', $ids)
+            ->get();
+
+        return response()->json([
+            'data' => $orders->mapWithKeys(function ($order) use ($workflow) {
+                $state = $workflow->order($order);
+
+                return [$order->id => [
+                    'stage' => $state['stage'],
+                    'stage_index' => $state['stage_index'],
+                    'owner' => $state['owner'],
+                    'next_action' => $state['next_action'],
+                    'receipt_complete' => $state['receipt_complete'],
+                    'bill_id' => $state['bill_id'],
+                ]];
+            }),
+            'stages' => PurchaseOrderWorkflow::STAGES,
+        ]);
     }
 
     public function update(Request $request, PurchaseOrder $purchaseOrder)
