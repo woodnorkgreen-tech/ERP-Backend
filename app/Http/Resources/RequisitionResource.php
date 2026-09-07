@@ -55,6 +55,17 @@ class RequisitionResource extends JsonResource
             'urgency' => $this->urgency,
             'status' => $this->status,
             'total_amount' => (float) $this->total_amount,
+
+            /*
+             * Where the money for this request actually came from.
+             *
+             * Only when the items are loaded, which is the detail screen — the
+             * lookup walks requisition → orders → invoices → payments, and doing
+             * that per row of a paginated list would cost more than the answer is
+             * worth there. `whenLoaded('items')` is the existing signal in this
+             * resource for "this is the full view of one requisition".
+             */
+            'settlements' => $this->whenLoaded('items', fn () => $this->settlements()),
             // Add purchase order info
             'purchaseOrder' => $this->when($this->purchaseOrder, function () {
                 return [

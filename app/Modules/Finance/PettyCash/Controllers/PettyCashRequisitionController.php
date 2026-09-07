@@ -37,8 +37,16 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $user = Auth::user();
-            $query = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'approver', 'payee', 'project.enquiry', 'enquiry', 'items.payee'])
-                ->withCount('items');
+            // `disbursement.paymentSource` is what lets a requisition say how it
+            // was actually paid. The source has always been recorded — on the
+            // disbursement, which is the thing that moved the money — but the
+            // list never loaded it, so "which requests came out of the tin?" was
+            // a question the screen could not answer about its own rows.
+            $query = PettyCashRequisition::with([
+                'requisitionType', 'requester.employee', 'department', 'approver', 'payee',
+                'project.enquiry', 'enquiry', 'items.payee',
+                'disbursement.paymentSource',
+            ])->withCount('items');
 
             // If not admin/finance, only show their own
             if ($user && !$user->can('viewAllRequisitions', PettyCashDisbursement::class)) {
@@ -63,6 +71,26 @@ class PettyCashRequisitionController extends Controller
                     $request->start_date . ' 00:00:00',
                     $request->end_date . ' 23:59:59'
                 ]);
+            }
+
+            // Which float or account settled it. Filtered through the
+            // disbursement rather than a column on the requisition: a request is
+            // not paid from anywhere until somebody pays it, and duplicating the
+            // answer onto the request would be a second copy to keep in step.
+            if ($request->filled('payment_source_id')) {
+                $query->whereHas(
+                    'disbursement',
+                    fn ($q) => $q->where('payment_source_id', $request->payment_source_id)
+                        ->where('status', 'active')
+                );
+            }
+
+            // Unpaid is the absence of a disbursement, not a status: a request
+            // can be approved for weeks before the cash goes out.
+            if ($request->filled('settlement')) {
+                $request->settlement === 'unpaid'
+                    ? $query->whereDoesntHave('disbursement', fn ($q) => $q->where('status', 'active'))
+                    : $query->whereHas('disbursement', fn ($q) => $q->where('status', 'active'));
             }
 
             $perPage = $request->get('per_page', 15);
@@ -247,7 +275,7 @@ class PettyCashRequisitionController extends Controller
     public function show(int $id): JsonResponse
     {
         try {
-            $requisition = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'items.payee', 'approver', 'disbursement', 'payee', 'project.enquiry', 'enquiry'])
+            $requisition = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'items.payee', 'approver', 'disbursement.paymentSource', 'payee', 'project.enquiry', 'enquiry'])
                 ->findOrFail($id);
 
             if (!$this->mayView($requisition)) {
