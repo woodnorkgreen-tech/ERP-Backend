@@ -146,7 +146,7 @@ class LedgerExportService
             ->join('journal_entries as je', 'je.id', '=', 'jl.journal_entry_id')
             ->join('chart_of_accounts as coa', 'coa.id', '=', 'jl.account_id')
             ->leftJoin('cost_lines as cl', 'cl.id', '=', 'je.cost_line_id')
-            ->where('je.status', 'posted')
+            ->whereIn('je.status', ['posted', 'reversed'])
             ->whereBetween('je.posting_date', [$from, $to])
             ->orderBy('je.posting_date')
             ->get([
@@ -189,10 +189,11 @@ class LedgerExportService
                 'Project and overhead costs verified in this system',
                 'Recoverable input VAT and withholding tax on those costs',
                 'Stores inventory movements and goods-received accruals',
+                'Payroll accruals and payments explicitly posted from HR',
             ],
             'excludes' => [
                 'Revenue, client invoices and receipts',
-                'Payroll',
+                'Payroll not explicitly posted from HR',
                 'Bank and cash movements not raised as a spend voucher',
                 'Opening balances, equity, depreciation and year-end adjustments',
             ],

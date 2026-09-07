@@ -19,21 +19,21 @@ class FinanceReadinessController extends Controller
 
         $today = now();
         $period = AccountingPeriod::forDate($today);
-        $requiredAccounts = ['1030', '1300', '2100', '2120', '2150'];
+        $requiredAccounts = ['1030', '1200', '1300', '1330', '2100', '2120', '2150'];
         $availableRequiredAccounts = DB::table('chart_of_accounts')
-            ->whereIn('code', $requiredAccounts)->where('is_postable', true)->pluck('code');
+            ->whereIn('code', $requiredAccounts)->where('is_postable', true)->where('is_active', true)->pluck('code');
         $missingRequiredAccounts = array_values(array_diff($requiredAccounts, $availableRequiredAccounts->all()));
         $unmappedExpenseCodes = DB::table('expense_codes as ec')
             ->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ec.default_debit_account_id')
             ->where('ec.is_active', true)
             ->where(function ($query) {
-                $query->whereNull('ec.default_debit_account_id')->orWhere('coa.is_postable', false);
+                $query->whereNull('coa.id')->orWhere('coa.is_postable', false)->orWhere('coa.is_active', false);
             })->count();
         $invalidPaymentSources = DB::table('payment_sources as ps')
             ->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ps.gl_account_id')
             ->where('ps.is_active', true)
             ->where(function ($query) {
-                $query->whereNull('ps.gl_account_id')->orWhere('coa.is_postable', false);
+                $query->whereNull('coa.id')->orWhere('coa.is_postable', false)->orWhere('coa.is_active', false);
             })->count();
 
         $checks = collect([
@@ -44,7 +44,7 @@ class FinanceReadinessController extends Controller
                     : 'No accounting period covers today.',
                 'Run the Finance reference seeder, then confirm the current month is open.'),
             $this->countCheck('chart_of_accounts', 'Postable accounts',
-                DB::table('chart_of_accounts')->where('is_postable', true)->count(),
+                DB::table('chart_of_accounts')->where('is_postable', true)->where('is_active', true)->count(),
                 'No postable accounts are configured.'),
             $this->check('required_accounts', 'Required control accounts',
                 $missingRequiredAccounts === [],
@@ -80,21 +80,27 @@ class FinanceReadinessController extends Controller
 
         $lineTotals = DB::table('journal_entries as je')
             ->leftJoin('journal_lines as jl', 'jl.journal_entry_id', '=', 'je.id')
-            ->where('je.status', 'posted')
+            ->whereIn('je.status', ['posted', 'reversed'])
             ->groupBy('je.id', 'je.total_debit', 'je.total_credit')
             ->selectRaw("je.id, je.total_debit, je.total_credit, COALESCE(SUM(CASE WHEN jl.entry_type = 'debit' THEN jl.amount ELSE 0 END), 0) AS line_debit, COALESCE(SUM(CASE WHEN jl.entry_type = 'credit' THEN jl.amount ELSE 0 END), 0) AS line_credit")
             ->get();
 
+        // One statement reads both sides from the same database snapshot, so a
+        // concurrent disbursement cannot manufacture a reconciliation failure.
+        $cash = DB::table('petty_cash_ledger_entries')
+            ->selectRaw("COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE -amount END), 0) AS ledger_balance")
+            ->selectRaw('(SELECT current_balance FROM petty_cash_balances WHERE id = 1) AS cached_balance')
+            ->first();
+
         $integrity = [
-            // Planned lines are budget, not spend, and are never posted to the GL.
-            // They are created already VERIFIED because completing the budget task
-            // is their approval, so counting them as unposted actuals made this
-            // check permanently red — every budget line ever written was a fault
-            // it could never clear. Same predicate CostQueueQuery uses to decide
-            // what is postable, so the two cannot drift apart.
+            'petty_cash_balance_mismatch' => bccomp(
+                (string) $cash->ledger_balance, (string) ($cash->cached_balance ?? '0.00'), 2
+            ) === 0 ? 0 : 1,
+            // Budgets and commitments do not post: only accrued and actual costs
+            // are accounting events. Match the verification service's posting gate.
             'verified_costs_without_journal' => DB::table('cost_lines')
                 ->where('status', 'verified')
-                ->where('nature', '!=', CostLine::NATURE_PLANNED)
+                ->whereIn('nature', [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL])
                 ->whereNull('journal_entry_id')->count(),
             'posted_journals_without_period' => DB::table('journal_entries')
                 ->where('status', 'posted')->whereNull('accounting_period_id')->count(),
@@ -123,12 +129,13 @@ class FinanceReadinessController extends Controller
                 : 'Finance setup needs attention before live posting.',
             'checks' => $checks->values(),
             'integrity' => $integrity,
+            'operations' => app(\App\Modules\ProcurementStores\Services\OperationsReadinessService::class)->report(),
             'setup_command' => app()->environment(['local', 'testing'])
                 ? 'php artisan db:seed --class="App\\Modules\\Finance\\Database\\Seeders\\FinanceReferenceSeeder"'
                 : null,
             'ledger_scope' => [
                 'label' => 'Operational cost ledger',
-                'note' => 'This ledger covers verified costs and spend vouchers. Revenue, payroll, opening balances and ordinary bank movements remain in the statutory accounting package.',
+                'note' => 'This ledger covers verified costs, spend vouchers and payroll explicitly posted from HR. Revenue, opening balances and other bank movements remain in the statutory accounting package.',
             ],
         ]]);
     }

@@ -142,9 +142,8 @@ class TaxScheduleService
     /**
      * Withholding tax deducted in a month, by payee — the WHT remittance return.
      *
-     * One row per payee, because that is how WHT is remitted and how a
-     * certificate is issued: the supplier gets one certificate for the month
-     * showing the aggregate withheld, not one per delivery note.
+     * One row per payee for monthly reconciliation. This grouping is not a
+     * remittance timetable: each deduction has its own payment deadline.
      *
      * @return array<string, mixed>
      */
@@ -188,7 +187,11 @@ class TaxScheduleService
                 'under_withheld' => $this->sum($exposed, 'aggregation_shortfall'),
                 'exposed_payee_count' => $exposed->count(),
             ],
-            'due_date' => $this->dueDateFor($end->toDateString()),
+            // WHT is due per deduction, not on the VAT return's monthly date.
+            // Incurred-at is not evidence of when the supplier was paid.
+            'due_date' => null,
+            'remittance_rule' => 'Remit within five working days after deduction. Confirm each payment date and applicable public holidays; do not wait for month-end.',
+            'remittance_source' => 'https://www.kra.go.ke/individual//filing-paying/types-of-taxes/individual-withholding-tax',
             'basis' => 'Verified, posted, unreversed cost lines carrying a WHT category, by payee, '
                 . 'dated on when the cost was incurred.',
         ];

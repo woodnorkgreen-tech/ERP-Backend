@@ -133,6 +133,54 @@ class PayrollIntegrityTest extends TestCase
         $this->assertSame($payment->id, $posting->postPayment($run->fresh(), $source, '2026-08-31', 'DUPLICATE')->id);
     }
 
+    public function test_inconsistent_payslips_cannot_create_a_balanced_looking_header(): void
+    {
+        $this->actingAsPayrollManager();
+        $this->financeConfiguration();
+        $run = $this->runWithPayslip(110000);
+
+        try {
+            app(PayrollFinancePostingService::class)->postAccrual($run);
+            $this->fail('Net pay above gross must not reach the ledger.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('do not reconcile', $exception->getMessage());
+        }
+        $this->assertNull($run->fresh()->accrual_journal_entry_id);
+        $this->assertDatabaseCount('journal_entries', 0);
+    }
+
+    public function test_payroll_payment_cannot_use_an_inactive_bank_account(): void
+    {
+        $this->actingAsPayrollManager();
+        $this->financeConfiguration();
+        $run = $this->runWithPayslip(80000);
+        $posting = app(PayrollFinancePostingService::class);
+        $posting->postAccrual($run);
+        ChartOfAccount::where('code', '1010')->update(['is_active' => false]);
+
+        try {
+            $posting->postPayment($run->fresh(), PaymentSource::firstOrFail(), '2026-08-31', 'INACTIVE-BANK');
+            $this->fail('An inactive bank account accepted a payroll payment.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('active postable accounts', $exception->getMessage());
+        }
+        $this->assertNull($run->fresh()->payment_journal_entry_id);
+        $this->assertDatabaseCount('journal_entries', 1);
+    }
+
+    private function runWithPayslip(int $net): PayrollRun
+    {
+        $run = PayrollRun::create(['payroll_month' => '2026-08', 'status' => 'locked']);
+        Payslip::create([
+            'payroll_run_id' => $run->id, 'employee_id' => $this->employee()->id,
+            'payroll_month' => '2026-08', 'basic_salary' => 100000,
+            'gross_pay' => 100000, 'net_pay' => $net,
+            'tax_breakdown' => ['paye' => 15000], 'ledger_breakdown' => [], 'status' => 'locked',
+        ]);
+
+        return $run;
+    }
+
     private function actingAsPayrollManager(): User
     {
         $user = $this->user();
