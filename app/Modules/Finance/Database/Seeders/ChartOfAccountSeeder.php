@@ -127,6 +127,11 @@ class ChartOfAccountSeeder extends Seeder
         // ── Operating expenses (brief §2D) ────────────────────────────────
         ['7000', 'Operating Expenses',                 'expense', 'opex', 'debit', null,   false],
         ['7100', 'Office Rent & Electricity',          'expense', 'opex', 'debit', '7000', true],
+        // Added because the catalogue needed it, not the other way round:
+        // the requisition list had no way to name stationery or printer
+        // consumables, and OperationalExpenseCodes said so in as many words
+        // rather than fold them into Office Rent & Electricity.
+        ['7150', 'Office Supplies & Stationery',       'expense', 'opex', 'debit', '7000', true],
         ['7200', 'Administration Airtime & Internet',  'expense', 'opex', 'debit', '7000', true],
         ['7300', 'Professional Fees – Finance, HR, IT, Legal', 'expense', 'opex', 'debit', '7000', true],
         ['7400', 'Office Transport',                   'expense', 'opex', 'debit', '7000', true],

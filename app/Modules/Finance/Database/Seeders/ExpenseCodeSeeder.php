@@ -18,10 +18,15 @@ use Illuminate\Support\Facades\DB;
  *   WIP child the chart of accounts already carries for it;
  * - NE-001…NE-023 non-expense cash movements, in {@see NonExpenseCodes}.
  *
- * Still absent: production overhead (6xxx) and the remaining capex codes.
- * Neither has a capture path yet — production overhead is absorbed rather than
- * captured, and capex needs the asset register in the loop — so seeding them
- * would add codes nothing can currently post.
+ * Production overhead (6xxx) is now partly here. The six workshop, safety,
+ * cleaning and utilities codes in {@see OperationalExpenseCodes} were added
+ * because they are bought — a requisition for detergent or drill bits had
+ * nothing to classify itself as — and each names a postable 6xxx account. What
+ * is still absent is overhead *absorption*: spreading those costs across jobs
+ * is a period-end calculation, not a capture choice, so no code describes it.
+ *
+ * Still absent entirely: the remaining capex codes. Those need the asset
+ * register in the loop, so seeding them would add codes nothing can post.
  *
  * `default_debit_gl` is stored verbatim from the catalogue and the account FK is
  * resolved by reading the leading four-digit code out of it. Several rows name
@@ -172,6 +177,8 @@ class ExpenseCodeSeeder extends Seeder
 
         yield [
             'code' => 'OE-FIN-001',
+            // Posted automatically from the payment itself; nobody requests one.
+            'is_procurable' => false,
             'accounting_class' => 'Operating expense',
             'expense_family' => 'Finance costs',
             'expense_type' => 'Bank and mobile-money transaction charges',

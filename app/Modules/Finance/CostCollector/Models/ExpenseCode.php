@@ -32,7 +32,7 @@ class ExpenseCode extends Model
         'minimum_evidence', 'extra_operational_data',
         'key_control', 'pl_report_line', 'cash_flow_class', 'cash_flow_note',
         'requires_asset_record', 'requires_supplier', 'is_capex_review',
-        'is_active', 'sort_order',
+        'is_active', 'is_procurable', 'sort_order',
     ];
 
     protected $casts = [
@@ -42,6 +42,7 @@ class ExpenseCode extends Model
         'requires_supplier' => 'boolean',
         'is_capex_review' => 'boolean',
         'is_active' => 'boolean',
+        'is_procurable' => 'boolean',
     ];
 
     public function debitAccount(): BelongsTo
@@ -52,6 +53,18 @@ class ExpenseCode extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    /**
+     * Codes that describe something a supplier can be asked to deliver.
+     *
+     * Excludes stock movements, tax and loan settlements, cash transfers and
+     * journals — all of which are real catalogue entries the cost collector
+     * needs, and none of which belong on a purchase order.
+     */
+    public function scopeProcurable($query)
+    {
+        return $query->where('is_procurable', true);
     }
 
     public function requiresJobId(): bool
