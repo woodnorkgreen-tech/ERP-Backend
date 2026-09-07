@@ -166,8 +166,12 @@ class MaterialPickerTest extends TestCase
 
     public function test_unmapped_material_is_not_suggested_as_mdf(): void
     {
+        // A code of this test's own, like TEST-BOARDS below. The catalogue is
+        // seeded by migration now, so creating the real DM-WD-001 collides with
+        // it — and the test only needs *a* configured default to prove an
+        // unmapped material is not offered it.
         $code = ExpenseCode::create([
-            'code' => 'DM-WD-001', 'expense_type' => 'MDF boards',
+            'code' => 'TEST-MDF', 'expense_type' => 'MDF boards',
             'expense_family' => 'Direct materials', 'accounting_class' => 'Direct project cost',
             'job_id_rule' => 'required', 'is_active' => true, 'is_procurable' => true,
         ]);
