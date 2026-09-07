@@ -8,6 +8,7 @@ use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Modules\Finance\Support\ChartAccountMap;
 use Illuminate\Support\Facades\DB;
 
 /** A read-only pre-flight check for the reference data Finance depends on. */
@@ -19,7 +20,10 @@ class FinanceReadinessController extends Controller
 
         $today = now();
         $period = AccountingPeriod::forDate($today);
-        $requiredAccounts = ['1030', '1200', '1300', '1330', '2100', '2120', '2150'];
+        // Named by reference code, resolved to whatever this installation calls
+        // them. A company on its own chart configures the map rather than being
+        // told its control accounts are missing.
+        $requiredAccounts = ChartAccountMap::localMany(['1030', '1200', '1300', '1330', '2100', '2120', '2150']);
         $availableRequiredAccounts = DB::table('chart_of_accounts')
             ->whereIn('code', $requiredAccounts)->where('is_postable', true)->where('is_active', true)->pluck('code');
         $missingRequiredAccounts = array_values(array_diff($requiredAccounts, $availableRequiredAccounts->all()));
@@ -29,6 +33,17 @@ class FinanceReadinessController extends Controller
             ->where(function ($query) {
                 $query->whereNull('coa.id')->orWhere('coa.is_postable', false)->orWhere('coa.is_active', false);
             })->count();
+        // Codes the seeder switched off because their account did not resolve.
+        //
+        // Counted apart from the check below, which only sees ACTIVE codes: a
+        // code deactivated for want of a mapping leaves that check clean while
+        // being exactly the thing that emptied the pickers. Rows naming an
+        // account indirectly ("Relevant 1400 PPE account") carry no four-digit
+        // reference and are meant to stay unresolved, so they are not counted.
+        $unresolvedCatalogue = DB::table('expense_codes')
+            ->whereNull('default_debit_account_id')
+            ->where('default_debit_gl', 'REGEXP', '[0-9]{4}')
+            ->count();
         $invalidPaymentSources = DB::table('payment_sources as ps')
             ->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ps.gl_account_id')
             ->where('ps.is_active', true)
@@ -58,6 +73,12 @@ class FinanceReadinessController extends Controller
                     ? 'Every active expense code maps to a postable debit account.'
                     : number_format($unmappedExpenseCodes).' active expense code(s) have no postable debit account.',
                 'Map or deactivate every unusable expense code.'),
+            $this->check('expense_code_mapping', 'Expense catalogue account mapping',
+                $unresolvedCatalogue === 0,
+                $unresolvedCatalogue === 0
+                    ? 'Every catalogue code naming an account resolves to one in this chart.'
+                    : number_format($unresolvedCatalogue).' catalogue code(s) name an account this chart does not have, and are switched off.',
+                'Map the reference codes to this chart in config/finance_accounts.php, then re-run the expense code seeder.'),
             $this->check('payment_sources', 'Payment sources',
                 DB::table('payment_sources')->where('is_active', true)->exists() && $invalidPaymentSources === 0,
                 $invalidPaymentSources === 0

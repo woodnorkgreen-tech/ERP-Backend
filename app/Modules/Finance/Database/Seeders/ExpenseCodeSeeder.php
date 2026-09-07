@@ -4,6 +4,7 @@ namespace App\Modules\Finance\Database\Seeders;
 
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use Illuminate\Database\Seeder;
+use App\Modules\Finance\Support\ChartAccountMap;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -151,16 +152,19 @@ class ExpenseCodeSeeder extends Seeder
     }
 
     /**
-     * Reads the leading four-digit account code out of the catalogue's GL text.
-     * Rows that name an account indirectly resolve to null and keep the text.
+     * Reads the account out of the catalogue's GL text, through this
+     * installation's chart map.
+     *
+     * The four-digit code in that text is a reference, not an instruction: a
+     * company keeping its books under other codes says so in
+     * config/finance_accounts.php rather than by editing the catalogue. Rows
+     * that name an account indirectly still resolve to null and keep the text.
      */
     private function resolveAccount(?string $gl, $accounts): ?int
     {
-        if (blank($gl) || ! preg_match('/\b(\d{4})\b/', $gl, $matches)) {
-            return null;
-        }
+        $code = ChartAccountMap::localFromGl($gl);
 
-        return $accounts[$matches[1]] ?? null;
+        return $code === null ? null : ($accounts[$code] ?? null);
     }
 
     /** @return iterable<array<string, mixed>> */
