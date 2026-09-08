@@ -201,6 +201,7 @@ class UpdateEnquiryAction
 
             // Sync workflow tasks (create any newly selected tasks)
             app(EnquiryWorkflowService::class)->initializeWorkflow($enquiry);
+            app(\App\Modules\Design\Services\DesignProjectSyncService::class)->syncUpcoming($enquiry);
 
             return response()->json([
                 'message' => 'Enquiry updated successfully',

@@ -5,6 +5,8 @@ namespace App\Modules\Projects\Services;
 use App\Models\ProjectEnquiry;
 use App\Models\TaskAssignmentHistory;
 use App\Models\User;
+use App\Modules\Design\Services\DesignNotificationService;
+use App\Modules\Design\Services\DesignProjectSyncService;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Modules\HR\Models\Department;
 use Illuminate\Support\Facades\DB;
@@ -347,7 +349,7 @@ class EnquiryWorkflowService
     /**
      * Reassign task to a different user
      */
-    public function reassignEnquiryTask(int $taskId, int $newAssignedUserId, int $reassignedByUserId, string $reason = null): EnquiryTask
+    public function reassignEnquiryTask(int $taskId, int $newAssignedUserId, int $reassignedByUserId, ?string $reason = null): EnquiryTask
     {
         $task = EnquiryTask::findOrFail($taskId);
         $newAssignedUser = User::findOrFail($newAssignedUserId);
@@ -905,12 +907,18 @@ class EnquiryWorkflowService
         $dependentTasks = EnquiryTask::where('project_enquiry_id', $completedTask->project_enquiry_id)
             ->whereIn('type', $dependentTypes)
             ->where('status', 'pending')
-            ->with('assignedUsers')
+            ->with(['assignedUsers', 'enquiry'])
             ->get();
 
         foreach ($dependentTasks as $dependent) {
             // Only announce tasks that are now fully unblocked.
             if (!empty($dependent->blockingPrerequisiteTitles())) {
+                continue;
+            }
+
+            if ($dependent->type === 'design' && $dependent->enquiry) {
+                $job = app(DesignProjectSyncService::class)->syncFromEnquiry($dependent->enquiry);
+                app(DesignNotificationService::class)->notifyJobReady($job);
                 continue;
             }
 

@@ -13,4 +13,6 @@ return [
     App\Modules\Finance\Providers\FinanceServiceProvider::class,
     App\Modules\HR\Providers\HRServiceProvider::class,
     App\Modules\Notifications\Providers\NotificationsServiceProvider::class,
+    App\Modules\Design\Providers\DesignServiceProvider::class,
+    App\Modules\Printing\Providers\PrintingServiceProvider::class,
 ];

@@ -16,7 +16,9 @@ class DesignAsset extends Model
         'enquiry_task_id',
         'name',
         'original_name',
+        'source',
         'file_path',
+        'external_url',
         'file_size',
         'mime_type',
         'category',
@@ -97,8 +99,18 @@ class DesignAsset extends Model
     // Accessor for file URL
   public function getFileUrlAttribute(): string
 {
+    if ($this->isLink()) {
+        return (string) $this->external_url;
+    }
+
     return url('api/storage/' . $this->file_path);
 }
+
+    // Check if asset is an external link rather than an uploaded file
+    public function isLink(): bool
+    {
+        return $this->source === 'link';
+    }
 
     // Accessor for formatted file size
     public function getFormattedSizeAttribute(): string
@@ -116,7 +128,7 @@ class DesignAsset extends Model
     // Check if file is an image
     public function isImage(): bool
     {
-        return str_starts_with($this->mime_type, 'image/');
+        return str_starts_with($this->mime_type ?? '', 'image/');
     }
 
     // Get file extension

@@ -54,7 +54,7 @@ class NotificationService
                     'assigned_by' => $assignedBy->name,
                     'priority' => $task->priority,
                     'due_date' => $task->due_date?->toISOString(),
-                    'url' => "/projects/enquiries/{$task->project_enquiry_id}/tasks/{$task->id}",
+                    'url' => $this->taskWorkspaceUrl($task),
                 ],
                 users: [$assignedTo],
             );
@@ -605,7 +605,7 @@ class NotificationService
                     'department_id' => $task->department_id,
                     'priority' => $task->priority,
                     'due_date' => $task->due_date?->toISOString(),
-                    'url' => "/projects/enquiries/{$task->project_enquiry_id}/tasks/{$task->id}",
+                    'url' => $this->taskWorkspaceUrl($task),
                 ],
                 users: [$user],
             );
@@ -648,7 +648,7 @@ class NotificationService
                     'enquiry_number' => $enquiryNumber,
                     'submitted_by' => $submittedByName,
                     'item_count' => $itemCount,
-                    'url' => "/projects/enquiries/{$task->project_enquiry_id}/tasks/{$task->id}",
+                    'url' => $this->taskWorkspaceUrl($task),
                 ],
                 users: $explicitUsers->all(),
                 role: ['Project Manager', 'Project Officer', 'Client Service', 'Logistics'],
@@ -985,5 +985,10 @@ class NotificationService
         } catch (\Exception $e) {
             Log::error("Failed to send deliverables update notification: " . $e->getMessage());
         }
+    }
+
+    private function taskWorkspaceUrl(EnquiryTask $task): string
+    {
+        return "/projects/tasks?enquiry_id={$task->project_enquiry_id}&highlight_task={$task->id}";
     }
 }
