@@ -10,6 +10,8 @@ use App\Modules\ProcurementStores\Controllers\BillController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
 use App\Modules\ProcurementStores\Controllers\BoardController;
 use App\Modules\ProcurementStores\Controllers\BoardRequestController;
+use App\Modules\ProcurementStores\Controllers\ProcurementPerformanceController;
+use App\Modules\ProcurementStores\Controllers\ReplenishmentController;
 use App\Modules\ProcurementStores\Controllers\StockCountController;
 use App\Modules\ProcurementStores\Controllers\StoresResetController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptInspectionController;
@@ -36,6 +38,11 @@ Route::get('/inventory-logs/pdf', [ProcurementStoresController::class, 'inventor
 Route::get('/material-ledger', [ProcurementStoresController::class, 'materialLedger']);
 Route::get('/outstanding-reusables', [ProcurementStoresController::class, 'outstandingReusables']);
 Route::get('/material-demand-forecast', [ProcurementStoresController::class, 'materialDemandForecast']);
+// What the demand forecast implies should be bought, and the draft that starts it.
+Route::get('/replenishment-suggestions', [ReplenishmentController::class, 'index']);
+Route::post('/replenishment-suggestions/draft-requisition', [ReplenishmentController::class, 'draft']);
+// Cycle times per stage and lead time / on-time delivery per supplier, all derived.
+Route::get('/performance', [ProcurementPerformanceController::class, 'index']);
 Route::get('/finance-sync-exceptions', [ProcurementStoresController::class, 'financeSyncExceptions']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/retry', [ProcurementStoresController::class, 'retryFinanceSync']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [ProcurementStoresController::class, 'resolveFinanceValuation']);

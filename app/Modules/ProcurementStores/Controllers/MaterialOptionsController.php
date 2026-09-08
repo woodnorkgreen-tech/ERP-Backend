@@ -7,6 +7,7 @@ use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\CostCollector\Services\MaterialExpenseCodeResolver;
 use App\Modules\MaterialsLibrary\Services\MaterialPurchaseOptions;
+use App\Modules\ProcurementStores\Services\ProjectMaterialDemand;
 use Illuminate\Http\Request;
 
 /*
@@ -62,10 +63,23 @@ class MaterialOptionsController extends Controller
         // the same question twenty times.
         $suggestions = [];
 
+        // Asked once for the whole page, and only about what is on it.
+        //
+        // `available` answers "on the shelf and not held by a board request",
+        // which is not the same question as "free to buy against". A material
+        // can be sitting in stock in full while every unit of it is already
+        // specified on an approved job, and a buyer reading `available` alone
+        // would reorder it. Stores has always been able to see this on the
+        // demand forecast; this is the same figure, at the moment the purchase
+        // is still a decision.
+        $pendingDemand = app(ProjectMaterialDemand::class)
+            ->pendingByMaterial($materials->pluck('id')->all());
+
         return response()->json([
-            'data' => $materials->map(function (LibraryMaterial $material) use ($purchaseOptions, $expenseCodes, &$suggestions, $jobContext) {
+            'data' => $materials->map(function (LibraryMaterial $material) use ($purchaseOptions, $expenseCodes, &$suggestions, $jobContext, $pendingDemand) {
                 $onHand = (float) ($material->stock?->quantity_on_hand ?? 0);
                 $reserved = (float) ($material->stock?->quantity_reserved ?? 0);
+                $pending = (float) ($pendingDemand[$material->id] ?? 0);
 
                 return array_merge([
                     'id' => $material->id,
@@ -82,6 +96,13 @@ class MaterialOptionsController extends Controller
                     // is the only moment it can stop the purchase.
                     'quantity_on_hand' => $onHand,
                     'available' => max(0, $onHand - $reserved),
+                    // What approved jobs are already counting on, and what is
+                    // genuinely spare once they are served. `uncommitted` is the
+                    // number a reorder decision should be read against;
+                    // `available` is kept beside it unchanged so nothing that
+                    // already binds to it shifts meaning underneath.
+                    'pending_demand' => round($pending, 4),
+                    'uncommitted' => round(max(0, $onHand - $reserved - $pending), 4),
 
                     // What Finance would classify this material as, resolved by
                     // the same rule a Stores issue goes through. Sent so a
