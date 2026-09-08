@@ -7,6 +7,7 @@ use App\Modules\Finance\CostCollector\Contracts\CostContext;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 
 /**
@@ -81,7 +82,17 @@ class PettyCashCostProducer
         // Only reachable since supplier invoices could be paid from petty cash;
         // before that a disbursement never carried a bill, which is why nothing
         // needed to say this.
-        if ($disbursement->requisition?->bill_id) {
+        //
+        // Asked two ways because a supplier invoice can be settled from either
+        // end. A petty-cash-originated payment carries the bill on its
+        // requisition; one raised from the procurement screen creates the
+        // disbursement directly and links it the other way round, from the
+        // BillPayment — it sets no requisition_id at all, so the first test
+        // alone reported no supplier settlement and let the job be charged
+        // twice on the next backfill. The event path never reached here, which
+        // is why this stayed latent rather than showing up in daily use.
+        if ($disbursement->requisition?->bill_id
+            || BillPayment::where('disbursement_id', $disbursement->id)->exists()) {
             return 'skipped_supplier_settlement';
         }
 

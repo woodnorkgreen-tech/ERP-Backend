@@ -13,6 +13,8 @@ use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Models\SpendVoucherAllocation;
 use App\Modules\Finance\Models\VatTreatment;
 use App\Modules\Finance\Models\WhtCategory;
+use App\Modules\ProcurementStores\Models\Bill;
+use App\Modules\ProcurementStores\Models\BillPayment;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -666,5 +668,319 @@ class JournalPostingService
             'amount' => $value,
             'description' => 'Liability settlement for '.$voucher->voucher_no,
         ])->values()->all();
+    }
+
+    /**
+     * The supplier rail: what an invoice does to the books, and what paying it does.
+     *
+     * Goods receipt already posted Dr Raw-material Inventory / Cr Accrued
+     * Expenses — the company holds the stock and owes for it. Nothing then
+     * moved that liability from "accrued" to "owed to a named supplier on an
+     * invoice", and nothing relieved it when the supplier was paid. So 2150
+     * Accrued Expenses only ever grew, 2100 Accounts Payable was never credited
+     * by any workflow despite being seeded and referenced, and no supplier
+     * payment ever credited a bank or a float. There was no creditors ledger to
+     * age and no cash movement to reconcile.
+     *
+     * Two entries close it:
+     *
+     *   On verification   Dr 2150 Accrued Expenses  /  Cr 2100 Accounts Payable
+     *   On payment        Dr 2100 Accounts Payable  /  Cr <payment source>
+     *
+     * The invoice entry carries the tax, because the invoice is where tax
+     * becomes claimable. Up to four legs, the same shape a cost line posts:
+     *
+     *   Dr  Accrued Expenses      net          (the receipt's liability, cleared)
+     *   Dr  Input VAT recoverable vat          (recoverable treatments only)
+     *   Cr  WHT payable           wht          (retained, owed to KRA)
+     *   Cr  Accounts Payable      net+vat−wht  (what the supplier is actually owed)
+     *
+     * Invoices recorded before `bills` could state tax carry net = amount and
+     * zero for both taxes, so they still post as the two-leg entry they always
+     * did rather than being retrospectively reinterpreted.
+     */
+    public function postSupplierInvoice(Bill $bill): ?JournalEntry
+    {
+        $entryNo = 'JE-BILL-' . str_pad((string) $bill->id, 7, '0', STR_PAD_LEFT);
+
+        if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
+            return $existing;
+        }
+
+        /*
+         * Only a matched invoice clears an accrual, because only a matched
+         * invoice is guaranteed to have one. The three-way match caps the
+         * invoice at the value Stores accepted, and that acceptance is what
+         * credited 2150 — so the debit can never exceed what the receipt put
+         * there. A `legacy` invoice predates the match and was never accrued;
+         * debiting 2150 for it would relieve a liability no receipt ever
+         * recorded and drive the control account negative.
+         */
+        if ($bill->verification_basis !== 'three_way_match' || ! $bill->verified_at) {
+            return null;
+        }
+
+        $gross = $this->money($bill->amount);
+        if (bccomp($gross, '0.00', 2) <= 0) {
+            return null;
+        }
+
+        $period = AccountingPeriod::forDate($bill->bill_date ?? now());
+        $this->assertOpenPeriod($period?->id, "supplier invoice {$bill->bill_number}");
+
+        $accrued = $this->accountByCode(self::ACCRUED_CODE);
+        $payable = $this->accountByCode(self::PAYABLE_CODE);
+
+        if (! $accrued || ! $payable) {
+            throw new InvalidArgumentException(
+                "Supplier invoice {$bill->bill_number} cannot post: chart accounts "
+                . self::ACCRUED_CODE . ' and ' . self::PAYABLE_CODE . ' must both be active and postable.'
+            );
+        }
+
+        $legs = $this->supplierInvoiceLegs($bill, $gross, $accrued, $payable);
+
+        $accountIds = array_unique(array_column($legs, 'account_id'));
+        if (ChartOfAccount::postable()->whereIn('id', $accountIds)->count() !== count($accountIds)) {
+            throw new InvalidArgumentException(
+                "Supplier invoice {$bill->bill_number} resolves to an inactive or non-postable account. "
+                . 'Finance must correct the account mapping before posting.'
+            );
+        }
+
+        $requisition = $bill->purchaseOrder?->requisition;
+        $total = array_reduce(
+            array_filter($legs, fn (array $leg) => $leg['entry_type'] === 'debit'),
+            fn (string $carry, array $leg) => bcadd($carry, $leg['amount'], 2),
+            '0.00',
+        );
+
+        return DB::transaction(function () use ($bill, $entryNo, $period, $requisition, $legs, $total) {
+            $entry = JournalEntry::create([
+                'entry_no' => $entryNo,
+                'posting_date' => (string) ($bill->bill_date?->toDateString() ?? now()->toDateString()),
+                'accounting_period_id' => $period->id,
+                'source_type' => Bill::class,
+                'source_id' => $bill->id,
+                'source_ref' => $bill->bill_number,
+                'description' => 'Supplier invoice ' . ($bill->supplier_invoice_number ?: $bill->bill_number)
+                    . ' accepted against ' . ($bill->purchaseOrder?->po_number ?? 'order'),
+                'total_debit' => $total,
+                'total_credit' => $total,
+                'status' => 'posted',
+                'created_by' => $bill->verified_by ?? auth()->id(),
+                'posted_at' => now(),
+            ]);
+
+            foreach ($legs as $leg) {
+                JournalLine::create([
+                    'journal_entry_id' => $entry->id,
+                    'currency' => 'KES',
+                    'fx_rate' => 1,
+                    'base_amount' => $leg['amount'],
+                    'project_id' => $requisition?->project_id,
+                    'project_enquiry_id' => $requisition?->project_enquiry_id,
+                    ...$leg,
+                ]);
+            }
+
+            return $entry;
+        });
+    }
+
+    /**
+     * The legs of one supplier invoice, in posting order.
+     *
+     * The credit to Accounts Payable is the balancing figure rather than an
+     * independently computed one, for the same reason a cost line's is: an
+     * invoice whose stated net and VAT do not quite add to its gross still
+     * produces a balanced entry, and the discrepancy shows up as a payable that
+     * disagrees with the document rather than as a journal that will not post.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function supplierInvoiceLegs(Bill $bill, string $gross, int $accrued, int $payable): array
+    {
+        $vat = $this->money($bill->vat_amount);
+        $wht = $this->money($bill->wht_amount);
+        $net = bcsub($gross, $vat, 2);
+
+        // Only a recoverable treatment reaches the VAT account. Exempt,
+        // out-of-scope and explicitly non-recoverable tax stays in the cost of
+        // the goods, which is where the accrual already put it.
+        $recoverable = $bill->vatTreatment?->is_recoverable
+            && bccomp($vat, '0.00', 2) > 0;
+
+        if (! $recoverable) {
+            $net = $gross;
+            $vat = '0.00';
+        }
+
+        if (bccomp($wht, $gross, 2) > 0) {
+            throw new InvalidArgumentException(
+                "Withholding of {$wht} exceeds the value of invoice {$bill->bill_number}."
+            );
+        }
+
+        $legs = [[
+            'account_id' => $accrued,
+            'entry_type' => 'debit',
+            'amount' => $net,
+            'description' => 'Accrual cleared by supplier invoice ' . $bill->bill_number,
+        ]];
+
+        if (bccomp($vat, '0.00', 2) > 0) {
+            $legs[] = [
+                'account_id' => $bill->vatTreatment?->gl_account_id
+                    ?: $this->accountByCode(self::VAT_INPUT_CODE),
+                'entry_type' => 'debit',
+                'amount' => $vat,
+                'description' => 'Recoverable input VAT on ' . $bill->bill_number,
+            ];
+        }
+
+        if (bccomp($wht, '0.00', 2) > 0) {
+            $legs[] = [
+                'account_id' => $bill->whtCategory?->gl_account_id
+                    ?: $this->accountByCode(self::WHT_PAYABLE_CODE),
+                'entry_type' => 'credit',
+                'amount' => $wht,
+                'description' => 'Withholding tax retained on ' . $bill->bill_number,
+            ];
+        }
+
+        $legs[] = [
+            'account_id' => $payable,
+            'entry_type' => 'credit',
+            'amount' => bcsub(bcadd($net, $vat, 2), $wht, 2),
+            'description' => 'Owed to ' . ($bill->supplier?->supplier_name ?? 'supplier'),
+        ];
+
+        return $legs;
+    }
+
+    /**
+     * Cash (or float) leaving against a supplier invoice.
+     *
+     * Conditioned on the invoice having posted, so 2100 is only ever debited by
+     * a payment against an invoice that credited it. Without that condition a
+     * legacy invoice — payable, but never posted — would relieve a payable it
+     * never raised, and the control account would drift by exactly the value of
+     * the grandfathered balances the legacy basis exists to let through.
+     */
+    public function postSupplierPayment(BillPayment $payment): ?JournalEntry
+    {
+        $entryNo = 'JE-BPAY-' . str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT);
+
+        if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
+            return $existing;
+        }
+
+        $bill = $payment->bill ?: Bill::find($payment->bill_id);
+        if (! $bill) {
+            return null;
+        }
+
+        $invoiceEntry = JournalEntry::where('entry_no', 'JE-BILL-' . str_pad((string) $bill->id, 7, '0', STR_PAD_LEFT))->first();
+        if (! $invoiceEntry) {
+            return null;
+        }
+
+        $amount = $this->money($payment->amount_paid);
+        if (bccomp($amount, '0.00', 2) <= 0) {
+            return null;
+        }
+
+        $period = AccountingPeriod::forDate($payment->payment_date ?? now());
+        $this->assertOpenPeriod($period?->id, "supplier payment {$payment->payment_code}");
+
+        $payable = $this->accountByCode(self::PAYABLE_CODE);
+        $sourceAccount = $payment->payment_source_id
+            ? PaymentSource::whereKey($payment->payment_source_id)->value('gl_account_id')
+            : null;
+
+        if (! $payable || ! $sourceAccount || ! ChartOfAccount::postable()->whereKey($sourceAccount)->exists()) {
+            throw new InvalidArgumentException(
+                "Supplier payment {$payment->payment_code} cannot post: its payment source needs an active, "
+                . 'postable GL account, and chart account ' . self::PAYABLE_CODE . ' must be postable.'
+            );
+        }
+
+        $requisition = $bill->purchaseOrder?->requisition;
+
+        return DB::transaction(fn () => $this->writeEntry(
+            entryNo: $entryNo,
+            postingDate: (string) ($payment->payment_date?->toDateString() ?? now()->toDateString()),
+            periodId: $period->id,
+            sourceType: BillPayment::class,
+            sourceId: $payment->id,
+            sourceRef: $payment->payment_code,
+            description: 'Payment ' . $payment->payment_code . ' against invoice ' . $bill->bill_number,
+            amount: $amount,
+            debitAccountId: $payable,
+            creditAccountId: (int) $sourceAccount,
+            debitDescription: 'Settled ' . $bill->bill_number . ' for '
+                . ($bill->supplier?->supplier_name ?? 'supplier'),
+            creditDescription: 'Cash/float outflow for ' . $bill->bill_number,
+            createdBy: $payment->user_id,
+            projectId: $requisition?->project_id,
+            projectEnquiryId: $requisition?->project_enquiry_id,
+        ));
+    }
+
+    /**
+     * A two-leg entry with its lines. Shared by the invoice and the payment so
+     * the pair cannot drift apart in how they stamp a period, a source or a
+     * dimension.
+     */
+    private function writeEntry(
+        string $entryNo,
+        string $postingDate,
+        int $periodId,
+        string $sourceType,
+        int $sourceId,
+        ?string $sourceRef,
+        string $description,
+        string $amount,
+        int $debitAccountId,
+        int $creditAccountId,
+        string $debitDescription,
+        string $creditDescription,
+        ?int $createdBy,
+        mixed $projectId = null,
+        mixed $projectEnquiryId = null,
+    ): JournalEntry {
+        $entry = JournalEntry::create([
+            'entry_no' => $entryNo,
+            'posting_date' => $postingDate,
+            'accounting_period_id' => $periodId,
+            'source_type' => $sourceType,
+            'source_id' => $sourceId,
+            'source_ref' => $sourceRef,
+            'description' => $description,
+            'total_debit' => $amount,
+            'total_credit' => $amount,
+            'status' => 'posted',
+            'created_by' => $createdBy ?? auth()->id(),
+            'posted_at' => now(),
+        ]);
+
+        foreach ([
+            ['account_id' => $debitAccountId, 'entry_type' => 'debit', 'description' => $debitDescription],
+            ['account_id' => $creditAccountId, 'entry_type' => 'credit', 'description' => $creditDescription],
+        ] as $leg) {
+            JournalLine::create([
+                'journal_entry_id' => $entry->id,
+                'amount' => $amount,
+                'currency' => 'KES',
+                'fx_rate' => 1,
+                'base_amount' => $amount,
+                'project_id' => $projectId,
+                'project_enquiry_id' => $projectEnquiryId,
+                ...$leg,
+            ]);
+        }
+
+        return $entry;
     }
 }

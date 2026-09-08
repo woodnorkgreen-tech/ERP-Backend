@@ -12,7 +12,9 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\ProcurementStores\Services\PurchaseOrderWorkflow;
+use App\Modules\ProcurementStores\Services\SupplierInvoiceTax;
 use App\Modules\ProcurementStores\Services\SupplierPaymentGuard;
 use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -209,6 +211,13 @@ class BillController extends Controller
             'due_date' => 'required|date',
             'amount' => 'required|numeric|min:0',
             'supplier_invoice_number' => 'required|string|max:120',
+            // Optional throughout: the invoice states its own VAT when it has
+            // one, and the treatment prices it when it does not.
+            'vat_amount' => 'nullable|numeric|min:0',
+            'wht_amount' => 'nullable|numeric|min:0',
+            'etims_invoice_no' => 'nullable|string|max:64',
+            'supplier_pin' => 'nullable|string|max:20',
+            'tax_point_date' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -232,6 +241,18 @@ class BillController extends Controller
             $input['status'] = 'pending';
 
             $bill = Bill::create($input);
+
+            /*
+             * Priced after creation rather than before, because the split needs
+             * the supplier and the order the bill was just attached to. The
+             * invoice is the tax point for the procurement rail — nothing
+             * earlier in the chain carries VAT, so if it is not captured here it
+             * is not captured at all.
+             */
+            $bill->forceFill(app(SupplierInvoiceTax::class)->priceFor($bill->fresh(), $input))->save();
+            $bill->refresh();
+            $bill->updatePaymentStatus();
+
             $this->syncProjectProcurementFromBill($bill);
 
             return new BillResource($bill->load(['purchaseOrder', 'supplier', 'createdBy', 'payments']));
@@ -302,13 +323,35 @@ class BillController extends Controller
             ], 422);
         }
 
-        $bill->forceFill([
-            'verified_by' => auth()->id(),
-            'verified_at' => now(),
-            'verification_basis' => 'three_way_match',
-            'verification_fingerprint' => $state['fingerprint'],
-            'verification_notes' => $request->input('verification_notes'),
-        ])->save();
+        /*
+         * Verification is the accounting event, so it is where the liability
+         * moves from "accrued against a receipt" to "owed on a named invoice".
+         *
+         * The sign-off and its journal are one transaction on purpose. Posting
+         * after a committed save would leave the failure case looking exactly
+         * like the defect being fixed — a bill reading verified while Accounts
+         * Payable knows nothing about it — except now with an error message
+         * claiming otherwise. Either both land or neither does, and Accounts
+         * hears about a closed period or an unmapped account while the invoice
+         * is still theirs to fix.
+         */
+        try {
+            DB::transaction(function () use ($bill, $state, $request) {
+                $bill->forceFill([
+                    'verified_by' => auth()->id(),
+                    'verified_at' => now(),
+                    'verification_basis' => 'three_way_match',
+                    'verification_fingerprint' => $state['fingerprint'],
+                    'verification_notes' => $request->input('verification_notes'),
+                ])->save();
+
+                app(JournalPostingService::class)->postSupplierInvoice($bill->fresh());
+            });
+        } catch (\Throwable $e) {
+            return response([
+                'error' => 'The invoice matched, but it could not be posted to the ledger: ' . $e->getMessage(),
+            ], 422);
+        }
 
         return response()->json([
             'message' => 'Invoice verified against the order and the accepted receipt.',

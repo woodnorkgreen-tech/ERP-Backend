@@ -25,6 +25,14 @@ class Bill extends Model
         'verification_basis',
         'verification_fingerprint',
         'verification_notes',
+        'net_amount',
+        'vat_amount',
+        'wht_amount',
+        'vat_treatment_id',
+        'wht_category_id',
+        'etims_invoice_no',
+        'supplier_pin',
+        'tax_point_date',
     ];
 
     protected $casts = [
@@ -34,6 +42,10 @@ class Bill extends Model
         'paid_amount' => 'decimal:2',
         'balance' => 'decimal:2',
         'verified_at' => 'datetime',
+        'net_amount' => 'decimal:2',
+        'vat_amount' => 'decimal:2',
+        'wht_amount' => 'decimal:2',
+        'tax_point_date' => 'date',
     ];
 
     protected static function boot()
@@ -43,6 +55,28 @@ class Bill extends Model
         static::creating(function ($bill) {
             $bill->balance = $bill->amount;
             $bill->paid_amount = 0;
+        });
+
+        /*
+         * net + VAT = gross, always.
+         *
+         * Held here rather than trusted to callers because three things read
+         * the split — the three-way match, the ledger legs and the VAT return —
+         * and a row where they disagree would let an invoice be matched on one
+         * value, posted on another and claimed on a third. A bill created
+         * outside the controller (a fixture, an import, a future path) gets the
+         * honest default of "no VAT stated" rather than a null net.
+         */
+        static::saving(function ($bill) {
+            $gross = (float) $bill->amount;
+            $vat = (float) ($bill->vat_amount ?? 0);
+
+            if ($vat > $gross) {
+                $vat = $gross;
+                $bill->vat_amount = $vat;
+            }
+
+            $bill->net_amount = round($gross - $vat, 2);
         });
 
         static::updating(function ($bill) {
@@ -72,10 +106,32 @@ class Bill extends Model
     return $prefix . str_pad($number, 4, '0', STR_PAD_LEFT);
 }
 
+    /**
+     * What the supplier is actually owed: the invoice less anything withheld.
+     *
+     * Withholding is retained and paid to KRA instead, so it is never part of
+     * the balance a supplier can be paid. Rows predating tax capture carry
+     * `wht_amount` 0 and are unaffected.
+     */
+    public function payableAmount(): string
+    {
+        return bcsub(
+            number_format((float) $this->amount, 2, '.', ''),
+            number_format((float) ($this->wht_amount ?? 0), 2, '.', ''),
+            2,
+        );
+    }
+
+    /** The VAT-exclusive value of the invoice — what the three-way match compares. */
+    public function netAmount(): string
+    {
+        return number_format((float) ($this->net_amount ?? $this->amount), 2, '.', '');
+    }
+
     public function updatePaymentStatus()
     {
         $this->paid_amount = $this->payments()->sum('amount_paid');
-        $this->balance = $this->amount - $this->paid_amount;
+        $this->balance = $this->payableAmount() - $this->paid_amount;
         
         if ($this->balance <= 0) {
             $this->status = 'paid';
@@ -106,6 +162,16 @@ class Bill extends Model
     public function payments()
     {
         return $this->hasMany(BillPayment::class);
+    }
+
+    public function vatTreatment()
+    {
+        return $this->belongsTo(\App\Modules\Finance\Models\VatTreatment::class, 'vat_treatment_id');
+    }
+
+    public function whtCategory()
+    {
+        return $this->belongsTo(\App\Modules\Finance\Models\WhtCategory::class, 'wht_category_id');
     }
 
     public function verifiedBy()

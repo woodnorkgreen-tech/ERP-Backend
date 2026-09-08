@@ -57,6 +57,19 @@ class BillPayment extends Model
         // Update bill payment status after payment is created
         static::created(function ($payment) {
             $payment->bill->updatePaymentStatus();
+
+            /*
+             * The cash leg of the supplier rail, posted here for the same
+             * reason the three-way match is enforced here: three paths create a
+             * BillPayment — the single-invoice screen, the batch run, and a
+             * petty cash disbursement against a linked bill — and a control
+             * that lives in one of them is a control none of them has. The
+             * posting is a no-op unless the invoice itself posted, so a
+             * grandfathered legacy bill settles without relieving a payable it
+             * never raised.
+             */
+            app(\App\Modules\Finance\Services\JournalPostingService::class)
+                ->postSupplierPayment($payment);
         });
 
         // Update bill payment status after payment is deleted

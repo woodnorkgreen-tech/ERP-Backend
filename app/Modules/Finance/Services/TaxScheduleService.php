@@ -65,7 +65,16 @@ class TaxScheduleService
             ->orderBy('cost_lines.tax_point_date')
             ->orderBy('cost_lines.id')
             ->get()
-            ->map(fn (object $line) => $this->claimRow($line));
+            ->map(fn (object $line) => $this->claimRow($line))
+            ->concat(
+                $this->claimableBills()
+                    ->whereBetween('bills.tax_point_date', [$from, $to])
+                    ->orderBy('bills.tax_point_date')->orderBy('bills.id')
+                    ->get()
+                    ->map(fn (object $bill) => $this->claimRow($bill))
+            )
+            ->sortBy('tax_point_date')
+            ->values();
 
         [$supported, $unsupported] = $rows->partition(fn (array $row) => $row['is_supported']);
 
@@ -83,8 +92,8 @@ class TaxScheduleService
                 'unsupported_count' => $unsupported->count(),
             ],
             'due_date' => $this->dueDateFor($to),
-            'basis' => 'Verified, posted, unreversed cost lines on a recoverable VAT treatment, '
-                . 'dated by the supplier document (tax point).',
+            'basis' => 'Verified, posted, unreversed cost lines and verified supplier invoices on a '
+                . 'recoverable VAT treatment, dated by the supplier document (tax point).',
         ];
     }
 
@@ -114,6 +123,17 @@ class TaxScheduleService
             })
             ->get()
             ->map(fn (object $line) => $this->claimRow($line, $asOf))
+            ->concat(
+                $this->claimableBills()
+                    ->where(function ($q) {
+                        $q->whereNull('bills.etims_invoice_no')
+                            ->orWhere('bills.etims_invoice_no', '')
+                            ->orWhereNull('bills.supplier_pin')
+                            ->orWhere('bills.supplier_pin', '');
+                    })
+                    ->get()
+                    ->map(fn (object $bill) => $this->claimRow($bill, $asOf))
+            )
             ->sortBy(fn (array $row) => $row['days_to_deadline'] ?? PHP_INT_MAX)
             ->values();
 
@@ -135,7 +155,8 @@ class TaxScheduleService
                 'line_count' => $rows->count(),
             ],
             'action' => 'Each row needs the supplier\'s eTIMS invoice number, and a KRA PIN on the supplier record. '
-                . 'Both can be added by reversing and re-verifying the cost line.',
+                . 'On a cost line both are added by reversing and re-verifying it; on a supplier invoice they are '
+                . 'recorded against the invoice itself.',
         ];
     }
 
@@ -283,8 +304,17 @@ class TaxScheduleService
 
         $supported = filled($line->etims_invoice_no) && filled($line->supplier_pin);
 
+        // A bill has no cost line, so `cost_line_id` is null for it rather than
+        // carrying a bill id under a name that means something else. `source`
+        // and `document_id` are the pair to read; `cost_line_id` stays for what
+        // already binds to it. Both queries state their own source rather than
+        // it being inferred from the shape of the row.
+        $isBill = ($line->source ?? 'cost_line') === 'bill';
+
         return [
-            'cost_line_id' => (int) $line->id,
+            'source' => $isBill ? 'supplier_invoice' : 'cost_line',
+            'document_id' => (int) $line->id,
+            'cost_line_id' => $isBill ? null : (int) $line->id,
             'ref' => $line->ref,
             'job_number' => $line->job_number,
             'supplier_name' => $line->payee_name,
@@ -361,7 +391,51 @@ class TaxScheduleService
                 'vat_treatments.code as treatment_code',
                 'vat_treatments.rate_percent as rate_percent',
                 'vat_treatments.claim_window_months as claim_window_months',
-            ]);
+            ])
+            ->selectRaw("'cost_line' as source");
+    }
+
+    /**
+     * Supplier invoices whose VAT is claimable.
+     *
+     * The procurement rail reaches the ledger through `bills`, not through a
+     * priced cost line: a goods-receipt accrual carries no tax, so the invoice
+     * is the only place its VAT exists. Reading cost lines alone left every
+     * VAT-bearing supplier invoice out of the return — recognised in the ledger
+     * at 1330 and invisible on the working paper that gets filed.
+     *
+     * Selected with cost-line column names so {@see claimRow()} serves both
+     * rails. One definition of the claim window, the support test and the
+     * deadline, rather than a second copy that would drift from it.
+     *
+     * `verified_at` is the condition because that is what posts the invoice —
+     * an unverified bill has raised no input tax to claim.
+     */
+    private function claimableBills()
+    {
+        return DB::table('bills')
+            ->join('vat_treatments', 'vat_treatments.id', '=', 'bills.vat_treatment_id')
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'bills.supplier_id')
+            ->whereNotNull('bills.verified_at')
+            ->where('vat_treatments.is_recoverable', true)
+            ->where('bills.vat_amount', '>', 0)
+            ->select([
+                'bills.id',
+                'bills.bill_number as ref',
+                'bills.supplier_pin',
+                'bills.supplier_invoice_number as supplier_invoice_no',
+                'bills.etims_invoice_no',
+                'bills.tax_point_date',
+                'bills.net_amount',
+                'bills.vat_amount as tax_amount',
+                'suppliers.supplier_name as payee_name',
+                'vat_treatments.code as treatment_code',
+                'vat_treatments.rate_percent as rate_percent',
+                'vat_treatments.claim_window_months as claim_window_months',
+            ])
+            ->selectRaw('NULL as job_number')
+            ->selectRaw("'bill' as source")
+            ->selectRaw("CONCAT('Supplier invoice ', bills.bill_number) as description");
     }
 
     /** @param  Collection<int, array<string, mixed>>  $rows */

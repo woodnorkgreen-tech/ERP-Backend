@@ -176,7 +176,19 @@ class PurchaseOrderWorkflow
         }
 
         $workflow = $this->order($order);
-        $amount = (string) $bill->amount;
+
+        /*
+         * The match is made on the NET invoice value, because that is the only
+         * figure comparable to what it is checked against: an order is priced
+         * VAT-exclusive and Stores accepts quantities at those prices. Comparing
+         * the gross would fail every VAT-bearing invoice by exactly the tax, and
+         * "the invoice exceeds what was accepted" would be reported for an
+         * invoice that agreed with the order precisely.
+         *
+         * Invoices predating tax capture carry net = amount, so this is the
+         * same comparison it always was for them.
+         */
+        $amount = $bill->netAmount();
 
         $checks = [
             [
@@ -262,6 +274,10 @@ class PurchaseOrderWorkflow
             'bill_id' => $bill->id,
             'bill_number' => $bill->bill_number,
             'bill_amount' => $amount,
+            'bill_gross' => (string) $bill->amount,
+            'bill_vat' => (string) ($bill->vat_amount ?? 0),
+            'bill_wht' => (string) ($bill->wht_amount ?? 0),
+            'bill_payable' => $bill->payableAmount(),
             'bill_balance' => (string) $bill->balance,
             'supplier_invoice_number' => $bill->supplier_invoice_number,
             'checks' => $checks,
@@ -290,7 +306,18 @@ class PurchaseOrderWorkflow
             'order' => [$workflow['order_id'], $workflow['order_approved'], $workflow['supplier_id'], $workflow['order_total']],
             'accepted' => $workflow['accepted_value'],
             'items' => array_map(fn ($item) => [$item['id'], $item['ordered'], $item['accepted'], $item['unit_price']], $workflow['items']),
-            'invoice' => [(int) $bill->supplier_id, (string) $bill->supplier_invoice_number, (string) $bill->amount],
+            // The tax split is part of what was verified: change the VAT or the
+            // withholding after sign-off and the amount actually leaving changes
+            // with it, so the verification must withdraw exactly as it does for
+            // a re-priced line.
+            'invoice' => [
+                (int) $bill->supplier_id,
+                (string) $bill->supplier_invoice_number,
+                (string) $bill->amount,
+                (string) ($bill->net_amount ?? $bill->amount),
+                (string) ($bill->vat_amount ?? 0),
+                (string) ($bill->wht_amount ?? 0),
+            ],
         ], JSON_THROW_ON_ERROR));
     }
 }

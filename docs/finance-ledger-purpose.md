@@ -151,8 +151,20 @@ finished reviewing, and a schedule would lock periods out from under people stil
 
 ## 4. What deliberately was not done
 
-- **No revenue, payroll or bank posting.** That would be completing a general ledger, which is the
+- **No revenue or payroll posting.** That would be completing a general ledger, which is the
   decision this document argues against.
+- **~~No bank posting.~~ Amended 2026-09-07.** This bullet originally read "no revenue, payroll or
+  bank posting". Building the supplier-invoice producer from §5.5 showed the boundary could not hold
+  where it had been drawn: clearing `2150 Accrued Expenses` necessarily credits `2100 Accounts
+  Payable`, and relieving that payable necessarily credits whatever account the cash left. The two
+  legs are one mechanism, so posting only the sanctioned half would have moved the open loop from
+  2150 to 2100 rather than closing it — 2100 would then have grown forever in 2150's place.
+
+  **Bank and petty-cash credits are therefore posted, but only on the supplier rail** — a
+  `BillPayment` relieving a payable its own invoice raised, and only where that invoice posted. This
+  is a narrow, self-balancing exception rather than an opening of the ledger: there is still no
+  revenue, no payroll, no opening balances and no equity, and WNG's statutory books remain external.
+  Everything in §1 stands.
 - **No internal batching of journal entries.** Answered at the export instead — cheaper and safer.
 - **No "filed" state on the schedules.** Filing happens on KRA's portal; recording it here would be
   a claim the system cannot verify.
@@ -176,5 +188,18 @@ finished reviewing, and a schedule would lock periods out from under people stil
 3. **Confirm `tax_return_due_day`** and the claim window with WNG's tax advisor.
 4. **Close the historic periods** once Finance has reviewed them — `finance:close-period --dry-run`
    first, per month.
-5. Phase 3 items from `cost-capture-audit.md` that remain: the supplier-invoice producer and
-   `releaseAccrual()` on the procurement side.
+5. ~~Phase 3 items from `cost-capture-audit.md`: the supplier-invoice producer and `releaseAccrual()`
+   on the procurement side.~~ **Supplier-invoice producer done 2026-09-07.**
+   `JournalPostingService::postSupplierInvoice()` posts `Dr 2150 / Cr 2100` when Accounts verifies
+   the three-way match, and `postSupplierPayment()` posts `Dr 2100 / Cr <payment source>` from
+   `BillPayment::created` — see the §4 amendment for why the second leg had to come with the first.
+   Both are idempotent on `entry_no` (`JE-BILL-*`, `JE-BPAY-*`) and both refuse a `legacy` invoice,
+   which was never accrued and would drive 2150 negative. Covered by
+   `tests/Feature/Finance/SupplierLedgerRailTest.php`.
+
+   **Still open, and now the rail's biggest gap: the procurement side recognises no input VAT at
+   all.** `bills` carries a single `amount` and no tax columns, so both entries are net-only. The GRN
+   accrual passes no `taxAmount` either — this was assumed to be a VAT *timing* problem and is
+   actually a VAT *absence* problem. Closing it means tax capture on `bills` (schema, form, eTIMS
+   fields) so a supplier invoice can price its own VAT and WHT the way `CostTaxPricer` already does
+   for a verified cost line.

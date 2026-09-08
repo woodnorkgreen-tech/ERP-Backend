@@ -48,6 +48,20 @@ class SupplierPaymentGateTest extends TestCase
     {
         parent::setUp();
 
+        /*
+         * Verification is a ledger event, so this fixture needs a ledger.
+         *
+         * These tests used to pass without a chart because verifying an invoice
+         * touched no accounts at all — which was the defect, not the setup. Now
+         * that the sign-off moves the accrual onto Accounts Payable, a chart,
+         * an open period and payment sources carrying GL accounts are part of
+         * what the workflow assumes, exactly as the goods-receipt accrual
+         * already assumed them.
+         */
+        $this->seed(\App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder::class);
+        $this->seed(\App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class);
+        $this->seed(\App\Modules\Finance\Database\Seeders\PaymentSourceSeeder::class);
+
         Role::findOrCreate('Accounts', 'web');
         $this->accounts = User::create([
             'name' => 'Accounts Clerk',
