@@ -194,6 +194,13 @@ class ProcurementStoresController extends Controller
         // link as "unlinked" merely because it fell beyond an inventory page.
         if ($request->filled('material_ids')) {
             $query->whereIn('library_materials.id', $request->input('material_ids', []));
+        } elseif (! $request->boolean('include_hidden')) {
+            // Only the catalogue items Stores actually carries. Applied to
+            // browsing only: an explicit material_ids lookup above is an
+            // identity resolution, and filtering it would report a correctly
+            // linked BOM row as unlinked. include_hidden is the deliberate
+            // opt-out for a screen that wants the whole register back.
+            $query->inventoryVisible();
         }
 
         if ($request->input('selection_context') === 'project') {
@@ -1470,37 +1477,27 @@ class ProcurementStoresController extends Controller
             return response()->json(['message' => 'You are not permitted to view material demand forecasts.'], 403);
         }
 
-        $requirements = \App\Models\ElementMaterial::with([
-                'libraryMaterial.stock',
-                'element.taskMaterialsData.task',
-            ])
-            ->where('is_included', true)
-            ->whereNotNull('library_material_id')
-            ->orderBy('id')
-            ->get()
-            ->filter(fn ($line) => (bool) data_get($line->element?->taskMaterialsData?->project_info, 'approval_status.all_approved', false));
+        /*
+         * The demand half of this answer now comes from ProjectMaterialDemand,
+         * which the material picker reads too. It used to be worked out inline
+         * here, and only here — so Stores could see that a material was fully
+         * spoken for while a buyer choosing that same material saw nothing of
+         * it. One definition, so the two screens cannot disagree.
+         */
+        $pendingLines = app(\App\Modules\ProcurementStores\Services\ProjectMaterialDemand::class)->pendingLines();
 
-        $enquiryIds = $requirements->map(fn ($line) => $line->element?->taskMaterialsData?->task?->project_enquiry_id)
-            ->filter()->unique()->values();
-        $projects = \App\Models\Project::with('enquiry:id,title,client_id')
-            ->whereIn('enquiry_id', $enquiryIds)->get()->keyBy('enquiry_id');
-        $projectIds = $projects->pluck('id');
+        if ($pendingLines->isEmpty()) {
+            return response()->json(['data' => [], 'summary' => [
+                'materials' => 0, 'fully_covered' => 0, 'at_risk' => 0, 'covered_by_incoming' => 0,
+            ]]);
+        }
 
-        $movements = InventoryLog::query()
-            ->whereIn('project_id', $projectIds)
-            ->whereIn('type', ['check_out', 'issue', 'consumption', 'return'])
-            ->get(['id', 'type', 'quantity', 'material_id', 'project_id', 'project_material_id', 'original_issue_log_id', 'return_kind', 'notes']);
+        $materialIds = $pendingLines->pluck('library_material_id')->unique()->values();
+        $materials = \App\Modules\MaterialsLibrary\Models\LibraryMaterial::with('stock')
+            ->whereIn('id', $materialIds)->get()->keyBy('id');
 
-        $issueByLine = $movements->whereIn('type', ['check_out', 'issue', 'consumption'])
-            ->whereNotNull('project_material_id')->groupBy('project_material_id')
-            ->map(fn ($rows) => (float) $rows->sum(fn ($row) => abs((float) $row->quantity)));
-        $reopeningReturnByLine = $movements->where('type', 'return')
-            ->filter(fn ($row) => $row->return_kind !== 'recovered_offcut' && ! str_starts_with((string) $row->notes, 'Offcut '))
-            ->whereNotNull('project_material_id')->groupBy('project_material_id')
-            ->map(fn ($rows) => (float) $rows->sum('quantity'));
-
-        $boardMaterialIds = $requirements->filter(fn ($line) => $line->libraryMaterial?->isBoardTrackable())
-            ->pluck('library_material_id')->unique();
+        $boardMaterialIds = $materials->filter(fn ($material) => $material->isBoardTrackable())
+            ->pluck('id')->unique();
         $boardAvailable = Board::query()->whereIn('library_material_id', $boardMaterialIds)
             ->where('status', 'Available')->selectRaw('library_material_id, COUNT(*) AS quantity')
             ->groupBy('library_material_id')->pluck('quantity', 'library_material_id');
@@ -1513,28 +1510,23 @@ class ProcurementStoresController extends Controller
             ->groupBy('material_id')
             ->map(fn ($rows) => (float) $rows->sum(fn ($row) => max(0, (float) $row->quantity - (float) ($row->received_total ?? 0))));
 
-        $rows = $requirements->groupBy('library_material_id')->map(function ($materialLines, $materialId) use ($projects, $issueByLine, $reopeningReturnByLine, $boardAvailable, $incoming) {
-            $material = $materialLines->first()->libraryMaterial;
-            $projectRows = $materialLines->map(function ($line) use ($projects, $issueByLine, $reopeningReturnByLine) {
-                $task = $line->element?->taskMaterialsData?->task;
-                $project = $projects->get($task?->project_enquiry_id);
-                if (! $project) return null;
-                $approved = (float) $line->quantity;
-                $issued = max(0, (float) ($issueByLine[$line->id] ?? 0) - (float) ($reopeningReturnByLine[$line->id] ?? 0));
-                $pending = max(0, $approved - $issued);
-                return $pending > 0 ? [
-                    'project_id' => $project->id,
-                    'project_code' => $project->project_id,
-                    'project_title' => $project->enquiry?->title ?? 'Project',
-                    'project_material_id' => $line->id,
-                    'element' => $line->element?->name ?? 'Project materials',
-                    'approved' => round($approved, 4),
-                    'issued' => round($issued, 4),
-                    'pending' => round($pending, 4),
-                    'required_by' => $project->start_date?->toDateString(),
-                ] : null;
-            })->filter()->values();
-            if ($projectRows->isEmpty()) return null;
+        $rows = $pendingLines->groupBy('library_material_id')->map(function ($materialLines, $materialId) use ($materials, $boardAvailable, $incoming) {
+            $material = $materials->get($materialId);
+            // Shaped here rather than in the service: `approved` is the word
+            // this screen has always used for the specified quantity, and the
+            // service speaks of it as `specified` for callers with no notion of
+            // a materials-task approval.
+            $projectRows = $materialLines->map(fn (array $line) => [
+                'project_id' => $line['project_id'],
+                'project_code' => $line['project_code'],
+                'project_title' => $line['project_title'],
+                'project_material_id' => $line['project_material_id'],
+                'element' => $line['element'],
+                'approved' => $line['specified'],
+                'issued' => $line['issued'],
+                'pending' => $line['pending'],
+                'required_by' => $line['required_by'],
+            ])->values();
 
             $pending = (float) $projectRows->sum('pending');
             $reserved = (float) ($material?->stock?->quantity_reserved ?? 0);

@@ -41,6 +41,10 @@ class LibraryMaterialResource extends JsonResource
             'is_batch_controlled'   => (bool) $this->is_batch_controlled,
             'is_expiry_controlled'  => (bool) $this->is_expiry_controlled,
             'is_project_chargeable' => (bool) $this->is_project_chargeable,
+            // Whether Stores carries this on the shelf list. Distinct from
+            // item_status: an Active item can be a valid identity to name on a
+            // requisition without being something Stores stocks.
+            'is_inventory_visible' => (bool) ($this->is_inventory_visible ?? true),
             'minimum_reusable_length_mm' => $this->minimum_reusable_length_mm !== null ? (float) $this->minimum_reusable_length_mm : null,
             'minimum_reusable_width_mm'  => $this->minimum_reusable_width_mm !== null ? (float) $this->minimum_reusable_width_mm : null,
             'minimum_reusable_area_m2'   => $this->minimum_reusable_area_m2 !== null ? (float) $this->minimum_reusable_area_m2 : null,

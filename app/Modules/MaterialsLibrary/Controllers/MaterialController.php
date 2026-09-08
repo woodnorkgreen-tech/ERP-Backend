@@ -422,6 +422,105 @@ class MaterialController extends Controller
     }
 
     /**
+     * Choose which catalogue items Stores carries on the inventory list.
+     *
+     * The library is the register of every material identity the business can
+     * name; Store Inventory is the far shorter list of what is actually kept on
+     * the shelf. This is the one place that distinction is written.
+     *
+     * It is deliberately not part of the material form. Hiding an item that
+     * holds stock would make real goods invisible, so that refusal has to live
+     * in a single place rather than be repeated in every request that can write
+     * the column — which is also why the field is absent from
+     * Store/UpdateMaterialRequest.
+     */
+    public function inventoryVisibility(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'material_ids' => 'required|array|min:1|max:500',
+            'material_ids.*' => 'integer|distinct|exists:library_materials,id',
+            'visible' => 'required|boolean',
+        ]);
+
+        $visible = (bool) $validated['visible'];
+        $updated = 0;
+        $blocked = [];
+
+        DB::transaction(function () use ($validated, $visible, &$updated, &$blocked) {
+            $materials = LibraryMaterial::with('stock')
+                ->whereIn('id', $validated['material_ids'])
+                ->lockForUpdate()
+                ->get();
+
+            $outstanding = $this->materialIdsOnLoan($validated['material_ids']);
+
+            foreach ($materials as $material) {
+                // Two things keep an item on the list against the flag: stock on
+                // the shelf, and stock out on loan that has to come back. Boards
+                // are counted on the same stock row, so they are covered too.
+                $hasStock = (float) ($material->stock?->quantity_on_hand ?? 0) > 0;
+                if (! $visible && ($hasStock || $outstanding->contains($material->id))) {
+                    $blocked[] = $material->material_name ?: $material->material_code;
+                    continue;
+                }
+
+                if ((bool) ($material->is_inventory_visible ?? true) === $visible) {
+                    continue;
+                }
+
+                $material->forceFill([
+                    'is_inventory_visible' => $visible,
+                    'updated_by' => auth()->id(),
+                ])->save();
+                $updated++;
+            }
+        });
+
+        $message = $visible
+            ? "{$updated} material(s) now shown in inventory."
+            : "{$updated} material(s) hidden from inventory.";
+
+        if ($blocked !== []) {
+            $message .= ' '.count($blocked).' kept visible because stock is on hand: '
+                .implode(', ', array_slice($blocked, 0, 5))
+                .(count($blocked) > 5 ? '…' : '').'.';
+        }
+
+        return response()->json([
+            'message' => $message,
+            'updated' => $updated,
+            'blocked' => $blocked,
+        ]);
+    }
+
+    /**
+     * Which of these materials are still out on loan.
+     *
+     * A returnable item sits at zero on hand for exactly as long as it is in
+     * someone's hands, so stock alone does not say whether Stores is still owed
+     * it. Hiding one there would take it off every movement screen at the one
+     * moment it has to be returnable.
+     *
+     * Same balance expression as outstandingReusables(), narrowed to the ids
+     * being changed so this costs a single grouped read rather than riding on
+     * every inventory listing.
+     *
+     * @param  array<int>  $materialIds
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    private function materialIdsOnLoan(array $materialIds): \Illuminate\Support\Collection
+    {
+        return InventoryLog::query()
+            ->whereIn('material_id', $materialIds)
+            ->where('usage_type', 'reusable')
+            ->whereIn('type', ['check_out', 'return'])
+            ->groupBy('material_id')
+            ->havingRaw("SUM(CASE WHEN type = 'check_out' THEN ABS(quantity) ELSE -quantity END) > 0")
+            ->pluck('material_id')
+            ->map(fn ($id) => (int) $id);
+    }
+
+    /**
      * Display the specified material.
      */
     public function show($id): JsonResponse

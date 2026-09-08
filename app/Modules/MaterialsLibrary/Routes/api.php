@@ -44,6 +44,7 @@ Route::middleware('permission:'.Permissions::MATERIALS_LIBRARY_VIEW)->group(func
 // Specific routes before apiResource so /materials/{id} never swallows them.
 Route::middleware('permission:'.Permissions::MATERIALS_LIBRARY_MANAGE)->group(function () {
     Route::post('materials/bulk-controls', [MaterialController::class, 'bulkControls']);
+    Route::post('materials/inventory-visibility', [MaterialController::class, 'inventoryVisibility']);
     Route::post('materials/{id}/activate', [MaterialController::class, 'activate']);
     Route::post('materials/{id}/restore', [MaterialController::class, 'restore']);
     Route::delete('materials/{id}/force', [MaterialController::class, 'forceDelete']);

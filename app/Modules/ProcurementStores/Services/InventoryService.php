@@ -160,6 +160,17 @@ class InventoryService
             $stock->quantity_on_hand = $nextQuantity;
             $stock->save();
 
+            // Bringing stock in IS the declaration that Stores carries this item,
+            // so a receipt restores it to the inventory list on its own.
+            //
+            // This is what makes hiding safe. Without it an item could be hidden
+            // while empty, restocked, issued back down to zero, and then be both
+            // hidden and out on loan — invisible on every movement screen at the
+            // one moment it has to be returnable.
+            if ($quantity > 0 && ! $material->is_inventory_visible) {
+                $material->forceFill(['is_inventory_visible' => true])->save();
+            }
+
             // Cost is receipt evidence, not catalogue input. Keep the material's
             // valuation cost derived from posted receipts using weighted average.
             $isOpeningIncrease = $type === 'adjustment'

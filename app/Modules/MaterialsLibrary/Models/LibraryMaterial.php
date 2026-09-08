@@ -40,6 +40,7 @@ class LibraryMaterial extends Model
         'is_batch_controlled',
         'is_expiry_controlled',
         'is_project_chargeable',
+        'is_inventory_visible',
         'minimum_reusable_length_mm',
         'minimum_reusable_width_mm',
         'minimum_reusable_area_m2',
@@ -74,6 +75,7 @@ class LibraryMaterial extends Model
         'is_batch_controlled' => 'boolean',
         'is_expiry_controlled' => 'boolean',
         'is_project_chargeable' => 'boolean',
+        'is_inventory_visible' => 'boolean',
         'minimum_reusable_length_mm' => 'decimal:2',
         'minimum_reusable_width_mm' => 'decimal:2',
         'minimum_reusable_area_m2' => 'decimal:4',
@@ -236,6 +238,28 @@ class LibraryMaterial extends Model
         return $query->where(function ($governed) {
             $governed->where('item_status', 'Active')
                 ->orWhere(fn ($legacy) => $legacy->whereNull('item_status')->where('is_active', true));
+        });
+    }
+
+    /**
+     * Items Stores carries on the shelf — the inventory list, not the register.
+     *
+     * The library names every identity the business can refer to; only some of
+     * those are things Stores stocks. This scope is what separates the two, and
+     * it is a LISTING filter only: it must never gate an operation. Receiving,
+     * issuing and BOM linkage all resolve a material by identity and would be
+     * wrong to refuse one merely because it is not on the browse list.
+     *
+     * An item holding stock stays listed whatever the flag says. Hiding a row
+     * that has a balance would make real physical goods invisible, so the flag
+     * cannot do that — the write path refuses it and this read path is the
+     * backstop for stock that arrives after the fact.
+     */
+    public function scopeInventoryVisible($query)
+    {
+        return $query->where(function ($listed) {
+            $listed->where('is_inventory_visible', true)
+                ->orWhereHas('stock', fn ($stock) => $stock->where('quantity_on_hand', '>', 0));
         });
     }
 
