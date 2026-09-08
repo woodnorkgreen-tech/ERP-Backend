@@ -647,7 +647,11 @@ class LeaveManagementService
     {
         $query = Employee::query()
             ->with('department:id,name')
-            ->where('status', 'active')
+            ->where(function (Builder $builder) {
+                $builder
+                    ->whereNull('status')
+                    ->orWhereNotIn('status', User::NON_ASSIGNABLE_EMPLOYEE_STATUSES);
+            })
             ->orderBy('first_name')
             ->orderBy('last_name');
 
