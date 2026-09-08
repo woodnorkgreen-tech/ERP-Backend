@@ -2,6 +2,11 @@
 
 _2026-09-05. Applies to the ProcurementStores module and the supplier-payment path in Petty Cash._
 
+> How an order comes to be approved in the first place — one approval, no page
+> changes — is [request to order](purchase-request-to-order.md) (2026-09-08).
+> Stage 1 below is now usually reached without anyone approving the order
+> itself: the requisition's approval covers it.
+
 Approving a purchase order authorises a purchase. It does not mean the goods
 arrived, that they were any good, or that WNG owes the supplier anything yet.
 Before this change the system had no single answer to "where has this order got

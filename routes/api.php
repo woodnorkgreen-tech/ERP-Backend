@@ -100,6 +100,17 @@ Route::get('/user', function () {
     $user = auth()->user()->load(['roles', 'employee:id,profile_photo_path,updated_at']);
     $data = $user->toArray();
     $data['profile_photo_url'] = $user->employee?->profile_photo_url;
+    /*
+     * The effective permission names, role-inherited ones included.
+     *
+     * Screens used to re-declare role lists inline to decide what to offer —
+     * "may I approve this" answered differently depending on which screen
+     * asked, and drifting from the server's answer whenever a role list moved.
+     * Sending the rights the user actually holds lets a screen ask the same
+     * question the server does. It gates what is OFFERED only; every endpoint
+     * still re-checks.
+     */
+    $data['permissions'] = $user->getAllPermissions()->pluck('name')->values();
     unset($data['employee']);
     return response()->json($data);
 })->middleware(['auth:sanctum', 'active']);

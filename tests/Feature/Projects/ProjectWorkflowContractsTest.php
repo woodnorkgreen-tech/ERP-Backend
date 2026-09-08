@@ -1055,8 +1055,12 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('data.procurementItems.0.procurementLinks.0.requisitionId', $requisitionId)
             ->assertJsonPath('data.budgetSummary.operationalSync.linkedRequisitionCount', 1);
 
-        $this->postJson("/api/procurement-stores/requisitions/{$requisitionId}/submit")
-            ->assertSuccessful();
+        // No submit step: raising a requisition sends it, so it is already in
+        // the approver's queue. See Procurement\PurchaseFlowTest.
+        $this->assertSame(
+            'pending_approval',
+            \App\Modules\ProcurementStores\Models\Requisition::findOrFail($requisitionId)->status,
+        );
 
         Sanctum::actingAs($accounts);
 
@@ -1077,10 +1081,10 @@ class ProjectWorkflowContractsTest extends TestCase
         $purchaseOrderNumber = $purchaseOrderResponse->json('data.0.po_number');
         $purchaseOrderItemId = $purchaseOrderResponse->json('data.0.items.0.id');
 
-        $this->postJson("/api/procurement-stores/purchase-orders/{$purchaseOrderId}/submit")
-            ->assertSuccessful();
-        $this->postJson("/api/procurement-stores/purchase-orders/{$purchaseOrderId}/approve")
-            ->assertSuccessful();
+        // Nor a second approval: the order stayed inside the requisition that
+        // was just approved, so raising it placed it. The exceptions that still
+        // reach a person are pinned in Procurement\PurchaseFlowTest.
+        $this->assertSame('approved', $purchaseOrderResponse->json('data.0.status'));
 
         $synced = $this->getJson("/api/projects/tasks/{$procurementTask->id}/procurement");
 

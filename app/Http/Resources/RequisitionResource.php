@@ -57,6 +57,25 @@ class RequisitionResource extends JsonResource
             'total_amount' => (float) $this->total_amount,
 
             /*
+             * Why this cannot be approved yet, in the approver's language.
+             *
+             * The rules were reachable only by pressing Approve and being
+             * refused, so the register showed every pending row as equally
+             * ready and the approver discovered somebody else's mis-classified
+             * line at the moment they could do least about it. Same service the
+             * approve endpoint gates on, so the warning and the refusal cannot
+             * disagree.
+             *
+             * Only computed where items are already loaded — this must never be
+             * the reason a list query grows a query per row.
+             */
+            'approval_blocker' => $this->when(
+                $this->relationLoaded('items') && $this->status === 'pending_approval',
+                fn () => app(\App\Modules\ProcurementStores\Services\RequisitionApprovalCheck::class)
+                    ->firstBlocker($this->resource)['message'] ?? null,
+            ),
+
+            /*
              * Where the money for this request actually came from.
              *
              * Only when the items are loaded, which is the detail screen — the

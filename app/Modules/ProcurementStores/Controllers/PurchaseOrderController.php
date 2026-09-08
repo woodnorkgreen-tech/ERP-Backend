@@ -7,8 +7,10 @@ use App\Http\Resources\PurchaseOrderResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Http\Controllers\Controller;
+use App\Modules\ProcurementStores\Services\PurchaseApprovalPolicy;
 use App\Modules\ProcurementStores\Services\PurchaseOrderWorkflow;
 use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -32,27 +34,16 @@ class PurchaseOrderController extends Controller
         return $pdf->download($filename);
     }
     /**
-     * Check if user has approval/delete permissions
-     * Only Super Admin, Admin, and Accounts roles can approve/delete
+     * Whether this user may approve or delete a purchase order.
+     *
+     * The other half of the role list that used to live in two controllers,
+     * now one permission in PurchasePolicy. Reached only for the orders
+     * PurchaseApprovalPolicy sends to a person — one with no requisition
+     * behind it, or one that outgrew the requisition it came from.
      */
-    private function canApproveOrDelete()
+    private function canApproveOrDelete(): bool
     {
-        $user = auth()->user();
-        
-        if (!$user || !$user->roles) {
-            return false;
-        }
-        
-        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
-        $userRoles = $user->roles->pluck('name')->toArray();
-        
-        foreach ($allowedRoles as $role) {
-            if (in_array($role, $userRoles)) {
-                return true;
-            }
-        }
-        
-        return false;
+        return Gate::allows('approveOrder', PurchaseOrder::class);
     }
 
     private function syncProjectProcurement(PurchaseOrder|int $purchaseOrder): void
@@ -235,15 +226,33 @@ class PurchaseOrderController extends Controller
 
             DB::commit();
 
+            /*
+             * Raising the order is placing it.
+             *
+             * The order used to be born `pending`, then wait for somebody to
+             * open it and press "Submit for approval", then wait again for an
+             * approver — two more screens and two more waits after a
+             * requisition an approver had already signed. Since the requisition
+             * is the approval, the order goes straight out when it stays inside
+             * what was approved; PurchaseApprovalPolicy decides that, and the
+             * exceptions it refuses (no requisition, or grown past it) still
+             * land in an approver's queue exactly as before.
+             */
+            $decisions = [];
+
             foreach ($createdOrders as $purchaseOrder) {
+                $decisions[$purchaseOrder->id] = $this->issue($purchaseOrder);
                 $this->syncProjectProcurement($purchaseOrder);
             }
 
             $loaded = collect($createdOrders)->map(
-                fn ($po) => new PurchaseOrderResource($po->load(['items.material', 'supplier', 'createdBy', 'requisition']))
+                fn ($po) => new PurchaseOrderResource($po->fresh()->load(['items.material', 'supplier', 'createdBy', 'approvedBy', 'requisition']))
             );
 
-            return response(['data' => $loaded]);
+            return response([
+                'data' => $loaded,
+                'approvals' => $decisions,
+            ]);
         } catch (\Exception $e) {
             DB::rollBack();
             return response(['error' => 'Failed to create purchase order(s): ' . $e->getMessage()], 500);
@@ -404,7 +413,7 @@ class PurchaseOrderController extends Controller
         // ROLE RESTRICTION ADDED HERE
         if (!$this->canApproveOrDelete()) {
             return response([
-                'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can delete purchase orders.'
+                'error' => 'You do not have permission to delete purchase orders.'
             ], 403);
         }
 
@@ -430,16 +439,53 @@ class PurchaseOrderController extends Controller
         return response(['message' => 'Purchase order deleted successfully']);
     }
 
+    /**
+     * Put a pending order into the world: submit it, and let it approve itself
+     * when its requisition already covers it.
+     *
+     * Shared by storeLinked (where raising the order places it) and by
+     * submitForApproval (which remains for an order typed in by hand, and for
+     * anything created before this route existed). One copy, because the two
+     * paths disagreeing about when an order counts as placed is precisely the
+     * bug class the purchase-to-pay gate exists to prevent.
+     *
+     * The order is stamped as approved by whoever acted, because that is who
+     * acted; the policy's reason records that the system, not they, made the
+     * call.
+     *
+     * @return array{auto:bool, reason:string}
+     */
+    private function issue(PurchaseOrder $purchaseOrder): array
+    {
+        $purchaseOrder->submitForApproval();
+
+        $decision = app(PurchaseApprovalPolicy::class)->evaluate($purchaseOrder->fresh());
+
+        if ($decision['auto']) {
+            $purchaseOrder->approve(auth()->id());
+            \Log::info('[Purchase Order] Approved automatically', [
+                'purchase_order_id' => $purchaseOrder->id,
+                'po_number' => $purchaseOrder->po_number,
+                'total_amount' => $purchaseOrder->total_amount,
+                'reason' => $decision['reason'],
+            ]);
+        }
+
+        return $decision;
+    }
+
     public function submitForApproval(PurchaseOrder $purchaseOrder)
     {
         if ($purchaseOrder->status !== 'pending') {
             return response(['error' => 'Only pending purchase orders can be submitted'], 422);
         }
 
-        $purchaseOrder->submitForApproval();
+        $decision = $this->issue($purchaseOrder);
+
         $this->syncProjectProcurement($purchaseOrder);
 
-        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
+        return (new PurchaseOrderResource($purchaseOrder->fresh()->load(['items.material', 'supplier', 'createdBy', 'approvedBy'])))
+            ->additional(['approval' => $decision]);
     }
 
     public function approve(PurchaseOrder $purchaseOrder)
@@ -447,7 +493,7 @@ class PurchaseOrderController extends Controller
         // ROLE RESTRICTION ADDED HERE
         if (!$this->canApproveOrDelete()) {
             return response([
-                'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can approve purchase orders.'
+                'error' => 'You do not have permission to approve purchase orders.'
             ], 403);
         }
 

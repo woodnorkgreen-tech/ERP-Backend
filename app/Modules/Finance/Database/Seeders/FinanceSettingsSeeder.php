@@ -49,6 +49,18 @@ class FinanceSettingsSeeder extends Seeder
         ['capitalisation_threshold', null,
             'Capitalisation threshold (KES)',
             'Brief §2E / §7 open decision. MUST be set by WNG\'s accountant before capex flagging is switched on.'],
+
+        // Also seeded null, and for a stronger reason than the rest: this is the
+        // only setting that REMOVES a human approval rather than adding a
+        // warning. It is read through FinanceSetting::approvedValue(), so a
+        // value alone does nothing — an accountant must sign the row off before
+        // any purchase order approves itself. Until then every order routes to a
+        // person exactly as it does today.
+        ['purchase_order_auto_approval_limit', null,
+            'Purchase order auto-approval limit (KES)',
+            'An order at or below this value skips its second approval WHEN it comes from an already-approved '
+            .'requisition and has not grown beyond it. Never a blanket small-purchase exemption: an order with no '
+            .'requisition behind it always goes to a person. Requires accountant sign-off to take effect.'],
     ];
 
     public function run(): void

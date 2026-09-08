@@ -93,6 +93,19 @@ class AppServiceProvider extends ServiceProvider
             \App\Modules\Support\Policies\SupportTicketPolicy::class,
         );
 
+        // Purchasing approval. Both models point at the same policy on purpose:
+        // approving a requisition and approving the order it becomes are one
+        // decision seen at two moments, and holding them apart is how the two
+        // controllers' copied role checks drifted.
+        \Illuminate\Support\Facades\Gate::policy(
+            \App\Modules\ProcurementStores\Models\Requisition::class,
+            \App\Modules\ProcurementStores\Policies\PurchasePolicy::class,
+        );
+        \Illuminate\Support\Facades\Gate::policy(
+            \App\Modules\ProcurementStores\Models\PurchaseOrder::class,
+            \App\Modules\ProcurementStores\Policies\PurchasePolicy::class,
+        );
+
         // Route model binding
         Route::bind('enquiry', function ($value) {
             return \App\Models\ProjectEnquiry::findOrFail($value);

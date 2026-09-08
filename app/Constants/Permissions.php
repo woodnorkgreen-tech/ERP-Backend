@@ -230,6 +230,20 @@ class Permissions
     const PROCUREMENT_VENDORS_MANAGE = 'procurement.vendors.manage';
     const PROCUREMENT_QUOTATIONS_MANAGE = 'procurement.quotations.manage';
 
+    // Who may agree to a purchase.
+    //
+    // This is the ONE approval a purchase now needs, so it is held as a
+    // permission rather than a role list. Both controllers used to ask
+    // `in_array($role, ['Super Admin','Admin','Accounts'])` in a private method
+    // copied between them, which meant widening the approver pool was a code
+    // change and nobody could see from the admin screens who held the power.
+    //
+    // The order permission exists for the exception, not the rule: an order
+    // covered by its own approved requisition approves itself, and only one
+    // that outgrew its requisition or never had one reaches a person.
+    const PROCUREMENT_REQUISITIONS_APPROVE = 'procurement.requisitions.approve';
+    const PROCUREMENT_ORDERS_APPROVE = 'procurement.orders.approve';
+
     // Materials master and physical Stores custody
     const MATERIALS_LIBRARY_VIEW = 'materials_library.view';
     const MATERIALS_LIBRARY_MANAGE = 'materials_library.manage';
@@ -423,6 +437,7 @@ class Permissions
             // Procurement Permissions
             self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
             self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
+            self::PROCUREMENT_REQUISITIONS_APPROVE, self::PROCUREMENT_ORDERS_APPROVE,
             self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
             self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW,
 
@@ -544,6 +559,7 @@ class Permissions
             'procurement' => [
                 self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
                 self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
+                self::PROCUREMENT_REQUISITIONS_APPROVE, self::PROCUREMENT_ORDERS_APPROVE,
             ],
             'materials_stores' => [
                 self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
