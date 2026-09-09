@@ -4,7 +4,7 @@ namespace Tests\Feature\PettyCash;
 
 use App\Constants\Permissions;
 use App\Models\User;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -48,12 +48,12 @@ class PettyCashReportsTest extends TestCase
         ])->id;
     }
 
-    private function disbursement(array $overrides = []): PettyCashDisbursement
+    private function disbursement(array $overrides = []): Payment
     {
-        return PettyCashDisbursement::create(array_merge([
+        return Payment::create(array_merge([
             'top_up_id' => $this->topUpId,
             'amount' => 1000.00,
-            'receiver' => 'Bolt',
+            'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
             'description' => 'Site transport',
             'classification' => 'operations',

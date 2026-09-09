@@ -19,10 +19,22 @@ use Illuminate\Foundation\Events\Dispatchable;
  *
  * Carries the task id, not the model: the listener is queued and needs the
  * budget as it stands when it runs, not a snapshot from when it was raised.
+ *
+ * The actor IS a snapshot, deliberately. Who moved a budget is a fact about the
+ * moment it was moved, and it cannot be recovered later: the listener runs on a
+ * queue worker where `auth()` is empty. Nullable because the machine paths —
+ * the materials-list sync, the backfill command — have no person behind them,
+ * and recording a null actor is more honest than attributing it to whoever
+ * happened to trigger the job.
  */
 class BudgetLinesChanged
 {
     use Dispatchable;
 
-    public function __construct(public int $budgetTaskId) {}
+    public function __construct(
+        public int $budgetTaskId,
+        public ?int $actorId = null,
+    ) {
+        $this->actorId ??= auth()->id();
+    }
 }

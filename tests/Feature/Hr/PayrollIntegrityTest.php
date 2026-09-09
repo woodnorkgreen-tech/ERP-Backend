@@ -162,7 +162,13 @@ class PayrollIntegrityTest extends TestCase
             $posting->postPayment($run->fresh(), PaymentSource::firstOrFail(), '2026-08-31', 'INACTIVE-BANK');
             $this->fail('An inactive bank account accepted a payroll payment.');
         } catch (\InvalidArgumentException $exception) {
-            $this->assertStringContainsString('active postable accounts', $exception->getMessage());
+            // Wording moved when payroll stopped writing journals itself and
+            // started handing its legs to JournalPostingService (2026-09-08).
+            // The rule is unchanged and is now enforced for every document
+            // rather than only this one; what this test cares about is that an
+            // inactive bank is refused and nothing partial survives, which the
+            // two assertions below prove.
+            $this->assertStringContainsString('non-postable account', $exception->getMessage());
         }
         $this->assertNull($run->fresh()->payment_journal_entry_id);
         $this->assertDatabaseCount('journal_entries', 1);

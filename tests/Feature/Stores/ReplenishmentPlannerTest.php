@@ -192,6 +192,9 @@ class ReplenishmentPlannerTest extends TestCase
         $this->assertSame('urgent', $row['urgency']);
         $this->assertSame(-65.0, $row['projected_position']);
         $this->assertSame(65.0, $row['suggested_quantity']);
+        $this->assertCount(1, $row['demand_sources']);
+        $this->assertSame('WNG-REP-001', $row['demand_sources'][0]['project_code']);
+        $this->assertSame(85.0, $row['demand_sources'][0]['pending']);
     }
 
     /** Ordering the same shortfall twice is the failure this must not have. */
@@ -354,5 +357,55 @@ class ReplenishmentPlannerTest extends TestCase
         $this->postJson('/api/procurement-stores/replenishment-suggestions/draft-requisition', [
             'items' => [],
         ])->assertStatus(422);
+    }
+
+    public function test_automatic_priority_only_considers_selected_materials(): void
+    {
+        $urgent = $this->material('Urgent board', onHand: 0);
+        $this->specify($urgent, 10);
+        $buffer = $this->material('Buffer screws', onHand: 5, minimum: 10);
+        $department = Department::create(['name' => 'Stores', 'code' => 'STO']);
+
+        $response = $this->postJson('/api/procurement-stores/replenishment-suggestions/draft-requisition', [
+            'department_id' => $department->id,
+            'items' => [['material_id' => $buffer->id, 'quantity' => 5]],
+        ])->assertCreated();
+
+        $this->assertSame('normal', Requisition::findOrFail($response->json('data.id'))->urgency);
+    }
+
+    public function test_existing_requests_are_visible_without_reducing_the_shortage(): void
+    {
+        $material = $this->material('Board', onHand: 0);
+        $this->specify($material, 10);
+        $department = Department::create(['name' => 'Stores', 'code' => 'STO']);
+        $draft = $this->postJson('/api/procurement-stores/replenishment-suggestions/draft-requisition', [
+            'department_id' => $department->id,
+            'items' => [['material_id' => $material->id, 'quantity' => 8]],
+        ])->assertCreated();
+
+        $row = $this->getJson('/api/procurement-stores/replenishment-suggestions')->assertOk()->json('data.0');
+        $this->assertSame(10.0, (float) $row['suggested_quantity']);
+        $this->assertCount(1, $row['active_requests']);
+        $this->assertSame($draft->json('data.id'), $row['active_requests'][0]['id']);
+        $this->assertSame(8.0, (float) $row['active_requests'][0]['quantity']);
+
+        Requisition::findOrFail($draft->json('data.id'))->update(['status' => 'rejected']);
+        $this->getJson('/api/procurement-stores/replenishment-suggestions')->assertOk()
+            ->assertJsonCount(0, 'data.0.active_requests');
+    }
+
+    public function test_duplicate_material_lines_are_rejected_instead_of_silently_overwritten(): void
+    {
+        $material = $this->material('Board', onHand: 0);
+        $department = Department::create(['name' => 'Stores', 'code' => 'STO']);
+        $this->postJson('/api/procurement-stores/replenishment-suggestions/draft-requisition', [
+            'department_id' => $department->id,
+            'items' => [
+                ['material_id' => $material->id, 'quantity' => 8],
+                ['material_id' => $material->id, 'quantity' => 4],
+            ],
+        ])->assertStatus(422);
+        $this->assertSame(0, Requisition::count());
     }
 }

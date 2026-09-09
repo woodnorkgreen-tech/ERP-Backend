@@ -256,6 +256,9 @@ class RequisitionController extends Controller
             'first_item'        => $input['items'][0] ?? null,
         ]);
 
+        // After the log, so that stays a record of what the client actually sent.
+        $input = $this->nameLines($input);
+
         $validator = Validator::make($input, [
             'date'                       => 'required|date',
             'requested_by_type'          => 'required|in:project,office,employee',
@@ -275,8 +278,17 @@ class RequisitionController extends Controller
             'items.*.budget_item_persistent_id' => 'nullable|string',
             'items.*.material_id'        => 'nullable|exists:library_materials,id',
             'items.*.expense_code_id'    => 'nullable|integer|exists:expense_codes,id',
-            // Either material_id must be present OR custom_description must be provided
-            'items.*.custom_description' => 'nullable|string',
+            /*
+             * Either the line points at a catalogue material or it says what it
+             * is — checked against the derived name above, so a project line
+             * that carries its name in the budget snapshot passes on that.
+             *
+             * Enforced here and not on update(): update() deletes and recreates
+             * every line, so the same rule there would re-validate history and
+             * make any requisition holding one unnamed legacy line permanently
+             * uneditable, failing on a field the requester cannot see.
+             */
+            'items.*.custom_description' => 'required_without:items.*.material_id|nullable|string',
             'items.*.quantity'           => 'required|numeric|gt:0',
             'items.*.unit_price'         => 'required|numeric|min:0',
             'items.*.internal_budget_unit_price' => 'nullable|numeric|min:0',
@@ -337,7 +349,6 @@ class RequisitionController extends Controller
             foreach ($items as $item) {
                 $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null);
                 $item['total'] = $item['quantity'] * $item['unit_price'];
-                $item['custom_description'] = $item['custom_description'] ?? null;
                 $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
                     $input['requested_by_type'] === 'project'
                         ? $this->enquiryIdForProject($input['project_id'] ?? null)
@@ -392,6 +403,16 @@ class RequisitionController extends Controller
         }
 
         $input = $request->all();
+
+        /*
+         * Named the same way store() names a line, so an edit cannot quietly
+         * strip a description store() derived. Not paired with store()'s rule,
+         * though: the loop below deletes and recreates every line, so demanding
+         * a name here would re-judge history and trap any requisition holding
+         * an unnamed legacy line. Deriving still means no unnamed line can be
+         * written; it just does not refuse to save the ones already there.
+         */
+        $input = $this->nameLines($input);
 
         $validator = Validator::make($input, [
             'date'               => 'date',
@@ -582,6 +603,80 @@ class RequisitionController extends Controller
         }
 
         return Project::whereKey($projectId)->value('enquiry_id') ?: null;
+    }
+
+    /**
+     * The words a line without a catalogue material is bought on.
+     *
+     * A line has to be able to say what was asked for. With no `material_id`
+     * the description is the only thing standing between the requisition and a
+     * row that reads as nothing everywhere downstream — the approver's list,
+     * the order raised from it, the bill matched against that order.
+     *
+     * It derives rather than only demanding, because project-sourced lines keep
+     * their name somewhere else. They are built from a budget element and carry
+     * it in `procurement_item_snapshot`, so a missing `custom_description`
+     * there means the name is recoverable, not absent. That is the same
+     * reasoning — and the same snapshot — that `purpose` already falls back to
+     * when a project line arrives without one.
+     *
+     * Returns null only when the line genuinely names nothing, which is what
+     * lets store()'s rule reject exactly that and nothing else.
+     */
+    private function lineDescription(array $item): ?string
+    {
+        // Runs before validation, so nothing here may assume a shape: an array
+        // where a string belongs must come back as "no name" for the rules to
+        // reject, never as a warning or a line named "Array".
+        $text = static fn ($value) => is_scalar($value) ? trim((string) $value) : '';
+
+        $written = $text($item['custom_description'] ?? null);
+
+        if ($written !== '') {
+            return $written;
+        }
+
+        // A catalogue line is named by its material; it needs nothing here.
+        if (! empty($item['material_id'])) {
+            return null;
+        }
+
+        $snapshot = is_array($item['procurement_item_snapshot'] ?? null)
+            ? $item['procurement_item_snapshot']
+            : [];
+
+        foreach (['description', 'elementName'] as $key) {
+            $derived = $text($snapshot[$key] ?? null);
+
+            if ($derived !== '') {
+                return $derived;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Fill in each line's name before the rules are applied to it.
+     *
+     * Normalising ahead of validation rather than after is what lets one rule
+     * demand a name without rejecting the lines that hold theirs in the budget
+     * snapshot instead of in the field.
+     */
+    private function nameLines(array $input): array
+    {
+        if (! is_array($input['items'] ?? null)) {
+            return $input;
+        }
+
+        $input['items'] = array_map(
+            fn ($item) => is_array($item)
+                ? array_merge($item, ['custom_description' => $this->lineDescription($item)])
+                : $item,
+            $input['items']
+        );
+
+        return $input;
     }
 
     private function buyingUomId(mixed $materialId): ?int

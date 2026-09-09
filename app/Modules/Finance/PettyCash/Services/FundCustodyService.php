@@ -3,7 +3,7 @@
 namespace App\Modules\Finance\PettyCash\Services;
 
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use Carbon\Carbon;
@@ -30,7 +30,7 @@ class FundCustodyService
                 'reference' => 'PCF-'.str_pad((string) $topUp->id, 6, '0', STR_PAD_LEFT),
                 'date' => $topUp->date_topped_up?->toDateString(),
                 'source' => $topUp->payment_method,
-                'transaction_code' => $topUp->transaction_code,
+                'external_reference' => $topUp->external_reference,
                 'description' => $topUp->description,
                 'custodian' => $topUp->creator?->name,
                 'received' => $received,
@@ -43,7 +43,7 @@ class FundCustodyService
         })->values();
 
         // Archiving is a presentation state, never a financial reversal.
-        $period = PettyCashDisbursement::query()->active()
+        $period = Payment::query()->active()
             ->whereBetween('date_disbursed', [$start->toDateString(), $end->toDateString()]);
         $periodSpent = (float) (clone $period)->sum(DB::raw('amount + COALESCE(transaction_cost, 0)'));
         $periodCount = (clone $period)->count();
@@ -80,10 +80,10 @@ class FundCustodyService
                 || $batch['remaining'] < 0
             )->values(),
             'largest_payments' => (clone $period)->orderByRaw('(amount + COALESCE(transaction_cost, 0)) desc')->limit(5)
-                ->get(['id', 'receiver', 'description', 'date_disbursed', 'amount', 'transaction_cost'])
+                ->get(['id', 'payee_name', 'description', 'date_disbursed', 'amount', 'transaction_cost'])
                 ->map(fn ($payment) => [
                     'id' => $payment->id,
-                    'receiver' => $payment->receiver,
+                    'payee_name' => $payment->payee_name,
                     'description' => $payment->description,
                     'date' => $payment->date_disbursed?->toDateString(),
                     'total' => round((float) $payment->amount + (float) $payment->transaction_cost, 2),
@@ -117,15 +117,15 @@ class FundCustodyService
     private function paymentSlices(): Collection
     {
         $allocated = DB::table('petty_cash_disbursement_allocations as a')
-            ->join('petty_cash_disbursements as d', 'd.id', '=', 'a.disbursement_id')
+            ->join('payments as d', 'd.id', '=', 'a.disbursement_id')
             ->where('d.status', 'active')
-            ->selectRaw("a.top_up_id, d.id as disbursement_id, d.date_disbursed as date, d.receiver, d.description, d.classification, d.project_name, d.requisition_id, a.amount, a.transaction_cost, (a.amount + COALESCE(a.transaction_cost, 0)) as total")
+            ->selectRaw("a.top_up_id, d.id as disbursement_id, d.date_disbursed as date, d.payee_name, d.description, d.classification, d.project_name, d.requisition_id, a.amount, a.transaction_cost, (a.amount + COALESCE(a.transaction_cost, 0)) as total")
             ->get();
 
-        $direct = DB::table('petty_cash_disbursements as d')
+        $direct = DB::table('payments as d')
             ->where('d.status', 'active')->whereNotNull('d.top_up_id')
             ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('petty_cash_disbursement_allocations as a')->whereColumn('a.disbursement_id', 'd.id'))
-            ->selectRaw("d.top_up_id, d.id as disbursement_id, d.date_disbursed as date, d.receiver, d.description, d.classification, d.project_name, d.requisition_id, d.amount, COALESCE(d.transaction_cost, 0) as transaction_cost, (d.amount + COALESCE(d.transaction_cost, 0)) as total")
+            ->selectRaw("d.top_up_id, d.id as disbursement_id, d.date_disbursed as date, d.payee_name, d.description, d.classification, d.project_name, d.requisition_id, d.amount, COALESCE(d.transaction_cost, 0) as transaction_cost, (d.amount + COALESCE(d.transaction_cost, 0)) as total")
             ->get();
 
         return $allocated->concat($direct)->map(fn ($row) => (array) $row);
@@ -133,7 +133,7 @@ class FundCustodyService
 
     private function timeline(Carbon $start, Carbon $end, string $grain): array
     {
-        $rows = PettyCashDisbursement::query()->active()
+        $rows = Payment::query()->active()
             ->whereBetween('date_disbursed', [$start->toDateString(), $end->toDateString()])->get();
 
         $grouped = $rows->groupBy(function ($row) use ($grain) {

@@ -6,6 +6,7 @@ use App\Modules\Finance\CostCollector\Services\MaterialExpenseCodeResolver;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
+use App\Modules\ProcurementStores\Models\RequisitionItem;
 use Illuminate\Support\Collection;
 
 /**
@@ -52,7 +53,8 @@ class ReplenishmentPlanner
      */
     public function suggestions(): Collection
     {
-        $demandByMaterial = $this->demand->pendingByMaterial();
+        $demandLines = $this->demand->pendingLines()->groupBy('library_material_id');
+        $demandByMaterial = $demandLines->map(fn (Collection $lines) => (float) $lines->sum('pending'))->all();
 
         // Two populations, because there are two reasons to buy: something a
         // job is waiting for, and something the store is meant to keep. A
@@ -71,8 +73,20 @@ class ReplenishmentPlanner
 
         $incoming = $this->incomingByMaterial($candidateIds->all());
         $boardsAvailable = $this->boardsAvailableFor($materials);
+        $activeRequests = RequisitionItem::query()
+            ->whereIn('material_id', $candidateIds)
+            ->whereHas('requisition', fn ($query) => $query->whereIn('status', ['draft', 'pending_approval', 'approved']))
+            ->with('requisition:id,requisition_number,status')
+            ->get()
+            ->groupBy('material_id')
+            ->map(fn (Collection $items) => $items->groupBy('requisition_id')->map(fn (Collection $lines) => [
+                'id' => $lines->first()->requisition_id,
+                'requisition_number' => $lines->first()->requisition->requisition_number,
+                'status' => $lines->first()->requisition->status,
+                'quantity' => (float) $lines->sum('quantity'),
+            ])->values()->all());
 
-        return $materials->map(function (LibraryMaterial $material) use ($demandByMaterial, $incoming, $boardsAvailable) {
+        return $materials->map(function (LibraryMaterial $material) use ($demandByMaterial, $demandLines, $incoming, $boardsAvailable, $activeRequests) {
             $reserved = (float) ($material->stock?->quantity_reserved ?? 0);
 
             // A board-tracked material's truth is the count of physical boards
@@ -115,6 +129,9 @@ class ReplenishmentPlanner
                 'urgency' => $projected < 0 ? 'urgent' : 'normal',
                 'unit_price' => round($this->indicativePrice($material), 2),
                 'expense_code_id' => $this->expenseCodeIdFor($material),
+                // Requests are context for the buyer, not committed incoming stock.
+                'active_requests' => $activeRequests->get($material->id, []),
+                'demand_sources' => $demandLines->get($material->id, collect())->values()->all(),
             ];
         })
             ->filter()

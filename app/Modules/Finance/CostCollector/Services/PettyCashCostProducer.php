@@ -6,7 +6,8 @@ use App\Models\ProjectEnquiry;
 use App\Modules\Finance\CostCollector\Contracts\CostContext;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 
@@ -26,6 +27,7 @@ class PettyCashCostProducer
 {
     public function __construct(
         private CostCollectorService $collector,
+        private JournalPostingService $journalPosting,
     ) {}
 
     /**
@@ -34,16 +36,20 @@ class PettyCashCostProducer
      * this run can influence a later chunk's window. A cursor takes one stable
      * result set up front and is not exposed to that.
      *
-     * @return array{examined: int, posted: int, skipped_no_job: int, skipped_unmatched: int, skipped_inactive: int}
+     * @return array{examined: int, posted: int, skipped_no_job: int, skipped_unmatched: int, skipped_inactive: int, skipped_supplier_settlement: int}
      */
     public function backfill(): array
     {
+        // Every outcome postFor() can return needs a counter here. Supplier
+        // settlements were missing one, so a backfill over a database with any
+        // of them incremented an undefined key.
         $tally = [
             'examined' => 0, 'posted' => 0,
             'skipped_no_job' => 0, 'skipped_unmatched' => 0, 'skipped_inactive' => 0,
+            'skipped_supplier_settlement' => 0,
         ];
 
-        foreach (PettyCashDisbursement::query()->orderBy('id')->cursor() as $disbursement) {
+        foreach (Payment::query()->orderBy('id')->cursor() as $disbursement) {
             $tally['examined']++;
             $tally[$this->postFor($disbursement)]++;
         }
@@ -51,8 +57,8 @@ class PettyCashCostProducer
         return $tally;
     }
 
-    /** @return 'posted'|'skipped_no_job'|'skipped_unmatched'|'skipped_inactive' */
-    public function postFor(PettyCashDisbursement $disbursement): string
+    /** @return 'posted'|'skipped_no_job'|'skipped_unmatched'|'skipped_inactive'|'skipped_supplier_settlement' */
+    public function postFor(Payment $disbursement): string
     {
         // A voided or archived payment is not a project cost. Voids already have
         // a reversing entry on the cash ledger; mirroring them here would post a
@@ -60,6 +66,16 @@ class PettyCashCostProducer
         if ($disbursement->status !== 'active' || $disbursement->is_archived) {
             return 'skipped_inactive';
         }
+
+        // The transfer charge, before any of the attribution below.
+        //
+        // It is an overhead of banking, not a cost of whatever the payment was
+        // for, so it posts straight to the GL against 7800 and never touches a
+        // project. Running it here — above the supplier-settlement and
+        // no-job-number returns — is the point: those two returns are the common
+        // case, and while the fee was a job cost line at the bottom of this
+        // method, most fees were skipped along with them and reached no ledger.
+        $this->journalPosting->postPaymentFee($disbursement);
 
         // The promise is discharged the moment the cash leaves, whether or not
         // the payment can be attributed to a job below. Releasing here — after
@@ -109,6 +125,8 @@ class PettyCashCostProducer
             return 'skipped_unmatched';
         }
 
+        $exception = $disbursement->requisition?->budget_exception ?: [];
+
         $this->collector->postFromSource(
             new CostContext(
                 expenseCode: (string) ($disbursement->expenseCode?->code ?? ''),
@@ -117,13 +135,24 @@ class PettyCashCostProducer
                 enquiryId: $enquiry->id,
                 jobNumber: $disbursement->job_number,
                 consumesLineId: $disbursement->planned_cost_line_id,
-                sourceType: PettyCashDisbursement::class,
+                sourceType: Payment::class,
                 sourceId: $disbursement->id,
                 taxAmount: (string) ($disbursement->tax_amount ?? '0'),
                 incurredAt: (string) ($disbursement->date_disbursed ?? $disbursement->created_at),
-                payeeName: $disbursement->receiver,
+                payeeName: $disbursement->payee_name,
                 description: $disbursement->description,
                 details: array_filter([
+                    // The justification follows the money.
+                    //
+                    // A requisition approved past the project budget carries its
+                    // authorisation on the commitment. Paying it RELEASES that
+                    // commitment and posts this actual in its place — so without
+                    // this the explanation would be reversed away at exactly the
+                    // moment the cash left, and the cost account's Unbudgeted
+                    // panel would show an unexplained overrun where a minute
+                    // earlier it showed an authorised one.
+                    'unbudgeted_reason' => $exception['reason'] ?? null,
+                    'budget_exception_log_id' => $exception['governance_log_id'] ?? null,
                     // The only classification these 1,554 rows carry: a free-text
                     // account name from the retired chart. Kept verbatim so the
                     // lines can be mapped to expense codes once the catalogue is
@@ -134,36 +163,17 @@ class PettyCashCostProducer
                     'transaction_cost' => $disbursement->transaction_cost,
                     'payment_source_id' => $disbursement->payment_source_id,
                     'payment_method' => $disbursement->payment_method,
-                    'transaction_code' => $disbursement->transaction_code,
+                    'external_reference' => $disbursement->external_reference,
                     'venue' => $disbursement->venue,
                 ]),
             ),
             ['site' => $disbursement->venue],
         );
 
-        if (bccomp((string) ($disbursement->transaction_cost ?? '0'), '0', 2) === 1) {
-            $this->collector->postFromSource(
-                new CostContext(
-                    expenseCode: 'OE-FIN-001',
-                    amount: (string) $disbursement->transaction_cost,
-                    nature: CostLine::NATURE_ACTUAL,
-                    enquiryId: $enquiry->id,
-                    jobNumber: $disbursement->job_number,
-                    sourceType: PettyCashDisbursement::class,
-                    sourceId: $disbursement->id,
-                    sourceRef: 'transaction-fee',
-                    taxAmount: '0',
-                    incurredAt: (string) ($disbursement->date_disbursed ?? $disbursement->created_at),
-                    payeeName: $disbursement->paymentSource?->name ?: 'Payment provider',
-                    description: 'Transaction fee: ' . $disbursement->description,
-                    details: array_filter([
-                        'related_payment_reference' => $disbursement->transaction_code,
-                        'payment_source_id' => $disbursement->payment_source_id,
-                    ]),
-                ),
-                ['site' => $disbursement->venue],
-            );
-        }
+        // The fee is not posted here. It was charged to this job under
+        // OE-FIN-001 until Sept 2026; it is now an overhead journal raised at
+        // the top of this method, for every payment rather than only the
+        // job-attributable ones.
 
         return 'posted';
     }
@@ -214,6 +224,8 @@ class PettyCashCostProducer
             return 'skipped_office_code';
         }
 
+        $exception = $requisition->budget_exception ?: [];
+
         $this->collector->postFromSource(
             new CostContext(
                 // The requisition type names the form; the expense code it
@@ -247,6 +259,15 @@ class PettyCashCostProducer
                     'requisition_number' => $requisition->requisition_number,
                     'requisition_type' => $requisition->requisitionType?->name,
                     'venue' => $requisition->venue,
+                    // A requisition approved past the project budget carries the
+                    // authorization with it. `unbudgeted_reason` is the field the
+                    // cost account's Unbudgeted panel already renders — this line
+                    // has no consumes_line_id, so it lands there either way, and
+                    // the difference between a same-day explanation and a
+                    // close-out mystery is whether the reason travelled with it.
+                    'unbudgeted_reason' => $exception['reason'] ?? null,
+                    'budget_exception_funding_source' => $exception['funding_source'] ?? null,
+                    'budget_exception_log_id' => $exception['governance_log_id'] ?? null,
                 ]),
             ),
             ['site' => $requisition->venue],
@@ -287,7 +308,7 @@ class PettyCashCostProducer
      * call more than once: releaseCommitment() only acts on a line that is
      * still an open commitment.
      */
-    private function releaseRequisitionCommitment(PettyCashDisbursement $disbursement): void
+    private function releaseRequisitionCommitment(Payment $disbursement): void
     {
         if (! $disbursement->requisition_id) {
             return;

@@ -78,6 +78,8 @@ class FinanceService
 
     public function verifyPayment(EnquiryPayment $payment, int $userId): EnquiryPayment
     {
+        return DB::transaction(function () use ($payment, $userId) {
+        $payment = EnquiryPayment::query()->lockForUpdate()->findOrFail($payment->id);
         if ($payment->reversed_at || $payment->status === 'reversed') {
             throw new \DomainException('A reversed receipt cannot be verified.');
         }
@@ -98,8 +100,28 @@ class FinanceService
             );
         }
 
-        return DB::transaction(function () use ($payment, $userId, $isSelfVerification) {
             $payment->update(['status' => 'verified', 'verified_at' => now(), 'verified_by' => $userId]);
+
+            /*
+             * The cash arriving reaches the ledger here, and only here.
+             *
+             * Verification rather than capture is the right moment: recording it
+             * when somebody first types it in would put unconfirmed money in the
+             * bank account, and this step exists precisely because a payment
+             * claim and a payment are not the same thing.
+             *
+             * Debit the account the money landed in, credit Client Deposits — a
+             * LIABILITY, because money received before the work is invoiced is
+             * money WNG would have to give back. Crediting revenue here instead
+             * would book profit on a job nobody has started; revenue is
+             * recognised when the invoice is issued.
+             *
+             * Inside the same transaction as the status change, so a verified
+             * receipt cannot exist without its entry.
+             */
+            app(\App\Modules\Finance\Services\ReceivablesPostingService::class)
+                ->postClientReceipt($payment, $userId);
+
             \App\Models\GovernanceAuditLog::create([
                 'project_enquiry_id' => $payment->project_enquiry_id,
                 'user_id' => $userId,
@@ -153,11 +175,17 @@ class FinanceService
      */
     public function updatePayment(EnquiryPayment $payment, array $data, string $reason): EnquiryPayment
     {
-        if ($payment->reversed_at) {
-            throw new \DomainException('A reversed receipt cannot be edited. Record a new receipt instead.');
-        }
-
         return DB::transaction(function () use ($payment, $data, $reason) {
+            $payment = EnquiryPayment::query()->lockForUpdate()->findOrFail($payment->id);
+            if ($payment->reversed_at || $payment->status === 'reversed') {
+                throw new \DomainException('A reversed receipt cannot be edited. Record a new receipt instead.');
+            }
+            if ($payment->journal_entry_id) {
+                throw new \DomainException('This receipt has already reached the general ledger. Reverse it and record a replacement so the original amount and correction remain traceable.');
+            }
+            if (DB::table('project_invoice_allocations')->where('enquiry_payment_id', $payment->id)->exists()) {
+                throw new \DomainException('This receipt is allocated to an invoice and cannot be edited. Its invoice allocation must be corrected first.');
+            }
             if ($payment->client_receipt_id) {
                 $receipt = ClientReceipt::query()->lockForUpdate()->findOrFail($payment->client_receipt_id);
                 $otherAllocations = (float) $receipt->allocations()
@@ -203,11 +231,25 @@ class FinanceService
      */
     public function deletePayment(EnquiryPayment $payment, string $reason): bool
     {
-        if ($payment->reversed_at) {
-            throw new \DomainException('This receipt has already been reversed.');
-        }
-
         return DB::transaction(function () use ($payment, $reason) {
+            $payment = EnquiryPayment::query()->lockForUpdate()->findOrFail($payment->id);
+            if ($payment->reversed_at || $payment->status === 'reversed') {
+                throw new \DomainException('This receipt has already been reversed.');
+            }
+            if (DB::table('project_invoice_allocations')->where('enquiry_payment_id', $payment->id)->exists()) {
+                throw new \DomainException('This receipt is allocated to an invoice and cannot be reversed. Its invoice allocation must be corrected first.');
+            }
+            if ($payment->journal_entry_id) {
+                try {
+                    app(\App\Modules\Finance\Services\JournalPostingService::class)->reverseEntry(
+                        \App\Modules\Finance\Models\JournalEntry::findOrFail($payment->journal_entry_id),
+                        Auth::id(),
+                        $reason,
+                    );
+                } catch (\InvalidArgumentException $exception) {
+                    throw new \DomainException($exception->getMessage(), previous: $exception);
+                }
+            }
             \App\Models\GovernanceAuditLog::create([
                 'project_enquiry_id' => $payment->project_enquiry_id,
                 'user_id' => Auth::id(),

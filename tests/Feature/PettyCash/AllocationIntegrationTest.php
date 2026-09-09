@@ -44,7 +44,7 @@ class AllocationIntegrationTest extends TestCase
             'payment_source_id' => DB::table('payment_sources')->where('code', 'PC-MAIN')->value('id'),
             'amount' => 120.00,
             'transaction_cost' => 3.00,
-            'receiver' => 'Integration Test',
+            'payee_name' => 'Integration Test',
             'account' => 'acct',
             'description' => 'Allocation split test',
             'classification' => 'other',

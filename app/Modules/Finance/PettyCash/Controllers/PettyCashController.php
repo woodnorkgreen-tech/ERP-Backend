@@ -3,7 +3,7 @@
 namespace App\Modules\Finance\PettyCash\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\DirectDisbursementRequest;
 use App\Constants\Permissions;
 use App\Modules\Finance\PettyCash\Requests\CreateDisbursementRequest;
@@ -95,10 +95,16 @@ class PettyCashController extends Controller
                     ->orderBy('sort_order')->orderBy('expense_type')->get([
                         'id', 'code', 'expense_family', 'expense_type', 'job_id_rule', 'key_control',
                     ]),
+                // Each account carries the methods it usually pays through, so
+                // the form can offer a shortlist without deciding for the user.
+                // The full method list comes from /finance/payment-methods.
                 'payment_sources' => \App\Modules\Finance\Models\PaymentSource::query()
                     ->where('is_active', true)
                     ->whereIn('type', ['petty_cash', 'bank', 'mobile_money', 'card'])
-                    ->orderBy('name')->get(['id', 'code', 'name', 'type', 'currency']),
+                    ->orderBy('name')->get(['id', 'code', 'name', 'type', 'currency'])
+                    ->map(fn ($source) => $source->toArray() + [
+                        'typical_methods' => \App\Modules\Finance\Support\PaymentMethods::TYPICAL_FOR_SOURCE_TYPE[$source->type] ?? [],
+                    ]),
             ],
         ]);
     }
@@ -145,7 +151,7 @@ class PettyCashController extends Controller
         $baseQuery = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::query();
 
         $user = Auth::user();
-        if ($user && !$user->can('viewAllRequisitions', PettyCashDisbursement::class)) {
+        if ($user && !$user->can('viewAllRequisitions', Payment::class)) {
             $baseQuery->where('user_id', $user->id);
         }
 
@@ -313,7 +319,7 @@ class PettyCashController extends Controller
                     $this->service->logActivity(
                         'submitted', 'direct_disbursement_request', $directRequest->id,
                         'Exceptional direct payment submitted for approval',
-                        ['amount' => $validated['amount'], 'receiver' => $validated['receiver']],
+                        ['amount' => $validated['amount'], 'payee_name' => $validated['payee_name']],
                     );
                 }
 
@@ -342,7 +348,7 @@ class PettyCashController extends Controller
                 'message' => ($result['replayed'] ?? false)
                     ? 'Disbursement already processed'
                     : 'Disbursement created successfully',
-                'data' => $disbursement->load('topUp', 'creator'),
+                'data' => $disbursement->load('topUp', 'creator', 'paymentSource'),
                 'replayed' => (bool) ($result['replayed'] ?? false),
             ], ($result['replayed'] ?? false) ? 200 : 201);
         } catch (Exception $e) {
@@ -409,7 +415,7 @@ class PettyCashController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Direct payment approved and disbursed',
-            'data' => $result['data']->load('topUp', 'creator'),
+            'data' => $result['data']->load('topUp', 'creator', 'paymentSource'),
         ]);
     }
 
@@ -494,68 +500,13 @@ class PettyCashController extends Controller
         }
     }
 
-    /**
-     * Update the specified disbursement.
-     */
-    public function update(Request $request, int $id): JsonResponse
-    {
-        if (!Auth::user()?->can('update', PettyCashDisbursement::class)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'You do not have permission to update a disbursement.',
-            ], 403);
-        }
-
-        try {
-            $disbursement = $this->repository->findDisbursement($id);
-
-            if (!$disbursement) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Disbursement not found',
-                ], 404);
-            }
-
-            // Check if disbursement can be updated
-            if ($disbursement->is_voided) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Cannot update voided disbursement',
-                ], 400);
-            }
-
-            // Validate the request data (pass true for isUpdate and the ID to support partial updates and correct balance checks)
-            $validationErrors = $this->service->validateDisbursementData($request->all(), true, $id);
-            if (!empty($validationErrors)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validationErrors,
-                ], 422);
-            }
-
-            $updatedDisbursement = $this->service->updateDisbursement($disbursement, $request->all());
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Disbursement updated successfully',
-                'data' => $updatedDisbursement->load('topUp', 'creator'),
-            ]);
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to update disbursement',
-                'error' => $e->getMessage(),
-            ], 400);
-        }
-    }
 
     /**
      * Void the specified disbursement.
      */
     public function void(Request $request, int $id): JsonResponse
     {
-        if (!Auth::user()?->can('void', PettyCashDisbursement::class)) {
+        if (!Auth::user()?->can('void', Payment::class)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to void a disbursement.',
@@ -582,7 +533,7 @@ class PettyCashController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Disbursement voided successfully',
-                'data' => $disbursement->fresh()->load('topUp', 'creator', 'voidedBy'),
+                'data' => $disbursement->fresh()->load('topUp', 'creator', 'voidedBy', 'paymentSource'),
             ]);
         } catch (Exception $e) {
             return response()->json([
@@ -593,71 +544,7 @@ class PettyCashController extends Controller
         }
     }
 
-    /**
-     * Delete the specified disbursement.
-     */
-    public function destroy(int $id): JsonResponse
-    {
-        if (!Auth::user()?->can('delete', PettyCashDisbursement::class)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'You do not have permission to delete a disbursement.',
-            ], 403);
-        }
 
-        try {
-            $disbursement = $this->repository->findDisbursement($id);
-
-            if (!$disbursement) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Disbursement not found',
-                ], 404);
-            }
-
-            $this->service->deleteDisbursement($disbursement);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Disbursement deleted successfully',
-            ]);
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to delete disbursement',
-                'error' => $e->getMessage(),
-            ], 400);
-        }
-    }
-
-    /**
-     * Delete multiple disbursements.
-     */
-    public function bulkDestroy(Request $request): JsonResponse
-    {
-        if (!Auth::user()?->can('delete', PettyCashDisbursement::class)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'You do not have permission to delete a disbursement.',
-            ], 403);
-        }
-
-        $request->validate([
-            'ids' => 'required|array',
-            'ids.*' => 'exists:petty_cash_disbursements,id'
-        ]);
-
-        try {
-            $result = $this->service->bulkDeleteDisbursements($request->ids);
-            return response()->json($result);
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to perform bulk deletion',
-                'error' => $e->getMessage(),
-            ], 400);
-        }
-    }
 
     /**
      * Clear all petty cash data.
@@ -673,7 +560,7 @@ class PettyCashController extends Controller
 
         // Routed through the policy like everything else, but the policy keeps
         // this one Super-Admin-only on purpose — see PettyCashPolicy::clearAll().
-        if (!Auth::user()?->can('clearAll', PettyCashDisbursement::class)) {
+        if (!Auth::user()?->can('clearAll', Payment::class)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Only a Super Admin may clear petty cash history.',
@@ -1040,7 +927,7 @@ class PettyCashController extends Controller
             
             fclose($handle);
             
-            return response()->download($tempFile, 'petty_cash_disbursements_template.csv', [
+            return response()->download($tempFile, 'payments_template.csv', [
                 'Content-Type' => 'text/csv',
             ])->deleteFileAfterSend(true);
             
@@ -1058,7 +945,7 @@ class PettyCashController extends Controller
      */
     public function archive(Request $request, int $id): JsonResponse
     {
-        if (!Auth::user()?->can('archive', PettyCashDisbursement::class)) {
+        if (!Auth::user()?->can('archive', Payment::class)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to archive a disbursement.',
@@ -1101,7 +988,7 @@ class PettyCashController extends Controller
      */
     public function bulkArchive(Request $request): JsonResponse
     {
-        if (!Auth::user()?->can('archive', PettyCashDisbursement::class)) {
+        if (!Auth::user()?->can('archive', Payment::class)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to archive a disbursement.',
@@ -1135,7 +1022,7 @@ class PettyCashController extends Controller
      */
     public function archiveGroup(Request $request, int $id): JsonResponse
     {
-        if (!Auth::user()?->can('archive', PettyCashDisbursement::class)) {
+        if (!Auth::user()?->can('archive', Payment::class)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to archive a disbursement.',
@@ -1163,7 +1050,7 @@ class PettyCashController extends Controller
      */
     public function bulkArchiveGroups(Request $request): JsonResponse
     {
-        if (!Auth::user()?->can('archive', PettyCashDisbursement::class)) {
+        if (!Auth::user()?->can('archive', Payment::class)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to archive a disbursement.',
@@ -1197,7 +1084,7 @@ class PettyCashController extends Controller
      */
     public function getActivityLogs(Request $request): JsonResponse
     {
-        if (!Auth::user()?->can('viewActivityLogs', PettyCashDisbursement::class)) {
+        if (!Auth::user()?->can('viewActivityLogs', Payment::class)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to view petty cash activity logs.',

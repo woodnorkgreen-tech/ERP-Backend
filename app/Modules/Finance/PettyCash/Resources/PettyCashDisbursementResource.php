@@ -2,6 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Resources;
 
+use App\Modules\Finance\Support\PaymentMethods;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Auth;
@@ -19,8 +20,12 @@ class PettyCashDisbursementResource extends JsonResource
         
         return [
             'id' => $this->id,
+            // The ERP's own identifier for this payment. Before it existed the
+            // payee's M-Pesa code was the only reference a payment had.
+            'payment_no' => $this->payment_no,
+            'payment_type' => $this->payment_type,
             'top_up_id' => $this->top_up_id,
-            'receiver' => $this->receiver,
+            'payee_name' => $this->payee_name,
             'account' => $this->account,
             'expense_code_id' => $this->expense_code_id,
             'amount' => [
@@ -43,14 +48,22 @@ class PettyCashDisbursementResource extends JsonResource
                 'label' => $this->getPaymentMethodLabel(),
             ],
             'payment_source_id' => $this->payment_source_id,
+            // The account the money left, named. A list that shows only an id
+            // makes every caller look the account up again.
+            'payment_source' => $this->whenLoaded('paymentSource', fn () => [
+                'id' => $this->paymentSource->id,
+                'code' => $this->paymentSource->code,
+                'name' => $this->paymentSource->name,
+                'type' => $this->paymentSource->type,
+            ]),
             'receipt_type' => $this->receipt_type,
             'receipt_number' => $this->receipt_number,
             'tax_amount' => $this->tax_amount,
             'transaction_cost' => $this->transaction_cost,
             'direct_payment_reason' => $this->direct_payment_reason,
-            'transaction_code' => $this->when(
+            'external_reference' => $this->when(
                 $this->shouldShowTransactionCode($user),
-                $this->transaction_code
+                $this->external_reference
             ),
             'status' => [
                 'value' => $this->status,
@@ -132,16 +145,14 @@ class PettyCashDisbursementResource extends JsonResource
 
     /**
      * Get the payment method label.
+     *
+     * From PaymentMethods, not a local match(). The copy this replaced knew
+     * only cash, M-Pesa and bank transfer, so cheque, RTGS, EFT and card fell
+     * through to ucfirst() and rendered as "Rtgs" and "Eft".
      */
     private function getPaymentMethodLabel(): string
     {
-        return match ($this->payment_method) {
-            'cash' => 'Cash',
-            'mpesa' => 'M-Pesa',
-            'bank_transfer' => 'Bank Transfer',
-            'other' => 'Other',
-            default => ucfirst($this->payment_method),
-        };
+        return PaymentMethods::label((string) $this->payment_method);
     }
 
     /**

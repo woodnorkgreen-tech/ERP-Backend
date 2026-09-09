@@ -9,7 +9,7 @@ use App\Modules\Finance\CostCollector\Services\PettyCashCostProducer;
 use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
 use App\Modules\Finance\Models\ChartOfAccount;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisitionType;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
@@ -166,12 +166,12 @@ class PettyCashCommitmentTest extends TestCase
         $commitment = CostLine::where('nature', CostLine::NATURE_COMMITTED)->firstOrFail();
         $this->assertSame(CostLine::STATUS_VERIFIED, $commitment->status);
 
-        $disbursement = PettyCashDisbursement::create([
+        $disbursement = Payment::create([
             'top_up_id' => $this->topUpId,
             'requisition_id' => $requisition->id,
             'expense_code_id' => ExpenseCode::query()->value('id'),
             'amount' => 12000.00,
-            'receiver' => 'Total Kenya',
+            'payee_name' => 'Total Kenya',
             'account' => 'Cost of Sales:Site Running Costs',
             'classification' => 'operations',
             'description' => 'Fuel for the site generator',
@@ -198,11 +198,11 @@ class PettyCashCommitmentTest extends TestCase
         $this->producer->commitFor($requisition);
         $commitment = CostLine::where('nature', CostLine::NATURE_COMMITTED)->firstOrFail();
 
-        $disbursement = PettyCashDisbursement::create([
+        $disbursement = Payment::create([
             'top_up_id' => $this->topUpId,
             'requisition_id' => $requisition->id,
             'amount' => 12000.00,
-            'receiver' => 'Total Kenya',
+            'payee_name' => 'Total Kenya',
             'account' => 'Cost of Sales:Site Running Costs',
             'classification' => 'operations',
             'description' => 'Fuel',
@@ -377,7 +377,7 @@ class PettyCashCommitmentTest extends TestCase
             'expense_code_id' => $expenseCodeId,
             'payment_source_id' => $this->pettyCashSourceId(),
             'amount' => $requisition->total_amount,
-            'receiver' => 'Total Kenya',
+            'payee_name' => 'Total Kenya',
             'description' => 'Paying the request',
             'classification' => 'operations',
             'payment_method' => 'cash',

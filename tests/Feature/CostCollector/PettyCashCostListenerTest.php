@@ -12,7 +12,7 @@ use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -79,12 +79,12 @@ class PettyCashCostListenerTest extends TestCase
         ]);
     }
 
-    private function disbursement(array $overrides = []): PettyCashDisbursement
+    private function disbursement(array $overrides = []): Payment
     {
-        return PettyCashDisbursement::create(array_merge([
+        return Payment::create(array_merge([
             'top_up_id' => $this->topUpId,
             'amount' => 4500.00,
-            'receiver' => 'Bolt',
+            'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
             'description' => 'Site transport',
             'classification' => 'operations',
@@ -116,7 +116,7 @@ class PettyCashCostListenerTest extends TestCase
             'payment_source_id' => $this->paymentSourceId,
             'top_up_id' => $this->topUpId,
             'amount' => 4500.00,
-            'receiver' => 'Bolt',
+            'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
             'description' => 'Site transport',
             'classification' => 'operations',
@@ -128,7 +128,7 @@ class PettyCashCostListenerTest extends TestCase
 
         $this->assertTrue($result['success']);
 
-        $line = CostLine::where('source_type', PettyCashDisbursement::class)
+        $line = CostLine::where('source_type', Payment::class)
             ->where('source_id', $result['data']->id)
             ->first();
 
@@ -157,7 +157,7 @@ class PettyCashCostListenerTest extends TestCase
             'idempotency_key' => $key,
             'top_up_id' => $this->topUpId,
             'amount' => 4500.00,
-            'receiver' => 'Bolt',
+            'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
             'description' => 'Idempotent site transport',
             'classification' => 'operations',
@@ -173,14 +173,24 @@ class PettyCashCostListenerTest extends TestCase
         $this->assertTrue($replay['success']);
         $this->assertTrue($replay['replayed']);
         $this->assertSame($first['data']->id, $replay['data']->id);
-        $this->assertSame(1, PettyCashDisbursement::where('idempotency_key', $key)->count());
+        $this->assertSame(1, Payment::where('idempotency_key', $key)->count());
         $this->assertSame(1, DB::table('petty_cash_ledger_entries')
             ->where('reference_number', 'PCR-' . str_pad((string) $first['data']->id, 6, '0', STR_PAD_LEFT))
             ->where('type', 'debit')
             ->count());
     }
 
-    public function test_transaction_fee_posts_as_a_separate_finance_cost(): void
+    /**
+     * The fee is the bank's charge for moving the money, so it is an overhead of
+     * banking rather than a cost of the job the money was spent on.
+     *
+     * It used to be posted as a second cost line against the project under
+     * OE-FIN-001. Two jobs paid on one transfer would then have had to split a
+     * charge neither of them caused — and, worse, the fee was only posted when
+     * the payment had a job number and was not a supplier settlement, so most
+     * fees reached no ledger at all.
+     */
+    public function test_transaction_fee_posts_as_an_overhead_not_a_job_cost(): void
     {
         $this->enquiry('WNG-01-2026-099');
 
@@ -190,24 +200,49 @@ class PettyCashCostListenerTest extends TestCase
             'top_up_id' => $this->topUpId,
             'amount' => 2000,
             'transaction_cost' => 35,
-            'receiver' => 'Supplier',
+            'payee_name' => 'Supplier',
             'description' => 'Project purchase with transfer fee',
             'job_number' => 'WNG-01-2026-099',
             'date_disbursed' => now()->toDateString(),
         ]);
 
         $this->assertTrue($result['success']);
-        $lines = CostLine::where('source_type', PettyCashDisbursement::class)
-            ->where('source_id', $result['data']->id)
+        $payment = $result['data'];
+
+        // The job carries the purchase, and only the purchase.
+        $lines = CostLine::where('source_type', Payment::class)
+            ->where('source_id', $payment->id)
             ->orderBy('source_ref')->get();
 
-        $this->assertCount(2, $lines);
-        $fee = $lines->firstWhere('source_ref', 'transaction-fee');
-        $this->assertNotNull($fee);
-        $this->assertSame('35.00', $fee->amount);
-        $this->assertSame('OE-FIN-001', $fee->expenseCode->code);
+        $this->assertCount(1, $lines, 'The fee is no longer a project cost line.');
+        $this->assertSame('2000.00', $lines->first()->amount);
+        $this->assertNull(
+            $lines->firstWhere('source_ref', 'transaction-fee'),
+            'The fee must not be charged to the job.',
+        );
+
+        // The fee is in the general ledger instead, against bank charges.
+        $entry = \App\Modules\Finance\Models\JournalEntry::where(
+            'entry_no', 'JE-PFEE-' . str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT),
+        )->with('lines')->first();
+
+        $this->assertNotNull($entry, 'A fee must reach the general ledger.');
+        $this->assertSame('35.00', (string) $entry->total_debit);
+        $this->assertSame(
+            '7800',
+            \App\Modules\Finance\Models\ChartOfAccount::find(
+                $entry->lines->firstWhere('entry_type', 'debit')->account_id,
+            )->code,
+        );
+
+        foreach ($entry->lines as $line) {
+            $this->assertNull($line->project_enquiry_id, 'A transfer charge belongs to no job.');
+        }
+
+        // The float still gives up both, which never depended on where the fee
+        // was reported.
         $this->assertSame('2035.00', DB::table('petty_cash_ledger_entries')
-            ->where('reference_number', 'PCR-' . str_pad((string) $result['data']->id, 6, '0', STR_PAD_LEFT))
+            ->where('reference_number', 'PCR-' . str_pad((string) $payment->id, 6, '0', STR_PAD_LEFT))
             ->value('amount'));
     }
 
@@ -229,7 +264,7 @@ class PettyCashCostListenerTest extends TestCase
             'expense_code_id' => $this->expenseCodeId,
             'payment_source_id' => $this->paymentSourceId,
             'amount' => 1000,
-            'receiver' => 'Supplier',
+            'payee_name' => 'Supplier',
             'account' => 'Transport',
             'description' => 'Wrong project line',
             'classification' => 'operations',
@@ -241,7 +276,7 @@ class PettyCashCostListenerTest extends TestCase
 
         $this->assertFalse($result['success']);
         $this->assertArrayHasKey('planned_cost_line_id', $result['errors']);
-        $this->assertSame(0, PettyCashDisbursement::where('description', 'Wrong project line')->count());
+        $this->assertSame(0, Payment::where('description', 'Wrong project line')->count());
     }
 
     /**
@@ -258,7 +293,7 @@ class PettyCashCostListenerTest extends TestCase
         app(RecordPettyCashCost::class)->handle($event);
         app(RecordPettyCashCost::class)->handle($event);
 
-        $this->assertSame(1, CostLine::where('source_type', PettyCashDisbursement::class)
+        $this->assertSame(1, CostLine::where('source_type', Payment::class)
             ->where('source_id', $disbursement->id)
             ->count());
     }
@@ -283,11 +318,26 @@ class PettyCashCostListenerTest extends TestCase
         );
 
         $this->assertSame(CostLine::STATUS_REVERSED, $line->fresh()->status);
-        $this->assertSame(2, CostLine::where('source_id', $disbursement->id)->count());
+
+        // One line, not two: the fee is no longer costed to the job, so there
+        // is only the purchase itself to back out.
+        $this->assertSame(1, CostLine::where('source_id', $disbursement->id)->count());
         $this->assertSame(0, CostLine::where('source_id', $disbursement->id)
             ->where('status', '!=', CostLine::STATUS_REVERSED)->count());
         $this->assertDatabaseHas('journal_entries', [
             'reversal_of_id' => $line->journal_entry_id,
+            'status' => 'posted',
+        ]);
+
+        // The fee came back too. Its journal stands outside the cost ledger now,
+        // so the void has to reverse it in its own right — otherwise voiding a
+        // payment would return the cash to the float and leave the charge
+        // standing against it.
+        $fee = \App\Modules\Finance\Models\JournalEntry::where(
+            'entry_no', 'JE-PFEE-' . str_pad((string) $disbursement->id, 7, '0', STR_PAD_LEFT),
+        )->firstOrFail();
+        $this->assertDatabaseHas('journal_entries', [
+            'reversal_of_id' => $fee->id,
             'status' => 'posted',
         ]);
     }
@@ -319,7 +369,7 @@ class PettyCashCostListenerTest extends TestCase
             'payment_source_id' => $this->paymentSourceId,
             'top_up_id' => $this->topUpId,
             'amount' => 1200.00,
-            'receiver' => 'Bolt',
+            'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
             'description' => 'Site transport',
             'classification' => 'operations',
@@ -344,7 +394,7 @@ class PettyCashCostListenerTest extends TestCase
             'payment_source_id' => $this->paymentSourceId,
             'top_up_id' => $this->topUpId,
             'amount' => 99999999.00,
-            'receiver' => 'Bolt',
+            'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
             'description' => 'Too much',
             'classification' => 'operations',

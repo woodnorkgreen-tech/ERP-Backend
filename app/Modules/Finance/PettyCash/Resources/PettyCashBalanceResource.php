@@ -52,7 +52,7 @@ class PettyCashBalanceResource extends JsonResource
                         'formatted' => 'KES ' . number_format($this->last_transaction['amount'], 2),
                     ],
                     'description' => $this->last_transaction['description'] ?? null,
-                    'receiver' => $this->last_transaction['receiver'] ?? null,
+                    'payee_name' => $this->last_transaction['payee_name'] ?? null,
                     'created_at' => [
                         'raw' => $this->last_transaction['created_at']->toISOString(),
                         'formatted' => $this->last_transaction['created_at']->format('M j, Y g:i A'),

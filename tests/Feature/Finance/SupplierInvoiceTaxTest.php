@@ -12,7 +12,6 @@ use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
-use App\Modules\ProcurementStores\Models\PaymentMethod;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use App\Modules\ProcurementStores\Models\Supplier;
@@ -294,16 +293,11 @@ class SupplierInvoiceTaxTest extends TestCase
         $bill->refresh();
 
         $source = PaymentSource::where('code', 'BANK-MAIN')->firstOrFail();
-        $method = PaymentMethod::updateOrCreate(
-            ['method_name' => 'Bank Transfer'],
-            ['payment_source_id' => $source->id, 'is_active' => true],
-        );
-
         BillPayment::create([
             'bill_id' => $bill->id,
             'amount_paid' => $bill->payableAmount(),
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $method->id,
+            'payment_method' => 'bank_transfer',
             'payment_source_id' => $source->id,
             'reference_number' => 'TRX-VAT-1',
             'user_id' => $this->accounts->id,

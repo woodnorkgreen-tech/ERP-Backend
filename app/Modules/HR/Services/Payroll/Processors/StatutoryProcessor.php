@@ -78,9 +78,34 @@ class StatutoryProcessor implements PayrollProcessorInterface
             $insuranceRelief = 0.0;
         }
 
-        // Employer-side costs (not deducted from employee but tracked for budgeting)
-        $employerNssf = $nssf; // Employer matches employee NSSF contribution (0 if NSSF-exempt)
-        $employerShif = 0;    // Employer SHIF is separate; can be added as variable if needed
+        /*
+         * Employer-side costs.
+         *
+         * These are NOT deducted from the employee — they are what WNG pays on
+         * top of the salary. Until Stage 2 of the general ledger plan they were
+         * computed here and recorded nowhere in the accounts, so the true cost
+         * of employing someone was understated by every shilling below.
+         *
+         * The rates are variables with defaults, following the same pattern as
+         * the employee side, so a statutory change is a configuration change
+         * rather than a deploy. THE DEFAULTS NEED CONFIRMING WITH WNG'S TAX
+         * ADVISER — they mirror the employee-side rates already in this file,
+         * which is the common arrangement but not a substitute for advice.
+         */
+        $employerNssf = $isExempt('nssf')
+            ? 0.0
+            : $nssf * $getVar('EMPLOYER_NSSF_MATCH', 1.0); // employer matches the employee tiers
+
+        // The Affordable Housing Levy is paid by both sides. Only the employee
+        // half was ever computed, so the employer half reached neither the
+        // payslip nor the ledger.
+        $employerHousingLevy = $isExempt('housing_levy')
+            ? 0.0
+            : $grossPay * $getVar('EMPLOYER_HOUSING_LEVY_RATE', $housingLevyRate);
+
+        // SHIF is an employee contribution; there is no employer match to
+        // compute. Left explicit so its absence reads as a decision.
+        $employerShif = $grossPay * $getVar('EMPLOYER_SHIF_RATE', 0.0);
 
         $dto->taxBreakdown = [
             'paye'               => round($finalPaye, 2),
@@ -91,6 +116,12 @@ class StatutoryProcessor implements PayrollProcessorInterface
             'personal_relief'    => round($personalRelief, 2),
             'insurance_relief'   => round($insuranceRelief, 2),
             'employer_nssf'      => round($employerNssf, 2),
+            'employer_housing_levy' => round($employerHousingLevy, 2),
+            'employer_shif'      => round($employerShif, 2),
+            // What employing this person costs WNG beyond their gross pay. Read
+            // by PayrollFinancePostingService as one figure so a new employer
+            // charge is added here and reaches the ledger without touching it.
+            'employer_total'     => round($employerNssf + $employerHousingLevy + $employerShif, 2),
             'exemptions'         => array_values($exemptions), // statutory items skipped for this employee
         ];
 

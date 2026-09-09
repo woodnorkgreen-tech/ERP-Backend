@@ -20,9 +20,9 @@ class OfflineBatchServiceTest extends TestCase
         $book = new Spreadsheet();
         $book->getActiveSheet()->setTitle('Instructions')->setCellValue('B2', OfflineBatchService::VERSION);
         $sheets = [
-            'TopUps' => ['offline_reference', 'date_received', 'amount', 'payment_method', 'transaction_code', 'description'],
+            'TopUps' => ['offline_reference', 'date_received', 'amount', 'payment_method', 'external_reference', 'description'],
             'Requisitions' => ['offline_reference', 'requester_email', 'department_id', 'type_code', 'purpose', 'payee_name', 'payee_phone', 'project_name', 'venue', 'custom_fields_json', 'items_json'],
-            'Payouts' => ['offline_reference', 'requisition_reference', 'date_paid', 'receiver', 'amount', 'transaction_cost', 'expense_code', 'payment_source_code', 'transaction_code', 'receipt_type', 'receipt_number', 'tax_amount', 'description', 'direct_payment_reason'],
+            'Payouts' => ['offline_reference', 'requisition_reference', 'date_paid', 'payee_name', 'amount', 'transaction_cost', 'expense_code', 'payment_source_code', 'external_reference', 'receipt_type', 'receipt_number', 'tax_amount', 'description', 'direct_payment_reason'],
         ];
         foreach ($sheets as $name => $headers) $book->createSheet()->setTitle($name)->fromArray($headers);
         $book->getSheetByName('TopUps')->fromArray(['OFF-001', '2026-08-23', '=1000+500', 'cash', 'CASH-001', 'Field float'], null, 'A2');
@@ -36,6 +36,6 @@ class OfflineBatchServiceTest extends TestCase
         $this->assertSame('invalid', $batch->status);
         $this->assertStringContainsString('Formulas are not allowed', $batch->rows->first()->errors[0]);
         $this->assertDatabaseCount('petty_cash_top_ups', 0);
-        $this->assertDatabaseCount('petty_cash_disbursements', 0);
+        $this->assertDatabaseCount('payments', 0);
     }
 }

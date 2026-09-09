@@ -2,7 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Services;
 
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -109,7 +109,7 @@ class PettyCashReportService
         // filtered on `created_at` while every other report filters on
         // `date_disbursed`. A project total that disagreed with the summary
         // total on the same screen is worse than no project total.
-        $query = PettyCashDisbursement::active()
+        $query = Payment::active()
             ->notArchived()
             ->whereNotNull('project_name')
             ->where('project_name', '!=', '')
@@ -166,7 +166,7 @@ class PettyCashReportService
         $endDate = Carbon::now()->endOfMonth();
 
         // Get monthly disbursements
-        $monthlyDisbursements = DB::table('petty_cash_disbursements')
+        $monthlyDisbursements = DB::table('payments')
             ->select(
                 DB::raw('YEAR(created_at) as year'),
                 DB::raw('MONTH(created_at) as month'),
@@ -333,14 +333,14 @@ class PettyCashReportService
                 return [
                     $disbursement->id,
                     $disbursement->created_at->format('Y-m-d H:i:s'),
-                    $disbursement->receiver,
+                    $disbursement->payee_name,
                     $disbursement->account,
                     $disbursement->amount,
                     $disbursement->description,
                     $disbursement->project_name,
                     $disbursement->classification,
                     $disbursement->payment_method,
-                    $disbursement->transaction_code,
+                    $disbursement->external_reference,
                     $disbursement->status,
                     $disbursement->creator->name ?? '',
                     $disbursement->voidedBy->name ?? '',
@@ -368,7 +368,7 @@ class PettyCashReportService
                     $topUp->created_at->format('Y-m-d H:i:s'),
                     $topUp->amount,
                     $topUp->payment_method,
-                    $topUp->transaction_code,
+                    $topUp->external_reference,
                     $topUp->description,
                     $topUp->creator->name ?? '',
                     $topUp->remaining_balance,

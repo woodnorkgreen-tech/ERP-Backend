@@ -4,7 +4,7 @@ namespace Tests\Feature\PettyCash;
 
 use App\Models\User;
 use App\Modules\Finance\Models\PaymentSource;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -113,10 +113,10 @@ class RequisitionSettlementVisibilityTest extends TestCase
     {
         $requisition = $this->requisition();
 
-        PettyCashDisbursement::create([
+        Payment::create([
             'requisition_id' => $requisition->id,
             'payment_source_id' => PaymentSource::where('code', $sourceCode)->value('id'),
-            'receiver' => 'Site Supervisor',
+            'payee_name' => 'Site Supervisor',
             'account' => 'Site refreshments',
             'classification' => 'operations',
             'amount' => 5000,

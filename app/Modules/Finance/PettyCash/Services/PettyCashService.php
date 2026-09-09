@@ -5,7 +5,9 @@ namespace App\Modules\Finance\PettyCash\Services;
 use App\Events\PettyCashDisbursementPaid;
 use App\Events\PettyCashDisbursementVoided;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Support\DocumentNumber;
+use App\Modules\Finance\Support\PaymentMethods;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use Illuminate\Support\Facades\Auth;
@@ -84,7 +86,7 @@ class PettyCashService
             }
 
             if ($consumed > 0) {
-                foreach (['payment_method', 'transaction_code'] as $immutableField) {
+                foreach (['payment_method', 'external_reference'] as $immutableField) {
                     if (array_key_exists($immutableField, $data)
                         && (string) $data[$immutableField] !== (string) $topUp->{$immutableField}) {
                         throw new Exception('Funding date, source and reference are immutable after a top-up has been consumed.');
@@ -143,7 +145,7 @@ class PettyCashService
         try {
             $result = DB::transaction(function () use ($data) {
                 if (! empty($data['idempotency_key'])) {
-                    $existing = PettyCashDisbursement::where('idempotency_key', $data['idempotency_key'])->first();
+                    $existing = Payment::where('idempotency_key', $data['idempotency_key'])->first();
 
                     if ($existing) {
                         return ['success' => true, 'data' => $existing, 'replayed' => true];
@@ -238,7 +240,7 @@ class PettyCashService
                         $expenseCode = $approvedCode;
                     }
 
-                    $data['receiver'] = $requisition->payee_name ?: $data['receiver'];
+                    $data['payee_name'] = $requisition->payee_name ?: $data['payee_name'];
                     $data['description'] = $requisition->purpose ?: $data['description'];
                     $data['project_id'] ??= $requisition->project_id;
                     $data['project_enquiry_id'] ??= $requisition->enquiry_id;
@@ -263,12 +265,13 @@ class PettyCashService
                 // catalogue/source IDs are the authoritative classifications.
                 $data['account'] = $expenseCode->expense_type;
                 $data['classification'] = $hasProject ? 'operations' : 'admin';
-                $data['payment_method'] = match ($paymentSource->type) {
-                    'petty_cash' => 'cash',
-                    'mobile_money' => 'mpesa',
-                    'bank' => 'bank_transfer',
-                    default => 'other',
-                };
+
+                // The paying account no longer dictates the method. It only
+                // supplies a default for callers that name no method at all —
+                // the offline batch importer and the historical Excel import —
+                // so those keep working without asserting how the money moved.
+                $data['payment_method'] = ($data['payment_method'] ?? null)
+                    ?: (PaymentMethods::TYPICAL_FOR_SOURCE_TYPE[$paymentSource->type][0] ?? 'cash');
                 $data['tax'] = match ($data['receipt_type'] ?? 'none') {
                     'etr' => 'etr',
                     default => 'no_etr',
@@ -322,7 +325,7 @@ class PettyCashService
                 // Recheck after obtaining the singleton balance lock. This
                 // serializes concurrent submissions using the same key.
                 if (! empty($data['idempotency_key'])) {
-                    $existing = PettyCashDisbursement::where('idempotency_key', $data['idempotency_key'])->first();
+                    $existing = Payment::where('idempotency_key', $data['idempotency_key'])->first();
 
                     if ($existing) {
                         return ['success' => true, 'data' => $existing, 'replayed' => true];
@@ -424,6 +427,17 @@ class PettyCashService
                     }
                 }
 
+                // The ERP's own identifier for this payment, claimed inside the
+                // transaction that writes it. Before this, a payment had only
+                // the payee's M-Pesa or bank reference to be known by — so two
+                // payments quoting the same till receipt were indistinguishable,
+                // and a cash payment had no reference at all.
+                $data['payment_no'] ??= DocumentNumber::next(
+                    DocumentNumber::PAYMENT,
+                    (string) \Carbon\Carbon::parse($data['date_disbursed'] ?? now())->year,
+                );
+                $data['payment_type'] ??= 'direct';
+
                 $disbursement = $this->repository->createDisbursement($data);
 
                 // If we planned a split across multiple top-ups, persist allocation records
@@ -458,9 +472,9 @@ class PettyCashService
                 }
 
                 // Log activity
-                $this->logActivity('created', 'disbursement', $disbursement->id, "Disbursement of KES " . number_format($disbursement->amount, 2) . " to " . $disbursement->receiver, [
+                $this->logActivity('created', 'disbursement', $disbursement->id, "Disbursement of KES " . number_format($disbursement->amount, 2) . " to " . $disbursement->payee_name, [
                     'amount' => $disbursement->amount,
-                    'receiver' => $disbursement->receiver,
+                    'payee_name' => $disbursement->payee_name,
                     'top_up_id' => $disbursement->top_up_id
                 ]);
 
@@ -512,7 +526,7 @@ class PettyCashService
         }
 
         // Auto-detect status based on active disbursements
-        $hasActiveDisbursement = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::where('requisition_id', $requisitionId)
+        $hasActiveDisbursement = \App\Modules\Finance\Models\Payment::where('requisition_id', $requisitionId)
             ->where('status', 'active')
             ->exists();
 
@@ -522,23 +536,16 @@ class PettyCashService
         }
     }
 
-    /**
-     * Update an existing disbursement.
-     */
-    public function updateDisbursement(PettyCashDisbursement $disbursement, array $data): PettyCashDisbursement
-    {
-        throw new Exception('Mutating past financial disbursements is strictly forbidden to preserve ledger integrity. Please void this transaction and create a new one instead.');
-    }
 
     /**
      * Void a disbursement and restore balance.
      */
-    public function voidDisbursement(PettyCashDisbursement $disbursement, string $reason): bool
+    public function voidDisbursement(Payment $disbursement, string $reason): bool
     {
         DB::beginTransaction();
 
         try {
-            $disbursement = PettyCashDisbursement::whereKey($disbursement->id)->lockForUpdate()->firstOrFail();
+            $disbursement = Payment::whereKey($disbursement->id)->lockForUpdate()->firstOrFail();
             if ($disbursement->is_voided) {
                 throw new Exception('Disbursement is already voided.');
             }
@@ -556,7 +563,7 @@ class PettyCashService
             $entry = LedgerEntry::custom('PCR-' . str_pad((string)$disbursement->id, 6, '0', STR_PAD_LEFT) . '-VOID', 'credit', number_format($totalRefunded, 2, '.', ''), [
                 'amount' => (float)$disbursement->amount,
                 'transaction_cost' => (float)($disbursement->transaction_cost ?? 0),
-                'receiver' => $disbursement->receiver,
+                'payee_name' => $disbursement->payee_name,
                 'account' => $disbursement->account,
                 'description' => $disbursement->description,
                 'note' => 'Disbursement voided',
@@ -596,21 +603,7 @@ class PettyCashService
         }
     }
 
-    /**
-     * Delete a disbursement and restore balance.
-     */
-    public function deleteDisbursement(PettyCashDisbursement $disbursement): bool
-    {
-        throw new Exception('Deleting past financial disbursements is strictly forbidden to preserve ledger integrity. Please void this transaction instead.');
-    }
 
-    /**
-     * Delete multiple disbursements at once.
-     */
-    public function bulkDeleteDisbursements(array $disbursementIds): array
-    {
-        throw new Exception('Bulk deleting financial disbursements is strictly forbidden to preserve ledger integrity.');
-    }
 
     /**
      * Clear all petty cash data (disbursements, top-ups, and reset balance).
@@ -626,8 +619,8 @@ class PettyCashService
             \App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation::query()->delete();
 
             // Delete all disbursements and top-ups
-            $disbursementsCount = PettyCashDisbursement::count();
-            PettyCashDisbursement::query()->delete();
+            $disbursementsCount = Payment::count();
+            Payment::query()->delete();
 
             $topUpsCount = PettyCashTopUp::count();
             PettyCashTopUp::query()->delete();
@@ -778,7 +771,7 @@ class PettyCashService
         $errors = [];
 
         // Validate required fields (top_up_id is now optional as service can auto-allocate)
-        $requiredFields = ['receiver', 'expense_code_id', 'payment_source_id', 'amount', 'description'];
+        $requiredFields = ['payee_name', 'expense_code_id', 'payment_source_id', 'amount', 'description'];
         foreach ($requiredFields as $field) {
             // Only require fields if not updating, or if they are explicitly provided in the update
             if (!$isUpdate && empty($data[$field])) {
@@ -837,7 +830,7 @@ class PettyCashService
             $errors['classification'] = ['Invalid classification selected.'];
         }
 
-        $validPaymentMethods = ['cash', 'mpesa', 'equity', 'stanbic', 'ncba', 'kcb', 'family', 'bank_transfer', 'other'];
+        $validPaymentMethods = PaymentMethods::values();
         if (!empty($data['payment_method']) && !in_array($data['payment_method'], $validPaymentMethods)) {
             $errors['payment_method'] = ['Invalid payment method selected.'];
         }
@@ -876,14 +869,14 @@ class PettyCashService
         }
 
         // Validate payment method
-        $validPaymentMethods = ['cash', 'mpesa', 'equity', 'stanbic', 'ncba', 'kcb', 'family', 'bank_transfer', 'other'];
+        $validPaymentMethods = PaymentMethods::values();
         if (!empty($data['payment_method']) && !in_array($data['payment_method'], $validPaymentMethods)) {
             $errors['payment_method'] = 'Invalid payment method selected.';
         }
 
         // Validate transaction code for non-cash payments
-        if (!empty($data['payment_method']) && $data['payment_method'] !== 'cash' && empty($data['transaction_code'])) {
-            $errors['transaction_code'] = 'Transaction code is required for non-cash payments.';
+        if (!empty($data['payment_method']) && $data['payment_method'] !== 'cash' && empty($data['external_reference'])) {
+            $errors['external_reference'] = 'An external reference is required for non-cash payments.';
         }
 
         // Validate date
@@ -899,7 +892,7 @@ class PettyCashService
     /**
      * Archive a disbursement.
      */
-    public function archiveDisbursement(\App\Modules\Finance\PettyCash\Models\PettyCashDisbursement $disbursement): bool
+    public function archiveDisbursement(\App\Modules\Finance\Models\Payment $disbursement): bool
     {
         DB::beginTransaction();
 
@@ -983,19 +976,23 @@ class PettyCashService
     {
         try {
             $source = $disbursement->paymentSource;
-            $method = \App\Modules\ProcurementStores\Models\PaymentMethod::where('payment_source_id', $source->id)->where('is_active', true)->first()
-                ?? \App\Modules\ProcurementStores\Models\PaymentMethod::create([
-                    'method_name' => $source->name, 'payment_source_id' => $source->id, 'is_active' => true,
-                ]);
 
+            /*
+             * This used to mint a `payment_methods` row named after the paying
+             * account when none matched — which is how "Main Petty Cash Float"
+             * came to sit in the method dropdown beside "Cheque". The account is
+             * carried by payment_source_id and the method by the payment itself,
+             * so there is nothing left to invent.
+             */
             \App\Modules\ProcurementStores\Models\BillPayment::create([
                 'bill_id' => $requisition->bill_id,
                 'amount_paid' => $disbursement->amount,
                 'payment_date' => $disbursement->date_disbursed ?? now(),
-                'payment_method_id' => $method->id,
+                'payment_method' => $disbursement->payment_method,
                 'payment_source_id' => $source->id,
                 'disbursement_id' => $disbursement->id,
-                'reference_number' => "Paid via Petty Cash Req #{$requisition->requisition_number} (Disb #{$disbursement->id})",
+                'reference_number' => $disbursement->payment_no
+                    ?: "Paid via requisition {$requisition->requisition_number}",
                 'user_id' => $disbursement->created_by ?? Auth::id(),
             ]);
             

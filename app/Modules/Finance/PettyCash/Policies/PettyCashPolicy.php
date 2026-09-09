@@ -2,11 +2,13 @@
 
 namespace App\Modules\Finance\PettyCash\Policies;
 
+use App\Modules\Finance\Models\Payment;
 use App\Constants\Permissions;
 use App\Models\User;
 
 /**
- * Single source of truth for *who may act on petty cash* (GL plan BE-0).
+ * Single source of truth for *who may act on petty cash* (general ledger plan,
+ * task BE-0).
  *
  * This replaces eleven hand-typed `hasRole('Super Admin')` checks in
  * PettyCashController and two role-list checks in PettyCashRequisitionController,
@@ -17,16 +19,21 @@ use App\Models\User;
  * action is gated on one role name.
  *
  * **This widens access on purpose.** The permissions already existed and were
- * already granted: Accounts, Admin and Manager hold
- * `void_disbursement`/`delete_disbursement`/`edit_disbursement` today, and the
- * Super-Admin-only checks meant none of them could use what they had been given.
- * Honouring the grant is the point of the consolidation — Finance staff doing
- * Finance work without a Super Admin in the loop.
+ * already granted: Accounts, Admin and Manager hold `void_disbursement` and
+ * `edit_disbursement` today, and the Super-Admin-only checks meant none of them
+ * could use what they had been given. Honouring the grant is the point of the
+ * consolidation — Finance staff doing Finance work without a Super Admin in the
+ * loop.
+ *
+ * There is deliberately no `update` or `delete` ability for a disbursement. The
+ * cash ledger is append-only: a payment that was recorded wrongly is corrected
+ * by voiding it and recording the right one, so an ability to edit or delete
+ * one would name a capability the module does not have.
  *
  * `clearAll` is the deliberate exception: see that method.
  *
  * Abilities take a nullable model so bulk endpoints can authorize against the
- * class (`$this->authorize('delete', PettyCashDisbursement::class)`) with the
+ * class (`$this->authorize('archive', Payment::class)`) with the
  * same rule as the single-record path.
  */
 class PettyCashPolicy
@@ -57,24 +64,32 @@ class PettyCashPolicy
         return $user->can(Permissions::FINANCE_PETTY_CASH_CREATE);
     }
 
-    public function update(User $user, $disbursement = null): bool
-    {
-        return $user->can(Permissions::FINANCE_PETTY_CASH_UPDATE);
-    }
-
     public function void(User $user, $disbursement = null): bool
     {
         return $user->can(Permissions::FINANCE_PETTY_CASH_VOID);
     }
 
-    public function delete(User $user, $disbursement = null): bool
+    /**
+     * Reviewing a requisition — approving it, rejecting it, or editing one
+     * somebody else raised.
+     *
+     * This was written as `update` on the disbursement, so the right to approve
+     * a requisition was expressed as the right to edit a cash payment. That
+     * payment can no longer be edited by anyone: the cash ledger is append-only
+     * and a mistake is corrected by voiding. Naming the ability for the thing it
+     * actually authorises leaves no ability on this policy that implies a
+     * capability the module does not have.
+     *
+     * The permission behind it is unchanged, so who may do this is unchanged.
+     */
+    public function reviewRequisition(User $user, $disbursement = null): bool
     {
-        return $user->can(Permissions::FINANCE_PETTY_CASH_DELETE);
+        return $user->can(Permissions::FINANCE_PETTY_CASH_UPDATE);
     }
 
     /**
      * Archiving posts no ledger entry — it is a filing decision, not a financial
-     * one — so it rides on the same right as editing rather than deletion.
+     * one — so it rides on the same right as reviewing rather than on voiding.
      */
     public function archive(User $user, $disbursement = null): bool
     {

@@ -91,7 +91,7 @@ final class RolePermissions
                 Permissions::FINANCE_COSTS_READ, Permissions::FINANCE_COSTS_REVERSE,
                 Permissions::FINANCE_COSTS_VERIFY, Permissions::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
                 Permissions::FINANCE_PETTY_CASH_CREATE, Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
-                Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_UPDATE,
+                Permissions::FINANCE_PETTY_CASH_UPDATE,
                 Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL, Permissions::FINANCE_PETTY_CASH_VIEW,
                 Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE, Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
                 Permissions::FINANCE_PETTY_CASH_VOID, Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
@@ -120,7 +120,7 @@ final class RolePermissions
             'Manager' => [
                 Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_ACCESS, Permissions::DEPARTMENT_READ,
                 Permissions::EMPLOYEE_READ, Permissions::FINANCE_PETTY_CASH_CREATE,
-                Permissions::FINANCE_PETTY_CASH_DELETE, Permissions::FINANCE_PETTY_CASH_UPDATE,
+                Permissions::FINANCE_PETTY_CASH_UPDATE,
                 Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL, Permissions::FINANCE_PETTY_CASH_VIEW,
                 Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE, Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
                 Permissions::FINANCE_PETTY_CASH_VOID, Permissions::COMPENSATION_READ,
@@ -138,10 +138,17 @@ final class RolePermissions
                 Permissions::DASHBOARD_FINANCE, Permissions::FINANCE_BUDGET_READ,
                 Permissions::FINANCE_COSTS_CREATE, Permissions::FINANCE_COSTS_READ,
                 Permissions::FINANCE_COSTS_REVERSE, Permissions::FINANCE_COSTS_VERIFY,
+                // Accounts already reverses costs and receipts. Journal reversal
+                // is the same authority reaching the documents that had none —
+                // supplier invoices, supplier payments, payroll — and closing a
+                // month is the job this role does anyway. Withholding both would
+                // leave every correction and every month-end waiting on a
+                // developer, which is the state these two permissions exist to end.
+                Permissions::FINANCE_JOURNALS_REVERSE, Permissions::FINANCE_PERIODS_MANAGE,
                 Permissions::FINANCE_PETTY_CASH_ADMIN,
                 Permissions::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
                 Permissions::FINANCE_PETTY_CASH_CREATE_LEGACY, Permissions::FINANCE_PETTY_CASH_CREATE,
-                Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP, Permissions::FINANCE_PETTY_CASH_DELETE,
+                Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP,
                 Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_UPDATE_LEGACY,
                 Permissions::FINANCE_PETTY_CASH_UPLOAD_EXCEL, Permissions::FINANCE_PETTY_CASH_VIEW,
                 Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE, Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -150,6 +157,7 @@ final class RolePermissions
                 Permissions::FINANCE_RECEIVABLES_CORRECT, Permissions::FINANCE_RECEIVABLES_READ,
                 Permissions::FINANCE_RECEIVABLES_RECORD, Permissions::FINANCE_RECEIVABLES_RELEASE,
                 Permissions::FINANCE_RECEIVABLES_REVERSE, Permissions::FINANCE_RECEIVABLES_VERIFY,
+                Permissions::FINANCE_PAYMENT_SOURCES_MANAGE,
                 Permissions::FINANCE_REQUISITION_TYPES_MANAGE, Permissions::FINANCE_SPEND_VOUCHERS_APPROVE,
                 Permissions::FINANCE_SPEND_VOUCHERS_CREATE, Permissions::FINANCE_SPEND_VOUCHERS_POST,
                 Permissions::FINANCE_SPEND_VOUCHERS_READ, Permissions::FINANCE_VIEW,

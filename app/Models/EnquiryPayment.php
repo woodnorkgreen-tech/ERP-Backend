@@ -29,6 +29,7 @@ class EnquiryPayment extends Model
         'reversed_at',
         'reversed_by',
         'reversal_reason',
+        'journal_entry_id',
     ];
 
     protected $casts = [

@@ -3,6 +3,7 @@
 namespace App\Modules\Finance\PettyCash\Services;
 
 use App\Models\User;
+use App\Modules\Finance\Support\PaymentMethods;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\PettyCash\Models\PettyCashOfflineBatch;
@@ -24,9 +25,9 @@ class OfflineBatchService
     // when a workbook is saved and reopened.
     public const VERSION = 'v1.0';
     private const SHEETS = [
-        'TopUps' => ['offline_reference', 'date_received', 'amount', 'payment_method', 'transaction_code', 'description'],
+        'TopUps' => ['offline_reference', 'date_received', 'amount', 'payment_method', 'external_reference', 'description'],
         'Requisitions' => ['offline_reference', 'requester_email', 'department_id', 'type_code', 'purpose', 'payee_name', 'payee_phone', 'project_name', 'venue', 'custom_fields_json', 'items_json'],
-        'Payouts' => ['offline_reference', 'requisition_reference', 'date_paid', 'receiver', 'amount', 'transaction_cost', 'expense_code', 'payment_source_code', 'transaction_code', 'receipt_type', 'receipt_number', 'tax_amount', 'description', 'direct_payment_reason'],
+        'Payouts' => ['offline_reference', 'requisition_reference', 'date_paid', 'payee_name', 'amount', 'transaction_cost', 'expense_code', 'payment_source_code', 'external_reference', 'receipt_type', 'receipt_number', 'tax_amount', 'description', 'direct_payment_reason'],
     ];
 
     public function stage(UploadedFile $file, int $userId): PettyCashOfflineBatch
@@ -117,7 +118,10 @@ class OfflineBatchService
         if ($type === 'top_up') {
             if (! $this->date($p['date_received'] ?? null)) $e[] = 'date_received must be YYYY-MM-DD.';
             if ((float) ($p['amount'] ?? 0) <= 0) $e[] = 'amount must be greater than zero.';
-            if (! in_array(strtolower((string) ($p['payment_method'] ?? '')), ['cash', 'bank_transfer', 'mpesa', 'cheque', 'other'], true)) $e[] = 'payment_method is not supported.';
+            // One list, shared with every other payment path. The literal here
+            // accepted 'other' — which no column allows — and rejected rtgs,
+            // eft and card, which every other form offers.
+            if (! in_array(strtolower((string) ($p['payment_method'] ?? '')), PaymentMethods::values(), true)) $e[] = 'payment_method must be one of: '.implode(', ', PaymentMethods::values()).'.';
         } elseif ($type === 'requisition') {
             $requester = User::where('email', $p['requester_email'] ?? '')->first();
             if (! $requester) $e[] = 'requester_email must match an active system user.';
@@ -142,7 +146,7 @@ class OfflineBatchService
             if (! ExpenseCode::active()->where('code', $p['expense_code'] ?? '')->exists()) $e[] = 'expense_code is not active.';
             if (! PaymentSource::where('code', $p['payment_source_code'] ?? '')->where('type', 'petty_cash')->where('is_active', true)->exists()) $e[] = 'payment_source_code must identify an active petty-cash source.';
             if (blank($p['requisition_reference'] ?? null) && blank($p['direct_payment_reason'] ?? null)) $e[] = 'A payout needs requisition_reference or direct_payment_reason.';
-            if (blank($p['receiver'] ?? null) && blank($p['requisition_reference'] ?? null)) $e[] = 'receiver is required for a direct payout.';
+            if (blank($p['payee_name'] ?? null) && blank($p['requisition_reference'] ?? null)) $e[] = 'payee_name is required for a direct payout.';
             if (! in_array(strtolower((string) ($p['receipt_type'] ?? 'none')), ['etr', 'invoice', 'receipt', 'none'], true)) $e[] = 'receipt_type must be etr, invoice, receipt or none.';
         }
         return array_values(array_unique($e));
@@ -159,7 +163,7 @@ class OfflineBatchService
 
             foreach ($batch->rows()->where('record_type', 'top_up')->orderBy('row_number')->get() as $row) {
                 $p = $row->payload;
-                $model = $cash->createTopUp(['amount' => $p['amount'], 'date_topped_up' => $p['date_received'], 'payment_method' => strtolower($p['payment_method']), 'transaction_code' => $p['transaction_code'] ?: null, 'description' => trim(($p['description'] ?? '')." [Offline batch {$batch->batch_reference}; ref {$row->offline_reference}]")]);
+                $model = $cash->createTopUp(['amount' => $p['amount'], 'date_topped_up' => $p['date_received'], 'payment_method' => strtolower($p['payment_method']), 'external_reference' => $p['external_reference'] ?: null, 'description' => trim(($p['description'] ?? '')." [Offline batch {$batch->batch_reference}; ref {$row->offline_reference}]")]);
                 $row->update(['status' => 'posted', 'posted_type' => 'top_up', 'posted_id' => $model->id]);
             }
             foreach ($batch->rows()->where('record_type', 'requisition')->orderBy('row_number')->get() as $row) {
@@ -177,7 +181,7 @@ class OfflineBatchService
                 $p = $row->payload; $reqRef = strtoupper((string) ($p['requisition_reference'] ?? '')); $req = $reqRef ? ($requisitions[$reqRef] ?? null) : null;
                 $expense = ExpenseCode::active()->where('code', $p['expense_code'])->firstOrFail();
                 $source = PaymentSource::where('code', $p['payment_source_code'])->where('type', 'petty_cash')->where('is_active', true)->firstOrFail();
-                $result = $cash->createDisbursement(['receiver' => $p['receiver'] ?: ($req?->payee_name ?: 'Approved payee'), 'amount' => $p['amount'], 'transaction_cost' => $p['transaction_cost'] ?: 0, 'description' => $p['description'] ?: ($req?->purpose ?: $p['direct_payment_reason']), 'expense_code_id' => $expense->id, 'payment_source_id' => $source->id, 'transaction_code' => $p['transaction_code'] ?: null, 'receipt_type' => strtolower($p['receipt_type'] ?: 'none'), 'receipt_number' => $p['receipt_number'] ?: null, 'tax_amount' => $p['tax_amount'] ?: 0, 'date_disbursed' => $p['date_paid'], 'requisition_id' => $req?->id, 'direct_payment_reason' => $req ? null : $p['direct_payment_reason'], 'idempotency_key' => hash('sha256', $batch->batch_reference.':'.$row->offline_reference)]);
+                $result = $cash->createDisbursement(['payee_name' => $p['payee_name'] ?: ($req?->payee_name ?: 'Approved payee'), 'amount' => $p['amount'], 'transaction_cost' => $p['transaction_cost'] ?: 0, 'description' => $p['description'] ?: ($req?->purpose ?: $p['direct_payment_reason']), 'expense_code_id' => $expense->id, 'payment_source_id' => $source->id, 'external_reference' => $p['external_reference'] ?: null, 'receipt_type' => strtolower($p['receipt_type'] ?: 'none'), 'receipt_number' => $p['receipt_number'] ?: null, 'tax_amount' => $p['tax_amount'] ?: 0, 'date_disbursed' => $p['date_paid'], 'requisition_id' => $req?->id, 'direct_payment_reason' => $req ? null : $p['direct_payment_reason'], 'idempotency_key' => hash('sha256', $batch->batch_reference.':'.$row->offline_reference)]);
                 if (! ($result['success'] ?? false)) throw ValidationException::withMessages(['batch' => ["Payout {$row->offline_reference} failed", $result['errors'] ?? []]]);
                 $row->update(['status' => 'posted', 'posted_type' => 'disbursement', 'posted_id' => $result['data']->id]);
             }

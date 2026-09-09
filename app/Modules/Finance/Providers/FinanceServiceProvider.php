@@ -38,7 +38,7 @@ class FinanceServiceProvider extends ServiceProvider
         // Bound to the disbursement so bulk endpoints can authorize against the
         // class and single-record endpoints against the model, under one rule.
         \Illuminate\Support\Facades\Gate::policy(
-            \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::class,
+            \App\Modules\Finance\Models\Payment::class,
             \App\Modules\Finance\PettyCash\Policies\PettyCashPolicy::class,
         );
 

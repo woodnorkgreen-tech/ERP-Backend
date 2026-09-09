@@ -4,7 +4,7 @@ namespace Tests\Feature\PettyCash;
 
 use App\Constants\Permissions;
 use App\Models\User;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -48,24 +48,39 @@ class PettyCashPolicyTest extends TestCase
     {
         $accounts = $this->userWith([
             Permissions::FINANCE_PETTY_CASH_VOID,
-            Permissions::FINANCE_PETTY_CASH_DELETE,
             Permissions::FINANCE_PETTY_CASH_UPDATE,
         ]);
 
-        $this->assertTrue($accounts->can('void', PettyCashDisbursement::class));
-        $this->assertTrue($accounts->can('delete', PettyCashDisbursement::class));
-        $this->assertTrue($accounts->can('update', PettyCashDisbursement::class));
-        $this->assertTrue($accounts->can('archive', PettyCashDisbursement::class));
+        $this->assertTrue($accounts->can('void', Payment::class));
+        $this->assertTrue($accounts->can('reviewRequisition', Payment::class));
+        $this->assertTrue($accounts->can('archive', Payment::class));
+    }
+
+    /**
+     * The cash ledger is append-only, so no permission and no role — Super Admin
+     * included — may edit or delete a disbursement. A missing policy ability
+     * denies, which is the behaviour being pinned here: the module must not grow
+     * an `update` or `delete` back without this test being changed on purpose.
+     */
+    public function test_a_disbursement_can_never_be_edited_or_deleted(): void
+    {
+        $accounts = $this->userWith([
+            Permissions::FINANCE_PETTY_CASH_VOID,
+            Permissions::FINANCE_PETTY_CASH_UPDATE,
+        ]);
+
+        $this->assertFalse($accounts->can('update', Payment::class));
+        $this->assertFalse($accounts->can('delete', Payment::class));
     }
 
     public function test_holding_one_petty_cash_permission_does_not_grant_the_others(): void
     {
         $viewer = $this->userWith([Permissions::FINANCE_PETTY_CASH_VIEW]);
 
-        $this->assertTrue($viewer->can('viewAny', PettyCashDisbursement::class));
-        $this->assertFalse($viewer->can('void', PettyCashDisbursement::class));
-        $this->assertFalse($viewer->can('delete', PettyCashDisbursement::class));
-        $this->assertFalse($viewer->can('update', PettyCashDisbursement::class));
+        $this->assertTrue($viewer->can('viewAny', Payment::class));
+        $this->assertFalse($viewer->can('void', Payment::class));
+        $this->assertFalse($viewer->can('reviewRequisition', Payment::class));
+        $this->assertFalse($viewer->can('archive', Payment::class));
     }
 
     /**
@@ -77,17 +92,17 @@ class PettyCashPolicyTest extends TestCase
     {
         $withAdmin = $this->userWith([Permissions::FINANCE_PETTY_CASH_ADMIN]);
 
-        $this->assertFalse($withAdmin->can('clearAll', PettyCashDisbursement::class));
-        $this->assertTrue($this->superAdmin()->can('clearAll', PettyCashDisbursement::class));
+        $this->assertFalse($withAdmin->can('clearAll', Payment::class));
+        $this->assertTrue($this->superAdmin()->can('clearAll', Payment::class));
     }
 
     public function test_super_admin_still_passes_every_ability(): void
     {
         $admin = $this->superAdmin();
 
-        foreach (['viewAny', 'update', 'void', 'delete', 'archive', 'viewActivityLogs', 'clearAll'] as $ability) {
+        foreach (['viewAny', 'reviewRequisition', 'void', 'archive', 'viewActivityLogs', 'clearAll'] as $ability) {
             $this->assertTrue(
-                $admin->can($ability, PettyCashDisbursement::class),
+                $admin->can($ability, Payment::class),
                 "Super Admin should pass {$ability}",
             );
         }
@@ -117,9 +132,9 @@ class PettyCashPolicyTest extends TestCase
     public function test_requisition_visibility_follows_the_policy(): void
     {
         $reporter = User::factory()->create(['is_active' => true]);
-        $this->assertFalse($reporter->can('viewAllRequisitions', PettyCashDisbursement::class));
+        $this->assertFalse($reporter->can('viewAllRequisitions', Payment::class));
 
         $finance = $this->userWith([Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS]);
-        $this->assertTrue($finance->can('viewAllRequisitions', PettyCashDisbursement::class));
+        $this->assertTrue($finance->can('viewAllRequisitions', Payment::class));
     }
 }

@@ -16,8 +16,18 @@ class Department extends Model
         'description',
         'manager_id',
         'budget',
-        'location'
+        'location',
+        // 'direct' means this department's people deliver client work, so their
+        // pay is a cost of sales rather than office overhead. Null is treated as
+        // indirect, which is what payroll did before the distinction existed.
+        'labour_classification',
     ];
+
+    /** Departments whose payroll is a direct cost of delivering client work. */
+    public const LABOUR_DIRECT = 'direct';
+
+    /** Everything else: administration, support, and anything unclassified. */
+    public const LABOUR_INDIRECT = 'indirect';
 
     protected $casts = [
         'budget' => 'decimal:2'

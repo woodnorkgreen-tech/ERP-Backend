@@ -9,6 +9,7 @@ use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\HR\Models\Department;
@@ -18,7 +19,6 @@ use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use App\Modules\Finance\PettyCash\Services\LedgerEntry;
 use App\Modules\Finance\PettyCash\Services\LedgerService;
 use Illuminate\Support\Facades\DB;
-use App\Modules\ProcurementStores\Models\PaymentMethod;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use App\Modules\ProcurementStores\Models\Requisition;
@@ -26,6 +26,7 @@ use App\Modules\ProcurementStores\Models\Supplier;
 use App\Modules\ProcurementStores\Services\PurchaseOrderWorkflow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -62,7 +63,18 @@ class SupplierPaymentGateTest extends TestCase
         $this->seed(\App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class);
         $this->seed(\App\Modules\Finance\Database\Seeders\PaymentSourceSeeder::class);
 
-        Role::findOrCreate('Accounts', 'web');
+        /*
+         * Accounts pays suppliers, so the fixture's role carries the permission
+         * the live one does. Settling an invoice on the spot is now gated on
+         * being allowed to move money out of an account at all — the same right
+         * a petty cash disbursement needs, because since the payment
+         * architecture was unified there is one payments table behind both.
+         */
+        $accountsRole = Role::findOrCreate('Accounts', 'web');
+        $accountsRole->givePermissionTo(
+            Permission::findOrCreate('finance.petty_cash.create_disbursement', 'web'),
+        );
+
         $this->accounts = User::create([
             'name' => 'Accounts Clerk',
             'email' => uniqid('accounts_').'@test.local',
@@ -149,27 +161,17 @@ class SupplierPaymentGateTest extends TestCase
     }
 
     /**
-     * A payment method that can actually settle a bill.
+     * The account a supplier payment leaves.
      *
-     * The payment source is not incidental to the fixture: a method without one
-     * names no ledger account, so the controller now refuses it. Creating the
-     * method bare made this suite pass while exercising a payment that could
-     * never have been posted.
+     * This used to build a `payment_methods` row, which had to carry a payment
+     * source or the payment was unpostable — the method row existed only to
+     * reach the account behind it. The account is now named directly.
      */
-    private function paymentMethod(): PaymentMethod
+    private function payingAccount(): PaymentSource
     {
-        $source = PaymentSource::firstOrCreate(
+        return PaymentSource::firstOrCreate(
             ['code' => 'BANK-MAIN'],
-            ['name' => 'Bank – Main Account', 'type' => 'bank', 'currency' => 'KES', 'is_active' => true],
-        );
-
-        // updateOrCreate, not firstOrCreate: a seeded "Bank Transfer" already
-        // exists in some databases with no source, and firstOrCreate would hand
-        // it back unchanged — leaving the fixture testing exactly the unpostable
-        // payment this gate now refuses.
-        return PaymentMethod::updateOrCreate(
-            ['method_name' => 'Bank Transfer'],
-            ['payment_source_id' => $source->id, 'is_active' => true],
+            ['name' => 'Equity Bank – Operating Account', 'type' => 'bank', 'currency' => 'KES', 'is_active' => true],
         );
     }
 
@@ -226,7 +228,8 @@ class SupplierPaymentGateTest extends TestCase
         $response = $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $this->paymentMethod()->id,
+            'payment_source_id' => $this->payingAccount()->id,
+            'payment_method' => 'bank_transfer',
             'reference_number' => 'FT-0001',
         ]);
 
@@ -247,12 +250,19 @@ class SupplierPaymentGateTest extends TestCase
         $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $this->paymentMethod()->id,
+            'payment_source_id' => $this->payingAccount()->id,
+            'payment_method' => 'bank_transfer',
             'reference_number' => 'FT-0001',
         ])->assertSuccessful();
 
         $this->assertSame('paid', $bill->fresh()->status);
         $this->assertSame('three_way_match', $bill->fresh()->verification_basis);
+        $billPayment = BillPayment::where('bill_id', $bill->id)->firstOrFail();
+        $financePayment = Payment::findOrFail($billPayment->disbursement_id);
+        $this->assertSame($billPayment->payment_code, $financePayment->payment_no);
+        $this->assertSame('bank_transfer', $financePayment->payment_method);
+        $this->assertSame($this->payingAccount()->id, $financePayment->payment_source_id);
+        $this->assertSame('FT-0001', $financePayment->external_reference);
     }
 
     public function test_an_invoice_above_the_value_accepted_into_stock_is_refused(): void
@@ -297,7 +307,8 @@ class SupplierPaymentGateTest extends TestCase
         $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
             'amount_paid' => 40000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $this->paymentMethod()->id,
+            'payment_source_id' => $this->payingAccount()->id,
+            'payment_method' => 'bank_transfer',
             'reference_number' => 'FT-0002',
         ])->assertStatus(422);
     }
@@ -333,7 +344,8 @@ class SupplierPaymentGateTest extends TestCase
             'bill_id' => $bill->id,
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $this->paymentMethod()->id,
+            'payment_source_id' => $this->payingAccount()->id,
+            'payment_method' => 'bank_transfer',
             'reference_number' => 'DIRECT',
             'user_id' => $this->accounts->id,
         ]);
@@ -432,7 +444,8 @@ class SupplierPaymentGateTest extends TestCase
             'bill_ids' => [$verified->id, $unverified->id],
             'amount_paid' => 40000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $this->paymentMethod()->id,
+            'payment_source_id' => $this->payingAccount()->id,
+            'payment_method' => 'bank_transfer',
             'reference_number' => 'FT-BATCH',
         ]);
 
@@ -453,7 +466,8 @@ class SupplierPaymentGateTest extends TestCase
         $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
             'amount_paid' => 60000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $this->paymentMethod()->id,
+            'payment_source_id' => $this->payingAccount()->id,
+            'payment_method' => 'bank_transfer',
             'reference_number' => 'FT-0003',
         ])->assertStatus(422);
     }
@@ -479,6 +493,7 @@ class SupplierPaymentGateTest extends TestCase
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
             'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
             'reference_number' => 'PC-0001',
         ])->assertSuccessful();
 
@@ -513,12 +528,14 @@ class SupplierPaymentGateTest extends TestCase
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
             'payment_source_id' => $this->source('BANK-MAIN')->id,
+            'payment_method' => 'bank_transfer',
             'reference_number' => 'FT-9001',
         ])->assertSuccessful();
 
         $payment = BillPayment::where('bill_id', $bill->id)->sole();
 
-        $this->assertNull($payment->disbursement_id);
+        $this->assertNotNull($payment->disbursement_id, 'Every supplier settlement must have one common Finance payment.');
+        $this->assertSame('BANK-MAIN', Payment::findOrFail($payment->disbursement_id)->paymentSource->code);
         $this->assertSame(
             $this->source('BANK-MAIN')->id,
             $payment->payment_source_id,
@@ -529,6 +546,10 @@ class SupplierPaymentGateTest extends TestCase
             bccomp($opening, (string) PettyCashBalance::current()->current_balance, 2),
             'Money that never came out of the tin must not be deducted from it.'
         );
+        $this->assertSame(0, DB::table('petty_cash_ledger_entries')
+            ->where('source_type', 'disbursement')
+            ->where('source_id', $payment->disbursement_id)
+            ->count(), 'A bank payment is visible in Finance without becoming a petty-cash movement.');
     }
 
     public function test_a_payment_the_float_cannot_cover_is_refused(): void
@@ -541,6 +562,7 @@ class SupplierPaymentGateTest extends TestCase
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
             'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
             'reference_number' => 'PC-0002',
         ])->assertStatus(422);
 
@@ -616,6 +638,7 @@ class SupplierPaymentGateTest extends TestCase
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
             'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
             'reference_number' => 'PC-0003',
         ])->assertSuccessful();
 
@@ -736,7 +759,7 @@ class SupplierPaymentGateTest extends TestCase
             'requisition_id' => $requisition->id,
             'payment_source_id' => $this->source('PC-MAIN')->id,
             'expense_code_id' => $this->cashExpenseCode()->id,
-            'receiver' => 'Timber & Board Ltd',
+            'payee_name' => 'Timber & Board Ltd',
             'account' => 'Supplier invoice payment',
             'classification' => 'operations',
             'amount' => $amount,
@@ -762,5 +785,201 @@ class SupplierPaymentGateTest extends TestCase
                 'is_active' => true,
             ],
         );
+    }
+
+    // ── What it costs to move the money ──────────────────────────────────────
+    //
+    // A bank or M-Pesa charge is a cost of running WNG's accounts, not of the
+    // thing being bought. These pin where it lands and what it must never
+    // touch: the supplier's balance, and any project.
+
+    public function test_a_transaction_fee_leaves_the_float_without_crediting_the_supplier(): void
+    {
+        $this->topUpFloat('100000.00');
+        $bill = $this->payableBill();
+
+        $this->postJson('/api/procurement-stores/multi-payment', [
+            'bill_ids' => [$bill->id],
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
+            'reference_number' => 'PC-FEE-1',
+            'transaction_cost' => 150,
+        ])->assertSuccessful();
+
+        $payment = Payment::where('payee_type', 'supplier')->latest('id')->first();
+        $this->assertSame('50000.00', $payment->amount);
+        $this->assertSame('150.00', $payment->transaction_cost);
+
+        // The supplier is credited the invoice amount. The fee was ours.
+        $this->assertSame('0.00', (string) $bill->fresh()->balance);
+        $this->assertSame('50000.00', (string) BillPayment::where('bill_id', $bill->id)->sum('amount_paid'));
+
+        // But the tin gave up both.
+        $this->assertSame(
+            '49850.00',
+            number_format((float) PettyCashBalance::current()->current_balance, 2, '.', ''),
+            'The float must be reduced by the payment and its fee.',
+        );
+    }
+
+    public function test_a_transaction_fee_posts_to_bank_charges_and_never_to_a_project(): void
+    {
+        $this->topUpFloat('100000.00');
+        $bill = $this->payableBill();
+
+        $this->postJson('/api/procurement-stores/multi-payment', [
+            'bill_ids' => [$bill->id],
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
+            'reference_number' => 'PC-FEE-2',
+            'transaction_cost' => 150,
+        ])->assertSuccessful();
+
+        $payment = Payment::where('payee_type', 'supplier')->latest('id')->first();
+        app(\App\Modules\Finance\CostCollector\Services\PettyCashCostProducer::class)->postFor($payment);
+
+        $entry = \App\Modules\Finance\Models\JournalEntry::where(
+            'entry_no', 'JE-PFEE-'.str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT),
+        )->with('lines')->first();
+
+        $this->assertNotNull($entry, 'A payment carrying a fee must post a fee journal.');
+        $this->assertSame('150.00', (string) $entry->total_debit);
+
+        $debit = $entry->lines->firstWhere('entry_type', 'debit');
+        $this->assertSame(
+            '7800',
+            \App\Modules\Finance\Models\ChartOfAccount::find($debit->account_id)->code,
+            'A transfer charge is an overhead, so it debits bank charges.',
+        );
+
+        foreach ($entry->lines as $line) {
+            $this->assertNull($line->project_id, 'A transaction fee must not be charged to a project.');
+            $this->assertNull($line->project_enquiry_id, 'A transaction fee must not be charged to a job.');
+        }
+    }
+
+    public function test_a_fund_request_fee_is_an_overhead_not_a_job_cost(): void
+    {
+        $this->topUpFloat('100000.00');
+        $bill = $this->payableBill();
+        $requisition = $this->fundRequisitionFor($bill, '50000.00');
+
+        $payout = $this->payout($requisition, '50000.00');
+        $payout['transaction_cost'] = 200;
+        $payout['job_number'] = 'JOB-FEE-1';
+
+        $result = app(PettyCashService::class)->createDisbursement($payout);
+        $this->assertTrue($result['success'], 'The payout should succeed.');
+
+        $payment = $result['data'];
+        app(\App\Modules\Finance\CostCollector\Services\PettyCashCostProducer::class)->postFor($payment);
+
+        // The fee reaches the ledger even though the payment itself is a
+        // supplier settlement the producer otherwise skips entirely.
+        $entry = \App\Modules\Finance\Models\JournalEntry::where(
+            'entry_no', 'JE-PFEE-'.str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT),
+        )->first();
+        $this->assertNotNull($entry, 'A fund-request fee must post even on a supplier settlement.');
+        $this->assertSame('200.00', (string) $entry->total_debit);
+
+        // And it is not on the job. It used to be, under OE-FIN-001.
+        $this->assertSame(
+            0,
+            \App\Modules\Finance\CostCollector\Models\CostLine::where('source_type', Payment::class)
+                ->where('source_id', $payment->id)
+                ->where('source_ref', 'transaction-fee')
+                ->count(),
+            'The fee must no longer be posted as a project cost line.',
+        );
+    }
+
+    public function test_one_transfer_settling_several_invoices_is_one_payment_with_one_fee(): void
+    {
+        $this->topUpFloat('200000.00');
+
+        // Two invoices against one delivery, splitting its accepted value —
+        // rather than two deliveries, which would move the order underneath the
+        // first invoice and withdraw its verification.
+        $this->deliver(received: 10, confirmed: true);
+        $first = $this->bill(25000, invoiceNumber: 'SINV-2001');
+        $second = $this->bill(25000, invoiceNumber: 'SINV-2002');
+
+        foreach ([$first, $second] as $invoice) {
+            $this->postJson("/api/procurement-stores/bills/{$invoice->id}/verify")->assertOk();
+        }
+
+        $this->postJson('/api/procurement-stores/multi-payment', [
+            'bill_ids' => [$first->id, $second->id],
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
+            'reference_number' => 'PC-BATCH-1',
+            'transaction_cost' => 300,
+        ])->assertSuccessful();
+
+        $payments = Payment::where('payee_type', 'supplier')->get();
+        $this->assertCount(1, $payments, 'One movement of money is one payment document.');
+        $this->assertSame('300.00', $payments->first()->transaction_cost, 'The fee is charged once, not per invoice.');
+
+        $allocations = BillPayment::whereIn('bill_id', [$first->id, $second->id])->get();
+        $this->assertCount(2, $allocations);
+        $this->assertSame(
+            [$payments->first()->id, $payments->first()->id],
+            $allocations->pluck('disbursement_id')->all(),
+            'Both invoice allocations hang off the one payment.',
+        );
+        $this->assertSame(50000.0, (float) $allocations->sum('amount_paid'));
+    }
+
+    public function test_a_legacy_invoice_cannot_be_settled_on_the_spot(): void
+    {
+        $this->topUpFloat('100000.00');
+        $bill = $this->bill(50000, invoiceNumber: null);
+        $bill->forceFill([
+            'verified_at' => now()->subMonth(),
+            'verification_basis' => 'legacy',
+        ])->saveQuietly();
+
+        $this->postJson('/api/procurement-stores/multi-payment', [
+            'bill_ids' => [$bill->id],
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
+            'reference_number' => 'PC-LEGACY-1',
+        ])->assertStatus(403);
+
+        $this->assertSame(0, BillPayment::where('bill_id', $bill->id)->count());
+    }
+
+    public function test_paying_a_supplier_needs_the_right_to_move_money(): void
+    {
+        $this->topUpFloat('100000.00');
+        $bill = $this->payableBill();
+
+        $clerk = User::create([
+            'name' => 'Procurement Clerk',
+            'email' => uniqid('clerk_').'@test.local',
+            'password' => bcrypt('secret'),
+            'is_active' => true,
+        ]);
+        $clerk->assignRole(Role::findOrCreate('Procurement', 'web'));
+        Sanctum::actingAs($clerk);
+
+        $this->postJson('/api/procurement-stores/multi-payment', [
+            'bill_ids' => [$bill->id],
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
+            'reference_number' => 'PC-NOPERM-1',
+        ])->assertStatus(403);
+
+        $this->assertSame(0, BillPayment::where('bill_id', $bill->id)->count());
     }
 }

@@ -72,7 +72,7 @@ class ReplenishmentController extends Controller
             'department_id' => 'required|integer|exists:departments,id',
             'urgency' => 'nullable|in:normal,urgent',
             'items' => 'required|array|min:1',
-            'items.*.material_id' => 'required|integer|exists:library_materials,id',
+            'items.*.material_id' => 'required|integer|distinct|exists:library_materials,id',
             'items.*.quantity' => 'required|numeric|gt:0',
         ]);
 
@@ -105,7 +105,7 @@ class ReplenishmentController extends Controller
                 'requested_by_type' => 'office',
                 'department_id' => (int) $request->input('department_id'),
                 'urgency' => $request->input('urgency')
-                    ?? ($planned->contains(fn ($row) => $row['reason'] === 'job_shortfall') ? 'urgent' : 'normal'),
+                    ?? ($planned->only($requested->keys()->all())->contains(fn ($row) => $row['reason'] === 'job_shortfall') ? 'urgent' : 'normal'),
                 'status' => 'draft',
                 'total_amount' => 0,
                 'user_id' => auth()->id(),

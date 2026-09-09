@@ -5,7 +5,7 @@ namespace Tests\Unit\PettyCash;
 use App\Modules\Finance\PettyCash\Services\LedgerService;
 use App\Modules\Finance\PettyCash\Services\LedgerEntry;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -59,7 +59,7 @@ class LedgerServiceTest extends TestCase
         $topUp->id = 1;
         $topUp->amount = 100.00;
         $topUp->payment_method = 'cash';
-        $topUp->transaction_code = null;
+        $topUp->external_reference = null;
         $topUp->description = 'Test topup';
         $topUp->created_by = 1;
         $topUp->date_topped_up = null;
@@ -84,11 +84,11 @@ class LedgerServiceTest extends TestCase
         // Seed a balance
         DB::table('petty_cash_balances')->where('id', 1)->update(['current_balance' => 200.00]);
 
-        $d = new PettyCashDisbursement();
+        $d = new Payment();
         $d->id = 1;
         $d->amount = 50.00;
         $d->transaction_cost = 0.00;
-        $d->receiver = 'Receiver';
+        $d->payee_name = 'Receiver';
         $d->payment_method = 'cash';
         $d->description = 'Test';
 

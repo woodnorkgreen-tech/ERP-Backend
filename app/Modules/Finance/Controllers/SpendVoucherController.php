@@ -11,6 +11,7 @@ use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Models\SpendVoucherAllocation;
 use App\Modules\Finance\Services\JournalPostingService;
+use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\HR\Models\HRAuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -86,41 +87,12 @@ class SpendVoucherController extends Controller
         ];
     }
 
-    /**
-     * Active payment sources for the voucher form.
-     *
-     * `payment_source_id` decides which GL account the credit leg hits
-     * (resolveAccountsForVoucher reads its gl_account_id), yet the only list of
-     * sources anywhere was on the receivables endpoint, gated on a receivables
-     * permission a voucher creator has no reason to hold. So the form omitted
-     * the field, and every voucher fell back to a chart lookup for any asset
-     * account it could find.
-     */
-    public function paymentSources(Request $request): JsonResponse
-    {
-        abort_unless(
-            $request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_READ)
-                || $request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_CREATE),
-            403
-        );
-
-        $sources = PaymentSource::query()
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->get(['id', 'code', 'name', 'type', 'currency']);
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $sources,
-        ]);
-    }
-
     /** Verified, journalised liabilities which have not already been paid. */
     public function eligibleLiabilities(Request $request): JsonResponse
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_CREATE), 403);
 
-        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ['2100', '2150'])->pluck('id');
+        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany(['2100', '2150']))->pluck('id');
         $lines = CostLine::query()
             ->withReferenceNames()
             ->with(['expenseCode:id,code,expense_type'])
@@ -279,7 +251,7 @@ class SpendVoucherController extends Controller
             throw new \DomainException('One or more selected liabilities no longer exist. Refresh the list and try again.');
         }
 
-        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ['2100', '2150'])->pluck('id');
+        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany(['2100', '2150']))->pluck('id');
         foreach ($lines as $line) {
             $eligible = $line->status === CostLine::STATUS_VERIFIED
                 && $line->journal_entry_id !== null

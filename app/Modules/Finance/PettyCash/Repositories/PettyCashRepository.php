@@ -3,7 +3,7 @@
 namespace App\Modules\Finance\PettyCash\Repositories;
 
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -36,7 +36,7 @@ class PettyCashRepository
         if (!empty($filters['search'])) {
             $query->where(function ($q) use ($filters) {
                 $q->where('description', 'like', '%' . $filters['search'] . '%')
-                  ->orWhere('transaction_code', 'like', '%' . $filters['search'] . '%');
+                  ->orWhere('external_reference', 'like', '%' . $filters['search'] . '%');
             });
         }
 
@@ -52,7 +52,7 @@ class PettyCashRepository
      */
     public function getDisbursements(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = PettyCashDisbursement::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry', 'plannedCostLine')
+        $query = Payment::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry', 'plannedCostLine', 'paymentSource')
             ->orderBy('date_disbursed', 'desc')
             ->orderBy('created_at', 'desc');
 
@@ -104,7 +104,7 @@ class PettyCashRepository
         $query = PettyCashTopUp::with([
             'creator',
             'disbursements' => function ($q) use ($filters) {
-                $q->with('creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry');
+                $q->with('creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry', 'paymentSource');
                 
                 // Apply disbursement filters
                 if (!empty($filters['disbursement_status'])) {
@@ -139,7 +139,7 @@ class PettyCashRepository
         if (!empty($filters['search'])) {
             $query->where(function ($q) use ($filters) {
                 $q->where('description', 'like', '%' . $filters['search'] . '%')
-                  ->orWhere('transaction_code', 'like', '%' . $filters['search'] . '%')
+                  ->orWhere('external_reference', 'like', '%' . $filters['search'] . '%')
                   ->orWhereHas('disbursements', function ($subQ) use ($filters) {
                       $subQ->search($filters['search']);
                   });
@@ -165,9 +165,9 @@ class PettyCashRepository
     /**
      * Find a specific disbursement by ID.
      */
-    public function findDisbursement(int $id): ?PettyCashDisbursement
+    public function findDisbursement(int $id): ?Payment
     {
-        return PettyCashDisbursement::with('topUp', 'creator', 'voidedBy')
+        return Payment::with('topUp', 'creator', 'voidedBy', 'paymentSource')
             ->find($id);
     }
 
@@ -190,23 +190,16 @@ class PettyCashRepository
     /**
      * Create a new disbursement.
      */
-    public function createDisbursement(array $data): PettyCashDisbursement
+    public function createDisbursement(array $data): Payment
     {
-        return PettyCashDisbursement::create($data);
+        return Payment::create($data);
     }
 
-    /**
-     * Update a disbursement.
-     */
-    public function updateDisbursement(PettyCashDisbursement $disbursement, array $data): bool
-    {
-        return $disbursement->update($data);
-    }
 
     /**
      * Void a disbursement.
      */
-    public function voidDisbursement(PettyCashDisbursement $disbursement, int $voidedBy, string $reason): bool
+    public function voidDisbursement(Payment $disbursement, int $voidedBy, string $reason): bool
     {
         return $disbursement->void($voidedBy, $reason);
     }
@@ -224,7 +217,7 @@ class PettyCashRepository
      */
     public function getTopUpsWithAvailableBalance(): Collection
     {
-        $directDisbursements = DB::table('petty_cash_disbursements as d')
+        $directDisbursements = DB::table('payments as d')
             ->select('d.top_up_id', DB::raw('SUM(d.amount + COALESCE(d.transaction_cost, 0)) as total'))
             ->where('d.status', 'active')
             ->whereNotExists(function ($query) {
@@ -235,7 +228,7 @@ class PettyCashRepository
             ->groupBy('d.top_up_id');
 
         $allocations = DB::table('petty_cash_disbursement_allocations as a')
-            ->join('petty_cash_disbursements as d', 'd.id', '=', 'a.disbursement_id')
+            ->join('payments as d', 'd.id', '=', 'a.disbursement_id')
             ->select('a.top_up_id', DB::raw('SUM(a.amount + COALESCE(a.transaction_cost, 0)) as total'))
             ->where('d.status', 'active')
             ->groupBy('a.top_up_id');
@@ -265,7 +258,7 @@ class PettyCashRepository
     public function getTransactionSummary(array $filters = []): array
     {
         $topUpQuery = PettyCashTopUp::notArchived();
-        $disbursementQuery = PettyCashDisbursement::active()->notArchived();
+        $disbursementQuery = Payment::active()->notArchived();
 
         // Apply date filters - Aligning to created_at for consistency if date_disbursed/date_topped_up differs
         if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
@@ -303,7 +296,7 @@ class PettyCashRepository
      */
     public function getSpendingByClassification(array $filters = []): Collection
     {
-        $query = PettyCashDisbursement::active()
+        $query = Payment::active()
             ->notArchived()
             ->select('classification', DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
             ->groupBy('classification');
@@ -321,7 +314,7 @@ class PettyCashRepository
      */
     public function getSpendingByPaymentMethod(array $filters = []): Collection
     {
-        $query = PettyCashDisbursement::active()
+        $query = Payment::active()
             ->notArchived()
             ->select('payment_method', DB::raw('SUM(amount + COALESCE(transaction_cost, 0)) as total_amount'), DB::raw('COUNT(*) as transaction_count'))
             ->groupBy('payment_method');
@@ -354,7 +347,7 @@ class PettyCashRepository
                 ];
             });
 
-        $disbursements = PettyCashDisbursement::with('creator')
+        $disbursements = Payment::with('creator')
             ->active()
             ->latest()
             ->limit($limit)
@@ -365,7 +358,7 @@ class PettyCashRepository
                     'type' => 'disbursement',
                     'amount' => $disbursement->amount,
                     'description' => $disbursement->description,
-                    'receiver' => $disbursement->receiver,
+                    'payee_name' => $disbursement->payee_name,
                     'created_at' => $disbursement->created_at,
                     'creator' => $disbursement->creator->name,
                 ];
@@ -411,8 +404,8 @@ class PettyCashRepository
             $query->where(function ($q) use ($search) {
                 $q->where('reference_number', 'like', $search)
                   ->orWhere('metadata->description', 'like', $search)
-                  ->orWhere('metadata->receiver', 'like', $search)
-                  ->orWhere('metadata->transaction_code', 'like', $search);
+                  ->orWhere('metadata->payee_name', 'like', $search)
+                  ->orWhere('metadata->external_reference', 'like', $search);
             });
         }
 
@@ -480,7 +473,7 @@ class PettyCashRepository
                 'previous_balance' => (float)$item->balance_snapshot - (float)($item->type === 'credit' ? $item->amount : -($item->amount)),
                 'transaction_date' => $item->posted_at,
                 'description' => $meta['description'] ?? '',
-                'receiver' => $meta['receiver'] ?? null,
+                'payee_name' => $meta['payee_name'] ?? null,
                 'account' => $meta['account'] ?? null,
                 'project_name' => $meta['project_name'] ?? null,
                 'venue' => $meta['venue'] ?? null,
@@ -488,7 +481,7 @@ class PettyCashRepository
                 'classification' => $meta['classification'] ?? null,
                 'job_number' => $meta['job_number'] ?? null,
                 'status' => $meta['status'] ?? 'active',
-                'transaction_code' => $meta['transaction_code'] ?? null,
+                'external_reference' => $meta['external_reference'] ?? null,
                 'created_at' => $item->created_at,
                 // The running balance the ledger already stores. Additive field:
                 // it is what makes the transaction list read as a cashbook rather
@@ -513,7 +506,7 @@ class PettyCashRepository
     private function archivedSourceIds(): array
     {
         return [
-            'disbursement' => PettyCashDisbursement::where('is_archived', true)->pluck('id')->all(),
+            'disbursement' => Payment::where('is_archived', true)->pluck('id')->all(),
             'top_up' => PettyCashTopUp::where('is_archived', true)->pluck('id')->all(),
         ];
     }
@@ -572,7 +565,7 @@ class PettyCashRepository
     /**
      * Archive a specific disbursement.
      */
-    public function archiveDisbursement(PettyCashDisbursement $disbursement, int $userId): bool
+    public function archiveDisbursement(Payment $disbursement, int $userId): bool
     {
         return $disbursement->update([
             'is_archived' => true,
@@ -586,7 +579,7 @@ class PettyCashRepository
      */
     public function bulkArchiveDisbursements(array $ids, int $userId): int
     {
-        return PettyCashDisbursement::whereIn('id', $ids)->update([
+        return Payment::whereIn('id', $ids)->update([
             'is_archived' => true,
             'archived_at' => now(),
             'archived_by' => $userId
@@ -619,7 +612,7 @@ class PettyCashRepository
             ]);
 
             // Archive all related disbursements
-            PettyCashDisbursement::where('top_up_id', $topUpId)->update([
+            Payment::where('top_up_id', $topUpId)->update([
                 'is_archived' => true,
                 'archived_at' => now(),
                 'archived_by' => $userId
@@ -643,7 +636,7 @@ class PettyCashRepository
             ]);
 
             // Archive all related disbursements
-            PettyCashDisbursement::whereIn('top_up_id', $topUpIds)->update([
+            Payment::whereIn('top_up_id', $topUpIds)->update([
                 'is_archived' => true,
                 'archived_at' => now(),
                 'archived_by' => $userId
@@ -665,14 +658,14 @@ class PettyCashRepository
             ->sum('amount');
         
         // Opening Disbursements (only active ones)
-        $openingDisbursements = PettyCashDisbursement::active()->notArchived()
+        $openingDisbursements = Payment::active()->notArchived()
             ->where('date_disbursed', '<', $startDate)
             ->sum(DB::raw('amount + COALESCE(transaction_cost, 0)'));
         
         $openingBalance = (float)$openingTopUps - (float)$openingDisbursements;
 
         // 2. Fetch Disbursements in range
-        $disbursementQuery = PettyCashDisbursement::with(['topUp', 'creator'])
+        $disbursementQuery = Payment::with(['topUp', 'creator', 'paymentSource'])
             ->active()
             ->notArchived()
             ->whereBetween('date_disbursed', [$startDate, $endDate])

@@ -11,7 +11,6 @@ use App\Modules\ProcurementStores\Controllers\BillController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptNoteController;
 use App\Modules\ProcurementStores\Controllers\BoardController;
 use App\Modules\ProcurementStores\Controllers\BoardRequestController;
-use App\Modules\ProcurementStores\Controllers\ProcurementPerformanceController;
 use App\Modules\ProcurementStores\Controllers\ReplenishmentController;
 use App\Modules\ProcurementStores\Controllers\StockCountController;
 use App\Modules\ProcurementStores\Controllers\StoresResetController;
@@ -61,8 +60,6 @@ Route::get('/material-demand-forecast', [ProcurementStoresController::class, 'ma
 // What the demand forecast implies should be bought, and the draft that starts it.
 Route::get('/replenishment-suggestions', [ReplenishmentController::class, 'index']);
 Route::post('/replenishment-suggestions/draft-requisition', [ReplenishmentController::class, 'draft']);
-// Cycle times per stage and lead time / on-time delivery per supplier, all derived.
-Route::get('/performance', [ProcurementPerformanceController::class, 'index']);
 Route::get('/finance-sync-exceptions', [ProcurementStoresController::class, 'financeSyncExceptions']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/retry', [ProcurementStoresController::class, 'retryFinanceSync']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [ProcurementStoresController::class, 'resolveFinanceValuation']);
@@ -114,9 +111,6 @@ Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 's
 // Bills - Specific routes FIRST (before resource)
 Route::get('/bills-stats', [BillController::class, 'stats']);
 Route::get('/pending-bills', [BillController::class, 'getPendingBills']);
-Route::get('/payment-sources', [BillController::class, 'getPaymentSources']);
-Route::get('/payment-methods', [BillController::class, 'getPaymentMethods']);
-Route::post('/payment-methods', [BillController::class, 'storePaymentMethod']);
 Route::post('/search/bills', [BillController::class, 'search']);
 Route::post('/bills/{bill}/record-payment', [BillController::class, 'recordPayment']);
 Route::get('/bills/{bill}/verification', [BillController::class, 'verification']);
@@ -134,7 +128,8 @@ Route::get('/goods-receipt-notes/available-purchase-orders', [GoodsReceiptNoteCo
 Route::get('/goods-receipt-notes/receiving-queue', [GoodsReceiptNoteController::class, 'receivingQueue']);
 Route::get('/goods-receipt-notes/pending-confirmations', [GoodsReceiptNoteController::class, 'pendingConfirmations']);
 Route::get('/goods-receipt-notes/pending-confirmations-count', [GoodsReceiptNoteController::class, 'pendingConfirmationsCount']);
-Route::post('/goods-receipt-note-items/{grnItem}/confirm', [GoodsReceiptNoteController::class, 'confirmItem']);
+Route::post('/goods-receipt-note-items/{grnItem}/confirm', [GoodsReceiptNoteController::class, 'confirmItem'])
+    ->middleware('permission:stores.manage');
 Route::get('/goods-receipt-notes/{id}/download', [GoodsReceiptNoteController::class, 'downloadPdf']);
 Route::get('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'show']);
 Route::post('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'store']);

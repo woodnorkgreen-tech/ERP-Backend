@@ -54,6 +54,11 @@ Route::middleware('permission:'.Permissions::MATERIALS_LIBRARY_MANAGE)->group(fu
     Route::delete('materials/{material}', [MaterialController::class, 'destroy']);
 });
 
+// Reference data the registry can grow: a unit nobody registered used to need a migration.
+Route::middleware('permission:'.Permissions::MATERIALS_LIBRARY_MANAGE)->group(function () {
+    Route::post('reference/units-of-measure', [ReferenceDataController::class, 'storeUnitOfMeasure']);
+});
+
 // Categories
 Route::middleware('permission:'.Permissions::MATERIALS_LIBRARY_MANAGE)->group(function () {
     Route::post('categories/{id}/normalize-attributes', [CategoryController::class, 'normalizeAttributes']);

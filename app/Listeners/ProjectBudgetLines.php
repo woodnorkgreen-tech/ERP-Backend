@@ -47,7 +47,9 @@ class ProjectBudgetLines implements ShouldQueue
 
         Log::info('Projected budget lines', [
             'budget_task_id' => $event->budgetTaskId,
-            ...$this->projector->project($budget),
+            // The actor rides on the event because this runs on a queue worker,
+            // where `auth()` is empty — see BudgetLinesChanged.
+            ...$this->projector->project($budget, $event->actorId),
         ]);
     }
 

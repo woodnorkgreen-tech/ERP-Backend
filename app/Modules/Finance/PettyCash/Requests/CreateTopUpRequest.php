@@ -2,7 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Requests;
 
-use App\Modules\Finance\PettyCash\Support\PaymentMethods;
+use App\Modules\Finance\Support\PaymentMethods;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -37,13 +37,10 @@ class CreateTopUpRequest extends FormRequest
             'payment_method' => [
                 'required',
                 'string',
-                // Read from PaymentMethods, not a literal list. The literal here
-                // predated the bank options, so this rule would have rejected
-                // equity, stanbic, ncba, kcb and family — all valid in the
-                // column enum and offered by the API.
+                // The one canonical list, shared with payments and bills.
                 Rule::in(PaymentMethods::values()),
             ],
-            'transaction_code' => [
+            'external_reference' => [
                 'nullable',
                 'string',
                 'max:255',
@@ -81,8 +78,8 @@ class CreateTopUpRequest extends FormRequest
             'date_topped_up.before_or_equal' => 'A top-up cannot be dated in the future.',
             'payment_method.required' => 'Please select a payment method.',
             'payment_method.in' => 'The selected payment method is invalid.',
-            'transaction_code.required_unless' => 'Transaction code is required for non-cash payments.',
-            'transaction_code.max' => 'Transaction code cannot exceed 255 characters.',
+            'external_reference.required_unless' => 'Transaction code is required for non-cash payments.',
+            'external_reference.max' => 'Transaction code cannot exceed 255 characters.',
             'description.max' => 'Description cannot exceed 1000 characters.',
         ];
     }
@@ -96,7 +93,7 @@ class CreateTopUpRequest extends FormRequest
     {
         return [
             'payment_method' => 'payment method',
-            'transaction_code' => 'transaction code',
+            'external_reference' => 'transaction code',
         ];
     }
 
@@ -111,17 +108,20 @@ class CreateTopUpRequest extends FormRequest
         $validator->after(function ($validator) {
             // Additional custom validation logic can be added here
             $paymentMethod = $this->input('payment_method');
-            $transactionCode = $this->input('transaction_code');
+            $transactionCode = $this->input('external_reference');
 
             // Validate transaction code for specific payment methods
-            if (in_array($paymentMethod, ['mpesa', 'bank_transfer']) && empty($transactionCode)) {
-                $validator->errors()->add('transaction_code', 'Transaction code is required for ' . $paymentMethod . ' payments.');
+            if (PaymentMethods::requiresReference($paymentMethod) && empty($transactionCode)) {
+                $validator->errors()->add(
+                    'external_reference',
+                    'An external reference is required for ' . PaymentMethods::label($paymentMethod) . ' payments.',
+                );
             }
 
             // Validate transaction code format for M-Pesa
             if ($paymentMethod === 'mpesa' && $transactionCode) {
                 if (!preg_match('/^[A-Z0-9]{10}$/', $transactionCode)) {
-                    $validator->errors()->add('transaction_code', 'M-Pesa transaction code must be 10 characters long and contain only uppercase letters and numbers.');
+                    $validator->errors()->add('external_reference', 'M-Pesa transaction code must be 10 characters long and contain only uppercase letters and numbers.');
                 }
             }
         });

@@ -2,7 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Imports;
 
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
@@ -66,8 +66,11 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'tdate' => 'date',
             'dateofpayment' => 'date',
             'paymentdate' => 'date',
-            'receiver' => 'receiver',
-            'payee' => 'receiver',
+            // 'receiver' stays as an accepted spreadsheet header: the column is
+            // named that in every workbook staff already hold.
+            'receiver' => 'payee_name',
+            'payee_name' => 'payee_name',
+            'payee' => 'payee_name',
             'account' => 'account',
             'ledger' => 'account',
             'amount' => 'amount',
@@ -84,7 +87,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'jobno' => 'job_number',
             'jobnumber' => 'job_number',
             'paymentmethod' => 'payment_method',
-            'transactioncode' => 'transaction_code',
+            'transactioncode' => 'external_reference',
             'venue' => 'venue',
             'site' => 'venue',
             'location' => 'venue',
@@ -103,7 +106,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
         // Fallback for numeric keys (if header row detection failed or column missing)
         $fallbacks = [
             0 => 'date',
-            1 => 'receiver',
+            1 => 'payee_name',
             2 => 'account',
             3 => 'amount',
             4 => 'description',
@@ -111,7 +114,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             6 => 'tax',
             7 => 'classification',
             8 => 'job_number',
-            9 => 'transaction_code'
+            9 => 'external_reference'
         ];
         
         foreach ($fallbacks as $index => $targetKey) {
@@ -188,7 +191,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             }
 
             // Create disbursement (only if we have meaningful data)
-            if ($amount > 0 || !empty($mappedRow['receiver'] ?? null)) {
+            if ($amount > 0 || !empty($mappedRow['payee_name'] ?? null)) {
                 $disbursementData = $this->prepareDisbursementData($mappedRow, $date);
                 
                 $result = $this->service->createDisbursement($disbursementData);
@@ -210,7 +213,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
     private function normalizeMappedRow(array $row): array
     {
         // Trim and cast basic fields
-        if (isset($row['receiver'])) $row['receiver'] = (string)$row['receiver'];
+        if (isset($row['payee_name'])) $row['payee_name'] = (string)$row['payee_name'];
         if (isset($row['account'])) $row['account'] = (string)$row['account'];
         if (isset($row['description'])) $row['description'] = (string)$row['description'];
 
@@ -357,7 +360,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
 
     private function isDuplicate($row, $date): bool
     {
-        $receiver = trim(is_array($row['receiver'] ?? '') ? json_encode($row['receiver'] ?? '') : ($row['receiver'] ?? ''));
+        $payee_name = trim(is_array($row['payee_name'] ?? '') ? json_encode($row['payee_name'] ?? '') : ($row['payee_name'] ?? ''));
         $account = trim(is_array($row['account'] ?? '') ? json_encode($row['account'] ?? '') : ($row['account'] ?? ''));
         $amount = 0;
         if (isset($row['amount']) && !empty(trim(is_array($row['amount']) ? json_encode($row['amount']) : $row['amount']))) {
@@ -399,7 +402,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
         $jobNumber = trim(is_array($row['job_number'] ?? '') ? json_encode($row['job_number'] ?? '') : ($row['job_number'] ?? ''));
 
         // Enhanced duplicate checking with additional fields for better accuracy
-        $query = PettyCashDisbursement::where('receiver', $receiver)
+        $query = Payment::where('payee_name', $payee_name)
             ->where('account', $account)
             ->where('amount', $amount)
             ->whereDate('date_disbursed', $date->format('Y-m-d'));
@@ -486,8 +489,8 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
         }
 
         // Create defaults for missing values to bypass strict DB/Validation
-        $receiver = trim(is_array($row['receiver'] ?? '') ? json_encode($row['receiver'] ?? '') : ($row['receiver'] ?? ''));
-        if (empty($receiver)) $receiver = 'Unknown Payee';
+        $payee_name = trim(is_array($row['payee_name'] ?? '') ? json_encode($row['payee_name'] ?? '') : ($row['payee_name'] ?? ''));
+        if (empty($payee_name)) $payee_name = 'Unknown Payee';
 
         $account = trim(is_array($row['account'] ?? '') ? json_encode($row['account'] ?? '') : ($row['account'] ?? ''));
         if (empty($account)) $account = 'General Ledger';
@@ -499,7 +502,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
         if (empty($tax)) $tax = 'no_etr';
 
         return [
-            'receiver' => $receiver,
+            'payee_name' => $payee_name,
             'account' => $account,
             'amount' => $amount > 0 ? $amount : 0.00,
             'description' => $description,
@@ -509,7 +512,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'job_number' => trim(is_array($row['job_number'] ?? '') ? json_encode($row['job_number'] ?? '') : ($row['job_number'] ?? '')),
             'tax' => $tax,
             'payment_method' => $row['payment_method'] ?? 'cash',
-            'transaction_code' => $row['transaction_code'] ?? ('IMP-' . time() . '-' . rand(1000, 9999)),
+            'external_reference' => $row['external_reference'] ?? ('IMP-' . time() . '-' . rand(1000, 9999)),
             'status' => 'active',
             'created_by' => auth()->id() ?? 1, // Default to system user if not authenticated
             'date_disbursed' => $date ? $date->format('Y-m-d') : now()->format('Y-m-d'),
@@ -564,7 +567,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
         // Relaxing rules to the absolute minimum to allow "messy" data imports
         return [
             'date' => 'nullable',
-            'receiver' => 'nullable',
+            'payee_name' => 'nullable',
             'account' => 'nullable',
             'amount' => 'nullable',
             'description' => 'nullable',
@@ -573,7 +576,7 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
             'job_number' => 'nullable',
             'tax' => 'nullable',
             'venue' => 'nullable',
-            'transaction_code' => 'nullable'
+            'external_reference' => 'nullable'
         ];
     }
 
@@ -581,8 +584,8 @@ class PettyCashDisbursementImport implements ToCollection, WithHeadingRow, WithC
     {
         return [
             'date.required' => 'DATE is required',
-            'receiver.required' => 'RECEIVER is required',
-            'receiver.max' => 'RECEIVER must not exceed 255 characters',
+            'payee_name.required' => 'PAYEE is required',
+            'payee_name.max' => 'PAYEE must not exceed 255 characters',
             'account.required' => 'ACCOUNT is required',
             'account.max' => 'ACCOUNT must not exceed 255 characters',
             'amount.required' => 'AMOUNT is required',

@@ -57,6 +57,13 @@ class LibraryMaterialResource extends JsonResource
             'purchase_uom_id' => $this->purchase_uom_id,
             'issue_uom_id' => $this->issue_uom_id,
             'base_uom' => $this->whenLoaded('baseUom', fn () => $this->baseUom?->code),
+            // Once stock has moved, the stock unit is what every past quantity
+            // was counted in — changing it would silently reinterpret history,
+            // so MaterialController::update refuses it. Say so before the edit
+            // rather than after the save. Only present where the caller loaded
+            // the existence check, so the form can tell "not locked" from
+            // "not known".
+            'base_uom_locked' => $this->whenHas('has_stock_movements', fn () => (bool) $this->has_stock_movements),
             'purchase_uom' => $this->whenLoaded('purchaseUom', fn () => $this->purchaseUom ? ['id' => $this->purchaseUom->id, 'code' => $this->purchaseUom->code, 'name' => $this->purchaseUom->name] : null),
             'issue_uom' => $this->whenLoaded('issueUom', fn () => $this->issueUom ? ['id' => $this->issueUom->id, 'code' => $this->issueUom->code, 'name' => $this->issueUom->name] : null),
             'uom_conversions' => $this->whenLoaded('uomConversions', fn () => $this->uomConversions->map(fn ($conversion) => [

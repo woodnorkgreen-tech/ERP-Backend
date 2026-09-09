@@ -31,18 +31,27 @@ class BudgetProjector
     public function __construct(
         private CostCollectorService $collector,
         private UnbudgetedSpendAdopter $adopter,
+        private \App\Services\Governance\BudgetRevisionRecorder $revisions,
     ) {}
 
     /**
-     * @return array{projected:int, skipped:int, retired:int, adopted:int}
+     * @param  int|null  $actorId  who caused the change; null for machine paths
+     * @return array{projected:int, skipped:int, retired:int, adopted:int, revised:bool}
      */
-    public function project(TaskBudgetData $budget): array
+    public function project(TaskBudgetData $budget, ?int $actorId = null): array
     {
         $task = $budget->task;
 
         if (! $task) {
-            return ['projected' => 0, 'skipped' => 0, 'retired' => 0, 'adopted' => 0];
+            return ['projected' => 0, 'skipped' => 0, 'retired' => 0, 'adopted' => 0, 'revised' => false];
         }
+
+        // Read before anything moves. This is the figure the expenditure gate was
+        // measuring approvals against a moment ago, and comparing it with what
+        // the projection leaves behind is the only way to see the budget move —
+        // the planned lines themselves are superseded one at a time, so no single
+        // write knows the total changed.
+        $before = $this->revisions->plannedTotalFor($task->project_enquiry_id);
 
         $lines = $this->linesFor($budget, $task->project_enquiry_id, $task->id);
 
@@ -72,11 +81,25 @@ class BudgetProjector
         // pass would let whichever projected first claim it unopposed.
         $adopted = $this->adopter->adoptForEnquiry($task->project_enquiry_id);
 
+        // Recorded, never refused. A budget that moves while money is already
+        // committed against it is the other way out of an over-budget block, and
+        // it used to be the free one — see BudgetRevisionRecorder.
+        $revision = $task->enquiry
+            ? $this->revisions->record(
+                $task->enquiry,
+                $before,
+                $this->revisions->plannedTotalFor($task->project_enquiry_id),
+                $actorId,
+                $task->id,
+            )
+            : null;
+
         return [
             'projected' => $projected,
             'skipped' => $skipped,
             'retired' => $retired,
             'adopted' => $adopted,
+            'revised' => $revision !== null,
         ];
     }
 

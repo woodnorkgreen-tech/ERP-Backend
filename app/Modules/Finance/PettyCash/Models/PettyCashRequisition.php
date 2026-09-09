@@ -2,6 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Models;
 
+use App\Modules\Finance\Models\Payment;
 use App\Models\User;
 use App\Modules\HR\Models\Department;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -37,6 +38,7 @@ class PettyCashRequisition extends Model
         'approved_by',
         'approved_at',
         'rejection_reason',
+        'budget_exception',
         'digital_signature',
         'received_at',
         'payee_name',
@@ -62,6 +64,7 @@ class PettyCashRequisition extends Model
         'updated_at' => 'datetime',
         'custom_fields' => 'array',
         'type_snapshot' => 'array',
+        'budget_exception' => 'array',
     ];
 
     /**
@@ -106,7 +109,7 @@ class PettyCashRequisition extends Model
      */
     public function disbursement(): HasOne
     {
-        return $this->hasOne(PettyCashDisbursement::class, 'requisition_id');
+        return $this->hasOne(Payment::class, 'requisition_id');
     }
 
     /**

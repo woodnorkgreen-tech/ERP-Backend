@@ -836,8 +836,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('enquiries/{enquiry}/finance-progress', [EnquiryController::class, 'getFinanceProgress']);
         Route::get('receivables/summary', [EnquiryController::class, 'receivablesSummary'])
             ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
-        Route::get('receivables/payment-sources', [EnquiryController::class, 'receivablesPaymentSources'])
-            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
         Route::get('receivables/receipts/unallocated', [EnquiryController::class, 'unallocatedReceipts'])
             ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
         Route::post('receivables/receipts/{receipt}/allocations', [EnquiryController::class, 'allocateReceipt'])
@@ -851,6 +849,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('enquiries/{enquiry}/invoices', [EnquiryController::class, 'createProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
         Route::post('enquiries/{enquiry}/invoices/{invoice}/issue', [EnquiryController::class, 'issueProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
         Route::post('enquiries/{enquiry}/invoices/{invoice}/allocate', [EnquiryController::class, 'allocatePaymentToInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/void', [EnquiryController::class, 'voidProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_REVERSE);
         Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment'])
             ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
         Route::post('enquiries/{enquiry}/payments/{payment}/verify', [EnquiryController::class, 'verifyPayment'])
@@ -942,12 +941,26 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::prefix('finance')->group(function () {
         Route::get('readiness', [\App\Modules\Finance\Controllers\FinanceReadinessController::class, 'show']);
 
+        /*
+         * The paying-account master. One place, replacing four endpoints that
+         * served the same rows behind four different permissions — the spend
+         * voucher form, the receivables screen, procurement's bill payment form
+         * and the petty cash top-up form. Reading is auth-only by design: the
+         * clerk recording a payment must be able to name the account.
+         */
+        Route::get('payment-sources', [\App\Modules\Finance\Controllers\PaymentSourceController::class, 'index']);
+        // How money can be transmitted. A controlled list, served once.
+        Route::get('payment-methods', [\App\Modules\Finance\Controllers\PaymentSourceController::class, 'paymentMethods']);
+        Route::get('payment-sources/ledger-accounts', [\App\Modules\Finance\Controllers\PaymentSourceController::class, 'ledgerAccounts']);
+        Route::post('payment-sources', [\App\Modules\Finance\Controllers\PaymentSourceController::class, 'store'])
+            ->middleware('permission:' . Permissions::FINANCE_PAYMENT_SOURCES_MANAGE);
+        Route::put('payment-sources/{paymentSource}', [\App\Modules\Finance\Controllers\PaymentSourceController::class, 'update'])
+            ->middleware('permission:' . Permissions::FINANCE_PAYMENT_SOURCES_MANAGE);
+
         // Spend Vouchers Routes
         Route::prefix('spend-vouchers')->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
             Route::post('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'store']);
-            // Ahead of `{id}` so it is not resolved as a voucher id.
-            Route::get('payment-sources', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'paymentSources']);
             Route::get('eligible-liabilities', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'eligibleLiabilities']);
             Route::get('/{id}', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'show']);
             Route::post('/{id}/cancel', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'cancel']);
@@ -967,6 +980,37 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             // Also ahead of `{journal}`.
             Route::get('export', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'export']);
             Route::get('{journal}', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'show']);
+            // The single write, and not a second ledger writer: it delegates to
+            // the same JournalPostingService that wrote the entry being
+            // corrected. Before this, only a cost line could be reversed — every
+            // other document was correctable only by hand in the database.
+            Route::post('{journal}/reverse', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'reverse']);
+        });
+
+        /*
+         * Which departments' pay is a direct cost of client work rather than
+         * office overhead. A Finance policy decision, so it lives here rather
+         * than on the Administration department form — see the controller.
+         */
+        Route::get('labour-classification', [\App\Modules\Finance\Controllers\LabourClassificationController::class, 'index']);
+        Route::patch('labour-classification/{department}', [\App\Modules\Finance\Controllers\LabourClassificationController::class, 'update']);
+
+        /*
+         * Accounting periods — the months the ledger posts into.
+         *
+         * Closing a month declares it final, so no transaction can afterwards
+         * appear in a month already reported on. The month-end checklist has
+         * existed since August as `finance:close-period`, runnable only by a
+         * developer at a terminal; these endpoints put the same checks behind a
+         * screen Finance can operate, which is the point of having a control at
+         * all.
+         */
+        Route::prefix('accounting-periods')->group(function () {
+            Route::get('/', [\App\Modules\Finance\Controllers\AccountingPeriodController::class, 'index']);
+            Route::get('{period}/checklist', [\App\Modules\Finance\Controllers\AccountingPeriodController::class, 'checklist']);
+            Route::post('{period}/close', [\App\Modules\Finance\Controllers\AccountingPeriodController::class, 'close']);
+            Route::post('{period}/lock', [\App\Modules\Finance\Controllers\AccountingPeriodController::class, 'lock']);
+            Route::post('{period}/reopen', [\App\Modules\Finance\Controllers\AccountingPeriodController::class, 'reopen']);
         });
 
         // KRA filing schedules. Read-only and download-shaped: Finance files
@@ -976,6 +1020,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('vat-input-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'vatInput']);
             Route::get('etims-gap', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'etimsGap']);
             Route::get('wht-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'wht']);
+            // Reference data for raising a client invoice: which Value Added Tax
+            // treatments are in force, so a sales line can be priced from a rule
+            // rather than from a typed figure.
+            Route::get('treatments', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'treatments']);
         });
 
         // Petty Cash Module Routes
@@ -1061,7 +1109,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
             // Statistics and validation routes
             Route::get('statistics', [PettyCashTopUpController::class, 'statistics']);
-            Route::get('payment-methods', [PettyCashTopUpController::class, 'paymentMethods']);
             Route::post('validate/top-up', [PettyCashTopUpController::class, 'validateTopUp']);
 
             // Requisition routes

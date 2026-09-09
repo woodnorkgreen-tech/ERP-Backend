@@ -4,7 +4,7 @@ namespace App\Listeners;
 
 use App\Events\PettyCashDisbursementPaid;
 use App\Modules\Finance\CostCollector\Services\PettyCashCostProducer;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -35,7 +35,7 @@ class RecordPettyCashCost implements ShouldQueue
 
     public function handle(PettyCashDisbursementPaid $event): void
     {
-        $disbursement = PettyCashDisbursement::find($event->disbursementId);
+        $disbursement = Payment::find($event->disbursementId);
 
         // Voided between payment and handling, or removed outright. The producer
         // would skip it anyway; reading it back is what makes that decision on

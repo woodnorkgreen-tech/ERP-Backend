@@ -6,7 +6,7 @@ use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -40,9 +40,12 @@ class DirectDisbursementApprovalTest extends TestCase
         $payload = [
             'idempotency_key' => (string) Str::uuid(),
             'top_up_id' => $topUp->id,
-            'receiver' => 'Office Supplier',
+            'payee_name' => 'Office Supplier',
             'expense_code_id' => DB::table('expense_codes')->where('job_id_rule', 'not_allowed')->value('id'),
             'payment_source_id' => DB::table('payment_sources')->where('code', 'PC-MAIN')->value('id'),
+            // Stated, not inferred from the account: the float pays out in cash
+            // and by M-Pesa, and the record has to say which.
+            'payment_method' => 'cash',
             'amount' => 1500,
             'transaction_cost' => 0,
             'description' => 'Urgent office consumables',
@@ -58,7 +61,7 @@ class DirectDisbursementApprovalTest extends TestCase
             ->assertJsonPath('pending_approval', true);
 
         $requestId = $submission->json('data.id');
-        $this->assertSame(0, PettyCashDisbursement::count());
+        $this->assertSame(0, Payment::count());
         $this->assertSame(0, DB::table('petty_cash_ledger_entries')->where('type', 'debit')->count());
 
         $this->actingAs($maker, 'sanctum')
@@ -69,7 +72,7 @@ class DirectDisbursementApprovalTest extends TestCase
             ->postJson("/api/finance/petty-cash/direct-disbursement-requests/{$requestId}/approve")
             ->assertOk();
 
-        $this->assertSame(1, PettyCashDisbursement::count());
+        $this->assertSame(1, Payment::count());
         $this->assertSame(1, DB::table('petty_cash_ledger_entries')->where('type', 'debit')->count());
         $this->assertDatabaseHas('direct_disbursement_requests', [
             'id' => $requestId, 'status' => 'approved', 'approved_by' => $checker->id,

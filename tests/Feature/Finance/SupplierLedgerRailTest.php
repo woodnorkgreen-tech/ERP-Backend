@@ -11,7 +11,6 @@ use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
-use App\Modules\ProcurementStores\Models\PaymentMethod;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use App\Modules\ProcurementStores\Models\Supplier;
@@ -139,14 +138,10 @@ class SupplierLedgerRailTest extends TestCase
         ]);
     }
 
-    private function paymentMethod(): PaymentMethod
+    /** The account a supplier payment leaves. How it is sent is a separate fact. */
+    private function payingAccount(): PaymentSource
     {
-        $source = PaymentSource::where('code', 'BANK-MAIN')->firstOrFail();
-
-        return PaymentMethod::updateOrCreate(
-            ['method_name' => 'Bank Transfer'],
-            ['payment_source_id' => $source->id, 'is_active' => true],
-        );
+        return PaymentSource::where('code', 'BANK-MAIN')->firstOrFail();
     }
 
     /** The signed movement on one account across every posted entry. */
@@ -230,13 +225,13 @@ class SupplierLedgerRailTest extends TestCase
         $bill = $this->bill();
         $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
 
-        $method = $this->paymentMethod();
+        $source = $this->payingAccount();
         BillPayment::create([
             'bill_id' => $bill->id,
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $method->id,
-            'payment_source_id' => $method->payment_source_id,
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $source->id,
             'reference_number' => 'TRX-001',
             'user_id' => $this->accounts->id,
         ]);
@@ -263,13 +258,13 @@ class SupplierLedgerRailTest extends TestCase
             'verification_basis' => 'legacy',
         ])->save();
 
-        $method = $this->paymentMethod();
+        $source = $this->payingAccount();
         BillPayment::create([
             'bill_id' => $bill->id,
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $method->id,
-            'payment_source_id' => $method->payment_source_id,
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $source->id,
             'reference_number' => 'TRX-002',
             'user_id' => $this->accounts->id,
         ]);
@@ -285,13 +280,13 @@ class SupplierLedgerRailTest extends TestCase
         $bill = $this->bill();
         $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
 
-        $method = $this->paymentMethod();
+        $source = $this->payingAccount();
         BillPayment::create([
             'bill_id' => $bill->id,
             'amount_paid' => 20000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $method->id,
-            'payment_source_id' => $method->payment_source_id,
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $source->id,
             'reference_number' => 'TRX-003',
             'user_id' => $this->accounts->id,
         ]);
@@ -333,13 +328,13 @@ class SupplierLedgerRailTest extends TestCase
         $bill = $this->bill();
         $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
 
-        $method = $this->paymentMethod();
+        $source = $this->payingAccount();
         BillPayment::create([
             'bill_id' => $bill->id,
             'amount_paid' => 50000,
             'payment_date' => now()->toDateString(),
-            'payment_method_id' => $method->id,
-            'payment_source_id' => $method->payment_source_id,
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $source->id,
             'reference_number' => 'TRX-004',
             'user_id' => $this->accounts->id,
         ]);

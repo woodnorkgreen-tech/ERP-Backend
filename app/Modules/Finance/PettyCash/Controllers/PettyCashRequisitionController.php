@@ -3,8 +3,10 @@
 namespace App\Modules\Finance\PettyCash\Controllers;
 
 use App\Constants\EnquiryConstants;
+use App\Constants\Permissions;
 use App\Http\Controllers\Controller;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Support\PaymentMethods;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisitionItem;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisitionType;
@@ -12,6 +14,7 @@ use App\Modules\HR\Models\Department;
 use App\Modules\HR\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Auth;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use Illuminate\Support\Facades\DB;
@@ -49,7 +52,7 @@ class PettyCashRequisitionController extends Controller
             ])->withCount('items');
 
             // If not admin/finance, only show their own
-            if ($user && !$user->can('viewAllRequisitions', PettyCashDisbursement::class)) {
+            if ($user && !$user->can('viewAllRequisitions', Payment::class)) {
                 $query->where('user_id', $user->id);
             }
 
@@ -129,7 +132,7 @@ class PettyCashRequisitionController extends Controller
             $query = PettyCashRequisition::query();
 
             // Scope to user if not admin
-            if ($user && !$user->can('viewAllRequisitions', PettyCashDisbursement::class)) {
+            if ($user && !$user->can('viewAllRequisitions', Payment::class)) {
                 $query->where('user_id', $user->id);
             }
 
@@ -436,7 +439,7 @@ class PettyCashRequisitionController extends Controller
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
 
-            if (!Auth::user()?->can('update', PettyCashDisbursement::class)) {
+            if (!Auth::user()?->can('reviewRequisition', Payment::class)) {
                 return response()->json(['success' => false, 'message' => 'You are not authorized to approve requisitions'], 403);
             }
             $selfApproval = $requisition->user_id === Auth::id();
@@ -464,19 +467,73 @@ class PettyCashRequisitionController extends Controller
             }
 
             $enquiry = $requisition->enquiry ?? $requisition->project?->enquiry;
+            $exception = null;
+
             if ($enquiry) {
                 $gate = app(ProjectGovernanceService::class)->checkGate($enquiry, 'expenditure', [
                     'amount' => (float) $requisition->total_amount,
                     'source' => 'petty_cash_requisition',
                     'requisition_id' => $requisition->id,
+                    // Take this requisition's own outstanding commitment out of the
+                    // exposure it is measured against. Editing an approved
+                    // requisition sends it back to pending, which releases that
+                    // commitment — but the release is queued, so on re-approval the
+                    // line can still be open and the requisition would be blocked
+                    // by the weight of itself.
+                    'exclude_source_type' => PettyCashRequisition::class,
+                    'exclude_source_id' => $requisition->id,
                 ]);
+
                 if (!$gate->isAuthorized()) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => $gate->getMessage(),
-                        'code' => 'PROJECT_BUDGET_NOT_READY',
-                        'context' => $gate->context,
-                    ], 422);
+                    $mayAuthorizeOverrun = Auth::user()?->can(Permissions::FINANCE_EXPENDITURE_EXCEPTION_APPROVE) ?? false;
+
+                    // Two different answers behind one block. Without a stated
+                    // reason this is still a refusal, and the refusal is the
+                    // point: the figures go back so the approver can check them
+                    // against the cost account, cancel a stale commitment, or
+                    // reclassify spend that was never a project cost. Only when
+                    // someone with the authority to carry an overrun writes down
+                    // why does the approval go through — and then it goes through
+                    // recorded, not forced.
+                    if (blank($request->input('budget_exception_reason'))) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => $gate->getMessage(),
+                            'code' => 'PROJECT_BUDGET_NOT_READY',
+                            'context' => $gate->context,
+                            'can_authorize_exception' => $mayAuthorizeOverrun,
+                        ], 422);
+                    }
+
+                    if (!$mayAuthorizeOverrun) {
+                        return response()->json([
+                            'success' => false,
+                            'code' => 'EXPENDITURE_EXCEPTION_FORBIDDEN',
+                            'message' => 'Approving spend beyond a project budget is a separate authority from approving the requisition. Ask someone who holds "Authorize Spending Beyond an Approved Project Budget", or revise the project budget first.',
+                        ], 403);
+                    }
+
+                    $request->validate([
+                        'budget_exception_reason' => ['required', 'string', 'min:20', 'max:1000'],
+                        'budget_exception_funding_source' => ['required', 'string', 'min:3', 'max:255'],
+                    ], [
+                        'budget_exception_reason.required' => 'State why the company will carry this overrun.',
+                        'budget_exception_reason.min' => 'The business justification must be at least 20 characters.',
+                        'budget_exception_funding_source.required' => 'Name where the money is coming from instead.',
+                    ]);
+
+                    $exception = $this->recordExpenditureException($requisition, $enquiry, $gate, $request, $selfApproval);
+
+                    // An exception that could not be written is not an exception,
+                    // it is an unrecorded override. The approval stops here rather
+                    // than letting the money through with no trail behind it.
+                    if ($exception === null) {
+                        return response()->json([
+                            'success' => false,
+                            'code' => 'EXPENDITURE_EXCEPTION_NOT_RECORDED',
+                            'message' => 'The budget exception could not be written to the audit log, so the approval was not applied. Try again.',
+                        ], 500);
+                    }
                 }
             }
 
@@ -484,6 +541,7 @@ class PettyCashRequisitionController extends Controller
                 'status' => 'approved',
                 'approved_by' => Auth::id(),
                 'approved_at' => now(),
+                'budget_exception' => $exception,
             ]);
 
             // The project's money is now spoken for. Recorded as a commitment
@@ -495,7 +553,7 @@ class PettyCashRequisitionController extends Controller
                     'self_approval_override',
                     'requisition',
                     $requisition->id,
-                    "Emergency self-approval override for {$requisition->requisition_number}",
+                    "Authorized self-approval exception for {$requisition->requisition_number}",
                     [
                         'reason' => $request->string('override_reason')->toString(),
                         'amount' => (float) $requisition->total_amount,
@@ -507,11 +565,16 @@ class PettyCashRequisitionController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => $selfApproval
-                    ? 'Requisition approved using the audited emergency override'
-                    : 'Requisition marked as Approved',
+                'message' => $this->approvalMessage($selfApproval, $exception !== null),
                 'data' => $requisition
             ]);
+        } catch (ValidationException $e) {
+            // A rejected field is a 422 with field errors, not a server fault.
+            // The generic handler below catches Exception, and ValidationException
+            // is one — so every failed validation in this method, the
+            // self-approval reason included, was being answered as "Failed to
+            // approve requisition" with a 500 and no field attribution.
+            throw $e;
         } catch (GovernanceException $e) {
             return response()->json([
                 'success' => false,
@@ -528,6 +591,123 @@ class PettyCashRequisitionController extends Controller
     }
 
     /**
+     * Write down that a project was committed to spend it had no budget for.
+     *
+     * The record has to survive the requisition, so the authoritative copy is a
+     * governance audit row — the same table the block itself was already written
+     * to, seconds earlier, by ProjectGovernanceService::logDecision. A reviewer
+     * reading that log now sees the refusal and the authorization as consecutive
+     * entries on one project, with the figures each was taken on.
+     *
+     * The array returned is the requisition's own copy, for the screen to render
+     * and for PettyCashCostProducer to lift `reason` onto the commitment's
+     * `details.unbudgeted_reason`. That is what puts the overrun in the cost
+     * account's Unbudgeted panel on the day it is authorised, carrying its
+     * justification, instead of surfacing unexplained at close-out.
+     *
+     * Deliberately not a status. The requisition is approved — a "pending budget
+     * exception" state would be a fourth queue for Finance to work, holding
+     * documents whose decision has in fact already been taken, and every
+     * downstream listener would need teaching about it. What was exceptional
+     * about the approval is recorded on the approval.
+     *
+     * @return array<string, mixed>|null null when the audit write failed
+     */
+    private function recordExpenditureException(
+        PettyCashRequisition $requisition,
+        ProjectEnquiry $enquiry,
+        \App\Services\Governance\GateResult $gate,
+        Request $request,
+        bool $selfApproval,
+    ): ?array {
+        $figures = $gate->context;
+        $budget = (float) ($figures['budget'] ?? 0);
+        $exposureBefore = (float) ($figures['current_commitment'] ?? 0);
+        $requested = (float) $requisition->total_amount;
+
+        // The zero-budget block carries no overage of its own — there is no
+        // budget for the spend to be over. The whole request is the overrun.
+        $overage = (float) ($figures['overage'] ?? $requested);
+
+        $reason = trim((string) $request->input('budget_exception_reason'));
+        $fundingSource = trim((string) $request->input('budget_exception_funding_source'));
+
+        $log = app(ProjectGovernanceService::class)->logEvent(
+            $enquiry,
+            'expenditure_exception',
+            (int) Auth::id(),
+            [
+                'requisition_id' => $requisition->id,
+                'requisition_number' => $requisition->requisition_number,
+                'budget' => $budget,
+                'budget_source' => $figures['budget_source'] ?? null,
+                'exposure_before' => $exposureBefore,
+                'requested' => $requested,
+                'projected_exposure' => $exposureBefore + $requested,
+                'overage' => $overage,
+                'reason' => $reason,
+                'funding_source' => $fundingSource,
+                'self_approved' => $selfApproval,
+                'blocked_by' => $gate->getMessage(),
+            ],
+            'Authorized expenditure exception: KES '.number_format($requested, 2)
+                .' approved against '.($enquiry->job_number ?: "enquiry #{$enquiry->id}")
+                .'. Projected exposure KES '.number_format($exposureBefore + $requested, 2)
+                .', exceeding the budget by KES '.number_format($overage, 2).'.',
+        );
+
+        if (! $log) {
+            return null;
+        }
+
+        // Mirrored onto the petty cash activity log too. Finance works that
+        // screen daily and the governance log is a Projects-side table they have
+        // no reason to open — an override nobody sees is only half recorded.
+        app(PettyCashService::class)->logActivity(
+            'budget_exception_approved',
+            'requisition',
+            $requisition->id,
+            "Authorized spending beyond budget for {$requisition->requisition_number}",
+            [
+                'overage' => $overage,
+                'budget' => $budget,
+                'reason' => $reason,
+                'funding_source' => $fundingSource,
+                'governance_log_id' => $log->id,
+            ],
+        );
+
+        return [
+            'reason' => $reason,
+            'funding_source' => $fundingSource,
+            'budget' => $budget,
+            'budget_source' => $figures['budget_source'] ?? null,
+            'exposure_before' => $exposureBefore,
+            'requested' => $requested,
+            'overage' => $overage,
+            'governance_log_id' => $log->id,
+            'approved_by' => (int) Auth::id(),
+            'approved_at' => now()->toIso8601String(),
+            'self_approved' => $selfApproval,
+        ];
+    }
+
+    /**
+     * Say which exception, if any, the approval rode on — both can apply at once,
+     * and an approver told only about the self-approval would not know the
+     * project was also committed past its budget.
+     */
+    private function approvalMessage(bool $selfApproval, bool $budgetException): string
+    {
+        return match (true) {
+            $selfApproval && $budgetException => 'Requisition approved using an audited self-approval and budget exception',
+            $budgetException => 'Requisition approved outside the project budget, with the exception recorded',
+            $selfApproval => 'Requisition approved using an audited self-approval exception',
+            default => 'Requisition marked as Approved',
+        };
+    }
+
+    /**
      * Disburse a requisition.
      */
     public function disburse(Request $request, int $id): JsonResponse
@@ -535,7 +715,7 @@ class PettyCashRequisitionController extends Controller
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
 
-            if (!Auth::user()?->can('create', PettyCashDisbursement::class)) {
+            if (!Auth::user()?->can('create', Payment::class)) {
                 return response()->json(['success' => false, 'message' => 'You are not authorized to disburse requisitions'], 403);
             }
             if ($requisition->user_id === Auth::id() && ! \App\Support\SelfApproval::allowed()) {
@@ -554,14 +734,20 @@ class PettyCashRequisitionController extends Controller
             $validatedPayment = $request->validate([
                 'idempotency_key' => ['required', 'uuid'],
                 'expense_code_id' => ['required', 'integer', 'exists:expense_codes,id'],
+                // Paying account and payment method, both stated. The method was
+                // missing here while the direct-payment endpoint asked for it, so
+                // paying a requisition silently fell back to whatever the account
+                // usually uses — a cheque against an approved request recorded
+                // itself as a bank transfer.
                 'payment_source_id' => ['required', 'integer', 'exists:payment_sources,id'],
+                'payment_method' => ['required', Rule::in(PaymentMethods::values())],
+                'external_reference' => ['nullable', 'string', 'max:255', 'required_unless:payment_method,cash'],
                 'planned_cost_line_id' => ['nullable', 'integer', 'exists:cost_lines,id'],
                 'amount' => ['required', 'numeric', 'min:0.01'],
-                'receiver' => ['required', 'string', 'max:255'],
+                'payee_name' => ['required', 'string', 'max:255'],
                 'description' => ['required', 'string', 'max:1000'],
                 'date_disbursed' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
                 'transaction_cost' => ['nullable', 'numeric', 'min:0'],
-                'transaction_code' => ['nullable', 'string', 'max:255'],
                 'receipt_type' => ['required', 'in:etr,non_etr,none'],
                 'receipt_number' => ['nullable', 'string', 'max:100', 'required_if:receipt_type,etr'],
                 'tax_amount' => ['required', 'numeric', 'min:0', 'lte:amount'],
@@ -631,7 +817,7 @@ class PettyCashRequisitionController extends Controller
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
 
-            if (!Auth::user()?->can('update', PettyCashDisbursement::class)) {
+            if (!Auth::user()?->can('reviewRequisition', Payment::class)) {
                 return response()->json(['success' => false, 'message' => 'You are not authorized to reject requisitions'], 403);
             }
             if ($requisition->user_id === Auth::id() && ! \App\Support\SelfApproval::allowed()) {
@@ -1375,7 +1561,7 @@ class PettyCashRequisitionController extends Controller
     private function mayView(PettyCashRequisition $requisition): bool
     {
         return $requisition->user_id === Auth::id()
-            || (Auth::user()?->can('viewAllRequisitions', PettyCashDisbursement::class) ?? false);
+            || (Auth::user()?->can('viewAllRequisitions', Payment::class) ?? false);
     }
 
     /**
@@ -1496,7 +1682,7 @@ class PettyCashRequisitionController extends Controller
 
     private function mayEdit(PettyCashRequisition $requisition): bool
     {
-        if (Auth::user()?->can('update', PettyCashDisbursement::class)) {
+        if (Auth::user()?->can('reviewRequisition', Payment::class)) {
             return true;
         }
 

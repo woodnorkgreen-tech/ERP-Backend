@@ -1194,18 +1194,7 @@ class EnquiryController extends Controller
         return response()->json(['data' => ['stats' => $stats, 'tabs' => $tabs]]);
     }
 
-    public function receivablesPaymentSources(): JsonResponse
-    {
-        $sources = \App\Modules\Finance\Models\PaymentSource::query()
-            ->where('is_active', true)
-            ->whereIn('type', ['bank', 'mobile_money', 'petty_cash'])
-            ->orderBy('name')
-            ->get(['id', 'code', 'name', 'type', 'currency']);
-
-        return response()->json(['data' => $sources]);
-    }
-
-    public function unallocatedReceipts(): JsonResponse
+        public function unallocatedReceipts(): JsonResponse
     {
         $receipts = \App\Modules\Finance\Models\ClientReceipt::query()
             ->with(['paymentSource:id,code,name,type,currency', 'allocations' => fn ($query) => $query
@@ -1467,12 +1456,72 @@ class EnquiryController extends Controller
         return response()->json(['data'=>$invoices]);
     }
 
+    /**
+     * Raise a draft invoice from priced lines.
+     *
+     * `lines` replaced a typed `subtotal` and `tax_amount` in Stage 1 of the
+     * general ledger plan. The header still carries those columns and every
+     * existing reader still works, but they are now SUMMED from the lines by
+     * `InvoicePricer` rather than asserted — so the Value Added Tax on a client
+     * invoice finally has a rate behind it, resolved from the effective-dated
+     * treatment in force on the invoice date.
+     *
+     * The lines are priced BEFORE the over-billing check, because the check
+     * compares against a total that must be the real one. Pricing first and
+     * writing second also means an invoice that would breach the agreed price
+     * leaves nothing behind.
+     */
     public function createProjectInvoice(Request $request, ProjectEnquiry $enquiry): JsonResponse
     {
-        $data = $request->validate(['invoice_date'=>'required|date','due_date'=>'required|date|after_or_equal:invoice_date','subtotal'=>'required|numeric|gt:0','tax_amount'=>'nullable|numeric|min:0','notes'=>'nullable|string|max:1000']);
-        $total = (float) $data['subtotal'] + (float) ($data['tax_amount'] ?? 0);
+        $data = $request->validate([
+            'invoice_date' => 'required|date',
+            'due_date' => 'required|date|after_or_equal:invoice_date',
+            'notes' => 'nullable|string|max:1000',
+            'lines' => 'required|array|min:1',
+            'lines.*.description' => 'required|string|max:500',
+            'lines.*.quantity' => 'required|numeric|gt:0',
+            'lines.*.unit_price' => 'required|numeric|min:0',
+            'lines.*.vat_treatment_id' => 'nullable|integer|exists:vat_treatments,id',
+            'lines.*.revenue_account_id' => 'nullable|integer|exists:chart_of_accounts,id',
+        ]);
+
+        $pricer = app(\App\Modules\Finance\Services\InvoicePricer::class);
+        $invoiceDate = \Illuminate\Support\Carbon::parse($data['invoice_date'])->toDateString();
+
         try {
-            $invoice = DB::transaction(function () use ($enquiry,$data,$total) {
+            $priced = collect($data['lines'])->values()->map(function (array $line, int $index) use ($pricer, $invoiceDate) {
+                $treatment = $pricer->treatmentFor($line['vat_treatment_id'] ?? null, $invoiceDate);
+
+                return array_merge(
+                    $pricer->priceLine($line['quantity'], $line['unit_price'], $treatment),
+                    [
+                        'description' => $line['description'],
+                        'quantity' => $line['quantity'],
+                        'unit_price' => $line['unit_price'],
+                        'vat_treatment_id' => $line['vat_treatment_id'] ?? null,
+                        'revenue_account_id' => $line['revenue_account_id'] ?? null,
+                        'sort_order' => $index,
+                    ],
+                );
+            })->all();
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        $total = (float) array_reduce(
+            $priced,
+            fn (string $carry, array $line) => bcadd($carry, $line['total_amount'], 2),
+            '0.00',
+        );
+
+        if ($total <= 0) {
+            return response()->json([
+                'message' => 'An invoice has to bill something. Every line priced to zero.',
+            ], 422);
+        }
+
+        try {
+            $invoice = DB::transaction(function () use ($enquiry,$data,$total,$priced) {
                 // Serialise the aggregate invariant on the parent. Without this
                 // lock, two individually valid invoices could both observe the
                 // same remaining balance and overbill the agreed price.
@@ -1487,8 +1536,22 @@ class EnquiryController extends Controller
                     throw new \DomainException('That would bill the client more than the agreed price. Invoices so far come to '.number_format($existing,2).' and the agreed price is '.number_format($basis,2).', so this invoice cannot exceed '.number_format($basis-$existing,2).'.');
                 }
 
-                $invoice = \App\Modules\Finance\Models\ProjectInvoice::create([...$data,'tax_amount'=>$data['tax_amount']??0,'total_amount'=>$total,'invoice_number'=>'TMP-'.\Illuminate\Support\Str::uuid(),'project_enquiry_id'=>$lockedEnquiry->id,'created_by'=>Auth::id()]);
-                $invoice->update(['invoice_number'=>'INV-'.now()->format('Ym').'-'.str_pad((string)$invoice->id,6,'0',STR_PAD_LEFT)]); return $invoice;
+                $invoice = \App\Modules\Finance\Models\ProjectInvoice::create([
+                    'invoice_date' => $data['invoice_date'],
+                    'due_date' => $data['due_date'],
+                    'notes' => $data['notes'] ?? null,
+                    // Placeholders. InvoicePricer::retotal() below is what makes
+                    // these true, from the lines, so the header can never state
+                    // a figure the lines do not add up to.
+                    'subtotal' => 0, 'tax_amount' => 0, 'total_amount' => 0,
+                    'invoice_number'=>'TMP-'.\Illuminate\Support\Str::uuid(),
+                    'project_enquiry_id'=>$lockedEnquiry->id,
+                    'created_by'=>Auth::id(),
+                ]);
+                $invoice->update(['invoice_number'=>'INV-'.now()->format('Ym').'-'.str_pad((string)$invoice->id,6,'0',STR_PAD_LEFT)]);
+                $invoice->lines()->createMany($priced);
+
+                return app(\App\Modules\Finance\Services\InvoicePricer::class)->retotal($invoice);
             });
         } catch (\DomainException $exception) {
             return response()->json(['message'=>$exception->getMessage()],422);
@@ -1496,16 +1559,164 @@ class EnquiryController extends Controller
         return response()->json(['message'=>'Draft invoice created.','data'=>$invoice],201);
     }
 
+    /**
+     * Issue a draft invoice — and recognise its revenue in the ledger.
+     *
+     * Issuing is the moment WNG has earned the money and the client owes it, so
+     * it is the moment the journal entry belongs to: debit Accounts Receivable
+     * for the whole amount, credit Project Revenue for the amount before tax,
+     * credit Output Value Added Tax Payable for the tax. Until Stage 1 this
+     * method changed a status field and stopped, which is why the chart's
+     * revenue accounts had never once been touched.
+     *
+     * The posting happens INSIDE the transaction that flips the status, so an
+     * invoice cannot end up issued without its entry — the failure this
+     * codebase already learned from on spend vouchers, where `post()` set
+     * `status = 'posted'` before a posting that could return null.
+     */
     public function issueProjectInvoice(ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
     {
         abort_unless((int)$invoice->project_enquiry_id===(int)$enquiry->id,404);
-        $invoice = DB::transaction(function () use ($invoice) {
-            $lockedInvoice = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
-            abort_unless($lockedInvoice->status==='draft',422,'Only draft invoices can be issued.');
-            $lockedInvoice->update(['status'=>'issued','issued_by'=>Auth::id(),'issued_at'=>now()]);
-            return $lockedInvoice;
-        });
-        return response()->json(['message'=>'Invoice issued.','data'=>$invoice]);
+
+        try {
+            $invoice = DB::transaction(function () use ($invoice) {
+                $lockedInvoice = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
+                abort_unless($lockedInvoice->status==='draft',422,'Only draft invoices can be issued.');
+                $lockedInvoice->update(['status'=>'issued','issued_by'=>Auth::id(),'issued_at'=>now()]);
+
+                app(\App\Modules\Finance\Services\ReceivablesPostingService::class)
+                    ->postInvoiceIssued($lockedInvoice, Auth::id());
+
+                /*
+                 * Match the cost to the revenue just recognised: release this
+                 * job's Work in Progress into Cost of Sales, in proportion to
+                 * how much of the agreed price has now been billed.
+                 *
+                 * Same transaction as the revenue, deliberately — a job whose
+                 * revenue landed in September and whose costs landed in October
+                 * shows a loss then a windfall, for work that was profitable all
+                 * along. On WNG's data 21% of jobs cross a month end.
+                 *
+                 * Runs AFTER the revenue posting because the released fraction
+                 * is measured from invoices that have reached the ledger.
+                 */
+                app(\App\Modules\Finance\Services\WorkInProgressReleaseService::class)
+                    ->releaseForInvoice($lockedInvoice->fresh(), Auth::id());
+
+                return $lockedInvoice->fresh();
+            });
+        } catch (\InvalidArgumentException $exception) {
+            // A closed month, or a control account this chart does not carry.
+            // Both are things a person can act on, and neither is a 500.
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['message'=>'Invoice issued and revenue recorded.','data'=>$invoice]);
+    }
+
+    /**
+     * Cancel an invoice, and take what it asserted back out of the ledger.
+     *
+     * Until now there was no way to do this. `project_invoices` has carried
+     * `voided_by`, `voided_at`, `void_reason` and a `void` status since it was
+     * created, and FOUR places already read that state — the over-billing cap,
+     * the allocation guard, `WorkInProgressReleaseService::billedFraction()`
+     * ("void invoices are excluded; they bill nothing") and the billing screen's
+     * own remaining-to-bill sum. Nothing ever wrote it. So an invoice issued for
+     * the wrong amount overstated revenue, Accounts Receivable and Output Value
+     * Added Tax permanently, held Work in Progress open against Cost of Sales,
+     * and consumed agreed-price headroom that could never be recovered — the
+     * project simply could not be billed correctly again.
+     *
+     * The receipt side already does this properly: `FinanceService::deletePayment`
+     * reverses the journal entry, records the reason and marks the row. This is
+     * the same shape for the invoice side.
+     *
+     * ## Reversed, never deleted
+     *
+     * Both entries are REVERSED — a compensating entry dated today, not an edit
+     * to a month that may already be reported. Issuing posts two entries, so
+     * voiding undoes two: the cost release first, then the revenue. Reversing
+     * the release returns the costs to Work in Progress, which is where they
+     * belong once the job is unbilled again.
+     *
+     * ## Allocated invoices are refused rather than unwound
+     *
+     * A receipt applied to an invoice is a third document with its own entry.
+     * Unwinding it silently would reverse somebody's cash matching without them
+     * asking, so this refuses and says which order to work in — the same rule,
+     * and the same wording, the receipt side uses in the mirror case.
+     */
+    public function voidProjectInvoice(Request $request, ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
+    {
+        abort_unless((int) $invoice->project_enquiry_id === (int) $enquiry->id, 404);
+
+        $data = $request->validate([
+            'reason' => 'required|string|min:5|max:500',
+        ]);
+
+        try {
+            $invoice = DB::transaction(function () use ($invoice, $data) {
+                $lockedInvoice = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
+
+                if ($lockedInvoice->status === 'void') {
+                    throw new \DomainException('This invoice has already been voided.');
+                }
+                if (DB::table('project_invoice_allocations')->where('project_invoice_id', $lockedInvoice->id)->exists()) {
+                    throw new \DomainException('A receipt has been applied to this invoice, so it cannot be voided. Reverse the allocation first.');
+                }
+
+                // Costs first, then revenue — the mirror of issuing, which
+                // recognised the revenue and then released the cost against it.
+                app(\App\Modules\Finance\Services\WorkInProgressReleaseService::class)
+                    ->reverseForInvoice($lockedInvoice, Auth::id(), $data['reason']);
+
+                $entry = $lockedInvoice->journal_entry_id
+                    ? \App\Modules\Finance\Models\JournalEntry::find($lockedInvoice->journal_entry_id)
+                    : null;
+
+                // A draft has no entry, and one already reversed through the
+                // ledger correction screen must not be reversed twice.
+                if ($entry && $entry->status === 'posted') {
+                    app(\App\Modules\Finance\Services\JournalPostingService::class)
+                        ->reverseEntry($entry, Auth::id(), $data['reason']);
+                }
+
+                $lockedInvoice->update([
+                    'status' => 'void',
+                    'voided_by' => Auth::id(),
+                    'voided_at' => now(),
+                    'void_reason' => $data['reason'],
+                ]);
+
+                \App\Models\GovernanceAuditLog::create([
+                    'project_enquiry_id' => $lockedInvoice->project_enquiry_id,
+                    'user_id' => Auth::id(),
+                    'gate_type' => 'Invoice Void',
+                    'action_status' => 'authorized',
+                    'model_type' => \App\Modules\Finance\Models\ProjectInvoice::class,
+                    'model_id' => $lockedInvoice->id,
+                    'message' => "Invoice {$lockedInvoice->invoice_number} of {$lockedInvoice->total_amount} voided",
+                    'context' => [
+                        'reason' => $data['reason'],
+                        'voided_amount' => $lockedInvoice->total_amount,
+                        'journal_entry_id' => $entry?->id,
+                    ],
+                    'ip_address' => request()->ip(),
+                ]);
+
+                return $lockedInvoice->fresh();
+            });
+        } catch (\DomainException|\InvalidArgumentException $exception) {
+            // A closed month blocks the reversal, and that is a message for a
+            // person rather than a 500.
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => 'Invoice voided. Its revenue and cost entries have been reversed.',
+            'data' => $invoice,
+        ]);
     }
 
     public function allocatePaymentToInvoice(Request $request, ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
@@ -1516,13 +1727,41 @@ class EnquiryController extends Controller
         try {
             DB::transaction(function () use ($invoice,$payment,$data) {
                 $lockedInvoice=$invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id); $lockedPayment=$payment->newQuery()->lockForUpdate()->findOrFail($payment->id);
+                // 'partially_paid' used to be accepted here too. `project_invoices.status`
+                // is an enum of draft/issued/paid/void, so no row could ever hold it and
+                // nothing ever set it — a part-allocated invoice stays 'issued' and is
+                // told apart by its balance, which is what the screen already shows.
+                if ($lockedInvoice->status !== 'issued' || $lockedInvoice->voided_at) {
+                    throw new \DomainException('Only an issued, unpaid invoice can receive a payment allocation.');
+                }
+                if ($lockedPayment->status !== 'verified' || $lockedPayment->reversed_at) {
+                    throw new \DomainException('Only a verified, unreversed receipt can be allocated to an invoice.');
+                }
+                if ($lockedInvoice->journal_entry_id && $lockedInvoice->journalEntry?->status !== 'posted') {
+                    throw new \DomainException('The invoice journal has been reversed. Correct the invoice before allocating a receipt.');
+                }
+                if ($lockedPayment->journal_entry_id && \App\Modules\Finance\Models\JournalEntry::whereKey($lockedPayment->journal_entry_id)->value('status') !== 'posted') {
+                    throw new \DomainException('The receipt journal has been reversed. Record a replacement receipt before allocating it.');
+                }
                 $paymentUsed=(float)DB::table('project_invoice_allocations')->where('enquiry_payment_id',$lockedPayment->id)->sum('amount');
                 $invoicePaid=(float)DB::table('project_invoice_allocations')->where('project_invoice_id',$lockedInvoice->id)->sum('amount');
                 if ((float)$data['amount']>(float)$lockedPayment->amount-$paymentUsed || (float)$data['amount']>(float)$lockedInvoice->total_amount-$invoicePaid) throw new \DomainException('Allocation exceeds the available payment or invoice balance.');
-                DB::table('project_invoice_allocations')->insert(['project_invoice_id'=>$lockedInvoice->id,'enquiry_payment_id'=>$lockedPayment->id,'amount'=>$data['amount'],'allocated_by'=>Auth::id(),'created_at'=>now(),'updated_at'=>now()]);
+                $allocationId = DB::table('project_invoice_allocations')->insertGetId(['project_invoice_id'=>$lockedInvoice->id,'enquiry_payment_id'=>$lockedPayment->id,'amount'=>$data['amount'],'allocated_by'=>Auth::id(),'created_at'=>now(),'updated_at'=>now()]);
+
+                // Matching money already held to the invoice it settles: debit
+                // Client Deposits, credit Accounts Receivable. No cash moves —
+                // that happened when the receipt was verified.
+                $entry = app(\App\Modules\Finance\Services\ReceivablesPostingService::class)
+                    ->postInvoiceAllocation($allocationId, $lockedInvoice, $lockedPayment, $data['amount'], Auth::id());
+
+                if ($entry) {
+                    DB::table('project_invoice_allocations')->where('id', $allocationId)
+                        ->update(['journal_entry_id' => $entry->id]);
+                }
+
                 if ($invoicePaid+(float)$data['amount'] >= (float)$lockedInvoice->total_amount) $lockedInvoice->update(['status'=>'paid']);
             });
-        } catch (\DomainException $e) {
+        } catch (\DomainException|\InvalidArgumentException $e) {
             return response()->json(['message'=>$e->getMessage()],422);
         }
         return response()->json(['message'=>'Payment allocated to invoice.']);

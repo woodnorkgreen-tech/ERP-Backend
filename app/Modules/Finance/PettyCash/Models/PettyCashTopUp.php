@@ -2,6 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Models;
 
+use App\Modules\Finance\Models\Payment;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -27,7 +28,7 @@ class PettyCashTopUp extends Model
         'previous_balance',
         'date_topped_up',
         'payment_method',
-        'transaction_code',
+        'external_reference',
         'description',
         'created_by',
         'is_archived',
@@ -73,7 +74,7 @@ class PettyCashTopUp extends Model
      */
     public function disbursements(): HasMany
     {
-        return $this->hasMany(PettyCashDisbursement::class, 'top_up_id');
+        return $this->hasMany(Payment::class, 'top_up_id');
     }
 
     /**
@@ -81,7 +82,7 @@ class PettyCashTopUp extends Model
      */
     public function activeDisbursements(): HasMany
     {
-        return $this->hasMany(PettyCashDisbursement::class, 'top_up_id')
+        return $this->hasMany(Payment::class, 'top_up_id')
                     ->where('status', 'active');
     }
 
@@ -99,7 +100,7 @@ class PettyCashTopUp extends Model
     public function getRemainingBalanceAttribute(): float
     {
         // Sum disbursements that are directly tied to this top-up and that have no allocations
-        $directDisbursed = (float) \Illuminate\Support\Facades\DB::table('petty_cash_disbursements as d')
+        $directDisbursed = (float) \Illuminate\Support\Facades\DB::table('payments as d')
             ->where('d.top_up_id', $this->id)
             ->where('d.status', 'active')
             ->whereNotExists(function ($query) {
@@ -111,7 +112,7 @@ class PettyCashTopUp extends Model
 
         // Sum allocations that reference this top-up
         $allocationsSum = (float) \Illuminate\Support\Facades\DB::table('petty_cash_disbursement_allocations as a')
-            ->join('petty_cash_disbursements as d', 'd.id', '=', 'a.disbursement_id')
+            ->join('payments as d', 'd.id', '=', 'a.disbursement_id')
             ->where('a.top_up_id', $this->id)
             ->where('d.status', 'active')
             ->sum(\Illuminate\Support\Facades\DB::raw('a.amount + COALESCE(a.transaction_cost, 0)'));

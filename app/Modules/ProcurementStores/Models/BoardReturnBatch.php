@@ -11,5 +11,5 @@ class BoardReturnBatch extends Model
     public function items() { return $this->hasMany(BoardReturnBatchItem::class); }
     public function project() { return $this->belongsTo(\App\Models\Project::class); }
     public function initiator() { return $this->belongsTo(\App\Models\User::class, 'initiated_by'); }
-    public function receiver() { return $this->belongsTo(\App\Models\User::class, 'received_by'); }
+    public function payee_name() { return $this->belongsTo(\App\Models\User::class, 'received_by'); }
 }

@@ -297,9 +297,8 @@ class JournalPostingTest extends TestCase
 
         $this->user->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_READ);
 
-        // Must resolve to its own action rather than being read as a voucher id.
         $response = $this->actingAs($this->user, 'sanctum')
-            ->getJson('/api/finance/spend-vouchers/payment-sources')
+            ->getJson('/api/finance/payment-sources')
             ->assertOk();
 
         $names = collect($response->json('data'))->pluck('name');
@@ -307,13 +306,22 @@ class JournalPostingTest extends TestCase
         $this->assertNotContains('Retired Account', $names);
     }
 
-    public function test_payment_sources_require_the_voucher_read_permission(): void
+    /**
+     * Reading the paying accounts needs no finance permission.
+     *
+     * It used to need finance.spend_vouchers.read, and three other copies of the
+     * same list each needed a different one — which is why procurement's bill
+     * payment screen had its own endpoint. Anyone recording a payment has to be
+     * able to name the account it left. Opening one is still gated.
+     */
+    public function test_any_authenticated_user_may_read_the_paying_accounts(): void
     {
         $outsider = User::factory()->create(['is_active' => true]);
 
         $this->actingAs($outsider, 'sanctum')
-            ->getJson('/api/finance/spend-vouchers/payment-sources')
-            ->assertForbidden();
+            ->getJson('/api/finance/payment-sources')
+            ->assertOk()
+            ->assertJsonPath('meta.can_manage', false);
     }
 
     public function test_a_voucher_carries_the_period_of_its_posting_date(): void

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\PettyCash;
 
+use App\Modules\Finance\Support\PaymentMethods;
 use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
@@ -125,8 +126,8 @@ class TopUpIntegrityTest extends TestCase
         $response = $this->actingAs($this->custodian, 'sanctum')
             ->postJson('/api/finance/petty-cash/top-ups', [
                 'amount' => 25000,
-                'payment_method' => 'equity',
-                'transaction_code' => 'EQ-99812',
+                'payment_method' => 'bank_transfer',
+                'external_reference' => 'EQ-99812',
                 'date_topped_up' => now()->toDateString(),
                 'description' => 'Monthly float',
             ]);
@@ -137,25 +138,46 @@ class TopUpIntegrityTest extends TestCase
         // anything the rules do not declare.
         $this->assertDatabaseHas('petty_cash_top_ups', [
             'amount' => 25000,
-            'payment_method' => 'equity',
+            'payment_method' => 'bank_transfer',
             'date_topped_up' => now()->toDateString(),
         ]);
     }
 
-    public function test_the_bank_payment_methods_are_accepted(): void
+    public function test_every_canonical_payment_method_is_accepted(): void
     {
-        // The rule these replaced listed only cash/mpesa/bank_transfer/other, so
-        // wiring it unchanged would have rejected every bank method the column
-        // actually allows.
-        foreach (['equity', 'stanbic', 'ncba', 'kcb', 'family', 'bank_transfer'] as $method) {
+        foreach (PaymentMethods::values() as $method) {
             $this->actingAs($this->custodian, 'sanctum')
                 ->postJson('/api/finance/petty-cash/top-ups', [
                     'amount' => 1000,
                     'payment_method' => $method,
-                    'transaction_code' => strtoupper($method) . '-001',
+                    // M-Pesa references have a fixed shape the validator checks.
+                    'external_reference' => $method === 'mpesa' ? 'QWE72X12AB' : strtoupper($method) . '-001',
                     'date_topped_up' => now()->toDateString(),
                 ])
                 ->assertCreated();
+        }
+    }
+
+    /**
+     * A bank is an account, not a way of moving money.
+     *
+     * `equity`, `stanbic`, `ncba`, `kcb` and `family` were payment methods here.
+     * Naming the bank as the method meant a transfer and a cheque drawn on the
+     * same account were indistinguishable, and the account itself was recorded
+     * nowhere else. They are payment sources now.
+     */
+    public function test_a_bank_name_is_no_longer_a_payment_method(): void
+    {
+        foreach (['equity', 'stanbic', 'ncba', 'kcb', 'family'] as $bank) {
+            $this->actingAs($this->custodian, 'sanctum')
+                ->postJson('/api/finance/petty-cash/top-ups', [
+                    'amount' => 1000,
+                    'payment_method' => $bank,
+                    'external_reference' => strtoupper($bank) . '-001',
+                    'date_topped_up' => now()->toDateString(),
+                ])
+                ->assertStatus(422)
+                ->assertJsonValidationErrors(['payment_method']);
         }
     }
 
@@ -164,11 +186,11 @@ class TopUpIntegrityTest extends TestCase
         $this->actingAs($this->custodian, 'sanctum')
             ->postJson('/api/finance/petty-cash/top-ups', [
                 'amount' => 1000,
-                'payment_method' => 'equity',
+                'payment_method' => 'bank_transfer',
                 'date_topped_up' => now()->toDateString(),
             ])
             ->assertStatus(422)
-            ->assertJsonValidationErrors(['transaction_code']);
+            ->assertJsonValidationErrors(['external_reference']);
 
         $this->actingAs($this->custodian, 'sanctum')
             ->postJson('/api/finance/petty-cash/top-ups', [

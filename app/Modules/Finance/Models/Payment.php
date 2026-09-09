@@ -1,21 +1,35 @@
 <?php
 
-namespace App\Modules\Finance\PettyCash\Models;
+namespace App\Modules\Finance\Models;
 
 use App\Models\User;
+use App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation;
+use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
+use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class PettyCashDisbursement extends Model
+/**
+ * One outgoing payment, whatever account it left.
+ *
+ * Formerly PettyCashDisbursement. The service behind it had already stopped
+ * being petty-cash-specific — it skips the float balance check, the top-up
+ * allocation and the cash ledger entry for any source that is not a float — so
+ * the only thing tying a bank payment to petty cash was the name. Which account
+ * the money left is `payment_source_id`; how it reached the payee is
+ * `payment_method`; the two are independent and neither is derived from the
+ * other.
+ */
+class Payment extends Model
 {
     use HasFactory;
 
     /**
      * The table associated with the model.
      */
-    protected $table = 'petty_cash_disbursements';
+    protected $table = 'payments';
 
     /**
      * The attributes that are mass assignable.
@@ -23,8 +37,12 @@ class PettyCashDisbursement extends Model
      * @var array<string>
      */
     protected $fillable = [
+        'payment_no',
+        'payment_type',
         'top_up_id',
-        'receiver',
+        'payee_name',
+        'payee_type',
+        'payee_id',
         'account',
         'expense_code_id',
         'amount',
@@ -37,7 +55,7 @@ class PettyCashDisbursement extends Model
         'job_number',
         'payment_method',
         'payment_source_id',
-        'transaction_code',
+        'external_reference',
         'status',
         'void_reason',
         'created_by',
@@ -212,12 +230,13 @@ class PettyCashDisbursement extends Model
     public function scopeSearch($query, string $search)
     {
         return $query->where(function ($q) use ($search) {
-            $q->where('receiver', 'like', '%' . $search . '%')
+            $q->where('payee_name', 'like', '%' . $search . '%')
+              ->orWhere('payment_no', 'like', '%' . $search . '%')
               ->orWhere('account', 'like', '%' . $search . '%')
               ->orWhere('description', 'like', '%' . $search . '%')
               ->orWhere('project_name', 'like', '%' . $search . '%')
               ->orWhere('job_number', 'like', '%' . $search . '%')
-              ->orWhere('transaction_code', 'like', '%' . $search . '%');
+              ->orWhere('external_reference', 'like', '%' . $search . '%');
         });
     }
 

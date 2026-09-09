@@ -7,7 +7,7 @@ use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Services\PettyCashCostProducer;
 use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -58,12 +58,12 @@ class PettyCashCostProducerTest extends TestCase
         ]);
     }
 
-    private function disbursement(array $overrides = []): PettyCashDisbursement
+    private function disbursement(array $overrides = []): Payment
     {
-        return PettyCashDisbursement::create(array_merge([
+        return Payment::create(array_merge([
             'top_up_id' => $this->topUpId,
             'amount' => 4500.00,
-            'receiver' => 'Bolt',
+            'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
             'description' => 'Site transport',
             'classification' => 'operations',

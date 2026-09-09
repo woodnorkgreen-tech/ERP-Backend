@@ -4,7 +4,7 @@ namespace App\Modules\Finance\PettyCash\Controllers;
 
 use App\Http\Controllers\Controller;
 use Carbon\Carbon;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Exports\PettyCashTransactionsExport;
 use App\Modules\Finance\PettyCash\Services\PettyCashReportService;
 use App\Modules\Finance\PettyCash\Services\FundCustodyService;
@@ -35,7 +35,7 @@ class PettyCashReportController extends Controller
 
     public function custody(Request $request, FundCustodyService $custody): JsonResponse
     {
-        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $this->authorize('viewReports', Payment::class);
         $validated = $request->validate([
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
@@ -48,13 +48,13 @@ class PettyCashReportController extends Controller
 
     public function topUpCustody(int $id, FundCustodyService $custody): JsonResponse
     {
-        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $this->authorize('viewReports', Payment::class);
         return response()->json(['success' => true, 'data' => $custody->topUp($id)]);
     }
 
     public function custodyStatement(Request $request, FundCustodyService $custody)
     {
-        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $this->authorize('viewReports', Payment::class);
         $validated = $request->validate([
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
@@ -71,7 +71,7 @@ class PettyCashReportController extends Controller
             fputcsv($out, []);
             fputcsv($out, ['Funding batch', 'Date', 'Source', 'Reference', 'Description', 'Received', 'Consumed', 'Remaining', 'Utilization %', 'State']);
             foreach ($report['batches'] as $batch) fputcsv($out, [
-                $batch['reference'], $batch['date'], $batch['source'], $batch['transaction_code'], $batch['description'],
+                $batch['reference'], $batch['date'], $batch['source'], $batch['external_reference'], $batch['description'],
                 $batch['received'], $batch['consumed'], $batch['remaining'], $batch['utilization_percentage'], $batch['state'],
             ]);
             fclose($out);
@@ -80,7 +80,7 @@ class PettyCashReportController extends Controller
 
     public function topUpStatement(int $id, FundCustodyService $custody)
     {
-        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $this->authorize('viewReports', Payment::class);
         $report = $custody->topUp($id);
 
         return response()->streamDownload(function () use ($report) {
@@ -92,7 +92,7 @@ class PettyCashReportController extends Controller
             fputcsv($out, []);
             fputcsv($out, ['Payment ID', 'Date', 'Receiver', 'Description', 'Classification', 'Project', 'Requisition ID', 'Amount', 'Transaction cost', 'Total consumed']);
             foreach ($report['payments'] as $payment) fputcsv($out, [
-                $payment['disbursement_id'], $payment['date'], $payment['receiver'], $payment['description'], $payment['classification'],
+                $payment['disbursement_id'], $payment['date'], $payment['payee_name'], $payment['description'], $payment['classification'],
                 $payment['project_name'], $payment['requisition_id'], $payment['amount'], $payment['transaction_cost'], $payment['total'],
             ]);
             fclose($out);
@@ -110,7 +110,7 @@ class PettyCashReportController extends Controller
      */
     public function analytics(Request $request): JsonResponse
     {
-        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $this->authorize('viewReports', Payment::class);
 
         $filters = $this->filters($request);
 
@@ -137,7 +137,7 @@ class PettyCashReportController extends Controller
     /** Spend per project, ranked, with each project's share of the total. */
     public function projects(Request $request): JsonResponse
     {
-        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $this->authorize('viewReports', Payment::class);
 
         $filters = $this->filters($request);
 
@@ -169,7 +169,7 @@ class PettyCashReportController extends Controller
      */
     public function export(Request $request)
     {
-        $this->authorize('viewReports', PettyCashDisbursement::class);
+        $this->authorize('viewReports', Payment::class);
 
         $validated = $request->validate([
             'type' => ['required', 'string', 'in:disbursements,top_ups,summary'],

@@ -9,10 +9,12 @@ use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Resources\JournalEntryResource;
+use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Services\LedgerExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -153,6 +155,53 @@ class JournalEntryController extends Controller
         return response()->json([
             'status' => 'success',
             'data' => new JournalEntryResource($journal),
+        ]);
+    }
+
+    /**
+     * Correct a posted entry by posting its opposite.
+     *
+     * The one write on this controller, and it is deliberately not an exception
+     * to the read-only rule above. That rule exists to stop a SECOND way of
+     * moving the ledger appearing beside the posting service; this endpoint
+     * moves nothing itself — it asks `JournalPostingService` for the same
+     * compensating entry it has always written for cost lines, so there is
+     * still exactly one writer.
+     *
+     * Why it has to exist: until now only a cost line could be reversed. A
+     * mis-posted supplier invoice, supplier payment, payroll run or spend
+     * voucher could be corrected only by editing the database by hand — which
+     * is both the least auditable action available and the one an immutable
+     * ledger is supposed to make unnecessary.
+     *
+     * A reason is required and not optional-with-a-default. The reversal is
+     * permanent and public; the person reading it in six months needs to know
+     * why it happened, and a default would guarantee that most of them say
+     * nothing.
+     */
+    public function reverse(Request $request, JournalEntry $journal, JournalPostingService $posting): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_JOURNALS_REVERSE), 403);
+
+        $validated = $request->validate([
+            'reason' => 'required|string|min:5|max:500',
+        ]);
+
+        try {
+            $reversal = $posting->reverseEntry($journal, $request->user()->id, $validated['reason']);
+        } catch (InvalidArgumentException $exception) {
+            // The service's refusals are all business rules a person can act on
+            // — already reversed, never posted, no open month to post into — so
+            // they belong in front of the user rather than in a 500.
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        $reversal->load(['lines.account', 'accountingPeriod', 'reversalOf']);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Entry ' . $journal->entry_no . ' reversed by ' . $reversal->entry_no . '.',
+            'data' => new JournalEntryResource($reversal),
         ]);
     }
 

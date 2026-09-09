@@ -74,21 +74,32 @@ class ProjectGovernanceService
      * Write a named governance event directly to the audit log without running a policy.
      * Use this for explicit, trusted actions (e.g. project completion) that don't need
      * a policy evaluation but must still be auditable.
+     *
+     * Returns the row so a caller can cite it. An expenditure exception stamps the
+     * log id onto the requisition it authorised, which is what makes the override
+     * traceable in both directions — from the document to the decision, and from
+     * the decision back to the money it let through.
+     *
+     * Still swallows its own failure and returns null: an audit write must not be
+     * able to roll back the action it describes. A caller that must not proceed
+     * unrecorded checks the return.
      */
-    public function logEvent(ProjectEnquiry $enquiry, string $eventType, int $userId, array $context = []): void
+    public function logEvent(ProjectEnquiry $enquiry, string $eventType, int $userId, array $context = [], ?string $message = null): ?\App\Models\GovernanceAuditLog
     {
         try {
-            \App\Models\GovernanceAuditLog::create([
+            return \App\Models\GovernanceAuditLog::create([
                 'project_enquiry_id' => $enquiry->id,
                 'user_id'            => $userId,
                 'gate_type'          => $eventType,
                 'action_status'      => 'authorized',
-                'message'            => "Event recorded: {$eventType}",
+                'message'            => $message ?? "Event recorded: {$eventType}",
                 'context'            => $context,
                 'ip_address'         => request()->ip(),
             ]);
         } catch (\Exception $e) {
             Log::error("Governance: Failed to log event [{$eventType}]: " . $e->getMessage());
+
+            return null;
         }
     }
 

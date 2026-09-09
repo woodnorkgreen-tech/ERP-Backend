@@ -2,6 +2,7 @@
 
 namespace App\Modules\Finance\PettyCash\Models;
 
+use App\Modules\Finance\Models\Payment;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Exception;
@@ -183,12 +184,12 @@ class PettyCashBalance extends Model
         }
 
         if ($this->last_transaction_type === 'disbursement') {
-            $transaction = PettyCashDisbursement::find($this->last_transaction_id);
+            $transaction = Payment::find($this->last_transaction_id);
             return $transaction ? [
                 'type' => 'disbursement',
                 'amount' => $transaction->amount,
                 'created_at' => $transaction->created_at,
-                'receiver' => $transaction->receiver,
+                'payee_name' => $transaction->payee_name,
                 'description' => $transaction->description,
             ] : null;
         }

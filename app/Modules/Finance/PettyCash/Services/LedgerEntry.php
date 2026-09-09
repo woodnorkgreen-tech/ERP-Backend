@@ -3,7 +3,7 @@
 namespace App\Modules\Finance\PettyCash\Services;
 
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 
 final class LedgerEntry
 {
@@ -28,7 +28,7 @@ final class LedgerEntry
     {
         $entry = new self('TOP-' . str_pad((string)$topUp->id, 6, '0', STR_PAD_LEFT), 'credit', number_format($topUp->amount, 2, '.', ''), [
             'payment_method' => $topUp->payment_method ?? 'cash',
-            'transaction_code' => $topUp->transaction_code ?? null,
+            'external_reference' => $topUp->external_reference ?? null,
             'description' => $topUp->description ?? 'Top Up',
             'created_by' => $topUp->created_by ?? null,
         ], $topUp->date_topped_up ? new \DateTimeImmutable($topUp->date_topped_up) : null);
@@ -55,7 +55,7 @@ final class LedgerEntry
                 'reverses' => 'TOP-' . str_pad((string) $topUp->id, 6, '0', STR_PAD_LEFT),
                 'reason' => 'Top-up deleted',
                 'payment_method' => $topUp->payment_method ?? 'cash',
-                'transaction_code' => $topUp->transaction_code ?? null,
+                'external_reference' => $topUp->external_reference ?? null,
                 'original_created_by' => $topUp->created_by ?? null,
                 'reversed_by' => $reversedBy,
             ],
@@ -72,19 +72,19 @@ final class LedgerEntry
         return $entry;
     }
 
-    public static function debitForDisbursement(PettyCashDisbursement $d): self
+    public static function debitForDisbursement(Payment $d): self
     {
         $amount = bcadd((string)$d->amount, (string)($d->transaction_cost ?? '0'), 2);
         $entry = new self('PCR-' . str_pad((string)$d->id, 6, '0', STR_PAD_LEFT), 'debit', $amount, [
             'amount' => (float)$d->amount,
-            'receiver' => $d->receiver,
+            'payee_name' => $d->payee_name,
             'account' => $d->account,
             'expense_code_id' => $d->expense_code_id,
             'description' => $d->description,
             'classification' => $d->classification,
             'payment_method' => $d->payment_method,
             'payment_source_id' => $d->payment_source_id,
-            'transaction_code' => $d->transaction_code,
+            'external_reference' => $d->external_reference,
             'transaction_cost' => (float)($d->transaction_cost ?? 0),
             'receipt_type' => $d->receipt_type,
             'receipt_number' => $d->receipt_number,

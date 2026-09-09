@@ -27,9 +27,9 @@ class PettyCashTopUpResource extends JsonResource
                 'value' => $this->payment_method,
                 'label' => $this->getPaymentMethodLabel(),
             ],
-            'transaction_code' => $this->when(
+            'external_reference' => $this->when(
                 $this->shouldShowTransactionCode($user),
-                $this->transaction_code
+                $this->external_reference
             ),
             'description' => $this->description,
             'date_topped_up' => [

@@ -24,7 +24,21 @@ class FinanceReadinessController extends Controller
         // Named by reference code, resolved to whatever this installation calls
         // them. A company on its own chart configures the map rather than being
         // told its control accounts are missing.
-        $requiredAccounts = ChartAccountMap::localMany(['1030', '1200', '1300', '1330', '2100', '2120', '2150']);
+        // 1100/2110/2200/4100 joined the list in Stage 1, when client invoices
+        // and receipts began reaching the ledger. WNG's live chart carries no
+        // Client Deposits and no Output VAT Payable account at the time of
+        // writing, so this check is how that surfaces — before somebody issues
+        // an invoice and meets the failure, rather than at that moment.
+        // 3900 and 6800 joined when stock counts began telling the accounts what
+        // they found: opening stock credits equity, a later count debits or
+        // credits an adjustment expense. Without them an approved count is
+        // refused rather than silently diverging, which is the better failure —
+        // but it should be visible here first.
+        $requiredAccounts = ChartAccountMap::localMany([
+            '1030', '1100', '1200', '1300', '1330',
+            '2100', '2110', '2120', '2150', '2200',
+            '3900', '4100', '6800',
+        ]);
         $availableRequiredAccounts = DB::table('chart_of_accounts')
             ->whereIn('code', $requiredAccounts)->where('is_postable', true)->where('is_active', true)->pluck('code');
         $missingRequiredAccounts = array_values(array_diff($requiredAccounts, $availableRequiredAccounts->all()));
@@ -38,12 +52,18 @@ class FinanceReadinessController extends Controller
         //
         // Counted apart from the check below, which only sees ACTIVE codes: a
         // code deactivated for want of a mapping leaves that check clean while
-        // being exactly the thing that emptied the pickers. Rows naming an
-        // account indirectly ("Relevant 1400 PPE account") carry no four-digit
-        // reference and are meant to stay unresolved, so they are not counted.
+        // being exactly the thing that emptied the pickers.
+        //
+        // Anchored, because a catalogue row states its account by LEADING with
+        // the code ("1211 Project WIP - Direct Materials"). Rows naming one in
+        // prose ("Relevant 1400 PPE account") are meant to stay unresolved: the
+        // poster picks the specific child account at capture time, so there is
+        // no single default to configure. An unanchored pattern read the range
+        // hint inside that prose as a reference and reported two deliberately
+        // indirect capex codes as a chart misconfiguration that never cleared.
         $unresolvedCatalogue = DB::table('expense_codes')
             ->whereNull('default_debit_account_id')
-            ->where('default_debit_gl', 'REGEXP', '[0-9]{4}')
+            ->where('default_debit_gl', 'REGEXP', '^[0-9]{4}')
             ->count();
         // Active codes that name a department or a stage the catalogue map does
         // not turn into a real dimension row. Counted only where the catalogue

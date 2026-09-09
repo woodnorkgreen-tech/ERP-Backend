@@ -8,7 +8,6 @@ use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Modules\ProcurementStores\Models\Supplier;
-use App\Modules\ProcurementStores\Services\ProcurementPerformance;
 use App\Modules\ProcurementStores\Services\PurchaseApprovalPolicy;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -17,18 +16,15 @@ use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 /**
- * The speed half of the chain: measuring it, and stopping it asking the same
- * question twice.
+ * The speed half of the chain: stopping it asking the same question twice.
  *
- * Every timestamp needed to measure this was already being written and nothing
- * read any of them as a duration; meanwhile a KES 500 stapler and a KES 2m truss
- * order took the identical route, and the requisition and the order each carried
- * their own approval.
+ * A KES 500 stapler and a KES 2m truss order took the identical route, and the
+ * requisition and the order each carried their own approval.
  *
- * The auto-approval tests matter most for what they refuse: an order that
- * outgrew its requisition or never had one always reaches a person, and an
- * unsigned limit caps nothing. What they now also pin is the rule going the
- * other way — cover alone approves, so one purchase asks for one approval.
+ * These tests matter most for what they refuse: an order that outgrew its
+ * requisition or never had one always reaches a person, and an unsigned limit
+ * caps nothing. What they also pin is the rule going the other way — cover
+ * alone approves, so one purchase asks for one approval.
  */
 class ProcurementSpeedTest extends TestCase
 {
@@ -226,108 +222,5 @@ class ProcurementSpeedTest extends TestCase
         $this->submit($order)->assertOk();
 
         $this->assertSame('approved', $order->fresh()->status);
-    }
-
-    // ---- Measurement ----
-
-    public function test_it_measures_how_long_each_stage_took(): void
-    {
-        $requisition = $this->requisition(5000);
-        $requisition->forceFill([
-            'created_at' => now()->subDays(10),
-            'submitted_at' => now()->subDays(8),
-            'approved_at' => now()->subDays(5),
-        ])->save();
-
-        $stages = collect(app(ProcurementPerformance::class)->stages()['stages'])->keyBy('key');
-
-        $this->assertSame(2.0, $stages['requisition_raised_to_submitted']['median_days']);
-        $this->assertSame(3.0, $stages['requisition_approval']['median_days']);
-        $this->assertSame('Approver', $stages['requisition_approval']['owner']);
-    }
-
-    public function test_a_stage_nothing_has_completed_reports_nothing_rather_than_zero(): void
-    {
-        $this->requisition(5000, status: 'draft');
-
-        $stages = collect(app(ProcurementPerformance::class)->stages()['stages'])->keyBy('key');
-
-        $this->assertSame(0, $stages['requisition_approval']['completed']);
-        $this->assertNull($stages['requisition_approval']['median_days']);
-    }
-
-    public function test_it_derives_supplier_lead_time_and_on_time_delivery(): void
-    {
-        // Promised in 7 days, arrived in 5 — early.
-        $early = $this->order(1000);
-        $early->forceFill([
-            'date' => now()->subDays(20)->toDateString(),
-            'due_date' => now()->subDays(13)->toDateString(),
-        ])->save();
-        $this->receive($early, now()->subDays(15));
-
-        // Promised in 7 days, arrived in 11 — four days late.
-        $late = $this->order(1000);
-        $late->forceFill([
-            'date' => now()->subDays(20)->toDateString(),
-            'due_date' => now()->subDays(13)->toDateString(),
-        ])->save();
-        $this->receive($late, now()->subDays(9));
-
-        $row = app(ProcurementPerformance::class)->suppliers()
-            ->firstWhere('supplier_id', $this->supplier->id);
-
-        $this->assertSame(2, $row['delivered']);
-        $this->assertSame(1, $row['on_time']);
-        $this->assertSame(1, $row['late']);
-        $this->assertSame(50.0, $row['on_time_rate']);
-        $this->assertSame(8.0, $row['avg_lead_time_days']);   // (5 + 11) / 2
-        $this->assertSame(4.0, $row['avg_days_late']);
-    }
-
-    /** An order placed yesterday is not a broken promise. */
-    public function test_an_undelivered_order_is_not_counted_as_late(): void
-    {
-        $this->order(1000);
-
-        $row = app(ProcurementPerformance::class)->suppliers()
-            ->firstWhere('supplier_id', $this->supplier->id);
-
-        $this->assertSame(0, $row['delivered']);
-        $this->assertSame(0, $row['late']);
-        $this->assertNull($row['on_time_rate']);
-        $this->assertSame(1, $row['open_orders']);
-    }
-
-    public function test_the_endpoint_names_the_slowest_stage(): void
-    {
-        $requisition = $this->requisition(5000);
-        $requisition->forceFill([
-            'created_at' => now()->subDays(30),
-            'submitted_at' => now()->subDays(29),
-            'approved_at' => now()->subDays(8),
-        ])->save();
-
-        $response = $this->getJson('/api/procurement-stores/performance')->assertOk();
-
-        $this->assertSame('requisition_approval', $response->json('summary.slowest_stage'));
-    }
-
-    public function test_performance_is_closed_to_anyone_without_a_buying_role(): void
-    {
-        Sanctum::actingAs(User::factory()->create(['is_active' => true]));
-
-        $this->getJson('/api/procurement-stores/performance')->assertStatus(403);
-    }
-
-    private function receive(PurchaseOrder $order, $date): void
-    {
-        DB::table('goods_receipt_notes')->insert([
-            'grn_number' => 'GRN-' . uniqid(), 'date' => $date->toDateString(),
-            'purchase_order_id' => $order->id, 'batch_number' => 'B-' . uniqid(),
-            'store_location' => 'Store', 'quality_check' => 'pass',
-            'store_status' => 'confirmed', 'received_by' => $this->user->id,
-            'created_at' => now(), 'updated_at' => now(),
-        ]);
     }
 }

@@ -1131,6 +1131,9 @@ class ProjectWorkflowContractsTest extends TestCase
             'material_type' => 'consumable',
             'item_status' => 'Active',
         ]);
+        // This integration test carries one actor through several departments;
+        // receiving into stock is deliberately a separate Stores permission.
+        $accounts->givePermissionTo(Permission::findOrCreate(Permissions::STORES_MANAGE, 'web'));
         $confirmation = $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$grnItemId}/confirm", [
             'material_id' => $material->id,
             'unit_price' => 100,

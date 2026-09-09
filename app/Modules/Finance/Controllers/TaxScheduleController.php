@@ -28,6 +28,60 @@ class TaxScheduleController extends Controller
 {
     public function __construct(private TaxScheduleService $schedules) {}
 
+    /**
+     * The Value Added Tax treatments a sales invoice may be raised under.
+     *
+     * The purchases side has always reached these through the tax-preview
+     * endpoint, which prices a specific cost line. A sales invoice needs the
+     * plain list before anything has been priced — you pick the treatment for a
+     * line and the rate follows — so there was nowhere for the invoice form to
+     * get its options from, and no way for a person to choose anything but the
+     * default.
+     *
+     * Effective-dated on the invoice date rather than today, because an invoice
+     * raised into last month must offer last month's rates. That is the same
+     * rule `InvoicePricer` applies when it prices the line, so the form cannot
+     * offer a treatment the pricer will then refuse.
+     *
+     * Gated on receivables read rather than `finance.reports.view`: this is
+     * reference data for raising a bill, carries no third-party tax identity,
+     * and the people who raise invoices are not the people who read the ledger.
+     */
+    public function treatments(Request $request): JsonResponse
+    {
+        abort_unless(
+            $request->user()?->can(Permissions::FINANCE_RECEIVABLES_READ)
+                || $request->user()?->can(Permissions::FINANCE_REPORTS_VIEW),
+            403,
+        );
+
+        $filters = $request->validate([
+            'on_date' => ['nullable', 'date'],
+        ]);
+
+        $onDate = $filters['on_date'] ?? now()->toDateString();
+
+        $treatments = \App\Modules\Finance\Models\VatTreatment::query()
+            ->effectiveOn($onDate)
+            ->orderByDesc('rate_percent')
+            ->get()
+            ->map(fn ($treatment) => [
+                'id' => $treatment->id,
+                'code' => $treatment->code,
+                'name' => $treatment->name,
+                'rate_percent' => (float) $treatment->rate_percent,
+                // What the person choosing actually needs to see: the rate as it
+                // will appear on the line, not a code they have to decode.
+                'label' => $treatment->name . ' (' . rtrim(rtrim(number_format((float) $treatment->rate_percent, 2), '0'), '.') . '%)',
+            ]);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $treatments,
+            'on_date' => $onDate,
+        ]);
+    }
+
     /** Input VAT claimable in a period — the purchases side of the VAT return. */
     public function vatInput(Request $request): JsonResponse|StreamedResponse
     {

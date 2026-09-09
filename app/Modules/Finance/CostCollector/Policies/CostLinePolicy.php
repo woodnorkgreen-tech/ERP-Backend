@@ -41,7 +41,7 @@ class CostLinePolicy
      *
      * Separation of duties is the rule; this is the documented exception for a
      * one-person finance function or an out-of-hours close, mirroring the
-     * emergency self-approval the petty-cash requisition flow already allows.
+     * audited self-approval exception the petty-cash requisition flow already allows.
      * It is not a silent bypass — the service additionally demands a written
      * reason and records the override against the line.
      *

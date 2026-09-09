@@ -3,7 +3,7 @@
 namespace Tests\Feature\PettyCash;
 
 use App\Models\User;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursement;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use App\Modules\Finance\PettyCash\Services\LedgerEntry;
@@ -47,12 +47,12 @@ class FlatTransactionFiltersTest extends TestCase
         (new LedgerService())->post(LedgerEntry::creditForTopUp($topUp));
     }
 
-    private function postDisbursement(array $overrides = []): PettyCashDisbursement
+    private function postDisbursement(array $overrides = []): Payment
     {
-        $disbursement = PettyCashDisbursement::create(array_merge([
+        $disbursement = Payment::create(array_merge([
             'top_up_id' => $this->topUpId,
             'amount' => 1000.00,
-            'receiver' => 'Bolt',
+            'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
             'description' => 'Site transport',
             'classification' => 'operations',
@@ -99,12 +99,12 @@ class FlatTransactionFiltersTest extends TestCase
     public function test_the_payment_method_filter_narrows_the_ledger(): void
     {
         $this->postDisbursement(['payment_method' => 'cash']);
-        $this->postDisbursement(['payment_method' => 'ncba', 'transaction_code' => 'NCBA-77812']);
+        $this->postDisbursement(['payment_method' => 'bank_transfer', 'external_reference' => 'NCBA-77812']);
 
-        $rows = $this->rows(['payment_method' => 'ncba']);
+        $rows = $this->rows(['payment_method' => 'bank_transfer']);
 
         $this->assertCount(1, $rows);
-        $this->assertSame('ncba', $rows[0]->payment_method);
+        $this->assertSame('bank_transfer', $rows[0]->payment_method);
     }
 
     public function test_a_top_up_counts_as_active_though_it_records_no_status(): void
@@ -124,18 +124,18 @@ class FlatTransactionFiltersTest extends TestCase
 
     public function test_archiving_a_source_record_hides_its_ledger_entry(): void
     {
-        $kept = $this->postDisbursement(['receiver' => 'Bolt']);
-        $archived = $this->postDisbursement(['receiver' => 'Uber']);
+        $kept = $this->postDisbursement(['payee_name' => 'Bolt']);
+        $archived = $this->postDisbursement(['payee_name' => 'Uber']);
         $archived->update(['is_archived' => true]);
 
         $current = $this->rows();
         $this->assertCount(2, $current);
         $this->assertSame([false, false], array_map(fn ($row) => $row->is_archived, $current));
-        $this->assertSame('Bolt', $current[0]->receiver);
+        $this->assertSame('Bolt', $current[0]->payee_name);
 
         $archivedRows = $this->rows(['show_archived' => true]);
         $this->assertCount(1, $archivedRows);
-        $this->assertSame('Uber', $archivedRows[0]->receiver);
+        $this->assertSame('Uber', $archivedRows[0]->payee_name);
         $this->assertTrue($archivedRows[0]->is_archived);
 
         $this->assertSame($kept->id, (int) substr($current[0]->reference_number, 4, 6));

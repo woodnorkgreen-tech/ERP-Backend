@@ -10,7 +10,7 @@ trait LoadsRelationships
     protected function getDefaultRelationships(string $resourceType): array
     {
         $relationships = [
-            'bill' => ['purchaseOrder', 'supplier', 'createdBy', 'payments.paymentMethod', 'payments.createdBy'],
+            'bill' => ['purchaseOrder', 'supplier', 'createdBy', 'payments.createdBy'],
             'requisition' => ['items.material', 'project', 'employee', 'department', 'createdBy', 'approvedBy'],
             'purchaseOrder' => ['items.material', 'supplier', 'createdBy', 'approvedBy'],
             'board' => ['material', 'movements'],

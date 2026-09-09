@@ -37,7 +37,7 @@ class ServiceTransactionGuardTest extends TestCase
             $table->decimal('previous_balance', 10, 2)->default(0.00);
             $table->date('date_topped_up')->nullable();
             $table->string('payment_method')->nullable();
-            $table->string('transaction_code')->nullable();
+            $table->string('external_reference')->nullable();
             $table->text('description')->nullable();
             $table->unsignedBigInteger('created_by')->nullable();
             $table->boolean('is_archived')->default(false);
@@ -47,11 +47,11 @@ class ServiceTransactionGuardTest extends TestCase
             $table->timestamp('updated_at')->nullable();
         });
 
-        Schema::dropIfExists('petty_cash_disbursements');
-        Schema::create('petty_cash_disbursements', function ($table) {
+        Schema::dropIfExists('payments');
+        Schema::create('payments', function ($table) {
             $table->id();
             $table->unsignedBigInteger('top_up_id')->nullable();
-            $table->string('receiver')->nullable();
+            $table->string('payee_name')->nullable();
             $table->string('account')->nullable();
             $table->decimal('amount', 10, 2)->default(0.00);
             $table->text('description')->nullable();
@@ -60,7 +60,7 @@ class ServiceTransactionGuardTest extends TestCase
             $table->string('classification')->nullable();
             $table->string('job_number')->nullable();
             $table->string('payment_method')->nullable();
-            $table->string('transaction_code')->nullable();
+            $table->string('external_reference')->nullable();
             $table->string('status')->default('active');
             $table->string('void_reason')->nullable();
             $table->unsignedBigInteger('created_by')->nullable();
@@ -124,7 +124,7 @@ class ServiceTransactionGuardTest extends TestCase
         $result = $service->createDisbursement([
             'amount' => 100.00,
             'transaction_cost' => 0.00,
-            'receiver' => 'Test Receiver',
+            'payee_name' => 'Test Receiver',
             'account' => 'Test Account',
             'description' => 'Test',
             'payment_method' => 'cash',

@@ -78,7 +78,10 @@ class MaterialController extends Controller
      */
     private function buildMaterialQuery(Request $request, ?int $workstationId = null)
     {
-        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom', 'purchaseUom', 'issueUom', 'uomConversions']);
+        $query = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom', 'purchaseUom', 'issueUom', 'uomConversions'])
+            // One subquery for the page, not one per row: whether the stock unit
+            // is still free to change (see LibraryMaterialResource::base_uom_locked).
+            ->withExists('inventoryLogs as has_stock_movements');
 
         if ($request->boolean('with_trashed')) {
             $query->withTrashed();
@@ -525,7 +528,9 @@ class MaterialController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $material = LibraryMaterial::with(['workstation', 'stock'])->findOrFail($id);
+        $material = LibraryMaterial::with(['workstation', 'stock'])
+            ->withExists('inventoryLogs as has_stock_movements')
+            ->findOrFail($id);
         return response()->json([
             'data' => new LibraryMaterialResource($material)
         ]);

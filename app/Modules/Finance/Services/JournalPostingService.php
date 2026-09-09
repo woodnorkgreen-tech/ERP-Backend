@@ -7,12 +7,14 @@ use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\PostingRule;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Models\SpendVoucherAllocation;
 use App\Modules\Finance\Models\VatTreatment;
 use App\Modules\Finance\Models\WhtCategory;
+use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +45,14 @@ class JournalPostingService
     private const INVENTORY_CODE = '1200';      // material relieved from the shelf
     private const ACCRUED_CODE = '2150';        // goods received, not yet invoiced
     private const PAYABLE_CODE = '2100';        // incurred, still owed to someone
+
+    /**
+     * What a bank, card or mobile-money operator charges us to move the money.
+     *
+     * The account the expense catalogue already names as the debit for
+     * `OE-FIN-001`, which is why it is referenced by code here too.
+     */
+    private const BANK_CHARGES_CODE = '7800';
 
     /**
      * Create a balanced GL journal entry for a verified CostLine.
@@ -383,7 +393,57 @@ class JournalPostingService
             throw new InvalidArgumentException("Cost line {$line->ref} has no posted journal to reverse.");
         }
 
-        $original = JournalEntry::with('lines')->findOrFail($line->journal_entry_id);
+        return $this->reverseEntry(
+            JournalEntry::with('lines')->findOrFail($line->journal_entry_id),
+            $actorId,
+            $reason,
+        );
+    }
+
+    /**
+     * Compensate ANY posted journal entry, whatever document produced it.
+     *
+     * This was `reverseCostLine`'s private body until 2026-09-08. Cost lines
+     * were the only document that could be corrected: a mis-posted spend
+     * voucher, supplier invoice, supplier payment or payroll run could only be
+     * put right by editing the database by hand, which is precisely the thing an
+     * immutable ledger exists to make impossible. Generalising it costs nothing,
+     * because none of the logic here was ever cost-line specific — the legs are
+     * copied and flipped, and the identity fields are copied from the original.
+     *
+     * Three properties this must keep:
+     *
+     * - **The original is never touched.** Its status becomes `reversed` so a
+     *   reader can see it was corrected, but not one figure changes. Reports and
+     *   exports deliberately include both, so a reversed month still nets to what
+     *   it always did.
+     * - **The reversal is dated today, not when the original was posted.** You
+     *   correct an error on the day you find it. Back-dating the compensation
+     *   into the original's month would silently restate a period that has
+     *   already been reported on, and would fail outright once that month is
+     *   closed.
+     * - **Exactly one reversal per entry.** `reversal_of_id` carries a unique
+     *   key; the read below makes the common case a clean no-op rather than an
+     *   integrity error, and the key is what settles a genuine race.
+     */
+    public function reverseEntry(JournalEntry $original, ?int $actorId, string $reason): JournalEntry
+    {
+        if ($original->status === 'draft') {
+            throw new InvalidArgumentException(
+                "Journal entry {$original->entry_no} was never posted, so there is nothing to reverse."
+            );
+        }
+
+        // A reversal reverses a document, not another reversal. Allowing it
+        // would produce a chain nobody can read and would restate the original
+        // a second time; correcting a wrong reversal means posting the document
+        // again, which is a decision for the person who owns the document.
+        if ($original->reversal_of_id) {
+            throw new InvalidArgumentException(
+                "Journal entry {$original->entry_no} is itself a reversal and cannot be reversed. "
+                . 'Post the corrected document instead.'
+            );
+        }
 
         if ($existing = JournalEntry::where('reversal_of_id', $original->id)->first()) {
             return $existing;
@@ -394,15 +454,26 @@ class JournalPostingService
             throw new InvalidArgumentException('No open accounting period is available for the reversal.');
         }
 
-        return DB::transaction(function () use ($line, $original, $period, $actorId, $reason) {
+        $original->loadMissing('lines');
+
+        if ($original->lines->isEmpty()) {
+            throw new InvalidArgumentException(
+                "Journal entry {$original->entry_no} has no lines to reverse."
+            );
+        }
+
+        return DB::transaction(function () use ($original, $period, $actorId, $reason) {
             $entry = JournalEntry::create([
-                'entry_no' => 'JE-CL-' . str_pad((string) $line->id, 7, '0', STR_PAD_LEFT) . '-REV',
+                'entry_no' => $this->reversalEntryNo($original),
                 'posting_date' => now()->toDateString(),
                 'accounting_period_id' => $period->id,
-                'cost_line_id' => $line->id,
-                'source_type' => CostLine::class,
-                'source_id' => $line->id,
-                'source_ref' => $line->ref,
+                // Identity travels with the reversal so the compensating entry
+                // is reachable from the same document the original was.
+                'cost_line_id' => $original->cost_line_id,
+                'spend_voucher_id' => $original->spend_voucher_id,
+                'source_type' => $original->source_type,
+                'source_id' => $original->source_id,
+                'source_ref' => $original->source_ref,
                 'description' => 'Reversal of ' . $original->entry_no . ': ' . $reason,
                 'total_debit' => $original->total_credit,
                 'total_credit' => $original->total_debit,
@@ -421,7 +492,7 @@ class JournalPostingService
                     'currency' => $originalLine->currency,
                     'fx_rate' => $originalLine->fx_rate,
                     'base_amount' => $originalLine->base_amount,
-                    'description' => 'Reversal: ' . ($originalLine->description ?? $line->ref),
+                    'description' => 'Reversal: ' . ($originalLine->description ?? $original->source_ref),
                     'cost_centre_id' => $originalLine->cost_centre_id,
                     'activity_id' => $originalLine->activity_id,
                     'project_id' => $originalLine->project_id,
@@ -433,6 +504,20 @@ class JournalPostingService
 
             return $entry;
         });
+    }
+
+    /**
+     * `entry_no` is unique and 32 characters wide, so the suffix has to fit
+     * rather than be assumed to. Every generated number today is well inside
+     * that (`JE-BILL-0000001` is the longest at 15), but a future document
+     * prefix should not silently collide with another entry's truncation.
+     */
+    private function reversalEntryNo(JournalEntry $original): string
+    {
+        $suffix = '-REV';
+        $room = 32 - strlen($suffix);
+
+        return substr($original->entry_no, 0, $room) . $suffix;
     }
 
     private function resolveRuleForCostLine(CostLine $line): ?PostingRule
@@ -613,7 +698,7 @@ class JournalPostingService
             ),
         };
 
-        $controlAccounts = ChartOfAccount::postable()->whereIn('code', [self::PAYABLE_CODE, self::ACCRUED_CODE])
+        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany([self::PAYABLE_CODE, self::ACCRUED_CODE]))
             ->pluck('id')->map(fn ($id) => (int) $id);
         $allocations = SpendVoucherAllocation::query()->where('spend_voucher_id', $voucher->id)
             ->lockForUpdate()->with('costLine.journalEntry.lines')->get();
@@ -926,6 +1011,196 @@ class JournalPostingService
             projectId: $requisition?->project_id,
             projectEnquiryId: $requisition?->project_enquiry_id,
         ));
+    }
+
+    /**
+     * The fee a bank, card or mobile-money operator charged us to move money.
+     *
+     *   Dr  7800 Bank & Mobile-money Charges   fee
+     *   Cr  <the account the money left>       fee
+     *
+     * Posted from the payment rather than from what the payment settled, because
+     * one payment carries one fee however many invoices or requisition lines it
+     * discharges. Keyed on the payment's id, so a retry or a backfill re-posts
+     * nothing.
+     *
+     * **Deliberately carries no project or enquiry.** A transfer charge is what
+     * it costs WNG to operate a bank account, not what an event cost to produce;
+     * two jobs paid on one M-Pesa transfer would otherwise have to split a fee
+     * that neither of them caused. It was previously posted as a job cost line
+     * under OE-FIN-001 — and only when the payment had a job number and was not
+     * a supplier settlement, so most fees reached no ledger at all.
+     */
+    public function postPaymentFee(Payment $payment): ?JournalEntry
+    {
+        $fee = $this->money($payment->transaction_cost);
+        if (bccomp($fee, '0.00', 2) <= 0) {
+            return null;
+        }
+
+        // A void reverses the whole cash movement, fee included. Posting the
+        // charge anyway would leave an expense behind for money that came back.
+        if ($payment->status !== 'active') {
+            return null;
+        }
+
+        $charges = $this->accountByCode(self::BANK_CHARGES_CODE);
+        $sourceAccount = $payment->payment_source_id
+            ? PaymentSource::whereKey($payment->payment_source_id)->value('gl_account_id')
+            : null;
+
+        if (! $charges || ! $sourceAccount) {
+            throw new InvalidArgumentException(
+                "Payment {$payment->payment_no} carries a transaction fee that cannot post: chart account "
+                . self::BANK_CHARGES_CODE . ' must be postable, and the paying account needs a GL account.'
+            );
+        }
+
+        $reference = $payment->payment_no ?: (string) $payment->id;
+
+        return $this->postBalancedEntry(
+            entryNo: 'JE-PFEE-' . str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT),
+            postingDate: (string) ($payment->date_disbursed?->toDateString() ?? $payment->created_at?->toDateString() ?? now()->toDateString()),
+            sourceType: Payment::class,
+            sourceId: $payment->id,
+            sourceRef: $reference,
+            description: 'Transaction fee on payment ' . $reference,
+            legs: [
+                [
+                    'account_id' => $charges,
+                    'entry_type' => 'debit',
+                    'amount' => $fee,
+                    'description' => 'Transfer charge on ' . $reference,
+                ],
+                [
+                    'account_id' => (int) $sourceAccount,
+                    'entry_type' => 'credit',
+                    'amount' => $fee,
+                    'description' => 'Fee deducted from ' . ($payment->paymentSource?->name ?? 'paying account'),
+                ],
+            ],
+            createdBy: $payment->created_by,
+        );
+    }
+
+    /**
+     * Write one balanced entry with any number of legs.
+     *
+     * The single funnel. Producers decide WHICH accounts an event hits and for
+     * how much — that is genuinely their business knowledge — and then hand the
+     * legs here, where the rules that must hold for every entry regardless of
+     * origin are applied in one place:
+     *
+     *   1. the month must be open
+     *   2. every account must exist, be active and be postable
+     *   3. debits must equal credits
+     *   4. the same `entry_no` must never produce two entries
+     *
+     * This exists because HR was writing payroll journals directly against the
+     * models, with its own copy of rules 1–3 and no copy of rule 4. Two writers
+     * with two rule sets is how the petty-cash board-request path produced a
+     * second, unreconciled ledger, and the fix there was the same as the fix
+     * here: leave one door.
+     *
+     * @param  array<int, array<string, mixed>>  $legs  each with account_id,
+     *         entry_type ('debit'|'credit'), amount, and optionally description,
+     *         project_id, project_enquiry_id, cost_centre_id, activity_id
+     */
+    public function postBalancedEntry(
+        string $entryNo,
+        string $postingDate,
+        string $sourceType,
+        int $sourceId,
+        ?string $sourceRef,
+        string $description,
+        array $legs,
+        ?int $createdBy = null,
+    ): JournalEntry {
+        if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
+            return $existing;
+        }
+
+        if ($legs === []) {
+            throw new InvalidArgumentException("Journal entry {$entryNo} has no lines.");
+        }
+
+        $period = AccountingPeriod::forDate(\Illuminate\Support\Carbon::parse($postingDate));
+        $this->assertOpenPeriod($period?->id, $entryNo);
+
+        $debit = '0.00';
+        $credit = '0.00';
+
+        foreach ($legs as $leg) {
+            $amount = $this->money($leg['amount']);
+
+            if (bccomp($amount, '0.00', 2) < 0) {
+                throw new InvalidArgumentException(
+                    "Journal entry {$entryNo} carries a negative amount. Swap the leg instead of negating it."
+                );
+            }
+
+            if ($leg['entry_type'] === 'debit') {
+                $debit = bcadd($debit, $amount, 2);
+            } else {
+                $credit = bcadd($credit, $amount, 2);
+            }
+        }
+
+        if (bccomp($debit, $credit, 2) !== 0) {
+            throw new InvalidArgumentException(
+                "Journal entry {$entryNo} does not balance: debit {$debit} against credit {$credit}."
+            );
+        }
+
+        // Checked as a set rather than per leg, so one query answers for the
+        // whole entry and the error names the entry rather than a single line.
+        $accountIds = array_values(array_unique(array_column($legs, 'account_id')));
+        if (ChartOfAccount::postable()->whereIn('id', $accountIds)->count() !== count($accountIds)) {
+            throw new InvalidArgumentException(
+                "Journal entry {$entryNo} resolves to an inactive or non-postable account. "
+                . 'Finance must correct the account mapping before posting.'
+            );
+        }
+
+        return DB::transaction(function () use (
+            $entryNo, $postingDate, $period, $sourceType, $sourceId, $sourceRef, $description, $legs, $debit, $createdBy
+        ) {
+            $entry = JournalEntry::create([
+                'entry_no' => $entryNo,
+                'posting_date' => $postingDate,
+                'accounting_period_id' => $period->id,
+                'source_type' => $sourceType,
+                'source_id' => $sourceId,
+                'source_ref' => $sourceRef,
+                'description' => $description,
+                'total_debit' => $debit,
+                'total_credit' => $debit,
+                'status' => 'posted',
+                'created_by' => $createdBy ?? auth()->id(),
+                'posted_at' => now(),
+            ]);
+
+            foreach ($legs as $leg) {
+                $amount = $this->money($leg['amount']);
+
+                JournalLine::create([
+                    'journal_entry_id' => $entry->id,
+                    'account_id' => $leg['account_id'],
+                    'entry_type' => $leg['entry_type'],
+                    'amount' => $amount,
+                    'base_amount' => $leg['base_amount'] ?? $amount,
+                    'currency' => $leg['currency'] ?? 'KES',
+                    'fx_rate' => $leg['fx_rate'] ?? 1,
+                    'description' => $leg['description'] ?? null,
+                    'cost_centre_id' => $leg['cost_centre_id'] ?? null,
+                    'activity_id' => $leg['activity_id'] ?? null,
+                    'project_id' => $leg['project_id'] ?? null,
+                    'project_enquiry_id' => $leg['project_enquiry_id'] ?? null,
+                ]);
+            }
+
+            return $entry;
+        });
     }
 
     /**

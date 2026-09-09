@@ -61,6 +61,9 @@ class ProjectBudgetsCommand extends Command
     {
         $budget = TaskBudgetData::with('task')->findOrFail($budgetId);
 
-        return ['budgets' => 1, ...$projector->project($budget)];
+        $result = $projector->project($budget);
+
+        // `revised` is a bool; the table below counts things.
+        return ['budgets' => 1, ...$result, 'revised' => (int) $result['revised']];
     }
 }

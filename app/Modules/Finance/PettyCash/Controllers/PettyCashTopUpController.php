@@ -10,7 +10,6 @@ use App\Modules\Finance\PettyCash\Services\LedgerService;
 use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use App\Modules\Finance\PettyCash\Requests\CreateTopUpRequest;
-use App\Modules\Finance\PettyCash\Support\PaymentMethods;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -411,20 +410,6 @@ class PettyCashTopUpController extends Controller
             ], 500);
         }
     }
-
-    /**
-     * Get supported petty cash payment methods.
-     */
-    public function paymentMethods(): JsonResponse
-    {
-        // Served from PaymentMethods so the client never keeps its own copy —
-        // the frontend had two, both missing the bank options.
-        return response()->json([
-            'success' => true,
-            'data' => PaymentMethods::options(),
-        ]);
-    }
-
     /**
      * Remove the specified top-up from storage.
      */
@@ -449,7 +434,7 @@ class PettyCashTopUpController extends Controller
             // Any historical consumption makes the funding record part of the
             // audit chain. This includes split allocations where top_up_id may
             // point at a different primary batch, and includes voided payments.
-            $linkedDisbursements = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::query()
+            $linkedDisbursements = \App\Modules\Finance\Models\Payment::query()
                 ->where(function ($query) use ($topUp) {
                     $query->where('top_up_id', $topUp->id)
                         ->orWhereHas('allocations', fn ($allocation) => $allocation->where('top_up_id', $topUp->id));
@@ -457,7 +442,7 @@ class PettyCashTopUpController extends Controller
             if ($linkedDisbursements->isNotEmpty()) {
                 $details = $linkedDisbursements->take(5)->map(function($d) {
                     $formattedAmount = number_format((float)$d->amount, 2);
-                    return "#{$d->id}: {$d->receiver} (KES {$formattedAmount})";
+                    return "#{$d->id}: {$d->payee_name} (KES {$formattedAmount})";
                 })->implode(', ');
 
                 return response()->json([

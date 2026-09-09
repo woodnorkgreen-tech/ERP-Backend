@@ -123,6 +123,16 @@ class Permissions
     // not need the authority to release cash through it.
     const FINANCE_REQUISITION_TYPES_MANAGE = 'finance.requisition_types.manage';
 
+    /*
+     * Opening a bank account in the ERP decides which ledger account every
+     * payment through it credits, so it is a Finance control and not something
+     * a payment clerk acquires by being able to spend. Reading the list is not
+     * gated at all — a procurement clerk paying a supplier has to see which
+     * accounts exist, and previously four separate endpoints served that same
+     * list behind four different permissions.
+     */
+    const FINANCE_PAYMENT_SOURCES_MANAGE = 'finance.payment_sources.manage';
+
 
     // Spend vouchers deliberately split maker, checker and poster. A single
     // broad Finance permission would let the person requesting cash approve and
@@ -146,6 +156,27 @@ class Permissions
     const FINANCE_INVOICE_UPDATE = 'finance.invoice.update';
     const FINANCE_INVOICE_DELETE = 'finance.invoice.delete';
 
+    /**
+     * Reversing a posted journal entry, whatever document produced it.
+     *
+     * Distinct from FINANCE_COSTS_REVERSE, which authorises reversing a cost a
+     * person reported. This one reaches a supplier invoice, a supplier payment,
+     * a payroll run and a spend voucher — documents whose figures have already
+     * left the business — so it is the ledger-level authority rather than the
+     * cost-capture one, and is held by fewer people.
+     */
+    const FINANCE_JOURNALS_REVERSE = 'finance.journals.reverse';
+
+    /**
+     * Opening, locking and closing an accounting month.
+     *
+     * Closing a month declares it final: nothing more may be posted into it, so
+     * every figure already reported for it stops moving. That is a Finance
+     * decision about a month they have finished reviewing, which is why it is
+     * its own authority rather than part of reporting.
+     */
+    const FINANCE_PERIODS_MANAGE = 'finance.periods.manage';
+
     const FINANCE_REPORTS_VIEW = 'finance.reports.view';
     const FINANCE_ANALYTICS_VIEW = 'finance.analytics.view';
 
@@ -153,9 +184,18 @@ class Permissions
     const FINANCE_PETTY_CASH_VIEW_BALANCE = 'finance.petty_cash.view_balance';
     const FINANCE_PETTY_CASH_VIEW_REPORTS = 'finance.petty_cash.view_reports';
     const FINANCE_PETTY_CASH_CREATE = 'finance.petty_cash.create_disbursement';
+    /*
+     * Reviewing a fund requisition — approving it, rejecting it, editing one
+     * somebody else raised — and archiving a settled record.
+     *
+     * It does not grant editing a disbursement, and there is no permission that
+     * does: the cash ledger is append-only, so a payment recorded wrongly is
+     * corrected by voiding it and recording the right one. The stored name is
+     * kept as `edit_disbursement` because roles are already granted it; renaming
+     * the string would revoke the right from every role holding it.
+     */
     const FINANCE_PETTY_CASH_UPDATE = 'finance.petty_cash.edit_disbursement';
     const FINANCE_PETTY_CASH_VOID = 'finance.petty_cash.void_disbursement';
-    const FINANCE_PETTY_CASH_DELETE = 'finance.petty_cash.delete_disbursement';
     const FINANCE_PETTY_CASH_DELETE_TOP_UP = 'finance.petty_cash.delete_top_up';
     const FINANCE_PETTY_CASH_CREATE_TOP_UP = 'finance.petty_cash.create_top_up';
     const FINANCE_PETTY_CASH_UPLOAD_EXCEL = 'finance.petty_cash.upload_excel';
@@ -347,6 +387,24 @@ class Permissions
     const APPROVALS_SELF_APPROVE = 'approvals.self_approve';
 
     /**
+     * Committing a project to spend it has no budget for.
+     *
+     * Held separately from approving the requisition itself, and for the same
+     * reason APPROVALS_SELF_APPROVE is separate: approving a payment inside its
+     * budget is a Finance clerk's job, while deciding the company will carry an
+     * overrun is a management one. Someone who may do the first must not acquire
+     * the second by holding it.
+     *
+     * Granting this does not hide the overrun. Every exception writes an
+     * `expenditure_exception` row to the governance audit log carrying the
+     * budget, the exposure it broke, the reason and the funding source, and the
+     * commitment it authorises is posted with that reason attached, so it lands
+     * in the cost account's Unbudgeted panel the same day rather than surfacing
+     * at close-out.
+     */
+    const FINANCE_EXPENDITURE_EXCEPTION_APPROVE = 'finance.expenditure_exception.approve';
+
+    /**
      * Get all permission constants as an array
      */
     public static function all(): array
@@ -387,6 +445,7 @@ class Permissions
             self::FINANCE_QUOTE_APPROVE, self::FINANCE_QUOTE_DELETE, self::FINANCE_INVOICE_CREATE,
             self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
             self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
+            self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PERIODS_MANAGE,
             self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
             self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
             self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
@@ -398,14 +457,14 @@ class Permissions
 
             // Cross-cutting approvals
             self::APPROVALS_SELF_APPROVE,
+            self::FINANCE_EXPENDITURE_EXCEPTION_APPROVE,
 
             self::FINANCE_PETTY_CASH_VIEW,
             self::FINANCE_PETTY_CASH_VIEW_BALANCE,
             self::FINANCE_PETTY_CASH_VIEW_REPORTS,
             self::FINANCE_PETTY_CASH_CREATE,
             self::FINANCE_PETTY_CASH_UPDATE,
-            self::FINANCE_PETTY_CASH_VOID, 
-            self::FINANCE_PETTY_CASH_DELETE, 
+            self::FINANCE_PETTY_CASH_VOID,
             self::FINANCE_PETTY_CASH_DELETE_TOP_UP,
             self::FINANCE_PETTY_CASH_CREATE_TOP_UP, 
             self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
@@ -414,6 +473,7 @@ class Permissions
             self::FINANCE_PETTY_CASH_EDIT_TOP_UP,
             self::FINANCE_EXPENSE_CODES_MANAGE,
             self::FINANCE_REQUISITION_TYPES_MANAGE,
+            self::FINANCE_PAYMENT_SOURCES_MANAGE,
             self::FINANCE_PETTY_CASH_EXPORT_DATA,
             self::FINANCE_PETTY_CASH_MANAGE_SETTINGS,
             self::FINANCE_PETTY_CASH_RECALCULATE_BALANCE,
@@ -513,6 +573,7 @@ class Permissions
                 self::FINANCE_QUOTE_APPROVE, self::FINANCE_QUOTE_DELETE, self::FINANCE_INVOICE_CREATE,
                 self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
                 self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
+                self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PERIODS_MANAGE,
                 self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
                 self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
                 self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
@@ -526,8 +587,7 @@ class Permissions
                 self::FINANCE_PETTY_CASH_VIEW_REPORTS,
                 self::FINANCE_PETTY_CASH_CREATE,
                 self::FINANCE_PETTY_CASH_UPDATE,
-                self::FINANCE_PETTY_CASH_VOID, 
-                self::FINANCE_PETTY_CASH_DELETE, 
+                self::FINANCE_PETTY_CASH_VOID,
                 self::FINANCE_PETTY_CASH_DELETE_TOP_UP,
                 self::FINANCE_PETTY_CASH_CREATE_TOP_UP, 
                 self::FINANCE_PETTY_CASH_UPLOAD_EXCEL, 
@@ -536,6 +596,7 @@ class Permissions
                 self::FINANCE_PETTY_CASH_EDIT_TOP_UP,
                 self::FINANCE_EXPENSE_CODES_MANAGE,
                 self::FINANCE_REQUISITION_TYPES_MANAGE,
+                self::FINANCE_PAYMENT_SOURCES_MANAGE,
                 self::FINANCE_PETTY_CASH_EXPORT_DATA,
                 self::FINANCE_PETTY_CASH_MANAGE_SETTINGS,
                 self::FINANCE_PETTY_CASH_RECALCULATE_BALANCE,
@@ -570,6 +631,7 @@ class Permissions
             ],
             'approvals' => [
                 self::APPROVALS_SELF_APPROVE,
+                self::FINANCE_EXPENDITURE_EXCEPTION_APPROVE,
             ],
             'tasks' => [
                 self::TASK_CREATE, self::TASK_READ, self::TASK_UPDATE, self::TASK_DELETE,
@@ -669,6 +731,7 @@ class Permissions
 
             // Admin
             self::APPROVALS_SELF_APPROVE => 'Approve Your Own Submissions (bypasses separation of duties)',
+            self::FINANCE_EXPENDITURE_EXCEPTION_APPROVE => 'Authorize Spending Beyond an Approved Project Budget',
 
             self::ADMIN_ACCESS => 'Access System Control Panel',
             self::ADMIN_SETTINGS => 'Modify Global System Config',

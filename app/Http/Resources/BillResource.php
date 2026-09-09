@@ -78,10 +78,12 @@ class BillResource extends JsonResource
                         'disbursement_id' => $payment->disbursement_id,
                         'amount_paid' => (float) $payment->amount_paid,
                         'payment_date' => $payment->payment_date->format('Y-m-d'),
-                        'payment_method' => $payment->paymentMethod ? [
-                            'id' => $payment->paymentMethod->id,
-                            'method_name' => $payment->paymentMethod->method_name,
-                        ] : null,
+                        // The account it left and how it was sent, side by side.
+                        // These used to be one field: the "method" carried names
+                        // like "Equity Bank", so the account was the only fact
+                        // recorded and the transmission was lost.
+                        'payment_method' => $payment->payment_method,
+                        'payment_method_label' => $payment->payment_method_label,
                         'reference_number' => $payment->reference_number, // CHANGED from 'notes'
                         'created_by' => $payment->createdBy ? [
                             'id' => $payment->createdBy->id,

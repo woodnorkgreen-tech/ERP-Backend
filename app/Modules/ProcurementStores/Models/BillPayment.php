@@ -15,7 +15,7 @@ class BillPayment extends Model
         'bill_id',
         'amount_paid',
         'payment_date',
-        'payment_method_id',
+        'payment_method',
         'payment_source_id',
         'disbursement_id',
         'reference_number', // CHANGED from 'notes'
@@ -85,9 +85,9 @@ class BillPayment extends Model
      */
     public static function generatePaymentCode()
     {
-        $lastPayment = self::orderBy('id', 'desc')->first();
-        $number = $lastPayment ? intval(substr($lastPayment->payment_code, 4)) + 1 : 1;
-        return 'PAY-' . str_pad($number, 6, '0', STR_PAD_LEFT);
+        return \App\Modules\Finance\Support\DocumentNumber::next(
+            \App\Modules\Finance\Support\DocumentNumber::PAYMENT,
+        );
     }
 
     /**
@@ -98,12 +98,12 @@ class BillPayment extends Model
         return $this->belongsTo(Bill::class);
     }
 
-    /**
-     * Get the payment method
-     */
-    public function paymentMethod()
+    /** How the money reached the supplier, as a person reads it. */
+    public function getPaymentMethodLabelAttribute(): ?string
     {
-        return $this->belongsTo(PaymentMethod::class);
+        return $this->payment_method
+            ? \App\Modules\Finance\Support\PaymentMethods::label($this->payment_method)
+            : null;
     }
 
     /**
@@ -116,7 +116,7 @@ class BillPayment extends Model
 
     public function disbursement()
     {
-        return $this->belongsTo(\App\Modules\Finance\PettyCash\Models\PettyCashDisbursement::class);
+        return $this->belongsTo(\App\Modules\Finance\Models\Payment::class);
     }
 
     public function createdBy()
