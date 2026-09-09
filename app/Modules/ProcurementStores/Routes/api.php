@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Modules\ProcurementStores\Controllers\ProcurementStoresController;
+use App\Modules\ProcurementStores\Controllers\StockMovementController;
 use App\Modules\ProcurementStores\Controllers\MaterialOptionsController;
 use App\Modules\ProcurementStores\Controllers\SupplierController;
 use App\Modules\ProcurementStores\Controllers\RequisitionController;
@@ -26,11 +27,30 @@ Route::get('/readiness', [OperationsReadinessController::class, 'show']);
 Route::post('/inventory/check-availability', [ProcurementStoresController::class, 'checkAvailability']);
 Route::get('/inventory', [ProcurementStoresController::class, 'inventory']);
 Route::get('/inventory/{material}/control-options', [ProcurementStoresController::class, 'controlOptions']);
+/*
+ * One movement endpoint: a type, and one or more lines.
+ *
+ * Receiving, issuing, returning and writing off are the same act with a
+ * different sign and a different set of questions, and a movement of one line
+ * and a movement of forty differ only in how long `lines` is. The whole posting
+ * is one transaction, so a delivery is recorded as the single event it was.
+ */
+Route::post('/movements', [StockMovementController::class, 'store']);
+
+/*
+ * The five older movement routes. They are adapters over StockMovementPoster —
+ * the same code /movements uses — kept because they are published API that the
+ * goods-receipt flow and other screens still call. They no longer carry rules
+ * of their own, which is what let batch receiving quietly accept less than
+ * single receiving did.
+ */
 Route::post('/check-in', [ProcurementStoresController::class, 'checkIn']);
 Route::post('/check-out', [ProcurementStoresController::class, 'checkOut']);
 Route::post('/batch-check-in', [ProcurementStoresController::class, 'batchCheckIn']);
 Route::post('/batch-check-out', [ProcurementStoresController::class, 'batchCheckOut']);
 Route::post('/update-settings', [ProcurementStoresController::class, 'updateStockSettings']);
+// One shelf decision applied to many materials — reorder level, bin, warehouse.
+Route::post('/bulk-stock-settings', [ProcurementStoresController::class, 'bulkStockSettings']);
 Route::post('/returns', [ProcurementStoresController::class, 'returns']);
 Route::post('/defective', [ProcurementStoresController::class, 'markDefective']);
 Route::get('/inventory-logs', [ProcurementStoresController::class, 'inventoryLogs']);

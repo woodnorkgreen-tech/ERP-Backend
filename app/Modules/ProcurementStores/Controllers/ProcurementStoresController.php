@@ -8,11 +8,10 @@ use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use App\Modules\ProcurementStores\Models\InventoryLot;
 use App\Modules\ProcurementStores\Models\InventorySerialItem;
-use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Models\StoresFinancePosting;
 use App\Modules\ProcurementStores\Jobs\ProcessStoresFinancePosting;
-use App\Modules\ProcurementStores\Services\BoardRegistrationService;
+use App\Modules\ProcurementStores\Services\StockMovementPoster;
 use App\Modules\ProcurementStores\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -155,25 +154,6 @@ class ProcurementStoresController extends Controller
             ]);
 
         return response()->json(['data' => ['lots' => $lots, 'serial_items' => $serials]]);
-    }
-
-    private function validateControlledMovement(Request $request, LibraryMaterial $material, string $type): void
-    {
-        $quantity = (float) $request->quantity;
-        if ($material->is_serialized) {
-            if ($quantity !== (float) (int) $quantity) {
-                throw ValidationException::withMessages(['quantity' => 'Serialized stock must move in whole units.']);
-            }
-            $field = $type === 'check_in' ? 'serial_numbers' : 'serial_item_ids';
-            $values = array_values(array_filter($request->input($field, []), fn ($value) => $value !== null && $value !== ''));
-            if (count($values) !== (int) $quantity || count($values) !== count(array_unique($values))) {
-                throw ValidationException::withMessages([$field => "Provide exactly {$quantity} unique serialized units."]);
-            }
-            $request->merge([$field => $values]);
-        }
-        if ($type === 'return' && $material->is_batch_controlled && !$material->is_serialized && !$request->filled('inventory_lot_id')) {
-            throw ValidationException::withMessages(['inventory_lot_id' => 'Select the original lot for this return.']);
-        }
     }
 
     /**
@@ -430,7 +410,20 @@ class ProcurementStoresController extends Controller
     /**
      * Process a stock check-in (Add to inventory)
      */
-    public function checkIn(Request $request): JsonResponse
+    /*
+     * The six movement endpoints in this controller are adapters now.
+     *
+     * Each keeps its own published contract — its validation, its role check and
+     * the exact response body its callers already parse — but the rules that
+     * decide whether a movement may happen live in StockMovementPoster, which
+     * every one of them, and the multi-line /movements endpoint, goes through.
+     *
+     * That is the whole point of the change. Batch receiving used to be a
+     * reduced copy of this method: no lot number, no expiry, no serial numbers,
+     * no goods-receipt reconciliation. The same delivery therefore obeyed
+     * different rules depending on which screen someone happened to open.
+     */
+    public function checkIn(Request $request, StockMovementPoster $poster): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
             return response()->json(['message' => 'Only Stores team members can check stock in.'], 403);
@@ -454,127 +447,10 @@ class ProcurementStoresController extends Controller
             'grn_item_id' => 'nullable|integer|exists:goods_receipt_note_items,id',
         ]);
 
-        $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])->findOrFail($request->material_id);
-
-        if (($material->item_status ?? 'Active') !== 'Active') {
-            return response()->json(['message' => "Only Active Material Library items can be received. This item is {$material->item_status}."], 422);
-        }
-
-        if ($material->is_batch_controlled && !$request->filled('lot_number')) {
-            return response()->json(['message' => 'A supplier or internal lot number is required for this material.'], 422);
-        }
-        if ($material->is_expiry_controlled && !$request->filled('expiry_date')) {
-            return response()->json(['message' => 'An expiry date is required for this material.'], 422);
-        }
-        $this->validateControlledMovement($request, $material, 'check_in');
-
-        if ($material->isBoardTrackable() && (float) $request->quantity !== (float) (int) $request->quantity) {
-            return response()->json([
-                'message' => 'Board sheets must be received as a whole number because each sheet receives its own tracking code.',
-            ], 422);
-        }
-
-        // An unpriced board is an unissuable board. Catch it at receipt, while the
-        // delivery note is still in hand, rather than at the materials desk.
-        if ($material->isBoardTrackable()
-            && ! $request->filled('receipt_unit_cost')
-            && (float) $material->unit_cost <= 0
-            && (float) ($material->default_unit_cost ?? 0) <= 0) {
-            return response()->json([
-                'message' => "[{$material->material_name}] has no price yet. Enter the receipt price per board, or set a "
-                    . 'default price on the material in the Material Library — boards received without a value cannot be '
-                    . 'issued to a project.',
-            ], 422);
-        }
-
-        $log    = null;
-        $boards = [];
-
-        // Wrap adjustStock + createBoardRecords in ONE transaction so a board
-        // creation failure rolls back the stock increment, preventing a state
-        // where quantity_on_hand is incremented but no board records exist.
-        DB::transaction(function () use ($request, $material, &$log, &$boards) {
-            $grnItem = null;
-            if ($request->filled('grn_item_id')) {
-                $grnItem = GoodsReceiptNoteItem::with(['goodsReceiptNote', 'purchaseOrderItem', 'inspection'])->lockForUpdate()->findOrFail($request->integer('grn_item_id'));
-                if ((int) $grnItem->material_id !== (int) $request->material_id || ! $grnItem->accepted) {
-                    throw ValidationException::withMessages(['grn_item_id' => 'This GRN line does not match the selected accepted material.']);
-                }
-                if ($grnItem->inventory_log_id || $grnItem->stock_status === 'posted') {
-                    throw ValidationException::withMessages(['grn_item_id' => 'This GRN line has already been added to Stores stock.']);
-                }
-                // The PO line is an immutable buying-unit snapshot. Do not make
-                // an older approved receipt change meaning when the catalogue's
-                // current buying unit is edited later.
-                $expectedUomId = (int) ($grnItem->purchaseOrderItem?->uom_id
-                    ?: $material->purchase_uom_id
-                    ?: $material->base_uom_id);
-                if ((int) ($request->entered_uom_id ?: $material->base_uom_id) !== $expectedUomId) {
-                    throw ValidationException::withMessages(['entered_uom_id' => 'Complete this GRN line in the buying unit recorded on the purchase order.']);
-                }
-            }
-
-            $service = new InventoryService();
-            $meta = $request->all();
-            if ($grnItem) {
-                $meta['expected_entered_uom_id'] = $expectedUomId;
-                $meta['reference_no'] = $grnItem->goodsReceiptNote?->grn_number;
-                $meta['notes'] = trim(($request->notes ? $request->notes.' · ' : '')."Completed from GRN {$meta['reference_no']}");
-            }
-            $log = $service->adjustStock(
-                $request->material_id,
-                $request->quantity,
-                'check_in',
-                $meta
-            );
-
-            if ($grnItem) {
-                $factor = (float) ($log->uom_conversion_factor ?: 1);
-                $approvedReceiptQuantity = $grnItem->inspection
-                    ? (float) $grnItem->inspection->accepted_quantity
-                    : (float) $grnItem->received_quantity;
-                $expectedStockQuantity = $approvedReceiptQuantity * $factor;
-                if (abs(abs((float) $log->quantity) - $expectedStockQuantity) > 0.00001) {
-                    throw ValidationException::withMessages([
-                        'quantity' => "Receive the full quantity approved for Stores ({$approvedReceiptQuantity}); rejected or quarantined quantities must not enter available stock.",
-                    ]);
-                }
-            }
-
-            if ($material->isBoardTrackable()) {
-                $registration = new BoardRegistrationService();
-                $boards = $registration->createBoardRecords(
-                    material:    $material,
-                    quantity:    (int) $request->quantity,
-                    batchNumber: $log->batch_number,
-                    length:      $request->length    ?? null,
-                    width:       $request->width     ?? null,
-                    thickness:   $request->thickness ?? null,
-                    userId:      auth()->id(),
-                    // What this delivery actually cost per board. Without it the
-                    // boards inherit a catalogue average that is still zero on a
-                    // first receipt, and every one of them is unissuable.
-                    unitValue:   $request->filled('receipt_unit_cost') ? (float) $request->receipt_unit_cost : null,
-                );
-                $log->update(['usage_type' => 'reusable']);
-            }
-
-            if ($grnItem) {
-                // Manually checking a GRN line into Stock is a store
-                // confirmation too — see GoodsReceiptNoteController::store().
-                $grnItem->update([
-                    'entered_uom_id' => $request->entered_uom_id ?: $material->base_uom_id,
-                    'stock_quantity' => abs((float) $log->quantity),
-                    'receipt_unit_cost' => $request->receipt_unit_cost,
-                    'stock_status' => 'posted',
-                    'inventory_log_id' => $log->id,
-                    'unit_price' => $request->receipt_unit_cost,
-                    'store_status' => 'confirmed',
-                    'confirmed_by' => auth()->id(),
-                    'confirmed_at' => now(),
-                ]);
-            }
-        });
+        $result = $poster->post('receive', $request->except('type'));
+        $log = $result['log'];
+        $boards = $result['boards'];
+        $material = LibraryMaterial::find($request->material_id);
 
         return response()->json([
             'message'      => 'Stock updated successfully',
@@ -592,7 +468,7 @@ class ProcurementStoresController extends Controller
                 'width'         => $b->width,
                 'thickness'     => $b->thickness,
                 'batch_number'  => $b->batch_number,
-                'material'      => ['name' => $material->material_name, 'code' => $material->material_code],
+                'material'      => ['name' => $material?->material_name, 'code' => $material?->material_code],
             ], $boards),
         ]);
     }
@@ -603,7 +479,7 @@ class ProcurementStoresController extends Controller
      * Individually tracked board/sheet materials must NOT be checked out through
      * this generic endpoint. Reusable tools still use this normal quantity flow.
      */
-    public function checkOut(Request $request): JsonResponse
+    public function checkOut(Request $request, StockMovementPoster $poster): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
             return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
@@ -622,46 +498,7 @@ class ProcurementStoresController extends Controller
             'serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
         ]);
 
-        $material = LibraryMaterial::with(['materialCategory.parent', 'uomConversions'])->find($request->material_id);
-        if ($material?->isBoardTrackable()) {
-            return response()->json([
-                'message' => "'{$material->material_name}' is a tracked board material. "
-                    . 'Issue it via a Board Request so individual boards are assigned to the job.',
-                'status' => 'error',
-                'redirect' => 'board_request',
-            ], 422);
-        }
-        $this->validateControlledMovement($request, $material, 'check_out');
-
-        if ($request->filled('project_material_id')) {
-            $project = \App\Models\Project::findOrFail($request->project_id);
-            $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')->findOrFail($request->project_material_id);
-            $materialsData = $planned->element?->taskMaterialsData;
-            // Validate identity before approval so a line from another project
-            // can never be presented as an approval problem.
-            if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
-                || (int) $planned->library_material_id !== (int) $material->id) {
-                throw ValidationException::withMessages(['project_material_id' => 'This material line does not belong to the selected project.']);
-            }
-            $this->assertMaterialsApproved($materialsData);
-            $issued = (float) InventoryLog::where('project_material_id', $planned->id)
-                ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
-                - (float) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
-            if ((float) $request->quantity > max(0, (float) $planned->quantity - $issued)) {
-                throw ValidationException::withMessages(['quantity' => 'Quantity exceeds the remaining approved project requirement.']);
-            }
-        }
-
-        $service = new InventoryService();
-
-        // Sufficiency is checked inside adjustStock's row lock. Testing it here
-        // with an unlocked read only produced a second, racier answer.
-        $log = $service->adjustStock(
-            $request->material_id,
-            -$request->quantity,
-            'check_out',
-            $request->all()
-        );
+        $log = $poster->post('issue', $request->all())['log'];
 
         return response()->json([
             'message' => 'Stock issued successfully',
@@ -758,9 +595,73 @@ class ProcurementStoresController extends Controller
     }
 
     /**
+     * Apply one shelf decision to many materials at once.
+     *
+     * Reorder levels and bin locations are typed for hundreds of items during
+     * setup, one modal at a time, and a whole shelf usually shares an answer.
+     * Stock on hand already had row selection built — checkboxes, select-all,
+     * the lot — with nothing that consumed it; this is what it now does.
+     *
+     * Balances are deliberately NOT settable here. Changing a counted quantity
+     * posts a stock adjustment and needs a reason per material, so it stays on
+     * the single-material form where that reason can be given.
+     */
+    public function bulkStockSettings(Request $request): JsonResponse
+    {
+        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+            return response()->json(['message' => 'Only Stores team members can update stock settings.'], 403);
+        }
+
+        $validated = $request->validate([
+            'material_ids' => 'required|array|min:1|max:500',
+            'material_ids.*' => 'integer|exists:library_materials,id',
+            'min_stock_level' => 'nullable|numeric|min:0',
+            'location_bin' => 'nullable|string|max:50',
+            'warehouse_code' => 'nullable|string|max:20',
+        ]);
+
+        // A request naming no field to change would report success having done
+        // nothing, which is worse than saying so.
+        $changes = array_filter(
+            $request->only(['min_stock_level', 'location_bin', 'warehouse_code']),
+            fn ($value, $key) => $request->has($key) && $value !== null && $value !== '',
+            ARRAY_FILTER_USE_BOTH,
+        );
+
+        if ($changes === []) {
+            throw ValidationException::withMessages([
+                'settings' => 'Choose at least one setting to apply — a reorder level, a bin or a warehouse.',
+            ]);
+        }
+
+        $ids = array_values(array_unique($validated['material_ids']));
+
+        DB::transaction(function () use ($ids, $changes) {
+            foreach ($ids as $materialId) {
+                Stock::firstOrCreate(
+                    ['material_id' => $materialId],
+                    ['quantity_on_hand' => 0, 'quantity_reserved' => 0],
+                );
+            }
+
+            Stock::whereIn('material_id', $ids)->update($changes);
+        });
+
+        $count = count($ids);
+        $fields = implode(', ', array_keys($changes));
+
+        return response()->json([
+            'message' => "Updated {$fields} on {$count} ".($count === 1 ? 'material' : 'materials').'.',
+            'updated' => $count,
+            'applied' => array_keys($changes),
+            'status' => 'success',
+        ]);
+    }
+
+    /**
      * Process a stock return (Add back to inventory from project)
      */
-    public function returns(Request $request): JsonResponse
+    public function returns(Request $request, StockMovementPoster $poster): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
             return response()->json(['message' => 'Only Stores team members can record returns.'], 403);
@@ -777,72 +678,7 @@ class ProcurementStoresController extends Controller
             'serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
         ]);
 
-        // Board materials must be returned through the Board Lifecycle endpoint so that
-        // individual Board records transition back to Available and stock stays in sync.
-        $material = LibraryMaterial::with(['materialCategory.parent', 'uomConversions'])->find($request->material_id);
-        if ($material?->isBoardTrackable()) {
-            return response()->json([
-                'message'  => "'{$material->material_name}' is a tracked board material. "
-                    . 'Return individual boards via POST /boards/{id}/transition with status=Available.',
-                'status'   => 'error',
-                'redirect' => 'board_lifecycle',
-            ], 422);
-        }
-        $this->validateControlledMovement($request, $material, 'return');
-
-        $returnQuantityBase = (float) $request->quantity;
-        if ($request->filled('entered_uom_id') && (int) $request->entered_uom_id !== (int) $material->base_uom_id) {
-            $factor = (float) ($material->uomConversions
-                ->first(fn ($row) => (int) $row->from_uom_id === (int) $request->entered_uom_id
-                    && (int) $row->to_uom_id === (int) $material->base_uom_id)?->factor ?? 0);
-            if ($factor <= 0) {
-                throw ValidationException::withMessages(['entered_uom_id' => 'This return unit has no conversion to the stock unit.']);
-            }
-            $returnQuantityBase *= $factor;
-        }
-
-        $log = DB::transaction(function () use ($request, $returnQuantityBase) {
-            $issue = InventoryLog::query()->lockForUpdate()
-                ->find($request->integer('original_issue_log_id'));
-            if (! $issue) {
-                throw ValidationException::withMessages([
-                    'original_issue_log_id' => 'This issue is no longer available. Refresh the project custody list and select the current issue.',
-                ]);
-            }
-
-            if (! in_array($issue->type, ['check_out', 'issue', 'consumption'], true)) {
-                throw ValidationException::withMessages(['original_issue_log_id' => 'Select an original stock issue.']);
-            }
-            if ((int) $issue->material_id !== $request->integer('material_id')) {
-                throw ValidationException::withMessages(['material_id' => 'The returned material must match the original issue.']);
-            }
-            if ($issue->usage_type !== 'reusable') {
-                throw ValidationException::withMessages([
-                    'original_issue_log_id' => 'Consumable issues are final and cannot be returned to stock.',
-                ]);
-            }
-
-            $issued = abs((float) $issue->quantity);
-            $alreadyReturned = (float) InventoryLog::where('original_issue_log_id', $issue->id)
-                ->where('type', 'return')->sum('quantity');
-            if ($alreadyReturned + $returnQuantityBase > $issued + 0.00001) {
-                throw ValidationException::withMessages([
-                    'quantity' => 'Return quantity exceeds the unreturned quantity from the original issue.',
-                ]);
-            }
-
-            $meta = $request->all();
-            $meta['project_id'] = $issue->project_id;
-            $meta['project_material_id'] = $issue->project_material_id;
-            $meta['reference_no'] = $issue->reference_no;
-
-            return app(InventoryService::class)->adjustStock(
-                $request->integer('material_id'),
-                (float) $request->quantity,
-                'return',
-                $meta,
-            );
-        });
+        $log = $poster->post('return', $request->all())['log'];
 
         return response()->json([
             'message' => 'Material returned successfully',
@@ -854,7 +690,7 @@ class ProcurementStoresController extends Controller
     /**
      * Mark stock as defective (Deduct from inventory)
      */
-    public function markDefective(Request $request): JsonResponse
+    public function markDefective(Request $request, StockMovementPoster $poster): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
             return response()->json(['message' => 'Only Stores team members can mark stock defective.'], 403);
@@ -870,28 +706,7 @@ class ProcurementStoresController extends Controller
             'serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
         ]);
 
-        // Board materials must be scrapped through the Board Lifecycle endpoint so that
-        // individual Board records transition to Scrapped and stock stays in sync.
-        $material = LibraryMaterial::with('materialCategory.parent')->find($request->material_id);
-        if ($material?->isBoardTrackable()) {
-            return response()->json([
-                'message'  => "'{$material->material_name}' is a tracked board material. "
-                    . 'Scrap individual boards via POST /boards/{id}/transition with status=Scrapped.',
-                'status'   => 'error',
-                'redirect' => 'board_lifecycle',
-            ], 422);
-        }
-        $this->validateControlledMovement($request, $material, 'defective');
-
-        $service = new InventoryService();
-
-        // Sufficiency is checked inside adjustStock's row lock — see checkOut().
-        $log = $service->adjustStock(
-            $request->material_id, 
-            -$request->quantity, // Negative for defective removal
-            'defective', 
-            $request->all()
-        );
+        $log = $poster->post('damage', $request->all())['log'];
 
         return response()->json([
             'message' => 'Stock marked as defective and removed from inventory',
@@ -903,7 +718,7 @@ class ProcurementStoresController extends Controller
     /**
      * Process batch check-in (multiple materials with same batch number)
      */
-    public function batchCheckIn(Request $request): JsonResponse
+    public function batchCheckIn(Request $request, StockMovementPoster $poster): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
             return response()->json(['message' => 'Only Stores team members can check stock in.'], 403);
@@ -918,88 +733,27 @@ class ProcurementStoresController extends Controller
             'items.*.receipt_unit_cost' => 'nullable|numeric|min:0',
             'items.*.reference_no' => 'nullable|string',
             'items.*.notes' => 'nullable|string',
+            // Accepted now, and honoured, because the poster is the same code
+            // the single receipt uses. This endpoint used to drop them silently.
+            'items.*.lot_number' => 'nullable|string|max:100',
+            'items.*.expiry_date' => 'nullable|date|after_or_equal:today',
+            'items.*.location' => 'nullable|string|max:50',
+            'items.*.serial_numbers' => 'nullable|array',
+            'items.*.serial_numbers.*' => 'string|max:150',
             'warehouse_code' => 'sometimes|string',
             'logged_at' => 'nullable|date'
         ]);
 
-        $service    = new InventoryService();
-        $logs       = [];
-        $allBoards  = [];
-        $batchNumber = null;
-
-        $batchMaterials = LibraryMaterial::with(['materialCategory.parent', 'workstation'])
-            ->whereIn('id', collect($request->items)->pluck('material_id'))
-            ->get()
-            ->keyBy('id');
-
-        foreach ($request->items as $item) {
-            $material = $batchMaterials->get($item['material_id']);
-            if ($material?->isBoardTrackable() && (float) $item['quantity'] !== (float) (int) $item['quantity']) {
-                return response()->json([
-                    'message' => "Board sheets for '{$material->material_name}' must be received as a whole number.",
-                ], 422);
-            }
-            if ($material?->isBoardTrackable()
-                && ! (isset($item['receipt_unit_cost']) && (float) $item['receipt_unit_cost'] > 0)
-                && (float) $material->unit_cost <= 0
-                && (float) ($material->default_unit_cost ?? 0) <= 0) {
-                return response()->json([
-                    'message' => "'{$material->material_name}' has no price yet. Enter the receipt price per board, or set a "
-                        . 'default price on the material in the Material Library — boards received without a value cannot be '
-                        . 'issued to a project.',
-                ], 422);
-            }
-        }
-
-        // Single outer transaction: if any item's board creation fails the
-        // entire batch rolls back — no partial stock increments without records.
-        DB::transaction(function () use ($request, $service, $batchMaterials, &$logs, &$allBoards, &$batchNumber) {
-            $batchNumber = $service->generateBatchNumber();
-
-            foreach ($request->items as $item) {
-                $meta = array_merge($item, [
-                    'batch_number'   => $batchNumber,
-                    'warehouse_code' => $request->warehouse_code ?? 'MAIN',
-                    'logged_at'      => $request->logged_at ?? now(),
-                ]);
-
-                $log    = $service->adjustStock($item['material_id'], $item['quantity'], 'check_in', $meta);
-                $logs[] = $log;
-
-                $material = $batchMaterials->get($item['material_id']);
-
-                if ($material?->isBoardTrackable()) {
-                    $registration = new BoardRegistrationService();
-                    $boards = $registration->createBoardRecords(
-                        material:    $material,
-                        quantity:    (int) $item['quantity'],
-                        batchNumber: $batchNumber,
-                        length:      $item['length']    ?? null,
-                        width:       $item['width']     ?? null,
-                        thickness:   $item['thickness'] ?? null,
-                        userId:      auth()->id(),
-                        unitValue:   isset($item['receipt_unit_cost']) ? (float) $item['receipt_unit_cost'] : null,
-                    );
-                    $log->update(['usage_type' => 'reusable']);
-                    $allBoards = array_merge($allBoards, $boards);
-                }
-            }
-        });
-
-        return response()->json([
-            'message'         => 'Batch check-in processed successfully',
-            'batch_number'    => $batchNumber,
-            'items_processed' => count($logs),
-            'data'            => $logs,
-            'boards_created'  => count($allBoards),
-            'status'          => 'success',
-        ]);
+        return $this->postBatch($poster, 'receive', $request, [
+            'warehouse_code' => $request->warehouse_code ?? 'MAIN',
+            'logged_at' => $request->logged_at ?? now(),
+        ], 'Batch check-in processed successfully');
     }
 
     /**
      * Process batch check-out (multiple materials with same batch number)
      */
-    public function batchCheckOut(Request $request): JsonResponse
+    public function batchCheckOut(Request $request, StockMovementPoster $poster): JsonResponse
     {
         if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
             return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
@@ -1015,131 +769,76 @@ class ProcurementStoresController extends Controller
             'items.*.notes' => 'nullable|string',
             'items.*.usage_type' => 'nullable|string|in:consumable,reusable',
             'items.*.requestor' => 'nullable|string',
+            'items.*.inventory_lot_id' => 'nullable|exists:inventory_lots,id',
+            'items.*.serial_item_ids' => 'nullable|array',
+            'items.*.serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
             'requestor_name' => 'required|string|max:255',
             'reference_no' => 'nullable|string|max:255',
             'project_id' => 'nullable|exists:projects,id',
             'logged_at' => 'nullable|date'
         ]);
 
-        $service = new InventoryService();
-        
-        // Validate all items before processing any — board guard first, then stock
-        foreach ($request->items as $item) {
-            $material = LibraryMaterial::with('materialCategory.parent')->find($item['material_id']);
+        return $this->postBatch($poster, 'issue', $request, [
+            'project_id' => $request->project_id ?: null,
+            'logged_at' => $request->logged_at ?? now(),
+        ], 'Batch check-out processed successfully', function (array $item) use ($request) {
+            return [
+                'recipient_name' => $item['requestor'] ?? $request->requestor_name ?? null,
+                'reference_no' => $item['reference_no'] ?? $request->reference_no ?? null,
+                'notes' => $item['notes'] ?? 'Project material issue',
+            ];
+        });
+    }
 
-            // Board materials must go through the board request flow so individual
-            // Board records are allocated and stock stays in sync.
-            if ($material?->isBoardTrackable()) {
-                return response()->json([
-                    'message'  => "'{$material->material_name}' is a tracked board material. "
-                        . 'Issue it via a Board Request so individual boards are assigned to the job.',
-                    'status'   => 'error',
-                    'redirect' => 'board_request',
-                ], 422);
-            }
+    /**
+     * Post every line of a batch under one batch number, in one transaction.
+     *
+     * Either the whole list posts or none of it does. Receiving a delivery is
+     * one act to the person doing it, and a half-posted one — some lines in,
+     * some rejected, no record of which — is exactly the state that made people
+     * count the shelf twice.
+     */
+    private function postBatch(
+        StockMovementPoster $poster,
+        string $type,
+        Request $request,
+        array $shared,
+        string $message,
+        ?callable $perItem = null,
+    ): JsonResponse {
+        $logs = [];
+        $boards = [];
+        $batchNumber = null;
 
-            // Availability is validated atomically by InventoryService after
-            // converting the entered issue unit to the stock unit.
+        try {
+            DB::transaction(function () use ($poster, $type, $request, $shared, $perItem, &$logs, &$boards, &$batchNumber) {
+                $batchNumber = $poster->newBatchNumber();
+
+                foreach ($request->items as $item) {
+                    $line = array_merge(
+                        $item,
+                        $shared,
+                        $perItem ? $perItem($item) : [],
+                        ['batch_number' => $batchNumber],
+                    );
+
+                    $result = $poster->post($type, $line);
+                    $logs[] = $result['log'];
+                    $boards = array_merge($boards, $result['boards']);
+                }
+            });
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage(), 'status' => 'error'], 422);
         }
 
-        // All items validated, process the batch
-        $batchNumber = $service->generateBatchNumber();
-        // One project pick is one operational decision: either every selected
-        // line posts or none does. This avoids a half-issued preparation list.
-        $logs = DB::transaction(function () use ($request, $service, $batchNumber) {
-            $posted = [];
-            foreach ($request->items as $item) {
-                $material = LibraryMaterial::with(['materialCategory.parent', 'uomConversions'])->findOrFail($item['material_id']);
-                $movementQuantity = $this->quantityInBaseUnit($material, (float) $item['quantity'], $item['entered_uom_id'] ?? null);
-                if (! empty($item['project_material_id'])) {
-                    if (! $request->project_id) {
-                        throw ValidationException::withMessages(['project_id' => 'A project is required for approved material issues.']);
-                    }
-
-                    $project = \App\Models\Project::findOrFail($request->project_id);
-                    $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')
-                        ->lockForUpdate()->findOrFail($item['project_material_id']);
-                    $materialsData = $planned->element?->taskMaterialsData;
-
-                    // Project ownership, catalogue identity and departmental
-                    // sign-off are all authoritative server-side controls.
-                    if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id) {
-                        throw ValidationException::withMessages([
-                            'items' => "{$planned->description} does not belong to this project.",
-                        ]);
-                    }
-                    if ((int) $planned->library_material_id !== (int) $item['material_id']) {
-                        throw ValidationException::withMessages([
-                            'items' => "{$planned->description} is linked to a different Material Library item.",
-                        ]);
-                    }
-                    $this->assertMaterialsApproved($materialsData);
-
-                    $netIssued = (float) InventoryLog::where('project_material_id', $planned->id)
-                        ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
-                        - (float) InventoryLog::where('project_material_id', $planned->id)
-                            ->fulfilmentReopeningReturns()->sum('quantity');
-
-                    // Pre-linkage issues are allocated FIFO across repeated
-                    // approved lines for the same catalogue material. This keeps
-                    // historical projects truthful without charging the same
-                    // legacy issue to every repeated line.
-                    $legacyIssued = (float) InventoryLog::where('project_id', $project->id)
-                        ->where('material_id', $planned->library_material_id)
-                        ->whereNull('project_material_id')
-                        ->whereIn('type', ['check_out', 'issue', 'consumption'])
-                        ->sum(DB::raw('ABS(quantity)'))
-                        - (float) InventoryLog::where('project_id', $project->id)
-                            ->where('material_id', $planned->library_material_id)
-                            ->whereNull('project_material_id')
-                            ->fulfilmentReopeningReturns()->sum('quantity');
-                    $earlierRequirement = (float) \App\Models\ElementMaterial::query()
-                        ->where('library_material_id', $planned->library_material_id)
-                        ->where('is_included', true)
-                        ->where('id', '<', $planned->id)
-                        ->whereHas('element', fn ($query) => $query->where('task_materials_data_id', $materialsData->id))
-                        ->sum('quantity');
-                    $legacyForThisLine = min(
-                        (float) $planned->quantity,
-                        max(0, $legacyIssued - $earlierRequirement),
-                    );
-                    $netIssued += $legacyForThisLine;
-                    $remaining = max(0, (float) $planned->quantity - $netIssued);
-                    if ($movementQuantity > $remaining + 0.00001) {
-                        throw ValidationException::withMessages([
-                            'items' => "{$planned->description} has only {$remaining} remaining on the approved requirement.",
-                        ]);
-                    }
-
-                }
-
-                $meta = array_merge($item, [
-                    'batch_number' => $batchNumber,
-                    'project_id' => $request->project_id ?? null,
-                    'recipient_name' => $item['requestor'] ?? $request->requestor_name ?? null,
-                    'reference_no' => $item['reference_no'] ?? $request->reference_no ?? null,
-                    'notes' => $item['notes'] ?? 'Project material issue',
-                    'logged_at' => $request->logged_at ?? now(),
-                ]);
-
-                $posted[] = $service->adjustStock(
-                    $item['material_id'],
-                    -$item['quantity'],
-                    'check_out',
-                    $meta,
-                );
-            }
-
-            return $posted;
-        });
-
-        return response()->json([
-            'message' => 'Batch check-out processed successfully',
-            'batch_number' => $batchNumber,
+        return response()->json(array_filter([
+            'message'         => $message,
+            'batch_number'    => $batchNumber,
             'items_processed' => count($logs),
-            'data' => $logs,
-            'status' => 'success'
-        ]);
+            'data'            => $logs,
+            'boards_created'  => $type === 'receive' ? count($boards) : null,
+            'status'          => 'success',
+        ], fn ($value) => $value !== null));
     }
 
     private function assertMaterialsApproved($materialsData): void
@@ -1151,30 +850,6 @@ class ProcurementStoresController extends Controller
         }
     }
 
-    /** Convert a user-entered movement quantity for validation against base-unit requirements. */
-    private function quantityInBaseUnit(LibraryMaterial $material, float $quantity, mixed $enteredUomId): float
-    {
-        if (! $enteredUomId || (int) $enteredUomId === (int) $material->base_uom_id) {
-            return $quantity;
-        }
-
-        if ((int) $enteredUomId !== (int) $material->issue_uom_id) {
-            throw ValidationException::withMessages(['items' => "{$material->material_name} must be issued in its stock unit or configured issuing unit."]);
-        }
-
-        $factor = (float) ($material->uomConversions
-            ->first(fn ($row) => (int) $row->from_uom_id === (int) $enteredUomId
-                && (int) $row->to_uom_id === (int) $material->base_uom_id)?->factor ?? 0);
-        if ($factor <= 0) {
-            throw ValidationException::withMessages(['items' => "{$material->material_name} has no valid issuing-unit conversion."]);
-        }
-
-        return $quantity * $factor;
-    }
-
-    /**
-     * Fetch recent stock movement logs with filtering
-     */
     public function inventoryLogs(Request $request): JsonResponse
     {
         // materialCategory.parent feeds the appended board_trackable attribute,
