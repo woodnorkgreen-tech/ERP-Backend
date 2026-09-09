@@ -199,6 +199,8 @@ class StockCountController extends Controller
         if ($stockCount->status !== 'submitted') return response()->json(['message' => 'Only a submitted count can be approved.'], 422);
         if ((int) $stockCount->created_by === (int) auth()->id()) return response()->json(['message' => 'The person who created the count cannot approve its adjustments.'], 422);
         $validated = $request->validate(['review_notes' => 'nullable|string|max:1000']);
+
+        try {
         DB::transaction(function () use ($stockCount, $validated) {
             $locked = StockCount::with('items.material')->lockForUpdate()->findOrFail($stockCount->id);
             if ($locked->mode === StockCount::MODE_OPENING) {
@@ -234,7 +236,38 @@ class StockCountController extends Controller
                 }
             }
             $locked->update(['status' => 'approved', 'reviewed_by' => auth()->id(), 'reviewed_at' => now(), 'review_notes' => $validated['review_notes'] ?? null]);
+
+            /*
+             * Tell the accounts what the count found.
+             *
+             * Until 2026-09-08 this method corrected quantities and posted no
+             * journal at all, so the ledger's stock value and the store's could
+             * only drift apart with nothing detecting it. Measured before the
+             * fix: the ledger held NEGATIVE 76,580 of inventory against a store
+             * worth 55,910 — you cannot own less than nothing.
+             *
+             * Opening inventory credits equity (the stock was already ours
+             * before the books opened); a later count credits or debits an
+             * adjustment expense (a shortage is a real loss, not a quiet edit to
+             * a number). Inside the same transaction as the quantity change, so
+             * the shelf and the accounts cannot disagree about what happened.
+             */
+            app(\App\Modules\Finance\Services\StockMovementPostingService::class)
+                ->postStockCount($locked->fresh('items.material'), auth()->id());
         });
+        } catch (\InvalidArgumentException $exception) {
+            /*
+             * A shut accounting month, or a control account this chart does not
+             * carry. Both are things a person can act on, and neither is a
+             * server fault — so they must not surface as a 500 on a screen a
+             * storekeeper is using.
+             *
+             * The whole approval rolls back with it, deliberately: a count that
+             * moved the shelf but not the accounts is exactly the divergence
+             * this posting exists to end.
+             */
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
         return response()->json(['message' => $stockCount->mode === StockCount::MODE_OPENING
             ? 'Opening inventory approved. Active catalogue items are now initialized in Stores; receive tracked lots, serials and boards through Receive Stock.'
             : 'Count approved and stock variances posted once.']);

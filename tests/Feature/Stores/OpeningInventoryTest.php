@@ -25,6 +25,8 @@ class OpeningInventoryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Approval posts inventory value to Finance in the same transaction.
+        $this->seed(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         foreach (['Stores', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);

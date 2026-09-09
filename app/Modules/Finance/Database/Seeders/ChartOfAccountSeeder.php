@@ -95,6 +95,19 @@ class ChartOfAccountSeeder extends Seeder
         ['3100', 'Share Capital',                      'equity', 'balance_sheet', 'credit', null, true],
         ['3200', 'Retained Earnings',                  'equity', 'balance_sheet', 'credit', null, true],
         ['3300', 'Dividends & Drawings',               'equity', 'balance_sheet', 'debit',  null, true],
+        /*
+         * Where a starting position lands.
+         *
+         * Stock that existed before this ledger did has no purchase behind it to
+         * credit — it simply IS, on the day the books open. The other side of
+         * that entry is equity, because it is part of what the owners already
+         * had. Held in its own account rather than going straight to retained
+         * earnings so the opening exercise can be seen, checked and finished:
+         * once every opening balance is in, this account nets to zero, and any
+         * balance left in it is the part of the starting position nobody has
+         * accounted for yet.
+         */
+        ['3900', 'Opening Balance Equity',             'equity', 'balance_sheet', 'credit', null, true],
 
         // ── Revenue ───────────────────────────────────────────────────────
         ['4100', 'Project Revenue',                    'revenue', 'revenue', 'credit', null, true],
@@ -123,6 +136,17 @@ class ChartOfAccountSeeder extends Seeder
         ['6500', 'Machinery Depreciation',             'expense', 'overhead', 'debit', '6000', true],
         ['6600', 'PPE & Workshop Safety',              'expense', 'overhead', 'debit', '6000', true],
         ['6700', 'Cleaning & Waste Disposal',          'expense', 'overhead', 'debit', '6000', true],
+        /*
+         * What a physical count found that the records did not.
+         *
+         * A count that finds less stock than the books claim has discovered a
+         * real loss — breakage, theft, mis-issue — and a loss is an expense, not
+         * a quiet edit to a quantity. Finding MORE is the same event in reverse
+         * and credits this account, which is why one account serves both rather
+         * than a separate gain line: over and under counts on the same material
+         * in successive months should offset, and splitting them hides that.
+         */
+        ['6800', 'Inventory Adjustments & Shrinkage',  'expense', 'overhead', 'debit', '6000', true],
 
         // ── Operating expenses (brief §2D) ────────────────────────────────
         ['7000', 'Operating Expenses',                 'expense', 'opex', 'debit', null,   false],
