@@ -2,6 +2,7 @@
 
 namespace App\Modules\UniversalTask\Database\Seeders;
 
+use App\Models\User;
 use App\Modules\UniversalTask\Models\TaskTemplate;
 use Illuminate\Database\Seeder;
 
@@ -539,19 +540,40 @@ class TaskTemplateSeeder extends Seeder
             ]
         ];
 
+        /*
+         * `created_by` is NOT NULL and `updated_by` carries a foreign key, and
+         * this used to write 1 to both with the comment "Assuming admin user
+         * exists". On a database where it does not, the second one fails the
+         * constraint and the first quietly attributes every template to
+         * whoever id 1 turns out to be. The owner is resolved instead, and no
+         * owner means no templates rather than a wrong one.
+         */
+        $owner = User::orderBy('id')->value('id');
+
+        if ($owner === null) {
+            $this->command?->warn('Task templates skipped: no user to own them.');
+
+            return;
+        }
+
+        // Upserted on the name. `task_templates.name` is indexed but not
+        // unique, so `create()` added a fresh copy of all six templates —
+        // JSON payload and all — every time this ran.
         foreach ($templates as $templateData) {
-            TaskTemplate::create([
-                'name' => $templateData['name'],
-                'description' => $templateData['description'],
-                'category' => $templateData['category'],
-                'template_data' => $templateData['template_data'],
-                'variables' => $templateData['variables'] ?? null,
-                'tags' => $templateData['tags'] ?? null,
-                'created_by' => 1, // Assuming admin user exists
-                'updated_by' => 1,
-                'is_active' => true,
-                'version' => 1
-            ]);
+            TaskTemplate::updateOrCreate(
+                ['name' => $templateData['name']],
+                [
+                    'description' => $templateData['description'],
+                    'category' => $templateData['category'],
+                    'template_data' => $templateData['template_data'],
+                    'variables' => $templateData['variables'] ?? null,
+                    'tags' => $templateData['tags'] ?? null,
+                    'created_by' => $owner,
+                    'updated_by' => $owner,
+                    'is_active' => true,
+                    'version' => 1,
+                ],
+            );
         }
     }
 }

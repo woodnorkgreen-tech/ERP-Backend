@@ -74,25 +74,38 @@ class ElementTemplatesSeeder extends Seeder
             ],
         ];
 
+        /*
+         * Upserted, because `element_templates.name` is unique: a plain
+         * `create()` here meant the seeder threw a duplicate-key error the
+         * second time anyone ran it, and the materials were worse — nothing
+         * keys them, so each run that got that far added another copy of every
+         * line to the templates it had already written.
+         */
         foreach ($templates as $index => $templateData) {
-            $template = ElementTemplate::create([
-                'name' => $templateData['name'],
-                'display_name' => $templateData['display_name'],
-                'description' => $templateData['description'],
-                'category' => $templateData['category'],
-                'color' => $templateData['color'],
-                'sort_order' => $index + 1,
-            ]);
+            $template = ElementTemplate::updateOrCreate(
+                ['name' => $templateData['name']],
+                [
+                    'display_name' => $templateData['display_name'],
+                    'description' => $templateData['description'],
+                    'category' => $templateData['category'],
+                    'color' => $templateData['color'],
+                    'sort_order' => $index + 1,
+                ],
+            );
 
             foreach ($templateData['materials'] as $materialIndex => $materialData) {
-                ElementTemplateMaterial::create([
-                    'element_template_id' => $template->id,
-                    'description' => $materialData['description'],
-                    'unit_of_measurement' => $materialData['unit'],
-                    'default_quantity' => $materialData['quantity'],
-                    'is_default_included' => $materialData['included'],
-                    'sort_order' => $materialIndex + 1,
-                ]);
+                ElementTemplateMaterial::updateOrCreate(
+                    [
+                        'element_template_id' => $template->id,
+                        'description' => $materialData['description'],
+                    ],
+                    [
+                        'unit_of_measurement' => $materialData['unit'],
+                        'default_quantity' => $materialData['quantity'],
+                        'is_default_included' => $materialData['included'],
+                        'sort_order' => $materialIndex + 1,
+                    ],
+                );
             }
         }
     }

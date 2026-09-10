@@ -170,7 +170,7 @@ class MaterialCategorySeeder extends Seeder
 
         if ($this->command) {
             $count = MaterialCategory::count();
-            $this->command->info("✅ MaterialCategorySeeder: {$count} categories seeded with codes.");
+            $this->command?->info("✅ MaterialCategorySeeder: {$count} categories seeded with codes.");
         }
     }
 }

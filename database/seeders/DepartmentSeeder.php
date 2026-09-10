@@ -75,11 +75,18 @@ class DepartmentSeeder extends Seeder
             ]
         ];
 
+        /*
+         * `budget` and `location` are set on the row, not defined by this file.
+         * Upserting the whole array put them back to 0.00 and '' on every run,
+         * so seeding a live database silently cleared every departmental budget
+         * Finance had entered. Only the description is this seeder's to assert;
+         * a new department still gets the zero default from the schema.
+         */
         foreach ($departments as $department) {
-            Department::updateOrCreate(
+            Department::firstOrCreate(
                 ['name' => $department['name']],
                 $department
-            );
+            )->update(['description' => $department['description']]);
         }
     }
 }

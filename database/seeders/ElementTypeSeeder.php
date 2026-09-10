@@ -4,7 +4,6 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use App\Models\ElementType;
-use Illuminate\Support\Facades\DB;
 
 class ElementTypeSeeder extends Seeder
 {
@@ -13,9 +12,6 @@ class ElementTypeSeeder extends Seeder
      */
     public function run(): void
     {
-        // Clear existing data
-        DB::table('element_types')->truncate();
-
         // Default element types matching frontend
         $elementTypes = [
             ['name' => 'stage', 'display_name' => 'Stage', 'category' => 'structure', 'is_predefined' => true, 'order' => 1],
@@ -32,10 +28,16 @@ class ElementTypeSeeder extends Seeder
             ['name' => 'signage', 'display_name' => 'Signage & Branding', 'category' => 'branding', 'is_predefined' => true, 'order' => 12],
         ];
 
+        /*
+         * Upserted on the name, which is the column's unique key. This used to
+         * open with `truncate()` — which is why it could then `create()` without
+         * colliding, and also why running it discarded every element type added
+         * since, along with any row a project element still pointed at.
+         */
         foreach ($elementTypes as $type) {
-            ElementType::create($type);
+            ElementType::updateOrCreate(['name' => $type['name']], $type);
         }
 
-        $this->command->info('Element types seeded successfully!');
+        $this->command?->info('Element types seeded successfully!');
     }
 }
