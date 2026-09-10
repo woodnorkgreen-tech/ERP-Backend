@@ -27,13 +27,12 @@ class StoreMaterialRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // Two answers are genuinely required to name a thing: what it is
-            // called, and what kind of thing it is. Everything below was
-            // mandatory here until the governance set moved to activation —
-            // where it is checked by MaterialCompleteness, at the only moment
-            // being wrong actually costs anything.
+            // A catalogue row only needs a name to exist. Category is part of
+            // the governance set checked by MaterialCompleteness at activation —
+            // the moment stock movement becomes possible. Drafts may omit it and
+            // finish later from Needs finishing.
             'material_name' => 'required|string|max:255',
-            'material_category_id' => 'required|integer|exists:material_categories,id',
+            'material_category_id' => 'nullable|integer|exists:material_categories,id',
 
             'workstation_id' => 'nullable|exists:workstations,id',
             'item_type_id' => 'nullable|integer|exists:material_item_types,id',

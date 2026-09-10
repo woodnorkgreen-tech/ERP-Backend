@@ -44,7 +44,7 @@ class UpdateMaterialRequest extends FormRequest
             'category' => 'nullable|string|max:100',
             'subcategory' => 'nullable|string|max:100',
             'material_type'       => 'nullable|in:consumable,reusable',
-            'material_category_id'=> 'sometimes|required|integer|exists:material_categories,id',
+            'material_category_id'=> 'nullable|integer|exists:material_categories,id',
             'item_status' => ['sometimes', Rule::in(MaterialControl::STATUSES)],
             'issue_disposition' => ['sometimes', Rule::in(MaterialControl::DISPOSITIONS)],
             'tracking_mode' => ['sometimes', Rule::in(MaterialControl::TRACKING_MODES)],

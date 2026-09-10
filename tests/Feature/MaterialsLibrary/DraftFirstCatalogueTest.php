@@ -18,9 +18,9 @@ use App\Constants\Permissions;
 
 /**
  * Identity and behaviour are different facts with different lifetimes. A
- * catalogue row only needs a name and a kind to exist; everything the old form
- * demanded up front is required at activation instead — the moment stock
- * movement becomes possible and being wrong first costs something.
+ * catalogue row only needs a name to exist; everything the old form demanded
+ * up front — including category — is required at activation instead, the moment
+ * stock movement becomes possible and being wrong first costs something.
  */
 class DraftFirstCatalogueTest extends TestCase
 {
@@ -88,6 +88,18 @@ class DraftFirstCatalogueTest extends TestCase
         $this->assertSame('MDF 18mm Sheet', $material->material_name);
         $this->assertNotEmpty($material->material_code, 'A code should be generated when none is typed.');
         $this->assertNull($material->workstation_id, 'Workstation is routing, not identity.');
+    }
+
+    public function test_a_material_saves_with_only_a_name(): void
+    {
+        $this->createMaterial(['material_category_id' => null])->assertCreated();
+
+        $material = LibraryMaterial::with('materialCategory.parent')->sole();
+        $this->assertSame('MDF 18mm Sheet', $material->material_name);
+        $this->assertNull($material->material_category_id);
+        $this->assertStringStartsWith('DRAFT-', $material->material_code);
+        $this->assertSame('Under Review', $material->item_status);
+        $this->assertArrayHasKey('material_category_id', MaterialCompleteness::missing($material));
     }
 
     public function test_an_alternative_name_is_stored_returned_and_searchable(): void

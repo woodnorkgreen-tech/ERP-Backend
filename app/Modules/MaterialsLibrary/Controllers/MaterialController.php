@@ -35,7 +35,21 @@ class MaterialController extends Controller
                 ->map(fn (LibraryMaterial $material) => (new LibraryMaterialResource($material))->resolve($request))
         );
         
-        $stats = [
+        $stats = $this->catalogueStats();
+
+        return response()->json(array_merge(
+            $materials->toArray(),
+            ['stats' => $stats]
+        ));
+    }
+
+    /**
+     * Catalogue header counts — shared by the full list and the workstation list
+     * so the Hidden tab badge stays current after a shelf decision on either.
+     */
+    private function catalogueStats(): array
+    {
+        return [
             'total_value' => (float) LibraryMaterial::governed()
                 ->join('stocks', 'library_materials.id', '=', 'stocks.material_id')
                 ->sum(DB::raw('stocks.quantity_on_hand * library_materials.unit_cost')),
@@ -50,12 +64,12 @@ class MaterialController extends Controller
                         $sq->where('quantity_on_hand', '<=', 0);
                     })->orWhereDoesntHave('stock');
                 })->count(),
+            // Catalogue "Hidden" tab: items deliberately kept off the inventory
+            // list. Null is treated as visible — the column defaults to true.
+            'hidden_count' => (int) LibraryMaterial::governed()
+                ->where('is_inventory_visible', false)
+                ->count(),
         ];
-
-        return response()->json(array_merge(
-            $materials->toArray(),
-            ['stats' => $stats]
-        ));
     }
 
     /**
@@ -70,7 +84,10 @@ class MaterialController extends Controller
                 ->map(fn (LibraryMaterial $material) => (new LibraryMaterialResource($material))->resolve($request))
         );
 
-        return response()->json($materials);
+        return response()->json(array_merge(
+            $materials->toArray(),
+            ['stats' => $this->catalogueStats()]
+        ));
     }
 
     /**
@@ -132,6 +149,20 @@ class MaterialController extends Controller
         // This is UX only - InventoryService::adjustStock() holds the real line.
         if ($request->input('availability') === 'issuable') {
             $query->issuable();
+        }
+
+        // Catalogue tabs: shown vs deliberately hidden from inventory. Omit the
+        // param (or pass "all") for pickers that still need every nameable item.
+        // This is the library's own split — Stores stock lists use
+        // scopeInventoryVisible(), which also keeps stock-on-hand rows listed.
+        $inventoryVisibility = $request->input('inventory_visibility');
+        if ($inventoryVisibility === 'hidden') {
+            $query->where('is_inventory_visible', false);
+        } elseif ($inventoryVisibility === 'visible' || $inventoryVisibility === 'shown') {
+            $query->where(function ($listed) {
+                $listed->where('is_inventory_visible', true)
+                    ->orWhereNull('is_inventory_visible');
+            });
         }
 
         // Advanced Filters
@@ -218,12 +249,23 @@ class MaterialController extends Controller
         // typist. Only gaps are filled; a supplied value always wins.
         $data = $defaults->apply($data);
 
-        $category = MaterialCategory::with('parent')->find($data['material_category_id']);
-        if (blank($data['material_code'] ?? null) && $category) {
-            $workstationCode = ! empty($data['workstation_id'])
-                ? \App\Modules\MaterialsLibrary\Models\Workstation::whereKey($data['workstation_id'])->value('code')
-                : null;
-            $data['material_code'] = $defaults->suggestCode($category, $workstationCode);
+        $categoryId = $data['material_category_id'] ?? null;
+        $category = $categoryId
+            ? MaterialCategory::with('parent')->find($categoryId)
+            : null;
+
+        if (blank($data['material_code'] ?? null)) {
+            if ($category) {
+                $workstationCode = ! empty($data['workstation_id'])
+                    ? \App\Modules\MaterialsLibrary\Models\Workstation::whereKey($data['workstation_id'])->value('code')
+                    : null;
+                $data['material_code'] = $defaults->suggestCode($category, $workstationCode);
+            } else {
+                // The code column is unique and not nullable, so a draft without
+                // a category still needs an identity. Replaced when the typist
+                // (or a later category assignment) supplies a real one.
+                $data['material_code'] = $defaults->suggestDraftCode();
+            }
         }
 
         $data = $this->syncControlCompatibility($data);

@@ -967,6 +967,45 @@ class ProcurementStoresController extends Controller
             ->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 50));
 
+        // Tell the activity list which board check-ins still have live boards, so
+        // the overview can lock those rows instead of failing mid bulk-delete.
+        $boardBatches = $logs->getCollection()
+            ->filter(fn (InventoryLog $log) => $log->usage_type === 'reusable'
+                && $log->type === 'check_in'
+                && filled($log->batch_number))
+            ->pluck('batch_number')
+            ->unique()
+            ->values();
+
+        $activeByBatch = $boardBatches->isEmpty()
+            ? collect()
+            : Board::query()
+                ->whereIn('batch_number', $boardBatches)
+                ->whereNotIn('status', ['Consumed', 'Scrapped'])
+                ->selectRaw('batch_number, COUNT(*) as active_count')
+                ->groupBy('batch_number')
+                ->pluck('active_count', 'batch_number');
+
+        $logs->setCollection(
+            $logs->getCollection()->map(function (InventoryLog $log) use ($activeByBatch) {
+                $activeBoards = 0;
+                if ($log->usage_type === 'reusable' && $log->type === 'check_in' && filled($log->batch_number)) {
+                    $activeBoards = (int) ($activeByBatch[$log->batch_number] ?? 0);
+                }
+
+                $log->setAttribute('active_board_count', $activeBoards);
+                $log->setAttribute('can_delete', $activeBoards === 0);
+                $log->setAttribute(
+                    'delete_blocked_reason',
+                    $activeBoards > 0
+                        ? "{$activeBoards} active board(s) still use batch [{$log->batch_number}]. Scrap or consume them before deleting this receipt."
+                        : null
+                );
+
+                return $log;
+            })
+        );
+
         return response()->json([
             'data'   => $logs,
             'status' => 'success',

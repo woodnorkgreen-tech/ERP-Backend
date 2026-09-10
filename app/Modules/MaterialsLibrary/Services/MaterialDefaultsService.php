@@ -121,6 +121,26 @@ class MaterialDefaultsService
     }
 
     /**
+     * Provisional identity for a draft that has a name but no category yet.
+     *
+     * The material_code column is unique and not nullable, so something has to
+     * occupy it until the typist (or a later category assignment) supplies a
+     * real catalogue code. Format: DRAFT-{0001}
+     */
+    public function suggestDraftCode(): string
+    {
+        $prefix = 'DRAFT-';
+        $seq = DB::table('library_materials')->where('material_code', 'like', $prefix.'%')->count() + 1;
+
+        do {
+            $code = $prefix.str_pad((string) $seq, 4, '0', STR_PAD_LEFT);
+            $seq++;
+        } while (DB::table('library_materials')->where('material_code', $code)->exists());
+
+        return $code;
+    }
+
+    /**
      * Resolve a free-text unit against the registry so legacy strings such as
      * "PCS" or "Sheet" settle onto the governed unit rather than being retyped.
      */
