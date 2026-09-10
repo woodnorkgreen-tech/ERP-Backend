@@ -1,12 +1,29 @@
 <?php
 
-namespace Database\Seeders;
+namespace App\Console\Commands;
 
 use App\Modules\HR\Models\Employee;
-use Illuminate\Database\Seeder;
+use Illuminate\Console\Command;
 
-class HikvisionIdSeeder extends Seeder
+/**
+ * Maps the attendance device's person ids onto employees, by name.
+ *
+ * This was a seeder, and it is not one: it carries the person list from a single
+ * Hikvision export taken in May 2026 and matches it against whoever is in the
+ * employees table now. That is a backfill — run once against a known state,
+ * read its output, done — and it sat in database/seeders where `db:seed` could
+ * reach it and where nobody would think to look for it.
+ *
+ * It never overwrites: an employee already carrying a different person id is
+ * reported as a conflict and skipped, as is an ambiguous name. Reading the
+ * output is the point, so nothing here is silent.
+ */
+class MapHikvisionIdsToEmployees extends Command
 {
+    protected $signature = 'hr:map-hikvision-ids';
+
+    protected $description = 'Match the May 2026 Hikvision person ids onto employees by name';
+
     /**
      * Persons that couldn't be auto-matched (single-word name or ambiguous).
      * Each entry: person_id => [first, last]  (null = skip that token in the WHERE clause).
@@ -102,7 +119,7 @@ class HikvisionIdSeeder extends Seeder
         ['id' => '87040341',  'name' => 'Derrick Mwendo'],
     ];
 
-    public function run(): void
+    public function handle(): int
     {
         $employees = Employee::select('id', 'first_name', 'last_name', 'hikvision_id')->get();
 
@@ -196,6 +213,10 @@ class HikvisionIdSeeder extends Seeder
             $this->out('');
             $this->out('Unresolved persons can be linked manually via the employee profile edit form (Hikvision Device ID field).');
         }
+
+        // Zero regardless: an unmatched or ambiguous name is a name for somebody
+        // to look at, not a failed run.
+        return self::SUCCESS;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -261,8 +282,6 @@ class HikvisionIdSeeder extends Seeder
 
     private function out(string $msg): void
     {
-        if (isset($this->command)) {
-            $this->command->line($msg);
-        }
+        $this->line($msg);
     }
 }
