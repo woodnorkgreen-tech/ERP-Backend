@@ -19,8 +19,8 @@ use Illuminate\Support\Facades\Schema;
  *
  * The payment_method enum carried five bank names (equity, stanbic, ncba, kcb,
  * family). Those are accounts, so they move to payment_sources; what is left is
- * a list of transmission methods. Every live row is `cash`, so no value is
- * remapped and nothing is lost.
+ * a list of transmission methods. Rows still holding a retired value are
+ * translated before the column is narrowed; see narrowMethodEnum().
  */
 return new class extends Migration
 {
@@ -145,27 +145,32 @@ return new class extends Migration
         // 3. The disbursement becomes the payment.
         // ------------------------------------------------------------------
         if (Schema::hasTable('petty_cash_disbursements')) {
-            DB::statement("ALTER TABLE petty_cash_disbursements MODIFY payment_method ENUM($methods) NOT NULL DEFAULT 'cash'");
+            $this->narrowMethodEnum('petty_cash_disbursements', $methods);
             Schema::rename('petty_cash_disbursements', 'payments');
         }
-        DB::statement("ALTER TABLE petty_cash_top_ups MODIFY payment_method ENUM($methods) NOT NULL DEFAULT 'cash'");
+        $this->narrowMethodEnum('petty_cash_top_ups', $methods);
 
-        Schema::table('payments', function (Blueprint $table) {
-            // The document number the ERP owns. There was none: `transaction_code`
-            // held the M-Pesa or bank reference, so the payee's reference was the
-            // only identifier a payment had.
-            $table->string('payment_no', 32)->nullable()->unique()->after('id');
+        // Guarded because the step below it can fail on live data and leave the
+        // migration unrecorded, so this file has to survive being re-run.
+        if (! Schema::hasColumn('payments', 'payment_no')) {
+            Schema::table('payments', function (Blueprint $table) {
+                // The document number the ERP owns. There was none: `transaction_code`
+                // held the M-Pesa or bank reference, so the payee's reference was
+                // the only identifier a payment had.
+                $table->string('payment_no', 32)->nullable()->unique()->after('id');
 
-            // Whether the money is spent or merely advanced. An advance is not yet
-            // an expense, and until now nothing on the record said which it was.
-            $table->enum('payment_type', ['direct', 'advance', 'retirement', 'refund'])
-                ->default('direct')->after('payment_no');
+                // Whether the money is spent or merely advanced. An advance is not
+                // yet an expense, and until now nothing on the record said which it
+                // was.
+                $table->enum('payment_type', ['direct', 'advance', 'retirement', 'refund'])
+                    ->default('direct')->after('payment_no');
 
-            $table->string('payee_type', 32)->nullable()->after('receiver');
-            $table->unsignedBigInteger('payee_id')->nullable()->after('payee_type');
+                $table->string('payee_type', 32)->nullable()->after('receiver');
+                $table->unsignedBigInteger('payee_id')->nullable()->after('payee_type');
 
-            $table->index(['payment_type', 'status']);
-        });
+                $table->index(['payment_type', 'status']);
+            });
+        }
 
         // `receiver` and `transaction_code` are renamed to the standard terms so
         // one word means one thing across Finance, Procurement and Stores.
@@ -187,6 +192,62 @@ return new class extends Migration
         $this->backfillPaymentNumbers();
     }
 
+    /** Retired method value => the bank it actually named. */
+    private const LEGACY_BANKS = [
+        'equity' => 'Equity Bank',
+        'stanbic' => 'Stanbic Bank',
+        'ncba' => 'NCBA Bank',
+        'kcb' => 'KCB Bank',
+        'family' => 'Family Bank',
+    ];
+
+    /**
+     * Translate the retired method values, then narrow the column onto the list.
+     *
+     * The dev database held nothing but `cash`, so the first cut of this
+     * migration altered the column outright. Production holds the bank names and
+     * `other`, and MySQL in strict mode refuses the ALTER rather than truncating
+     * them — which is the right refusal: silently emptying the method on a
+     * settled payment would be a loss no one would notice. Every retired value
+     * is therefore rewritten while the old enum still accepts it.
+     *
+     * Neither of these tables has a payment_source_id for a bank to move to, so
+     * the bank goes into the description. That is a note, not a record — but it
+     * is the only surviving trace of which account the money moved through, and
+     * dropping it is not the migration's to do.
+     */
+    private function narrowMethodEnum(string $table, string $methods): void
+    {
+        // The reference column is renamed further down this same migration, so a
+        // re-run can reach here with either name in place.
+        $reference = Schema::hasColumn($table, 'transaction_code')
+            ? 'transaction_code'
+            : 'external_reference';
+
+        foreach (self::LEGACY_BANKS as $legacy => $bank) {
+            DB::table($table)->where('payment_method', $legacy)->update([
+                'description' => DB::raw("TRIM(CONCAT(COALESCE(description, ''), ' [bank: {$bank}]'))"),
+                'payment_method' => 'bank_transfer',
+            ]);
+        }
+
+        /*
+         * `other` named no method at all, so what it becomes is a reading, not a
+         * translation. A row carrying the payee's reference moved through a
+         * channel that issues one, which cash does not; a row without one is read
+         * as cash, the value the column defaults to. The original is written into
+         * the description either way, so the guess stays visible and correctable.
+         */
+        DB::table($table)->where('payment_method', 'other')->update([
+            'description' => DB::raw("TRIM(CONCAT(COALESCE(description, ''), ' [method recorded as: other]'))"),
+            'payment_method' => DB::raw(
+                "CASE WHEN {$reference} IS NULL OR {$reference} = '' THEN 'cash' ELSE 'bank_transfer' END"
+            ),
+        ]);
+
+        DB::statement("ALTER TABLE {$table} MODIFY payment_method ENUM({$methods}) NOT NULL DEFAULT 'cash'");
+    }
+
     /**
      * Every existing payment gets a number, ordered by when the money moved.
      *
@@ -197,15 +258,29 @@ return new class extends Migration
     {
         $counters = [];
 
-        DB::table('payments')->orderBy('date_disbursed')->orderBy('id')
-            ->select('id', 'date_disbursed', 'created_at')->each(function ($row) use (&$counters) {
-                $year = substr((string) ($row->date_disbursed ?? $row->created_at), 0, 4) ?: date('Y');
-                $counters[$year] = ($counters[$year] ?? 0) + 1;
+        // payment_no is unique, so a second run that started from zero would
+        // abort on the first number it reissued. Each year resumes above the
+        // highest number that year has already handed out.
+        foreach (DB::table('payments')->whereNotNull('payment_no')->pluck('payment_no') as $issued) {
+            $year = substr((string) $issued, 4, 4);
+            $counters[$year] = max($counters[$year] ?? 0, (int) substr((string) $issued, 9));
+        }
 
-                DB::table('payments')->where('id', $row->id)->update([
-                    'payment_no' => sprintf('PAY-%s-%04d', $year, $counters[$year]),
-                ]);
-            });
+        // Read in full rather than chunked: numbering removes rows from this
+        // filter as it goes, and an offset-paged chunk would step over the rows
+        // that shift up behind it.
+        $unnumbered = DB::table('payments')->whereNull('payment_no')
+            ->orderBy('date_disbursed')->orderBy('id')
+            ->select('id', 'date_disbursed', 'created_at')->get();
+
+        foreach ($unnumbered as $row) {
+            $year = substr((string) ($row->date_disbursed ?? $row->created_at), 0, 4) ?: date('Y');
+            $counters[$year] = ($counters[$year] ?? 0) + 1;
+
+            DB::table('payments')->where('id', $row->id)->update([
+                'payment_no' => sprintf('PAY-%s-%04d', $year, $counters[$year]),
+            ]);
+        }
 
         // Hand the sequence over where the backfill stopped, or the first live
         // payment of each year would be issued a number already in use.
