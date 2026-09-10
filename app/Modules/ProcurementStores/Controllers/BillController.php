@@ -103,7 +103,13 @@ class BillController extends Controller
 
     public function index(Request $request)
     {
-        $query = Bill::with(['purchaseOrder', 'supplier', 'createdBy', 'payments']);
+        $query = Bill::with([
+            'purchaseOrder', 'supplier', 'createdBy:id,name',
+            // BillResource walks each payment's source and creator. Left to lazy
+            // loading that is two queries per payment, so a 100-bill page paid
+            // hundreds of round trips for two names.
+            'payments.paymentSource:id,code,name,type', 'payments.createdBy:id,name',
+        ]);
 
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
@@ -124,27 +130,37 @@ class BillController extends Controller
             $query->where('status', $request->status);
         }
 
-        $bills = $query->orderBy('created_at', 'desc')->paginate(20);
+        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
+        $bills = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return BillResource::collection($bills)->preserveQuery();
     }
 
     public function search(Request $request)
     {
-        $searchTerm = $request->input('searchTerm');
+        $searchTerm = trim((string) $request->input('searchTerm', ''));
+        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
 
-        $bills = Bill::with(['purchaseOrder', 'supplier', 'createdBy', 'payments'])
-            ->where(function ($query) use ($searchTerm) {
-                $query->where('bill_number', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhereHas('purchaseOrder', function ($q) use ($searchTerm) {
-                        $q->where('po_number', 'LIKE', '%' . $searchTerm . '%');
-                    })
-                    ->orWhereHas('supplier', function ($q) use ($searchTerm) {
-                        $q->where('supplier_name', 'LIKE', '%' . $searchTerm . '%');
-                    });
+        $bills = Bill::with([
+            'purchaseOrder', 'supplier', 'createdBy:id,name',
+            // BillResource walks each payment's source and creator. Left to lazy
+            // loading that is two queries per payment, so a 100-bill page paid
+            // hundreds of round trips for two names.
+            'payments.paymentSource:id,code,name,type', 'payments.createdBy:id,name',
+        ])
+            ->when($searchTerm !== '', function ($query) use ($searchTerm) {
+                $query->where(function ($query) use ($searchTerm) {
+                    $query->where('bill_number', 'LIKE', '%' . $searchTerm . '%')
+                        ->orWhereHas('purchaseOrder', function ($q) use ($searchTerm) {
+                            $q->where('po_number', 'LIKE', '%' . $searchTerm . '%');
+                        })
+                        ->orWhereHas('supplier', function ($q) use ($searchTerm) {
+                            $q->where('supplier_name', 'LIKE', '%' . $searchTerm . '%');
+                        });
+                });
             })
             ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            ->paginate($perPage);
 
         return BillResource::collection($bills)->preserveQuery();
     }
@@ -257,7 +273,13 @@ class BillController extends Controller
 
             $this->syncProjectProcurementFromBill($bill);
 
-            return new BillResource($bill->load(['purchaseOrder', 'supplier', 'createdBy', 'payments']));
+            return new BillResource($bill->load([
+            'purchaseOrder', 'supplier', 'createdBy:id,name',
+            // BillResource walks each payment's source and creator. Left to lazy
+            // loading that is two queries per payment, so a 100-bill page paid
+            // hundreds of round trips for two names.
+            'payments.paymentSource:id,code,name,type', 'payments.createdBy:id,name',
+        ]));
         } catch (\Exception $e) {
             return response(['error' => 'Failed to create bill: ' . $e->getMessage()], 500);
         }
@@ -608,16 +630,31 @@ class BillController extends Controller
 
     public function stats()
     {
-        $totalBills = Bill::count();
-        $pendingAmount = Bill::whereIn('status', ['pending', 'partial', 'overdue'])->sum('balance');
-        $paidAmount = Bill::where('status', 'paid')->sum('amount');
-        $overdueCount = Bill::where('status', 'overdue')->count();
+        // One pass over the table instead of four. The per-status counts are
+        // returned here as well: the dashboard used to fetch a hundred fully
+        // hydrated bills — each dragging its purchase order, requisition,
+        // project, line items and payments across the wire — purely to count
+        // three status buckets the database can count in place.
+        $totals = Bill::query()
+            ->selectRaw("
+                COUNT(*) AS total_bills,
+                COALESCE(SUM(CASE WHEN status IN ('pending', 'partial', 'overdue') THEN balance ELSE 0 END), 0) AS pending_amount,
+                COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) AS paid_amount,
+                COALESCE(SUM(CASE WHEN status = 'overdue' THEN 1 ELSE 0 END), 0) AS overdue_count,
+                COALESCE(SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END), 0) AS paid_count,
+                COALESCE(SUM(CASE WHEN status IN ('partial', 'partially_paid') THEN 1 ELSE 0 END), 0) AS partially_paid_count,
+                COALESCE(SUM(CASE WHEN status = 'unpaid' THEN 1 ELSE 0 END), 0) AS unpaid_count
+            ")
+            ->first();
 
         return response()->json([
-            'total_bills' => $totalBills,
-            'pending_amount' => (float) $pendingAmount,
-            'paid_amount' => (float) $paidAmount,
-            'overdue_count' => $overdueCount,
+            'total_bills' => (int) $totals->total_bills,
+            'pending_amount' => (float) $totals->pending_amount,
+            'paid_amount' => (float) $totals->paid_amount,
+            'overdue_count' => (int) $totals->overdue_count,
+            'paid_count' => (int) $totals->paid_count,
+            'partially_paid_count' => (int) $totals->partially_paid_count,
+            'unpaid_count' => (int) $totals->unpaid_count,
         ]);
     }
 

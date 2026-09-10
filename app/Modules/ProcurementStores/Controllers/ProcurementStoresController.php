@@ -246,7 +246,36 @@ class ProcurementStoresController extends Controller
         } else {
             $query->latest('library_materials.created_at');
         }
-        $summaryMaterials = (clone $query)->get();
+        // Project selectors do not consume the inventory-wide summary. Avoid
+        // hydrating every matching material and all its relationships merely to
+        // discard that work at response time.
+        $needsSummary = $request->input('selection_context') !== 'project';
+        // The summary spans every match, so this second pass reads the whole
+        // catalogue. It is projected down to the columns the counters actually
+        // use: the page query's eager loads (workstation, item type, three UOMs
+        // and the conversion table) are dropped, along with the wide columns
+        // and the ordering, none of which survive into a count or a sum.
+        // materialCategory.parent stays because board classification falls back
+        // to the root category name for rows with no tracking_mode.
+        $summaryMaterials = $needsSummary
+            ? (clone $query)
+                ->reorder()
+                ->setEagerLoads([])
+                ->with([
+                    'stock:id,material_id,quantity_on_hand,quantity_reserved,min_stock_level',
+                    'materialCategory:id,name,parent_id',
+                    'materialCategory.parent:id,name',
+                ])
+                ->get([
+                    'library_materials.id',
+                    'library_materials.material_category_id',
+                    'library_materials.category',
+                    'library_materials.unit_cost',
+                    'library_materials.material_type',
+                    'library_materials.tracking_mode',
+                    'library_materials.issue_disposition',
+                ])
+            : collect();
         $pageLimit = $includeUnstocked ? 500 : 200;
         $paginator = $query->paginate(min((int) $request->get('per_page', 50), $pageLimit));
 
@@ -347,29 +376,65 @@ class ProcurementStoresController extends Controller
             ];
         };
 
-        $summaryRows = $summaryMaterials->map($formatMaterial);
         $paginator->getCollection()->transform(function ($material) use ($formatMaterial) {
             $row = $formatMaterial($material);
             unset($row['_stock_value']);
             return $row;
         });
 
+        // Counted straight off the lean projection rather than through
+        // $formatMaterial: that closure reads workstation, UOM and conversion
+        // relations the summary never reports, and on a lean row each of those
+        // would lazy-load once per catalogue item. Same definitions as the row
+        // formatter, deliberately kept side by side with it.
         $summary = [
-            'total_items' => $summaryRows->count(),
-            'stocked_item_count' => $summaryRows->where('is_stocked', true)->count(),
-            'unstocked_item_count' => $summaryRows->where('is_stocked', false)->count(),
-            'total_value' => round((float) $summaryRows->sum('_stock_value'), 2),
-            'low_stock_count' => $summaryRows->filter(fn ($row) =>
-                $row['min_stock_level'] > 0 && $row['available'] <= $row['min_stock_level']
-            )->count(),
-            'out_of_stock_count' => $summaryRows->filter(fn ($row) =>
-                $row['is_stocked'] && $row['available'] <= 0
-            )->count(),
-            'board_item_count' => $summaryRows->where('board_trackable', true)->count(),
-            'reusable_item_count' => $summaryRows->filter(fn ($row) =>
-                $row['issue_disposition'] === 'returnable' && !$row['board_trackable']
-            )->count(),
+            'total_items' => 0,
+            'stocked_item_count' => 0,
+            'unstocked_item_count' => 0,
+            'total_value' => 0.0,
+            'low_stock_count' => 0,
+            'out_of_stock_count' => 0,
+            'board_item_count' => 0,
+            'reusable_item_count' => 0,
         ];
+
+        foreach ($summaryMaterials as $material) {
+            $isBoard = $material->isBoardTrackable();
+            $bc      = $isBoard ? $boardCounts->get($material->id) : null;
+            $stock   = $material->stock;
+
+            $reserved  = (float) ($stock?->quantity_reserved ?? 0);
+            $onHand    = $bc
+                ? (float) $bc->in_stores_cnt
+                : (float) ($stock?->quantity_on_hand ?? 0);
+            $available = $bc
+                ? max(0.0, (float) $bc->available_cnt - $reserved)
+                : (float) ($stock ? ($stock->quantity_on_hand - $reserved) : 0);
+            $minLevel    = (float) ($stock?->min_stock_level ?? 0);
+            $disposition = $material->issue_disposition
+                ?? ($material->material_type === 'reusable' ? 'returnable' : 'consumed');
+
+            $summary['total_items']++;
+            $stock ? $summary['stocked_item_count']++ : $summary['unstocked_item_count']++;
+            $summary['total_value'] += $isBoard
+                ? (float) ($bc?->in_stores_value ?? 0)
+                : $onHand * (float) $material->unit_cost;
+
+            if ($minLevel > 0 && $available <= $minLevel) {
+                $summary['low_stock_count']++;
+            }
+            if ($stock && $available <= 0) {
+                $summary['out_of_stock_count']++;
+            }
+            if ($isBoard) {
+                $summary['board_item_count']++;
+            }
+            if (! $isBoard && $disposition === 'returnable') {
+                $summary['reusable_item_count']++;
+            }
+        }
+
+        $summary['total_value'] = round($summary['total_value'], 2);
 
         $response = [
             'data'   => $paginator,
@@ -859,7 +924,13 @@ class ProcurementStoresController extends Controller
         // desk can group custody and history the same way it groups the issue
         // list. Eager-loaded because the alternative is a query per row.
         $query = InventoryLog::with([
-            'material.materialCategory.parent', 'enteredUom', 'user', 'project.enquiry',
+            // user is narrowed to the two columns the movement list shows. The
+            // full model drags its roles ($with) into every row and, before the
+            // appends were removed, two EXISTS queries per row on top.
+            // enquiry.deliverables: project_scope is a real column with an accessor
+            // over that table, and accessors run when the model is serialized —
+            // so an unloaded relation is one query per enquiry on the page.
+            'material.materialCategory.parent', 'enteredUom', 'user:id,name', 'project.enquiry.deliverables',
             'projectMaterial:id,project_element_id', 'projectMaterial.element:id,name',
             'financePosting.costLine:id,ref,status,nature,net_amount,base_net_amount,quantity,unit_rate,verified_at',
         ]);

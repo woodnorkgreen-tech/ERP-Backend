@@ -98,6 +98,10 @@ Route::post('/logout', [AuthController::class, 'logout'])->middleware(['auth:san
 
 Route::get('/user', function () {
     $user = auth()->user()->load(['roles', 'employee:id,profile_photo_path,updated_at']);
+    // Appended here rather than on the model: the route guard reads these off
+    // the signed-in user, but every other User in a list payload would pay two
+    // EXISTS queries for flags nothing reads. See User::$appends.
+    $user->append(['is_manager', 'is_dept_lead']);
     $data = $user->toArray();
     $data['profile_photo_url'] = $user->employee?->profile_photo_url;
     /*

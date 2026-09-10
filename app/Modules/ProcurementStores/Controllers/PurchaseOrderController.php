@@ -85,24 +85,28 @@ class PurchaseOrderController extends Controller
             $query->where('status', $request->status);
         }
 
-        $purchaseOrders = $query->orderBy('created_at', 'desc')->paginate(20);
+        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
+        $purchaseOrders = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return PurchaseOrderResource::collection($purchaseOrders)->preserveQuery();
     }
 
     public function search(Request $request)
     {
-        $searchTerm = $request->input('searchTerm');
+        $searchTerm = trim((string) $request->input('searchTerm', ''));
+        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
 
         $purchaseOrders = PurchaseOrder::with(['items.material', 'supplier', 'createdBy', 'approvedBy'])
-            ->where(function ($query) use ($searchTerm) {
-                $query->where('po_number', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhereHas('supplier', function ($q) use ($searchTerm) {
-                        $q->where('supplier_name', 'LIKE', '%' . $searchTerm . '%');
-                    });
+            ->when($searchTerm !== '', function ($query) use ($searchTerm) {
+                $query->where(function ($query) use ($searchTerm) {
+                    $query->where('po_number', 'LIKE', '%' . $searchTerm . '%')
+                        ->orWhereHas('supplier', function ($q) use ($searchTerm) {
+                            $q->where('supplier_name', 'LIKE', '%' . $searchTerm . '%');
+                        });
+                });
             })
             ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            ->paginate($perPage);
 
         return PurchaseOrderResource::collection($purchaseOrders)->preserveQuery();
     }

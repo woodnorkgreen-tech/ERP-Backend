@@ -167,7 +167,8 @@ class RequisitionController extends Controller
             $query->where('user_id', auth()->id());
         }
 
-        $requisitions = $query->orderBy('created_at', 'desc')->paginate(20);
+        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
+        $requisitions = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }
@@ -238,8 +239,8 @@ class RequisitionController extends Controller
             $query->where('user_id', auth()->id());
         }
 
-        $requisitions = $query->orderBy('created_at', 'desc')
-            ->paginate($request->input('perPage', 20));
+        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
+        $requisitions = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return RequisitionResource::collection($requisitions)->preserveQuery();
     }

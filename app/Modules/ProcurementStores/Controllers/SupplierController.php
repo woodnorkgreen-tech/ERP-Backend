@@ -14,9 +14,10 @@ class SupplierController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $suppliers = Supplier::orderBy('created_at','desc')->paginate(20);
+        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
+        $suppliers = Supplier::orderBy('created_at','desc')->paginate($perPage);
 
         return SupplierResource::collection($suppliers)->preserveQuery();
     }
@@ -62,19 +63,23 @@ class SupplierController extends Controller
 
     public function search(Request $request)
     {
-        $searchTerm = $request->input('searchTerm');
+        $searchTerm = trim((string) $request->input('searchTerm', ''));
+        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
 
-        $supplier = Supplier::where(function ($query) use ($searchTerm) {
-                $query->where('supplier_name', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhere('contact_person', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhere('email', 'LIKE', '%' . $searchTerm . '%')
-                    // Finance looks a vendor up by the name on the certificate or
-                    // by PIN, neither of which is the trading name staff search by.
-                    ->orWhere('legal_name', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhere('kra_pin', 'LIKE', '%' . $searchTerm . '%');
+        $supplier = Supplier::query()
+            ->when($searchTerm !== '', function ($query) use ($searchTerm) {
+                $query->where(function ($query) use ($searchTerm) {
+                    $query->where('supplier_name', 'LIKE', '%' . $searchTerm . '%')
+                        ->orWhere('contact_person', 'LIKE', '%' . $searchTerm . '%')
+                        ->orWhere('email', 'LIKE', '%' . $searchTerm . '%')
+                        // Finance looks a vendor up by the name on the certificate or
+                        // by PIN, neither of which is the trading name staff search by.
+                        ->orWhere('legal_name', 'LIKE', '%' . $searchTerm . '%')
+                        ->orWhere('kra_pin', 'LIKE', '%' . $searchTerm . '%');
+                });
             })
             ->orderBy('created_at', 'asc')
-            ->paginate(20);
+            ->paginate($perPage);
 
         return SupplierResource::collection($supplier)->preserveQuery();
     }

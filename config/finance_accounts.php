@@ -68,86 +68,75 @@ return [
          | belongs to whoever signs the accounts.
          */
 
-        // ---- Same thing, different name. These carry no model change.
-        // '1030' => 'PETTY-001',   // Petty cash float          -> Petty cash
-        // '2100' => 'AP-001',      // Accounts payable          -> Accounts Payable (A/P)
-        // '1213' => 'COS-020',     // Subcontractors            -> Subcontractors - COS
-        // '1214' => 'COS-016',     // Transport & logistics     -> Cost of Sales:Transport & Delivery
-        // '1217' => 'COS-006',     // Project facilitation      -> Cost of Sales:Field Facilitation
-        // '6200' => 'OPE-023',     // Machinery repairs         -> Repairs and Maintenance
-        // '6400' => 'OPE-006',     // Small tools & consumables -> Consumables
-        // '7150' => 'OPE-030',     // Office supplies           -> Stationery & Printing
-        // '7200' => 'OPE-031',     // Airtime & internet        -> Telephone & Internet
-        // '7400' => 'OPE-032',     // Office transport          -> Transport & Delivery
-        // '7600' => 'OPE-029',     // Staff welfare             -> Staff Welfare
+        // ---- Control accounts that exist with same 4-digit codes in WNG chart
+        '1030' => '1030',   // Petty cash float
+        '2100' => '2100',   // Accounts payable
+        '1100' => '1100',   // Accounts receivable
+        '1200' => '1200',   // Raw-material inventory
+        '1300' => '1300',   // Staff advances / imprest
+        '1330' => '1330',   // Input VAT recoverable
+        '2110' => '2110',   // Output VAT payable
+        '2120' => '2120',   // Withholding tax payable
+        '2150' => '2150',   // Accrued expenses
+        '2200' => '2200',   // Client deposits
+        '3900' => '3900',   // Opening balance equity
+        '4100' => '4100',   // Project revenue
+        '6800' => '6800',   // Inventory adjustments & shrinkage
 
-        // ---- Sound mapping, but WIP becomes an expense. See the note above.
-        // '1211' => 'COS-008',     // WIP direct materials      -> Cost of Sales:Materials
-        // '1212' => 'PE-007',      // WIP direct labour         -> Personnel Expenses:Wages-Direct Labour
+        // ---- WIP accounts (1211-1219) map to COS accounts (5100-5900)
+        // WNG has no WIP; costs go straight to COS on purchase
+        '1211' => '5100',   // WIP direct materials      -> Cost of Sales: Direct Materials
+        '1212' => '5200',   // WIP direct labour         -> Cost of Sales: Direct Labour
+        '1213' => '5300',   // WIP subcontractors        -> Cost of Sales: Subcontractors
+        '1214' => '5400',   // WIP transport & logistics -> Cost of Sales: Transport & Logistics
+        '1215' => '5500',   // WIP equipment & site      -> Cost of Sales: Equipment & Site
+        '1216' => '5600',   // WIP project utilities     -> Cost of Sales: Project Utilities
+        '1217' => '5700',   // WIP project facilitation  -> Cost of Sales: Project Facilitation
+        '1218' => '5800',   // WIP venue & statutory     -> Cost of Sales: Venue & Statutory
+        '1219' => '5900',   // WIP rework & warranty     -> Cost of Sales: Rework & Warranty
 
-        // ---- My reading is weaker here; these want a second opinion.
-        // '1215' => 'COS-019',     // Equipment & site   — or OPE-013 Equipment Rental
-        // '1216' => 'COS-019',     // Project utilities  — lands in Overhead - COS with the above
-        // '1218' => 'COS-018',     // Venue & statutory  — Other - COS; no venue account exists
-        // '1219' => 'COS-018',     // Rework & warranty  — shares Other - COS, so the two cannot be told apart
-        // '6100' => 'OPE-012',     // Workshop electricity — shares Electricity & Water with the office
-        // '6600' => 'OPE-006',     // PPE & workshop safety — Consumables is the closest, and it is not close
-        // '6700' => 'OPE-014',     // Cleaning & waste  -> Garbage Collections (cleaning has no account)
-        // '7100' => 'OPE-022',     // Office rent & electricity -> Rent & lease Payments; electricity splits to OPE-012
-        // '7800' => 'FIN-003',     // Bank charges -> Finance cost:Bank charges; Mpesa splits to FIN-005
+        // ---- Production overhead (6xxx) - same codes exist in WNG chart
+        '6100' => '6100',   // Workshop electricity
+        '6200' => '6200',   // Machinery repairs & maintenance
+        '6400' => '6400',   // Small tools & workshop consumables
+        '6600' => '6600',   // PPE & workshop safety
+        '6700' => '6700',   // Cleaning & waste disposal
 
-        /*
-         | ---- NO COUNTERPART EXISTS. These cannot be mapped, only created.
-         |
-         | This is the real blocker, and it is bigger than the naming. WNG's
-         | chart is a profit-and-loss chart: it carries expenses, banks, AR, AP
-         | and equity, and almost no other balance-sheet control accounts. The
-         | module posts to all of the following, and none of them exist:
-         |
-         |   1200  Raw-material inventory   (INV-001 is Inventory *Shrinkage*,
-         |                                   an expense, not the stock asset)
-         |   1330  Input VAT recoverable
-         |   2150  Output VAT payable       (VP-001 is Vat *Penalty*)
-         |   2120  Withholding tax payable
-         |   2200  Client deposits
-         |   1300  Staff advances
-         |   1310  Supplier advances
-         |   1320  Refundable deposits
-         |   1340  Prepaid expenses
-         |   1600  Leasehold improvements
-         |   2300  Loans payable
-         |
-         | The first four matter most. Without an inventory asset the goods
-         | receipt accrual has nothing to debit, so the stores flow this system
-         | is built around cannot post at all; and without the VAT and WHT
-         | accounts the tax schedules have nothing to accumulate against, which
-         | is the reason this ledger exists.
-         |
-         | These have to be added to the chart. That is ordinary — any business
-         | remitting VAT and WHT keeps them — and they may already exist in the
-         | statutory books this chart was imported from.
-         */
+        // ---- Operating expenses (7xxx) - same codes exist in WNG chart
+        '7100' => '7100',   // Office rent & electricity
+        '7150' => '7150',   // Office supplies & stationery
+        '7200' => '7200',   // Administration airtime & internet
+        '7400' => '7400',   // Office transport
+        '7600' => '7600',   // Staff welfare
+        '7800' => '7800',   // Bank & mobile-money charges
+
+        // ---- Control accounts that may need creating (map to themselves for now)
+        '1310' => '1310',   // Supplier advances (create if missing)
+        '1320' => '1320',   // Refundable deposits (create if missing)
+        '1340' => '1340',   // Prepaid expenses (create if missing)
+        '1600' => '1600',   // Leasehold improvements (create if missing)
+        '2300' => '2300',   // Loans payable (create if missing)
 
     ],
 
     /*
-     | Does this installation keep the reference chart as its own?
-     |
-     | True where the ERP is the first system here to hold a chart at all —
-     | development, the test suite, a fresh install. ChartOfAccountSeeder then
-     | owns chart_of_accounts and re-asserts its accounts whenever it runs.
-     |
-     | False where the company brought its own, which is WNG's production case:
-     | 123 mnemonic accounts imported from QuickBooks, with real postings behind
-     | them. Seeding the reference chart there would stand 88 numeric accounts
-     | up beside the real ones and leave two charts where the pickers expect
-     | one. The `map` above is how the catalogue reaches a foreign chart; the
-     | seeder must not touch it.
-     |
-     | Defaults off in production and on everywhere else, so the cost of getting
-     | it wrong falls on a developer meeting an empty chart rather than on a live
-     | ledger. Set FINANCE_SEED_REFERENCE_CHART=true on a genuinely fresh
-     | production install that has no chart of its own.
+     * Does this installation keep the reference chart as its own?
+     *
+     * True where the ERP is the first system here to hold a chart at all —
+     * development, the test suite, a fresh install. ChartOfAccountSeeder then
+     * owns chart_of_accounts and re-asserts its accounts whenever it runs.
+     *
+     * False where the company brought its own, which is WNG's production case:
+     * 123 mnemonic accounts imported from QuickBooks, with real postings behind
+     * them. Seeding the reference chart there would stand 88 numeric accounts
+     * up beside the real ones and leave two charts where the pickers expect
+     * one. The `map` above is how the catalogue reaches a foreign chart; the
+     * seeder must not touch it.
+     *
+     * Defaults off in production and on everywhere else, so the cost of getting
+     * it wrong falls on a developer meeting an empty chart rather than on a live
+     * ledger. Set FINANCE_SEED_REFERENCE_CHART=true on a genuinely fresh
+     * production install that has no chart of its own.
      */
     'seed_reference_chart' => env('FINANCE_SEED_REFERENCE_CHART', env('APP_ENV') !== 'production'),
 

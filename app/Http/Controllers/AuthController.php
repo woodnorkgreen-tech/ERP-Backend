@@ -126,7 +126,10 @@ class AuthController extends Controller
 
         \Log::info('Token created successfully', ['email' => $request->email, 'user_id' => $user->id]);
 
-        // Return user with role information
+        // Return user with role information. The hierarchy flags are appended
+        // per-payload rather than on the model — see User::$appends for why.
+        $user->append(['is_manager', 'is_dept_lead']);
+
         return response()->json([
             'user' => $user,
             'token' => $token

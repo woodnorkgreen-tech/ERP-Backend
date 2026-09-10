@@ -16,8 +16,20 @@ class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
-      protected $with = ['roles'];
-      protected $appends = ['is_manager', 'is_dept_lead'];
+    protected $with = ['roles'];
+
+    /*
+     * is_manager / is_dept_lead are NOT appended globally. Each one runs an
+     * EXISTS query, so appending them made every serialized User cost two
+     * extra queries — and a User rides along in almost every list row in
+     * Stores, Procurement and Finance as createdBy / approvedBy / user. A
+     * 50-row movement list paid 100 queries for flags no list screen reads.
+     *
+     * Only the authenticated-user payloads need them, and those append the
+     * pair explicitly (routes/api.php /user, AuthController::login). Reading
+     * $user->is_manager still works everywhere — accessors are unaffected by
+     * $appends, which controls serialization only.
+     */
 
     protected $guard_name = 'web';
 

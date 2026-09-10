@@ -52,7 +52,11 @@ class PettyCashRepository
      */
     public function getDisbursements(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = Payment::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry', 'plannedCostLine', 'paymentSource')
+        // enquiry.deliverables is eager-loaded because ProjectEnquiry::project_scope
+        // is a real column carrying an accessor that reads the deliverables
+        // table. Laravel runs accessors over real attributes when serializing,
+        // so without this every enquiry on the page costs its own query.
+        $query = Payment::with('topUp', 'creator', 'voidedBy', 'requisition', 'project.enquiry.deliverables', 'enquiry.deliverables', 'plannedCostLine', 'paymentSource')
             ->orderBy('date_disbursed', 'desc')
             ->orderBy('created_at', 'desc');
 
@@ -104,7 +108,7 @@ class PettyCashRepository
         $query = PettyCashTopUp::with([
             'creator',
             'disbursements' => function ($q) use ($filters) {
-                $q->with('creator', 'voidedBy', 'requisition', 'project.enquiry', 'enquiry', 'paymentSource');
+                $q->with('creator', 'voidedBy', 'requisition', 'project.enquiry.deliverables', 'enquiry.deliverables', 'paymentSource');
                 
                 // Apply disbursement filters
                 if (!empty($filters['disbursement_status'])) {

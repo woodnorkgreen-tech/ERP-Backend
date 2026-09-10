@@ -646,27 +646,28 @@ class BoardController extends Controller
      */
     public function stockRegistry(Request $request): JsonResponse
     {
-        // Pre-load per-material counts in two queries — eliminates N+1
-        $availableCounts = Board::query()
-            ->selectRaw('library_material_id, COUNT(*) as cnt')
-            ->where('status', 'Available')
+        // Per-material counts and value in a single grouped pass. These were
+        // three separate scans of the board table for figures that share one
+        // GROUP BY; a status CASE gets all three from the same rows.
+        //
+        // Value comes from each board's stored current_value, not the live
+        // material unit_cost. Offcuts carry a reduced proportional value, and
+        // editing a material's price must not retroactively restate stock that
+        // was already received.
+        $boardTotals = Board::query()
+            ->selectRaw("
+                library_material_id,
+                SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) AS available_cnt,
+                SUM(CASE WHEN status IN ('Allocated', 'At Station', 'WIP') THEN 1 ELSE 0 END) AS on_job_cnt,
+                SUM(CASE WHEN status = 'Available' THEN current_value ELSE 0 END) AS available_value
+            ")
             ->groupBy('library_material_id')
-            ->pluck('cnt', 'library_material_id');
+            ->get()
+            ->keyBy('library_material_id');
 
-        $onJobCounts = Board::query()
-            ->selectRaw('library_material_id, COUNT(*) as cnt')
-            ->whereIn('status', ['Allocated', 'At Station', 'WIP'])
-            ->groupBy('library_material_id')
-            ->pluck('cnt', 'library_material_id');
-
-        // Value from each board's stored current_value, not the live material
-        // unit_cost. Offcuts carry a reduced proportional value, and editing a
-        // material's price must not retroactively restate already-received stock.
-        $availableValues = Board::query()
-            ->selectRaw('library_material_id, SUM(current_value) as val')
-            ->where('status', 'Available')
-            ->groupBy('library_material_id')
-            ->pluck('val', 'library_material_id');
+        $availableCounts = $boardTotals->map(fn ($row) => (int) $row->available_cnt);
+        $onJobCounts     = $boardTotals->map(fn ($row) => (int) $row->on_job_cnt);
+        $availableValues = $boardTotals->map(fn ($row) => (float) $row->available_value);
 
         $stocks = Stock::with(['material.workstation'])
             ->where('tracking_mode', Stock::TRACK_BY_AREA)
