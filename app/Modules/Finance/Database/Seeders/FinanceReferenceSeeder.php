@@ -13,6 +13,14 @@ use Illuminate\Database\Seeder;
  *
  * Order matters once: payment sources resolve GL account IDs, so the chart has
  * to exist first.
+ *
+ * ChartOfAccountSeeder is the exception to "every seeder below is idempotent and
+ * safe to re-run". It is, now — but only because it asks
+ * finance_accounts.seed_reference_chart whose chart this is, and does nothing on
+ * an installation that brought its own. Before that gate existed, this
+ * docblock's promise was false of its own first child: on WNG's production
+ * ledger the chart seeder would have stood 88 numeric accounts beside 123
+ * mnemonic ones and then purged what it did not recognise.
  */
 class FinanceReferenceSeeder extends Seeder
 {

@@ -30,8 +30,26 @@ use Illuminate\Support\Facades\DB;
  *
  * Header accounts aggregate and are not postable; only leaves accept entries.
  *
- * Idempotent: upserts by `code`, then deactivates any account not in this list
- * rather than deleting it, so a code retired mid-year cannot orphan history.
+ * Idempotent, and it touches only the accounts listed here: upserts by `code`
+ * and never deletes, deactivates or reparents anything outside the list.
+ *
+ * It used to end by purging everything outside the list — deleting an account
+ * where four named tables did not reference it, deactivating it where they did.
+ * That was written to clear a 120-row export that had never received a posting,
+ * and it read as safe because the docblock said "deactivates rather than
+ * deletes". The code deleted, and `isReferenced()` checked four of the eight
+ * columns that point at the chart: `journal_lines.account_id` is not among them,
+ * so the ledger was protected only by that column's RESTRICT, while
+ * `project_invoice_lines.revenue_account_id`, `vat_treatments.gl_account_id` and
+ * `wht_categories.gl_account_id` are ON DELETE SET NULL and would have been
+ * emptied in silence.
+ *
+ * The export it was written for is long gone. What remains is a seeder that
+ * assumed it owned the whole chart, which on WNG's production ledger is 123
+ * mnemonic accounts it has never heard of. Whether this installation keeps the
+ * reference chart at all is now config/finance_accounts.php's answer to give.
+ *
+ * @see config/finance_accounts.php
  */
 class ChartOfAccountSeeder extends Seeder
 {
@@ -179,6 +197,15 @@ class ChartOfAccountSeeder extends Seeder
 
     public function run(): void
     {
+        if (! config('finance_accounts.seed_reference_chart')) {
+            $this->command?->warn(
+                'Chart of accounts left alone: this installation keeps its own chart '
+                .'(finance_accounts.seed_reference_chart is off).'
+            );
+
+            return;
+        }
+
         DB::transaction(function () {
             foreach (self::ACCOUNTS as [$code, $name, $category, $type, $balance, , $postable]) {
                 ChartOfAccount::updateOrCreate(
@@ -200,55 +227,6 @@ class ChartOfAccountSeeder extends Seeder
                 ChartOfAccount::where('code', $code)
                     ->update(['parent_id' => $parent ? $ids[$parent] ?? null : null]);
             }
-
-            // Purge anything outside this chart. The previous export had never
-            // received a posting, so leaving 120 dead rows behind would only make
-            // the account picker ambiguous. Rows that ARE referenced are retired
-            // instead of deleted, so a code that once carried postings stays
-            // resolvable — the seeder is safe to re-run at any point later.
-            $stale = ChartOfAccount::whereNotIn('code', array_column(self::ACCOUNTS, 0))->get();
-
-            foreach ($stale as $account) {
-                if ($this->isReferenced($account->id)) {
-                    $account->update(['is_active' => false]);
-                    continue;
-                }
-
-                $account->delete();
-            }
         });
-    }
-
-    /**
-     * Does anything point at this account? Checked by column rather than by
-     * relationship so a table added later is a one-line change here, and a
-     * missing table (partially migrated environment) is not fatal.
-     */
-    private function isReferenced(int $accountId): bool
-    {
-        $references = [
-            'payment_sources' => ['gl_account_id'],
-            'posting_rules'   => ['debit_account_id', 'credit_account_id'],
-            'expense_codes'   => ['default_debit_account_id'],
-            'chart_of_accounts' => ['parent_id'],
-        ];
-
-        foreach ($references as $table => $columns) {
-            if (! \Illuminate\Support\Facades\Schema::hasTable($table)) {
-                continue;
-            }
-
-            foreach ($columns as $column) {
-                if (! \Illuminate\Support\Facades\Schema::hasColumn($table, $column)) {
-                    continue;
-                }
-
-                if (DB::table($table)->where($column, $accountId)->exists()) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 }

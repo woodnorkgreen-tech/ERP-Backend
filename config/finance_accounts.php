@@ -130,4 +130,25 @@ return [
 
     ],
 
+    /*
+     | Does this installation keep the reference chart as its own?
+     |
+     | True where the ERP is the first system here to hold a chart at all —
+     | development, the test suite, a fresh install. ChartOfAccountSeeder then
+     | owns chart_of_accounts and re-asserts its accounts whenever it runs.
+     |
+     | False where the company brought its own, which is WNG's production case:
+     | 123 mnemonic accounts imported from QuickBooks, with real postings behind
+     | them. Seeding the reference chart there would stand 88 numeric accounts
+     | up beside the real ones and leave two charts where the pickers expect
+     | one. The `map` above is how the catalogue reaches a foreign chart; the
+     | seeder must not touch it.
+     |
+     | Defaults off in production and on everywhere else, so the cost of getting
+     | it wrong falls on a developer meeting an empty chart rather than on a live
+     | ledger. Set FINANCE_SEED_REFERENCE_CHART=true on a genuinely fresh
+     | production install that has no chart of its own.
+     */
+    'seed_reference_chart' => env('FINANCE_SEED_REFERENCE_CHART', env('APP_ENV') !== 'production'),
+
 ];
