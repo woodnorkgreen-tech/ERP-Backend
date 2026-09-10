@@ -6,14 +6,21 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
+use Database\Seeders\Concerns\DemoData;
 
 class ProjectsUserSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         // Get the Projects department
         $projectsDepartment = \App\Modules\HR\Models\Department::where('name', 'Projects')->first();
 
@@ -55,8 +62,8 @@ class ProjectsUserSeeder extends Seeder
             $projectOfficerUser->assignRole($projectOfficerRole);
         }
 
-        $this->command->info('Project users created/updated successfully!');
-        $this->command->info('Project Manager - Email: pm@company.com, Password: password');
-        $this->command->info('Project Officer - Email: po@company.com, Password: password');
+        $this->command?->info('Project users created/updated successfully!');
+        $this->command?->info('Project Manager - Email: pm@company.com, Password: password');
+        $this->command?->info('Project Officer - Email: po@company.com, Password: password');
     }
 }

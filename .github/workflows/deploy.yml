@@ -42,9 +42,20 @@ jobs:
             # invalidates every session and every encrypted value. A key is
             # provisioned once, by hand, and then left alone.
 
-            # No db:seed. ChartOfAccountSeeder deletes accounts outside its own
-            # list, so seeding is a deliberate act against a known chart, never
-            # a step in shipping code.
+            # No db:seed. That command means DatabaseSeeder, which also plants
+            # demo employees, demo clients and @company.com logins.
+            #
+            # The reference data — permissions, the expense catalogue, the
+            # accounting calendar, statutory payroll rates — is now separable and
+            # safe to re-run:
+            #
+            #   php artisan db:seed --class=ReferenceDataSeeder --force
+            #
+            # It is not automatic yet on purpose. PayrollSeeder and
+            # AssetCategorySeeder have never run on this database, so the first
+            # run inserts rather than upserts and wants somebody watching it.
+            # Once it has been run by hand and the result checked, add it here.
+            # See docs/seeding-in-production.md.
 
       - name: Deploy to staging
         if: github.ref == 'refs/heads/staging'

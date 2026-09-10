@@ -4,14 +4,21 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use App\Modules\ClientService\Models\Client;
+use Database\Seeders\Concerns\DemoData;
 
 class ClientSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         $clients = [
             [
                 'full_name' => 'John Smith',
@@ -117,6 +124,6 @@ class ClientSeeder extends Seeder
             );
         }
 
-        $this->command->info('Sample clients seeded successfully!');
+        $this->command?->info('Sample clients seeded successfully!');
     }
 }

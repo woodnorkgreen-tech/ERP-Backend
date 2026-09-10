@@ -6,14 +6,21 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
+use Database\Seeders\Concerns\DemoData;
 
 class SuperAdminUserSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         // Create Super Admin User
         $superAdminUser = User::firstOrCreate(
             ['email' => 'superadmin@company.com'],
@@ -32,9 +39,9 @@ class SuperAdminUserSeeder extends Seeder
             $superAdminUser->assignRole($superAdminRole);
         }
 
-        $this->command->info('Super Admin user created/updated successfully!');
-        $this->command->info('Email: superadmin@company.com');
-        $this->command->info('Password: password');
-        $this->command->info('Role: Super Admin');
+        $this->command?->info('Super Admin user created/updated successfully!');
+        $this->command?->info('Email: superadmin@company.com');
+        $this->command?->info('Password: password');
+        $this->command?->info('Role: Super Admin');
     }
 }

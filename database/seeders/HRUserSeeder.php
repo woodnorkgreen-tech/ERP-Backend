@@ -6,14 +6,21 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
+use Database\Seeders\Concerns\DemoData;
 
 class HRUserSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         // Create HR User
         $hrUser = User::firstOrCreate(
             ['email' => 'hr@company.com'],
@@ -31,9 +38,9 @@ class HRUserSeeder extends Seeder
             $hrUser->assignRole($hrRole);
         }
 
-        $this->command->info('HR user created/updated successfully!');
-        $this->command->info('Email: hr@company.com');
-        $this->command->info('Password: password');
-        $this->command->info('Role: HR');
+        $this->command?->info('HR user created/updated successfully!');
+        $this->command?->info('Email: hr@company.com');
+        $this->command?->info('Password: password');
+        $this->command?->info('Role: HR');
     }
 }

@@ -8,14 +8,21 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
+use Database\Seeders\Concerns\DemoData;
 
 class EmployeeSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         // Get departments
         $projectsDept = Department::where('name', 'Projects')->first();
         $productionDept = Department::where('name', 'Production')->first();

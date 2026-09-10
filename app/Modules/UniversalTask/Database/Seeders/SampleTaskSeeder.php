@@ -10,14 +10,21 @@ use App\Modules\UniversalTask\Models\TaskIssue;
 use App\Modules\UniversalTask\Models\TaskTimeEntry;
 use Illuminate\Database\Seeder;
 use Carbon\Carbon;
+use Database\Seeders\Concerns\DemoData;
 
 class SampleTaskSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         // Get existing users or create sample ones
         $users = User::all();
         if ($users->isEmpty()) {
@@ -304,6 +311,6 @@ class SampleTaskSeeder extends Seeder
             TaskTimeEntry::create($timeEntryData);
         }
 
-        $this->command->info('Sample tasks, subtasks, comments, issues, and time entries created successfully!');
+        $this->command?->info('Sample tasks, subtasks, comments, issues, and time entries created successfully!');
     }
 }

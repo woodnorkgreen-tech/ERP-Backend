@@ -6,14 +6,21 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
+use Database\Seeders\Concerns\DemoData;
 
 class ClientServiceUserSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         // Create Client Service User
         $clientServiceUser = User::firstOrCreate(
             ['email' => 'clientservice@company.com'],
@@ -31,9 +38,9 @@ class ClientServiceUserSeeder extends Seeder
             $clientServiceUser->assignRole($clientServiceRole);
         }
 
-        $this->command->info('Client Service user created/updated successfully!');
-        $this->command->info('Email: clientservice@company.com');
-        $this->command->info('Password: password');
-        $this->command->info('Role: Client Service');
+        $this->command?->info('Client Service user created/updated successfully!');
+        $this->command?->info('Email: clientservice@company.com');
+        $this->command?->info('Password: password');
+        $this->command?->info('Role: Client Service');
     }
 }

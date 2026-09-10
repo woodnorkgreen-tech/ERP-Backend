@@ -12,22 +12,29 @@ use App\Modules\UniversalTask\Models\TaskIssue;
 use App\Modules\UniversalTask\Models\TaskExperienceLog;
 use Illuminate\Database\Seeder;
 use Carbon\Carbon;
+use Database\Seeders\Concerns\DemoData;
 
 class UniversalTaskSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
-        $this->command->info('Seeding Universal Task System data...');
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
+        $this->command?->info('Seeding Universal Task System data...');
 
         // Get departments and users
         $departments = Department::all();
         $users = User::all();
 
         if ($departments->isEmpty() || $users->isEmpty()) {
-            $this->command->error('Departments and users must be seeded first!');
+            $this->command?->error('Departments and users must be seeded first!');
             return;
         }
 
@@ -282,7 +289,23 @@ class UniversalTaskSeeder extends Seeder
                         'task_id' => $task->id,
                         'title' => $this->getRandomIssueTitle(),
                         'description' => $this->getRandomIssueDescription(),
-                        'issue_type' => ['blocker', 'technical', 'resource', 'dependency', 'general'][rand(0, 4)],
+                        /*
+                         * `blocker` and nothing else, because the two schemas
+                         * disagree about what this column accepts and it is the
+                         * only value in both. The migration declares sixteen
+                         * values (bug, feature_request, improvement, …); the
+                         * dev database's column holds five entirely different
+                         * ones (blocker, technical, resource, dependency,
+                         * general) and was evidently altered by hand. This
+                         * seeder wrote the dev vocabulary, so on a freshly
+                         * migrated database four of its five picks were
+                         * truncated — intermittently, since it picked at
+                         * random, which is why it went unnoticed.
+                         *
+                         * Which vocabulary is right is a question for whoever
+                         * owns the module; see docs/seeding-in-production.md.
+                         */
+                        'issue_type' => 'blocker',
                         'severity' => ['low', 'medium', 'high', 'critical'][rand(0, 3)],
                         'status' => ['open', 'in_progress', 'resolved'][rand(0, 2)],
                         'reported_by' => $assignee->id,
@@ -328,9 +351,9 @@ class UniversalTaskSeeder extends Seeder
             }
         }
 
-        $this->command->info('Universal Task System seeded successfully!');
-        $this->command->info('Created ' . count($createdTasks) . ' sample tasks across all departments');
-        $this->command->info('Tasks include various statuses, priorities, and relationships');
+        $this->command?->info('Universal Task System seeded successfully!');
+        $this->command?->info('Created ' . count($createdTasks) . ' sample tasks across all departments');
+        $this->command?->info('Tasks include various statuses, priorities, and relationships');
     }
 
     private function getRandomComment(): string

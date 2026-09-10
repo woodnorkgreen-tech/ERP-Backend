@@ -7,14 +7,21 @@ use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use App\Modules\HR\Models\Department;
 use App\Modules\HR\Models\Employee;
+use Database\Seeders\Concerns\DemoData;
 
 class DesignerUserSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         // Get the Design/Creatives department
         $creativesDepartment = Department::where('name', 'Design/Creatives')->first();
 
@@ -38,9 +45,9 @@ class DesignerUserSeeder extends Seeder
         // Assign Designer role
         $designerUser->assignRole('Designer');
 
-        $this->command->info('Designer user created/updated successfully!');
-        $this->command->info('Email: designer@company.com');
-        $this->command->info('Password: password');
-        $this->command->info('Role: Designer');
+        $this->command?->info('Designer user created/updated successfully!');
+        $this->command?->info('Email: designer@company.com');
+        $this->command?->info('Password: password');
+        $this->command?->info('Role: Designer');
     }
 }

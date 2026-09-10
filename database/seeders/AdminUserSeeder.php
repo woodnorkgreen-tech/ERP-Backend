@@ -6,14 +6,21 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
+use Database\Seeders\Concerns\DemoData;
 
 class AdminUserSeeder extends Seeder
 {
+    use DemoData;
+
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        if (! $this->demoDataIsAllowed()) {
+            return;
+        }
+
         // Create Admin User
         $adminUser = User::firstOrCreate(
             ['email' => 'admin@company.com'],
@@ -32,9 +39,9 @@ class AdminUserSeeder extends Seeder
             $adminUser->assignRole($adminRole);
         }
 
-        $this->command->info('Admin user created/updated successfully!');
-        $this->command->info('Email: admin@company.com');
-        $this->command->info('Password: password');
-        $this->command->info('Role: Admin');
+        $this->command?->info('Admin user created/updated successfully!');
+        $this->command?->info('Email: admin@company.com');
+        $this->command?->info('Password: password');
+        $this->command?->info('Role: Admin');
     }
 }
