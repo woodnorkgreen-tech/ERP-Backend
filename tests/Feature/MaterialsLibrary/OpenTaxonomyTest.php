@@ -4,6 +4,7 @@ namespace Tests\Feature\MaterialsLibrary;
 
 use App\Constants\Permissions;
 use App\Models\User;
+use App\Modules\MaterialsLibrary\Database\Seeders\LegacyMaterialCategorySeeder;
 use App\Modules\MaterialsLibrary\Database\Seeders\MaterialCategorySeeder;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Models\MaterialCategory;
@@ -136,6 +137,44 @@ class OpenTaxonomyTest extends TestCase
         $standardLeaf = MaterialCategory::where('name', 'MDF Boards')->where('parent_id', $standardGroup->id)->sole();
         $this->assertNotSame($customLeaf->id, $standardLeaf->id);
         $this->assertSame('MDF', $standardLeaf->code);
+    }
+
+    public function test_legacy_seeder_adds_missing_categories_without_replacing_custom_ones(): void
+    {
+        $customGroup = MaterialCategory::create([
+            'name' => 'Custom Legacy Group', 'code' => 'CUS', 'sort_order' => 99,
+            'is_active' => true, 'is_selectable' => false,
+        ]);
+        $customLeaf = MaterialCategory::create([
+            'name' => 'Custom Legacy Leaf', 'code' => 'CUSL', 'sort_order' => 99,
+            'parent_id' => $customGroup->id, 'is_active' => true, 'is_selectable' => true,
+        ]);
+
+        $initialGroupCount = MaterialCategory::whereNull('parent_id')->count();
+        $initialCategoryCount = MaterialCategory::count();
+
+        app(LegacyMaterialCategorySeeder::class)->run();
+
+        $customGroup->refresh();
+        $customLeaf->refresh();
+        $this->assertSame('CUS', $customGroup->code);
+        $this->assertSame(99, $customGroup->sort_order);
+        $this->assertSame('CUSL', $customLeaf->code);
+        $this->assertSame(99, $customLeaf->sort_order);
+        $this->assertSame($customGroup->id, $customLeaf->parent_id);
+
+        $this->assertSame($initialGroupCount + 24, MaterialCategory::whereNull('parent_id')->count());
+        $this->assertSame($initialCategoryCount + 111, MaterialCategory::count());
+
+        $legacyGroup = MaterialCategory::where('name', 'MDF')->whereNull('parent_id')->sole();
+        $this->assertSame('MDF2', $legacyGroup->code);
+        $this->assertSame(2, MaterialCategory::where('parent_id', $legacyGroup->id)->count());
+        $this->assertSame('SHEE', MaterialCategory::where('name', 'Sheet')->where('parent_id', $legacyGroup->id)->sole()->code);
+
+        // Idempotent: re-running does not duplicate or alter anything
+        app(LegacyMaterialCategorySeeder::class)->run();
+        $this->assertSame($initialGroupCount + 24, MaterialCategory::whereNull('parent_id')->count());
+        $this->assertSame($initialCategoryCount + 111, MaterialCategory::count());
     }
 
     public function test_the_tree_stays_two_levels_deep(): void
