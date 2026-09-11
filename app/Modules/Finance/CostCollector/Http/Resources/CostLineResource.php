@@ -140,11 +140,17 @@ class CostLineResource extends JsonResource
             'voucher_id' => $this->voucher_id,
             'funding_voucher_id' => $this->funding_voucher_id,
 
+            // Payment settlement is a cash fact, not a second cost. Surfaced so
+            // the cost account can show "paid by voucher X" without folding the
+            // payment amount into budget-vs-actual.
+            'settlement' => $this->settlement(),
+
             // ── GL ────────────────────────────────────────────────────────
             'journal_entry_id' => $this->journal_entry_id,
             'journal_entry_no' => $this->whenNotNull($this->journal_entry_no),
             'posted_at' => $this->posted_at?->toIso8601String(),
             'accounting_period_id' => $this->accounting_period_id,
+            'cos_transferred_at' => $this->cos_transferred_at?->toIso8601String(),
 
             'evidence_count' => count($this->evidence ?? []),
             'evidence' => collect($this->evidence ?? [])->map(fn (array $item) => [
@@ -156,6 +162,93 @@ class CostLineResource extends JsonResource
             'details' => $this->details ?? (object) [],
             'latest_query_response' => collect($this->capture_meta['query_responses'] ?? [])->last(),
             'latest_revision' => collect($this->capture_meta['revisions'] ?? [])->last(),
+        ];
+    }
+
+    /**
+     * How this cost relates to cash, without treating cash as spend.
+     *
+     * - `paid_at_capture` — money already left when the cost was recorded
+     *   (petty-cash disbursement, funding voucher named on the line).
+     * - `settled` — a posted spend voucher later cleared the payable.
+     * - `open_liability` — verified cost whose journal credit is still payable /
+     *   accrued, with no posted voucher allocation.
+     * - `not_payable` — planned / committed / stock movements that are not a
+     *   cash liability on this screen.
+     *
+     * @return array{status: string, label: string, paid_amount: string|null, vouchers: array<int, array{id: int, voucher_no: string|null, amount: string, status: string|null}>}
+     */
+    private function settlement(): array
+    {
+        $nature = (string) $this->nature;
+        if (in_array($nature, ['planned', 'committed'], true)) {
+            return [
+                'status' => 'not_payable',
+                'label' => 'Not a cash liability',
+                'paid_amount' => null,
+                'vouchers' => [],
+            ];
+        }
+
+        $allocations = $this->relationLoaded('voucherAllocations')
+            ? $this->voucherAllocations
+            : collect();
+
+        $posted = $allocations
+            ->filter(fn ($allocation) => ($allocation->voucher?->status ?? null) === 'posted'
+                || filled($allocation->voucher?->posted_at))
+            ->values();
+
+        $vouchers = $posted->map(fn ($allocation) => [
+            'id' => (int) $allocation->spend_voucher_id,
+            'voucher_no' => $allocation->voucher?->voucher_no,
+            'amount' => number_format((float) $allocation->amount, 2, '.', ''),
+            'status' => $allocation->voucher?->status,
+        ])->all();
+
+        $paidAmount = $posted->reduce(
+            fn (string $sum, $allocation) => bcadd($sum, (string) $allocation->amount, 2),
+            '0.00',
+        );
+
+        if ($this->funding_voucher_id || filled($this->details['payment_source_id'] ?? null)
+            || str_contains((string) $this->source_type, 'PettyCash')
+            || str_contains((string) $this->source_ref, 'disbursement')) {
+            return [
+                'status' => 'paid_at_capture',
+                'label' => 'Paid when recorded',
+                'paid_amount' => $this->payableAmount(),
+                'vouchers' => $vouchers,
+            ];
+        }
+
+        if (bccomp($paidAmount, '0.00', 2) === 1) {
+            $payable = $this->payableAmount();
+            $fully = bccomp($paidAmount, $payable, 2) >= 0;
+
+            return [
+                'status' => $fully ? 'settled' : 'part_settled',
+                'label' => $fully ? 'Settled by payment voucher' : 'Partly settled by payment voucher',
+                'paid_amount' => $paidAmount,
+                'vouchers' => $vouchers,
+            ];
+        }
+
+        if (in_array($this->source_ref, ['stock-issue', 'stock-return'], true)
+            || str_contains((string) $this->source_type, 'Stores')) {
+            return [
+                'status' => 'not_payable',
+                'label' => 'Inventory movement — no cash liability',
+                'paid_amount' => null,
+                'vouchers' => [],
+            ];
+        }
+
+        return [
+            'status' => 'open_liability',
+            'label' => 'Open liability — payment settles, does not re-cost',
+            'paid_amount' => null,
+            'vouchers' => [],
         ];
     }
 

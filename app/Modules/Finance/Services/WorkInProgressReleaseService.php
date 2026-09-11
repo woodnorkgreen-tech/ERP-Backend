@@ -113,6 +113,13 @@ class WorkInProgressReleaseService
                 );
             }
 
+            // When the installation maps WIP straight to COS (same local
+            // account), cost already hit P&L on purchase. Releasing again
+            // would Dr/Cr the same account and invent a second move.
+            if ($wipAccount === $costAccount) {
+                continue;
+            }
+
             $movement = $this->movementOn($wipAccount, $enquiryId);
 
             $target = $this->money(bcmul($movement['cost'], $fraction, 6));
@@ -141,10 +148,12 @@ class WorkInProgressReleaseService
         }
 
         if ($legs === []) {
+            $this->stampFullyReleasedCostLines($enquiryId, $fraction);
+
             return null;
         }
 
-        return $this->posting->postBalancedEntry(
+        $entry = $this->posting->postBalancedEntry(
             entryNo: $this->entryNoFor($invoice),
             postingDate: $invoice->invoice_date->toDateString(),
             sourceType: ProjectInvoice::class,
@@ -154,6 +163,31 @@ class WorkInProgressReleaseService
             legs: $legs,
             createdBy: $actorId,
         );
+
+        $this->stampFullyReleasedCostLines($enquiryId, $fraction);
+
+        return $entry;
+    }
+
+    /**
+     * When the job is fully billed, mark verified actuals as transferred so
+     * cost-account margin and the line payload agree with the journals.
+     *
+     * Partial billing leaves the stamp null: proportional release is held on
+     * the WIP journals, not on each cost line.
+     */
+    private function stampFullyReleasedCostLines(int $enquiryId, string $fraction): void
+    {
+        if (bccomp($fraction, '1.000000', 6) < 0) {
+            return;
+        }
+
+        \App\Modules\Finance\CostCollector\Models\CostLine::query()
+            ->where('project_enquiry_id', $enquiryId)
+            ->where('status', \App\Modules\Finance\CostCollector\Models\CostLine::STATUS_VERIFIED)
+            ->where('nature', \App\Modules\Finance\CostCollector\Models\CostLine::NATURE_ACTUAL)
+            ->whereNull('cos_transferred_at')
+            ->update(['cos_transferred_at' => now()]);
     }
 
     /**

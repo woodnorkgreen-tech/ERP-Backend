@@ -302,6 +302,117 @@ class CostAccountService
             'unbudgeted' => $this->unbudgeted($enquiry),
             'exceptions' => $this->exceptionSpend($enquiry),
             'coverage' => $this->coverage($enquiry),
+            // Cash and billing sit beside the cost statement so they cannot be
+            // mistaken for another spend column (paying ≠ costing).
+            'cash_movements' => $this->cashMovements($enquiry),
+            'margin' => $this->marginAgainstJournals($enquiry),
+        ];
+    }
+
+    /**
+     * Cash paid out against this job — custody facts, not project cost.
+     *
+     * @return array{paid_out: string, payment_count: int, note: string}
+     */
+    private function cashMovements(ProjectEnquiry $enquiry): array
+    {
+        $row = DB::table('payments')
+            ->where('project_enquiry_id', $enquiry->id)
+            ->whereNull('voided_at')
+            ->where(function ($q) {
+                $q->whereNull('is_archived')->orWhere('is_archived', false);
+            })
+            ->selectRaw('COUNT(*) AS payment_count, COALESCE(SUM(amount), 0) AS paid_out')
+            ->first();
+
+        return [
+            'paid_out' => $this->money($row->paid_out ?? 0),
+            'payment_count' => (int) ($row->payment_count ?? 0),
+            'note' => 'Cash leaving the business for this job. Not added to budget-versus-actual; costs already sit in verified cost lines.',
+        ];
+    }
+
+    /**
+     * Job margin from the subledger: billed revenue versus cost released to
+     * Cost of Sales (or verified actuals when nothing has been released yet).
+     *
+     * @return array{
+     *   billed_revenue: string,
+     *   cost_of_sales: string,
+     *   cost_basis: 'released'|'actual',
+     *   margin: string,
+     *   margin_percent: float|null,
+     *   billed_fraction: string,
+     *   note: string
+     * }
+     */
+    private function marginAgainstJournals(ProjectEnquiry $enquiry): array
+    {
+        $billed = $this->money(
+            DB::table('project_invoices')
+                ->where('project_enquiry_id', $enquiry->id)
+                ->whereNot('status', 'void')
+                ->whereNotNull('journal_entry_id')
+                ->sum('total_amount'),
+        );
+
+        $released = $this->money(
+            DB::table('journal_lines as jl')
+                ->join('journal_entries as je', 'je.id', '=', 'jl.journal_entry_id')
+                ->join('chart_of_accounts as coa', 'coa.id', '=', 'jl.account_id')
+                ->where('jl.project_enquiry_id', $enquiry->id)
+                ->whereIn('je.status', ['posted', 'reversed'])
+                ->where('je.source_type', \App\Modules\Finance\Models\ProjectInvoice::class)
+                ->where(function ($q) {
+                    $q->where('coa.code', 'like', '5%')
+                        ->orWhere('coa.code', 'like', 'COS-%');
+                })
+                ->selectRaw(
+                    "COALESCE(SUM(CASE WHEN jl.entry_type = 'debit' THEN jl.base_amount ELSE -jl.base_amount END), 0) as released",
+                )
+                ->value('released'),
+        );
+
+        $actual = $this->money(
+            CostLine::query()
+                ->where('project_enquiry_id', $enquiry->id)
+                ->counting()
+                ->where('nature', CostLine::NATURE_ACTUAL)
+                ->sum('net_amount'),
+        );
+
+        $usesRelease = bccomp($released, '0.00', 2) === 1;
+        $costOfSales = $usesRelease ? $released : $actual;
+        $basis = $usesRelease ? 'released' : 'actual';
+        $margin = bcsub($billed, $costOfSales, 2);
+        $marginPercent = bccomp($billed, '0.00', 2) === 1
+            ? round((float) bcmul(bcdiv($margin, $billed, 6), '100', 4), 1)
+            : null;
+
+        $agreed = (float) DB::table('quote_approvals')
+            ->where('enquiry_id', $enquiry->id)
+            ->where('approval_status', 'approved')
+            ->orderByDesc('updated_at')
+            ->value('quote_amount');
+
+        $fraction = ($agreed > 0 && bccomp($billed, '0.00', 2) === 1)
+            ? bcdiv($billed, $this->money($agreed), 6)
+            : '0.000000';
+
+        if (bccomp($fraction, '1.000000', 6) > 0) {
+            $fraction = '1.000000';
+        }
+
+        return [
+            'billed_revenue' => $billed,
+            'cost_of_sales' => $costOfSales,
+            'cost_basis' => $basis,
+            'margin' => $margin,
+            'margin_percent' => $marginPercent,
+            'billed_fraction' => $fraction,
+            'note' => $usesRelease
+                ? 'Cost of sales is Work in Progress released against issued invoices.'
+                : 'No WIP→COS release yet; margin uses verified actual costs until billing releases them.',
         ];
     }
 
@@ -468,7 +579,11 @@ class CostAccountService
     public function linesForCategory(ProjectEnquiry $enquiry, string $category): array
     {
         $lines = CostLine::withReferenceNames()
-            ->with(['expenseCode', 'submittedBy'])
+            ->with([
+                'expenseCode',
+                'submittedBy',
+                'voucherAllocations.voucher',
+            ])
             ->where('project_enquiry_id', $enquiry->id)
             ->counting()
             ->where(function ($q) use ($category) {
