@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\MaterialsLibrary;
 
+use App\Constants\Permissions;
 use App\Models\User;
+use App\Modules\MaterialsLibrary\Database\Seeders\MaterialCategorySeeder;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Models\MaterialCategory;
 use App\Modules\MaterialsLibrary\Models\MaterialItemType;
@@ -14,7 +16,6 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
-use App\Constants\Permissions;
 
 /**
  * The people who know what a material is are the people typing the list, so the
@@ -26,7 +27,9 @@ class OpenTaxonomyTest extends TestCase
     use RefreshDatabase;
 
     private MaterialCategory $group;
+
     private MaterialItemType $stockType;
+
     private UnitOfMeasure $pcs;
 
     protected function setUp(): void
@@ -106,6 +109,33 @@ class OpenTaxonomyTest extends TestCase
         $this->postJson('/api/materials-library/categories', [
             'name' => 'screws & bolts', 'parent_id' => $this->group->id,
         ])->assertStatus(422)->assertJsonValidationErrors('name');
+    }
+
+    public function test_seeding_adds_missing_categories_without_replacing_custom_ones(): void
+    {
+        $customGroup = MaterialCategory::create([
+            'name' => 'Custom Group', 'code' => 'CUS', 'sort_order' => 99,
+            'is_active' => true, 'is_selectable' => false,
+        ]);
+        $customLeaf = MaterialCategory::create([
+            'name' => 'MDF Boards', 'code' => 'CUS-MDF', 'sort_order' => 99,
+            'parent_id' => $customGroup->id, 'is_active' => true, 'is_selectable' => true,
+        ]);
+
+        app(MaterialCategorySeeder::class)->run();
+
+        $customGroup->refresh();
+        $customLeaf->refresh();
+        $this->assertSame('CUS', $customGroup->code);
+        $this->assertSame(99, $customGroup->sort_order);
+        $this->assertSame('CUS-MDF', $customLeaf->code);
+        $this->assertSame(99, $customLeaf->sort_order);
+        $this->assertSame($customGroup->id, $customLeaf->parent_id);
+
+        $standardGroup = MaterialCategory::where('name', 'Boards')->whereNull('parent_id')->sole();
+        $standardLeaf = MaterialCategory::where('name', 'MDF Boards')->where('parent_id', $standardGroup->id)->sole();
+        $this->assertNotSame($customLeaf->id, $standardLeaf->id);
+        $this->assertSame('MDF', $standardLeaf->code);
     }
 
     public function test_the_tree_stays_two_levels_deep(): void

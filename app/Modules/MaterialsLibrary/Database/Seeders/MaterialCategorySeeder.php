@@ -2,8 +2,8 @@
 
 namespace App\Modules\MaterialsLibrary\Database\Seeders;
 
-use Illuminate\Database\Seeder;
 use App\Modules\MaterialsLibrary\Models\MaterialCategory;
+use Illuminate\Database\Seeder;
 
 class MaterialCategorySeeder extends Seeder
 {
@@ -23,9 +23,9 @@ class MaterialCategorySeeder extends Seeder
         $taxonomy = [
             // ── Board-eligible parents ────────────────────────────────────────
             [
-                'name'       => 'Boards',
+                'name' => 'Boards',
                 'sort_order' => 1,
-                'children'   => [
+                'children' => [
                     ['name' => 'MDF Boards',        'code' => 'MDF',  'sort_order' => 1],
                     ['name' => 'Plywood',            'code' => 'PLY',  'sort_order' => 2],
                     ['name' => 'PVC Foam Boards',    'code' => 'PVC',  'sort_order' => 3],
@@ -34,21 +34,21 @@ class MaterialCategorySeeder extends Seeder
                 ],
             ],
             [
-                'name'       => 'Sheet Materials',
+                'name' => 'Sheet Materials',
                 'sort_order' => 2,
-                'children'   => [
+                'children' => [
                     ['name' => 'Acrylic Sheets',     'code' => 'ACR',  'sort_order' => 1],
                     ['name' => 'ACP Panels',         'code' => 'ACP',  'sort_order' => 2],
-                    ['name' => 'Aluminium Composite','code' => 'ALX',  'sort_order' => 3],
+                    ['name' => 'Aluminium Composite', 'code' => 'ALX',  'sort_order' => 3],
                     ['name' => 'Forex PVC Sheets',   'code' => 'FPV',  'sort_order' => 4],
                     ['name' => 'Polycarbonate',      'code' => 'PCB',  'sort_order' => 5],
                     ['name' => 'Correx Sheets',      'code' => 'CRX',  'sort_order' => 6],
                 ],
             ],
             [
-                'name'       => 'Veneer',
+                'name' => 'Veneer',
                 'sort_order' => 3,
-                'children'   => [
+                'children' => [
                     ['name' => 'Wood Veneer',        'code' => 'WVN',  'sort_order' => 1],
                     ['name' => 'Melamine Veneer',    'code' => 'MVN',  'sort_order' => 2],
                     ['name' => 'HPL Laminate',       'code' => 'HPL',  'sort_order' => 3],
@@ -57,9 +57,9 @@ class MaterialCategorySeeder extends Seeder
 
             // ── Consumable parents ────────────────────────────────────────────
             [
-                'name'       => 'Printing Media',
+                'name' => 'Printing Media',
                 'sort_order' => 4,
-                'children'   => [
+                'children' => [
                     ['name' => 'Vinyl Media',        'code' => 'VNL',  'sort_order' => 1],
                     ['name' => 'Banner & Mesh',      'code' => 'BNR',  'sort_order' => 2],
                     ['name' => 'Canvas & Fabric',    'code' => 'CVS',  'sort_order' => 3],
@@ -68,9 +68,9 @@ class MaterialCategorySeeder extends Seeder
                 ],
             ],
             [
-                'name'       => 'Inks & Coatings',
+                'name' => 'Inks & Coatings',
                 'sort_order' => 5,
-                'children'   => [
+                'children' => [
                     ['name' => 'Solvent Inks',       'code' => 'SVI',  'sort_order' => 1],
                     ['name' => 'UV Inks',            'code' => 'UVI',  'sort_order' => 2],
                     ['name' => 'Latex Inks',         'code' => 'LTX',  'sort_order' => 3],
@@ -80,9 +80,9 @@ class MaterialCategorySeeder extends Seeder
                 ],
             ],
             [
-                'name'       => 'Adhesives & Laminates',
+                'name' => 'Adhesives & Laminates',
                 'sort_order' => 6,
-                'children'   => [
+                'children' => [
                     ['name' => 'Mounting Adhesives', 'code' => 'MAD',  'sort_order' => 1],
                     ['name' => 'Double-Sided Tapes', 'code' => 'DST',  'sort_order' => 2],
                     ['name' => 'Laminating Film',    'code' => 'LMF',  'sort_order' => 3],
@@ -90,19 +90,19 @@ class MaterialCategorySeeder extends Seeder
                 ],
             ],
             [
-                'name'       => 'Metals & Profiles',
+                'name' => 'Metals & Profiles',
                 'sort_order' => 7,
-                'children'   => [
+                'children' => [
                     ['name' => 'Steel Sections',     'code' => 'SHS',  'sort_order' => 1],
                     ['name' => 'Aluminium Profiles', 'code' => 'ALP',  'sort_order' => 2],
-                    ['name' => 'Welding Consumables','code' => 'WLD',  'sort_order' => 3],
+                    ['name' => 'Welding Consumables', 'code' => 'WLD',  'sort_order' => 3],
                     ['name' => 'Cutting Discs',      'code' => 'CTD',  'sort_order' => 4],
                 ],
             ],
             [
-                'name'       => 'Electrical & LED',
+                'name' => 'Electrical & LED',
                 'sort_order' => 8,
-                'children'   => [
+                'children' => [
                     ['name' => 'LED Modules',        'code' => 'LEM',  'sort_order' => 1],
                     ['name' => 'LED Strips',         'code' => 'LES',  'sort_order' => 2],
                     ['name' => 'Power Supplies',     'code' => 'PSU',  'sort_order' => 3],
@@ -111,19 +111,19 @@ class MaterialCategorySeeder extends Seeder
                 ],
             ],
             [
-                'name'       => 'Hardware & Fasteners',
+                'name' => 'Hardware & Fasteners',
                 'sort_order' => 9,
-                'children'   => [
+                'children' => [
                     ['name' => 'Screws & Bolts',     'code' => 'SCR',  'sort_order' => 1],
                     ['name' => 'Hinges & Brackets',  'code' => 'HNG',  'sort_order' => 2],
-                    ['name' => 'Standoffs & Fixings','code' => 'STD',  'sort_order' => 3],
+                    ['name' => 'Standoffs & Fixings', 'code' => 'STD',  'sort_order' => 3],
                     ['name' => 'Rivets & Clips',     'code' => 'RVT',  'sort_order' => 4],
                 ],
             ],
             [
-                'name'       => 'Packaging & Dispatch',
+                'name' => 'Packaging & Dispatch',
                 'sort_order' => 10,
-                'children'   => [
+                'children' => [
                     ['name' => 'Stretch Film',       'code' => 'STW',  'sort_order' => 1],
                     ['name' => 'Foam Padding',       'code' => 'FPD',  'sort_order' => 2],
                     ['name' => 'Cardboard Boxes',    'code' => 'CBX',  'sort_order' => 3],
@@ -131,9 +131,9 @@ class MaterialCategorySeeder extends Seeder
                 ],
             ],
             [
-                'name'       => 'Cutting Tools',
+                'name' => 'Cutting Tools',
                 'sort_order' => 11,
-                'children'   => [
+                'children' => [
                     ['name' => 'CNC Router Bits',    'code' => 'CRB',  'sort_order' => 1],
                     ['name' => 'Laser Lenses',       'code' => 'LSL',  'sort_order' => 2],
                     ['name' => 'Drill Bits',         'code' => 'DRB',  'sort_order' => 3],
@@ -141,9 +141,9 @@ class MaterialCategorySeeder extends Seeder
                 ],
             ],
             [
-                'name'       => 'Timber & Wood',
+                'name' => 'Timber & Wood',
                 'sort_order' => 12,
-                'children'   => [
+                'children' => [
                     ['name' => 'Solid Timber',       'code' => 'TIM',  'sort_order' => 1],
                     ['name' => 'Treated Timber',     'code' => 'TTM',  'sort_order' => 2],
                     ['name' => 'Dowels & Mouldings', 'code' => 'DWL',  'sort_order' => 3],
@@ -155,14 +155,14 @@ class MaterialCategorySeeder extends Seeder
             $children = $parentData['children'] ?? [];
             unset($parentData['children']);
 
-            $parent = MaterialCategory::updateOrCreate(
-                ['name' => $parentData['name']],
+            $parent = MaterialCategory::firstOrCreate(
+                ['name' => $parentData['name'], 'parent_id' => null],
                 array_merge($parentData, ['parent_id' => null, 'is_active' => true])
             );
 
             foreach ($children as $childData) {
-                MaterialCategory::updateOrCreate(
-                    ['name' => $childData['name']],
+                MaterialCategory::firstOrCreate(
+                    ['name' => $childData['name'], 'parent_id' => $parent->id],
                     array_merge($childData, ['parent_id' => $parent->id, 'is_active' => true])
                 );
             }
@@ -170,7 +170,7 @@ class MaterialCategorySeeder extends Seeder
 
         if ($this->command) {
             $count = MaterialCategory::count();
-            $this->command?->info("✅ MaterialCategorySeeder: {$count} categories seeded with codes.");
+            $this->command?->info("MaterialCategorySeeder: {$count} categories seeded with codes.");
         }
     }
 }
