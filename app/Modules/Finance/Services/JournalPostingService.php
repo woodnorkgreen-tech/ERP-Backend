@@ -45,6 +45,7 @@ class JournalPostingService
     private const INVENTORY_CODE = '1200';      // material relieved from the shelf
     private const ACCRUED_CODE = '2150';        // goods received, not yet invoiced
     private const PAYABLE_CODE = '2100';        // incurred, still owed to someone
+    private const STAFF_ADVANCE_CODE = '1300';  // staff float/advance imprest asset
 
     /**
      * What a bank, card or mobile-money operator charges us to move the money.
@@ -1257,5 +1258,191 @@ class JournalPostingService
         }
 
         return $entry;
+    }
+
+    /**
+     * Create a balanced GL journal entry when a petty cash requisition is disbursed as an advance float.
+     *
+     *   Dr  1300 Staff Advances / Imprest      disbursement amount
+     *   Cr  Payment Source / Cash Float        disbursement amount
+     */
+    public function postPettyCashAdvance(Payment $disbursement): ?JournalEntry
+    {
+        $amount = $this->money($disbursement->amount);
+        if (bccomp($amount, '0.00', 2) <= 0 || $disbursement->status !== 'active') {
+            return null;
+        }
+
+        $advanceAccount = $this->accountByCode(self::STAFF_ADVANCE_CODE);
+        $sourceAccount = $disbursement->payment_source_id
+            ? PaymentSource::whereKey($disbursement->payment_source_id)->value('gl_account_id')
+            : null;
+        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', '1010')->value('id');
+
+        if (! $advanceAccount || ! $sourceAccount) {
+            throw new InvalidArgumentException(
+                "Disbursement {$disbursement->id} cannot post advance: chart account "
+                . self::STAFF_ADVANCE_CODE . ' must be postable, and the paying source needs a postable GL account.'
+            );
+        }
+
+        $reference = $disbursement->requisition?->requisition_number ?: ($disbursement->payment_no ?: (string) $disbursement->id);
+        $entryNo = 'JE-PCA-' . str_pad((string) $disbursement->id, 7, '0', STR_PAD_LEFT);
+
+        return $this->postBalancedEntry(
+            entryNo: $entryNo,
+            postingDate: (string) ($disbursement->date_disbursed?->toDateString() ?? $disbursement->created_at?->toDateString() ?? now()->toDateString()),
+            sourceType: Payment::class,
+            sourceId: $disbursement->id,
+            sourceRef: $reference,
+            description: "Staff advance float for requisition {$reference} to " . ($disbursement->payee_name ?? 'Requester'),
+            legs: [
+                [
+                    'account_id' => (int) $advanceAccount,
+                    'entry_type' => 'debit',
+                    'amount' => $amount,
+                    'description' => 'Staff advance float: ' . ($disbursement->payee_name ?? 'Requester'),
+                    'project_id' => $disbursement->project_id,
+                    'project_enquiry_id' => $disbursement->project_enquiry_id,
+                ],
+                [
+                    'account_id' => (int) $sourceAccount,
+                    'entry_type' => 'credit',
+                    'amount' => $amount,
+                    'description' => 'Disbursed from ' . ($disbursement->paymentSource?->name ?? 'Cash Float'),
+                    'project_id' => $disbursement->project_id,
+                    'project_enquiry_id' => $disbursement->project_enquiry_id,
+                ],
+            ],
+            createdBy: $disbursement->created_by,
+        );
+    }
+
+    /**
+     * Create a balanced clearing GL journal entry when a petty cash requisition is surrendered and reconciled.
+     *
+     *   Dr  Expense / WIP (net)             per verified receipt item
+     *   Dr  Input VAT 1330 (if ETR/eTIMS)   per verified receipt item
+     *   Dr  Payment Source / Cash Float     cash change returned
+     *   Cr  1300 Staff Advances             advance cleared (up to advance amount)
+     *   Cr  Payment Source / Cash Float     reimbursement for overspend (if any)
+     */
+    public function postPettyCashSurrender(\App\Modules\Finance\PettyCash\Models\PettyCashRequisition $requisition): ?JournalEntry
+    {
+        $requisition->loadMissing(['surrenderItems.expenseCode', 'disbursement.paymentSource']);
+
+        $entryNo = 'JE-PCS-' . str_pad((string) $requisition->id, 7, '0', STR_PAD_LEFT);
+        if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
+            return $existing;
+        }
+
+        $advanceAccount = $this->accountByCode(self::STAFF_ADVANCE_CODE);
+        $sourceAccount = $requisition->disbursement?->payment_source_id
+            ? PaymentSource::whereKey($requisition->disbursement->payment_source_id)->value('gl_account_id')
+            : null;
+        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', '1010')->value('id');
+
+        if (! $advanceAccount || ! $sourceAccount) {
+            throw new InvalidArgumentException(
+                "Requisition {$requisition->requisition_number} cannot reconcile surrender: chart account "
+                . self::STAFF_ADVANCE_CODE . ' must be postable, and the paying source needs a postable GL account.'
+            );
+        }
+
+        $legs = [];
+        $totalSpent = '0.00';
+
+        foreach ($requisition->surrenderItems as $item) {
+            $tax = $this->money($item->tax_amount ?: 0);
+            $net = $item->net_amount ? $this->money($item->net_amount) : bcsub($this->money($item->amount), $tax, 2);
+            $gross = bcadd($net, $tax, 2);
+            $totalSpent = bcadd($totalSpent, $gross, 2);
+
+            $debitId = $item->expenseCode?->default_debit_account_id
+                ?: ChartOfAccount::postable()->where('category', 'expense')->orderBy('code')->value('id');
+
+            if (bccomp($net, '0.00', 2) === 1 && $debitId) {
+                $legs[] = [
+                    'account_id' => (int) $debitId,
+                    'entry_type' => 'debit',
+                    'amount' => $net,
+                    'description' => $item->description ?: "Receipt {$item->receipt_number} on {$requisition->requisition_number}",
+                    'project_id' => $requisition->project_id,
+                    'project_enquiry_id' => $requisition->enquiry_id,
+                ];
+            }
+
+            if (bccomp($tax, '0.00', 2) === 1 && $item->receipt_type === 'etr') {
+                $vatInputId = $this->accountByCode(self::VAT_INPUT_CODE);
+                if ($vatInputId) {
+                    $legs[] = [
+                        'account_id' => (int) $vatInputId,
+                        'entry_type' => 'debit',
+                        'amount' => $tax,
+                        'description' => "Input VAT on receipt {$item->receipt_number} (PIN: {$item->supplier_kra_pin})",
+                        'project_id' => $requisition->project_id,
+                        'project_enquiry_id' => $requisition->enquiry_id,
+                    ];
+                }
+            }
+        }
+
+        $cashReturned = $this->money($requisition->cash_returned_amount ?? 0);
+        if (bccomp($cashReturned, '0.00', 2) === 1) {
+            $legs[] = [
+                'account_id' => (int) $sourceAccount,
+                'entry_type' => 'debit',
+                'amount' => $cashReturned,
+                'description' => "Cash change returned on {$requisition->requisition_number}",
+                'project_id' => $requisition->project_id,
+                'project_enquiry_id' => $requisition->enquiry_id,
+            ];
+        }
+
+        // Total accounted is total expenses + cash change returned
+        $totalAccounted = bcadd($totalSpent, $cashReturned, 2);
+        $advanceAmount = $this->money($requisition->total_amount);
+
+        // Advance cleared cannot exceed the original advance amount
+        $advanceCleared = bccomp($totalAccounted, $advanceAmount, 2) === 1
+            ? $advanceAmount
+            : $totalAccounted;
+
+        if (bccomp($advanceCleared, '0.00', 2) === 1) {
+            $legs[] = [
+                'account_id' => (int) $advanceAccount,
+                'entry_type' => 'credit',
+                'amount' => $advanceCleared,
+                'description' => "Clear staff advance on {$requisition->requisition_number}",
+                'project_id' => $requisition->project_id,
+                'project_enquiry_id' => $requisition->enquiry_id,
+            ];
+        }
+
+        // If employee overspent, company owes / paid reimbursement
+        $overspent = bcsub($totalAccounted, $advanceAmount, 2);
+        if (bccomp($overspent, '0.00', 2) === 1) {
+            $legs[] = [
+                'account_id' => (int) $sourceAccount,
+                'entry_type' => 'credit',
+                'amount' => $overspent,
+                'description' => "Reimbursement for out-of-pocket overspend on {$requisition->requisition_number}",
+                'project_id' => $requisition->project_id,
+                'project_enquiry_id' => $requisition->enquiry_id,
+            ];
+        }
+
+        $postingDate = (string) ($requisition->surrender_reconciled_at?->toDateString() ?? now()->toDateString());
+
+        return $this->postBalancedEntry(
+            entryNo: $entryNo,
+            postingDate: $postingDate,
+            sourceType: \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::class,
+            sourceId: $requisition->id,
+            sourceRef: $requisition->requisition_number,
+            description: "Surrender reconciliation: {$requisition->requisition_number} ({$requisition->purpose})",
+            legs: $legs,
+            createdBy: $requisition->surrender_reconciled_by ?? auth()->id(),
+        );
     }
 }

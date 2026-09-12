@@ -1131,6 +1131,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('requisitions/{id}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmReceipt']);
             Route::post('requisitions/{id}/items/{itemId}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmItemReceipt']);
             Route::get('requisitions/{id}/voucher', [PettyCashRequisitionController::class, 'downloadVoucher']);
+            Route::post('requisitions/{id}/surrender', [PettyCashRequisitionController::class, 'submitSurrender']);
+            Route::post('requisitions/{id}/reconcile', [PettyCashRequisitionController::class, 'reconcileSurrender']);
         });
     });
 

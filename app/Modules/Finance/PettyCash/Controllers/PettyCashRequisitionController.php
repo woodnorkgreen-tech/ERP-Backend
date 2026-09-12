@@ -136,7 +136,7 @@ class PettyCashRequisitionController extends Controller
                 $query->where('user_id', $user->id);
             }
 
-            $statuses = ['pending', 'approved', 'disbursed', 'received', 'rejected'];
+            $statuses = ['pending', 'approved', 'disbursed', 'received', 'surrender_pending', 'surrendered', 'rejected'];
             $stats = collect($statuses)
                 ->mapWithKeys(fn ($status) => [
                     $status => ['count' => 0, 'amount' => 0.0],
@@ -278,8 +278,22 @@ class PettyCashRequisitionController extends Controller
     public function show(int $id): JsonResponse
     {
         try {
-            $requisition = PettyCashRequisition::with(['requisitionType', 'requester.employee', 'department', 'items.payee', 'approver', 'disbursement.paymentSource', 'payee', 'project.enquiry', 'enquiry'])
-                ->findOrFail($id);
+            $requisition = PettyCashRequisition::with([
+                'requisitionType',
+                'requester.employee',
+                'department',
+                'items.payee',
+                'approver',
+                'disbursement.paymentSource',
+                'payee',
+                'project.enquiry',
+                'enquiry',
+                'surrenderItems.expenseCode',
+                'surrenderedBy',
+                'surrenderReconciledBy',
+                'advanceJournalEntry',
+                'surrenderJournalEntry',
+            ])->findOrFail($id);
 
             if (!$this->mayView($requisition)) {
                 return response()->json(['success' => false, 'message' => 'You may only view your own requisitions'], 403);
@@ -748,10 +762,13 @@ class PettyCashRequisitionController extends Controller
                 'description' => ['required', 'string', 'max:1000'],
                 'date_disbursed' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
                 'transaction_cost' => ['nullable', 'numeric', 'min:0'],
-                'receipt_type' => ['required', 'in:etr,non_etr,none'],
-                'receipt_number' => ['nullable', 'string', 'max:100', 'required_if:receipt_type,etr'],
-                'tax_amount' => ['required', 'numeric', 'min:0', 'lte:amount'],
+                'receipt_type' => ['nullable', 'in:etr,non_etr,none'],
+                'receipt_number' => ['nullable', 'string', 'max:100'],
+                'tax_amount' => ['nullable', 'numeric', 'min:0', 'lte:amount'],
             ]);
+
+            $validatedPayment['receipt_type'] ??= 'none';
+            $validatedPayment['tax_amount'] ??= 0.00;
 
             if (bccomp((string) $validatedPayment['amount'], (string) $requisition->total_amount, 2) !== 0) {
                 return response()->json([
@@ -787,10 +804,20 @@ class PettyCashRequisitionController extends Controller
                 ], 422);
             }
 
+            // Post advance GL journal entry (Dr 1300 Staff Advance / Cr Cash Float)
+            try {
+                $advanceEntry = app(\App\Modules\Finance\Services\JournalPostingService::class)->postPettyCashAdvance($result['data']);
+                if ($advanceEntry) {
+                    $requisition->update(['advance_journal_entry_id' => $advanceEntry->id]);
+                }
+            } catch (\Throwable $e) {
+                \Log::warning("Could not post petty cash advance journal: " . $e->getMessage());
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Requisition disbursed. QR code link generated.',
-                'data' => $requisition->fresh(['disbursement', 'requester', 'department', 'items'])
+                'data' => $requisition->fresh(['disbursement.paymentSource', 'requester', 'department', 'items', 'advanceJournalEntry'])
             ]);
         } catch (Exception $e) {
             return response()->json([
@@ -1688,5 +1715,285 @@ class PettyCashRequisitionController extends Controller
 
         return $requisition->user_id === Auth::id()
             && in_array($requisition->status, ['pending', 'rejected'], true);
+    }
+
+    /**
+     * Submit receipts and returned cash to surrender an advance float.
+     */
+    public function submitSurrender(Request $request, int $id): JsonResponse
+    {
+        try {
+            $requisition = PettyCashRequisition::findOrFail($id);
+
+            if (!in_array($requisition->status, ['disbursed', 'received', 'surrender_pending'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only disbursed or received requisitions can be surrendered',
+                ], 422);
+            }
+
+            if (!Auth::user()?->can('create', Payment::class) && $requisition->user_id !== Auth::id()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You are not authorized to surrender this requisition',
+                ], 403);
+            }
+
+            $validated = $request->validate([
+                'items' => ['required', 'array', 'min:1'],
+                'items.*.expense_code_id' => ['required', 'integer', 'exists:expense_codes,id'],
+                'items.*.amount' => ['required', 'numeric', 'min:0.01'],
+                'items.*.tax_amount' => ['nullable', 'numeric', 'min:0'],
+                'items.*.receipt_type' => ['required', 'in:etr,non_etr,none'],
+                'items.*.receipt_number' => ['nullable', 'string', 'max:100'],
+                'items.*.supplier_kra_pin' => ['nullable', 'string', 'max:32'],
+                'items.*.supplier_name' => ['nullable', 'string', 'max:255'],
+                'items.*.description' => ['required', 'string', 'max:1000'],
+                'items.*.receipt_path' => ['nullable', 'string', 'max:500'],
+                'cash_returned_amount' => ['nullable', 'numeric', 'min:0'],
+                'surrender_notes' => ['nullable', 'string', 'max:1000'],
+            ]);
+
+            DB::transaction(function () use ($requisition, $validated) {
+                // Remove existing surrender items if re-submitting
+                $requisition->surrenderItems()->delete();
+
+                $totalSpent = '0.00';
+
+                foreach ($validated['items'] as $itemData) {
+                    $gross = number_format((float) $itemData['amount'], 2, '.', '');
+                    $tax = number_format((float) ($itemData['tax_amount'] ?? 0), 2, '.', '');
+                    $net = bcsub($gross, $tax, 2);
+
+                    $requisition->surrenderItems()->create([
+                        'expense_code_id' => $itemData['expense_code_id'],
+                        'amount' => $gross,
+                        'net_amount' => $net,
+                        'tax_amount' => $tax,
+                        'receipt_type' => $itemData['receipt_type'],
+                        'receipt_number' => $itemData['receipt_number'] ?? null,
+                        'supplier_kra_pin' => $itemData['supplier_kra_pin'] ?? null,
+                        'supplier_name' => $itemData['supplier_name'] ?? null,
+                        'description' => $itemData['description'],
+                        'receipt_path' => $itemData['receipt_path'] ?? null,
+                    ]);
+
+                    $totalSpent = bcadd($totalSpent, $gross, 2);
+                }
+
+                $cashReturned = number_format((float) ($validated['cash_returned_amount'] ?? 0), 2, '.', '');
+
+                $requisition->update([
+                    'status' => 'surrender_pending',
+                    'surrendered_at' => now(),
+                    'surrendered_by' => Auth::id(),
+                    'actual_spent_amount' => $totalSpent,
+                    'cash_returned_amount' => $cashReturned,
+                    'surrender_notes' => $validated['surrender_notes'] ?? null,
+                ]);
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Surrender submitted successfully. Awaiting Finance reconciliation.',
+                'data' => $requisition->fresh(['surrenderItems.expenseCode', 'surrenderedBy', 'disbursement.paymentSource', 'requester', 'department']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $ve) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error on surrender items',
+                'errors' => $ve->errors(),
+            ], 422);
+        } catch (Exception $e) {
+            \Log::error("Failed to submit surrender: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to submit surrender',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Reconcile surrendered receipts and cash return:
+     *  - Creates verified CostLines for actual spend (with eTIMS / VAT)
+     *  - Releases the original commitment
+     *  - Posts the clearing journal (Dr Expenses, Dr VAT, Dr Cash returned, Cr 1300 Advance)
+     *  - Marks requisition as surrendered
+     */
+    public function reconcileSurrender(Request $request, int $id): JsonResponse
+    {
+        try {
+            $requisition = PettyCashRequisition::with(['surrenderItems.expenseCode', 'disbursement.paymentSource'])->findOrFail($id);
+
+            if (!Auth::user()?->can('create', Payment::class)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You are not authorized to reconcile requisitions',
+                ], 403);
+            }
+
+            // If items were passed directly into reconcile endpoint, save them first
+            if ($request->has('items')) {
+                $validated = $request->validate([
+                    'items' => ['required', 'array', 'min:1'],
+                    'items.*.expense_code_id' => ['required', 'integer', 'exists:expense_codes,id'],
+                    'items.*.amount' => ['required', 'numeric', 'min:0.01'],
+                    'items.*.tax_amount' => ['nullable', 'numeric', 'min:0'],
+                    'items.*.receipt_type' => ['required', 'in:etr,non_etr,none'],
+                    'items.*.receipt_number' => ['nullable', 'string', 'max:100'],
+                    'items.*.supplier_kra_pin' => ['nullable', 'string', 'max:32'],
+                    'items.*.supplier_name' => ['nullable', 'string', 'max:255'],
+                    'items.*.description' => ['required', 'string', 'max:1000'],
+                    'items.*.receipt_path' => ['nullable', 'string', 'max:500'],
+                    'cash_returned_amount' => ['nullable', 'numeric', 'min:0'],
+                    'surrender_notes' => ['nullable', 'string', 'max:1000'],
+                ]);
+
+                DB::transaction(function () use ($requisition, $validated) {
+                    $requisition->surrenderItems()->delete();
+                    $totalSpent = '0.00';
+
+                    foreach ($validated['items'] as $itemData) {
+                        $gross = number_format((float) $itemData['amount'], 2, '.', '');
+                        $tax = number_format((float) ($itemData['tax_amount'] ?? 0), 2, '.', '');
+                        $net = bcsub($gross, $tax, 2);
+
+                        $requisition->surrenderItems()->create([
+                            'expense_code_id' => $itemData['expense_code_id'],
+                            'amount' => $gross,
+                            'net_amount' => $net,
+                            'tax_amount' => $tax,
+                            'receipt_type' => $itemData['receipt_type'],
+                            'receipt_number' => $itemData['receipt_number'] ?? null,
+                            'supplier_kra_pin' => $itemData['supplier_kra_pin'] ?? null,
+                            'supplier_name' => $itemData['supplier_name'] ?? null,
+                            'description' => $itemData['description'],
+                            'receipt_path' => $itemData['receipt_path'] ?? null,
+                        ]);
+
+                        $totalSpent = bcadd($totalSpent, $gross, 2);
+                    }
+
+                    $cashReturned = number_format((float) ($validated['cash_returned_amount'] ?? 0), 2, '.', '');
+                    $requisition->update([
+                        'surrendered_at' => now(),
+                        'surrendered_by' => Auth::id(),
+                        'actual_spent_amount' => $totalSpent,
+                        'cash_returned_amount' => $cashReturned,
+                        'surrender_notes' => $validated['surrender_notes'] ?? null,
+                    ]);
+                });
+
+                $requisition->refresh();
+                $requisition->load(['surrenderItems.expenseCode', 'disbursement.paymentSource']);
+            }
+
+            if ($requisition->surrenderItems->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot reconcile a requisition without any surrender receipt items',
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $enquiry = $requisition->enquiry ?? $requisition->project?->enquiry;
+            $collector = app(\App\Modules\Finance\CostCollector\Services\CostCollectorService::class);
+            $producer = app(\App\Modules\Finance\CostCollector\Services\PettyCashCostProducer::class);
+            $journalPosting = app(\App\Modules\Finance\Services\JournalPostingService::class);
+
+            // 1. Create verified CostLines for each surrender item
+            foreach ($requisition->surrenderItems as $item) {
+                if ($enquiry) {
+                    $costLine = $collector->postFromSource(
+                        new \App\Modules\Finance\CostCollector\Contracts\CostContext(
+                            expenseCode: (string) ($item->expenseCode?->code ?? ''),
+                            amount: (string) $item->amount,
+                            nature: \App\Modules\Finance\CostCollector\Models\CostLine::NATURE_ACTUAL,
+                            enquiryId: $enquiry->id,
+                            jobNumber: $enquiry->job_number,
+                            sourceType: \App\Modules\Finance\PettyCash\Models\PettyCashSurrenderItem::class,
+                            sourceId: $item->id,
+                            taxAmount: (string) $item->tax_amount,
+                            incurredAt: (string) ($requisition->disbursement?->date_disbursed ?? now()->toDateString()),
+                            payeeName: $item->supplier_name ?: ($requisition->payee_name ?: $requisition->requester_name),
+                            description: $item->description,
+                            details: array_filter([
+                                'receipt_type' => $item->receipt_type,
+                                'receipt_number' => $item->receipt_number,
+                                'supplier_kra_pin' => $item->supplier_kra_pin,
+                                'requisition_id' => $requisition->id,
+                                'requisition_number' => $requisition->requisition_number,
+                                'venue' => $requisition->venue,
+                            ]),
+                        ),
+                        ['site' => $requisition->venue]
+                    );
+
+                    $item->update(['cost_line_id' => $costLine->id]);
+                }
+            }
+
+            // 2. Release the commitment
+            $producer->releaseFor($requisition, "Reconciled upon surrender of receipts for {$requisition->requisition_number}");
+
+            // 3. Update petty cash ledger if cash was returned and payment was from petty cash
+            $cashReturned = (float) ($requisition->cash_returned_amount ?? 0);
+            if ($cashReturned > 0 && ($requisition->disbursement?->paymentSource?->type === 'petty_cash' || !$requisition->disbursement?->payment_source_id)) {
+                $ledger = new \App\Modules\Finance\PettyCash\Services\LedgerService();
+                $entry = \App\Modules\Finance\PettyCash\Services\LedgerEntry::custom(
+                    'SURR-' . $requisition->requisition_number,
+                    'credit',
+                    number_format($cashReturned, 2, '.', ''),
+                    [
+                        'reason' => 'Cash change returned on surrender',
+                        'requisition_id' => $requisition->id,
+                        'requisition_number' => $requisition->requisition_number,
+                        'payee_name' => $requisition->payee_name,
+                        'reconciled_by' => Auth::id(),
+                    ]
+                );
+                $entry->sourceType = 'top_up';
+                $entry->sourceId = $requisition->id;
+                $ledger->post($entry);
+            }
+
+            // 4. Update status and timestamps
+            $requisition->update([
+                'status' => 'surrendered',
+                'surrender_reconciled_at' => now(),
+                'surrender_reconciled_by' => Auth::id(),
+            ]);
+
+            // 5. Post General Ledger clearing journal
+            $surrenderJournal = $journalPosting->postPettyCashSurrender($requisition);
+            if ($surrenderJournal) {
+                $requisition->update(['surrender_journal_entry_id' => $surrenderJournal->id]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Requisition surrender successfully reconciled. Actual costs and clearing journals posted.',
+                'data' => $requisition->fresh(['surrenderItems.expenseCode', 'surrenderedBy', 'surrenderReconciledBy', 'surrenderJournalEntry.lines', 'disbursement.paymentSource', 'requester', 'department']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $ve) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $ve->errors(),
+            ], 422);
+        } catch (Exception $e) {
+            DB::rollBack();
+            \Log::error("Failed to reconcile surrender: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to reconcile surrender: ' . $e->getMessage(),
+                'error' => $e->getMessage(),
+            ], 500);
+        }
     }
 }

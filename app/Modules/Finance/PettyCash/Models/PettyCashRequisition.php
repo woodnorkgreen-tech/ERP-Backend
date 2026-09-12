@@ -54,12 +54,25 @@ class PettyCashRequisition extends Model
         'is_public',
         'requester_name',
         'requester_phone',
+        'surrendered_at',
+        'surrendered_by',
+        'actual_spent_amount',
+        'cash_returned_amount',
+        'surrender_notes',
+        'surrender_reconciled_at',
+        'surrender_reconciled_by',
+        'advance_journal_entry_id',
+        'surrender_journal_entry_id',
     ];
 
     protected $casts = [
         'total_amount' => 'decimal:2',
+        'actual_spent_amount' => 'decimal:2',
+        'cash_returned_amount' => 'decimal:2',
         'approved_at' => 'datetime',
         'received_at' => 'datetime',
+        'surrendered_at' => 'datetime',
+        'surrender_reconciled_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'custom_fields' => 'array',
@@ -142,6 +155,34 @@ class PettyCashRequisition extends Model
     public function bill(): BelongsTo
     {
         return $this->belongsTo(\App\Modules\ProcurementStores\Models\Bill::class, 'bill_id');
+    }
+
+    /**
+     * Get the surrender items (receipts & expense claims).
+     */
+    public function surrenderItems(): HasMany
+    {
+        return $this->hasMany(PettyCashSurrenderItem::class, 'requisition_id');
+    }
+
+    public function surrenderedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'surrendered_by');
+    }
+
+    public function surrenderReconciledBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'surrender_reconciled_by');
+    }
+
+    public function advanceJournalEntry(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Finance\Models\JournalEntry::class, 'advance_journal_entry_id');
+    }
+
+    public function surrenderJournalEntry(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Finance\Models\JournalEntry::class, 'surrender_journal_entry_id');
     }
 
     /**
