@@ -70,6 +70,8 @@ class CostCollectorService implements CollectsCost
                 'details' => $context->details ?: null,
                 'evidence' => $context->evidence ?: null,
                 'submitted_by_user_id' => auth()->id(),
+                'submitted_by_name' => auth()->user()?->name,
+                'submitted_by_phone' => auth()->user()?->phone,
                 'payee_id' => $context->payeeId,
                 'payee_name' => $context->payeeName,
                 // Left deliberately without a verifier: the approval was the

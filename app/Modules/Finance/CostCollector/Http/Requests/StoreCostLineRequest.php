@@ -39,6 +39,8 @@ class StoreCostLineRequest extends FormRequest
             'consumes_line_id' => 'nullable|integer|exists:cost_lines,id',
 
             'cost_cause' => 'nullable|string|max:32',
+            'funding_mode' => 'nullable|string|in:out_of_pocket,company_paid,unpaid_invoice',
+            'payment_source_id' => 'nullable|required_if:funding_mode,company_paid|integer|exists:payment_sources,id',
             'payee_type' => 'nullable|string|max:32',
             'payee_id' => 'nullable|integer',
             'payee_name' => 'nullable|string|max:191',
@@ -79,6 +81,17 @@ class StoreCostLineRequest extends FormRequest
 
     public function toContext(): CostContext
     {
+        $details = $this->input('details', []);
+        $fundingMode = $this->input('funding_mode', 'out_of_pocket');
+        $details['funding_mode'] = $fundingMode;
+
+        if ($fundingMode === 'company_paid' && $this->filled('payment_source_id')) {
+            $details['payment_source_id'] = $this->integer('payment_source_id');
+        } elseif ($fundingMode === 'out_of_pocket') {
+            $details['claimant_user_id'] = $this->user()?->id;
+            $details['claimant_name'] = $this->user()?->name;
+        }
+
         return new CostContext(
             expenseCode: $this->string('expense_code')->toString(),
             amount: (string) $this->input('amount'),
@@ -95,7 +108,7 @@ class StoreCostLineRequest extends FormRequest
             payeeId: $this->integer('payee_id') ?: null,
             payeeName: $this->input('payee_name'),
             consumesLineId: $this->integer('consumes_line_id') ?: null,
-            details: $this->input('details', []),
+            details: $details,
             evidence: $this->input('evidence', []),
             description: $this->input('description'),
             costCause: $this->input('cost_cause'),

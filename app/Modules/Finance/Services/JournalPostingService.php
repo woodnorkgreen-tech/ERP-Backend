@@ -239,12 +239,21 @@ class JournalPostingService
             ];
         }
 
+        $creditDesc = 'Payable/Clearing for ' . $line->ref;
+        $sourceId = $line->details['payment_source_id'] ?? null;
+        if ($sourceId && $source = PaymentSource::find($sourceId)) {
+            $creditDesc = "Direct settlement via {$source->name} for {$line->ref}";
+        } elseif (($line->details['funding_mode'] ?? null) === 'out_of_pocket') {
+            $claimant = $line->details['claimant_name'] ?? $line->submitted_by_name ?? 'Staff';
+            $creditDesc = "Reimbursement payable to {$claimant} for {$line->ref}";
+        }
+
         $legs[] = [
             'account_id' => $creditAccountId,
             'entry_type' => 'credit',
             'amount' => $settled,
             'base_amount' => $this->base($line, $settled),
-            'description' => 'Payable/Clearing for ' . $line->ref,
+            'description' => $creditDesc,
         ];
 
         return $legs;

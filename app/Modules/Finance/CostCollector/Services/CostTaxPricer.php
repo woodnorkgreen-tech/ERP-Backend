@@ -224,7 +224,7 @@ class CostTaxPricer
                 // will query if it does not match their own remittance advice.
                 'payable' => bcsub(bcadd($net, $taxAmount, 2), $wht, 2),
             ],
-            'legs' => $this->legs($net, $taxAmount, $wht, $treatmentId),
+            'legs' => $this->legs($net, $taxAmount, $wht, $treatmentId, $this->creditLegLabel($line)),
             'suggested' => [
                 'vat_treatment_id' => $treatmentId,
                 'wht_category_id' => $categoryId,
@@ -300,7 +300,7 @@ class CostTaxPricer
      *
      * @return array<int, array<string, string>>
      */
-    private function legs(string $net, string $tax, string $wht, ?int $treatmentId): array
+    private function legs(string $net, string $tax, string $wht, ?int $treatmentId, string $creditLabel = 'Cash / supplier payable'): array
     {
         $recoverable = $treatmentId
             && VatTreatment::whereKey($treatmentId)->value('is_recoverable');
@@ -323,11 +323,30 @@ class CostTaxPricer
 
         $legs[] = [
             'side' => 'credit',
-            'label' => 'Cash / supplier payable',
+            'label' => $creditLabel,
             'amount' => bcsub(bcadd($net, $tax, 2), $wht, 2),
         ];
 
         return $legs;
+    }
+
+    private function creditLegLabel(CostLine $line): string
+    {
+        $sourceId = $line->details['payment_source_id'] ?? null;
+        if ($sourceId && $source = \App\Modules\Finance\Models\PaymentSource::find($sourceId)) {
+            return "Direct settlement: {$source->name}";
+        }
+
+        if (($line->details['funding_mode'] ?? null) === 'out_of_pocket') {
+            $claimant = $line->details['claimant_name'] ?? $line->submitted_by_name ?? 'Staff';
+            return "Staff reimbursement payable ({$claimant})";
+        }
+
+        if (($line->details['funding_mode'] ?? null) === 'unpaid_invoice') {
+            return 'Accounts payable (Supplier credit)';
+        }
+
+        return 'Cash / supplier payable';
     }
 
     /** @return array<int, array<string, mixed>> */

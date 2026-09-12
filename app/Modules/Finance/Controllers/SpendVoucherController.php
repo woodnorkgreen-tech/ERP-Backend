@@ -111,11 +111,21 @@ class SpendVoucherController extends Controller
                 $allocated = $this->activeAllocatedAmount($line->id);
                 $remaining = bcsub($payable, $allocated, 2);
 
+                $fundingMode = $line->details['funding_mode'] ?? (
+                    ! empty($line->submitted_by_user_id) && empty($line->payee_supplier_name)
+                        ? 'out_of_pocket'
+                        : 'unpaid_invoice'
+                );
+                $claimantName = $line->details['claimant_name'] ?? $line->submitted_by_name ?? null;
+
                 return [
                     'id' => $line->id,
                     'ref' => $line->ref,
                     'description' => $line->description,
                     'payee_name' => $line->payee_name ?: $line->payee_supplier_name,
+                    'funding_mode' => $fundingMode,
+                    'claimant_name' => $claimantName,
+                    'claimant_user_id' => $line->details['claimant_user_id'] ?? $line->submitted_by_user_id,
                     'job_number' => $line->job_number,
                     'incurred_at' => $line->incurred_at?->toDateString(),
                     'expense_code' => $line->expenseCode?->code,
