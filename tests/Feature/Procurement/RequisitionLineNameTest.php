@@ -235,4 +235,26 @@ class RequisitionLineNameTest extends TestCase
             $requisition->fresh()->items->first()->custom_description
         );
     }
+
+    public function test_an_item_without_purpose_is_saved_with_derived_purpose(): void
+    {
+        $payload = [
+            'date' => now()->toDateString(),
+            'requested_by_type' => 'office',
+            'department_id' => $this->department->id,
+            'urgency' => 'normal',
+            'items' => [[
+                'custom_description' => 'Printer Paper A4',
+                'quantity' => 5,
+                'unit_price' => 500,
+                // purpose intentionally omitted
+            ]],
+        ];
+
+        $this->postJson(self::ENDPOINT, $payload)->assertSuccessful();
+
+        $requisition = Requisition::first();
+        $this->assertSame('Office / department requisition', $requisition->items->first()->purpose);
+    }
 }
+

@@ -150,7 +150,14 @@ class JournalEntryController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
 
-        $journal->load(['lines.account', 'accountingPeriod', 'reversedBy']);
+        $journal->load([
+            'lines.account',
+            'accountingPeriod',
+            'reversedBy',
+            'costLine.projectEnquiry',
+            'costLine.expenseCode',
+            'costLine.vatTreatment',
+        ]);
 
         return response()->json([
             'status' => 'success',

@@ -52,6 +52,7 @@ class JournalEntryResource extends JsonResource
                     // Finance reads material cost at project level. Batch and
                     // material stay on the child row for Stores traceability.
                     'group_key' => "project-costs:{$projectKey}",
+                    'enquiry_id' => $this->costLine->project_enquiry_id ?? $this->costLine->project_id,
                     'batch_number' => $details['batch_number'] ?? null,
                     'stores_reference' => $details['stores_reference'] ?? null,
                     'job_number' => $this->costLine->projectEnquiry?->job_number
@@ -65,6 +66,16 @@ class JournalEntryResource extends JsonResource
                     'is_material' => isset($details['inventory_log_id']),
                     'is_unbudgeted' => $this->costLine->consumes_line_id === null,
                     'unbudgeted_reason' => $details['unbudgeted_reason'] ?? null,
+                    'expense_code' => $this->costLine->expenseCode?->code,
+                    'expense_type' => $this->costLine->expenseCode?->expense_type ?? $this->costLine->expenseCode?->name,
+                    'paid_to' => $this->costLine->paid_to,
+                    'net_amount' => (string) ($this->costLine->net_amount ?? $this->costLine->amount),
+                    'tax_amount' => (string) ($this->costLine->tax_amount ?? '0.00'),
+                    'wht_amount' => (string) ($this->costLine->wht_amount ?? '0.00'),
+                    'tax_point_date' => $this->costLine->tax_point_date?->toDateString(),
+                    'etims_invoice_no' => $this->costLine->etims_invoice_no,
+                    'supplier_pin' => $this->costLine->supplier_pin,
+                    'supplier_invoice_no' => $this->costLine->supplier_invoice_no,
                 ];
             }),
 

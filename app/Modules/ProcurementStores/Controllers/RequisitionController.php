@@ -293,7 +293,7 @@ class RequisitionController extends Controller
             'items.*.quantity'           => 'required|numeric|gt:0',
             'items.*.unit_price'         => 'required|numeric|min:0',
             'items.*.internal_budget_unit_price' => 'nullable|numeric|min:0',
-            'items.*.purpose'            => 'required|string',
+            'items.*.purpose'            => 'nullable|string',
             'items.*.procurement_item_snapshot' => 'nullable|array',
         ]);
 
@@ -355,6 +355,16 @@ class RequisitionController extends Controller
                         ? $this->enquiryIdForProject($input['project_id'] ?? null)
                         : null
                 );
+
+                if (empty($item['purpose'])) {
+                    $item['purpose'] = match ($input['requested_by_type']) {
+                        'project' => trim(($item['procurement_item_snapshot']['elementName'] ?? '') . ' – ' . ($item['custom_description'] ?? 'Project material'), ' –') ?: 'Project use',
+                        'office' => 'Office / department requisition',
+                        'employee' => 'Employee requisition',
+                        default => 'Material requisition',
+                    };
+                }
+
                 $requisition->items()->create($item);
             }
 
@@ -484,11 +494,13 @@ class RequisitionController extends Controller
                     // it's still meaningful, instead of failing to save.
                     if (empty($item['purpose'])) {
                         $snapshot = $item['procurement_item_snapshot'] ?? [];
-                        $item['purpose'] = trim(
-                            ($snapshot['elementName'] ?? '') . ' – ' .
-                            ($snapshot['description'] ?? $item['custom_description'] ?? 'Project material'),
-                            ' –'
-                        ) ?: 'Project material requisition';
+                        $type = $input['requested_by_type'] ?? $requisition->requested_by_type;
+                        $item['purpose'] = match ($type) {
+                            'project' => trim(($snapshot['elementName'] ?? '') . ' – ' . ($snapshot['description'] ?? $item['custom_description'] ?? 'Project material'), ' –') ?: 'Project use',
+                            'office' => 'Office / department requisition',
+                            'employee' => 'Employee requisition',
+                            default => 'Material requisition',
+                        };
                     }
                     $requisition->items()->create($item);
                 }
