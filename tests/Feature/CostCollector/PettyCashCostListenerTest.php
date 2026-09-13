@@ -342,6 +342,35 @@ class PettyCashCostListenerTest extends TestCase
         ]);
     }
 
+    public function test_an_overhead_payment_without_a_project_reaches_the_gl_and_reverses_on_void(): void
+    {
+        $disbursement = $this->disbursement([
+            'expense_code_id' => $this->overheadExpenseCodeId,
+            'payment_source_id' => $this->paymentSourceId,
+            'job_number' => null,
+        ]);
+
+        $event = new PettyCashDisbursementPaid($disbursement->id);
+        app(RecordPettyCashCost::class)->handle($event);
+
+        $entry = \App\Modules\Finance\Models\JournalEntry::where(
+            'entry_no', 'JE-PAY-' . str_pad((string) $disbursement->id, 7, '0', STR_PAD_LEFT),
+        )->firstOrFail();
+
+        $this->assertSame('posted', $entry->status);
+        $this->assertSame('4500.00', $entry->total_debit);
+        $this->assertSame('4500.00', $entry->total_credit);
+
+        app(ReversePettyCashCost::class)->handle(
+            new PettyCashDisbursementVoided($disbursement->id, $this->user->id, 'Incorrect overhead payment'),
+        );
+
+        $this->assertDatabaseHas('journal_entries', [
+            'reversal_of_id' => $entry->id,
+            'status' => 'posted',
+        ]);
+    }
+
     /** A payment that never became a cost has nothing to back out. */
     public function test_voiding_an_uncosted_disbursement_is_a_no_op(): void
     {

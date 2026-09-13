@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder;
+use App\Modules\Finance\Models\PeriodAuditLog;
 use App\Modules\Finance\Services\JournalPostingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -101,12 +102,23 @@ class AccountingPeriodControlTest extends TestCase
 
         $period = $this->period();
 
-        $response = $this->actingAs($this->manager(), 'sanctum')
+        $manager = $this->manager();
+
+        $response = $this->actingAs($manager, 'sanctum')
             ->postJson("/api/finance/accounting-periods/{$period->id}/close", ['force' => true])
             ->assertOk();
 
         $this->assertStringContainsString('outstanding', $response->json('message'));
         $this->assertSame(AccountingPeriod::STATUS_CLOSED, $period->fresh()->status);
+
+        $this->assertDatabaseHas('finance_period_audit_logs', [
+            'accounting_period_id' => $period->id,
+            'user_id' => $manager->id,
+            'action' => 'closed',
+            'from_status' => AccountingPeriod::STATUS_OPEN,
+            'to_status' => AccountingPeriod::STATUS_CLOSED,
+            'forced' => true,
+        ]);
     }
 
     public function test_closing_a_month_stops_anything_more_being_posted_into_it(): void
@@ -161,6 +173,14 @@ class AccountingPeriodControlTest extends TestCase
         $this->assertSame(AccountingPeriod::STATUS_OPEN, $reopened->status);
         $this->assertSame('Supplier invoice arrived after the close meeting', $reopened->reopen_reason);
         $this->assertSame($manager->id, $reopened->reopened_by);
+
+        $this->assertSame(
+            'Supplier invoice arrived after the close meeting',
+            PeriodAuditLog::where('accounting_period_id', $period->id)
+                ->where('action', 'reopened')
+                ->latest('id')
+                ->value('reason'),
+        );
     }
 
     public function test_locking_freezes_a_month_without_declaring_it_final(): void

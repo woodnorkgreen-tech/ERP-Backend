@@ -113,6 +113,7 @@ class PettyCashCostProducer
         }
 
         if (blank($disbursement->job_number)) {
+            $this->journalPosting->postDirectPayment($disbursement);
             return 'skipped_no_job';
         }
 
@@ -122,6 +123,7 @@ class PettyCashCostProducer
         // rather than a client job — it has no cost object to attach to, and
         // inventing one would put overhead into a project's margin.
         if (! $enquiry) {
+            $this->journalPosting->postDirectPayment($disbursement);
             return 'skipped_unmatched';
         }
 

@@ -1095,6 +1095,67 @@ class JournalPostingService
     }
 
     /**
+     * Post a payment that has no project cost line behind it.
+     *
+     * Project payments are posted by the cost collector so their journal keeps
+     * the project dimensions. Overhead and unmatched payments have no cost
+     * line, but they still moved money and must not disappear from the GL.
+     */
+    public function postDirectPayment(Payment $payment): ?JournalEntry
+    {
+        if ($payment->status !== 'active') {
+            return null;
+        }
+
+        $entryNo = 'JE-PAY-' . str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT);
+        if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
+            return $existing;
+        }
+
+        $expenseAccount = $payment->expenseCode?->default_debit_account_id;
+        $sourceAccount = $payment->payment_source_id
+            ? PaymentSource::whereKey($payment->payment_source_id)->value('gl_account_id')
+            : null;
+
+        if (! $expenseAccount || ! $sourceAccount) {
+            throw new InvalidArgumentException(
+                "Payment {$payment->payment_no} cannot post: its expense code and paying source must map to postable GL accounts."
+            );
+        }
+
+        $amount = $this->money($payment->amount);
+        if (bccomp($amount, '0.00', 2) <= 0) {
+            return null;
+        }
+
+        return $this->postBalancedEntry(
+            entryNo: $entryNo,
+            postingDate: (string) ($payment->date_disbursed?->toDateString() ?? now()->toDateString()),
+            sourceType: Payment::class,
+            sourceId: $payment->id,
+            sourceRef: $payment->payment_no ?: (string) $payment->id,
+            description: 'Direct payment ' . ($payment->payment_no ?: $payment->id),
+            legs: [
+                [
+                    'account_id' => (int) $expenseAccount,
+                    'entry_type' => 'debit',
+                    'amount' => $amount,
+                    'description' => $payment->description ?: 'Direct payment expense',
+                    'project_id' => $payment->project_id,
+                    'project_enquiry_id' => $payment->project_enquiry_id,
+                ],
+                [
+                    'account_id' => (int) $sourceAccount,
+                    'entry_type' => 'credit',
+                    'amount' => $amount,
+                    'description' => 'Payment from ' . ($payment->paymentSource?->name ?? 'paying account'),
+                ],
+            ],
+            createdBy: $payment->created_by,
+        );
+    }
+
+    /**
      * Write one balanced entry with any number of legs.
      *
      * The single funnel. Producers decide WHICH accounts an event hits and for

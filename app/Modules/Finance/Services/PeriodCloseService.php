@@ -4,6 +4,7 @@ namespace App\Modules\Finance\Services;
 
 use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\Models\PeriodAuditLog;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -100,27 +101,33 @@ class PeriodCloseService
      */
     public function close(AccountingPeriod $period, ?int $actorId, bool $force = false): array
     {
-        if (! $period->isOpen()) {
-            throw new InvalidArgumentException(
-                "The {$period->starts_on->format('F Y')} period is already {$period->status}."
-            );
-        }
+        return DB::transaction(function () use ($period, $actorId, $force): array {
+            $period = AccountingPeriod::query()->lockForUpdate()->findOrFail($period->id);
 
-        $checklist = $this->checklist($period);
+            if (! $period->isOpen()) {
+                throw new InvalidArgumentException(
+                    "The {$period->starts_on->format('F Y')} period is already {$period->status}."
+                );
+            }
 
-        if ($checklist['blockers'] && ! $force) {
-            throw new InvalidArgumentException(
-                'This month cannot be closed yet: ' . $this->describe($checklist) . '.'
-            );
-        }
+            $checklist = $this->checklist($period);
 
-        $period->forceFill([
-            'status' => AccountingPeriod::STATUS_CLOSED,
-            'locked_at' => now(),
-            'locked_by' => $actorId,
-        ])->save();
+            if ($checklist['blockers'] && ! $force) {
+                throw new InvalidArgumentException(
+                    'This month cannot be closed yet: ' . $this->describe($checklist) . '.'
+                );
+            }
 
-        return $checklist + ['forced' => (bool) $checklist['blockers']];
+            $period->forceFill([
+                'status' => AccountingPeriod::STATUS_CLOSED,
+                'locked_at' => now(),
+                'locked_by' => $actorId,
+            ])->save();
+
+            $this->audit($period, 'closed', AccountingPeriod::STATUS_OPEN, AccountingPeriod::STATUS_CLOSED, $actorId, null, $force, $checklist);
+
+            return $checklist + ['forced' => (bool) $checklist['blockers']];
+        });
     }
 
     /**
@@ -133,19 +140,25 @@ class PeriodCloseService
      */
     public function lock(AccountingPeriod $period, ?int $actorId): AccountingPeriod
     {
-        if (! $period->isOpen()) {
-            throw new InvalidArgumentException(
-                "The {$period->starts_on->format('F Y')} period is already {$period->status}."
-            );
-        }
+        return DB::transaction(function () use ($period, $actorId): AccountingPeriod {
+            $period = AccountingPeriod::query()->lockForUpdate()->findOrFail($period->id);
 
-        $period->forceFill([
-            'status' => AccountingPeriod::STATUS_LOCKED,
-            'locked_at' => now(),
-            'locked_by' => $actorId,
-        ])->save();
+            if (! $period->isOpen()) {
+                throw new InvalidArgumentException(
+                    "The {$period->starts_on->format('F Y')} period is already {$period->status}."
+                );
+            }
 
-        return $period;
+            $period->forceFill([
+                'status' => AccountingPeriod::STATUS_LOCKED,
+                'locked_at' => now(),
+                'locked_by' => $actorId,
+            ])->save();
+
+            $this->audit($period, 'locked', AccountingPeriod::STATUS_OPEN, AccountingPeriod::STATUS_LOCKED, $actorId);
+
+            return $period;
+        });
     }
 
     /**
@@ -159,20 +172,51 @@ class PeriodCloseService
      */
     public function reopen(AccountingPeriod $period, ?int $actorId, string $reason): AccountingPeriod
     {
-        if ($period->isOpen()) {
-            throw new InvalidArgumentException(
-                "The {$period->starts_on->format('F Y')} period is already open."
-            );
-        }
+        return DB::transaction(function () use ($period, $actorId, $reason): AccountingPeriod {
+            $period = AccountingPeriod::query()->lockForUpdate()->findOrFail($period->id);
 
-        $period->forceFill([
-            'status' => AccountingPeriod::STATUS_OPEN,
-            'reopened_at' => now(),
-            'reopened_by' => $actorId,
-            'reopen_reason' => $reason,
-        ])->save();
+            if ($period->isOpen()) {
+                throw new InvalidArgumentException(
+                    "The {$period->starts_on->format('F Y')} period is already open."
+                );
+            }
 
-        return $period;
+            $fromStatus = $period->status;
+            $period->forceFill([
+                'status' => AccountingPeriod::STATUS_OPEN,
+                'reopened_at' => now(),
+                'reopened_by' => $actorId,
+                'reopen_reason' => $reason,
+            ])->save();
+
+            $this->audit($period, 'reopened', $fromStatus, AccountingPeriod::STATUS_OPEN, $actorId, $reason);
+
+            return $period;
+        });
+    }
+
+    private function audit(
+        AccountingPeriod $period,
+        string $action,
+        string $fromStatus,
+        string $toStatus,
+        ?int $actorId,
+        ?string $reason = null,
+        bool $forced = false,
+        ?array $checklist = null,
+    ): void {
+        PeriodAuditLog::create([
+            'accounting_period_id' => $period->id,
+            'user_id' => $actorId,
+            'action' => $action,
+            'from_status' => $fromStatus,
+            'to_status' => $toStatus,
+            'reason' => $reason,
+            'forced' => $forced,
+            'checklist' => $checklist,
+            'ip_address' => app()->runningInConsole() ? null : request()->ip(),
+            'user_agent' => app()->runningInConsole() ? null : request()->userAgent(),
+        ]);
     }
 
     /** A one-line summary of why a close was refused. */

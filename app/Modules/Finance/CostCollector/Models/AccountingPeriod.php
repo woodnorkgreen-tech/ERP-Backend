@@ -4,6 +4,9 @@ namespace App\Modules\Finance\CostCollector\Models;
 
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use App\Modules\Finance\Models\PeriodAuditLog;
 
 class AccountingPeriod extends Model
 {
@@ -33,5 +36,15 @@ class AccountingPeriod extends Model
     public function isOpen(): bool
     {
         return $this->status === self::STATUS_OPEN;
+    }
+
+    public function auditLogs(): HasMany
+    {
+        return $this->hasMany(PeriodAuditLog::class);
+    }
+
+    public function latestAuditLog(): HasOne
+    {
+        return $this->hasOne(PeriodAuditLog::class)->latestOfMany();
     }
 }

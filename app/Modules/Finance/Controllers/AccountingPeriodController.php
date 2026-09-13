@@ -48,6 +48,7 @@ class AccountingPeriodController extends Controller
         ]);
 
         $query = AccountingPeriod::query()
+            ->with('latestAuditLog')
             ->orderByDesc('year')
             ->orderByDesc('month');
 
@@ -74,6 +75,14 @@ class AccountingPeriodController extends Controller
                 'locked_at' => $period->locked_at?->toIso8601String(),
                 'reopened_at' => $period->reopened_at?->toIso8601String(),
                 'reopen_reason' => $period->reopen_reason,
+                'last_audit' => $period->latestAuditLog ? [
+                    'action' => $period->latestAuditLog->action,
+                    'from_status' => $period->latestAuditLog->from_status,
+                    'to_status' => $period->latestAuditLog->to_status,
+                    'reason' => $period->latestAuditLog->reason,
+                    'forced' => $period->latestAuditLog->forced,
+                    'created_at' => $period->latestAuditLog->created_at?->toIso8601String(),
+                ] : null,
                 'is_current' => $current && $current->id === $period->id,
             ]),
         ]);

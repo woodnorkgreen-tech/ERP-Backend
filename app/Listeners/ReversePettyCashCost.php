@@ -47,6 +47,7 @@ class ReversePettyCashCost implements ShouldQueue
         // was posted under OE-FIN-001 the cost-line reversal took it with the
         // rest; now nothing else would.
         $this->reverseFee($event);
+        $this->reverseDirectPayment($event);
 
         $lines = CostLine::where('source_type', Payment::class)
             ->where('source_id', $event->disbursementId)
@@ -126,6 +127,32 @@ class ReversePettyCashCost implements ShouldQueue
             );
         } catch (Throwable $failure) {
             Log::error('Voided payment fee could not be reversed', [
+                'disbursement_id' => $event->disbursementId,
+                'entry_no' => $entry->entry_no,
+                'error' => $failure->getMessage(),
+            ]);
+        }
+    }
+
+    private function reverseDirectPayment(PettyCashDisbursementVoided $event): void
+    {
+        $entry = JournalEntry::where(
+            'entry_no',
+            'JE-PAY-' . str_pad((string) $event->disbursementId, 7, '0', STR_PAD_LEFT),
+        )->first();
+
+        if (! $entry) {
+            return;
+        }
+
+        try {
+            $this->journalPosting->reverseEntry(
+                $entry,
+                $event->voidedByUserId,
+                'Payment voided: ' . $event->reason,
+            );
+        } catch (Throwable $failure) {
+            Log::error('Direct payment journal could not be reversed', [
                 'disbursement_id' => $event->disbursementId,
                 'entry_no' => $entry->entry_no,
                 'error' => $failure->getMessage(),

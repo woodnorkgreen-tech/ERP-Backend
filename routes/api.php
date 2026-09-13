@@ -961,6 +961,22 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('payment-sources/{paymentSource}', [\App\Modules\Finance\Controllers\PaymentSourceController::class, 'update'])
             ->middleware('permission:' . Permissions::FINANCE_PAYMENT_SOURCES_MANAGE);
 
+        // Statement-based bank, mobile-money, card, and petty-cash reconciliation.
+        Route::prefix('reconciliation')->group(function () {
+            Route::get('offset-accounts', [\App\Modules\Finance\Controllers\CashMovementController::class, 'accounts']);
+            Route::get('movements', [\App\Modules\Finance\Controllers\CashMovementController::class, 'index']);
+            Route::post('movements', [\App\Modules\Finance\Controllers\CashMovementController::class, 'store']);
+            Route::post('movements/{movement}/void', [\App\Modules\Finance\Controllers\CashMovementController::class, 'void']);
+            Route::get('accounts', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'accounts']);
+            Route::post('statements/import', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'import']);
+            Route::get('statements/{statement}', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'show']);
+            Route::post('statements/{statement}/transactions/{transaction}/match', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'match']);
+            Route::post('statements/{statement}/transactions/{transaction}/ignore', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'ignore']);
+                        Route::get('statements/{statement}/transactions/{transaction}/suggestions', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'suggestions']);
+            Route::post('statements/{statement}/reconcile', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'reconcile']);
+            Route::post('statements/{statement}/reopen', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'reopen']);
+        });
+
         // Spend Vouchers Routes
         Route::prefix('spend-vouchers')->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
