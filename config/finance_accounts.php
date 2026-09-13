@@ -85,15 +85,15 @@ return [
 
         // ---- WIP accounts (1211-1219) map to COS accounts (5100-5900)
         // WNG has no WIP; costs go straight to COS on purchase
-        '1211' => '5100',   // WIP direct materials      -> Cost of Sales: Direct Materials
-        '1212' => '5200',   // WIP direct labour         -> Cost of Sales: Direct Labour
-        '1213' => '5300',   // WIP subcontractors        -> Cost of Sales: Subcontractors
-        '1214' => '5400',   // WIP transport & logistics -> Cost of Sales: Transport & Logistics
-        '1215' => '5500',   // WIP equipment & site      -> Cost of Sales: Equipment & Site
-        '1216' => '5600',   // WIP project utilities     -> Cost of Sales: Project Utilities
-        '1217' => '5700',   // WIP project facilitation  -> Cost of Sales: Project Facilitation
-        '1218' => '5800',   // WIP venue & statutory     -> Cost of Sales: Venue & Statutory
-        '1219' => '5900',   // WIP rework & warranty     -> Cost of Sales: Rework & Warranty
+        // '1211' => '5100',   // WIP direct materials      -> Cost of Sales: Direct Materials
+        // '1212' => '5200',   // WIP direct labour         -> Cost of Sales: Direct Labour
+        // '1213' => '5300',   // WIP subcontractors        -> Cost of Sales: Subcontractors
+        // '1214' => '5400',   // WIP transport & logistics -> Cost of Sales: Transport & Logistics
+        // '1215' => '5500',   // WIP equipment & site      -> Cost of Sales: Equipment & Site
+        // '1216' => '5600',   // WIP project utilities     -> Cost of Sales: Project Utilities
+        // '1217' => '5700',   // WIP project facilitation  -> Cost of Sales: Project Facilitation
+        // '1218' => '5800',   // WIP venue & statutory     -> Cost of Sales: Venue & Statutory
+        // '1219' => '5900',   // WIP rework & warranty     -> Cost of Sales: Rework & Warranty
 
         // ---- Production overhead (6xxx) - same codes exist in WNG chart
         '6100' => '6100',   // Workshop electricity

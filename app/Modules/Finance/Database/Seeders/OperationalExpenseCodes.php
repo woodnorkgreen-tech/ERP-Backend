@@ -44,6 +44,21 @@ use App\Modules\Finance\CostCollector\Models\ExpenseCode;
  */
 class OperationalExpenseCodes
 {
+    /**
+     * Valid cost classifications whose normal entry door is not an LPO.
+     *
+     * These remain active for direct Finance capture, cash requisitions and
+     * payroll. Procurement only offers costs that genuinely continue through
+     * supplier order, delivery/service acceptance and invoice matching.
+     */
+    private const NON_PROCUREMENT_CODES = [
+        'DL-CAS-001', 'DL-CAS-002', // Casual workers: cash requisition/payroll.
+        'RW-LAB-001',               // Internal/casual rework labour; outsourced work uses SC-*.
+        'VS-PRM-001',               // Statutory payment, not a supplier delivery.
+        'OE-TRP-001', 'OE-COM-001', 'OE-WEL-001', // Routine direct/admin spend.
+        'OE-UTL-001', 'OE-UTL-002', // Utility/rent bills are verified in Finance.
+    ];
+
     /** Shared by every project-cost row; only the family details differ. */
     private const PROJECT_DEFAULTS = [
         'accounting_class' => 'Direct project cost',
@@ -311,7 +326,9 @@ class OperationalExpenseCodes
                 yield array_merge(self::PROJECT_DEFAULTS, [
                     'code' => $code,
                     // Paid to staff through fund requisitions or payroll.
-                    'is_procurable' => ! in_array($code, ['DL-ALW-001', 'PF-PDM-001'], true),
+                    'is_procurable' => ! in_array($code, [
+                        'DL-ALW-001', 'PF-PDM-001', ...self::NON_PROCUREMENT_CODES,
+                    ], true),
                     'expense_family' => $family['family'],
                     'expense_type' => $type,
                     'simple_meaning' => $meaning,
@@ -336,6 +353,7 @@ class OperationalExpenseCodes
         foreach (self::OVERHEADS as [$code, $type, $meaning, $example, $gl, $familyName, $centre, $plLine, $vat]) {
             yield [
                 'code' => $code,
+                'is_procurable' => ! in_array($code, self::NON_PROCUREMENT_CODES, true),
                 // Read off the account rather than carried in the tuple: the 6xxx
                 // and 7xxx ranges already draw this line, and a tenth column would
                 // let a row disagree with the account it posts to.

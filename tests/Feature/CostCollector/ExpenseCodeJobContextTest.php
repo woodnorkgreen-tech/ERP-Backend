@@ -135,6 +135,26 @@ class ExpenseCodeJobContextTest extends TestCase
         }
     }
 
+    public function test_finance_cash_payroll_and_accounting_treatments_stay_out_of_procurement(): void
+    {
+        $financeOnly = [
+            'DL-CAS-001', 'DL-CAS-002', 'RW-LAB-001', 'VS-PRM-001',
+            'OE-TRP-001', 'OE-COM-001', 'OE-WEL-001',
+            'OE-UTL-001', 'OE-UTL-002', 'NE-011', 'NE-012',
+        ];
+
+        $purchaseCodes = collect($this->getJson('/api/costs/expense-codes?limit=100&procurable=true')
+            ->assertOk()->json('data'))->pluck('code');
+
+        foreach ($financeOnly as $code) {
+            $this->assertNotContains($code, $purchaseCodes, "{$code} must not enter through an LPO.");
+            $this->assertTrue(
+                (bool) ExpenseCode::where('code', $code)->value('is_active'),
+                "{$code} must remain available to Finance.",
+            );
+        }
+    }
+
     public function test_not_asking_for_the_procurable_slice_leaves_the_catalogue_whole(): void
     {
         $codes = collect($this->getJson('/api/costs/expense-codes?limit=100')->assertOk()->json('data'))
@@ -192,8 +212,6 @@ class ExpenseCodeJobContextTest extends TestCase
             'OE-PPE-001',   // Protective equipment and workshop safety
             'OE-CLN-001',   // Cleaning supplies and services
             'OE-WST-001',   // Waste collection and disposal
-            'OE-UTL-001',   // Workshop electricity
-            'OE-UTL-002',   // Office rent and electricity
         ] as $code) {
             $this->assertContains($code, $offered, "{$code} is bought without a job number.");
         }
@@ -212,7 +230,7 @@ class ExpenseCodeJobContextTest extends TestCase
             '/api/costs/expense-codes?limit=100&procurable=true&job_context=true',
         )->assertOk()->json('data'))->pluck('code');
 
-        foreach (['OE-OFF-001', 'OE-WSC-001', 'OE-PPE-001', 'OE-CLN-001', 'OE-UTL-001'] as $code) {
+        foreach (['OE-OFF-001', 'OE-WSC-001', 'OE-PPE-001', 'OE-CLN-001'] as $code) {
             $this->assertNotContains($code, $withJob);
             $this->assertSame(
                 ExpenseCode::JOB_NOT_ALLOWED,
@@ -240,7 +258,7 @@ class ExpenseCodeJobContextTest extends TestCase
     }
 
     /**
-     * The picker's first screen is a list of family names, and four of them were
+     * The picker's first screen is a list of family names, and several were
      * the account's name rather than the purchase's. A requester restocking a
      * shelf does not look under "Inventory purchase".
      */
@@ -260,8 +278,6 @@ class ExpenseCodeJobContextTest extends TestCase
             'Workshop and maintenance',
             'Safety and protective equipment',
             'Cleaning and waste',
-            'Premises and utilities',
-            'Staff and administration',
         ] as $plainName) {
             $this->assertContains($plainName, $families);
         }

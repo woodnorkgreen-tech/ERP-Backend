@@ -144,6 +144,7 @@ class CostCollectorApiTest extends TestCase
             'amount' => 25000,
             'job_number' => 'WNG-TEST-001',
             'description' => 'MDF for reception counter',
+            'funding_mode' => 'out_of_pocket',
         ])
             ->assertCreated()
             ->assertJsonPath('data.status', CostLine::STATUS_SUBMITTED)
@@ -191,6 +192,7 @@ class CostCollectorApiTest extends TestCase
         $this->actingAs($stranger, 'sanctum')
             ->postJson('/api/costs', [
                 'expense_code' => self::CODE, 'amount' => 5000, 'job_number' => 'WNG-TEST-001',
+                'funding_mode' => 'out_of_pocket',
             ])
             ->assertForbidden();
 
@@ -204,6 +206,7 @@ class CostCollectorApiTest extends TestCase
         $this->postJson('/api/costs', [
             'expense_code' => self::CODE,
             'amount' => 25000,
+            'funding_mode' => 'out_of_pocket',
         ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['jobNumber']);
@@ -222,6 +225,7 @@ class CostCollectorApiTest extends TestCase
             'source_type' => 'GoodsReceiptNote',
             'source_id' => 1,
             'nature' => CostLine::NATURE_PLANNED,
+            'funding_mode' => 'out_of_pocket',
         ])->assertCreated();
 
         $line = CostLine::firstOrFail();
@@ -240,11 +244,13 @@ class CostCollectorApiTest extends TestCase
             'expense_code' => self::CODE, 'amount' => 100,
             'job_number' => 'WNG-TEST-001',
             'incurred_at' => now()->addWeek()->toIso8601String(),
+            'funding_mode' => 'out_of_pocket',
         ])->assertStatus(422)->assertJsonValidationErrors(['incurred_at']);
 
         $this->postJson('/api/costs', [
             'expense_code' => self::CODE, 'amount' => 100, 'tax_amount' => 500,
             'job_number' => 'WNG-TEST-001',
+            'funding_mode' => 'out_of_pocket',
         ])->assertStatus(422)->assertJsonValidationErrors(['tax_amount']);
     }
 
@@ -309,6 +315,7 @@ class CostCollectorApiTest extends TestCase
 
         $this->postJson('/api/costs', [
             'expense_code' => self::CODE, 'amount' => 100, 'job_number' => 'WNG-TEST-001',
+            'funding_mode' => 'out_of_pocket',
         ])->assertCreated();
 
         CostLine::create([

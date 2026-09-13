@@ -126,6 +126,7 @@ class SpendVoucherController extends Controller
                     'funding_mode' => $fundingMode,
                     'claimant_name' => $claimantName,
                     'claimant_user_id' => $line->details['claimant_user_id'] ?? $line->submitted_by_user_id,
+                    'claimant_phone' => $line->submitted_by_phone,
                     'job_number' => $line->job_number,
                     'incurred_at' => $line->incurred_at?->toDateString(),
                     'expense_code' => $line->expenseCode?->code,

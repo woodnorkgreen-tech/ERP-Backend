@@ -279,6 +279,7 @@ class RequisitionController extends Controller
             'items.*.budget_item_persistent_id' => 'nullable|string',
             'items.*.material_id'        => 'nullable|exists:library_materials,id',
             'items.*.expense_code_id'    => 'nullable|integer|exists:expense_codes,id',
+            'items.*.supplier_id'        => 'nullable|integer|exists:suppliers,id',
             /*
              * Either the line points at a catalogue material or it says what it
              * is — checked against the derived name above, so a project line

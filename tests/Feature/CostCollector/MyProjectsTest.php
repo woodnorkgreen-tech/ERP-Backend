@@ -148,6 +148,82 @@ class MyProjectsTest extends TestCase
             ->assertJsonCount(1, 'data');
     }
 
+    public function test_cost_sheet_returns_every_approved_project_in_the_selected_stage(): void
+    {
+        for ($index = 1; $index <= 14; $index++) {
+            $id = $this->enquiry(
+                sprintf('WNG-09-2026-%03d', $index),
+                "Confirmed project {$index}",
+                EnquiryConstants::STATUS_AWAITING_DEPOSIT,
+            );
+            DB::table('project_enquiries')->where('id', $id)->update(['quote_approved' => true]);
+        }
+
+        $response = $this->actingAs($this->portfolioUser(), 'sanctum')
+            ->getJson('/api/costs/my-projects?context=cost_sheet&stage=confirmed')
+            ->assertOk();
+
+        $response->assertJsonCount(14, 'data');
+        $response->assertJsonPath('meta.scope', 'portfolio');
+        $response->assertJsonPath('meta.stage', 'confirmed');
+        $response->assertJsonPath('meta.total', 14);
+    }
+
+    public function test_cost_sheet_stage_tabs_include_completed_and_closed_but_never_cancelled(): void
+    {
+        foreach ([
+            EnquiryConstants::STATUS_IN_PROGRESS,
+            EnquiryConstants::STATUS_COMPLETED,
+            EnquiryConstants::STATUS_CLOSED,
+            EnquiryConstants::STATUS_CANCELLED,
+        ] as $index => $status) {
+            $id = $this->enquiry("WNG-09-2026-10{$index}", ucfirst($status), $status);
+            DB::table('project_enquiries')->where('id', $id)->update(['quote_approved' => true]);
+        }
+
+        $user = $this->portfolioUser();
+        foreach (['in_progress', 'completed', 'closed'] as $stage) {
+            $this->actingAs($user, 'sanctum')
+                ->getJson("/api/costs/my-projects?context=cost_sheet&stage={$stage}")
+                ->assertOk()
+                ->assertJsonCount(1, 'data');
+        }
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/costs/my-projects?context=cost_sheet&stage=closed&q=Cancelled')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+    }
+
+    public function test_cost_sheet_treats_planning_as_an_active_in_progress_project(): void
+    {
+        $planning = $this->enquiry(
+            'WNG-09-2026-120',
+            'Planning is active',
+            EnquiryConstants::STATUS_PLANNING,
+        );
+        DB::table('project_enquiries')->where('id', $planning)->update(['quote_approved' => true]);
+
+        $user = $this->portfolioUser();
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/costs/my-projects?context=cost_sheet&stage=in_progress')
+            ->assertOk()
+            ->assertJsonPath('data.0.job_number', 'WNG-09-2026-120');
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/costs/my-projects?context=cost_sheet&stage=confirmed')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+    }
+
+    public function test_cost_sheet_portfolio_requires_finance_read_access(): void
+    {
+        $this->actingAs($this->technician, 'sanctum')
+            ->getJson('/api/costs/my-projects?context=cost_sheet&stage=confirmed')
+            ->assertForbidden();
+    }
+
     /** Someone who may read the cost portfolio, so search spans every open job. */
     private function portfolioUser(): User
     {

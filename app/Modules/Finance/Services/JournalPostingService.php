@@ -245,7 +245,8 @@ class JournalPostingService
             $creditDesc = "Direct settlement via {$source->name} for {$line->ref}";
         } elseif (($line->details['funding_mode'] ?? null) === 'out_of_pocket') {
             $claimant = $line->details['claimant_name'] ?? $line->submitted_by_name ?? 'Staff';
-            $creditDesc = "Reimbursement payable to {$claimant} for {$line->ref}";
+            $merchant = $line->payee_name ?: 'merchant not recorded';
+            $creditDesc = "Staff reimbursement payable to {$claimant} (Receipt from {$merchant}) for {$line->ref}";
         }
 
         $legs[] = [

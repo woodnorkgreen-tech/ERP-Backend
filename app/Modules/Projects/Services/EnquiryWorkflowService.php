@@ -226,6 +226,35 @@ class EnquiryWorkflowService
 
             $task->save();
 
+            // The first controlled task start is the authoritative boundary
+            // between delivery preparation and execution. Previously nothing
+            // advanced the parent project beyond `planning`, leaving active
+            // work permanently misclassified across Finance and Projects.
+            if ($status === 'in_progress') {
+                $enquiry = ProjectEnquiry::query()
+                    ->lockForUpdate()
+                    ->findOrFail($task->project_enquiry_id);
+
+                if ($enquiry->status === EnquiryConstants::STATUS_PLANNING) {
+                    $enquiry->update(['status' => EnquiryConstants::STATUS_IN_PROGRESS]);
+                    $enquiry->project()->update(['status' => EnquiryConstants::STATUS_IN_PROGRESS]);
+
+                    $this->governanceService->logEvent(
+                        $enquiry,
+                        'project_execution_started',
+                        $userId ?? (int) $task->created_by,
+                        [
+                            'trigger' => 'task_started',
+                            'task_id' => $task->id,
+                            'task_type' => $task->type,
+                            'from_status' => EnquiryConstants::STATUS_PLANNING,
+                            'to_status' => EnquiryConstants::STATUS_IN_PROGRESS,
+                        ],
+                        "Project execution started when task {$task->id} moved to In Progress.",
+                    );
+                }
+            }
+
             $task->recordCustomAction('status_transition', [
                 'from' => $oldStatus,
                 'to' => $status,

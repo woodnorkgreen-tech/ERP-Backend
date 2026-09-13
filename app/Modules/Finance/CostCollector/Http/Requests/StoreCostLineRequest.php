@@ -6,6 +6,7 @@ use App\Modules\Finance\CostCollector\Contracts\CostContext;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
@@ -39,8 +40,13 @@ class StoreCostLineRequest extends FormRequest
             'consumes_line_id' => 'nullable|integer|exists:cost_lines,id',
 
             'cost_cause' => 'nullable|string|max:32',
-            'funding_mode' => 'nullable|string|in:out_of_pocket,company_paid,unpaid_invoice',
-            'payment_source_id' => 'nullable|required_if:funding_mode,company_paid|integer|exists:payment_sources,id',
+            'funding_mode' => 'required|string|in:out_of_pocket,company_paid,unpaid_invoice',
+            'payment_source_id' => [
+                'nullable',
+                'required_if:funding_mode,company_paid',
+                'integer',
+                Rule::exists('payment_sources', 'id')->where('is_active', true),
+            ],
             'payee_type' => 'nullable|string|max:32',
             'payee_id' => 'nullable|integer',
             'payee_name' => 'nullable|string|max:191',
@@ -63,6 +69,17 @@ class StoreCostLineRequest extends FormRequest
     public function after(): array
     {
         return [function (Validator $validator): void {
+            if ($this->input('funding_mode') === 'unpaid_invoice') {
+                if (strtoupper((string) $this->input('payee_type')) !== 'SUPPLIER') {
+                    $validator->errors()->add('payee_type', 'A supplier credit invoice must name a registered supplier.');
+                }
+
+                if (! $this->filled('payee_id')
+                    || ! \App\Modules\ProcurementStores\Models\Supplier::whereKey($this->integer('payee_id'))->exists()) {
+                    $validator->errors()->add('payee_id', 'Select the supplier from the Supplier Master.');
+                }
+            }
+
             $prefix = 'cost-evidence/' . $this->user()->id . '/';
 
             foreach ($this->input('evidence', []) as $index => $item) {
@@ -82,7 +99,7 @@ class StoreCostLineRequest extends FormRequest
     public function toContext(): CostContext
     {
         $details = $this->input('details', []);
-        $fundingMode = $this->input('funding_mode', 'out_of_pocket');
+        $fundingMode = $this->string('funding_mode')->toString();
         $details['funding_mode'] = $fundingMode;
 
         if ($fundingMode === 'company_paid' && $this->filled('payment_source_id')) {

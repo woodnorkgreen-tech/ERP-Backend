@@ -1174,6 +1174,38 @@ class ProjectWorkflowContractsTest extends TestCase
         );
     }
 
+    public function test_starting_the_first_project_task_advances_planning_to_in_progress(): void
+    {
+        $operator = $this->user('Project Manager');
+        $enquiry = $this->enquiry([
+            'status' => EnquiryConstants::STATUS_PLANNING,
+            'quote_approved' => true,
+            'finance_released' => true,
+            'created_by' => $operator->id,
+        ]);
+        $project = Project::create([
+            'enquiry_id' => $enquiry->id,
+            'project_id' => 'PROJECT-EXECUTION-TEST',
+            'status' => EnquiryConstants::STATUS_PLANNING,
+        ]);
+        $task = $this->task($enquiry, 'project_management', [
+            'status' => 'pending',
+            'created_by' => $operator->id,
+        ]);
+
+        $updated = app(\App\Modules\Projects\Services\EnquiryWorkflowService::class)
+            ->updateTaskStatus($task->id, 'in_progress', $operator->id);
+
+        $this->assertSame('in_progress', $updated->status);
+        $this->assertSame(EnquiryConstants::STATUS_IN_PROGRESS, $enquiry->fresh()->status);
+        $this->assertSame(EnquiryConstants::STATUS_IN_PROGRESS, $project->fresh()->status);
+        $this->assertDatabaseHas('governance_audit_logs', [
+            'project_enquiry_id' => $enquiry->id,
+            'gate_type' => 'project_execution_started',
+            'user_id' => $operator->id,
+        ]);
+    }
+
     private function user(?string $role = null): User
     {
         $user = User::create([

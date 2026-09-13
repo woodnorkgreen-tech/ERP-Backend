@@ -13,6 +13,8 @@ use App\Modules\Finance\Database\Seeders\ExpenseCodeSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
 use App\Modules\Finance\Database\Seeders\PaymentSourceSeeder;
 use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\HR\Models\Department;
+use App\Modules\HR\Models\Employee;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -45,7 +47,17 @@ class CostSettlementModeTest extends TestCase
             Permission::findOrCreate($name, 'web');
         }
 
-        $this->user = User::factory()->create(['is_active' => true, 'name' => 'Jane Claimant']);
+        $department = Department::create(['name' => 'Finance']);
+        $employee = Employee::create([
+            'employee_id' => 'EMP-CLAIMANT',
+            'first_name' => 'Jane', 'last_name' => 'Claimant',
+            'email' => 'jane.claimant@example.test', 'phone' => '254712345678',
+            'department_id' => $department->id, 'position' => 'Officer',
+            'hire_date' => now()->subYear()->toDateString(), 'status' => 'active',
+        ]);
+        $this->user = User::factory()->create([
+            'is_active' => true, 'name' => 'Jane Claimant', 'employee_id' => $employee->id,
+        ]);
         $this->user->givePermissionTo([Permissions::FINANCE_COSTS_CREATE, Permissions::FINANCE_COSTS_READ]);
 
         $this->verifier = User::factory()->create(['is_active' => true, 'name' => 'Finance Verifier']);
@@ -110,7 +122,8 @@ class CostSettlementModeTest extends TestCase
         // Assert credit leg goes to 2100 Accounts Payable (reimbursement liability)
         $creditLine = $journal->lines->where('entry_type', 'credit')->first();
         $this->assertNotNull($creditLine);
-        $this->assertStringContainsString('Reimbursement payable to Jane Claimant', $creditLine->description);
+        $this->assertStringContainsString('Staff reimbursement payable to Jane Claimant', $creditLine->description);
+        $this->assertStringContainsString('Receipt from Shell Petrol Station', $creditLine->description);
 
         // Verify it appears in eligible liabilities for spend vouchers with claimant metadata
         $this->actingAs($this->verifier, 'sanctum');
@@ -122,6 +135,7 @@ class CostSettlementModeTest extends TestCase
         $this->assertEquals('out_of_pocket', $item['funding_mode']);
         $this->assertEquals('Jane Claimant', $item['claimant_name']);
         $this->assertEquals($this->user->id, $item['claimant_user_id']);
+        $this->assertEquals('254712345678', $item['claimant_phone']);
     }
 
     public function test_company_paid_cost_credits_bank_directly_without_creating_ap_liability(): void
@@ -167,5 +181,29 @@ class CostSettlementModeTest extends TestCase
 
         $item = collect($liabilitiesResponse->json('data'))->firstWhere('id', $costId);
         $this->assertNull($item, 'Direct company-paid cost lines must not create open AP liabilities.');
+    }
+
+    public function test_capture_requires_an_explicit_funding_mode(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson('/api/costs', [
+                'expense_code' => $this->expenseCode->code,
+                'amount' => 1000,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('funding_mode');
+    }
+
+    public function test_supplier_credit_requires_a_supplier_master_payee(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson('/api/costs', [
+                'expense_code' => $this->expenseCode->code,
+                'amount' => 1000,
+                'funding_mode' => 'unpaid_invoice',
+                'payee_name' => 'Typed supplier name',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['payee_type', 'payee_id']);
     }
 }

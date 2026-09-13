@@ -150,14 +150,47 @@ class CostLineController extends Controller
      */
     public function myProjects(Request $request): JsonResponse
     {
-        $validated = $request->validate(['q' => 'nullable|string|max:120']);
+        $validated = $request->validate([
+            'q' => 'nullable|string|max:120',
+            'context' => 'nullable|in:capture,cost_sheet',
+            'stage' => 'nullable|in:confirmed,in_progress,completed,closed',
+        ]);
         $userId = $request->user()->id;
         $search = $validated['q'] ?? null;
+        $costSheet = ($validated['context'] ?? 'capture') === 'cost_sheet';
+        $stage = $validated['stage'] ?? 'confirmed';
         $portfolioAccess = $request->user()->can(Permissions::FINANCE_COSTS_READ)
             || $request->user()->can(Permissions::FINANCE_COSTS_CREATE);
 
+        // A cost sheet is a Finance statement, not an expense-entry shortcut.
+        // It must remain available after delivery and formal closure, and must
+        // never be narrowed to the current user's project assignments.
+        if ($costSheet) {
+            abort_unless($request->user()->can(Permissions::FINANCE_COSTS_READ), 403);
+        }
+
+        $stageStatuses = [
+            'confirmed' => [
+                EnquiryConstants::STATUS_QUOTE_APPROVED,
+                EnquiryConstants::STATUS_AWAITING_DEPOSIT,
+            ],
+            // Planning is active delivery preparation, not a funding wait.
+            // Group it with execution so the UI's "Active projects" label
+            // matches the lifecycle data users work with every day.
+            'in_progress' => [
+                EnquiryConstants::STATUS_PLANNING,
+                EnquiryConstants::STATUS_IN_PROGRESS,
+            ],
+            'completed' => [EnquiryConstants::STATUS_COMPLETED],
+            'closed' => [EnquiryConstants::STATUS_CLOSED],
+        ];
+
         $enquiries = ProjectEnquiry::query()
-            ->whereNotIn('status', EnquiryConstants::getClosedStatuses())
+            ->when(
+                $costSheet,
+                fn ($query) => $query->where('quote_approved', true)->whereIn('status', $stageStatuses[$stage]),
+                fn ($query) => $query->whereNotIn('status', EnquiryConstants::getClosedStatuses()),
+            )
             ->whereNotNull('job_number')
             ->when($search, fn ($query, $term) => $query->where(function ($q) use ($term) {
                 $q->where('job_number', 'like', "%{$term}%")
@@ -166,7 +199,7 @@ class CostLineController extends Controller
             // Without a search term, narrow to what this person is on. Both the
             // pivot and the legacy column are checked, because task assignment
             // still writes the older field in places.
-            ->when(! $portfolioAccess, fn ($query) => $query->where(function ($assigned) use ($userId) {
+            ->when(! $costSheet && ! $portfolioAccess, fn ($query) => $query->where(function ($assigned) use ($userId) {
                 $assigned->where('project_officer_id', $userId)
                     ->orWhere('assigned_po', $userId)
                     ->orWhereJsonContains('assigned_users', $userId)
@@ -176,7 +209,7 @@ class CostLineController extends Controller
                         ->orWhere('assigned_to', $userId)));
             }))
             ->latest('id')
-            ->limit($search ? 25 : 10)
+            ->when(! $costSheet, fn ($query) => $query->limit($search ? 25 : 10))
             ->get(['id', 'job_number', 'title', 'venue', 'status']);
 
         return response()->json([
@@ -187,7 +220,11 @@ class CostLineController extends Controller
                 'venue' => $enquiry->venue,
                 'status' => $enquiry->status,
             ]),
-            'meta' => ['scope' => $portfolioAccess && $search ? 'search' : 'assigned'],
+            'meta' => [
+                'scope' => $costSheet ? 'portfolio' : ($portfolioAccess && $search ? 'search' : 'assigned'),
+                'stage' => $costSheet ? $stage : null,
+                'total' => $enquiries->count(),
+            ],
         ]);
     }
 

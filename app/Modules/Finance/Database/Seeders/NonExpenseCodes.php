@@ -222,7 +222,7 @@ final class NonExpenseCodes
                 ],
             ],
             [
-                'code' => 'NE-011', 'is_procurable' => true, 'expense_type' => 'Prepaid rent',
+                'code' => 'NE-011', 'is_procurable' => false, 'expense_type' => 'Prepaid rent',
                 'accounting_class' => 'Prepayment asset', 'expense_family' => 'Rent and insurance paid in advance',
                 'simple_meaning' => 'Rent paid now that relates to future months.',
                 'example' => "Three months' workshop rent paid in advance.",
@@ -243,7 +243,7 @@ final class NonExpenseCodes
                 ],
             ],
             [
-                'code' => 'NE-012', 'is_procurable' => true, 'expense_type' => 'Prepaid insurance',
+                'code' => 'NE-012', 'is_procurable' => false, 'expense_type' => 'Prepaid insurance',
                 'accounting_class' => 'Prepayment asset', 'expense_family' => 'Rent and insurance paid in advance',
                 'simple_meaning' => 'Insurance paid now that covers future months.',
                 'example' => 'Annual vehicle and workshop insurance premium paid in July.',

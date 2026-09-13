@@ -55,7 +55,7 @@ class ProjectsDashboardService
                 'start' => $start?->toDateString(),
                 'end' => $end?->toDateString(),
             ],
-            'kpis' => $this->kpis($start, $end),
+            'kpis' => $this->kpis($start, $end, $signals),
             'signals' => $prioritySignals,
             'signal_counts' => collect($signals)->countBy('type')->all(),
             'total_signals' => count($signals),
@@ -80,7 +80,7 @@ class ProjectsDashboardService
      * Live portfolio counts plus period throughput metrics. Completed projects
      * use updated_at because the projects table has no completed_at column.
      */
-    private function kpis(?Carbon $start, ?Carbon $end): array
+    private function kpis(?Carbon $start, ?Carbon $end, array $signals): array
     {
         $totalEnquiries = $this->withinRange(ProjectEnquiry::query(), 'created_at', $start, $end)->count();
         $convertedEnquiries = $this->withinRange(ProjectEnquiry::whereNotNull('job_number'), 'created_at', $start, $end)->count();
@@ -89,13 +89,36 @@ class ProjectsDashboardService
             ->whereNotNull('end_date')
             ->whereDate('end_date', '<', Carbon::today());
 
+        $confirmedJobs = ProjectEnquiry::query()
+            ->where('quote_approved', true)
+            ->whereNotNull('job_number')
+            ->whereIn('status', ['quote_approved', 'awaiting_deposit'])
+            ->count();
+
+        $dueSoonProjects = Project::query()
+            ->whereIn('status', self::ACTIVE_PROJECT_STATUSES)
+            ->whereBetween('end_date', [Carbon::today(), Carbon::today()->addDays(self::DEADLINE_SOON_DAYS)])
+            ->count();
+
         return [
             // Snapshot metrics must never hide older work that is still active.
             'active_projects' => Project::whereIn('status', self::ACTIVE_PROJECT_STATUSES)->count(),
+            'confirmed_jobs' => $confirmedJobs,
+            'planning_projects' => Project::where('status', 'planning')->count(),
+            'in_progress_projects' => Project::where('status', 'in_progress')->count(),
             'overdue_projects' => $overdueProjects->count(),
+            'due_soon_projects' => $dueSoonProjects,
+            'unassigned_projects' => Project::query()
+                ->whereIn('status', self::ACTIVE_PROJECT_STATUSES)
+                ->whereHas('enquiry', fn ($query) => $query->whereNull('project_officer_id'))
+                ->count(),
+            // Signals may overlap (for example, overdue and stalled). This is
+            // the number of distinct projects needing a decision, not cards.
+            'attention_projects' => collect($signals)->pluck('action_url')->unique()->count(),
             'conversion_rate' => $totalEnquiries > 0
                 ? round(($convertedEnquiries / $totalEnquiries) * 100, 1)
                 : 0.0,
+            'converted_enquiries' => $convertedEnquiries,
             'completed_projects' => $this->withinRange(
                 Project::where('status', 'completed'), 'updated_at', $start, $end
             )->count(),
