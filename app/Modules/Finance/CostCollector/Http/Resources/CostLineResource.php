@@ -60,6 +60,10 @@ class CostLineResource extends JsonResource
                 'type_id' => $this->payee_type_id,
                 'id' => $this->payee_id,
                 'is_supplier' => filled($this->payee_supplier_name),
+                'kra_pin' => $this->payee_supplier_kra_pin,
+                // Not a block — the payee type flags it for the verifier, who
+                // decides on the actual WHT treatment when the invoice is checked.
+                'requires_wht_review' => (bool) $this->payee_requires_wht_review,
             ],
 
             // ── Coding ────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ namespace App\Modules\Finance\CostCollector\Services;
 
 use App\Models\ProjectEnquiry;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\Models\FinanceSetting;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -289,6 +290,8 @@ class CostAccountService
             ->get();
 
         $categories = $this->pivotByCategory($rows);
+        $totals = $this->totals($categories);
+        $margin = $this->marginAgainstJournals($enquiry);
 
         return [
             'project' => [
@@ -296,7 +299,7 @@ class CostAccountService
                 'job_number' => $enquiry->job_number,
                 'title' => $enquiry->title,
             ],
-            'totals' => $this->totals($categories),
+            'totals' => $totals,
             'categories' => $categories,
             'elements' => $this->elementBreakdown($enquiry),
             'unbudgeted' => $this->unbudgeted($enquiry),
@@ -305,7 +308,48 @@ class CostAccountService
             // Cash and billing sit beside the cost statement so they cannot be
             // mistaken for another spend column (paying ≠ costing).
             'cash_movements' => $this->cashMovements($enquiry),
-            'margin' => $this->marginAgainstJournals($enquiry),
+            'margin' => $margin,
+            'alerts' => $this->alerts($totals, $margin),
+        ];
+    }
+
+    /**
+     * Brief §9's three thresholds, read against the figures already computed
+     * above rather than recomputed.
+     *
+     * Advisory only — none of these block anything, they flag. `FinanceSetting`
+     * itself draws the line: `value()` is right for "a warning threshold that
+     * is merely proposed is still better guidance than nothing", and a hard
+     * block is the only thing that must wait for `approvedValue()`. Seeded
+     * unapproved and read through `value()` regardless, so a threshold Finance
+     * has not yet signed off still shows a project running hot rather than
+     * showing nothing.
+     *
+     * A missing setting must never manufacture an alert nobody configured, so
+     * a null threshold turns every flag off rather than defaulting to some
+     * guessed number.
+     */
+    private function alerts(array $totals, array $margin): array
+    {
+        $overrunThreshold = FinanceSetting::value('cost_overrun_alert_percent');
+        $marginWarning = FinanceSetting::value('margin_warning_percent');
+        $marginEscalation = FinanceSetting::value('margin_escalation_percent');
+
+        $overrunPercent = $totals['utilisation_percent'] !== null
+            ? $totals['utilisation_percent'] - 100
+            : null;
+        $marginPercent = $margin['margin_percent'];
+
+        return [
+            'cost_overrun' => $overrunThreshold !== null && $overrunPercent !== null
+                && $overrunPercent > (float) $overrunThreshold,
+            'cost_overrun_threshold_percent' => $overrunThreshold !== null ? (float) $overrunThreshold : null,
+            'margin_warning' => $marginWarning !== null && $marginPercent !== null
+                && $marginPercent < (float) $marginWarning,
+            'margin_warning_threshold_percent' => $marginWarning !== null ? (float) $marginWarning : null,
+            'margin_escalation' => $marginEscalation !== null && $marginPercent !== null
+                && $marginPercent < (float) $marginEscalation,
+            'margin_escalation_threshold_percent' => $marginEscalation !== null ? (float) $marginEscalation : null,
         ];
     }
 

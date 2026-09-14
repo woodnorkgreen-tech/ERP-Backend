@@ -14,6 +14,7 @@ use App\Modules\Finance\PettyCash\Services\PettyCashService;
 use App\Modules\Finance\PettyCash\Services\TopUpAllocator;
 use App\Modules\Finance\Support\DocumentNumber;
 use App\Modules\Finance\Support\PaymentMethods;
+use App\Modules\Finance\Support\PettyCashCap;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -85,6 +86,10 @@ class SpendVoucherSettlementService
         $method = $method ?: (PaymentMethods::TYPICAL_FOR_SOURCE_TYPE[$source->type][0] ?? 'bank_transfer');
 
         if ($source->type === 'petty_cash') {
+            if (PettyCashCap::exceeds($amount)) {
+                throw ValidationException::withMessages(['total_amount' => PettyCashCap::message($amount)]);
+            }
+
             $balance = PettyCashBalance::current();
             $balance = PettyCashBalance::whereKey($balance->id)->lockForUpdate()->firstOrFail();
             if (bccomp((string) $balance->current_balance, $amount, 2) < 0) {

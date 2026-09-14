@@ -518,6 +518,44 @@ class SupplierPaymentGateTest extends TestCase
             ->count(), 'One cash movement, one ledger entry — never two.');
     }
 
+    /**
+     * Brief §6.3's petty-cash cap, approved. Unapproved it is a no-op — see
+     * PettyCashCap — so this pins the enforced side; the ordinary petty-cash
+     * payment test above already proves the unapproved default lets a normal
+     * payment through undisturbed.
+     */
+    public function test_a_supplier_payment_over_the_approved_petty_cash_cap_is_refused(): void
+    {
+        $approver = User::create([
+            'name' => 'Finance Approver', 'email' => uniqid('approver_').'@test.local',
+            'password' => bcrypt('secret'), 'is_active' => true,
+        ]);
+        DB::table('finance_settings')->insert([
+            'key' => 'petty_cash_max_per_transaction', 'value' => '20000', 'label' => 'Petty cash cap',
+            'effective_from' => '2020-01-01', 'approved_by' => $approver->id, 'approved_at' => now(),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $bill = $this->payableBill();
+        $this->topUpFloat('80000');
+        $opening = (string) PettyCashBalance::current()->current_balance;
+
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_source_id' => $this->source('PC-MAIN')->id,
+            'payment_method' => 'cash',
+            'reference_number' => 'PC-0002',
+        ])->assertStatus(422);
+
+        $this->assertDatabaseMissing('bill_payments', ['bill_id' => $bill->id]);
+        $this->assertSame(
+            0,
+            bccomp($opening, (string) PettyCashBalance::current()->current_balance, 2),
+            'A refused payment must not touch the float.'
+        );
+    }
+
     public function test_paying_an_invoice_from_the_bank_leaves_the_float_alone(): void
     {
         $bill = $this->payableBill();

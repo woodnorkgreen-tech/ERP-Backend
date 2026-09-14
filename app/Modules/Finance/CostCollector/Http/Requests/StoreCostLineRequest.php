@@ -4,7 +4,9 @@ namespace App\Modules\Finance\CostCollector\Http\Requests;
 
 use App\Modules\Finance\CostCollector\Contracts\CostContext;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\ProcurementStores\Models\Supplier;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -39,7 +41,7 @@ class StoreCostLineRequest extends FormRequest
             'task_id' => 'nullable|integer|exists:enquiry_tasks,id',
             'consumes_line_id' => 'nullable|integer|exists:cost_lines,id',
 
-            'cost_cause' => 'nullable|string|max:32',
+            'cost_cause' => ['nullable', 'string', 'max:32', Rule::exists('cost_causes', 'code')->where('is_active', true)],
             'funding_mode' => 'required|string|in:out_of_pocket,company_paid,unpaid_invoice',
             'payment_source_id' => [
                 'nullable',
@@ -75,9 +77,28 @@ class StoreCostLineRequest extends FormRequest
                 }
 
                 if (! $this->filled('payee_id')
-                    || ! \App\Modules\ProcurementStores\Models\Supplier::whereKey($this->integer('payee_id'))->exists()) {
+                    || ! Supplier::whereKey($this->integer('payee_id'))->exists()) {
                     $validator->errors()->add('payee_id', 'Select the supplier from the Supplier Master.');
                 }
+            } elseif ($this->filled('payee_type')) {
+                // The unpaid-invoice branch above already covers a supplier
+                // credit invoice with its own, more specific message. Every
+                // other funding mode reaches this instead — so a company-paid
+                // cost tagged payee_type SUPPLIER still has to name a real
+                // supplier, not just any integer.
+                $this->assertPayeeIsARegisteredSupplierWhenRequired($validator);
+            }
+
+            $this->assertSupplierHasAKraPinWhenRequired($validator);
+
+            if ($this->filled('cost_cause')
+                && ! $this->filled('description')
+                && DB::table('cost_causes')
+                    ->where('code', $this->input('cost_cause'))->value('requires_note')) {
+                $validator->errors()->add(
+                    'description',
+                    'This cause needs a short note explaining what happened.',
+                );
             }
 
             $prefix = 'cost-evidence/' . $this->user()->id . '/';
@@ -94,6 +115,60 @@ class StoreCostLineRequest extends FormRequest
                 }
             }
         }];
+    }
+
+    /**
+     * `payee_types` promised its booleans "drive capture-form validation
+     * directly, so introducing a payee type that needs a KRA PIN is a row
+     * rather than a release." `requires_wht_review` is deliberately not
+     * checked here: it flags the line for the verifier (CostLineResource),
+     * because whether withholding actually applies is a judgement the invoice
+     * itself has to answer, not something a capture-time checkbox can decide.
+     */
+    private function assertPayeeIsARegisteredSupplierWhenRequired(Validator $validator): void
+    {
+        $requiresSupplier = DB::table('payee_types')
+            ->where('code', strtoupper((string) $this->input('payee_type')))
+            ->value('requires_supplier_record');
+
+        if ($requiresSupplier
+            && (! $this->filled('payee_id')
+                || ! Supplier::whereKey($this->integer('payee_id'))->exists())) {
+            $validator->errors()->add('payee_id', 'This payee type must be a registered supplier from the Supplier Master.');
+        }
+    }
+
+    /**
+     * The PIN itself already lives on the Supplier record — a capturer
+     * retyping it every time would just be a second, driftable copy of the
+     * same fact. So this checks the master record the payee resolves to
+     * rather than asking for the PIN again.
+     */
+    private function assertSupplierHasAKraPinWhenRequired(Validator $validator): void
+    {
+        if (! $this->filled('payee_type') || ! $this->filled('payee_id')) {
+            return;
+        }
+
+        $requiresPin = DB::table('payee_types')
+            ->where('code', strtoupper((string) $this->input('payee_type')))
+            ->value('requires_kra_pin');
+
+        if (! $requiresPin) {
+            return;
+        }
+
+        $supplier = Supplier::find($this->integer('payee_id'));
+
+        // A payee_id that resolves to no supplier at all is already reported
+        // by the checks above; this only adds to that once a real supplier is
+        // on the line but its own record is missing the PIN it needs.
+        if ($supplier && blank($supplier->kra_pin)) {
+            $validator->errors()->add(
+                'payee_id',
+                "{$supplier->supplier_name} has no KRA PIN on file. Add it in the Supplier Master before recording this cost.",
+            );
+        }
     }
 
     public function toContext(): CostContext

@@ -17,6 +17,7 @@ class CostAccountTest extends TestCase
     use RefreshDatabase;
 
     private int $enquiryId;
+    private User $user;
 
     protected function setUp(): void
     {
@@ -30,6 +31,7 @@ class CostAccountTest extends TestCase
         $user = User::factory()->create(['is_active' => true]);
         $user->givePermissionTo(Permissions::FINANCE_COSTS_READ);
         $this->actingAs($user, 'sanctum');
+        $this->user = $user;
 
         $clientId = DB::table('clients')->insertGetId([
             'full_name' => 'Client', 'email' => 'c@t.local', 'phone' => '0700000000',
@@ -276,6 +278,94 @@ class CostAccountTest extends TestCase
         $response->assertJsonPath('data.coverage.lines_with_spend', 1);
         $response->assertJsonPath('data.coverage.lines_awaiting', 1);
         $this->assertEqualsWithDelta(50.0, $response->json('data.coverage.percent'), 0.01);
+    }
+
+    /**
+     * Brief §9's thresholds were seeded since the project began and never read
+     * by anything — see FinanceSettingsSeeder. Nothing here seeds
+     * FinanceSettingsSeeder, so this also proves the "never manufacture an
+     * alert nobody configured" guarantee: no thresholds exist, so every alert
+     * is false however far over budget the project runs.
+     */
+    public function test_no_alert_fires_when_no_threshold_is_configured(): void
+    {
+        $planned = $this->line(CostLine::NATURE_PLANNED, '10000.00');
+        $this->line(CostLine::NATURE_ACTUAL, '50000.00', ['consumes_line_id' => $planned->id]);
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk();
+
+        $response->assertJsonPath('data.alerts.cost_overrun', false);
+        $response->assertJsonPath('data.alerts.cost_overrun_threshold_percent', null);
+        $response->assertJsonPath('data.alerts.margin_warning', false);
+        $response->assertJsonPath('data.alerts.margin_escalation', false);
+    }
+
+    public function test_cost_overrun_alert_fires_only_past_the_configured_tolerance(): void
+    {
+        DB::table('finance_settings')->insert([
+            'key' => 'cost_overrun_alert_percent', 'value' => '10', 'label' => 'Cost overrun alert',
+            'effective_from' => '2020-01-01', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        // 400% used — an overrun of 300 points, comfortably past a 10% tolerance.
+        $planned = $this->line(CostLine::NATURE_PLANNED, '10000.00');
+        $this->line(CostLine::NATURE_ACTUAL, '40000.00', ['consumes_line_id' => $planned->id]);
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk();
+
+        $response->assertJsonPath('data.alerts.cost_overrun', true);
+        $response->assertJsonPath('data.alerts.cost_overrun_threshold_percent', 10);
+    }
+
+    public function test_a_project_within_tolerance_does_not_alert(): void
+    {
+        DB::table('finance_settings')->insert([
+            'key' => 'cost_overrun_alert_percent', 'value' => '10', 'label' => 'Cost overrun alert',
+            'effective_from' => '2020-01-01', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        // 105% used — 5 points over budget, inside a 10% tolerance.
+        $planned = $this->line(CostLine::NATURE_PLANNED, '10000.00');
+        $this->line(CostLine::NATURE_ACTUAL, '10500.00', ['consumes_line_id' => $planned->id]);
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk();
+
+        $response->assertJsonPath('data.alerts.cost_overrun', false);
+    }
+
+    public function test_margin_below_the_escalation_threshold_flags_both_alerts(): void
+    {
+        DB::table('finance_settings')->insert([
+            ['key' => 'margin_warning_percent', 'value' => '40', 'label' => 'Margin warning',
+                'effective_from' => '2020-01-01', 'created_at' => now(), 'updated_at' => now()],
+            ['key' => 'margin_escalation_percent', 'value' => '35', 'label' => 'Margin escalation',
+                'effective_from' => '2020-01-01', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $journalId = DB::table('journal_entries')->insertGetId([
+            'entry_no' => 'JE-TEST-MARGIN', 'posting_date' => now()->toDateString(),
+            'total_debit' => '100000.00', 'total_credit' => '100000.00', 'status' => 'posted',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        DB::table('project_invoices')->insert([
+            'invoice_number' => 'INV-TEST-MARGIN', 'project_enquiry_id' => $this->enquiryId,
+            'invoice_date' => now()->toDateString(), 'due_date' => now()->addDays(30)->toDateString(),
+            'subtotal' => '100000.00', 'total_amount' => '100000.00', 'status' => 'issued',
+            'journal_entry_id' => $journalId, 'created_by' => $this->user->id,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        // No WIP release posted against this invoice, so margin falls back to
+        // verified actuals: 70,000 cost against 100,000 billed is a 30% margin
+        // — below both the 40% warning and the 35% escalation threshold.
+        $this->line(CostLine::NATURE_ACTUAL, '70000.00');
+
+        $response = $this->getJson("/api/costs/account/{$this->enquiryId}")->assertOk();
+
+        $response->assertJsonPath('data.margin.margin_percent', 30);
+        $response->assertJsonPath('data.alerts.margin_warning', true);
+        $response->assertJsonPath('data.alerts.margin_escalation', true);
     }
 
     public function test_the_accounts_grid_lists_one_row_per_project_with_grand_totals(): void

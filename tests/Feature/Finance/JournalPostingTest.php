@@ -504,6 +504,51 @@ class JournalPostingTest extends TestCase
         $this->assertDatabaseMissing('journal_entries', ['spend_voucher_id' => $voucher->id]);
     }
 
+    /**
+     * Brief §6.3's petty-cash cap, approved. Unapproved it is a no-op — see
+     * PettyCashCap — so a voucher of any size posts exactly as it always has
+     * while the seeded default sits unsigned; this pins the enforced side.
+     */
+    public function test_posting_refuses_a_petty_cash_voucher_over_the_approved_cap(): void
+    {
+        $float = PaymentSource::create([
+            'name' => 'Main Petty Cash Float', 'code' => 'PC-CAP-TEST', 'type' => 'petty_cash',
+            'gl_account_id' => ChartOfAccount::where('code', '1030')->value('id'), 'is_active' => true,
+        ]);
+        \App\Modules\Finance\PettyCash\Models\PettyCashBalance::current()
+            ->update(['current_balance' => 100000.00]);
+
+        $approver = User::factory()->create(['is_active' => true]);
+        DB::table('finance_settings')->insert([
+            'key' => 'petty_cash_max_per_transaction', 'value' => '20000', 'label' => 'Petty cash cap',
+            'effective_from' => '2020-01-01', 'approved_by' => $approver->id, 'approved_at' => now(),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $voucher = $this->voucher([
+            'type' => 'advance',
+            'status' => 'approved',
+            'approved_by' => $this->approver->id,
+            'approved_at' => now(),
+            'total_amount' => '30000.00',
+            'base_total_amount' => '30000.00',
+            'net_amount' => '30000.00',
+            'net_cash_paid' => '30000.00',
+            'payment_source_id' => $float->id,
+        ]);
+
+        $this->actingAs($this->poster, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucher->id}/post")
+            ->assertUnprocessable();
+
+        $this->assertSame('approved', $voucher->fresh()->status);
+        $this->assertDatabaseMissing('payments', ['spend_voucher_id' => $voucher->id]);
+        $this->assertSame(
+            '100000.00',
+            (string) \App\Modules\Finance\PettyCash\Models\PettyCashBalance::current()->current_balance,
+        );
+    }
+
     public function test_spend_voucher_actions_require_their_own_permissions(): void
     {
         $outsider = User::factory()->create(['is_active' => true]);

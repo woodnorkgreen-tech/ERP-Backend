@@ -17,6 +17,7 @@ use App\Modules\ProcurementStores\Models\Supplier;
 use App\Modules\HR\Models\Department;
 use App\Modules\HR\Models\Employee;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
@@ -195,6 +196,143 @@ class CostSettlementModeTest extends TestCase
             ->assertJsonValidationErrors('funding_mode');
     }
 
+    public function test_cost_cause_must_be_a_recognised_code(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson('/api/costs', [
+                'expense_code' => $this->expenseCode->code,
+                'amount' => 1000,
+                'funding_mode' => 'out_of_pocket',
+                'payee_name' => 'Shell Petrol Station',
+                'cost_cause' => 'MADE-UP-CODE',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('cost_cause');
+    }
+
+    /** CLIENT-CHANGE, EMERGENCY, REWORK, BREAKDOWN, WASTAGE and WARRANTY all seed requires_note true. */
+    public function test_an_exception_cause_requires_a_note(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson('/api/costs', [
+                'expense_code' => $this->expenseCode->code,
+                'amount' => 1000,
+                'funding_mode' => 'out_of_pocket',
+                'payee_name' => 'Shell Petrol Station',
+                'cost_cause' => 'EMERGENCY',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('description');
+
+        $response = $this->postJson('/api/costs', [
+            'expense_code' => $this->expenseCode->code,
+            'amount' => 1000,
+            'funding_mode' => 'out_of_pocket',
+            'payee_name' => 'Shell Petrol Station',
+            'cost_cause' => 'EMERGENCY',
+            'description' => 'Generator failed on site; fuel bought to keep the crew going.',
+        ])->assertCreated();
+
+        $line = CostLine::findOrFail($response->json('data.id'));
+        $this->assertSame('EMERGENCY', DB::table('cost_causes')->where('id', $line->cost_cause_id)->value('code'));
+    }
+
+    /** PLANNED carries requires_note = false, so an ordinary cost still needs no note. */
+    public function test_the_default_cause_needs_no_note(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson('/api/costs', [
+                'expense_code' => $this->expenseCode->code,
+                'amount' => 1000,
+                'funding_mode' => 'out_of_pocket',
+                'payee_name' => 'Shell Petrol Station',
+            ])
+            ->assertCreated();
+    }
+
+    /**
+     * The PIN lives on the Supplier Master record itself — SpendVoucher already
+     * carries payee_kra_pin as free text, but a cost line has no such field and
+     * needs none: the requirement is that the supplier this payee resolves to
+     * has one on file, not that the capturer retypes it every time.
+     */
+    public function test_a_supplier_payee_type_requires_a_kra_pin_on_the_supplier_record(): void
+    {
+        $noPin = Supplier::create([
+            'supplier_name' => 'No Pin On File Ltd',
+            'contact_person' => 'Accounts', 'phone' => '0700000030',
+            'email' => 'no-pin-supplier@example.test', 'address' => 'Industrial Area',
+            'payment_terms' => '30 days', 'status' => 'Active', 'user_id' => $this->user->id,
+        ]);
+
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson('/api/costs', [
+                'expense_code' => $this->expenseCode->code,
+                'amount' => 4500,
+                'funding_mode' => 'company_paid',
+                'payment_source_id' => $this->bankSource->id,
+                'payee_type' => 'SUPPLIER',
+                'payee_id' => $noPin->id,
+                'payee_name' => $noPin->supplier_name,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('payee_id');
+
+        $withPin = Supplier::create([
+            'supplier_name' => 'Has Pin On File Ltd',
+            'contact_person' => 'Accounts', 'phone' => '0700000031',
+            'email' => 'has-pin-supplier@example.test', 'address' => 'Industrial Area',
+            'payment_terms' => '30 days', 'status' => 'Active', 'user_id' => $this->user->id,
+            'kra_pin' => 'P051234567A',
+        ]);
+
+        $this->postJson('/api/costs', [
+            'expense_code' => $this->expenseCode->code,
+            'amount' => 4500,
+            'funding_mode' => 'company_paid',
+            'payment_source_id' => $this->bankSource->id,
+            'payee_type' => 'SUPPLIER',
+            'payee_id' => $withPin->id,
+            'payee_name' => $withPin->supplier_name,
+        ])->assertCreated();
+    }
+
+    /**
+     * The unpaid-invoice funding mode already enforces this with its own
+     * message (test_supplier_credit_requires_a_supplier_master_payee); this is
+     * the same requirement reached from every other funding mode, driven by
+     * payee_types.requires_supplier_record rather than hardcoded to one path.
+     */
+    public function test_a_company_paid_cost_tagged_as_a_supplier_must_name_a_real_supplier(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson('/api/costs', [
+                'expense_code' => $this->expenseCode->code,
+                'amount' => 4500,
+                'funding_mode' => 'company_paid',
+                'payment_source_id' => $this->bankSource->id,
+                'payee_type' => 'SUPPLIER',
+                'payee_id' => 999999,
+                'payee_name' => 'Not A Real Supplier',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('payee_id');
+    }
+
+    public function test_cost_causes_are_listed_for_the_capture_form(): void
+    {
+        $response = $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/costs/cost-causes')
+            ->assertOk();
+
+        $codes = collect($response->json('data'))->pluck('code');
+        $this->assertEqualsCanonicalizing(
+            ['PLANNED', 'CLIENT-CHANGE', 'EMERGENCY', 'REWORK', 'BREAKDOWN', 'WASTAGE', 'WARRANTY'],
+            $codes->all(),
+        );
+        $this->assertTrue($response->json('data.0.code') === 'PLANNED', 'Ordered by sort_order, PLANNED first.');
+    }
+
     public function test_supplier_credit_requires_a_supplier_master_payee(): void
     {
         $this->actingAs($this->user, 'sanctum')
@@ -219,6 +357,7 @@ class CostSettlementModeTest extends TestCase
             'payment_terms' => '30 days',
             'status' => 'Active',
             'user_id' => $this->user->id,
+            'kra_pin' => 'P051111111A',
         ]);
 
         $this->actingAs($this->user, 'sanctum');
@@ -270,6 +409,7 @@ class CostSettlementModeTest extends TestCase
             'payment_terms' => '30 days',
             'status' => 'Active',
             'user_id' => $this->user->id,
+            'kra_pin' => 'P051222222A',
         ]);
 
         $this->actingAs($this->user, 'sanctum');

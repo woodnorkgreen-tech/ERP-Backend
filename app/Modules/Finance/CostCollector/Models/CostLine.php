@@ -194,6 +194,7 @@ class CostLine extends Model
                 'cost_cause_name' => $lookup('cost_causes', 'name', 'cost_cause_id'),
                 'cost_cause_is_exception' => $lookup('cost_causes', 'is_exception', 'cost_cause_id'),
                 'payee_type_name' => $lookup('payee_types', 'name', 'payee_type_id'),
+                'payee_requires_wht_review' => $lookup('payee_types', 'requires_wht_review', 'payee_type_id'),
                 'journal_entry_no' => $lookup('journal_entries', 'entry_no', 'journal_entry_id'),
                 // Aliased, unlike the rest: this one reads `cost_lines` from
                 // inside a query on `cost_lines`, so without a distinct name the
@@ -208,6 +209,13 @@ class CostLine extends Model
                     ->limit(1),
                 'payee_supplier_name' => DB::table('suppliers')
                     ->select('supplier_name')
+                    ->whereColumn('suppliers.id', 'cost_lines.payee_id')
+                    ->whereExists(fn ($q) => $q->selectRaw('1')->from('payee_types')
+                        ->whereColumn('payee_types.id', 'cost_lines.payee_type_id')
+                        ->where('payee_types.requires_supplier_record', true))
+                    ->limit(1),
+                'payee_supplier_kra_pin' => DB::table('suppliers')
+                    ->select('kra_pin')
                     ->whereColumn('suppliers.id', 'cost_lines.payee_id')
                     ->whereExists(fn ($q) => $q->selectRaw('1')->from('payee_types')
                         ->whereColumn('payee_types.id', 'cost_lines.payee_type_id')

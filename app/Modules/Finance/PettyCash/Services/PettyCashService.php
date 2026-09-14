@@ -8,6 +8,7 @@ use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Support\DocumentNumber;
 use App\Modules\Finance\Support\PaymentMethods;
+use App\Modules\Finance\Support\PettyCashCap;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
 use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
 use Illuminate\Support\Facades\Auth;
@@ -342,6 +343,16 @@ class PettyCashService
                             'errors' => [
                                 'amount' => ["Insufficient balance. Current balance: KES " . number_format($balance->current_balance, 2) . ", Required (Amount + Cost): KES " . number_format($totalToDeduct, 2)]
                             ]
+                        ];
+                    }
+                }
+
+                if ($paymentSource->type === 'petty_cash') {
+                    $transactionTotal = number_format($totalToDeduct, 2, '.', '');
+                    if (PettyCashCap::exceeds($transactionTotal)) {
+                        return [
+                            'success' => false,
+                            'errors' => ['amount' => [PettyCashCap::message($transactionTotal)]],
                         ];
                     }
                 }

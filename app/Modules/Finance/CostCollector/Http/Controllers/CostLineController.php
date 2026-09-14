@@ -14,6 +14,7 @@ use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Services\CostCollectorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class CostLineController extends Controller
 {
@@ -267,6 +268,24 @@ class CostLineController extends Controller
                 'spent' => number_format((float) ($line->drawn ?? 0), 2, '.', ''),
                 'remaining' => bcsub((string) $line->net_amount, (string) ($line->drawn ?: '0'), 2),
             ]),
+        ]);
+    }
+
+    /**
+     * Why a cost happened, for the capture form's Reason picker.
+     *
+     * Seeded since the project began with no way for anyone to read it: the
+     * capture form had no field for it, so every cost line defaulted to
+     * `PLANNED` and five of the seven causes (emergency, rework, breakdown,
+     * wastage, warranty) could never be recorded by anything.
+     */
+    public function costCauses(): JsonResponse
+    {
+        return response()->json([
+            'data' => DB::table('cost_causes')
+                ->where('is_active', true)
+                ->orderBy('sort_order')
+                ->get(['code', 'name', 'description', 'is_exception', 'requires_note']),
         ]);
     }
 }

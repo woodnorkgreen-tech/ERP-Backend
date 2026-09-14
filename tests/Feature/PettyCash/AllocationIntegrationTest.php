@@ -82,4 +82,43 @@ class AllocationIntegrationTest extends TestCase
         $this->assertEquals(50.00, round($t1->remaining_balance, 2));
         $this->assertEquals(100.00, round($t2->remaining_balance, 2));
     }
+
+    /**
+     * Brief §6.3's petty-cash cap, seeded since the project began and never
+     * enforced anywhere — see FinanceSettingsSeeder and PettyCashCap. Unapproved
+     * it is a no-op, which the test above already exercises (a KES 123
+     * disbursement sails through the seeded-but-unapproved KES 20,000 default);
+     * this pins the enforced side once Finance signs the row off.
+     */
+    public function test_a_disbursement_over_the_approved_petty_cash_cap_is_refused()
+    {
+        $this->seed(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
+        $user = User::factory()->create();
+
+        $approver = User::factory()->create();
+        DB::table('finance_settings')
+            ->where('key', 'petty_cash_max_per_transaction')
+            ->update(['approved_by' => $approver->id, 'approved_at' => now()]);
+
+        PettyCashBalance::current()->update(['current_balance' => 50000.00]);
+
+        $service = app(\App\Modules\Finance\PettyCash\Services\PettyCashService::class);
+
+        $result = $service->createDisbursement([
+            'expense_code_id' => DB::table('expense_codes')->where('job_id_rule', 'not_allowed')->value('id'),
+            'payment_source_id' => DB::table('payment_sources')->where('code', 'PC-MAIN')->value('id'),
+            'amount' => 25000.00,
+            'transaction_cost' => 0.00,
+            'payee_name' => 'Over The Cap',
+            'account' => 'acct',
+            'description' => 'Exceeds the approved cap',
+            'classification' => 'other',
+            'payment_method' => 'cash',
+            'created_by' => $user->id,
+        ]);
+
+        $this->assertFalse($result['success'] ?? true);
+        $this->assertArrayHasKey('amount', $result['errors'] ?? []);
+        $this->assertSame(50000.00, (float) PettyCashBalance::current()->current_balance);
+    }
 }

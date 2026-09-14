@@ -177,6 +177,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('{cost}/correction', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'correct']);
         Route::get('my-projects', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'myProjects']);
         Route::get('budget-lines/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'budgetLines']);
+        Route::get('cost-causes', [App\Modules\Finance\CostCollector\Http\Controllers\CostLineController::class, 'costCauses']);
 
         // The project cost account: budget vs committed vs actual, the
         // unbudgeted panel, exception spend and how much of the budget has been

@@ -6,6 +6,7 @@ use App\Events\PettyCashDisbursementPaid;
 use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Support\DocumentNumber;
 use App\Modules\Finance\Support\PaymentMethods;
+use App\Modules\Finance\Support\PettyCashCap;
 use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
 use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation;
@@ -126,6 +127,10 @@ class SupplierPaymentService
             ]);
 
             if ($source->type === 'petty_cash') {
+                if (PettyCashCap::exceeds($cashOut)) {
+                    throw ValidationException::withMessages(['amount_paid' => PettyCashCap::message($cashOut)]);
+                }
+
                 // The fee leaves the tin along with the payment, so the float
                 // has to cover both.
                 if (bccomp((string) $balance->current_balance, $cashOut, 2) < 0) {
