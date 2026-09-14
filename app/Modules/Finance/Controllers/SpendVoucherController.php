@@ -17,6 +17,7 @@ use App\Modules\HR\Models\HRAuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
@@ -197,13 +198,24 @@ class SpendVoucherController extends Controller
             'total_amount' => 'required|numeric|min:0.01',
             'payment_method' => 'nullable|string',
             'payment_reference' => 'nullable|string',
-            'payment_source_id' => 'required_unless:type,retirement|nullable|exists:payment_sources,id',
+            'payment_source_id' => [
+                'required_unless:type,retirement',
+                'nullable',
+                // A voucher pays out of a real account money can leave. Supplier
+                // Credit (type payable) is the liability itself — picking it as
+                // the "paying account" settles a liability by crediting the same
+                // control account it owes, a wash entry, while still minting a
+                // Payment document that claims cash moved.
+                Rule::exists('payment_sources', 'id')->where(fn ($query) => $query->where('type', '!=', 'payable')),
+            ],
             'notes' => 'nullable|string',
             'supplier_invoice_no' => 'nullable|string',
             'etims_invoice_no' => 'nullable|string',
             'allocations' => 'required_if:type,payment,reimbursement|array|min:1',
             'allocations.*.cost_line_id' => 'required|integer|distinct|exists:cost_lines,id',
             'allocations.*.amount' => 'required|numeric|gt:0',
+        ], [
+            'payment_source_id.exists' => 'Select the account money actually leaves from. Supplier Credit is a liability, not a paying account.',
         ]);
 
         // The primary key supplies the sequence. count()+1 races under two

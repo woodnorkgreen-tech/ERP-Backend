@@ -65,6 +65,17 @@ class SupplierPaymentService
                 throw ValidationException::withMessages(['payment_source_id' => 'Select an active paying account.']);
             }
 
+            // BillController's validator already refuses this at the request
+            // boundary; repeated here because this method also runs from
+            // anywhere else that calls it directly, and a supplier invoice's
+            // AP liability must never be "settled" by crediting the very same
+            // control account it owes.
+            if ($source->type === 'payable') {
+                throw ValidationException::withMessages([
+                    'payment_source_id' => 'Supplier Credit is a liability account, not a paying account. Select the bank, float, mobile money or card the money actually left from.',
+                ]);
+            }
+
             // How the money was transmitted is the payer's statement, not a
             // consequence of which account it left. Only when a caller says
             // nothing at all does the account's kind supply a default.

@@ -245,6 +245,66 @@ class SupplierLedgerRailTest extends TestCase
     }
 
     /**
+     * Supplier Credit (type payable) IS the invoice's own liability account —
+     * offering it as the "paying account" would credit 2100 to relieve a
+     * balance already carried on 2100, a wash entry that discharges a real
+     * payable with no cash leaving any bank or float.
+     */
+    public function test_a_supplier_payment_is_refused_from_the_request_boundary_when_funded_by_supplier_credit(): void
+    {
+        $this->deliverAndConfirm();
+        $bill = $this->bill();
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
+
+        \Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::FINANCE_PETTY_CASH_CREATE, 'web');
+        $this->accounts->givePermissionTo(\App\Constants\Permissions::FINANCE_PETTY_CASH_CREATE);
+        $apSource = PaymentSource::where('code', 'AP')->firstOrFail();
+
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/record-payment", [
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $apSource->id,
+            'reference_number' => 'TRX-AP-SOURCE',
+        ])->assertUnprocessable();
+
+        // Untouched: still exactly what verification posted, not relieved by
+        // a payment that never happened.
+        $this->assertSame('-50000.00', $this->movementOn(self::PAYABLE));
+        $this->assertDatabaseMissing('bill_payments', ['bill_id' => $bill->id]);
+    }
+
+    /**
+     * The controller validation above is the friendly error; this proves the
+     * invariant also holds at the one place every BillPayment creator shares —
+     * the single-invoice screen, the batch run, and a petty-cash disbursement
+     * against a linked bill all end in JournalPostingService::postSupplierPayment()
+     * via BillPayment::boot() — by creating the row directly, the way the batch
+     * run and the petty-cash path both do.
+     */
+    public function test_a_supplier_payment_is_refused_at_the_posting_choke_point_when_funded_by_supplier_credit(): void
+    {
+        $this->deliverAndConfirm();
+        $bill = $this->bill();
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
+
+        $apSource = PaymentSource::where('code', 'AP')->firstOrFail();
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Supplier Credit');
+
+        BillPayment::create([
+            'bill_id' => $bill->id,
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $apSource->id,
+            'reference_number' => 'TRX-AP-SOURCE-DIRECT',
+            'user_id' => $this->accounts->id,
+        ]);
+    }
+
+    /**
      * The payment leg is conditioned on the invoice leg. Without that, settling
      * a grandfathered legacy bill would debit a payable nothing ever credited.
      */

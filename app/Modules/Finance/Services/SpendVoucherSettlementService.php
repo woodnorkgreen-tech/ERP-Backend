@@ -63,6 +63,19 @@ class SpendVoucherSettlementService
             ]);
         }
 
+        // Supplier Credit (type payable) is the liability itself, not an account
+        // money leaves from. The request-time validation in
+        // SpendVoucherController already refuses it; this is the same rule
+        // enforced again at the one place every cash-out voucher must pass
+        // through, so a voucher written before that check existed — or by any
+        // future caller that skips it — still cannot mint a Payment against a
+        // liability account.
+        if ($source->type === 'payable') {
+            throw ValidationException::withMessages([
+                'payment_source_id' => 'Supplier Credit is a liability account, not a paying account. Select the bank, float, mobile money or card the money actually left from.',
+            ]);
+        }
+
         $method = $voucher->payment_method;
         if ($method !== null && $method !== '' && ! in_array($method, PaymentMethods::values(), true)) {
             throw ValidationException::withMessages([

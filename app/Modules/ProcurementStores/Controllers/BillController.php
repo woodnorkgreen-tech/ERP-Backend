@@ -438,13 +438,24 @@ class BillController extends Controller
             // Two independent facts: which account the money left, and how it
             // was transmitted. The account is required because it decides the
             // credit leg; the method is required because nothing else records
-            // whether this was a cheque or an RTGS.
-            'payment_source_id' => ['required', Rule::exists('payment_sources', 'id')->where('is_active', true)],
+            // whether this was a cheque or an RTGS. Supplier Credit (type
+            // payable) is excluded: it IS the liability this payment settles,
+            // so picking it as the paying account would credit the same
+            // control account the invoice already owes — a wash entry with no
+            // cash leaving any real bank or float.
+            'payment_source_id' => [
+                'required',
+                Rule::exists('payment_sources', 'id')->where(
+                    fn ($query) => $query->where('is_active', true)->where('type', '!=', 'payable')
+                ),
+            ],
             'payment_method' => ['required', Rule::in(PaymentMethods::values())],
             'reference_number' => 'nullable|required_unless:payment_method,cash|string|max:255',
             // What the bank or M-Pesa charged us to send it. On top of the
             // invoice, never part of it.
             'transaction_cost' => 'nullable|numeric|min:0|max:999999.99',
+        ], [
+            'payment_source_id.exists' => 'Select the account money actually leaves from. Supplier Credit is a liability, not a paying account.',
         ]);
 
         if ($validator->fails()) {
@@ -489,12 +500,21 @@ class BillController extends Controller
             'amount_paid' => 'required|numeric|min:0.01',
             'payment_date' => 'required|date',
             // Same gate as the single-bill path above. A batch payment is the
-            // one place a control is most likely to be missed.
-            'payment_source_id' => ['required', Rule::exists('payment_sources', 'id')->where('is_active', true)],
+            // one place a control is most likely to be missed. Supplier Credit
+            // excluded for the same reason: it's the liability being settled,
+            // not an account cash can leave from.
+            'payment_source_id' => [
+                'required',
+                Rule::exists('payment_sources', 'id')->where(
+                    fn ($query) => $query->where('is_active', true)->where('type', '!=', 'payable')
+                ),
+            ],
             'payment_method' => ['required', Rule::in(PaymentMethods::values())],
             'reference_number' => 'nullable|required_unless:payment_method,cash|string|max:255',
             // One transfer, one charge — however many invoices it clears.
             'transaction_cost' => 'nullable|numeric|min:0|max:999999.99',
+        ], [
+            'payment_source_id.exists' => 'Select the account money actually leaves from. Supplier Credit is a liability, not a paying account.',
         ]);
 
         if ($validator->fails()) {

@@ -459,6 +459,51 @@ class JournalPostingTest extends TestCase
         $this->assertDatabaseMissing('journal_entries', ['spend_voucher_id' => $voucher->id]);
     }
 
+    /**
+     * SpendVoucherController::store() refuses a `payable`-type payment source
+     * at request time (see CostSettlementModeTest), but this voucher is built
+     * directly on the model the way a pre-existing row or a future caller
+     * could, to prove the settlement service itself — not just the request
+     * validation — refuses to mint a Payment against a liability account.
+     */
+    public function test_posting_refuses_a_payment_source_that_is_itself_a_liability(): void
+    {
+        $apSource = PaymentSource::create([
+            'name' => 'Supplier Credit (Payable)', 'code' => 'AP-TEST', 'type' => 'payable',
+            'gl_account_id' => ChartOfAccount::where('code', '2100')->value('id'), 'is_active' => true,
+        ]);
+
+        $voucher = SpendVoucher::create([
+            'voucher_no' => 'SV-TEST-AP-SOURCE',
+            'type' => 'advance',
+            'status' => 'approved',
+            'transacted_at' => now(),
+            'posting_date' => now()->toDateString(),
+            'payee_name' => 'Test Supplier',
+            'requester_user_id' => $this->user->id,
+            'approved_by' => $this->approver->id,
+            'approved_at' => now(),
+            'total_amount' => '1000.00',
+            'base_total_amount' => '1000.00',
+            'net_amount' => '1000.00',
+            'net_cash_paid' => '1000.00',
+            'payment_source_id' => $apSource->id,
+        ]);
+
+        $this->actingAs($this->poster, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucher->id}/post")
+            ->assertUnprocessable()
+            ->assertJsonPath(
+                'message',
+                'Supplier Credit is a liability account, not a paying account. Select the bank, float, mobile money or card the money actually left from.',
+            );
+
+        $this->assertSame('approved', $voucher->fresh()->status);
+        $this->assertNull($voucher->fresh()->posted_at);
+        $this->assertDatabaseMissing('payments', ['spend_voucher_id' => $voucher->id]);
+        $this->assertDatabaseMissing('journal_entries', ['spend_voucher_id' => $voucher->id]);
+    }
+
     public function test_spend_voucher_actions_require_their_own_permissions(): void
     {
         $outsider = User::factory()->create(['is_active' => true]);

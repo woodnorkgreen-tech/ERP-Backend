@@ -259,6 +259,53 @@ class CostSettlementModeTest extends TestCase
         ]);
     }
 
+    public function test_a_payment_voucher_cannot_be_funded_from_supplier_credit(): void
+    {
+        $supplier = Supplier::create([
+            'supplier_name' => 'Credit Test Supplier Ltd',
+            'contact_person' => 'Accounts',
+            'phone' => '0700000020',
+            'email' => 'credit-test-supplier@example.test',
+            'address' => 'Industrial Area',
+            'payment_terms' => '30 days',
+            'status' => 'Active',
+            'user_id' => $this->user->id,
+        ]);
+
+        $this->actingAs($this->user, 'sanctum');
+        $costId = $this->postJson('/api/costs', [
+            'expense_code' => $this->expenseCode->code,
+            'amount' => 1800,
+            'description' => 'Supplier invoice on credit',
+            'funding_mode' => 'unpaid_invoice',
+            'payee_type' => 'SUPPLIER',
+            'payee_id' => $supplier->id,
+            'payee_name' => $supplier->supplier_name,
+        ])->assertCreated()->json('data.id');
+
+        app(CostVerificationService::class)->verify(CostLine::findOrFail($costId), $this->verifier);
+
+        // Supplier Credit is the liability the cost line was already booked
+        // against; offering it back as the voucher's own paying account would
+        // let a payment voucher "settle" it by crediting the same control
+        // account it owes, with no cash ever leaving a real bank or float.
+        $apSource = PaymentSource::where('code', 'AP')->firstOrFail();
+
+        $this->actingAs($this->verifier, 'sanctum')
+            ->postJson('/api/finance/spend-vouchers', [
+                'type' => 'payment',
+                'payee_name' => $supplier->supplier_name,
+                'total_amount' => 1800,
+                'payment_method' => 'bank_transfer',
+                'payment_source_id' => $apSource->id,
+                'allocations' => [['cost_line_id' => $costId, 'amount' => 1800]],
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['payment_source_id']);
+
+        $this->assertDatabaseMissing('spend_vouchers', ['payment_source_id' => $apSource->id]);
+    }
+
     public function test_incomplete_voucher_types_are_not_accepted_by_the_public_endpoint(): void
     {
         $this->actingAs($this->verifier, 'sanctum');

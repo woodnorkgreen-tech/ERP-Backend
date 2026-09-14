@@ -1049,9 +1049,22 @@ class JournalPostingService
         $this->assertOpenPeriod($period?->id, "supplier payment {$payment->payment_code}");
 
         $payable = $this->accountByCode(self::PAYABLE_CODE);
-        $sourceAccount = $payment->payment_source_id
-            ? PaymentSource::whereKey($payment->payment_source_id)->value('gl_account_id')
-            : null;
+        $source = $payment->payment_source_id ? PaymentSource::find($payment->payment_source_id) : null;
+        $sourceAccount = $source?->gl_account_id;
+
+        // The choke point every BillPayment creator shares — the single-invoice
+        // screen, the batch run, and a petty-cash disbursement against a linked
+        // bill all end up here (see BillPayment::boot()). Supplier Credit (type
+        // payable) IS the liability this payment is relieving: crediting it as
+        // the "cash" leg would debit and credit the same control account for
+        // the same amount, discharging a real payable with nothing actually
+        // paid.
+        if ($source?->type === 'payable') {
+            throw new InvalidArgumentException(
+                "Supplier payment {$payment->payment_code} cannot post: its paying account is Supplier Credit, "
+                . 'a liability account, not somewhere cash can leave from.'
+            );
+        }
 
         if (! $payable || ! $sourceAccount || ! ChartOfAccount::postable()->whereKey($sourceAccount)->exists()) {
             throw new InvalidArgumentException(
