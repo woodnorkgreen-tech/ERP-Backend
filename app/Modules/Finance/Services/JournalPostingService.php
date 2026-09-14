@@ -2,8 +2,8 @@
 
 namespace App\Modules\Finance\Services;
 
-use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
+use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
@@ -14,9 +14,11 @@ use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Models\SpendVoucherAllocation;
 use App\Modules\Finance\Models\VatTreatment;
 use App\Modules\Finance\Models\WhtCategory;
+use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -31,6 +33,7 @@ class JournalPostingService
      * Payable`).
      */
     private const VAT_INPUT_CODE = '1330';
+
     private const WHT_PAYABLE_CODE = '2120';
 
     /**
@@ -43,8 +46,11 @@ class JournalPostingService
      * against the bank.
      */
     private const INVENTORY_CODE = '1200';      // material relieved from the shelf
+
     private const ACCRUED_CODE = '2150';        // goods received, not yet invoiced
+
     private const PAYABLE_CODE = '2100';        // incurred, still owed to someone
+
     private const STAFF_ADVANCE_CODE = '1300';  // staff float/advance imprest asset
 
     /**
@@ -112,7 +118,7 @@ class JournalPostingService
                 '0.00',
             );
 
-            $entryNo = 'JE-CL-' . str_pad((string) $line->id, 7, '0', STR_PAD_LEFT);
+            $entryNo = 'JE-CL-'.str_pad((string) $line->id, 7, '0', STR_PAD_LEFT);
 
             $entry = JournalEntry::create([
                 'entry_no' => $entryNo,
@@ -122,7 +128,7 @@ class JournalPostingService
                 'source_type' => CostLine::class,
                 'source_id' => $line->id,
                 'source_ref' => $line->ref,
-                'description' => $line->description ?? 'Cost line posting: ' . $line->ref,
+                'description' => $line->description ?? 'Cost line posting: '.$line->ref,
                 'total_debit' => $total,
                 'total_credit' => $total,
                 'status' => 'posted',
@@ -225,7 +231,7 @@ class JournalPostingService
                 'entry_type' => 'debit',
                 'amount' => $tax,
                 'base_amount' => $this->base($line, $tax),
-                'description' => 'Recoverable input VAT on ' . $line->ref,
+                'description' => 'Recoverable input VAT on '.$line->ref,
             ];
         }
 
@@ -235,11 +241,11 @@ class JournalPostingService
                 'entry_type' => 'credit',
                 'amount' => $wht,
                 'base_amount' => $this->base($line, $wht),
-                'description' => 'Withholding tax retained on ' . $line->ref,
+                'description' => 'Withholding tax retained on '.$line->ref,
             ];
         }
 
-        $creditDesc = 'Payable/Clearing for ' . $line->ref;
+        $creditDesc = 'Payable/Clearing for '.$line->ref;
         $sourceId = $line->details['payment_source_id'] ?? null;
         if ($sourceId && $source = PaymentSource::find($sourceId)) {
             $creditDesc = "Direct settlement via {$source->name} for {$line->ref}";
@@ -282,7 +288,7 @@ class JournalPostingService
         if (! $account) {
             throw new InvalidArgumentException(
                 "Cost line {$line->ref} carries recoverable VAT but no input-VAT account is configured. "
-                . 'Set a GL account on the VAT treatment, or add account ' . self::VAT_INPUT_CODE . ' to the chart.'
+                .'Set a GL account on the VAT treatment, or add account '.self::VAT_INPUT_CODE.' to the chart.'
             );
         }
 
@@ -300,7 +306,7 @@ class JournalPostingService
         if (! $account) {
             throw new InvalidArgumentException(
                 "Cost line {$line->ref} withholds tax but no WHT payable account is configured. "
-                . 'Set a GL account on the WHT category, or add account ' . self::WHT_PAYABLE_CODE . ' to the chart.'
+                .'Set a GL account on the WHT category, or add account '.self::WHT_PAYABLE_CODE.' to the chart.'
             );
         }
 
@@ -336,8 +342,6 @@ class JournalPostingService
             return $existing;
         }
 
-        $this->assertOpenPeriod($voucher->accounting_period_id, "spend voucher {$voucher->voucher_no}");
-
         return DB::transaction(function () use ($voucher) {
             $amount = (string) ($voucher->net_cash_paid ?? $voucher->total_amount);
             if (bccomp($amount, '0.00', 2) <= 0) {
@@ -345,52 +349,65 @@ class JournalPostingService
             }
 
             $debitLegs = $this->voucherDebitLegs($voucher, $amount);
-            $creditAccountId = $this->voucherPaymentSourceAccount($voucher);
-
-            if (! $debitLegs || ! $creditAccountId) {
+            if (! $debitLegs) {
                 throw new InvalidArgumentException("No complete posting rule could be resolved for spend voucher {$voucher->voucher_no}.");
             }
 
-            $entryNo = 'JE-SV-' . str_pad((string) $voucher->id, 7, '0', STR_PAD_LEFT);
+            $entryNo = 'JE-SV-'.str_pad((string) $voucher->id, 7, '0', STR_PAD_LEFT);
 
-            $entry = JournalEntry::create([
-                'entry_no' => $entryNo,
-                'posting_date' => $voucher->posting_date ?? now()->toDateString(),
-                'accounting_period_id' => $voucher->accounting_period_id,
-                'spend_voucher_id' => $voucher->id,
-                'source_type' => SpendVoucher::class,
-                'source_id' => $voucher->id,
-                'source_ref' => $voucher->voucher_no,
-                'description' => 'Voucher payment: ' . $voucher->voucher_no,
-                'total_debit' => $amount,
-                'total_credit' => $amount,
-                'status' => 'posted',
-                'created_by' => $voucher->posted_by ?? auth()->id(),
-                'posted_at' => now(),
-            ]);
+            if (! in_array($voucher->type, ['payment', 'reimbursement', 'advance', 'refund'], true)) {
+                $creditAccountId = $this->voucherPaymentSourceAccount($voucher);
+                if (! $creditAccountId) {
+                    throw new InvalidArgumentException("No credit account could be resolved for spend voucher {$voucher->voucher_no}.");
+                }
 
-            foreach ($debitLegs as $leg) {
-                JournalLine::create([
-                    'journal_entry_id' => $entry->id,
+                $legs = array_map(fn (array $leg): array => [
+                    ...$leg,
                     'entry_type' => 'debit',
                     'currency' => $voucher->currency ?? 'KES',
                     'fx_rate' => $voucher->fx_rate ?? 1,
-                    'base_amount' => $leg['amount'],
-                    ...$leg,
-                ]);
-            }
+                ], $debitLegs);
+                $legs[] = [
+                    'account_id' => $creditAccountId,
+                    'entry_type' => 'credit',
+                    'amount' => $amount,
+                    'currency' => $voucher->currency ?? 'KES',
+                    'fx_rate' => $voucher->fx_rate ?? 1,
+                    'base_amount' => $voucher->base_total_amount ?? $amount,
+                    'description' => 'Voucher credit',
+                ];
 
-            // Credit leg
-            JournalLine::create([
-                'journal_entry_id' => $entry->id,
-                'account_id' => $creditAccountId,
-                'entry_type' => 'credit',
-                'amount' => $amount,
-                'currency' => $voucher->currency ?? 'KES',
-                'fx_rate' => $voucher->fx_rate ?? 1,
-                'base_amount' => $voucher->base_total_amount ?? $amount,
-                'description' => 'Cash/Bank Outflow',
-            ]);
+                $entry = $this->postBalancedEntry(
+                    entryNo: $entryNo,
+                    postingDate: (string) ($voucher->posting_date?->toDateString() ?? now()->toDateString()),
+                    sourceType: SpendVoucher::class,
+                    sourceId: $voucher->id,
+                    sourceRef: $voucher->voucher_no,
+                    description: 'Voucher posting: '.$voucher->voucher_no,
+                    legs: $legs,
+                    createdBy: $voucher->posted_by ?? auth()->id(),
+                    accountingPeriodId: $voucher->accounting_period_id,
+                    spendVoucherId: $voucher->id,
+                );
+            } else {
+                $entry = $this->postCashSettlement(
+                    entryNo: $entryNo,
+                    postingDate: (string) ($voucher->posting_date?->toDateString() ?? now()->toDateString()),
+                    sourceType: SpendVoucher::class,
+                    sourceId: $voucher->id,
+                    sourceRef: $voucher->voucher_no,
+                    description: 'Voucher payment: '.$voucher->voucher_no,
+                    debitLegs: $debitLegs,
+                    paymentSource: $voucher->paymentSource,
+                    creditDescription: 'Cash/Bank Outflow',
+                    createdBy: $voucher->posted_by ?? auth()->id(),
+                    accountingPeriodId: $voucher->accounting_period_id,
+                    spendVoucherId: $voucher->id,
+                    currency: $voucher->currency ?? 'KES',
+                    fxRate: (string) ($voucher->fx_rate ?? 1),
+                    creditBaseAmount: (string) ($voucher->base_total_amount ?? $amount),
+                );
+            }
 
             $voucher->forceFill([
                 'posted_at' => now(),
@@ -460,7 +477,7 @@ class JournalPostingService
         if ($original->reversal_of_id) {
             throw new InvalidArgumentException(
                 "Journal entry {$original->entry_no} is itself a reversal and cannot be reversed. "
-                . 'Post the corrected document instead.'
+                .'Post the corrected document instead.'
             );
         }
 
@@ -493,7 +510,7 @@ class JournalPostingService
                 'source_type' => $original->source_type,
                 'source_id' => $original->source_id,
                 'source_ref' => $original->source_ref,
-                'description' => 'Reversal of ' . $original->entry_no . ': ' . $reason,
+                'description' => 'Reversal of '.$original->entry_no.': '.$reason,
                 'total_debit' => $original->total_credit,
                 'total_credit' => $original->total_debit,
                 'status' => 'posted',
@@ -511,7 +528,7 @@ class JournalPostingService
                     'currency' => $originalLine->currency,
                     'fx_rate' => $originalLine->fx_rate,
                     'base_amount' => $originalLine->base_amount,
-                    'description' => 'Reversal: ' . ($originalLine->description ?? $original->source_ref),
+                    'description' => 'Reversal: '.($originalLine->description ?? $original->source_ref),
                     'cost_centre_id' => $originalLine->cost_centre_id,
                     'activity_id' => $originalLine->activity_id,
                     'project_id' => $originalLine->project_id,
@@ -536,7 +553,7 @@ class JournalPostingService
         $suffix = '-REV';
         $room = 32 - strlen($suffix);
 
-        return substr($original->entry_no, 0, $room) . $suffix;
+        return substr($original->entry_no, 0, $room).$suffix;
     }
 
     private function resolveRuleForCostLine(CostLine $line): ?PostingRule
@@ -546,7 +563,9 @@ class JournalPostingService
                 ->where('expense_code_id', $line->expense_code_id)
                 ->orderBy('priority', 'desc')
                 ->first();
-            if ($rule) return $rule;
+            if ($rule) {
+                return $rule;
+            }
         }
 
         return PostingRule::active()
@@ -694,6 +713,7 @@ class JournalPostingService
         }
 
         $creditId = $voucher->paymentSource?->gl_account_id;
+
         return $creditId && ChartOfAccount::postable()->whereKey($creditId)->exists()
             ? (int) $creditId
             : null;
@@ -705,6 +725,7 @@ class JournalPostingService
         // Advance: Dr Staff Advances (1300)
         if ($voucher->type === 'advance') {
             $account = $this->accountByCode('1300');
+
             return $account ? [[
                 'account_id' => $account,
                 'amount' => $voucherAmount,
@@ -721,6 +742,7 @@ class JournalPostingService
                 ->where('category', 'expense')
                 ->orderBy('code')
                 ->value('id');
+
             return $expenseAccount ? [[
                 'account_id' => (int) $expenseAccount,
                 'amount' => $voucherAmount,
@@ -731,6 +753,7 @@ class JournalPostingService
         // Top-up: Dr Petty Cash (1030)
         if ($voucher->type === 'top_up') {
             $account = $this->accountByCode('1030');
+
             return $account ? [[
                 'account_id' => $account,
                 'amount' => $voucherAmount,
@@ -758,8 +781,7 @@ class JournalPostingService
                         throw new InvalidArgumentException("Allocated cost line {$costLine->ref} is no longer a posted, verified liability.");
                     }
 
-                    $liabilityLines = $costLine->journalEntry->lines->filter(fn (JournalLine $line) =>
-                        $line->entry_type === 'credit' && $controlAccounts->contains((int) $line->account_id)
+                    $liabilityLines = $costLine->journalEntry->lines->filter(fn (JournalLine $line) => $line->entry_type === 'credit' && $controlAccounts->contains((int) $line->account_id)
                     );
                     $journalLiability = $liabilityLines->reduce(
                         fn (string $sum, JournalLine $line) => bcadd($sum, (string) $line->amount, 2),
@@ -802,6 +824,7 @@ class JournalPostingService
             // Refund without allocations defaults to Accounts Payable (2100)
             if ($voucher->type === 'refund') {
                 $account = $this->accountByCode(self::PAYABLE_CODE);
+
                 return $account ? [[
                     'account_id' => $account,
                     'amount' => $voucherAmount,
@@ -815,7 +838,7 @@ class JournalPostingService
         if ($voucher->type === 'reversal') {
             throw new InvalidArgumentException(
                 "Reversal voucher {$voucher->voucher_no} should be handled by reverseEntry method, not voucherDebitLegs. "
-                . "Use JournalPostingService::reverseEntry() instead."
+                .'Use JournalPostingService::reverseEntry() instead.'
             );
         }
 
@@ -855,7 +878,7 @@ class JournalPostingService
      */
     public function postSupplierInvoice(Bill $bill): ?JournalEntry
     {
-        $entryNo = 'JE-BILL-' . str_pad((string) $bill->id, 7, '0', STR_PAD_LEFT);
+        $entryNo = 'JE-BILL-'.str_pad((string) $bill->id, 7, '0', STR_PAD_LEFT);
 
         if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
             return $existing;
@@ -888,7 +911,7 @@ class JournalPostingService
         if (! $accrued || ! $payable) {
             throw new InvalidArgumentException(
                 "Supplier invoice {$bill->bill_number} cannot post: chart accounts "
-                . self::ACCRUED_CODE . ' and ' . self::PAYABLE_CODE . ' must both be active and postable.'
+                .self::ACCRUED_CODE.' and '.self::PAYABLE_CODE.' must both be active and postable.'
             );
         }
 
@@ -898,7 +921,7 @@ class JournalPostingService
         if (ChartOfAccount::postable()->whereIn('id', $accountIds)->count() !== count($accountIds)) {
             throw new InvalidArgumentException(
                 "Supplier invoice {$bill->bill_number} resolves to an inactive or non-postable account. "
-                . 'Finance must correct the account mapping before posting.'
+                .'Finance must correct the account mapping before posting.'
             );
         }
 
@@ -917,8 +940,8 @@ class JournalPostingService
                 'source_type' => Bill::class,
                 'source_id' => $bill->id,
                 'source_ref' => $bill->bill_number,
-                'description' => 'Supplier invoice ' . ($bill->supplier_invoice_number ?: $bill->bill_number)
-                    . ' accepted against ' . ($bill->purchaseOrder?->po_number ?? 'order'),
+                'description' => 'Supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
+                    .' accepted against '.($bill->purchaseOrder?->po_number ?? 'order'),
                 'total_debit' => $total,
                 'total_credit' => $total,
                 'status' => 'posted',
@@ -980,7 +1003,7 @@ class JournalPostingService
             'account_id' => $accrued,
             'entry_type' => 'debit',
             'amount' => $net,
-            'description' => 'Accrual cleared by supplier invoice ' . $bill->bill_number,
+            'description' => 'Accrual cleared by supplier invoice '.$bill->bill_number,
         ]];
 
         if (bccomp($vat, '0.00', 2) > 0) {
@@ -989,7 +1012,7 @@ class JournalPostingService
                     ?: $this->accountByCode(self::VAT_INPUT_CODE),
                 'entry_type' => 'debit',
                 'amount' => $vat,
-                'description' => 'Recoverable input VAT on ' . $bill->bill_number,
+                'description' => 'Recoverable input VAT on '.$bill->bill_number,
             ];
         }
 
@@ -999,7 +1022,7 @@ class JournalPostingService
                     ?: $this->accountByCode(self::WHT_PAYABLE_CODE),
                 'entry_type' => 'credit',
                 'amount' => $wht,
-                'description' => 'Withholding tax retained on ' . $bill->bill_number,
+                'description' => 'Withholding tax retained on '.$bill->bill_number,
             ];
         }
 
@@ -1007,7 +1030,7 @@ class JournalPostingService
             'account_id' => $payable,
             'entry_type' => 'credit',
             'amount' => bcsub(bcadd($net, $vat, 2), $wht, 2),
-            'description' => 'Owed to ' . ($bill->supplier?->supplier_name ?? 'supplier'),
+            'description' => 'Owed to '.($bill->supplier?->supplier_name ?? 'supplier'),
         ];
 
         return $legs;
@@ -1024,7 +1047,7 @@ class JournalPostingService
      */
     public function postSupplierPayment(BillPayment $payment): ?JournalEntry
     {
-        $entryNo = 'JE-BPAY-' . str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT);
+        $entryNo = 'JE-BPAY-'.str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT);
 
         if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
             return $existing;
@@ -1035,7 +1058,7 @@ class JournalPostingService
             return null;
         }
 
-        $invoiceEntry = JournalEntry::where('entry_no', 'JE-BILL-' . str_pad((string) $bill->id, 7, '0', STR_PAD_LEFT))->first();
+        $invoiceEntry = JournalEntry::where('entry_no', 'JE-BILL-'.str_pad((string) $bill->id, 7, '0', STR_PAD_LEFT))->first();
         if (! $invoiceEntry) {
             return null;
         }
@@ -1048,51 +1071,110 @@ class JournalPostingService
         $period = AccountingPeriod::forDate($payment->payment_date ?? now());
         $this->assertOpenPeriod($period?->id, "supplier payment {$payment->payment_code}");
 
-        $payable = $this->accountByCode(self::PAYABLE_CODE);
         $source = $payment->payment_source_id ? PaymentSource::find($payment->payment_source_id) : null;
-        $sourceAccount = $source?->gl_account_id;
-
-        // The choke point every BillPayment creator shares — the single-invoice
-        // screen, the batch run, and a petty-cash disbursement against a linked
-        // bill all end up here (see BillPayment::boot()). Supplier Credit (type
-        // payable) IS the liability this payment is relieving: crediting it as
-        // the "cash" leg would debit and credit the same control account for
-        // the same amount, discharging a real payable with nothing actually
-        // paid.
-        if ($source?->type === 'payable') {
+        $payable = $this->accountByCode(self::PAYABLE_CODE);
+        if (! $payable) {
             throw new InvalidArgumentException(
-                "Supplier payment {$payment->payment_code} cannot post: its paying account is Supplier Credit, "
-                . 'a liability account, not somewhere cash can leave from.'
-            );
-        }
-
-        if (! $payable || ! $sourceAccount || ! ChartOfAccount::postable()->whereKey($sourceAccount)->exists()) {
-            throw new InvalidArgumentException(
-                "Supplier payment {$payment->payment_code} cannot post: its payment source needs an active, "
-                . 'postable GL account, and chart account ' . self::PAYABLE_CODE . ' must be postable.'
+                'Supplier payment cannot post: chart account '.self::PAYABLE_CODE.' must be postable.'
             );
         }
 
         $requisition = $bill->purchaseOrder?->requisition;
 
-        return DB::transaction(fn () => $this->writeEntry(
+        return $this->postCashSettlement(
             entryNo: $entryNo,
             postingDate: (string) ($payment->payment_date?->toDateString() ?? now()->toDateString()),
-            periodId: $period->id,
             sourceType: BillPayment::class,
             sourceId: $payment->id,
             sourceRef: $payment->payment_code,
-            description: 'Payment ' . $payment->payment_code . ' against invoice ' . $bill->bill_number,
-            amount: $amount,
-            debitAccountId: $payable,
-            creditAccountId: (int) $sourceAccount,
-            debitDescription: 'Settled ' . $bill->bill_number . ' for '
-                . ($bill->supplier?->supplier_name ?? 'supplier'),
-            creditDescription: 'Cash/float outflow for ' . $bill->bill_number,
+            description: 'Payment '.$payment->payment_code.' against invoice '.$bill->bill_number,
+            debitLegs: [[
+                'account_id' => $payable,
+                'amount' => $amount,
+                'description' => 'Settled '.$bill->bill_number.' for '
+                    .($bill->supplier?->supplier_name ?? 'supplier'),
+                'project_id' => $requisition?->project_id,
+                'project_enquiry_id' => $requisition?->project_enquiry_id,
+            ]],
+            paymentSource: $source,
+            creditDescription: 'Cash/float outflow for '.$bill->bill_number,
             createdBy: $payment->user_id,
-            projectId: $requisition?->project_id,
-            projectEnquiryId: $requisition?->project_enquiry_id,
-        ));
+            accountingPeriodId: $period->id,
+            creditProjectId: $requisition?->project_id,
+            creditProjectEnquiryId: $requisition?->project_enquiry_id,
+        );
+    }
+
+    /**
+     * One accounting policy for cash leaving against an approved obligation.
+     *
+     * @param  array<int, array<string, mixed>>  $debitLegs
+     */
+    public function postCashSettlement(
+        string $entryNo,
+        string $postingDate,
+        string $sourceType,
+        int $sourceId,
+        ?string $sourceRef,
+        string $description,
+        array $debitLegs,
+        ?PaymentSource $paymentSource,
+        string $creditDescription,
+        ?int $createdBy = null,
+        ?int $accountingPeriodId = null,
+        ?int $spendVoucherId = null,
+        string $currency = 'KES',
+        string $fxRate = '1',
+        ?string $creditBaseAmount = null,
+        mixed $creditProjectId = null,
+        mixed $creditProjectEnquiryId = null,
+    ): JournalEntry {
+        if (! $paymentSource || $paymentSource->type === 'payable' || ! $paymentSource->is_active) {
+            throw new InvalidArgumentException(
+                "{$sourceRef} cannot post: Supplier Credit and inactive sources are not paying accounts."
+            );
+        }
+
+        $creditAccountId = $paymentSource->gl_account_id;
+        if (! $creditAccountId || ! ChartOfAccount::postable()->whereKey($creditAccountId)->exists()) {
+            throw new InvalidArgumentException("{$sourceRef} cannot post: its paying account needs an active, postable GL account.");
+        }
+
+        $total = array_reduce(
+            $debitLegs,
+            fn (string $sum, array $leg): string => bcadd($sum, $this->money($leg['amount'] ?? 0), 2),
+            '0.00',
+        );
+        $legs = array_map(fn (array $leg): array => [
+            ...$leg,
+            'entry_type' => 'debit',
+            'currency' => $leg['currency'] ?? $currency,
+            'fx_rate' => $leg['fx_rate'] ?? $fxRate,
+        ], $debitLegs);
+        $legs[] = [
+            'account_id' => (int) $creditAccountId,
+            'entry_type' => 'credit',
+            'amount' => $total,
+            'currency' => $currency,
+            'fx_rate' => $fxRate,
+            'base_amount' => $creditBaseAmount ?? $total,
+            'description' => $creditDescription,
+            'project_id' => $creditProjectId,
+            'project_enquiry_id' => $creditProjectEnquiryId,
+        ];
+
+        return $this->postBalancedEntry(
+            entryNo: $entryNo,
+            postingDate: $postingDate,
+            sourceType: $sourceType,
+            sourceId: $sourceId,
+            sourceRef: $sourceRef,
+            description: $description,
+            legs: $legs,
+            createdBy: $createdBy,
+            accountingPeriodId: $accountingPeriodId,
+            spendVoucherId: $spendVoucherId,
+        );
     }
 
     /**
@@ -1134,31 +1216,31 @@ class JournalPostingService
         if (! $charges || ! $sourceAccount) {
             throw new InvalidArgumentException(
                 "Payment {$payment->payment_no} carries a transaction fee that cannot post: chart account "
-                . self::BANK_CHARGES_CODE . ' must be postable, and the paying account needs a GL account.'
+                .self::BANK_CHARGES_CODE.' must be postable, and the paying account needs a GL account.'
             );
         }
 
         $reference = $payment->payment_no ?: (string) $payment->id;
 
         return $this->postBalancedEntry(
-            entryNo: 'JE-PFEE-' . str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT),
+            entryNo: 'JE-PFEE-'.str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT),
             postingDate: (string) ($payment->date_disbursed?->toDateString() ?? $payment->created_at?->toDateString() ?? now()->toDateString()),
             sourceType: Payment::class,
             sourceId: $payment->id,
             sourceRef: $reference,
-            description: 'Transaction fee on payment ' . $reference,
+            description: 'Transaction fee on payment '.$reference,
             legs: [
                 [
                     'account_id' => $charges,
                     'entry_type' => 'debit',
                     'amount' => $fee,
-                    'description' => 'Transfer charge on ' . $reference,
+                    'description' => 'Transfer charge on '.$reference,
                 ],
                 [
                     'account_id' => (int) $sourceAccount,
                     'entry_type' => 'credit',
                     'amount' => $fee,
-                    'description' => 'Fee deducted from ' . ($payment->paymentSource?->name ?? 'paying account'),
+                    'description' => 'Fee deducted from '.($payment->paymentSource?->name ?? 'paying account'),
                 ],
             ],
             createdBy: $payment->created_by,
@@ -1178,7 +1260,7 @@ class JournalPostingService
             return null;
         }
 
-        $entryNo = 'JE-PAY-' . str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT);
+        $entryNo = 'JE-PAY-'.str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT);
         if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
             return $existing;
         }
@@ -1205,7 +1287,7 @@ class JournalPostingService
             sourceType: Payment::class,
             sourceId: $payment->id,
             sourceRef: $payment->payment_no ?: (string) $payment->id,
-            description: 'Direct payment ' . ($payment->payment_no ?: $payment->id),
+            description: 'Direct payment '.($payment->payment_no ?: $payment->id),
             legs: [
                 [
                     'account_id' => (int) $expenseAccount,
@@ -1219,7 +1301,7 @@ class JournalPostingService
                     'account_id' => (int) $sourceAccount,
                     'entry_type' => 'credit',
                     'amount' => $amount,
-                    'description' => 'Payment from ' . ($payment->paymentSource?->name ?? 'paying account'),
+                    'description' => 'Payment from '.($payment->paymentSource?->name ?? 'paying account'),
                 ],
             ],
             createdBy: $payment->created_by,
@@ -1246,8 +1328,8 @@ class JournalPostingService
      * here: leave one door.
      *
      * @param  array<int, array<string, mixed>>  $legs  each with account_id,
-     *         entry_type ('debit'|'credit'), amount, and optionally description,
-     *         project_id, project_enquiry_id, cost_centre_id, activity_id
+     *                                                  entry_type ('debit'|'credit'), amount, and optionally description,
+     *                                                  project_id, project_enquiry_id, cost_centre_id, activity_id
      */
     public function postBalancedEntry(
         string $entryNo,
@@ -1258,6 +1340,8 @@ class JournalPostingService
         string $description,
         array $legs,
         ?int $createdBy = null,
+        ?int $accountingPeriodId = null,
+        ?int $spendVoucherId = null,
     ): JournalEntry {
         if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
             return $existing;
@@ -1267,7 +1351,9 @@ class JournalPostingService
             throw new InvalidArgumentException("Journal entry {$entryNo} has no lines.");
         }
 
-        $period = AccountingPeriod::forDate(\Illuminate\Support\Carbon::parse($postingDate));
+        $period = $accountingPeriodId
+            ? AccountingPeriod::query()->find($accountingPeriodId)
+            : AccountingPeriod::forDate(Carbon::parse($postingDate));
         $this->assertOpenPeriod($period?->id, $entryNo);
 
         $debit = '0.00';
@@ -1301,17 +1387,18 @@ class JournalPostingService
         if (ChartOfAccount::postable()->whereIn('id', $accountIds)->count() !== count($accountIds)) {
             throw new InvalidArgumentException(
                 "Journal entry {$entryNo} resolves to an inactive or non-postable account. "
-                . 'Finance must correct the account mapping before posting.'
+                .'Finance must correct the account mapping before posting.'
             );
         }
 
         return DB::transaction(function () use (
-            $entryNo, $postingDate, $period, $sourceType, $sourceId, $sourceRef, $description, $legs, $debit, $createdBy
+            $entryNo, $postingDate, $period, $sourceType, $sourceId, $sourceRef, $description, $legs, $debit, $createdBy, $spendVoucherId
         ) {
             $entry = JournalEntry::create([
                 'entry_no' => $entryNo,
                 'posting_date' => $postingDate,
                 'accounting_period_id' => $period->id,
+                'spend_voucher_id' => $spendVoucherId,
                 'source_type' => $sourceType,
                 'source_id' => $sourceId,
                 'source_ref' => $sourceRef,
@@ -1424,12 +1511,12 @@ class JournalPostingService
         if (! $advanceAccount || ! $sourceAccount) {
             throw new InvalidArgumentException(
                 "Disbursement {$disbursement->id} cannot post advance: chart account "
-                . self::STAFF_ADVANCE_CODE . ' must be postable, and the paying source needs a postable GL account.'
+                .self::STAFF_ADVANCE_CODE.' must be postable, and the paying source needs a postable GL account.'
             );
         }
 
         $reference = $disbursement->requisition?->requisition_number ?: ($disbursement->payment_no ?: (string) $disbursement->id);
-        $entryNo = 'JE-PCA-' . str_pad((string) $disbursement->id, 7, '0', STR_PAD_LEFT);
+        $entryNo = 'JE-PCA-'.str_pad((string) $disbursement->id, 7, '0', STR_PAD_LEFT);
 
         return $this->postBalancedEntry(
             entryNo: $entryNo,
@@ -1437,13 +1524,13 @@ class JournalPostingService
             sourceType: Payment::class,
             sourceId: $disbursement->id,
             sourceRef: $reference,
-            description: "Staff advance float for requisition {$reference} to " . ($disbursement->payee_name ?? 'Requester'),
+            description: "Staff advance float for requisition {$reference} to ".($disbursement->payee_name ?? 'Requester'),
             legs: [
                 [
                     'account_id' => (int) $advanceAccount,
                     'entry_type' => 'debit',
                     'amount' => $amount,
-                    'description' => 'Staff advance float: ' . ($disbursement->payee_name ?? 'Requester'),
+                    'description' => 'Staff advance float: '.($disbursement->payee_name ?? 'Requester'),
                     'project_id' => $disbursement->project_id,
                     'project_enquiry_id' => $disbursement->project_enquiry_id,
                 ],
@@ -1451,7 +1538,7 @@ class JournalPostingService
                     'account_id' => (int) $sourceAccount,
                     'entry_type' => 'credit',
                     'amount' => $amount,
-                    'description' => 'Disbursed from ' . ($disbursement->paymentSource?->name ?? 'Cash Float'),
+                    'description' => 'Disbursed from '.($disbursement->paymentSource?->name ?? 'Cash Float'),
                     'project_id' => $disbursement->project_id,
                     'project_enquiry_id' => $disbursement->project_enquiry_id,
                 ],
@@ -1469,11 +1556,11 @@ class JournalPostingService
      *   Cr  1300 Staff Advances             advance cleared (up to advance amount)
      *   Cr  Payment Source / Cash Float     reimbursement for overspend (if any)
      */
-    public function postPettyCashSurrender(\App\Modules\Finance\PettyCash\Models\PettyCashRequisition $requisition): ?JournalEntry
+    public function postPettyCashSurrender(PettyCashRequisition $requisition): ?JournalEntry
     {
         $requisition->loadMissing(['surrenderItems.expenseCode', 'disbursement.paymentSource']);
 
-        $entryNo = 'JE-PCS-' . str_pad((string) $requisition->id, 7, '0', STR_PAD_LEFT);
+        $entryNo = 'JE-PCS-'.str_pad((string) $requisition->id, 7, '0', STR_PAD_LEFT);
         if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
             return $existing;
         }
@@ -1487,7 +1574,7 @@ class JournalPostingService
         if (! $advanceAccount || ! $sourceAccount) {
             throw new InvalidArgumentException(
                 "Requisition {$requisition->requisition_number} cannot reconcile surrender: chart account "
-                . self::STAFF_ADVANCE_CODE . ' must be postable, and the paying source needs a postable GL account.'
+                .self::STAFF_ADVANCE_CODE.' must be postable, and the paying source needs a postable GL account.'
             );
         }
 
@@ -1579,7 +1666,7 @@ class JournalPostingService
         return $this->postBalancedEntry(
             entryNo: $entryNo,
             postingDate: $postingDate,
-            sourceType: \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::class,
+            sourceType: PettyCashRequisition::class,
             sourceId: $requisition->id,
             sourceRef: $requisition->requisition_number,
             description: "Surrender reconciliation: {$requisition->requisition_number} ({$requisition->purpose})",
