@@ -349,4 +349,23 @@ class SupplierLedgerRailTest extends TestCase
             $this->assertEquals($entry->total_debit, $debits, "Entry {$entry->entry_no} header disagrees with its lines.");
         }
     }
+
+    public function test_a_verified_supplier_invoice_cannot_be_deleted(): void
+    {
+        $bill = $this->bill();
+        $bill->forceFill([
+            'verified_at' => now(),
+            'verified_by' => $this->accounts->id,
+            'verification_basis' => 'three_way_match',
+        ])->save();
+
+        $this->deleteJson("/api/procurement-stores/bills/{$bill->id}")
+            ->assertUnprocessable()
+            ->assertJsonPath(
+                'error',
+                'A verified, posted, or paid supplier invoice is an accounting record and cannot be deleted. Reverse or credit it instead.',
+            );
+
+        $this->assertDatabaseHas('bills', ['id' => $bill->id]);
+    }
 }

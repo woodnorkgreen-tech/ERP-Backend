@@ -13,6 +13,7 @@ use App\Modules\Finance\Database\Seeders\ExpenseCodeSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
 use App\Modules\Finance\Database\Seeders\PaymentSourceSeeder;
 use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\ProcurementStores\Models\Supplier;
 use App\Modules\HR\Models\Department;
 use App\Modules\HR\Models\Employee;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -205,5 +206,70 @@ class CostSettlementModeTest extends TestCase
             ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['payee_type', 'payee_id']);
+    }
+
+    public function test_supplier_credit_can_only_be_paid_to_its_supplier_with_a_payment_voucher(): void
+    {
+        $supplier = Supplier::create([
+            'supplier_name' => 'Correct Supplier Ltd',
+            'contact_person' => 'Accounts',
+            'phone' => '0700000010',
+            'email' => 'correct-supplier@example.test',
+            'address' => 'Industrial Area',
+            'payment_terms' => '30 days',
+            'status' => 'Active',
+            'user_id' => $this->user->id,
+        ]);
+
+        $this->actingAs($this->user, 'sanctum');
+        $costId = $this->postJson('/api/costs', [
+            'expense_code' => $this->expenseCode->code,
+            'amount' => 2400,
+            'description' => 'Supplier invoice on credit',
+            'funding_mode' => 'unpaid_invoice',
+            'payee_type' => 'SUPPLIER',
+            'payee_id' => $supplier->id,
+            'payee_name' => 'Untrusted typed name',
+        ])->assertCreated()->json('data.id');
+
+        app(CostVerificationService::class)->verify(CostLine::findOrFail($costId), $this->verifier);
+        $this->actingAs($this->verifier, 'sanctum');
+
+        $payload = [
+            'payee_name' => 'Wrong Payee',
+            'total_amount' => 2400,
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $this->bankSource->id,
+            'allocations' => [['cost_line_id' => $costId, 'amount' => 2400]],
+        ];
+
+        $this->postJson('/api/finance/spend-vouchers', ['type' => 'reimbursement'] + $payload)
+            ->assertUnprocessable()
+            ->assertJsonPath('message', "Cost line ".CostLine::findOrFail($costId)->ref." is not an out-of-pocket staff claim. Use a payment voucher for supplier liabilities.");
+
+        $response = $this->postJson('/api/finance/spend-vouchers', ['type' => 'payment'] + $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.payee_name', 'Correct Supplier Ltd')
+            ->assertJsonPath('data.supplier_id', $supplier->id);
+
+        $this->assertDatabaseHas('spend_vouchers', [
+            'id' => $response->json('data.id'),
+            'payee_name' => 'Correct Supplier Ltd',
+            'supplier_id' => $supplier->id,
+        ]);
+    }
+
+    public function test_incomplete_voucher_types_are_not_accepted_by_the_public_endpoint(): void
+    {
+        $this->actingAs($this->verifier, 'sanctum');
+
+        foreach (['retirement', 'refund', 'top_up', 'reversal'] as $type) {
+            $this->postJson('/api/finance/spend-vouchers', [
+                'type' => $type,
+                'payee_name' => 'Unsafe free-form payee',
+                'total_amount' => 100,
+                'payment_source_id' => $this->bankSource->id,
+            ])->assertUnprocessable()->assertJsonValidationErrors('type');
+        }
     }
 }

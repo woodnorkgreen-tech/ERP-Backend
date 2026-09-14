@@ -141,6 +141,7 @@ class SpendVoucherController extends Controller
                     'ref' => $line->ref,
                     'description' => $line->description,
                     'payee_name' => $line->payee_name ?: $line->payee_supplier_name,
+                    'supplier_id' => $fundingMode === 'unpaid_invoice' ? $line->payee_id : null,
                     'funding_mode' => $fundingMode,
                     'claimant_name' => $claimantName,
                     'claimant_user_id' => $line->details['claimant_user_id'] ?? $line->submitted_by_user_id,

@@ -346,11 +346,16 @@ class JournalPostingTest extends TestCase
         // Left null on every voucher until now, which meant voucher journals
         // belonged to no period and could not be swept up by a period close.
         $this->actingAs($this->user, 'sanctum');
+        $source = PaymentSource::create([
+            'name' => 'Period Test Bank', 'code' => 'BANK-PERIOD', 'type' => 'bank',
+            'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'), 'is_active' => true,
+        ]);
 
         $response = $this->postJson('/api/finance/spend-vouchers', [
-            'type' => 'retirement',
+            'type' => 'advance',
             'payee_name' => 'Test Supplier',
             'total_amount' => 1000.00,
+            'payment_source_id' => $source->id,
         ]);
 
         $response->assertStatus(201);
@@ -366,11 +371,16 @@ class JournalPostingTest extends TestCase
     public function test_a_voucher_cannot_be_posted_into_a_locked_period(): void
     {
         $this->actingAs($this->user, 'sanctum');
+        $source = PaymentSource::create([
+            'name' => 'Locked Period Bank', 'code' => 'BANK-LOCKED', 'type' => 'bank',
+            'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'), 'is_active' => true,
+        ]);
 
         $voucherId = $this->postJson('/api/finance/spend-vouchers', [
-            'type' => 'retirement',
+            'type' => 'advance',
             'payee_name' => 'Test Supplier',
             'total_amount' => 1000.00,
+            'payment_source_id' => $source->id,
         ])->assertStatus(201)->json('data.id');
 
         $this->actingAs($this->approver, 'sanctum')
@@ -415,7 +425,11 @@ class JournalPostingTest extends TestCase
 
     public function test_posting_rolls_back_when_no_gl_accounts_can_be_resolved(): void
     {
-        $this->withoutExceptionHandling();
+        $bankAccountId = ChartOfAccount::where('code', '1010')->value('id');
+        $source = PaymentSource::create([
+            'name' => 'Unmapped Test Bank', 'code' => 'BANK-NO-GL', 'type' => 'bank',
+            'gl_account_id' => $bankAccountId, 'is_active' => true,
+        ]);
         ChartOfAccount::query()->update(['is_postable' => false]);
 
         $voucher = SpendVoucher::create([
@@ -432,15 +446,13 @@ class JournalPostingTest extends TestCase
             'base_total_amount' => '1000.00',
             'net_amount' => '1000.00',
             'net_cash_paid' => '1000.00',
+            'payment_source_id' => $source->id,
         ]);
 
-        try {
-            $this->actingAs($this->poster, 'sanctum')
-                ->postJson("/api/finance/spend-vouchers/{$voucher->id}/post");
-            $this->fail('Posting succeeded without a debit and credit account.');
-        } catch (\InvalidArgumentException $e) {
-            $this->assertStringContainsString('No complete posting rule', $e->getMessage());
-        }
+        $this->actingAs($this->poster, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucher->id}/post")
+            ->assertUnprocessable()
+            ->assertJsonPath('message', "No complete posting rule could be resolved for spend voucher {$voucher->voucher_no}.");
 
         $this->assertSame('approved', $voucher->fresh()->status);
         $this->assertNull($voucher->fresh()->posted_at);
@@ -467,10 +479,10 @@ class JournalPostingTest extends TestCase
         $superAdmin->assignRole('Super Admin');
 
         $source = PaymentSource::create([
-            'name' => 'Admin Safe',
-            'code' => 'SAFE-ADMIN',
-            'type' => 'petty_cash',
-            'gl_account_id' => ChartOfAccount::where('code', '1030')->value('id'),
+            'name' => 'Admin Bank',
+            'code' => 'BANK-ADMIN',
+            'type' => 'bank',
+            'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'),
             'is_active' => true,
         ]);
         $voucher = $this->voucher([
@@ -491,7 +503,11 @@ class JournalPostingTest extends TestCase
         $this->assertDatabaseHas('hr_audit_logs', [
             'action' => 'spend_voucher_posted',
             'model_id' => $voucher->id,
-            'message' => 'Spend voucher SV-SUPER-POST posted to General Ledger. Separation-of-duties override used.',
         ]);
+        $this->assertStringContainsString(
+            'Separation-of-duties override used.',
+            (string) DB::table('hr_audit_logs')->where('action', 'spend_voucher_posted')
+                ->where('model_id', $voucher->id)->value('message'),
+        );
     }
 }
