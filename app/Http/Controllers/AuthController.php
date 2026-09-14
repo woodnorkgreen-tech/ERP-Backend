@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Laravel\Sanctum\PersonalAccessToken;
 
 /**
  * @OA\Info(
@@ -146,7 +148,29 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        $user = $request->user();
+        $accessToken = $user?->currentAccessToken();
+        $bearerToken = $request->bearerToken();
+
+        // Resolve the credential from the Authorization header first. In a
+        // stateful Sanctum request currentAccessToken() may be a TransientToken
+        // even when the client supplied a bearer token, which previously left
+        // that token usable after a successful logout response.
+        $tokenModel = config('sanctum.personal_access_token_model', PersonalAccessToken::class);
+        $bearerAccessToken = $bearerToken ? $tokenModel::findToken($bearerToken) : null;
+
+        if ($bearerAccessToken && (int) $bearerAccessToken->tokenable_id === (int) $user?->id) {
+            $bearerAccessToken->delete();
+        } elseif ($accessToken instanceof PersonalAccessToken) {
+            $accessToken->delete();
+        }
+
+        if ($request->hasSession()) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
+
         return response()->json(['message' => 'Logged out']);
     }
 }
