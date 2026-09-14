@@ -31,7 +31,11 @@ class PaymentSourceController extends Controller
     {
         $sources = PaymentSource::query()
             ->with('glAccount:id,code,name')
-            ->when(! $request->boolean('include_inactive'), fn ($q) => $q->where('is_active', true))
+            ->when(
+                $request->query('for') === 'payment',
+                fn ($q) => $q->usableForPayment(),
+                fn ($q) => $q->when(! $request->boolean('include_inactive'), fn ($active) => $active->where('is_active', true)),
+            )
             ->orderByDesc('is_active')
             ->orderBy('name')
             ->get();

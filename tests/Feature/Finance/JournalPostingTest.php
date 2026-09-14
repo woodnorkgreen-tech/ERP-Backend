@@ -341,6 +341,33 @@ class JournalPostingTest extends TestCase
             ->assertJsonPath('meta.can_manage', false);
     }
 
+    public function test_payment_context_excludes_liabilities_and_inactive_sources(): void
+    {
+        $accountId = ChartOfAccount::where('code', '1030')->value('id');
+
+        PaymentSource::create([
+            'name' => 'Operational Bank', 'code' => 'BANK-USABLE', 'type' => 'bank',
+            'gl_account_id' => $accountId, 'is_active' => true,
+        ]);
+        PaymentSource::create([
+            'name' => 'Supplier Credit', 'code' => 'AP-NOT-CASH', 'type' => 'payable',
+            'gl_account_id' => $accountId, 'is_active' => true,
+        ]);
+        PaymentSource::create([
+            'name' => 'Closed Bank', 'code' => 'BANK-CLOSED', 'type' => 'bank',
+            'gl_account_id' => $accountId, 'is_active' => false,
+        ]);
+
+        $response = $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/finance/payment-sources?for=payment')
+            ->assertOk();
+
+        $codes = collect($response->json('data'))->pluck('code');
+        $this->assertContains('BANK-USABLE', $codes);
+        $this->assertNotContains('AP-NOT-CASH', $codes);
+        $this->assertNotContains('BANK-CLOSED', $codes);
+    }
+
     public function test_a_voucher_carries_the_period_of_its_posting_date(): void
     {
         // Left null on every voucher until now, which meant voucher journals
