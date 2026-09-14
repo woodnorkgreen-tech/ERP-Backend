@@ -553,63 +553,21 @@ class PettyCashService
      */
     public function voidDisbursement(Payment $disbursement, string $reason): bool
     {
-        DB::beginTransaction();
-
         try {
-            $disbursement = Payment::whereKey($disbursement->id)->lockForUpdate()->firstOrFail();
-            if ($disbursement->is_voided) {
-                throw new Exception('Disbursement is already voided.');
-            }
-
-            // Row-level lock the balance record
-            $balance = PettyCashBalance::where('id', 1)->lockForUpdate()->first();
-            if (!$balance) {
-                $balance = PettyCashBalance::create(['id' => 1, 'current_balance' => 0.00]);
-            }
-
-            $result = $this->repository->voidDisbursement($disbursement, Auth::id(), $reason);
-
-            $totalRefunded = bcadd((string)$disbursement->amount, (string)($disbursement->transaction_cost ?? '0'), 2);
-            $ledger = new LedgerService();
-            $entry = LedgerEntry::custom('PCR-' . str_pad((string)$disbursement->id, 6, '0', STR_PAD_LEFT) . '-VOID', 'credit', number_format($totalRefunded, 2, '.', ''), [
-                'amount' => (float)$disbursement->amount,
-                'transaction_cost' => (float)($disbursement->transaction_cost ?? 0),
-                'payee_name' => $disbursement->payee_name,
-                'account' => $disbursement->account,
-                'description' => $disbursement->description,
-                'note' => 'Disbursement voided',
-                'reason' => $reason,
-            ]);
-            $entry->sourceType = 'disbursement';
-            $entry->sourceId = $disbursement->id;
-            // Historical transactions may predate payment sources. Refund only
-            // a payment that actually debited this cashbook.
-            if (DB::table('petty_cash_ledger_entries')->where('source_type', 'disbursement')
-                ->where('source_id', $disbursement->id)->where('type', 'debit')->exists()) {
-                $ledger->post($entry);
-            }
-            $disbursement->billPayment?->delete();
-
-            // Refresh balance
-            $balance->refresh();
+            app(\App\Modules\Finance\Services\PaymentReversalService::class)
+                ->reverse($disbursement, Auth::id(), $reason);
 
             // Sync requisition status if linked
             if ($disbursement->requisition_id) {
                 $this->syncRequisitionStatus($disbursement->requisition_id);
             }
 
-            // Log activity
-            $this->logActivity('voided', 'disbursement', $disbursement->id, "Disbursement voided. Reason: " . $reason);
-
-            DB::commit();
-
             // After commit for the same reason as creation: the cost ledger must
             // never back out a line for a void that did not stick.
             PettyCashDisbursementVoided::dispatch($disbursement->id, Auth::id(), $reason);
 
-            return $result;
+            return true;
         } catch (Exception $e) {
-            DB::rollBack();
             throw new Exception('Failed to void disbursement: ' . $e->getMessage());
         }
     }

@@ -967,6 +967,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             ->middleware('permission:' . Permissions::FINANCE_PAYMENT_SOURCES_MANAGE);
         Route::put('payment-sources/{paymentSource}', [\App\Modules\Finance\Controllers\PaymentSourceController::class, 'update'])
             ->middleware('permission:' . Permissions::FINANCE_PAYMENT_SOURCES_MANAGE);
+        Route::post('payments/{payment}/reverse', [\App\Modules\Finance\Controllers\PaymentController::class, 'reverse'])
+            ->middleware('permission:' . Permissions::FINANCE_PAYMENTS_REVERSE);
 
         // Statement-based bank, mobile-money, card, and petty-cash reconciliation.
         Route::prefix('reconciliation')->group(function () {

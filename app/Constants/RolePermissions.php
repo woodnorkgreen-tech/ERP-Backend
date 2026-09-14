@@ -144,7 +144,8 @@ final class RolePermissions
                 // month is the job this role does anyway. Withholding both would
                 // leave every correction and every month-end waiting on a
                 // developer, which is the state these two permissions exist to end.
-                Permissions::FINANCE_JOURNALS_REVERSE, Permissions::FINANCE_PERIODS_MANAGE,
+                Permissions::FINANCE_JOURNALS_REVERSE, Permissions::FINANCE_PAYMENTS_REVERSE,
+                Permissions::FINANCE_PERIODS_MANAGE,
                 Permissions::FINANCE_PETTY_CASH_ADMIN,
                 Permissions::FINANCE_PETTY_CASH_APPROVE_OFFLINE_BATCH,
                 Permissions::FINANCE_PETTY_CASH_CREATE_LEGACY, Permissions::FINANCE_PETTY_CASH_CREATE,

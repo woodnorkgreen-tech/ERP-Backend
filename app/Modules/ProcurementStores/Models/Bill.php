@@ -130,7 +130,12 @@ class Bill extends Model
 
     public function updatePaymentStatus()
     {
-        $this->paid_amount = $this->payments()->sum('amount_paid');
+        $this->paid_amount = $this->payments()
+            ->where(function ($query) {
+                $query->whereNull('disbursement_id')
+                    ->orWhereHas('disbursement', fn ($payment) => $payment->where('status', 'active'));
+            })
+            ->sum('amount_paid');
         $this->balance = $this->payableAmount() - $this->paid_amount;
         
         if ($this->balance <= 0) {
@@ -139,6 +144,8 @@ class Bill extends Model
             $this->status = 'partial';
         } elseif ($this->due_date < now() && $this->balance > 0) {
             $this->status = 'overdue';
+        } else {
+            $this->status = 'pending';
         }
         
         $this->save();

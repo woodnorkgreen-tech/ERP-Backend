@@ -166,6 +166,7 @@ class Permissions
      * cost-capture one, and is held by fewer people.
      */
     const FINANCE_JOURNALS_REVERSE = 'finance.journals.reverse';
+    const FINANCE_PAYMENTS_REVERSE = 'finance.payments.reverse';
 
     /**
      * Opening, locking and closing an accounting month.
@@ -445,7 +446,7 @@ class Permissions
             self::FINANCE_QUOTE_APPROVE, self::FINANCE_QUOTE_DELETE, self::FINANCE_INVOICE_CREATE,
             self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
             self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
-            self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PERIODS_MANAGE,
+            self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PAYMENTS_REVERSE, self::FINANCE_PERIODS_MANAGE,
             self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
             self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
             self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
@@ -573,7 +574,7 @@ class Permissions
                 self::FINANCE_QUOTE_APPROVE, self::FINANCE_QUOTE_DELETE, self::FINANCE_INVOICE_CREATE,
                 self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
                 self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
-                self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PERIODS_MANAGE,
+                self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PAYMENTS_REVERSE, self::FINANCE_PERIODS_MANAGE,
                 self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
                 self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
                 self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,

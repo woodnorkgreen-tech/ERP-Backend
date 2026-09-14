@@ -7,10 +7,12 @@ use App\Http\Controllers\Controller;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Resources\JournalEntryResource;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Services\LedgerExportService;
+use App\Modules\ProcurementStores\Models\BillPayment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -193,6 +195,19 @@ class JournalEntryController extends Controller
         $validated = $request->validate([
             'reason' => 'required|string|min:5|max:500',
         ]);
+
+        $belongsToPayment = ($journal->source_type === Payment::class
+                && Payment::query()->whereKey($journal->source_id)->exists())
+            || ($journal->source_type === BillPayment::class
+                && BillPayment::query()->whereKey($journal->source_id)->whereNotNull('disbursement_id')->exists())
+            || ($journal->spend_voucher_id
+                && Payment::query()->where('spend_voucher_id', $journal->spend_voucher_id)->exists());
+
+        if ($belongsToPayment) {
+            return response()->json([
+                'message' => 'This journal belongs to a Payment. Reverse the Payment so its liability, voucher, cashbook and audit trail are corrected atomically.',
+            ], 422);
+        }
 
         try {
             $reversal = $posting->reverseEntry($journal, $request->user()->id, $validated['reason']);

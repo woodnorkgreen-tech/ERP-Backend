@@ -7,6 +7,7 @@ use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
 use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\Finance\Services\PaymentReversalService;
 use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
@@ -14,6 +15,7 @@ use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use App\Modules\ProcurementStores\Models\Supplier;
+use App\Modules\ProcurementStores\Services\SupplierPaymentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
@@ -354,6 +356,41 @@ class SupplierLedgerRailTest extends TestCase
         // 50,000 credited by the invoice, 20,000 debited by the payment.
         $this->assertSame('-30000.00', $this->movementOn(self::PAYABLE));
         $this->assertSame('-20000.00', $this->movementOn(self::BANK));
+    }
+
+    public function test_reversing_a_payment_preserves_evidence_and_reopens_the_invoice(): void
+    {
+        $this->deliverAndConfirm();
+        $bill = $this->bill();
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
+
+        $allocation = app(SupplierPaymentService::class)->record($bill->fresh(), [
+            'amount_paid' => 50000,
+            'payment_date' => now()->toDateString(),
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $this->payingAccount()->id,
+            'reference_number' => 'TRX-REVERSAL',
+            'user_id' => $this->accounts->id,
+        ]);
+        $payment = $allocation->disbursement;
+
+        app(PaymentReversalService::class)->reverse(
+            $payment,
+            $this->accounts->id,
+            'Supplier transfer was recalled',
+        );
+
+        $this->assertDatabaseHas('payments', [
+            'id' => $payment->id,
+            'status' => 'voided',
+            'void_reason' => 'Supplier transfer was recalled',
+        ]);
+        $this->assertDatabaseHas('bill_payments', ['id' => $allocation->id]);
+        $this->assertSame('0.00', (string) $bill->fresh()->paid_amount);
+        $this->assertSame('50000.00', (string) $bill->fresh()->balance);
+        $this->assertSame('-50000.00', $this->movementOn(self::PAYABLE));
+        $this->assertSame('0.00', $this->movementOn(self::BANK));
+        $this->assertTrue(JournalEntry::query()->where('reversal_of_id', '!=', null)->exists());
     }
 
     /**

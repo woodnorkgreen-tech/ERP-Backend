@@ -3,20 +3,11 @@
 namespace App\Modules\ProcurementStores\Services;
 
 use App\Events\PettyCashDisbursementPaid;
-use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\Finance\Services\PaymentSettlementService;
 use App\Modules\Finance\Support\DocumentNumber;
-use App\Modules\Finance\Support\PaymentMethods;
-use App\Modules\Finance\Support\PettyCashCap;
-use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
-use App\Modules\Finance\Models\Payment;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation;
-use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
-use App\Modules\Finance\PettyCash\Services\LedgerEntry;
-use App\Modules\Finance\PettyCash\Services\LedgerService;
-use App\Modules\Finance\PettyCash\Services\PettyCashService;
-use App\Modules\Finance\PettyCash\Services\TopUpAllocator;
 use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -32,9 +23,11 @@ use Illuminate\Validation\ValidationException;
  */
 class SupplierPaymentService
 {
+    public function __construct(private readonly PaymentSettlementService $payments) {}
+
     /**
      * @param  array<int, array{bill: Bill, amount: string|float}>  $allocations
-     *         what this one movement settles, and how much against each
+     *                                                                            what this one movement settles, and how much against each
      * @return array<int, BillPayment>
      */
     public function recordBatch(array $allocations, array $data): array
@@ -44,10 +37,6 @@ class SupplierPaymentService
         }
 
         $result = DB::transaction(function () use ($allocations, $data) {
-            // Share the balance lock with requisition payouts and cash reversals.
-            $balance = PettyCashBalance::current();
-            $balance = PettyCashBalance::whereKey($balance->id)->lockForUpdate()->firstOrFail();
-
             $guard = app(SupplierPaymentGuard::class);
             $locked = [];
             $total = '0.00';
@@ -61,40 +50,13 @@ class SupplierPaymentService
                 $total = bcadd($total, $amount, 2);
             }
 
-            $source = PaymentSource::where('is_active', true)->find($data['payment_source_id'] ?? 0);
-            if (! $source) {
-                throw ValidationException::withMessages(['payment_source_id' => 'Select an active paying account.']);
-            }
-
-            // BillController's validator already refuses this at the request
-            // boundary; repeated here because this method also runs from
-            // anywhere else that calls it directly, and a supplier invoice's
-            // AP liability must never be "settled" by crediting the very same
-            // control account it owes.
-            if ($source->type === 'payable') {
-                throw ValidationException::withMessages([
-                    'payment_source_id' => 'Supplier Credit is a liability account, not a paying account. Select the bank, float, mobile money or card the money actually left from.',
-                ]);
-            }
-
-            // How the money was transmitted is the payer's statement, not a
-            // consequence of which account it left. Only when a caller says
-            // nothing at all does the account's kind supply a default.
-            $method = $data['payment_method'] ?? null;
-            if ($method !== null && ! in_array($method, PaymentMethods::values(), true)) {
-                throw ValidationException::withMessages(['payment_method' => 'Select a valid payment method.']);
-            }
-            $method ??= PaymentMethods::TYPICAL_FOR_SOURCE_TYPE[$source->type][0] ?? 'bank_transfer';
-
             // What the provider charged us to move it. Carried on the payment,
             // never folded into what the supplier was credited — the supplier
             // received the invoice amount, not the fee.
             $fee = number_format((float) ($data['transaction_cost'] ?? 0), 2, '.', '');
-            $cashOut = bcadd($total, $fee, 2);
-
             $paymentCode = $data['payment_code'] ?? DocumentNumber::next(
                 DocumentNumber::PAYMENT,
-                (string) \Carbon\Carbon::parse($data['payment_date'])->year,
+                (string) Carbon::parse($data['payment_date'])->year,
             );
 
             // Project identity is read from the first invoice's order. A batch
@@ -102,10 +64,10 @@ class SupplierPaymentService
             // never charged to it: see JournalPostingService::postPaymentFee().
             $requisition = $locked[0]['bill']->purchaseOrder?->requisition;
 
-            $disbursement = Payment::create([
+            $disbursement = $this->payments->settle([
                 'payment_no' => $paymentCode,
                 'payment_type' => 'direct',
-                'payment_source_id' => $source->id,
+                'payment_source_id' => $data['payment_source_id'] ?? null,
                 'payee_name' => $locked[0]['bill']->supplier->supplier_name,
                 'payee_type' => 'supplier',
                 'payee_id' => $locked[0]['bill']->supplier_id,
@@ -115,46 +77,18 @@ class SupplierPaymentService
                 'description' => $this->describe($locked),
                 'date_disbursed' => $data['payment_date'],
                 'external_reference' => $data['reference_number'] ?? null,
-                'payment_method' => $method,
+                'payment_method' => $data['payment_method'] ?? null,
                 'classification' => $requisition?->project_id ? 'operations' : 'admin',
                 'project_id' => $requisition?->project_id,
                 'project_enquiry_id' => $requisition?->project_enquiry_id,
                 'job_number' => $requisition?->job_number,
-                'status' => 'active',
                 'tax' => 'no_etr',
                 'receipt_type' => 'none',
                 'created_by' => $data['user_id'],
-            ]);
+            ], 'amount_paid');
 
-            if ($source->type === 'petty_cash') {
-                if (PettyCashCap::exceeds($cashOut)) {
-                    throw ValidationException::withMessages(['amount_paid' => PettyCashCap::message($cashOut)]);
-                }
-
-                // The fee leaves the tin along with the payment, so the float
-                // has to cover both.
-                if (bccomp((string) $balance->current_balance, $cashOut, 2) < 0) {
-                    throw ValidationException::withMessages([
-                        'amount_paid' => 'Insufficient petty cash balance for this payment and its transaction fee.',
-                    ]);
-                }
-                try {
-                    $planned = (new TopUpAllocator(app(PettyCashRepository::class)))
-                        ->plan((float) $total, (float) $fee);
-                } catch (\Exception $e) {
-                    throw ValidationException::withMessages(['amount_paid' => $e->getMessage()]);
-                }
-                $disbursement->update(['top_up_id' => $planned[0]['top_up_id']]);
-                if (count($planned) > 1) {
-                    foreach ($planned as $slice) {
-                        PettyCashDisbursementAllocation::create(['disbursement_id' => $disbursement->id] + $slice);
-                    }
-                }
-                app(LedgerService::class)->post(LedgerEntry::debitForDisbursement($disbursement));
-                app(PettyCashService::class)->logActivity(
-                    'created', 'disbursement', $disbursement->id, $this->describe($locked),
-                );
-            }
+            $method = $disbursement->payment_method;
+            $sourceId = $disbursement->payment_source_id;
 
             $payments = [];
             foreach ($locked as $index => $entry) {
@@ -166,12 +100,12 @@ class SupplierPaymentService
                     // One movement, so one number — suffixed per invoice only
                     // when it settles more than one, which keeps every existing
                     // single-invoice payment code exactly as it was.
-                    'payment_code' => count($locked) === 1 ? $paymentCode : $paymentCode . '/' . ($index + 1),
+                    'payment_code' => count($locked) === 1 ? $paymentCode : $paymentCode.'/'.($index + 1),
                     'bill_id' => $entry['bill']->id,
                     'amount_paid' => $entry['amount'],
                     'payment_date' => $data['payment_date'],
                     'payment_method' => $method,
-                    'payment_source_id' => $source->id,
+                    'payment_source_id' => $sourceId,
                     'disbursement_id' => $disbursement->id,
                     'reference_number' => $data['reference_number'] ?? null,
                     'user_id' => $data['user_id'] ?? null,
@@ -210,6 +144,6 @@ class SupplierPaymentService
 
         return count($numbers) === 1
             ? "Payment for invoice {$numbers[0]}"
-            : 'Payment for invoices ' . implode(', ', $numbers);
+            : 'Payment for invoices '.implode(', ', $numbers);
     }
 }

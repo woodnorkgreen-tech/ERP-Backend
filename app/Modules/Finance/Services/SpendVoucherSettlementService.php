@@ -3,18 +3,9 @@
 namespace App\Modules\Finance\Services;
 
 use App\Modules\Finance\Models\Payment;
-use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\SpendVoucher;
-use App\Modules\Finance\PettyCash\Models\PettyCashBalance;
-use App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation;
-use App\Modules\Finance\PettyCash\Repositories\PettyCashRepository;
-use App\Modules\Finance\PettyCash\Services\LedgerEntry;
-use App\Modules\Finance\PettyCash\Services\LedgerService;
-use App\Modules\Finance\PettyCash\Services\PettyCashService;
-use App\Modules\Finance\PettyCash\Services\TopUpAllocator;
 use App\Modules\Finance\Support\DocumentNumber;
-use App\Modules\Finance\Support\PaymentMethods;
-use App\Modules\Finance\Support\PettyCashCap;
+use Carbon\Carbon;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -34,6 +25,8 @@ class SpendVoucherSettlementService
 {
     /** Voucher types that move cash out of a paying account. */
     private const CASH_OUT_TYPES = ['payment', 'reimbursement', 'advance', 'refund'];
+
+    public function __construct(private readonly PaymentSettlementService $payments) {}
 
     public function settle(SpendVoucher $voucher, int $actorId): ?Payment
     {
@@ -57,57 +50,15 @@ class SpendVoucherSettlementService
             ]);
         }
 
-        $source = PaymentSource::query()->where('is_active', true)->find($voucher->payment_source_id);
-        if (! $source) {
-            throw ValidationException::withMessages([
-                'payment_source_id' => 'Select an active paying account before posting this voucher.',
-            ]);
-        }
-
-        // Supplier Credit (type payable) is the liability itself, not an account
-        // money leaves from. The request-time validation in
-        // SpendVoucherController already refuses it; this is the same rule
-        // enforced again at the one place every cash-out voucher must pass
-        // through, so a voucher written before that check existed — or by any
-        // future caller that skips it — still cannot mint a Payment against a
-        // liability account.
-        if ($source->type === 'payable') {
-            throw ValidationException::withMessages([
-                'payment_source_id' => 'Supplier Credit is a liability account, not a paying account. Select the bank, float, mobile money or card the money actually left from.',
-            ]);
-        }
-
-        $method = $voucher->payment_method;
-        if ($method !== null && $method !== '' && ! in_array($method, PaymentMethods::values(), true)) {
-            throw ValidationException::withMessages([
-                'payment_method' => 'Select a valid payment method.',
-            ]);
-        }
-        $method = $method ?: (PaymentMethods::TYPICAL_FOR_SOURCE_TYPE[$source->type][0] ?? 'bank_transfer');
-
-        if ($source->type === 'petty_cash') {
-            if (PettyCashCap::exceeds($amount)) {
-                throw ValidationException::withMessages(['total_amount' => PettyCashCap::message($amount)]);
-            }
-
-            $balance = PettyCashBalance::current();
-            $balance = PettyCashBalance::whereKey($balance->id)->lockForUpdate()->firstOrFail();
-            if (bccomp((string) $balance->current_balance, $amount, 2) < 0) {
-                throw ValidationException::withMessages([
-                    'total_amount' => 'Insufficient petty cash balance for this voucher.',
-                ]);
-            }
-        }
-
         $paymentNo = DocumentNumber::next(
             DocumentNumber::PAYMENT,
-            (string) \Carbon\Carbon::parse($voucher->posting_date ?? now())->year,
+            (string) Carbon::parse($voucher->posting_date ?? now())->year,
         );
 
-        $payment = Payment::create([
+        $payment = $this->payments->settle([
             'payment_no' => $paymentNo,
             'payment_type' => $this->paymentTypeFor($voucher->type),
-            'payment_source_id' => $source->id,
+            'payment_source_id' => $voucher->payment_source_id,
             'spend_voucher_id' => $voucher->id,
             'payee_name' => $voucher->payee_name,
             'payee_type' => $voucher->supplier_id ? 'supplier' : 'other',
@@ -118,38 +69,13 @@ class SpendVoucherSettlementService
             'description' => $this->describe($voucher),
             'date_disbursed' => $voucher->posting_date ?? now()->toDateString(),
             'external_reference' => $voucher->payment_reference,
-            'payment_method' => $method,
+            'payment_method' => $voucher->payment_method,
             'classification' => 'operations',
-            'status' => 'active',
             'tax' => 'no_etr',
             'receipt_type' => 'none',
             'created_by' => $actorId,
             'idempotency_key' => 'spend-voucher:'.$voucher->id,
-        ]);
-
-        if ($source->type === 'petty_cash') {
-            try {
-                $planned = (new TopUpAllocator(app(PettyCashRepository::class)))
-                    ->plan((float) $amount, 0.0);
-            } catch (\Exception $e) {
-                throw ValidationException::withMessages(['total_amount' => $e->getMessage()]);
-            }
-
-            $payment->update(['top_up_id' => $planned[0]['top_up_id']]);
-            if (count($planned) > 1) {
-                foreach ($planned as $slice) {
-                    PettyCashDisbursementAllocation::create(['disbursement_id' => $payment->id] + $slice);
-                }
-            }
-
-            app(LedgerService::class)->post(LedgerEntry::debitForDisbursement($payment));
-            app(PettyCashService::class)->logActivity(
-                'created',
-                'disbursement',
-                $payment->id,
-                $this->describe($voucher),
-            );
-        }
+        ], 'total_amount');
 
         $voucher->forceFill([
             'petty_cash_disbursement_id' => $payment->id,
