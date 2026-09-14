@@ -943,6 +943,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Finance Module Routes
     Route::prefix('finance')->group(function () {
+        Route::get('work-queue/count', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'count']);
+        Route::get('work-queue', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'index']);
+        Route::post('work-queue/{workType}/{sourceId}/claim', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'claim']);
+        Route::delete('work-queue/{workType}/{sourceId}/claim', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'release']);
+        Route::put('work-queue/{workType}/{sourceId}/assignment', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'reassign']);
+        Route::get('work-queue/{workType}/{sourceId}/assignment-history', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'history']);
         Route::get('readiness', [\App\Modules\Finance\Controllers\FinanceReadinessController::class, 'show']);
 
         /*
@@ -968,11 +974,17 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('movements', [\App\Modules\Finance\Controllers\CashMovementController::class, 'store']);
             Route::post('movements/{movement}/void', [\App\Modules\Finance\Controllers\CashMovementController::class, 'void']);
             Route::get('accounts', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'accounts']);
+            Route::get('statements', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'index']);
+            Route::get('statements/prefill', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'prefill']);
             Route::post('statements/import', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'import']);
             Route::get('statements/{statement}', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'show']);
             Route::post('statements/{statement}/transactions/{transaction}/match', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'match']);
+            Route::post('statements/{statement}/transactions/{transaction}/create-and-match', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'createAndMatch']);
+            Route::post('statements/{statement}/transactions/{transaction}/unmatch', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'unmatch']);
             Route::post('statements/{statement}/transactions/{transaction}/ignore', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'ignore']);
-                        Route::get('statements/{statement}/transactions/{transaction}/suggestions', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'suggestions']);
+            Route::post('statements/{statement}/auto-match', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'autoMatch']);
+            Route::get('statements/{statement}/transactions/{transaction}/suggestions', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'suggestions']);
+            Route::get('statements/{statement}/transactions/{transaction}/candidates', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'candidates']);
             Route::post('statements/{statement}/reconcile', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'reconcile']);
             Route::post('statements/{statement}/reopen', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'reopen']);
         });

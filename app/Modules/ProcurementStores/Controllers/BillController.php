@@ -670,6 +670,14 @@ class BillController extends Controller
             ], 403);
         }
 
+        if ($bill->verified_at || $bill->payments()->exists()
+            || \App\Modules\Finance\Models\JournalEntry::query()
+                ->where('source_type', Bill::class)->where('source_id', $bill->id)->exists()) {
+            return response([
+                'error' => 'A verified, posted, or paid supplier invoice is an accounting record and cannot be deleted. Reverse or credit it instead.'
+            ], 422);
+        }
+
         try {
             $purchaseOrderId = $bill->purchase_order_id;
             $bill->delete();

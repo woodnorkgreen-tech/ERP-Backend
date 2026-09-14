@@ -11,15 +11,21 @@ use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Models\SpendVoucherAllocation;
 use App\Modules\Finance\Services\JournalPostingService;
+use App\Modules\Finance\Services\SpendVoucherSettlementService;
 use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\HR\Models\HRAuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 class SpendVoucherController extends Controller
 {
-    public function __construct(private JournalPostingService $journalPostingService) {}
+    public function __construct(
+        private JournalPostingService $journalPostingService,
+        private SpendVoucherSettlementService $settlementService,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -29,7 +35,13 @@ class SpendVoucherController extends Controller
             ->orderBy('created_at', 'desc');
 
         if ($request->has('status')) {
-            $query->where('status', $request->query('status'));
+            $status = $request->query('status');
+            // Clients that still filter on `draft` mean "awaiting approval".
+            if (in_array($status, ['draft', 'pending_approval'], true)) {
+                $query->whereIn('status', ['draft', 'pending_approval']);
+            } else {
+                $query->where('status', $status);
+            }
         }
 
         if ($request->has('type')) {
@@ -78,9 +90,15 @@ class SpendVoucherController extends Controller
             ->get()
             ->keyBy('status');
 
+        $awaiting = (int) ($counts['pending_approval']->count ?? 0)
+            + (int) ($counts['draft']->count ?? 0);
+
         return [
             'total' => (int) $counts->sum('count'),
-            'draft' => (int) ($counts['draft']->count ?? 0),
+            // Awaiting approval. `draft` is retained only so older clients that
+            // still read that key keep showing a non-zero queue count.
+            'pending_approval' => $awaiting,
+            'draft' => $awaiting,
             'approved' => (int) ($counts['approved']->count ?? 0),
             'posted' => (int) ($counts['posted']->count ?? 0),
             'posted_amount' => number_format((float) ($counts['posted']->amount ?? 0), 2, '.', ''),
@@ -167,7 +185,11 @@ class SpendVoucherController extends Controller
         }
 
         $validated = $request->validate([
-            'type' => 'required|string|in:advance,payment,retirement,reimbursement',
+            // Only the voucher types with complete capture, settlement and GL
+            // treatments are public here. Retirements live in the petty-cash
+            // requisition workflow; refunds, top-ups and reversals need their
+            // own source documents rather than a free-form AP debit.
+            'type' => 'required|string|in:advance,payment,reimbursement',
             'payee_name' => 'required|string|max:255',
             'payee_phone' => 'nullable|string|max:32',
             'payee_kra_pin' => 'nullable|string|max:32',
@@ -192,8 +214,15 @@ class SpendVoucherController extends Controller
             $voucher = DB::transaction(function () use ($validated, $period, $requestedAllocations) {
                 $liabilities = collect();
                 if (in_array($validated['type'], ['payment', 'reimbursement'], true)) {
-                    $liabilities = CostLine::query()->lockForUpdate()->whereKey($requestedAllocations->keys())->get();
-                    $this->assertEligibleLiabilities($liabilities, $requestedAllocations);
+                    $liabilities = CostLine::query()->withReferenceNames()
+                        ->lockForUpdate()->whereKey($requestedAllocations->keys())->get();
+                    $beneficiary = $this->assertEligibleLiabilities(
+                        $liabilities,
+                        $requestedAllocations,
+                        $validated['type'],
+                    );
+                    $validated['payee_name'] = $beneficiary['name'];
+                    $validated['supplier_id'] = $beneficiary['supplier_id'];
                     $allocationTotal = $requestedAllocations->reduce(
                         fn (string $total, array $allocation) => bcadd($total, (string) $allocation['amount'], 2),
                         '0.00'
@@ -205,7 +234,10 @@ class SpendVoucherController extends Controller
 
             $voucher = SpendVoucher::create(array_merge($validated, [
                 'voucher_no' => 'PENDING-' . bin2hex(random_bytes(8)),
-                'status' => 'draft',
+                // Same word the work queue and procurement use for "awaiting
+                // approval". `draft` is reserved for incomplete rows; create is
+                // a submission, not a scratch pad.
+                'status' => 'pending_approval',
                 'transacted_at' => now(),
                 'posting_date' => now()->toDateString(),
                 // Resolved from the posting date exactly as CostContextResolver
@@ -256,13 +288,23 @@ class SpendVoucherController extends Controller
         ], 201);
     }
 
-    private function assertEligibleLiabilities($lines, $requestedAllocations): void
+    /**
+     * Validate the accounting balance and the human beneficiary together.
+     * A balanced journal paid to the wrong person is still a failed payment.
+     *
+     * @return array{name:string,supplier_id:int|null}
+     */
+    private function assertEligibleLiabilities($lines, $requestedAllocations, string $voucherType): array
     {
         if ($lines->count() !== $requestedAllocations->count()) {
             throw new \DomainException('One or more selected liabilities no longer exist. Refresh the list and try again.');
         }
 
         $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany(['2100', '2150']))->pluck('id');
+        $beneficiaryKey = null;
+        $beneficiaryName = null;
+        $supplierId = null;
+
         foreach ($lines as $line) {
             $eligible = $line->status === CostLine::STATUS_VERIFIED
                 && $line->journal_entry_id !== null
@@ -273,12 +315,51 @@ class SpendVoucherController extends Controller
                 throw new \DomainException("Cost line {$line->ref} is not a posted, verified liability.");
             }
 
+            $fundingMode = $line->details['funding_mode'] ?? null;
+            $expectedMode = $voucherType === 'payment' ? 'unpaid_invoice' : 'out_of_pocket';
+            if ($fundingMode !== null && $fundingMode !== $expectedMode) {
+                throw new \DomainException($voucherType === 'payment'
+                    ? "Cost line {$line->ref} is not a supplier-credit liability. Use a reimbursement voucher for staff claims."
+                    : "Cost line {$line->ref} is not an out-of-pocket staff claim. Use a payment voucher for supplier liabilities.");
+            }
+
+            if ($fundingMode === 'unpaid_invoice') {
+                $lineSupplierId = (int) $line->payee_id;
+                if ($lineSupplierId < 1 || blank($line->payee_supplier_name)) {
+                    throw new \DomainException("Cost line {$line->ref} has no supplier-master beneficiary.");
+                }
+                $lineBeneficiaryKey = 'supplier:'.$lineSupplierId;
+                $lineBeneficiaryName = $line->payee_supplier_name;
+                $lineSupplier = $lineSupplierId;
+            } elseif ($fundingMode === 'out_of_pocket') {
+                $claimantId = (int) ($line->details['claimant_user_id'] ?? $line->submitted_by_user_id);
+                $lineBeneficiaryKey = 'claimant:'.$claimantId;
+                $lineBeneficiaryName = $line->details['claimant_name'] ?? $line->submitted_by_name;
+                $lineSupplier = null;
+            } else {
+                // Historical verified rows predate mandatory funding mode. Keep
+                // them payable, but never allow unlike names into one payment.
+                $lineBeneficiaryName = $line->payee_name ?: $line->payee_supplier_name
+                    ?: $line->submitted_by_name ?: 'Legacy payee';
+                $lineBeneficiaryKey = 'legacy:'.mb_strtolower(trim($lineBeneficiaryName));
+                $lineSupplier = null;
+            }
+
+            if ($beneficiaryKey !== null && $beneficiaryKey !== $lineBeneficiaryKey) {
+                throw new \DomainException('One payment voucher can pay only one supplier or claimant. Create separate vouchers for different beneficiaries.');
+            }
+            $beneficiaryKey = $lineBeneficiaryKey;
+            $beneficiaryName = $lineBeneficiaryName;
+            $supplierId = $lineSupplier;
+
             $allocation = (string) $requestedAllocations->get($line->id)['amount'];
             $remaining = bcsub($this->payableAmount($line), $this->activeAllocatedAmount($line->id), 2);
             if (bccomp($allocation, $remaining, 2) === 1) {
                 throw new \DomainException("Allocation {$allocation} exceeds the remaining balance {$remaining} on {$line->ref}.");
             }
         }
+
+        return ['name' => (string) $beneficiaryName, 'supplier_id' => $supplierId];
     }
 
     private function payableAmount(CostLine $line): string
@@ -306,11 +387,11 @@ class SpendVoucherController extends Controller
 
         $result = DB::transaction(function () use ($request, $id) {
             $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
-            if ($voucher->status !== 'draft') {
-                return ['error' => 'Only a draft voucher can be cancelled.'];
+            if (! in_array($voucher->status, ['pending_approval', 'draft'], true)) {
+                return ['error' => 'Only a voucher awaiting approval can be cancelled.'];
             }
             if ((int) $voucher->requester_user_id !== (int) $request->user()->id) {
-                return ['error' => 'Only the person who created this draft can cancel it.'];
+                return ['error' => 'Only the person who created this voucher can cancel it.'];
             }
 
             $costLineIds = SpendVoucherAllocation::where('spend_voucher_id', $voucher->id)->pluck('cost_line_id');
@@ -323,7 +404,7 @@ class SpendVoucherController extends Controller
                 'action' => 'spend_voucher_cancelled',
                 'model_type' => SpendVoucher::class,
                 'model_id' => $voucher->id,
-                'message' => "Draft spend voucher {$voucher->voucher_no} cancelled; reserved liabilities released.",
+                'message' => "Spend voucher {$voucher->voucher_no} cancelled; reserved liabilities released.",
                 'ip_address' => $request->ip(),
             ]);
 
@@ -334,7 +415,7 @@ class SpendVoucherController extends Controller
             return response()->json(['status' => 'error', 'message' => $result['error']], 422);
         }
 
-        return response()->json(['status' => 'success', 'message' => 'Draft voucher cancelled.', 'data' => $result['voucher']]);
+        return response()->json(['status' => 'success', 'message' => 'Voucher cancelled.', 'data' => $result['voucher']]);
     }
 
     public function approve(Request $request, int $id): JsonResponse
@@ -344,8 +425,8 @@ class SpendVoucherController extends Controller
         $result = DB::transaction(function () use ($request, $id) {
             $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
 
-            if ($voucher->status !== 'draft') {
-                return ['error' => 'Only draft vouchers can be approved'];
+            if (! in_array($voucher->status, ['pending_approval', 'draft'], true)) {
+                return ['error' => 'Only vouchers awaiting approval can be approved'];
             }
 
             if ($voucher->requester_user_id === $request->user()->id && ! \App\Support\SelfApproval::allowedFor($request->user())) {
@@ -385,56 +466,76 @@ class SpendVoucherController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_POST), 403);
 
-        $result = DB::transaction(function () use ($request, $id) {
-            $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
+        try {
+            $result = DB::transaction(function () use ($request, $id) {
+                $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
 
-            if ($voucher->status !== 'approved' || $voucher->posted_at) {
-                return ['error' => 'Only an approved, unposted voucher can be posted.'];
-            }
+                if ($voucher->status !== 'approved' || $voucher->posted_at) {
+                    return ['error' => 'Only an approved, unposted voucher can be posted.'];
+                }
 
-            $usesSeparationOverride = in_array(
-                $request->user()->id,
-                [$voucher->requester_user_id, $voucher->approved_by],
-                true
-            );
+                $usesSeparationOverride = in_array(
+                    $request->user()->id,
+                    [$voucher->requester_user_id, $voucher->approved_by],
+                    true
+                );
 
-            if ($usesSeparationOverride && ! \App\Support\SelfApproval::allowedFor($request->user())) {
-                return ['error' => 'The requester and approver cannot post this voucher.'];
-            }
+                if ($usesSeparationOverride && ! \App\Support\SelfApproval::allowedFor($request->user())) {
+                    return ['error' => 'The requester and approver cannot post this voucher.'];
+                }
 
-            $period = $voucher->accounting_period_id
-                ? AccountingPeriod::query()->sharedLock()->find($voucher->accounting_period_id)
-                : null;
+                $period = $voucher->accounting_period_id
+                    ? AccountingPeriod::query()->sharedLock()->find($voucher->accounting_period_id)
+                    : null;
 
-            if (! $period || ! $period->isOpen()) {
-                return ['error' => $period ? sprintf(
-                    'The accounting period %04d-%02d is %s, so this voucher cannot be posted into it.',
-                    $period->year,
-                    $period->month,
-                    $period->status,
-                ) : 'This voucher has no accounting period. Finance must correct its period before posting.'];
-            }
+                if (! $period || ! $period->isOpen()) {
+                    return ['error' => $period ? sprintf(
+                        'The accounting period %04d-%02d is %s, so this voucher cannot be posted into it.',
+                        $period->year,
+                        $period->month,
+                        $period->status,
+                    ) : 'This voucher has no accounting period. Finance must correct its period before posting.'];
+                }
 
-            $voucher->update([
-                'status' => 'posted',
-                'posted_by' => $request->user()->id,
-                'posted_at' => now(),
-            ]);
+                // Cash fact first: Payment (+ float debit when the source is a
+                // float). The AP/advance journal below never creates a Payment
+                // on its own — that was the disconnect that left bank recon and
+                // the petty-cash register blind to voucher settlements.
+                $payment = $this->settlementService->settle($voucher, $request->user()->id);
 
-            $entry = $this->journalPostingService->postSpendVoucher($voucher);
+                $voucher->update([
+                    'status' => 'posted',
+                    'posted_by' => $request->user()->id,
+                    'posted_at' => now(),
+                ]);
 
-            HRAuditLog::create([
-                'user_id' => $request->user()->id,
-                'action' => 'spend_voucher_posted',
-                'model_type' => SpendVoucher::class,
-                'model_id' => $voucher->id,
-                'message' => "Spend voucher {$voucher->voucher_no} posted to General Ledger."
-                    . ($usesSeparationOverride ? ' Separation-of-duties override used.' : ''),
-                'ip_address' => $request->ip(),
-            ]);
+                $entry = $this->journalPostingService->postSpendVoucher($voucher->fresh(['paymentSource', 'allocations']));
 
-            return ['voucher' => $voucher, 'journal_entry' => $entry];
-        });
+                HRAuditLog::create([
+                    'user_id' => $request->user()->id,
+                    'action' => 'spend_voucher_posted',
+                    'model_type' => SpendVoucher::class,
+                    'model_id' => $voucher->id,
+                    'message' => "Spend voucher {$voucher->voucher_no} posted to General Ledger."
+                        . ($payment ? " Payment {$payment->payment_no}." : '')
+                        . ($usesSeparationOverride ? ' Separation-of-duties override used.' : ''),
+                    'ip_address' => $request->ip(),
+                ]);
+
+                return ['voucher' => $voucher, 'journal_entry' => $entry, 'payment' => $payment];
+            });
+        } catch (ValidationException $exception) {
+            return response()->json([
+                'status' => 'error',
+                'message' => collect($exception->errors())->flatten()->first() ?: $exception->getMessage(),
+                'errors' => $exception->errors(),
+            ], 422);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
 
         if (isset($result['error'])) {
             return response()->json(['status' => 'error', 'message' => $result['error']], 422);
@@ -444,8 +545,9 @@ class SpendVoucherController extends Controller
             'status' => 'success',
             'message' => 'Voucher posted to General Ledger successfully',
             'data' => [
-                'voucher' => $result['voucher']->fresh(),
+                'voucher' => $result['voucher']->fresh(['paymentSource']),
                 'journal_entry' => $result['journal_entry'],
+                'payment' => $result['payment'],
             ],
         ]);
     }

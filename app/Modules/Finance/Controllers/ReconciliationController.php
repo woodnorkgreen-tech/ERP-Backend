@@ -58,12 +58,42 @@ class ReconciliationController extends Controller
         }
     }
 
+    public function index(Request $request, ReconciliationService $service): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
+
+        $sourceId = $request->validate([
+            'payment_source_id' => ['required', 'integer', 'exists:payment_sources,id'],
+        ])['payment_source_id'];
+
+        $source = PaymentSource::findOrFail($sourceId);
+
+        return response()->json([
+            'data' => $service->listStatements($source),
+        ]);
+    }
+
+    public function prefill(Request $request, ReconciliationService $service): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
+
+        $sourceId = $request->validate([
+            'payment_source_id' => ['required', 'integer', 'exists:payment_sources,id'],
+        ])['payment_source_id'];
+
+        $source = PaymentSource::findOrFail($sourceId);
+
+        return response()->json([
+            'data' => $service->prefill($source),
+        ]);
+    }
+
     public function show(Request $request, ReconciliationStatement $statement, ReconciliationService $service): JsonResponse
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
 
         return response()->json([
-            'data' => $statement->load('paymentSource', 'transactions.matches'),
+            'data' => $statement->load('paymentSource', 'transactions.matches.journalEntry', 'transactions.matches.payment'),
             'summary' => $service->summary($statement),
         ]);
     }
@@ -92,6 +122,53 @@ class ReconciliationController extends Controller
         }
     }
 
+    public function createAndMatch(Request $request, ReconciliationStatement $statement, StatementTransaction $transaction, ReconciliationService $service): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_PAYMENT_SOURCES_MANAGE), 403);
+
+        $data = $request->validate([
+            'offset_account_id' => ['required', 'integer', 'exists:chart_of_accounts,id'],
+            'transaction_type' => ['nullable', 'string', 'max:50'],
+            'reference' => ['nullable', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:1000'],
+            'counterparty' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $updatedTx = $service->createAndMatch(
+                $statement,
+                $transaction,
+                $data,
+                $request->user()->id,
+            );
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Ledger movement posted and statement transaction matched.',
+                'data' => $updatedTx->load('matches.journalEntry', 'matches.payment'),
+                'summary' => $service->summary($statement->fresh()),
+            ]);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+    }
+
+    public function unmatch(Request $request, ReconciliationStatement $statement, StatementTransaction $transaction, ReconciliationService $service): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_PAYMENT_SOURCES_MANAGE), 403);
+
+        try {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Transaction unmatched.',
+                'data' => $service->unmatch($statement, $transaction),
+                'summary' => $service->summary($statement->fresh()),
+            ]);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+    }
+
     public function ignore(Request $request, ReconciliationStatement $statement, StatementTransaction $transaction, ReconciliationService $service): JsonResponse
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_PAYMENT_SOURCES_MANAGE), 403);
@@ -102,13 +179,55 @@ class ReconciliationController extends Controller
             return response()->json(['message' => $exception->getMessage()], 422);
         }
     }
+
+    public function autoMatch(Request $request, ReconciliationStatement $statement, ReconciliationService $service): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_PAYMENT_SOURCES_MANAGE), 403);
+
+        $matchedCount = $service->runAutoMatch($statement, $request->user()->id);
+        $tolerance = $service->dateToleranceDays();
+
+        return response()->json([
+            'status' => 'success',
+            'matched_count' => $matchedCount,
+            'message' => $matchedCount > 0
+                ? "Auto-match complete: {$matchedCount} transaction(s) matched automatically."
+                : "No new matches found based on Reference + Amount + Account + Date (±{$tolerance} days tolerance).",
+            'summary' => $service->summary($statement->fresh()),
+        ]);
+    }
     
     public function suggestions(Request $request, ReconciliationStatement $statement, StatementTransaction $transaction, ReconciliationService $service): JsonResponse
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
 
         try {
-            return response()->json(['data' => $service->suggestions($statement, $transaction)]);
+            return response()->json(['data' => $service->candidates($statement, $transaction)]);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+    }
+
+    public function candidates(Request $request, ReconciliationStatement $statement, StatementTransaction $transaction, ReconciliationService $service): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
+
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:255'],
+            'from_date' => ['nullable', 'date'],
+            'to_date' => ['nullable', 'date', 'after_or_equal:from_date'],
+        ]);
+
+        try {
+            return response()->json([
+                'data' => $service->candidates(
+                    $statement,
+                    $transaction,
+                    $filters['search'] ?? null,
+                    $filters['from_date'] ?? null,
+                    $filters['to_date'] ?? null,
+                ),
+            ]);
         } catch (InvalidArgumentException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }

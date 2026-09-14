@@ -70,6 +70,7 @@ class Payment extends Model
         'archived_at',
         'archived_by',
         'requisition_id',
+        'spend_voucher_id',
         'direct_payment_reason',
         'transaction_cost',
         'budget_category',
@@ -148,6 +149,11 @@ class Payment extends Model
     public function requisition(): BelongsTo
     {
         return $this->belongsTo(PettyCashRequisition::class, 'requisition_id');
+    }
+
+    public function spendVoucher(): BelongsTo
+    {
+        return $this->belongsTo(SpendVoucher::class, 'spend_voucher_id');
     }
 
     public function project(): BelongsTo

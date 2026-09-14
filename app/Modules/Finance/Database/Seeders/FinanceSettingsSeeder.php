@@ -44,6 +44,10 @@ class FinanceSettingsSeeder extends Seeder
             'Cost overrun alert threshold (%)',
             'Brief §9: alert when actual plus committed cost exceeds budget by more than this.'],
 
+        ['reconciliation_date_tolerance_days', 3,
+            'Reconciliation date tolerance (days)',
+            'Maximum number of calendar days before or after the ERP posting date allowed for automatic matching. Amount, account and reference remain exact.'],
+
         // Seeded deliberately null. Capex review cannot function without it, and
         // a guessed threshold would be worse than a visibly missing one.
         ['capitalisation_threshold', null,

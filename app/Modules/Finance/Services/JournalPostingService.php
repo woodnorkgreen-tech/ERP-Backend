@@ -323,6 +323,14 @@ class JournalPostingService
      */
     public function postSpendVoucher(SpendVoucher $voucher): ?JournalEntry
     {
+        // Reversal vouchers: delegate to reverseEntry to ensure proper double-entry reversal
+        if ($voucher->type === 'reversal' && $voucher->reversal_of_id) {
+            $originalEntry = JournalEntry::where('spend_voucher_id', $voucher->reversal_of_id)->first();
+            if ($originalEntry) {
+                return $this->reverseEntry($originalEntry, $voucher->posted_by ?? auth()->id(), 'Reversal of voucher '.$voucher->voucher_no);
+            }
+        }
+
         $existing = JournalEntry::where('spend_voucher_id', $voucher->id)->first();
         if ($existing) {
             return $existing;
@@ -681,6 +689,10 @@ class JournalPostingService
 
     private function voucherPaymentSourceAccount(SpendVoucher $voucher): ?int
     {
+        if ($voucher->type === 'retirement') {
+            return $this->accountByCode('1300');
+        }
+
         $creditId = $voucher->paymentSource?->gl_account_id;
         return $creditId && ChartOfAccount::postable()->whereKey($creditId)->exists()
             ? (int) $creditId
@@ -690,6 +702,7 @@ class JournalPostingService
     /** @return array<int, array{account_id:int, amount:string, description:string}> */
     private function voucherDebitLegs(SpendVoucher $voucher, string $voucherAmount): array
     {
+        // Advance: Dr Staff Advances (1300)
         if ($voucher->type === 'advance') {
             $account = $this->accountByCode('1300');
             return $account ? [[
@@ -699,71 +712,116 @@ class JournalPostingService
             ]] : [];
         }
 
-        match ($voucher->type) {
-            'retirement' => throw new InvalidArgumentException(
-                "Spend voucher {$voucher->voucher_no} is a retirement, which clears an advance against verified receipts and is not a cash-out journal."
-            ),
-            'payment', 'reimbursement' => null,
-            default => throw new InvalidArgumentException(
-                "Spend voucher {$voucher->voucher_no} has no supported ledger treatment for type {$voucher->type}."
-            ),
-        };
-
-        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany([self::PAYABLE_CODE, self::ACCRUED_CODE]))
-            ->pluck('id')->map(fn ($id) => (int) $id);
-        $allocations = SpendVoucherAllocation::query()->where('spend_voucher_id', $voucher->id)
-            ->lockForUpdate()->with('costLine.journalEntry.lines')->get();
-
-        if ($allocations->isEmpty()) {
-            throw new InvalidArgumentException("Spend voucher {$voucher->voucher_no} has no verified liabilities allocated to it.");
+        // Retirement: Dr Expense account, Cr Staff Advances (1300)
+        // The credit to Staff Advances (1300) is handled by voucherPaymentSourceAccount()
+        if ($voucher->type === 'retirement') {
+            // Use the first expense account found, mirroring cost line fallback logic
+            $expenseAccount = ChartOfAccount::postable()
+                ->where('code', '!=', self::INVENTORY_CODE)
+                ->where('category', 'expense')
+                ->orderBy('code')
+                ->value('id');
+            return $expenseAccount ? [[
+                'account_id' => (int) $expenseAccount,
+                'amount' => $voucherAmount,
+                'description' => 'Retirement of advance - expense recognized for '.($voucher->payee_name ?? 'Payee'),
+            ]] : [];
         }
 
-        $byAccount = [];
-        foreach ($allocations as $allocation) {
-            $costLine = $allocation->costLine;
-            if ($costLine->status !== CostLine::STATUS_VERIFIED || $costLine->journalEntry?->status !== 'posted') {
-                throw new InvalidArgumentException("Allocated cost line {$costLine->ref} is no longer a posted, verified liability.");
-            }
-
-            $liabilityLines = $costLine->journalEntry->lines->filter(fn (JournalLine $line) =>
-                $line->entry_type === 'credit' && $controlAccounts->contains((int) $line->account_id)
-            );
-            $journalLiability = $liabilityLines->reduce(
-                fn (string $sum, JournalLine $line) => bcadd($sum, (string) $line->amount, 2),
-                '0.00'
-            );
-            $expected = bcsub(
-                bcadd((string) ($costLine->net_amount ?? 0), (string) ($costLine->tax_amount ?? 0), 2),
-                (string) ($costLine->wht_amount ?? 0),
-                2
-            );
-            if (bccomp($journalLiability, $expected, 2) !== 0) {
-                throw new InvalidArgumentException("Cost line {$costLine->ref} does not reconcile to its payable journal.");
-            }
-            if ($liabilityLines->pluck('account_id')->unique()->count() !== 1) {
-                throw new InvalidArgumentException("Cost line {$costLine->ref} spans multiple payable control accounts and needs an explicit allocation policy.");
-            }
-
-            $allocationAmount = (string) $allocation->amount;
-            if (bccomp($allocationAmount, '0.00', 2) !== 1 || bccomp($allocationAmount, $expected, 2) === 1) {
-                throw new InvalidArgumentException("Allocation on {$costLine->ref} is outside its payable balance.");
-            }
-            $accountId = (int) $liabilityLines->first()->account_id;
-            $byAccount[$accountId] = bcadd($byAccount[$accountId] ?? '0.00', $allocationAmount, 2);
+        // Top-up: Dr Petty Cash (1030)
+        if ($voucher->type === 'top_up') {
+            $account = $this->accountByCode('1030');
+            return $account ? [[
+                'account_id' => $account,
+                'amount' => $voucherAmount,
+                'description' => 'Petty cash top-up for '.($voucher->payee_name ?? 'Payee'),
+            ]] : [];
         }
 
-        $allocated = array_reduce($byAccount, fn (string $sum, string $value) => bcadd($sum, $value, 2), '0.00');
-        if (bccomp($allocated, $voucherAmount, 2) !== 0) {
+        // Payment, Reimbursement, Refund: Handle via allocations or default to Payable
+        if (in_array($voucher->type, ['payment', 'reimbursement', 'refund'], true)) {
+            $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany([self::PAYABLE_CODE, self::ACCRUED_CODE]))->pluck('id')->map(fn ($id) => (int) $id);
+
+            // Payment and reimbursement settle verified liabilities via allocations
+            if (in_array($voucher->type, ['payment', 'reimbursement'], true)) {
+                $allocations = SpendVoucherAllocation::query()->where('spend_voucher_id', $voucher->id)
+                    ->lockForUpdate()->with('costLine.journalEntry.lines')->get();
+
+                if ($allocations->isEmpty()) {
+                    throw new InvalidArgumentException("Spend voucher {$voucher->voucher_no} has no verified liabilities allocated to it.");
+                }
+
+                $byAccount = [];
+                foreach ($allocations as $allocation) {
+                    $costLine = $allocation->costLine;
+                    if ($costLine->status !== CostLine::STATUS_VERIFIED || $costLine->journalEntry?->status !== 'posted') {
+                        throw new InvalidArgumentException("Allocated cost line {$costLine->ref} is no longer a posted, verified liability.");
+                    }
+
+                    $liabilityLines = $costLine->journalEntry->lines->filter(fn (JournalLine $line) =>
+                        $line->entry_type === 'credit' && $controlAccounts->contains((int) $line->account_id)
+                    );
+                    $journalLiability = $liabilityLines->reduce(
+                        fn (string $sum, JournalLine $line) => bcadd($sum, (string) $line->amount, 2),
+                        '0.00'
+                    );
+                    $expected = bcsub(
+                        bcadd((string) ($costLine->net_amount ?? 0), (string) ($costLine->tax_amount ?? 0), 2),
+                        (string) ($costLine->wht_amount ?? 0),
+                        2
+                    );
+                    if (bccomp($journalLiability, $expected, 2) !== 0) {
+                        throw new InvalidArgumentException("Cost line {$costLine->ref} does not reconcile to its payable journal.");
+                    }
+                    if ($liabilityLines->pluck('account_id')->unique()->count() !== 1) {
+                        throw new InvalidArgumentException("Cost line {$costLine->ref} spans multiple payable control accounts and needs an explicit allocation policy.");
+                    }
+
+                    $allocationAmount = (string) $allocation->amount;
+                    if (bccomp($allocationAmount, '0.00', 2) !== 1 || bccomp($allocationAmount, $expected, 2) === 1) {
+                        throw new InvalidArgumentException("Allocation on {$costLine->ref} is outside its payable balance.");
+                    }
+                    $accountId = (int) $liabilityLines->first()->account_id;
+                    $byAccount[$accountId] = bcadd($byAccount[$accountId] ?? '0.00', $allocationAmount, 2);
+                }
+
+                $allocated = array_reduce($byAccount, fn (string $sum, string $value) => bcadd($sum, $value, 2), '0.00');
+                if (bccomp($allocated, $voucherAmount, 2) !== 0) {
+                    throw new InvalidArgumentException(
+                        "Spend voucher {$voucher->voucher_no} amount {$voucherAmount} does not equal allocated liabilities {$allocated}."
+                    );
+                }
+
+                return collect($byAccount)->map(fn (string $value, int $accountId) => [
+                    'account_id' => $accountId,
+                    'amount' => $value,
+                    'description' => 'Liability settlement for '.$voucher->voucher_no,
+                ])->values()->all();
+            }
+
+            // Refund without allocations defaults to Accounts Payable (2100)
+            if ($voucher->type === 'refund') {
+                $account = $this->accountByCode(self::PAYABLE_CODE);
+                return $account ? [[
+                    'account_id' => $account,
+                    'amount' => $voucherAmount,
+                    'description' => 'Refund payment for '.($voucher->payee_name ?? 'Payee'),
+                ]] : [];
+            }
+        }
+
+        // Removal: Using postSpendVoucher method as the primary reversal workflow
+        // The voucher->reversal_of_id field is set and handled by the reversal policy
+        if ($voucher->type === 'reversal') {
             throw new InvalidArgumentException(
-                "Spend voucher {$voucher->voucher_no} amount {$voucherAmount} does not equal allocated liabilities {$allocated}."
+                "Reversal voucher {$voucher->voucher_no} should be handled by reverseEntry method, not voucherDebitLegs. "
+                . "Use JournalPostingService::reverseEntry() instead."
             );
         }
 
-        return collect($byAccount)->map(fn (string $value, int $accountId) => [
-            'account_id' => $accountId,
-            'amount' => $value,
-            'description' => 'Liability settlement for '.$voucher->voucher_no,
-        ])->values()->all();
+        throw new InvalidArgumentException(
+            "Spend voucher {$voucher->voucher_no} has no supported ledger treatment for type {$voucher->type}."
+        );
     }
 
     /**

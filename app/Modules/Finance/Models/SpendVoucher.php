@@ -112,6 +112,12 @@ class SpendVoucher extends Model
         return $this->belongsTo(PaymentSource::class, 'payment_source_id');
     }
 
+    /** The cash document minted when this voucher was posted. */
+    public function payment(): BelongsTo
+    {
+        return $this->belongsTo(Payment::class, 'petty_cash_disbursement_id');
+    }
+
     public function accountingPeriod(): BelongsTo
     {
         return $this->belongsTo(AccountingPeriod::class, 'accounting_period_id');

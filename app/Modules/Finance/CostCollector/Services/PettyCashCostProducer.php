@@ -7,6 +7,7 @@ use App\Modules\Finance\CostCollector\Contracts\CostContext;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
@@ -110,6 +111,15 @@ class PettyCashCostProducer
         if ($disbursement->requisition?->bill_id
             || BillPayment::where('disbursement_id', $disbursement->id)->exists()) {
             return 'skipped_supplier_settlement';
+        }
+
+        // Settling a verified cost via spend voucher is the same rule as a
+        // supplier invoice: cash out discharges a liability already on the job.
+        // The voucher's own journal relieved AP; posting a cost here would
+        // charge the project twice for the same expense.
+        if ($disbursement->spend_voucher_id
+            || SpendVoucher::where('petty_cash_disbursement_id', $disbursement->id)->exists()) {
+            return 'skipped_voucher_settlement';
         }
 
         if (blank($disbursement->job_number)) {

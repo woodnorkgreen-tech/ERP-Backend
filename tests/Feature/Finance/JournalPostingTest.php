@@ -94,10 +94,10 @@ class JournalPostingTest extends TestCase
     public function test_spend_voucher_endpoints_flow(): void
     {
         $source = PaymentSource::create([
-            'name' => 'Main Safe',
-            'code' => 'SAFE-01',
-            'type' => 'petty_cash',
-            'gl_account_id' => ChartOfAccount::where('code', '1030')->value('id'),
+            'name' => 'Operating Bank',
+            'code' => 'BANK-TEST',
+            'type' => 'bank',
+            'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'),
             'is_active' => true,
         ]);
 
@@ -127,12 +127,14 @@ class JournalPostingTest extends TestCase
             'type' => 'payment',
             'payee_name' => 'Test Supplier',
             'total_amount' => 6000.00,
+            'payment_method' => 'bank_transfer',
             'payment_source_id' => $source->id,
             'allocations' => [['cost_line_id' => $liability->id, 'amount' => 6000.00]],
         ]);
 
         $response->assertStatus(201);
         $voucherId = $response->json('data.id');
+        $this->assertSame('pending_approval', $response->json('data.status'));
 
         $this->getJson('/api/finance/spend-vouchers/eligible-liabilities')
             ->assertOk()
@@ -178,6 +180,20 @@ class JournalPostingTest extends TestCase
             'amount' => '6000.00',
         ]);
 
+        // Cash fact: posting mints one Payment linked both ways, without a
+        // second project cost.
+        $this->assertDatabaseHas('payments', [
+            'spend_voucher_id' => $voucherId,
+            'payment_source_id' => $source->id,
+            'amount' => '6000.00',
+            'status' => 'active',
+        ]);
+        $this->assertNotNull($response->json('data.payment.payment_no'));
+        $this->assertDatabaseHas('spend_vouchers', [
+            'id' => $voucherId,
+            'petty_cash_disbursement_id' => $response->json('data.payment.id'),
+        ]);
+
         $this->assertDatabaseHas('hr_audit_logs', [
             'action' => 'spend_voucher_created',
             'model_type' => SpendVoucher::class,
@@ -203,7 +219,7 @@ class JournalPostingTest extends TestCase
         return SpendVoucher::create(array_merge([
             'voucher_no' => 'SV-' . uniqid(),
             'type' => 'retirement',
-            'status' => 'draft',
+            'status' => 'pending_approval',
             'transacted_at' => now(),
             'posting_date' => now()->toDateString(),
             'payee_name' => 'Test Supplier',
@@ -262,6 +278,7 @@ class JournalPostingTest extends TestCase
         // ...but the headline figures describe all 30. The client used to reduce
         // the page it happened to receive, so this read 25.
         $this->assertSame(30, $response->json('summary.total'));
+        $this->assertSame(30, $response->json('summary.pending_approval'));
         $this->assertSame(30, $response->json('summary.draft'));
     }
 

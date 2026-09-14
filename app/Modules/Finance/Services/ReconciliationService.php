@@ -2,18 +2,21 @@
 
 namespace App\Modules\Finance\Services;
 
+use App\Modules\Finance\Models\FinanceSetting;
+use App\Modules\Finance\Models\JournalEntry;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\ReconciliationStatement;
 use App\Modules\Finance\Models\StatementMatch;
 use App\Modules\Finance\Models\StatementTransaction;
-use App\Modules\Finance\Models\Payment;
-use App\Modules\Finance\Models\JournalEntry;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class ReconciliationService
 {
+    public const DATE_TOLERANCE_SETTING = 'reconciliation_date_tolerance_days';
+
     public function importCsv(
         PaymentSource $source,
         UploadedFile $file,
@@ -96,7 +99,7 @@ class ReconciliationService
                     ],
                 );
 
-                $this->autoMatch($transaction, $reference, $debit, $credit, $date, $actorId);
+                $this->autoMatch($statement, $transaction, $reference, $debit, $credit, $date, $actorId);
             }
 
             fclose($handle);
@@ -105,33 +108,96 @@ class ReconciliationService
         });
     }
 
-    private function autoMatch(StatementTransaction $transaction, ?string $reference, string $debit, string $credit, string $date, ?int $actorId): void
-    {
+    public function autoMatch(
+        ReconciliationStatement $statement,
+        StatementTransaction $transaction,
+        ?string $reference,
+        string $debit,
+        string $credit,
+        string $date,
+        ?int $actorId
+    ): bool {
         if ($transaction->match_status !== 'unmatched') {
-            return;
+            return false;
         }
 
-        $amount = bccomp($credit, '0.00', 2) === 1 ? $credit : $debit;
-        $payment = Payment::query()
-            ->when($reference, fn ($query) => $query->where(function ($nested) use ($reference) {
-                $nested->where('payment_no', $reference)->orWhere('external_reference', $reference);
-            }))
-            ->whereDate('date_disbursed', date('Y-m-d', strtotime($date)))
-            ->where('amount', $amount)
-            ->first();
+        $cleanRef = trim((string) ($reference ?: $transaction->external_reference));
+        if ($cleanRef === '') {
+            // Control 3 (Reference): Required for safe automatic matching to prevent ambiguous false positives.
+            return false;
+        }
 
-        $journal = $payment
-            ? JournalEntry::where('source_type', Payment::class)->where('source_id', $payment->id)->first()
-            : JournalEntry::query()
-                ->when($reference, fn ($query) => $query->where('source_ref', $reference))
-                ->whereDate('posting_date', date('Y-m-d', strtotime($date)))
-                ->where(function ($query) use ($amount) {
-                    $query->where('total_debit', $amount)->orWhere('total_credit', $amount);
+        $isCredit = bccomp($credit, '0.00', 2) === 1;
+        $amount = $isCredit ? $credit : $debit;
+        if (bccomp((string) $amount, '0.00', 2) !== 1) {
+            return false;
+        }
+
+        // Control 4 (Date): Within the effective Finance clearing-date tolerance.
+        $txDate = \Carbon\Carbon::parse($date);
+        $dateTolerance = $this->dateToleranceDays($txDate->toDateString());
+        $dateStart = $txDate->copy()->subDays($dateTolerance)->toDateString();
+        $dateEnd = $txDate->copy()->addDays($dateTolerance)->toDateString();
+
+        // Control 1: Account (must match payment_source_id of this statement)
+        // Control 2: Amount (exact match)
+        // Control 3: Reference (payment_no, external_reference, cheque number, or m-pesa code)
+        // Payments are disbursements, so only a bank debit can match one.
+        $payment = ! $isCredit
+            ? Payment::query()
+                ->where('payment_source_id', $statement->payment_source_id)
+                ->where(function ($query) use ($cleanRef) {
+                    $query->where('payment_no', $cleanRef)
+                        ->orWhere('external_reference', $cleanRef);
                 })
+                ->whereBetween('date_disbursed', [$dateStart, $dateEnd])
+                ->where('amount', $amount)
+                ->whereNotExists(function ($query) {
+                    $query->selectRaw('1')
+                        ->from('finance_statement_matches')
+                        ->whereColumn('finance_statement_matches.payment_id', 'payments.id');
+                })
+                ->first()
+            : null;
+
+        $journal = null;
+        if ($payment) {
+            $journal = JournalEntry::where('source_type', Payment::class)
+                ->where('source_id', $payment->id)
                 ->first();
+        } else {
+            // Check journal entries directly (e.g. client deposits or direct account entries)
+            $glAccountId = $statement->paymentSource?->gl_account_id;
+            $journalQuery = JournalEntry::query()
+                ->where(function ($query) use ($cleanRef) {
+                    $query->where('entry_no', $cleanRef)
+                        ->orWhere('source_ref', $cleanRef);
+                })
+                ->whereBetween('posting_date', [$dateStart, $dateEnd])
+                ->whereNotExists(function ($query) {
+                    $query->selectRaw('1')
+                        ->from('finance_statement_matches')
+                        ->whereColumn('finance_statement_matches.journal_entry_id', 'journal_entries.id');
+                });
+
+            // A source without a mapped GL account cannot pass the account
+            // control. On a bank statement, a credit is a GL debit (money in)
+            // and a debit is a GL credit (money out).
+            if (! $glAccountId) {
+                return false;
+            }
+
+            $journalQuery->whereHas('lines', function ($q) use ($glAccountId, $isCredit, $amount) {
+                $q->where('account_id', $glAccountId)
+                    ->where('entry_type', $isCredit ? 'debit' : 'credit')
+                    ->where('amount', $amount);
+            });
+
+            $journal = $journalQuery->first();
+        }
 
         if (! $payment && ! $journal) {
-            return;
+            return false;
         }
 
         StatementMatch::create([
@@ -142,11 +208,44 @@ class ReconciliationService
             'match_type' => 'automatic',
             'matched_by' => $actorId,
         ]);
+
         $transaction->forceFill([
             'match_status' => 'matched',
             'matched_by' => $actorId,
             'matched_at' => now(),
         ])->save();
+
+        return true;
+    }
+
+    public function dateToleranceDays(?string $on = null): int
+    {
+        return max(0, min(31, FinanceSetting::integer(self::DATE_TOLERANCE_SETTING, 3, $on)));
+    }
+
+    public function runAutoMatch(ReconciliationStatement $statement, ?int $actorId): int
+    {
+        $statement->loadMissing('paymentSource');
+        $unmatched = $statement->transactions()->where('match_status', 'unmatched')->get();
+        $matchedCount = 0;
+
+        foreach ($unmatched as $tx) {
+            $matched = $this->autoMatch(
+                $statement,
+                $tx,
+                $tx->external_reference,
+                (string) $tx->debit,
+                (string) $tx->credit,
+                $tx->transaction_date->toDateString(),
+                $actorId
+            );
+
+            if ($matched) {
+                $matchedCount++;
+            }
+        }
+
+        return $matchedCount;
     }
 
     public function match(
@@ -214,8 +313,79 @@ class ReconciliationService
         return $transaction->fresh('matches');
     }
     
-    public function suggestions(ReconciliationStatement $statement, StatementTransaction $transaction): array
+    public function unmatch(ReconciliationStatement $statement, StatementTransaction $transaction): StatementTransaction
     {
+        if ($statement->status === 'reconciled') {
+            throw new InvalidArgumentException('A reconciled statement cannot be changed. Reopen it first.');
+        }
+        if ($transaction->statement_id !== $statement->id) {
+            throw new InvalidArgumentException('The transaction does not belong to this statement.');
+        }
+
+        DB::transaction(function () use ($transaction): void {
+            $transaction = StatementTransaction::query()->lockForUpdate()->findOrFail($transaction->id);
+            $transaction->matches()->delete();
+            $transaction->forceFill([
+                'match_status' => 'unmatched',
+                'matched_by' => null,
+                'matched_at' => null,
+            ])->save();
+        });
+
+        return $transaction->fresh('matches');
+    }
+
+    public function createAndMatch(
+        ReconciliationStatement $statement,
+        StatementTransaction $transaction,
+        array $movementData,
+        ?int $actorId,
+    ): StatementTransaction {
+        if ($statement->status === 'reconciled') {
+            throw new InvalidArgumentException('A reconciled statement cannot be changed. Reopen it first.');
+        }
+        if ($transaction->statement_id !== $statement->id) {
+            throw new InvalidArgumentException('The transaction does not belong to this statement.');
+        }
+
+        return DB::transaction(function () use ($statement, $transaction, $movementData, $actorId): StatementTransaction {
+            $isCredit = bccomp((string) $transaction->credit, '0.00', 2) === 1;
+            $amount = $isCredit ? (string) $transaction->credit : (string) $transaction->debit;
+            $direction = $isCredit ? 'in' : 'out';
+
+            $payload = [
+                'payment_source_id' => $statement->payment_source_id,
+                'transaction_date' => $transaction->transaction_date->toDateString(),
+                'direction' => $direction,
+                'transaction_type' => $movementData['transaction_type'] ?? 'bank_fee',
+                'offset_account_id' => (int) $movementData['offset_account_id'],
+                'amount' => $amount,
+                'reference' => ! empty($movementData['reference']) ? $movementData['reference'] : $transaction->external_reference,
+                'description' => ! empty($movementData['description']) ? $movementData['description'] : ($transaction->description ?: 'Bank transaction adjustment'),
+                'counterparty' => $movementData['counterparty'] ?? null,
+            ];
+
+            $cashService = app(CashMovementService::class);
+            $movement = $cashService->create($payload, $actorId ?? 1);
+
+            return $this->match(
+                $statement,
+                $transaction,
+                $movement->journal_entry_id,
+                null,
+                $amount,
+                $actorId,
+            );
+        });
+    }
+
+    public function candidates(
+        ReconciliationStatement $statement,
+        StatementTransaction $transaction,
+        ?string $search = null,
+        ?string $fromDate = null,
+        ?string $toDate = null,
+    ): array {
         if ($transaction->statement_id !== $statement->id) {
             throw new InvalidArgumentException('The transaction does not belong to this statement.');
         }
@@ -224,26 +394,81 @@ class ReconciliationService
             ? (string) $transaction->credit
             : (string) $transaction->debit;
 
+        $from = $fromDate ?: $transaction->transaction_date->copy()->subDays(30)->toDateString();
+        $to = $toDate ?: $transaction->transaction_date->copy()->addDays(30)->toDateString();
+
+        $paymentsQuery = Payment::query()
+            ->where('payment_source_id', $statement->payment_source_id)
+            ->whereBetween('date_disbursed', [$from, $to]);
+
+        if ($search) {
+            $paymentsQuery->where(function ($q) use ($search) {
+                $q->where('payment_no', 'like', "%{$search}%")
+                  ->orWhere('external_reference', 'like', "%{$search}%")
+                  ->orWhere('payee_name', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
+        } else {
+            $paymentsQuery->where('amount', $amount);
+        }
+
+        $journalsQuery = JournalEntry::query()
+            ->whereBetween('posting_date', [$from, $to]);
+
+        if ($search) {
+            $journalsQuery->where(function ($q) use ($search) {
+                $q->where('entry_no', 'like', "%{$search}%")
+                  ->orWhere('source_ref', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
+        } else {
+            $journalsQuery->where(function ($query) use ($amount) {
+                $query->where('total_debit', $amount)->orWhere('total_credit', $amount);
+            });
+        }
+
         return [
-            'payments' => Payment::query()
-                ->where('payment_source_id', $statement->payment_source_id)
-                ->whereBetween('date_disbursed', [
-                    $transaction->transaction_date->copy()->subDays(3)->toDateString(),
-                    $transaction->transaction_date->copy()->addDays(3)->toDateString(),
-                ])
-                ->where('amount', $amount)
-                ->limit(10)
-                ->get(['id', 'payment_no', 'external_reference', 'payee_name', 'description', 'amount', 'date_disbursed']),
-            'journals' => JournalEntry::query()
-                ->whereBetween('posting_date', [
-                    $transaction->transaction_date->copy()->subDays(3)->toDateString(),
-                    $transaction->transaction_date->copy()->addDays(3)->toDateString(),
-                ])
-                ->where(function ($query) use ($amount) {
-                    $query->where('total_debit', $amount)->orWhere('total_credit', $amount);
-                })
-                ->limit(10)
-                ->get(['id', 'entry_no', 'source_ref', 'description', 'total_debit', 'total_credit', 'posting_date']),
+            'payments' => $paymentsQuery->limit(20)->get(['id', 'payment_no', 'external_reference', 'payee_name', 'description', 'amount', 'date_disbursed']),
+            'journals' => $journalsQuery->limit(20)->get(['id', 'entry_no', 'source_ref', 'description', 'total_debit', 'total_credit', 'posting_date']),
+        ];
+    }
+
+    public function listStatements(PaymentSource $source): array
+    {
+        $statements = ReconciliationStatement::where('payment_source_id', $source->id)
+            ->with(['paymentSource', 'transactions'])
+            ->orderByDesc('period_end')
+            ->orderByDesc('id')
+            ->get();
+
+        return $statements->map(function ($st) {
+            return $this->summary($st);
+        })->toArray();
+    }
+
+    public function prefill(PaymentSource $source): array
+    {
+        $latest = ReconciliationStatement::where('payment_source_id', $source->id)
+            ->orderByDesc('period_end')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $latest) {
+            return [
+                'has_previous' => false,
+                'opening_balance' => '0.00',
+                'period_start' => now()->startOfMonth()->toDateString(),
+                'period_end' => now()->endOfMonth()->toDateString(),
+            ];
+        }
+
+        return [
+            'has_previous' => true,
+            'last_statement_id' => $latest->id,
+            'last_status' => $latest->status,
+            'opening_balance' => (string) $latest->closing_balance,
+            'period_start' => $latest->period_end->copy()->addDay()->toDateString(),
+            'period_end' => $latest->period_end->copy()->addDay()->endOfMonth()->toDateString(),
         ];
     }
 

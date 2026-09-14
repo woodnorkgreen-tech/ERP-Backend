@@ -104,6 +104,10 @@ chart posts straight to COS).
   when there is no job attribution.
 - Spend vouchers must allocate to existing verified liabilities so they do not
   double-expense.
+- Posting a spend voucher mints one `payments` row (cash fact) and the settlement
+  journal; it must not fire the petty-cash cost producer. Float sources also debit
+  the petty-cash ledger. Work queue status for vouchers awaiting approval is
+  `pending_approval` — the same word procurement uses.
 
 ---
 
