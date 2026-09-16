@@ -102,7 +102,12 @@ class MaterialController extends Controller
 
         if ($request->boolean('with_trashed')) {
             $query->withTrashed();
-        } else {
+        } elseif (!$request->filled('search')) {
+            // A search is an explicit lookup for something the caller already
+            // believes exists — often the material they just registered as a
+            // draft. governed() is a browsing default (what Stores may move
+            // right now); a name/code search must not silently inherit it, or
+            // a freshly saved draft looks like it was never saved at all.
             $query->governed();
         }
 

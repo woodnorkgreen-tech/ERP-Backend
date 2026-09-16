@@ -120,6 +120,31 @@ class DraftFirstCatalogueTest extends TestCase
             ->assertJsonPath('data.0.alternative_item_name', 'Workshop white glue');
     }
 
+    /**
+     * governed() is a browsing default — the catalogue's curated, ready-to-move
+     * view — not a filter a name search should silently inherit. Without this,
+     * a material saved a moment ago as a draft is unfindable by the exact name
+     * just typed for it, reading as a lost save rather than an unfinished one.
+     */
+    public function test_a_freshly_saved_draft_is_still_findable_by_search(): void
+    {
+        $this->createMaterial(['material_category_id' => null, 'material_name' => 'Unclassified Epoxy Resin'])
+            ->assertCreated();
+
+        $material = LibraryMaterial::sole();
+        $this->assertSame('Under Review', $material->item_status);
+
+        $this->getJson('/api/materials-library/materials')
+            ->assertOk()
+            ->assertJsonMissing(['id' => $material->id]);
+
+        $this->getJson('/api/materials-library/materials?search=Epoxy')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $material->id)
+            ->assertJsonPath('data.0.item_status', 'Under Review');
+    }
+
     public function test_behaviour_is_derived_from_the_category_item_type(): void
     {
         $this->createMaterial()->assertStatus(201);
