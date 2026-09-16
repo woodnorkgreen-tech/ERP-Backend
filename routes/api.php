@@ -324,7 +324,16 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Project management
     Route::get('projects', function () {
-        $query = \App\Models\Project::with('enquiry.client');
+        // Every caller only ever reads a handful of fields off enquiry/client/
+        // projectOfficer (title, status, job_number, full_name, name), but the
+        // unrestricted eager load was serializing all ~48 project_enquiries
+        // columns and ~20 clients columns per row — a ~2MB payload for 535
+        // projects, refetched on every page load with no pagination.
+        $query = \App\Models\Project::with([
+            'enquiry:id,title,status,job_number,client_id,project_officer_id',
+            'enquiry.client:id,full_name',
+            'enquiry.projectOfficer' => fn ($q) => $q->select('id', 'name')->without('roles'),
+        ])->orderByDesc('created_at')->orderByDesc('id');
 
         if (request()->has('enquiry_id')) {
             $query->where('enquiry_id', request()->enquiry_id);
