@@ -33,6 +33,12 @@ class Bill extends Model
         'etims_invoice_no',
         'supplier_pin',
         'tax_point_date',
+        // Direct bills only — no purchase order to derive these from.
+        'expense_code_id',
+        'project_id',
+        'project_enquiry_id',
+        'job_number',
+        'department_id',
     ];
 
     protected $casts = [
@@ -184,6 +190,23 @@ class Bill extends Model
     public function verifiedBy()
     {
         return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    /** Direct bills only — a PO-backed bill classifies through its purchase order. */
+    public function expenseCode()
+    {
+        return $this->belongsTo(\App\Modules\Finance\CostCollector\Models\ExpenseCode::class);
+    }
+
+    /**
+     * No purchase order behind this invoice — a credit purchase that never
+     * went through Requisition→PO→GRN. Skips the three-way match and posts
+     * straight to its own expense classification instead of relieving a
+     * receipt accrual that was never raised.
+     */
+    public function isDirect(): bool
+    {
+        return $this->purchase_order_id === null;
     }
 
     /*

@@ -222,9 +222,15 @@ class BillController extends Controller
     public function store(Request $request)
     {
         $input = $request->all();
-        
+
+        // A direct bill (no purchase order — a credit purchase that never went
+        // through Requisition→PO→GRN) classifies itself instead of inheriting
+        // from an order: it needs its own supplier, expense code, and — if it
+        // belongs to a job — its own project reference.
+        $isDirect = blank($input['purchase_order_id'] ?? null);
+
         $validator = Validator::make($input, [
-            'purchase_order_id' => 'required|exists:purchase_orders,id',
+            'purchase_order_id' => 'nullable|exists:purchase_orders,id',
             'bill_date' => 'required|date',
             'due_date' => 'required|date',
             'amount' => 'required|numeric|min:0',
@@ -236,6 +242,27 @@ class BillController extends Controller
             'etims_invoice_no' => 'nullable|string|max:64',
             'supplier_pin' => 'nullable|string|max:20',
             'tax_point_date' => 'nullable|date',
+            'supplier_id' => [$isDirect ? 'required' : 'nullable', 'exists:suppliers,id'],
+            // Procurable (the same gate RequisitionApprovalCheck enforces for
+            // a purchase order line) and, further, not a raw fabrication
+            // material — a real materials purchase should go through
+            // Requisition→PO→GRN for the budget commitment and three-way
+            // match that gives, not bypass it as a one-line credit bill. See
+            // ExpenseCode::scopeForDirectBill().
+            'expense_code_id' => [
+                $isDirect ? 'required' : 'nullable',
+                Rule::exists('expense_codes', 'id')
+                    ->where('is_procurable', true)
+                    ->whereNot('expense_family', 'Direct materials'),
+            ],
+            'project_id' => 'nullable|exists:projects,id',
+            'project_enquiry_id' => 'nullable|exists:project_enquiries,id',
+            'job_number' => 'nullable|string|max:64',
+            'department_id' => 'nullable|exists:departments,id',
+        ], [
+            'expense_code_id.exists' => 'Choose a category for a service or overhead invoice. '
+                .'Staff payments, stores issues and non-purchase categories cannot classify a bill, '
+                .'and a materials purchase belongs on a purchase order, not a direct invoice.',
         ]);
 
         if ($validator->fails()) {
@@ -243,18 +270,49 @@ class BillController extends Controller
         }
 
         try {
-            $purchaseOrder = PurchaseOrder::findOrFail($input['purchase_order_id']);
-            
-            if ($purchaseOrder->status !== 'approved') {
-                return response(['error' => 'Only approved purchase orders can have bills'], 422);
+            if ($isDirect) {
+                $input['purchase_order_id'] = null;
+            } else {
+                $purchaseOrder = PurchaseOrder::findOrFail($input['purchase_order_id']);
+
+                if ($purchaseOrder->status !== 'approved') {
+                    return response(['error' => 'Only approved purchase orders can have bills'], 422);
+                }
+
+                if ($purchaseOrder->bills()->exists()) {
+                    return response(['error' => 'This purchase order already has a bill'], 422);
+                }
+
+                $input['supplier_id'] = $purchaseOrder->supplier_id;
+                // Classification comes from the order, not the request — a
+                // PO-backed bill's liability is relieving a receipt accrual,
+                // not debiting an expense code of its own.
+                $input['expense_code_id'] = null;
             }
-            
-            if ($purchaseOrder->bills()->exists()) {
-                return response(['error' => 'This purchase order already has a bill'], 422);
+
+            // A supplier credit invoice now has two doors: this one, and the
+            // Cost Collector's own unpaid_invoice capture. Nothing ties them
+            // together structurally, so this is the same guard
+            // StoreCostLineRequest::assertNotAlreadyRecordedAsABill() applies
+            // in the other direction — matched on supplier + the supplier's
+            // own invoice number, the only two facts both sides necessarily
+            // share.
+            $duplicate = \App\Modules\Finance\CostCollector\Models\CostLine::query()
+                ->where('payee_id', $input['supplier_id'])
+                ->where('details->funding_mode', 'unpaid_invoice')
+                ->whereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(details, "$.external_ref"))) = ?', [
+                    strtolower(trim((string) $input['supplier_invoice_number'])),
+                ])
+                ->first(['id', 'ref']);
+
+            if ($duplicate) {
+                return response(['error' => [
+                    'supplier_invoice_number' => ["Invoice {$input['supplier_invoice_number']} from this supplier is already recorded as cost line {$duplicate->ref}. "
+                        .'Pay it as a payment voucher rather than recording it again here.'],
+                ]], 422);
             }
-            
+
             $input['bill_number'] = Bill::generateBillNumber();
-            $input['supplier_id'] = $purchaseOrder->supplier_id;
             $input['user_id'] = auth()->id();
             $input['status'] = 'pending';
 
@@ -340,7 +398,9 @@ class BillController extends Controller
 
         if (! $state['eligible_for_verification']) {
             return response([
-                'error' => 'This invoice does not yet pass the three-way match.',
+                'error' => $bill->isDirect()
+                    ? 'This invoice is missing something Accounts needs before it can be verified.'
+                    : 'This invoice does not yet pass the three-way match.',
                 'blockers' => $state['blockers'],
                 'checks' => $state['checks'],
             ], 422);
@@ -363,7 +423,7 @@ class BillController extends Controller
                 $bill->forceFill([
                     'verified_by' => auth()->id(),
                     'verified_at' => now(),
-                    'verification_basis' => 'three_way_match',
+                    'verification_basis' => $bill->isDirect() ? 'direct' : 'three_way_match',
                     'verification_fingerprint' => $state['fingerprint'],
                     'verification_notes' => $request->input('verification_notes'),
                 ])->save();
@@ -446,7 +506,7 @@ class BillController extends Controller
             'payment_source_id' => [
                 'required',
                 Rule::exists('payment_sources', 'id')->where(
-                    fn ($query) => $query->where('is_active', true)->where('type', '!=', 'payable')
+                    fn ($query) => $query->where('is_active', true)->where('can_make_payment', true)
                 ),
             ],
             'payment_method' => ['required', Rule::in(PaymentMethods::values())],
@@ -506,7 +566,7 @@ class BillController extends Controller
             'payment_source_id' => [
                 'required',
                 Rule::exists('payment_sources', 'id')->where(
-                    fn ($query) => $query->where('is_active', true)->where('type', '!=', 'payable')
+                    fn ($query) => $query->where('is_active', true)->where('can_make_payment', true)
                 ),
             ],
             'payment_method' => ['required', Rule::in(PaymentMethods::values())],

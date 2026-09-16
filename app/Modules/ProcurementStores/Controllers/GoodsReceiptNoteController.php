@@ -211,6 +211,10 @@ class GoodsReceiptNoteController extends Controller
         $query = GoodsReceiptNote::with([
             'items.purchaseOrderItem.material',
             'purchaseOrder.supplier',
+            'purchaseOrder.requisition.project',
+            'purchaseOrder.requisition.department',
+            'purchaseOrder.requisition.projectEnquiry',
+            'purchaseOrder.requisition.employee',
             'receivedByUser'
         ]);
 
@@ -254,6 +258,10 @@ class GoodsReceiptNoteController extends Controller
         $grns = GoodsReceiptNote::with([
             'items.purchaseOrderItem.material',
             'purchaseOrder.supplier',
+            'purchaseOrder.requisition.project',
+            'purchaseOrder.requisition.department',
+            'purchaseOrder.requisition.projectEnquiry',
+            'purchaseOrder.requisition.employee',
             'receivedByUser'
         ])
             ->where(function ($query) use ($searchTerm) {
@@ -274,6 +282,10 @@ class GoodsReceiptNoteController extends Controller
         $grn = GoodsReceiptNote::with([
             'items.purchaseOrderItem.material',
             'purchaseOrder.supplier',
+            'purchaseOrder.requisition.project',
+            'purchaseOrder.requisition.department',
+            'purchaseOrder.requisition.projectEnquiry',
+            'purchaseOrder.requisition.employee',
             'receivedByUser'
         ])->findOrFail($id);
 

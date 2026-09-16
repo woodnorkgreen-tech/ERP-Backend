@@ -105,7 +105,9 @@ class RequisitionController extends Controller
     private function getRequestedByLabel(Requisition $requisition, string $type): string
     {
         return match($type) {
-            'project'  => $requisition->project?->project_name ?? 'Project',
+            'project'  => $requisition->project?->enquiry?->title
+                ?? $requisition->projectEnquiry?->title
+                ?? 'Project',
             'employee' => trim(
                 ($requisition->employee?->first_name ?? '') . ' ' .
                 ($requisition->employee?->last_name ?? '')
@@ -191,17 +193,30 @@ class RequisitionController extends Controller
         if (!empty($searchTerm)) {
             $query->where(function ($q) use ($searchTerm) {
                 $q->where('requisition_number', 'LIKE', '%' . $searchTerm . '%')
+                    // `projects` has no name/code of its own — its identity is the
+                    // enquiry it belongs to, so the search has to reach through it.
+                    // `project_id` here still stores a raw enquiry id on rows that
+                    // predate a Project record, which is what projectEnquiry covers.
                     ->orWhereHas('project', function ($projectQuery) use ($searchTerm) {
-                        $projectQuery->where('project_name', 'LIKE', '%' . $searchTerm . '%')
-                            ->orWhere('project_code', 'LIKE', '%' . $searchTerm . '%');
+                        $projectQuery->where('project_id', 'LIKE', '%' . $searchTerm . '%')
+                            ->orWhereHas('enquiry', function ($enquiryQuery) use ($searchTerm) {
+                                $enquiryQuery->where('title', 'LIKE', '%' . $searchTerm . '%')
+                                    ->orWhere('job_number', 'LIKE', '%' . $searchTerm . '%')
+                                    ->orWhere('enquiry_number', 'LIKE', '%' . $searchTerm . '%');
+                            });
+                    })
+                    ->orWhereHas('projectEnquiry', function ($enquiryQuery) use ($searchTerm) {
+                        $enquiryQuery->where('title', 'LIKE', '%' . $searchTerm . '%')
+                            ->orWhere('job_number', 'LIKE', '%' . $searchTerm . '%')
+                            ->orWhere('enquiry_number', 'LIKE', '%' . $searchTerm . '%');
                     })
                     ->orWhereHas('employee', function ($employeeQuery) use ($searchTerm) {
                         $employeeQuery->where('first_name', 'LIKE', '%' . $searchTerm . '%')
                             ->orWhere('last_name', 'LIKE', '%' . $searchTerm . '%')
-                            ->orWhere('employee_number', 'LIKE', '%' . $searchTerm . '%');
+                            ->orWhere('employee_id', 'LIKE', '%' . $searchTerm . '%');
                     })
                     ->orWhereHas('department', function ($deptQuery) use ($searchTerm) {
-                        $deptQuery->where('department_name', 'LIKE', '%' . $searchTerm . '%');
+                        $deptQuery->where('name', 'LIKE', '%' . $searchTerm . '%');
                     });
             });
         }
@@ -263,6 +278,7 @@ class RequisitionController extends Controller
         $validator = Validator::make($input, [
             'date'                       => 'required|date',
             'requested_by_type'          => 'required|in:project,office,employee',
+            'trigger_reason'             => 'nullable|string|max:1000',
             'project_id'                 => 'required_if:requested_by_type,project',
             'employee_id'                => 'required_if:requested_by_type,employee',
             'department_id'              => 'required_if:requested_by_type,office',
@@ -429,6 +445,7 @@ class RequisitionController extends Controller
         $validator = Validator::make($input, [
             'date'               => 'date',
             'requested_by_type'  => 'in:project,office,employee',
+            'trigger_reason'     => 'nullable|string|max:1000',
             'urgency'            => 'in:normal,urgent',
             'status'             => 'in:pending,approved,rejected,completed',
             'items'              => 'sometimes|array|min:1',

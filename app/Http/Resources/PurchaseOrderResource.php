@@ -29,6 +29,11 @@ class PurchaseOrderResource extends JsonResource
                 return [
                     'id' => $this->requisition->id,
                     'requisition_number' => $this->requisition->requisition_number,
+                    // What led to this requisition in the first place — project,
+                    // office/department, or employee, and why — so a purchase
+                    // order can be traced back to its origin without a second
+                    // trip to the requisition screen.
+                    'trigger' => $this->requisition->triggerContext(),
                 ];
             }),
             'submitted_at' => $this->submitted_at?->format('Y-m-d H:i:s'),

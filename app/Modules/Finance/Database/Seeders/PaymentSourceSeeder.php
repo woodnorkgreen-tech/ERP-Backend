@@ -63,6 +63,15 @@ class PaymentSourceSeeder extends Seeder
                 array_merge([
                     'name' => $name,
                     'type' => $type,
+                    // A raw query-builder write, so it bypasses
+                    // PaymentSource::booted()'s saving guard entirely — this is
+                    // where a payable source having drifted to
+                    // can_make_payment=true was actually coming from (the
+                    // column's schema default is true, and this seeder never
+                    // set it). Asserted every run, like `type`, because it's a
+                    // structural fact about the account, not an admin
+                    // preference such as `is_active`.
+                    'can_make_payment' => $type !== 'payable',
                     'gl_account_id' => $accounts[$accountCode] ?? null,
                     'currency' => 'KES',
                     'updated_at' => $now,

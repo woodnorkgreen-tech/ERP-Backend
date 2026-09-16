@@ -65,6 +65,7 @@ Route::post('/finance-sync-exceptions/{inventoryLog}/retry', [ProcurementStoresC
 Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [ProcurementStoresController::class, 'resolveFinanceValuation']);
 Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'destroyLog']);
 Route::post('/inventory-logs/{inventoryLog}/link-project-material', [ProcurementStoresController::class, 'linkProjectMaterial']);
+Route::post('/project-materials/{elementMaterial}/resolve-catalogue', [ProcurementStoresController::class, 'resolveProjectMaterialCatalogue']);
 Route::get('/stock-counts', [StockCountController::class, 'index']);
 Route::post('/stock-counts', [StockCountController::class, 'store']);
 Route::get('/stock-counts/{stockCount}', [StockCountController::class, 'show']);

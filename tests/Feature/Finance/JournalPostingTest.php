@@ -10,6 +10,7 @@ use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\SpendVoucher;
+use App\Modules\Finance\Models\SpendVoucherAllocation;
 use App\Modules\Finance\Services\JournalPostingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -213,6 +214,96 @@ class JournalPostingTest extends TestCase
         ]);
     }
 
+    /**
+     * The generic journal-reversal screen must refuse a voucher's journal and
+     * point at the atomic path instead — PaymentReversalService is what
+     * actually owns reversing a voucher's Payment, journal, status and (for
+     * petty cash) float together. This proves that path is real, not just
+     * plausible-looking: reversing the Payment must flip the voucher back to
+     * `reversed`, void the Payment, reverse its journal, and free the
+     * liability for a fresh voucher — all in one call, nothing left dangling.
+     */
+    public function test_reversing_a_posted_vouchers_payment_restores_everything_atomically(): void
+    {
+        $source = PaymentSource::create([
+            'name' => 'Reversal Test Bank', 'code' => 'BANK-REVERSAL', 'type' => 'bank',
+            'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'), 'is_active' => true,
+        ]);
+        $liability = $this->verifiedLiability('CL-REVERSE-001', '1000.00');
+
+        $voucherId = $this->actingAs($this->user, 'sanctum')->postJson('/api/finance/spend-vouchers', [
+            'type' => 'payment',
+            'payee_name' => 'Test Supplier',
+            'total_amount' => 1000.00,
+            'payment_source_id' => $source->id,
+            'allocations' => [['cost_line_id' => $liability->id, 'amount' => 1000.00]],
+        ])->assertStatus(201)->json('data.id');
+
+        $this->actingAs($this->approver, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucherId}/approve")->assertOk();
+        $posted = $this->actingAs($this->poster, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucherId}/post")->assertOk();
+        $paymentId = $posted->json('data.payment.id');
+
+        // The generic journal-reversal endpoint must refuse this journal.
+        $journalId = JournalEntry::where('spend_voucher_id', $voucherId)->value('id');
+        Permission::findOrCreate(Permissions::FINANCE_JOURNALS_REVERSE, 'web');
+        $this->user->givePermissionTo(Permissions::FINANCE_JOURNALS_REVERSE);
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson("/api/finance/journals/{$journalId}/reverse", ['reason' => 'Attempting the wrong path.'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'This journal belongs to a Payment. Reverse the Payment so its liability, voucher, cashbook and audit trail are corrected atomically.');
+
+        // Fully allocated: invisible to a new voucher until reversed.
+        $before = $this->getJson('/api/finance/spend-vouchers/eligible-liabilities')->assertOk();
+        $this->assertFalse(collect($before->json('data'))->contains('id', $liability->id));
+
+        Permission::findOrCreate(Permissions::FINANCE_PAYMENTS_REVERSE, 'web');
+        $reverser = User::factory()->create(['is_active' => true]);
+        $reverser->givePermissionTo(Permissions::FINANCE_PAYMENTS_REVERSE);
+
+        $this->actingAs($reverser, 'sanctum')
+            ->postJson("/api/finance/payments/{$paymentId}/reverse", [
+                'reason' => 'Posted against the wrong liability, correcting.',
+            ])->assertOk();
+
+        $this->assertSame('reversed', SpendVoucher::find($voucherId)->status);
+        $this->assertSame('voided', \App\Modules\Finance\Models\Payment::find($paymentId)->status);
+        $this->assertSame('reversed', JournalEntry::find($journalId)->status);
+
+        // The liability is payable again, for a full KES 1,000 — nothing was
+        // left partially allocated by the reversed voucher.
+        $after = $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/finance/spend-vouchers/eligible-liabilities')->assertOk();
+        $line = collect($after->json('data'))->firstWhere('id', $liability->id);
+        $this->assertNotNull($line, 'The liability must become payable again once the voucher that claimed it is reversed.');
+        $this->assertSame('1000.00', $line['remaining_amount']);
+    }
+
+    /**
+     * A verified, posted cost line — the only kind a payment/reimbursement
+     * voucher can allocate against, now that those are the only two types a
+     * voucher can be created as.
+     */
+    private function verifiedLiability(string $ref, string $amount, ?int $userId = null): CostLine
+    {
+        $liability = CostLine::create([
+            'ref' => $ref,
+            'nature' => CostLine::NATURE_ACTUAL,
+            'status' => CostLine::STATUS_VERIFIED,
+            'amount' => $amount,
+            'tax_amount' => '0.00',
+            'net_amount' => $amount,
+            'base_net_amount' => $amount,
+            'fx_rate' => '1.00',
+            'accounting_period_id' => AccountingPeriod::forDate(now())->id,
+            'submitted_by_user_id' => $userId ?? $this->user->id,
+        ]);
+        $this->postingService->postCostLine($liability);
+
+        return $liability;
+    }
+
     /** Every column the table requires, so callers name only what they vary. */
     private function voucher(array $overrides = []): SpendVoucher
     {
@@ -229,6 +320,54 @@ class JournalPostingTest extends TestCase
             'net_amount' => '1000.00',
             'net_cash_paid' => '1000.00',
         ], $overrides));
+    }
+
+    /**
+     * Recording the fee on the Payment row isn't posting it — the only other
+     * caller of postPaymentFee() is a queued listener on an event vouchers
+     * deliberately never fire. Without wiring it into post() directly, a
+     * voucher's transaction fee would sit as data forever, debited from the
+     * bank in reality but never reaching 7800 in the GL.
+     */
+    public function test_posting_a_voucher_with_a_transaction_fee_debits_bank_charges(): void
+    {
+        $source = PaymentSource::create([
+            'name' => 'Fee Test Bank', 'code' => 'BANK-FEE', 'type' => 'bank',
+            'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'), 'is_active' => true,
+        ]);
+        $liability = $this->verifiedLiability('CL-FEE-001', '1000.00');
+
+        $voucherId = $this->actingAs($this->user, 'sanctum')->postJson('/api/finance/spend-vouchers', [
+            'type' => 'payment',
+            'payee_name' => 'Test Supplier',
+            'total_amount' => 1000.00,
+            'transaction_cost' => 25.00,
+            'payment_source_id' => $source->id,
+            'allocations' => [['cost_line_id' => $liability->id, 'amount' => 1000.00]],
+        ])->assertStatus(201)->json('data.id');
+
+        $this->assertSame('25.00', (string) \App\Modules\Finance\Models\SpendVoucher::find($voucherId)->transaction_cost);
+
+        $this->actingAs($this->approver, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucherId}/approve")->assertOk();
+        $posted = $this->actingAs($this->poster, 'sanctum')
+            ->postJson("/api/finance/spend-vouchers/{$voucherId}/post")->assertOk();
+
+        $paymentId = $posted->json('data.payment.id');
+        $payment = \App\Modules\Finance\Models\Payment::find($paymentId);
+        $this->assertSame('25.00', (string) $payment->transaction_cost);
+
+        $feeEntry = JournalEntry::where('entry_no', 'JE-PFEE-'.str_pad((string) $paymentId, 7, '0', STR_PAD_LEFT))->first();
+        $this->assertNotNull($feeEntry, 'The transaction fee must post its own journal entry.');
+        $this->assertSame('25.00', (string) $feeEntry->total_debit);
+
+        $chargesAccountId = ChartOfAccount::where('code', '7800')->value('id');
+        $this->assertDatabaseHas('journal_lines', [
+            'journal_entry_id' => $feeEntry->id,
+            'account_id' => $chargesAccountId,
+            'entry_type' => 'debit',
+            'amount' => '25.00',
+        ]);
     }
 
     public function test_listing_vouchers_does_not_blow_up_once_one_exists(): void
@@ -341,6 +480,18 @@ class JournalPostingTest extends TestCase
             ->assertJsonPath('meta.can_manage', false);
     }
 
+    public function test_payment_vouchers_are_listed_at_the_spend_vouchers_url(): void
+    {
+        // "Payment Voucher" is the UI label only; there is one implementation
+        // and one API path (spend-vouchers) behind it — see
+        // erp-payment-voucher-naming-collapse.
+        $this->user->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_READ);
+
+        $this->actingAs($this->user, 'sanctum')
+            ->getJson('/api/finance/spend-vouchers')
+            ->assertOk();
+    }
+
     public function test_payment_context_excludes_liabilities_and_inactive_sources(): void
     {
         $accountId = ChartOfAccount::where('code', '1030')->value('id');
@@ -378,11 +529,14 @@ class JournalPostingTest extends TestCase
             'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'), 'is_active' => true,
         ]);
 
+        $liability = $this->verifiedLiability('CL-PERIOD-001', '1000.00');
+
         $response = $this->postJson('/api/finance/spend-vouchers', [
-            'type' => 'advance',
+            'type' => 'payment',
             'payee_name' => 'Test Supplier',
             'total_amount' => 1000.00,
             'payment_source_id' => $source->id,
+            'allocations' => [['cost_line_id' => $liability->id, 'amount' => 1000.00]],
         ]);
 
         $response->assertStatus(201);
@@ -403,11 +557,14 @@ class JournalPostingTest extends TestCase
             'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'), 'is_active' => true,
         ]);
 
+        $liability = $this->verifiedLiability('CL-LOCKED-001', '1000.00');
+
         $voucherId = $this->postJson('/api/finance/spend-vouchers', [
-            'type' => 'advance',
+            'type' => 'payment',
             'payee_name' => 'Test Supplier',
             'total_amount' => 1000.00,
             'payment_source_id' => $source->id,
+            'allocations' => [['cost_line_id' => $liability->id, 'amount' => 1000.00]],
         ])->assertStatus(201)->json('data.id');
 
         $this->actingAs($this->approver, 'sanctum')
@@ -457,11 +614,12 @@ class JournalPostingTest extends TestCase
             'name' => 'Unmapped Test Bank', 'code' => 'BANK-NO-GL', 'type' => 'bank',
             'gl_account_id' => $bankAccountId, 'is_active' => true,
         ]);
-        ChartOfAccount::query()->update(['is_postable' => false]);
+
+        $liability = $this->verifiedLiability('CL-NO-GL-001', '1000.00');
 
         $voucher = SpendVoucher::create([
             'voucher_no' => 'SV-TEST-NO-GL',
-            'type' => 'advance',
+            'type' => 'payment',
             'status' => 'approved',
             'transacted_at' => now(),
             'posting_date' => now()->toDateString(),
@@ -475,11 +633,25 @@ class JournalPostingTest extends TestCase
             'net_cash_paid' => '1000.00',
             'payment_source_id' => $source->id,
         ]);
+        SpendVoucherAllocation::create([
+            'spend_voucher_id' => $voucher->id,
+            'cost_line_id' => $liability->id,
+            'amount' => '1000.00',
+        ]);
+
+        // No control account remains postable, so the liability this voucher
+        // settles can no longer be traced to one — resolveVerifiedLiabilityAccount's
+        // reconciliation guard is what now catches an unresolvable GL setup,
+        // in place of the old types' "return an empty debit-leg array" path.
+        ChartOfAccount::query()->update(['is_postable' => false]);
 
         $this->actingAs($this->poster, 'sanctum')
             ->postJson("/api/finance/spend-vouchers/{$voucher->id}/post")
             ->assertUnprocessable()
-            ->assertJsonPath('message', "No complete posting rule could be resolved for spend voucher {$voucher->voucher_no}.");
+            ->assertJsonPath(
+                'message',
+                "Spend voucher {$voucher->voucher_no}: cost line {$liability->ref} does not reconcile to its payable journal.",
+            );
 
         $this->assertSame('approved', $voucher->fresh()->status);
         $this->assertNull($voucher->fresh()->posted_at);
@@ -602,14 +774,21 @@ class JournalPostingTest extends TestCase
             'gl_account_id' => ChartOfAccount::where('code', '1010')->value('id'),
             'is_active' => true,
         ]);
+        $liability = $this->verifiedLiability('CL-ADMIN-001', '1000.00', $superAdmin->id);
+
         $voucher = $this->voucher([
             'voucher_no' => 'SV-SUPER-POST',
-            'type' => 'advance',
+            'type' => 'payment',
             'status' => 'approved',
             'payment_source_id' => $source->id,
             'requester_user_id' => $superAdmin->id,
             'approved_by' => $superAdmin->id,
             'approved_at' => now(),
+        ]);
+        SpendVoucherAllocation::create([
+            'spend_voucher_id' => $voucher->id,
+            'cost_line_id' => $liability->id,
+            'amount' => '1000.00',
         ]);
 
         $this->actingAs($superAdmin, 'sanctum')

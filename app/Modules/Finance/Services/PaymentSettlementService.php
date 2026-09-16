@@ -30,7 +30,7 @@ class PaymentSettlementService
     public function settle(array $attributes, string $amountField = 'amount'): Payment
     {
         $sourceId = (int) ($attributes['payment_source_id'] ?? 0);
-        $source = PaymentSource::query()->usableForPayment()->find($sourceId);
+        $source = PaymentSource::query()->paymentCapable()->find($sourceId);
 
         if (! $source) {
             $configured = PaymentSource::query()->find($sourceId);

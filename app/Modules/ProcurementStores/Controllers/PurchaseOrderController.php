@@ -60,7 +60,10 @@ class PurchaseOrderController extends Controller
 
     public function index(Request $request)
     {
-        $query = PurchaseOrder::with(['items.material', 'supplier', 'createdBy', 'approvedBy']);
+        $query = PurchaseOrder::with([
+            'items.material', 'supplier', 'createdBy', 'approvedBy',
+            'requisition.project', 'requisition.department', 'requisition.projectEnquiry', 'requisition.employee',
+        ]);
 
         // Date filtering
         if ($request->has('date_filter')) {
@@ -96,7 +99,10 @@ class PurchaseOrderController extends Controller
         $searchTerm = trim((string) $request->input('searchTerm', ''));
         $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
 
-        $purchaseOrders = PurchaseOrder::with(['items.material', 'supplier', 'createdBy', 'approvedBy'])
+        $purchaseOrders = PurchaseOrder::with([
+            'items.material', 'supplier', 'createdBy', 'approvedBy',
+            'requisition.project', 'requisition.department', 'requisition.projectEnquiry', 'requisition.employee',
+        ])
             ->when($searchTerm !== '', function ($query) use ($searchTerm) {
                 $query->where(function ($query) use ($searchTerm) {
                     $query->where('po_number', 'LIKE', '%' . $searchTerm . '%')
@@ -320,7 +326,10 @@ class PurchaseOrderController extends Controller
 
     public function show(PurchaseOrder $purchaseOrder)
     {
-        return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
+        return new PurchaseOrderResource($purchaseOrder->load([
+            'items.material', 'supplier', 'createdBy', 'approvedBy',
+            'requisition.project', 'requisition.department', 'requisition.projectEnquiry', 'requisition.employee',
+        ]));
     }
 
     /**

@@ -13,6 +13,7 @@ class RequisitionResource extends JsonResource
             'requisition_number' => $this->requisition_number,
             'date' => $this->date?->format('Y-m-d'),
             'requested_by_type' => $this->requested_by_type,
+            'trigger_reason' => $this->trigger_reason,
             'project_id' => $this->project_id,
             'job_number' => $this->job_number,
             'project' => $this->whenLoaded('project', function () {

@@ -3,6 +3,7 @@
 namespace App\Modules\Finance\Services;
 
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Models\PaymentAllocation;
 use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Support\DocumentNumber;
 use Carbon\Carbon;
@@ -65,7 +66,7 @@ class SpendVoucherSettlementService
             'payee_id' => $voucher->supplier_id,
             'account' => 'Spend voucher settlement',
             'amount' => $amount,
-            'transaction_cost' => '0.00',
+            'transaction_cost' => $voucher->transaction_cost ?? '0.00',
             'description' => $this->describe($voucher),
             'date_disbursed' => $voucher->posting_date ?? now()->toDateString(),
             'external_reference' => $voucher->payment_reference,
@@ -80,6 +81,38 @@ class SpendVoucherSettlementService
         $voucher->forceFill([
             'petty_cash_disbursement_id' => $payment->id,
         ])->save();
+
+        // Mirror the voucher allocations on the cash document. This is the
+        // direct, durable settlement link used by duplicate-payment checks;
+        // updateOrCreate also makes a retry harmless.
+        foreach ($voucher->allocations()->get() as $allocation) {
+            PaymentAllocation::query()->updateOrCreate(
+                [
+                    'payment_id' => $payment->id,
+                    'cost_line_id' => $allocation->cost_line_id,
+                ],
+                [
+                    'amount' => $allocation->amount,
+                    'allocation_type' => 'settlement',
+                ],
+            );
+
+            $updated = \App\Modules\Finance\CostCollector\Models\CostLine::query()
+                ->whereKey($allocation->cost_line_id)
+                ->whereNull('settled_by_payment_id')
+                ->update(['settled_by_payment_id' => $payment->id]);
+
+            if ($updated === 0) {
+                $settledBy = \App\Modules\Finance\CostCollector\Models\CostLine::query()
+                    ->whereKey($allocation->cost_line_id)
+                    ->value('settled_by_payment_id');
+                if ((int) $settledBy !== (int) $payment->id) {
+                    throw ValidationException::withMessages([
+                        'allocations' => "Liability {$allocation->cost_line_id} was already paid by another payment.",
+                    ]);
+                }
+            }
+        }
 
         return $payment;
     }

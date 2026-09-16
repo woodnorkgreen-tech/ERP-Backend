@@ -27,6 +27,13 @@ class GoodsReceiptNoteResource extends JsonResource
                         'id' => $this->purchaseOrder->supplier->id,
                         'supplier_name' => $this->purchaseOrder->supplier->supplier_name,
                     ] : null,
+                    // Why this goods receipt exists at all — traced back through
+                    // the order to the requisition that triggered it.
+                    'requisition' => $this->purchaseOrder->requisition ? [
+                        'id' => $this->purchaseOrder->requisition->id,
+                        'requisition_number' => $this->purchaseOrder->requisition->requisition_number,
+                        'trigger' => $this->purchaseOrder->requisition->triggerContext(),
+                    ] : null,
                 ];
             }),
 

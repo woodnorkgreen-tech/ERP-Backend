@@ -159,18 +159,27 @@ class PurchaseOrderWorkflow
         $bill->loadMissing(['purchaseOrder', 'verifiedBy']);
         $order = $bill->purchaseOrder;
 
+        if ($bill->isDirect()) {
+            return $this->directBill($bill);
+        }
+
         if (! $order) {
+            // Defensive only: purchase_order_id is nullable exclusively for
+            // direct bills (isDirect() above), and the column's foreign key
+            // prevents a purchase order from being deleted while a bill
+            // still references it — so reaching here means the id itself is
+            // corrupt data, not a legitimate direct bill.
             return [
                 'stage' => 'invoice',
                 'stage_index' => array_search('invoice', self::STAGES, true),
                 'stages' => self::STAGES,
                 'owner' => 'Accounts',
-                'next_action' => 'This invoice has no purchase order. Link it to one before paying.',
+                'next_action' => 'This invoice\'s purchase order reference is invalid. It cannot be verified.',
                 'checks' => [],
                 'eligible_for_verification' => false,
                 'verified' => false,
                 'can_pay' => false,
-                'blockers' => ['This invoice is not linked to a purchase order.'],
+                'blockers' => ['The purchase order this invoice referenced could not be found.'],
                 'fingerprint' => null,
             ];
         }
@@ -312,6 +321,114 @@ class PurchaseOrderWorkflow
             // a re-priced line.
             'invoice' => [
                 (int) $bill->supplier_id,
+                (string) $bill->supplier_invoice_number,
+                (string) $bill->amount,
+                (string) ($bill->net_amount ?? $bill->amount),
+                (string) ($bill->vat_amount ?? 0),
+                (string) ($bill->wht_amount ?? 0),
+            ],
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * A direct bill has no order, receipt or three-way match to check against
+     * — it names a supplier, an expense classification, and its own invoice
+     * number, and Accounts verifies that as a genuine, correctly classified
+     * obligation rather than reconciling three documents.
+     */
+    private function directBill(Bill $bill): array
+    {
+        $checks = [
+            [
+                'key' => 'supplier',
+                'label' => 'Supplier registered in the Supplier Master',
+                'detail' => $bill->supplier?->supplier_name ?? 'Supplier',
+                'passed' => $bill->supplier_id !== null,
+            ],
+            [
+                'key' => 'expense_code',
+                'label' => 'Expense classification recorded',
+                'detail' => $bill->expenseCode?->simple_meaning ?? 'Not set',
+                'passed' => $bill->expense_code_id !== null,
+            ],
+            [
+                'key' => 'reference',
+                'label' => "Supplier's own invoice number recorded",
+                'detail' => trim((string) $bill->supplier_invoice_number) ?: 'Not recorded',
+                'passed' => trim((string) $bill->supplier_invoice_number) !== '',
+            ],
+        ];
+
+        $eligible = collect($checks)->every(fn ($check) => $check['passed']);
+        $fingerprint = $this->directFingerprint($bill);
+        $matched = $eligible
+            && $bill->verified_at !== null
+            && hash_equals((string) $bill->verification_fingerprint, $fingerprint);
+
+        $blockers = collect($checks)->where('passed', false)->pluck('label')->values()->all();
+        if (! $matched) {
+            $blockers[] = match (true) {
+                ! $eligible => 'Resolve the checks above, then verify the invoice.',
+                $bill->verified_at === null => 'Accounts must verify this invoice before it can be paid.',
+                default => 'The invoice changed after verification. Verify it again.',
+            };
+        }
+
+        $settled = bccomp((string) $bill->balance, '0.00', 2) <= 0;
+        $stage = match (true) {
+            $settled => 'complete',
+            $matched => 'payment',
+            default => 'verification',
+        };
+        $nextAction = match ($stage) {
+            'verification' => 'Check the supplier and expense classification, then verify this direct invoice.',
+            'payment' => 'The invoice is verified. Record the supplier payment.',
+            default => self::STAGE_GUIDE['complete'][1],
+        };
+
+        // A direct bill never had an order, delivery or stores stage to pass
+        // through — showing it against the full 7-stage PO journey (the same
+        // `self::STAGES`/`PurchaseTrail` component every order screen shares)
+        // would tick off three stages that never happened.
+        $directStages = ['verification', 'payment', 'complete'];
+
+        return [
+            'stage' => $stage,
+            'stage_index' => array_search($stage, $directStages, true),
+            'stages' => $directStages,
+            'order_number' => $bill->bill_number,
+            'owner' => 'Accounts',
+            'next_action' => $nextAction,
+            'bill_id' => $bill->id,
+            'bill_number' => $bill->bill_number,
+            'bill_amount' => $bill->netAmount(),
+            'bill_gross' => (string) $bill->amount,
+            'bill_vat' => (string) ($bill->vat_amount ?? 0),
+            'bill_wht' => (string) ($bill->wht_amount ?? 0),
+            'bill_payable' => $bill->payableAmount(),
+            'bill_balance' => (string) $bill->balance,
+            'supplier_invoice_number' => $bill->supplier_invoice_number,
+            'checks' => $checks,
+            'eligible_for_verification' => $eligible,
+            'verified' => $matched,
+            'verification_basis' => $matched ? 'direct' : null,
+            'verified_at' => $bill->verified_at?->toDateTimeString(),
+            'verified_by' => $bill->verifiedBy?->name,
+            'verification_notes' => $bill->verification_notes,
+            'can_pay' => $matched && $bill->status !== 'cancelled' && ! $settled,
+            'blockers' => $blockers,
+            'fingerprint' => $fingerprint,
+            'is_direct' => true,
+        ];
+    }
+
+    /** The direct-bill analogue of fingerprint() — no order or receipt to fold in. */
+    private function directFingerprint(Bill $bill): string
+    {
+        return hash('sha256', json_encode([
+            'invoice' => [
+                (int) $bill->supplier_id,
+                (int) $bill->expense_code_id,
                 (string) $bill->supplier_invoice_number,
                 (string) $bill->amount,
                 (string) ($bill->net_amount ?? $bill->amount),

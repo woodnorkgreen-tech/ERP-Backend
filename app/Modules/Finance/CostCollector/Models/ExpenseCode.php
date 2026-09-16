@@ -67,6 +67,25 @@ class ExpenseCode extends Model
         return $query->where('is_procurable', true);
     }
 
+    /**
+     * What a bill with no purchase order can be classified as.
+     *
+     * `is_procurable` only answers "is this a purchase at all" — it still
+     * leaves in every granular fabrication material (specific board types,
+     * welding consumables, print media: 42 of the 76 procurable codes at the
+     * time this was written). Those exist to itemize a PO line item by item,
+     * and a real materials purchase should go through Requisition→PO→GRN for
+     * the budget commitment and three-way match that gives — bypassing that
+     * with a no-PO credit bill isn't a legitimate shortcut, it's a control
+     * gap. A direct bill is for the exception a PO doesn't fit: services,
+     * subcontractors, utilities, venue hire, statutory cover, urgent
+     * overheads — one line, one classification, no items to receipt.
+     */
+    public function scopeForDirectBill($query)
+    {
+        return $query->procurable()->where('expense_family', '!=', 'Direct materials');
+    }
+
     public function requiresJobId(): bool
     {
         return $this->job_id_rule === self::JOB_REQUIRED;

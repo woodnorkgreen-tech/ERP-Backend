@@ -5,6 +5,9 @@ namespace Tests\Feature\Stores;
 use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
+use App\Modules\MaterialsLibrary\Models\MaterialCategory;
+use App\Modules\MaterialsLibrary\Models\MaterialItemType;
+use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -70,6 +73,33 @@ class StockMovementEndpointTest extends TestCase
     private function onHand(LibraryMaterial $material): float
     {
         return (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand');
+    }
+
+    /**
+     * A leaf category that resolves item type, disposition, tracking mode and
+     * stock unit entirely on its own — the shape a quick "receive it and name
+     * it" category needs so the material it produces is Active immediately.
+     */
+    private function fullyResolvingCategory(array $overrides = []): MaterialCategory
+    {
+        $itemType = MaterialItemType::create([
+            'code' => 'QC'.random_int(1000, 9999), 'name' => 'Quick Create Type',
+            'default_issue_disposition' => 'consumed', 'default_tracking_mode' => 'bulk_quantity',
+            'is_stock_item' => true, 'is_active' => true,
+        ]);
+        $unit = UnitOfMeasure::firstOrCreate(
+            ['code' => 'pcs'],
+            ['name' => 'Pieces', 'dimension' => 'count', 'is_active' => true],
+        );
+
+        return MaterialCategory::create(array_merge([
+            'name' => 'Quick Create Category '.uniqid(),
+            'code' => 'QCC'.random_int(1000, 9999),
+            'item_type_id' => $itemType->id,
+            'is_active' => true,
+            'is_selectable' => true,
+            'allowed_uoms' => [$unit->code],
+        ], $overrides));
     }
 
     public function test_one_request_receives_many_lines_under_a_single_batch_number(): void
@@ -264,5 +294,71 @@ class StockMovementEndpointTest extends TestCase
         $this->postJson('/api/procurement-stores/bulk-stock-settings', [
             'material_ids' => [$material->id],
         ])->assertStatus(422)->assertJsonValidationErrors('settings');
+    }
+
+    /**
+     * The point of the quick-create-and-receive path: a storekeeper who cannot
+     * find something in the catalogue should not have to leave this screen to
+     * name it. Category alone is enough for a category that settles everything
+     * else, so the material lands Active and its stock in the same request.
+     */
+    public function test_receiving_can_register_a_new_material_inline(): void
+    {
+        $category = $this->fullyResolvingCategory();
+
+        $response = $this->postJson('/api/procurement-stores/movements', [
+            'type' => 'receive',
+            'lines' => [[
+                'new_material' => [
+                    'material_name' => 'Contact Adhesive 1L',
+                    'material_category_id' => $category->id,
+                ],
+                'quantity' => 10,
+                'receipt_unit_cost' => 450,
+            ]],
+        ])->assertOk();
+
+        $response->assertJsonPath('lines_posted', 1);
+
+        $material = LibraryMaterial::where('material_name', 'Contact Adhesive 1L')->sole();
+        $this->assertSame('Active', $material->item_status, 'The category resolves everything, so it must not land as a draft.');
+        $this->assertSame((int) $category->id, (int) $material->material_category_id);
+        $this->assertSame(10.0, $this->onHand($material));
+        $this->assertSame($material->id, InventoryLog::where('type', 'check_in')->value('material_id'));
+    }
+
+    /**
+     * A category that cannot settle everything (a required specification) must
+     * not leave a stranded draft behind when the receipt it was created for
+     * fails — the whole thing is one transaction.
+     */
+    public function test_receiving_refuses_a_new_material_whose_category_needs_more_detail(): void
+    {
+        $category = $this->fullyResolvingCategory([
+            'required_attributes' => [['key' => 'thickness', 'label' => 'Thickness', 'required' => true]],
+        ]);
+
+        $this->postJson('/api/procurement-stores/movements', [
+            'type' => 'receive',
+            'lines' => [[
+                'new_material' => [
+                    'material_name' => 'Mystery Board',
+                    'material_category_id' => $category->id,
+                ],
+                'quantity' => 4,
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.new_material.material_category_id');
+
+        $this->assertSame(0, LibraryMaterial::count(), 'Nothing should be left behind when the receipt fails.');
+        $this->assertSame(0, InventoryLog::count());
+    }
+
+    /** A line still needs exactly one of material_id or new_material — never neither. */
+    public function test_a_receive_line_must_name_or_describe_a_material(): void
+    {
+        $this->postJson('/api/procurement-stores/movements', [
+            'type' => 'receive',
+            'lines' => [['quantity' => 4]],
+        ])->assertStatus(422)->assertJsonValidationErrors(['lines.0.material_id', 'lines.0.new_material']);
     }
 }

@@ -96,11 +96,17 @@ class SupplierInvoiceTax
 
     /**
      * The kind of spend, which can override the supplier's default treatment.
-     * Read off the requisition line behind the order, the same place the
-     * goods-receipt accrual reads it.
+     * A PO-backed bill reads it off the requisition line behind the order,
+     * the same place the goods-receipt accrual reads it; a direct bill (no
+     * order) carries its own expense code, since there is no requisition to
+     * read it from.
      */
     private function expenseCodeFor(Bill $bill): ?ExpenseCode
     {
+        if ($bill->isDirect()) {
+            return $bill->expense_code_id ? ExpenseCode::find($bill->expense_code_id) : null;
+        }
+
         $codeId = $bill->purchaseOrder?->items()
             ->with('requisitionItem')
             ->get()

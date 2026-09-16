@@ -5,14 +5,14 @@ namespace App\Modules\MaterialsLibrary\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Models\MaterialCategory;
-use App\Modules\MaterialsLibrary\Models\MaterialUomConversion;
 use App\Modules\MaterialsLibrary\Requests\StoreMaterialRequest;
 use App\Modules\MaterialsLibrary\Requests\UpdateMaterialRequest;
 use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
 use App\Modules\MaterialsLibrary\Services\MaterialDefaultsService;
+use App\Modules\MaterialsLibrary\Services\MaterialRegistrationService;
 use App\Modules\MaterialsLibrary\Support\MaterialCompleteness;
 use App\Modules\MaterialsLibrary\Support\MaterialControl;
-use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
+use App\Modules\MaterialsLibrary\Support\MaterialFieldSync;
 use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use App\Modules\ProcurementStores\Models\Stock;
@@ -242,60 +242,9 @@ class MaterialController extends Controller
     /**
      * Store a newly created material in storage.
      */
-    public function store(StoreMaterialRequest $request, MaterialDefaultsService $defaults): JsonResponse
+    public function store(StoreMaterialRequest $request, MaterialRegistrationService $registration): JsonResponse
     {
-        $data = $request->validated();
-        $conversions = $data['uom_conversions'] ?? [];
-        unset($data['uom_conversions']);
-        $data['created_by'] = auth()->id();
-        $data['updated_by'] = auth()->id();
-
-        // Let the taxonomy answer what it can before anything is asked of the
-        // typist. Only gaps are filled; a supplied value always wins.
-        $data = $defaults->apply($data);
-
-        $categoryId = $data['material_category_id'] ?? null;
-        $category = $categoryId
-            ? MaterialCategory::with('parent')->find($categoryId)
-            : null;
-
-        if (blank($data['material_code'] ?? null)) {
-            if ($category) {
-                $workstationCode = ! empty($data['workstation_id'])
-                    ? \App\Modules\MaterialsLibrary\Models\Workstation::whereKey($data['workstation_id'])->value('code')
-                    : null;
-                $data['material_code'] = $defaults->suggestCode($category, $workstationCode);
-            } else {
-                // The code column is unique and not nullable, so a draft without
-                // a category still needs an identity. Replaced when the typist
-                // (or a later category assignment) supplies a real one.
-                $data['material_code'] = $defaults->suggestDraftCode();
-            }
-        }
-
-        $data = $this->syncControlCompatibility($data);
-        $data = $this->syncUomCompatibility($data);
-
-        // Wrap attributes in 'attributes' key for JSON column if not already
-        if (isset($data['attributes']) && !isset($data['attributes']['attributes'])) {
-             $data['attributes'] = ['attributes' => $data['attributes']];
-        }
-
-        // Keep legacy string fields in sync with the FK so both lookup paths agree.
-        $data = $this->syncCategoryStrings($data);
-
-        $requestedStatus = $data['item_status'] ?? null;
-        $material = new LibraryMaterial($data);
-        $material->setRelation('materialCategory', $category);
-
-        // Anything short of the full governance set is born under review:
-        // searchable and editable, but refused by checkIn() and adjustStock().
-        $material->item_status = MaterialCompleteness::resolveStatus($material, $requestedStatus);
-        $material->is_active = $material->item_status === 'Active';
-        $material->save();
-
-        $this->syncUomConversions($material, $conversions);
-
+        $material = $registration->create($request->validated(), auth()->id());
         $material->load('stock', 'materialCategory.parent', 'uomConversions');
 
         return response()->json([
@@ -305,6 +254,66 @@ class MaterialController extends Controller
             'data' => new LibraryMaterialResource($material),
             'missing' => MaterialCompleteness::missing($material),
         ], 201);
+    }
+
+    /**
+     * One shared template (category, unit, disposition...) applied to many
+     * variant rows in a single save — a nail catalogued at 1", 1.5" and 2" is
+     * one catalogue decision, not the same form filled out three times.
+     *
+     * Reuses MaterialRegistrationService::create() per row so a bulk-created
+     * material goes through exactly the same defaults, code generation and
+     * Active/Under Review decision as one created through the single form —
+     * this must never become a second, divergent creation path.
+     *
+     * Rows are independent: one bad label does not lose the rest of the
+     * batch, and the response always says which rows landed and which did
+     * not, and why - a save must never resolve into silence either way.
+     */
+    public function bulkStore(\App\Modules\MaterialsLibrary\Requests\BulkStoreMaterialRequest $request, MaterialRegistrationService $registration): JsonResponse
+    {
+        $shared = $request->safe()->except('variants');
+        $variants = $request->input('variants');
+        $userId = auth()->id();
+
+        $created = [];
+        $failed = [];
+
+        DB::transaction(function () use ($shared, $variants, $registration, $userId, &$created, &$failed) {
+            foreach ($variants as $variant) {
+                $label = trim((string) $variant['label']);
+                $data = $shared;
+                $data['material_name'] = trim($shared['material_name']).' - '.$label;
+                if (! empty($variant['default_unit_cost'])) {
+                    $data['default_unit_cost'] = $variant['default_unit_cost'];
+                }
+
+                try {
+                    $material = $registration->create($data, $userId);
+                    $created[] = [
+                        'id' => $material->id,
+                        'material_name' => $material->material_name,
+                        'material_code' => $material->material_code,
+                        'item_status' => $material->item_status,
+                    ];
+                } catch (\Throwable $e) {
+                    $failed[] = ['label' => $label, 'error' => $e->getMessage()];
+                }
+            }
+        });
+
+        $draftCount = collect($created)->where('item_status', '!=', 'Active')->count();
+        $message = count($created).' of '.count($variants).' material(s) created';
+        $message .= $draftCount ? " ({$draftCount} saved as drafts — finish them from Needs Finishing)." : '.';
+        if ($failed) {
+            $message .= ' '.count($failed).' failed — see details below.';
+        }
+
+        return response()->json([
+            'message' => $message,
+            'created' => $created,
+            'failed' => $failed,
+        ], $created ? 201 : 422);
     }
 
     /**
@@ -446,9 +455,9 @@ class MaterialController extends Controller
                 }
 
                 $data = $defaults->apply($changes, $material);
-                $data = $this->syncControlCompatibility($data, $material);
-                $data = $this->syncUomCompatibility($data, $material);
-                $data = $this->syncCategoryStrings($data);
+                $data = MaterialFieldSync::syncControlCompatibility($data, $material);
+                $data = MaterialFieldSync::syncUomCompatibility($data, $material);
+                $data = MaterialFieldSync::syncCategoryStrings($data);
                 $data['updated_by'] = auth()->id();
 
                 $material->fill($data);
@@ -595,8 +604,8 @@ class MaterialController extends Controller
         $conversions = $data['uom_conversions'] ?? [];
         unset($data['uom_conversions']);
         $data['updated_by'] = auth()->id();
-        $data = $this->syncControlCompatibility($data, $material);
-        $data = $this->syncUomCompatibility($data, $material);
+        $data = MaterialFieldSync::syncControlCompatibility($data, $material);
+        $data = MaterialFieldSync::syncUomCompatibility($data, $material);
 
         $nextTrackingMode = $data['tracking_mode'] ?? $material->tracking_mode;
         $nextDisposition = $data['issue_disposition'] ?? $material->issue_disposition;
@@ -620,12 +629,12 @@ class MaterialController extends Controller
              $data['attributes'] = ['attributes' => $data['attributes']];
         }
 
-        $data = $this->syncCategoryStrings($data);
+        $data = MaterialFieldSync::syncCategoryStrings($data);
 
         DB::transaction(function () use ($material, $data, $hasConversions, $conversions) {
             $material->update($data);
             if ($hasConversions) {
-                $this->syncUomConversions($material, $conversions);
+                MaterialFieldSync::syncUomConversions($material, $conversions);
             }
 
             // An edit can change category and therefore its inherited required
@@ -704,81 +713,6 @@ class MaterialController extends Controller
             'message' => 'Material restored successfully',
             'data' => new LibraryMaterialResource($material)
         ]);
-    }
-
-    /**
-     * When material_category_id is provided, write matching values into the legacy
-     * category/subcategory string columns so both lookup paths stay consistent.
-     * The root category name maps to `category`; the leaf name maps to `subcategory`.
-     */
-    private function syncCategoryStrings(array $data): array
-    {
-        if (empty($data['material_category_id'])) {
-            return $data;
-        }
-
-        $cat = MaterialCategory::with('parent')->find($data['material_category_id']);
-        if (!$cat) {
-            return $data;
-        }
-
-        if ($cat->parent) {
-            // Leaf category: parent is the root
-            $data['category']    = $cat->parent->name;
-            $data['subcategory'] = $cat->name;
-        } else {
-            // Root category: use it directly, leave subcategory untouched
-            $data['category'] = $cat->name;
-            $data['subcategory'] = null;
-        }
-
-        return $data;
-    }
-
-    private function syncControlCompatibility(array $data, ?LibraryMaterial $material = null): array
-    {
-        $disposition = $data['issue_disposition'] ?? $material?->issue_disposition ?? 'consumed';
-        $data['material_type'] = MaterialControl::legacyMaterialType($disposition);
-
-        if (isset($data['item_status'])) {
-            $data['is_active'] = $data['item_status'] === 'Active';
-        } elseif (array_key_exists('is_active', $data)) {
-            $data['item_status'] = $data['is_active'] ? 'Active' : 'Inactive';
-        }
-
-        return $data;
-    }
-
-    private function syncUomCompatibility(array $data, ?LibraryMaterial $material = null): array
-    {
-        $baseUomId = $data['base_uom_id'] ?? $material?->base_uom_id;
-        if ($baseUomId) {
-            $baseUom = UnitOfMeasure::where('is_active', true)->findOrFail($baseUomId);
-            $data['unit_of_measure'] = $baseUom->code; // keep legacy consumers synchronized
-            $data['issue_uom_id'] ??= $baseUomId;
-        }
-        return $data;
-    }
-
-    /** Keep only the practical purchase/issue -> stock conversions supplied by the form. */
-    private function syncUomConversions(LibraryMaterial $material, array $conversions): void
-    {
-        $baseUomId = (int) $material->base_uom_id;
-        MaterialUomConversion::where('material_id', $material->id)->delete();
-
-        foreach ($conversions as $conversion) {
-            $fromUomId = (int) $conversion['from_uom_id'];
-            if (! $baseUomId || $fromUomId === $baseUomId) {
-                continue;
-            }
-
-            MaterialUomConversion::create([
-                'material_id' => $material->id,
-                'from_uom_id' => $fromUomId,
-                'to_uom_id' => $baseUomId,
-                'factor' => $conversion['factor'],
-            ]);
-        }
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Modules\Finance\CostCollector\Http\Requests;
 
 use App\Modules\Finance\CostCollector\Contracts\CostContext;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\Supplier;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
@@ -80,6 +81,8 @@ class StoreCostLineRequest extends FormRequest
                     || ! Supplier::whereKey($this->integer('payee_id'))->exists()) {
                     $validator->errors()->add('payee_id', 'Select the supplier from the Supplier Master.');
                 }
+
+                $this->assertNotAlreadyRecordedAsABill($validator);
             } elseif ($this->filled('payee_type')) {
                 // The unpaid-invoice branch above already covers a supplier
                 // credit invoice with its own, more specific message. Every
@@ -139,6 +142,40 @@ class StoreCostLineRequest extends FormRequest
     }
 
     /**
+     * A supplier credit invoice now has two doors: this capture form, and a
+     * direct bill in Procurement. Nothing ties them together structurally —
+     * they land in different tables, settle through different controllers —
+     * so the only real guard against the same invoice being recorded (and
+     * eventually paid) twice is catching it here, at the point a second
+     * recording would be created. Matched on supplier + the supplier's own
+     * invoice number, the only two facts a bill and a capture-form line
+     * would necessarily share. `external_ref` is optional on this form, so
+     * this only fires when it is actually filled in — a blank one can't be
+     * matched against anything and is not treated as a false negative.
+     */
+    private function assertNotAlreadyRecordedAsABill(Validator $validator): void
+    {
+        $reference = trim((string) $this->input('external_ref'));
+        $payeeId = $this->integer('payee_id');
+
+        if ($reference === '' || ! $payeeId) {
+            return;
+        }
+
+        $duplicate = Bill::where('supplier_id', $payeeId)
+            ->whereRaw('LOWER(supplier_invoice_number) = ?', [strtolower($reference)])
+            ->first(['id', 'bill_number']);
+
+        if ($duplicate) {
+            $validator->errors()->add(
+                'external_ref',
+                "Invoice {$reference} from this supplier is already recorded as bill {$duplicate->bill_number}. "
+                .'Pay it from Procurement rather than recording it again here.',
+            );
+        }
+    }
+
+    /**
      * The PIN itself already lives on the Supplier record — a capturer
      * retyping it every time would just be a second, driftable copy of the
      * same fact. So this checks the master record the payee resolves to
@@ -182,6 +219,16 @@ class StoreCostLineRequest extends FormRequest
         } elseif ($fundingMode === 'out_of_pocket') {
             $details['claimant_user_id'] = $this->user()?->id;
             $details['claimant_name'] = $this->user()?->name;
+        }
+
+        // Validated by rules() but had no column and no CostContext parameter
+        // to land in — accepted from the form, then silently discarded before
+        // ever reaching a cost line. Needed now as the match key for
+        // assertNotAlreadyRecordedAsABill(); stored in details rather than as
+        // a new column, matching how every other capture-path-specific fact
+        // here already is.
+        if ($this->filled('external_ref')) {
+            $details['external_ref'] = trim((string) $this->input('external_ref'));
         }
 
         return new CostContext(

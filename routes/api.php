@@ -1001,7 +1001,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('statements/{statement}/reopen', [\App\Modules\Finance\Controllers\ReconciliationController::class, 'reopen']);
         });
 
-        // Spend Vouchers Routes
+        // Payment Vouchers — the workflow is "SpendVoucher" internally (table,
+        // permissions, FKs); "Payment Voucher" is the user-facing name only,
+        // carried in the frontend labels. One controller, one API path: adding
+        // a same-implementation alias under a second URL was pure duplication
+        // with nothing external depending on either name.
         Route::prefix('spend-vouchers')->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
             Route::post('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'store']);

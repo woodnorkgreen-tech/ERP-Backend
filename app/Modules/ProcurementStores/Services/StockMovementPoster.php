@@ -5,6 +5,8 @@ namespace App\Modules\ProcurementStores\Services;
 use App\Models\ElementMaterial;
 use App\Models\Project;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
+use App\Modules\MaterialsLibrary\Services\MaterialRegistrationService;
+use App\Modules\MaterialsLibrary\Support\MaterialCompleteness;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use Illuminate\Support\Facades\DB;
@@ -48,6 +50,7 @@ class StockMovementPoster
     public function __construct(
         private readonly InventoryService $inventory,
         private readonly BoardRegistrationService $boards,
+        private readonly MaterialRegistrationService $registration,
     ) {
     }
 
@@ -81,42 +84,45 @@ class StockMovementPoster
 
     private function postReceipt(array $line): array
     {
-        $material = LibraryMaterial::with(['materialCategory.parent', 'workstation'])
-            ->findOrFail($line['material_id']);
-
-        if (($material->item_status ?? 'Active') !== 'Active') {
-            $this->reject('material_id', "Only Active Material Library items can be received. '{$material->material_name}' is {$material->item_status}.");
-        }
-        if ($material->is_batch_controlled && ! filled($line['lot_number'] ?? null)) {
-            $this->reject('lot_number', "A supplier or internal lot number is required for '{$material->material_name}'.");
-        }
-        if ($material->is_expiry_controlled && ! filled($line['expiry_date'] ?? null)) {
-            $this->reject('expiry_date', "An expiry date is required for '{$material->material_name}'.");
-        }
-
-        $line = $this->normaliseControlledMovement($line, $material, 'check_in');
-
-        $quantity = (float) $line['quantity'];
-        if ($material->isBoardTrackable() && $quantity !== (float) (int) $quantity) {
-            $this->reject('quantity', "Board sheets for '{$material->material_name}' must be received as a whole number, because each sheet gets its own tracking code.");
-        }
-
-        // An unpriced board is an unissuable board. Caught here, while the
-        // delivery note is still in hand, rather than at the materials desk.
-        if ($material->isBoardTrackable()
-            && ! filled($line['receipt_unit_cost'] ?? null)
-            && (float) $material->unit_cost <= 0
-            && (float) ($material->default_unit_cost ?? 0) <= 0) {
-            $this->reject('receipt_unit_cost', "'{$material->material_name}' has no price yet. Enter the receipt price per board, or set a default price on the material in the Material Catalogue — boards received without a value cannot be issued to a project.");
-        }
-
         $log = null;
         $boards = [];
 
-        // adjustStock and createBoardRecords go together or not at all: a board
-        // failure must not leave quantity_on_hand raised with no board records
-        // behind it.
-        DB::transaction(function () use ($line, $material, &$log, &$boards) {
+        // Everything from resolving the material through posting the movement is
+        // one transaction: a delivery of something that did not exist in the
+        // catalogue a moment ago either posts in full — the new catalogue row
+        // and its stock together — or neither exists. That is the same
+        // all-or-nothing guarantee this class already gives a batch of lines;
+        // registering the material inline is just one more thing that can fail.
+        DB::transaction(function () use (&$line, &$log, &$boards) {
+            $material = $this->resolveMaterial($line);
+            $line['material_id'] = $material->id;
+
+            if (($material->item_status ?? 'Active') !== 'Active') {
+                $this->reject('material_id', "Only Active Material Library items can be received. '{$material->material_name}' is {$material->item_status}.");
+            }
+            if ($material->is_batch_controlled && ! filled($line['lot_number'] ?? null)) {
+                $this->reject('lot_number', "A supplier or internal lot number is required for '{$material->material_name}'.");
+            }
+            if ($material->is_expiry_controlled && ! filled($line['expiry_date'] ?? null)) {
+                $this->reject('expiry_date', "An expiry date is required for '{$material->material_name}'.");
+            }
+
+            $line = $this->normaliseControlledMovement($line, $material, 'check_in');
+
+            $quantity = (float) $line['quantity'];
+            if ($material->isBoardTrackable() && $quantity !== (float) (int) $quantity) {
+                $this->reject('quantity', "Board sheets for '{$material->material_name}' must be received as a whole number, because each sheet gets its own tracking code.");
+            }
+
+            // An unpriced board is an unissuable board. Caught here, while the
+            // delivery note is still in hand, rather than at the materials desk.
+            if ($material->isBoardTrackable()
+                && ! filled($line['receipt_unit_cost'] ?? null)
+                && (float) $material->unit_cost <= 0
+                && (float) ($material->default_unit_cost ?? 0) <= 0) {
+                $this->reject('receipt_unit_cost', "'{$material->material_name}' has no price yet. Enter the receipt price per board, or set a default price on the material in the Material Catalogue — boards received without a value cannot be issued to a project.");
+            }
+
             $meta = $line;
             $grnItem = $this->lockGrnLine($line, $material, $meta);
 
@@ -166,6 +172,68 @@ class StockMovementPoster
         });
 
         return ['log' => $log, 'boards' => $boards];
+    }
+
+    /**
+     * Find the material this line names, or register it on the spot.
+     *
+     * A receive line either names an existing catalogue item or describes a
+     * new one — StockMovementRequest requires exactly one. Registering here,
+     * rather than sending the person to the Material Catalogue first, is the
+     * whole point: someone receiving a delivery of something new should not
+     * have to leave the receiving screen to name it.
+     */
+    private function resolveMaterial(array $line): LibraryMaterial
+    {
+        if (filled($line['material_id'] ?? null)) {
+            return LibraryMaterial::with(['materialCategory.parent', 'workstation'])
+                ->findOrFail($line['material_id']);
+        }
+
+        return $this->registerInlineMaterial((array) ($line['new_material'] ?? []));
+    }
+
+    /**
+     * Register a catalogue row for a delivery nobody had named yet.
+     *
+     * Category is the only real decision required of the person receiving
+     * stock — MaterialDefaultsService reads item type, issue disposition,
+     * tracking mode and the stock unit from it, the same as a full
+     * registration would. Everything below that is that same answer shown
+     * back as an editable suggestion (see StockMovementRequest), so a typist
+     * who already knows this delivery differs from its category default may
+     * say so directly rather than fixing it up afterwards in the catalogue.
+     * If the category still leaves something unresolved (a required
+     * specification MaterialCompleteness would catch — rare, but boards need
+     * a thickness), the whole receipt is refused rather than leaving a
+     * stranded draft behind: this runs inside postReceipt's transaction, so
+     * nothing is created either.
+     */
+    private function registerInlineMaterial(array $newMaterial): LibraryMaterial
+    {
+        $material = $this->registration->create([
+            'material_name' => $newMaterial['material_name'] ?? null,
+            'material_category_id' => $newMaterial['material_category_id'] ?? null,
+            'material_code' => $newMaterial['material_code'] ?? null,
+            'attributes' => $newMaterial['attributes'] ?? [],
+            'issue_disposition' => $newMaterial['issue_disposition'] ?? null,
+            'tracking_mode' => $newMaterial['tracking_mode'] ?? null,
+            'base_uom_id' => $newMaterial['base_uom_id'] ?? null,
+            'purchase_uom_id' => $newMaterial['purchase_uom_id'] ?? null,
+            'issue_uom_id' => $newMaterial['issue_uom_id'] ?? null,
+            'uom_conversions' => $newMaterial['uom_conversions'] ?? [],
+            'default_unit_cost' => $newMaterial['default_unit_cost'] ?? null,
+        ], (int) auth()->id());
+
+        if ($material->item_status !== 'Active') {
+            $missing = implode(', ', array_values(MaterialCompleteness::missing($material)));
+            $this->reject(
+                'new_material.material_category_id',
+                "\"{$material->materialCategory?->name}\" needs more detail before stock can be received against it — still missing: {$missing}. Register it fully from the Material Catalogue, or choose a simpler category.",
+            );
+        }
+
+        return $material->loadMissing('workstation');
     }
 
     /**

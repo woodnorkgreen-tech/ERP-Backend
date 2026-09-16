@@ -24,6 +24,7 @@ class BillResource extends JsonResource
                         'project_id' => $requisition->project_id,
                         'job_number' => $requisition->job_number,
                         'requested_by_type' => $requisition->requested_by_type,
+                        'trigger_reason' => $requisition->trigger_reason,
                         'department_name' => $requisition->department?->name,
                         'project' => $requisition->project ? [
                             'id' => $requisition->project->id,

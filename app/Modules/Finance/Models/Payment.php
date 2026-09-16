@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 /**
  * One outgoing payment, whatever account it left.
@@ -71,6 +72,9 @@ class Payment extends Model
         'archived_by',
         'requisition_id',
         'spend_voucher_id',
+        'voucher_id',
+        'source_document_type',
+        'source_document_id',
         'direct_payment_reason',
         'transaction_cost',
         'budget_category',
@@ -154,6 +158,34 @@ class Payment extends Model
     public function spendVoucher(): BelongsTo
     {
         return $this->belongsTo(SpendVoucher::class, 'spend_voucher_id');
+    }
+
+    /**
+     * Inverse relationship to voucher (Phase 2: Architecture Redesign).
+     * Makes "Payment owns the voucher" explicit.
+     */
+    public function voucher(): BelongsTo
+    {
+        return $this->belongsTo(SpendVoucher::class, 'voucher_id');
+    }
+
+    /**
+     * Polymorphic source document (Phase 2: Architecture Redesign).
+     * Answers: "What authorization triggered this payment?"
+     * Could be: Bill, CostLine, PettyCashRequisition, AdvanceRequest, etc.
+     */
+    public function sourceDocument(): MorphTo
+    {
+        return $this->morphTo();
+    }
+
+    /**
+     * Direct allocations to cost lines (Phase 2: Architecture Redesign).
+     * Replaces indirect link through spend_voucher_allocations.
+     */
+    public function paymentAllocations(): HasMany
+    {
+        return $this->hasMany(PaymentAllocation::class, 'payment_id');
     }
 
     public function project(): BelongsTo

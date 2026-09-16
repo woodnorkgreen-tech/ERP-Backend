@@ -33,7 +33,7 @@ class PaymentSourceController extends Controller
             ->with('glAccount:id,code,name')
             ->when(
                 $request->query('for') === 'payment',
-                fn ($q) => $q->usableForPayment(),
+                fn ($q) => $q->paymentCapable(),
                 fn ($q) => $q->when(! $request->boolean('include_inactive'), fn ($active) => $active->where('is_active', true)),
             )
             ->orderByDesc('is_active')
@@ -55,6 +55,7 @@ class PaymentSourceController extends Controller
                 'type' => $source->type,
                 'currency' => $source->currency,
                 'is_active' => (bool) $source->is_active,
+                'can_make_payment' => (bool) $source->can_make_payment,
                 'gl_account' => $source->glAccount?->only(['id', 'code', 'name']),
                 // Null everywhere else, deliberately: a bank balance is not held
                 // in this system, and a zero would read as "no money" rather
@@ -156,6 +157,14 @@ class PaymentSourceController extends Controller
             'float_limit' => ['nullable', 'numeric', 'min:0'],
             'custodian_user_id' => ['nullable', 'integer', 'exists:users,id'],
             'is_active' => ['nullable', 'boolean'],
+            // The model hard-enforces the pairing regardless (a payable is
+            // never payment-capable), but reject it here too so an admin who
+            // tries gets a clear reason instead of a silently-overridden save.
+            'can_make_payment' => [
+                'nullable',
+                'boolean',
+                Rule::prohibitedIf(fn () => request()->input('type') === 'payable' && request()->boolean('can_make_payment')),
+            ],
         ];
     }
 }

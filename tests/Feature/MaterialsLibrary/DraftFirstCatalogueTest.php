@@ -145,6 +145,51 @@ class DraftFirstCatalogueTest extends TestCase
             ->assertJsonPath('data.0.item_status', 'Under Review');
     }
 
+    /**
+     * A nail catalogued at 1", 1.5" and 2" is one catalogue decision (category,
+     * unit, disposition) applied three times, not three separate form fills —
+     * bulk create shares the template and only asks for what differs per row.
+     */
+    public function test_bulk_create_makes_one_material_per_variant_sharing_the_template(): void
+    {
+        $this->postJson('/api/materials-library/materials/bulk', [
+            'material_name' => 'Nail',
+            'material_category_id' => $this->leaf->id,
+            'variants' => [
+                ['label' => '1 inch'],
+                ['label' => '1.5 inch'],
+                ['label' => '2 inch', 'default_unit_cost' => 5.5],
+            ],
+        ])
+            ->assertCreated()
+            ->assertJsonCount(3, 'created')
+            ->assertJsonCount(0, 'failed')
+            ->assertJsonPath('created.0.material_name', 'Nail - 1 inch')
+            ->assertJsonPath('created.2.material_name', 'Nail - 2 inch');
+
+        $this->assertSame(3, LibraryMaterial::where('material_name', 'like', 'Nail - %')->count());
+        $twoInch = LibraryMaterial::where('material_name', 'Nail - 2 inch')->sole();
+        $this->assertEquals(5.5, (float) $twoInch->default_unit_cost);
+        $this->assertSame($this->leaf->id, $twoInch->material_category_id, 'Every variant inherits the shared category.');
+
+        // Every variant needs its own code — sharing the template must not mean sharing an identity.
+        $codes = LibraryMaterial::where('material_name', 'like', 'Nail - %')->pluck('material_code');
+        $this->assertSame($codes->count(), $codes->unique()->count(), 'Each variant must get its own code.');
+    }
+
+    public function test_bulk_create_rejects_duplicate_labels_within_the_same_batch(): void
+    {
+        $this->postJson('/api/materials-library/materials/bulk', [
+            'material_name' => 'Nail',
+            'variants' => [
+                ['label' => '1 inch'],
+                ['label' => '1 inch'],
+            ],
+        ])->assertStatus(422)->assertJsonValidationErrors(['variants.0.label', 'variants.1.label']);
+
+        $this->assertSame(0, LibraryMaterial::count(), 'Nothing should be created when the batch itself is invalid.');
+    }
+
     public function test_behaviour_is_derived_from_the_category_item_type(): void
     {
         $this->createMaterial()->assertStatus(201);

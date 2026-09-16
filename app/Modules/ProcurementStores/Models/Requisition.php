@@ -16,6 +16,7 @@ class Requisition extends Model
         'requisition_number',
         'date',
         'requested_by_type',
+        'trigger_reason',
         'project_id',
         'employee_id',
         'department_id',
@@ -93,6 +94,38 @@ class Requisition extends Model
     public function items()
     {
         return $this->hasMany(RequisitionItem::class);
+    }
+
+    /**
+     * Why this requisition exists, shaped once so every downstream transaction
+     * record (purchase order, GRN, bill, payment, cost line) that walks back to
+     * it shows the same answer instead of re-deriving its own.
+     *
+     * Expects `project`, `projectEnquiry`, `department` and `employee` to
+     * already be loaded where available — this does not eager-load them
+     * itself, to keep it safe to call from a resource that is iterating a
+     * collection.
+     */
+    public function triggerContext(): array
+    {
+        return [
+            'requested_by_type' => $this->requested_by_type,
+            'trigger_reason' => $this->trigger_reason,
+            'job_number' => $this->job_number,
+            'department_id' => $this->department_id,
+            'department_name' => $this->department?->name,
+            'employee_id' => $this->employee_id,
+            'employee_name' => $this->employee?->name,
+            'project' => $this->project ? [
+                'id' => $this->project->id,
+                'name' => $this->project->enquiry?->title ?? $this->project->project_id ?? 'N/A',
+            ] : null,
+            'enquiry' => $this->projectEnquiry ? [
+                'id' => $this->projectEnquiry->id,
+                'title' => $this->projectEnquiry->title,
+                'venue' => $this->projectEnquiry->venue,
+            ] : null,
+        ];
     }
 
   public function project()

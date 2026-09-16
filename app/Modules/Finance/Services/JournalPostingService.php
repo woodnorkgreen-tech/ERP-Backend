@@ -18,6 +18,8 @@ use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
+use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
+use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -326,6 +328,10 @@ class JournalPostingService
 
     /**
      * Create a balanced GL journal entry for a SpendVoucher.
+     *
+     * @deprecated Use postPayment() with the voucher's payment instead.
+     *             This method will be removed in a future version after
+     *             all callers migrate to the unified payment architecture.
      */
     public function postSpendVoucher(SpendVoucher $voucher): ?JournalEntry
     {
@@ -355,7 +361,7 @@ class JournalPostingService
 
             $entryNo = 'JE-SV-'.str_pad((string) $voucher->id, 7, '0', STR_PAD_LEFT);
 
-            if (! in_array($voucher->type, ['payment', 'reimbursement', 'advance', 'refund'], true)) {
+            if (! in_array($voucher->type, ['payment', 'reimbursement'], true)) {
                 $creditAccountId = $this->voucherPaymentSourceAccount($voucher);
                 if (! $creditAccountId) {
                     throw new InvalidArgumentException("No credit account could be resolved for spend voucher {$voucher->voucher_no}.");
@@ -719,132 +725,128 @@ class JournalPostingService
             : null;
     }
 
-    /** @return array<int, array{account_id:int, amount:string, description:string}> */
+    /**
+     * Payment and reimbursement are the only voucher types a voucher can be
+     * created with (see SpendVoucherController::store()), and both settle
+     * verified liabilities via allocations — nothing else reaches this method.
+     * advance/refund/top_up/retirement/reversal treatments used to live here
+     * but were never reachable: advance had no reconciliation of its own
+     * (Cash Requisition owns "cash before spending" now), and the rest were
+     * already excluded from voucher creation with no other caller in the
+     * codebase. Removed rather than left as dead branches.
+     *
+     * @return array<int, array{account_id:int, amount:string, description:string}>
+     */
     private function voucherDebitLegs(SpendVoucher $voucher, string $voucherAmount): array
     {
-        // Advance: Dr Staff Advances (1300)
-        if ($voucher->type === 'advance') {
-            $account = $this->accountByCode('1300');
-
-            return $account ? [[
-                'account_id' => $account,
-                'amount' => $voucherAmount,
-                'description' => 'Staff advance to '.($voucher->payee_name ?? 'Payee'),
-            ]] : [];
-        }
-
-        // Retirement: Dr Expense account, Cr Staff Advances (1300)
-        // The credit to Staff Advances (1300) is handled by voucherPaymentSourceAccount()
-        if ($voucher->type === 'retirement') {
-            // Use the first expense account found, mirroring cost line fallback logic
-            $expenseAccount = ChartOfAccount::postable()
-                ->where('code', '!=', self::INVENTORY_CODE)
-                ->where('category', 'expense')
-                ->orderBy('code')
-                ->value('id');
-
-            return $expenseAccount ? [[
-                'account_id' => (int) $expenseAccount,
-                'amount' => $voucherAmount,
-                'description' => 'Retirement of advance - expense recognized for '.($voucher->payee_name ?? 'Payee'),
-            ]] : [];
-        }
-
-        // Top-up: Dr Petty Cash (1030)
-        if ($voucher->type === 'top_up') {
-            $account = $this->accountByCode('1030');
-
-            return $account ? [[
-                'account_id' => $account,
-                'amount' => $voucherAmount,
-                'description' => 'Petty cash top-up for '.($voucher->payee_name ?? 'Payee'),
-            ]] : [];
-        }
-
-        // Payment, Reimbursement, Refund: Handle via allocations or default to Payable
-        if (in_array($voucher->type, ['payment', 'reimbursement', 'refund'], true)) {
-            $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany([self::PAYABLE_CODE, self::ACCRUED_CODE]))->pluck('id')->map(fn ($id) => (int) $id);
-
-            // Payment and reimbursement settle verified liabilities via allocations
-            if (in_array($voucher->type, ['payment', 'reimbursement'], true)) {
-                $allocations = SpendVoucherAllocation::query()->where('spend_voucher_id', $voucher->id)
-                    ->lockForUpdate()->with('costLine.journalEntry.lines')->get();
-
-                if ($allocations->isEmpty()) {
-                    throw new InvalidArgumentException("Spend voucher {$voucher->voucher_no} has no verified liabilities allocated to it.");
-                }
-
-                $byAccount = [];
-                foreach ($allocations as $allocation) {
-                    $costLine = $allocation->costLine;
-                    if ($costLine->status !== CostLine::STATUS_VERIFIED || $costLine->journalEntry?->status !== 'posted') {
-                        throw new InvalidArgumentException("Allocated cost line {$costLine->ref} is no longer a posted, verified liability.");
-                    }
-
-                    $liabilityLines = $costLine->journalEntry->lines->filter(fn (JournalLine $line) => $line->entry_type === 'credit' && $controlAccounts->contains((int) $line->account_id)
-                    );
-                    $journalLiability = $liabilityLines->reduce(
-                        fn (string $sum, JournalLine $line) => bcadd($sum, (string) $line->amount, 2),
-                        '0.00'
-                    );
-                    $expected = bcsub(
-                        bcadd((string) ($costLine->net_amount ?? 0), (string) ($costLine->tax_amount ?? 0), 2),
-                        (string) ($costLine->wht_amount ?? 0),
-                        2
-                    );
-                    if (bccomp($journalLiability, $expected, 2) !== 0) {
-                        throw new InvalidArgumentException("Cost line {$costLine->ref} does not reconcile to its payable journal.");
-                    }
-                    if ($liabilityLines->pluck('account_id')->unique()->count() !== 1) {
-                        throw new InvalidArgumentException("Cost line {$costLine->ref} spans multiple payable control accounts and needs an explicit allocation policy.");
-                    }
-
-                    $allocationAmount = (string) $allocation->amount;
-                    if (bccomp($allocationAmount, '0.00', 2) !== 1 || bccomp($allocationAmount, $expected, 2) === 1) {
-                        throw new InvalidArgumentException("Allocation on {$costLine->ref} is outside its payable balance.");
-                    }
-                    $accountId = (int) $liabilityLines->first()->account_id;
-                    $byAccount[$accountId] = bcadd($byAccount[$accountId] ?? '0.00', $allocationAmount, 2);
-                }
-
-                $allocated = array_reduce($byAccount, fn (string $sum, string $value) => bcadd($sum, $value, 2), '0.00');
-                if (bccomp($allocated, $voucherAmount, 2) !== 0) {
-                    throw new InvalidArgumentException(
-                        "Spend voucher {$voucher->voucher_no} amount {$voucherAmount} does not equal allocated liabilities {$allocated}."
-                    );
-                }
-
-                return collect($byAccount)->map(fn (string $value, int $accountId) => [
-                    'account_id' => $accountId,
-                    'amount' => $value,
-                    'description' => 'Liability settlement for '.$voucher->voucher_no,
-                ])->values()->all();
-            }
-
-            // Refund without allocations defaults to Accounts Payable (2100)
-            if ($voucher->type === 'refund') {
-                $account = $this->accountByCode(self::PAYABLE_CODE);
-
-                return $account ? [[
-                    'account_id' => $account,
-                    'amount' => $voucherAmount,
-                    'description' => 'Refund payment for '.($voucher->payee_name ?? 'Payee'),
-                ]] : [];
-            }
-        }
-
-        // Removal: Using postSpendVoucher method as the primary reversal workflow
-        // The voucher->reversal_of_id field is set and handled by the reversal policy
-        if ($voucher->type === 'reversal') {
+        if (! in_array($voucher->type, ['payment', 'reimbursement'], true)) {
             throw new InvalidArgumentException(
-                "Reversal voucher {$voucher->voucher_no} should be handled by reverseEntry method, not voucherDebitLegs. "
-                .'Use JournalPostingService::reverseEntry() instead.'
+                "Spend voucher {$voucher->voucher_no} has no supported ledger treatment for type {$voucher->type}."
             );
         }
 
-        throw new InvalidArgumentException(
-            "Spend voucher {$voucher->voucher_no} has no supported ledger treatment for type {$voucher->type}."
+        $allocations = SpendVoucherAllocation::query()->where('spend_voucher_id', $voucher->id)
+            ->lockForUpdate()->with('costLine.journalEntry.lines')->get();
+
+        if ($allocations->isEmpty()) {
+            throw new InvalidArgumentException("Spend voucher {$voucher->voucher_no} has no verified liabilities allocated to it.");
+        }
+
+        $byAccount = [];
+        foreach ($allocations as $allocation) {
+            $amount = (string) $allocation->amount;
+            $accountId = $this->resolveVerifiedLiabilityAccount(
+                $allocation->costLine,
+                $amount,
+                "Spend voucher {$voucher->voucher_no}"
+            );
+            $byAccount[$accountId] = bcadd($byAccount[$accountId] ?? '0.00', $amount, 2);
+        }
+
+        $allocated = array_reduce($byAccount, fn (string $sum, string $value) => bcadd($sum, $value, 2), '0.00');
+        if (bccomp($allocated, $voucherAmount, 2) !== 0) {
+            throw new InvalidArgumentException(
+                "Spend voucher {$voucher->voucher_no} amount {$voucherAmount} does not equal allocated liabilities {$allocated}."
+            );
+        }
+
+        return collect($byAccount)->map(fn (string $value, int $accountId) => [
+            'account_id' => $accountId,
+            'amount' => $value,
+            'description' => 'Liability settlement for '.$voucher->voucher_no,
+        ])->values()->all();
+    }
+
+    /**
+     * Resolve and validate the single control account a verified cost line's
+     * liability must be debited from, to settle it for the given amount.
+     *
+     * Reads the credit leg(s) the cost line's own posted journal entry
+     * recorded when its liability was recognized, rather than guessing from
+     * the cost line's `nature` — that is the only way to be sure the
+     * settlement debits the exact account that was originally credited.
+     *
+     * Two guarantees this must keep, shared by every caller that settles a
+     * cost line's liability (spend vouchers and direct payment allocations
+     * alike), because a control account picked without them can silently
+     * post to the wrong side of the ledger:
+     *
+     * - The liability legs found must reconcile to
+     *   `net_amount + tax_amount - wht_amount`. VAT-payable and WHT-payable
+     *   are liability-typed accounts too, so a cost line with a split
+     *   liability posting (AP + VAT + WHT legs) that isn't reconciled first
+     *   could have any one of those picked instead of the AP/Accrued leg.
+     * - Exactly one control account may hold that liability. A cost line
+     *   whose liability spans more than one needs an explicit allocation
+     *   policy, not a guess at which leg to debit.
+     */
+    private function resolveVerifiedLiabilityAccount(CostLine $costLine, string $allocationAmount, string $context): int
+    {
+        $controlAccounts = ChartOfAccount::postable()
+            ->whereIn('code', ChartAccountMap::localMany([self::PAYABLE_CODE, self::ACCRUED_CODE]))
+            ->pluck('id')->map(fn ($id) => (int) $id);
+
+        if ($costLine->status !== CostLine::STATUS_VERIFIED || $costLine->journalEntry?->status !== 'posted') {
+            throw new InvalidArgumentException("{$context}: cost line {$costLine->ref} is no longer a posted, verified liability.");
+        }
+
+        // Last line of defense: even if something upstream let a Bill-cleared
+        // GRN accrual reach here (a stale allocation created before this guard
+        // existed, a future caller that skips assertEligibleLiabilities), the
+        // actual debit must never happen. This is the one method every
+        // liability-settling path shares — voucherDebitLegs() today,
+        // UnifiedPaymentService::postPayment() when it's ever wired up.
+        if ($costLine->settled_by_bill_id !== null) {
+            throw new InvalidArgumentException(
+                "{$context}: cost line {$costLine->ref} was already settled when bill #{$costLine->settled_by_bill_id} "
+                .'was verified against the goods receipt — it is no longer a payable liability.'
+            );
+        }
+
+        $liabilityLines = $costLine->journalEntry->lines->filter(
+            fn (JournalLine $line) => $line->entry_type === 'credit' && $controlAccounts->contains((int) $line->account_id)
         );
+        $journalLiability = $liabilityLines->reduce(
+            fn (string $sum, JournalLine $line) => bcadd($sum, (string) $line->amount, 2),
+            '0.00'
+        );
+        $expected = bcsub(
+            bcadd((string) ($costLine->net_amount ?? 0), (string) ($costLine->tax_amount ?? 0), 2),
+            (string) ($costLine->wht_amount ?? 0),
+            2
+        );
+        if (bccomp($journalLiability, $expected, 2) !== 0) {
+            throw new InvalidArgumentException("{$context}: cost line {$costLine->ref} does not reconcile to its payable journal.");
+        }
+        if ($liabilityLines->pluck('account_id')->unique()->count() !== 1) {
+            throw new InvalidArgumentException("{$context}: cost line {$costLine->ref} spans multiple payable control accounts and needs an explicit allocation policy.");
+        }
+
+        if (bccomp($allocationAmount, '0.00', 2) !== 1 || bccomp($allocationAmount, $expected, 2) === 1) {
+            throw new InvalidArgumentException("{$context}: allocation on {$costLine->ref} is outside its payable balance.");
+        }
+
+        return (int) $liabilityLines->first()->account_id;
     }
 
     /**
@@ -875,6 +877,16 @@ class JournalPostingService
      * Invoices recorded before `bills` could state tax carry net = amount and
      * zero for both taxes, so they still post as the two-leg entry they always
      * did rather than being retrospectively reinterpreted.
+     *
+     * A direct bill (`verification_basis=direct`, no purchase order — a
+     * credit purchase that never went through Requisition→PO→GRN) has no
+     * receipt accrual to clear, so the first leg debits its own expense
+     * classification instead of 2150:
+     *
+     *   Dr  <bill's expense code account>  net
+     *   Dr  Input VAT recoverable          vat  (recoverable treatments only)
+     *   Cr  WHT payable                    wht  (retained, owed to KRA)
+     *   Cr  Accounts Payable               net+vat−wht
      */
     public function postSupplierInvoice(Bill $bill): ?JournalEntry
     {
@@ -891,9 +903,12 @@ class JournalPostingService
          * credited 2150 — so the debit can never exceed what the receipt put
          * there. A `legacy` invoice predates the match and was never accrued;
          * debiting 2150 for it would relieve a liability no receipt ever
-         * recorded and drive the control account negative.
+         * recorded and drive the control account negative. A `direct` invoice
+         * (no purchase order at all) never had a receipt to accrue either, so
+         * it debits its own expense classification instead of 2150 — see
+         * below.
          */
-        if ($bill->verification_basis !== 'three_way_match' || ! $bill->verified_at) {
+        if (! in_array($bill->verification_basis, ['three_way_match', 'direct'], true) || ! $bill->verified_at) {
             return null;
         }
 
@@ -905,17 +920,30 @@ class JournalPostingService
         $period = AccountingPeriod::forDate($bill->bill_date ?? now());
         $this->assertOpenPeriod($period?->id, "supplier invoice {$bill->bill_number}");
 
-        $accrued = $this->accountByCode(self::ACCRUED_CODE);
-        $payable = $this->accountByCode(self::PAYABLE_CODE);
+        if ($bill->isDirect()) {
+            $debitAccountId = $bill->expenseCode?->default_debit_account_id;
+            if (! $debitAccountId) {
+                throw new InvalidArgumentException(
+                    "Supplier invoice {$bill->bill_number} cannot post: its expense code has no default debit account mapped."
+                );
+            }
+        } else {
+            $debitAccountId = $this->accountByCode(self::ACCRUED_CODE);
+            if (! $debitAccountId) {
+                throw new InvalidArgumentException(
+                    "Supplier invoice {$bill->bill_number} cannot post: chart account ".self::ACCRUED_CODE.' must be active and postable.'
+                );
+            }
+        }
 
-        if (! $accrued || ! $payable) {
+        $payable = $this->accountByCode(self::PAYABLE_CODE);
+        if (! $payable) {
             throw new InvalidArgumentException(
-                "Supplier invoice {$bill->bill_number} cannot post: chart accounts "
-                .self::ACCRUED_CODE.' and '.self::PAYABLE_CODE.' must both be active and postable.'
+                "Supplier invoice {$bill->bill_number} cannot post: chart account ".self::PAYABLE_CODE.' must be active and postable.'
             );
         }
 
-        $legs = $this->supplierInvoiceLegs($bill, $gross, $accrued, $payable);
+        $legs = $this->supplierInvoiceLegs($bill, $gross, $debitAccountId, $payable);
 
         $accountIds = array_unique(array_column($legs, 'account_id'));
         if (ChartOfAccount::postable()->whereIn('id', $accountIds)->count() !== count($accountIds)) {
@@ -926,13 +954,15 @@ class JournalPostingService
         }
 
         $requisition = $bill->purchaseOrder?->requisition;
+        $projectId = $requisition?->project_id ?? $bill->project_id;
+        $projectEnquiryId = $requisition?->project_enquiry_id ?? $bill->project_enquiry_id;
         $total = array_reduce(
             array_filter($legs, fn (array $leg) => $leg['entry_type'] === 'debit'),
             fn (string $carry, array $leg) => bcadd($carry, $leg['amount'], 2),
             '0.00',
         );
 
-        return DB::transaction(function () use ($bill, $entryNo, $period, $requisition, $legs, $total) {
+        return DB::transaction(function () use ($bill, $entryNo, $period, $projectId, $projectEnquiryId, $legs, $total) {
             $entry = JournalEntry::create([
                 'entry_no' => $entryNo,
                 'posting_date' => (string) ($bill->bill_date?->toDateString() ?? now()->toDateString()),
@@ -940,8 +970,10 @@ class JournalPostingService
                 'source_type' => Bill::class,
                 'source_id' => $bill->id,
                 'source_ref' => $bill->bill_number,
-                'description' => 'Supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
-                    .' accepted against '.($bill->purchaseOrder?->po_number ?? 'order'),
+                'description' => $bill->isDirect()
+                    ? 'Direct supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
+                    : 'Supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
+                        .' accepted against '.($bill->purchaseOrder?->po_number ?? 'order'),
                 'total_debit' => $total,
                 'total_credit' => $total,
                 'status' => 'posted',
@@ -955,14 +987,42 @@ class JournalPostingService
                     'currency' => 'KES',
                     'fx_rate' => 1,
                     'base_amount' => $leg['amount'],
-                    'project_id' => $requisition?->project_id,
-                    'project_enquiry_id' => $requisition?->project_enquiry_id,
+                    'project_id' => $projectId,
+                    'project_enquiry_id' => $projectEnquiryId,
                     ...$leg,
                 ]);
             }
 
+            $this->markGrnAccrualsSettledByBill($bill);
+
             return $entry;
         });
+    }
+
+    /**
+     * Close the GRN accrual(s) this bill's three-way match just cleared.
+     *
+     * The debit above relieves 2150 in aggregate, but nothing else ties it
+     * back to the specific cost line(s) that credited it at goods receipt —
+     * without this, those lines stayed "verified, posted, unsettled" forever
+     * and kept showing up as payable liabilities in eligibleLiabilities()
+     * long after this bill had paid them. Confirmed to happen once already:
+     * CL-0000022 / BILL-2026-0003 was paid in full, then paid an extra
+     * KES 2,000 the next day via a Payment Voucher that had no way to know.
+     */
+    private function markGrnAccrualsSettledByBill(Bill $bill): void
+    {
+        $poItemIds = PurchaseOrderItem::where('purchase_order_id', $bill->purchase_order_id)->pluck('id');
+
+        if ($poItemIds->isEmpty()) {
+            return;
+        }
+
+        CostLine::where('source_type', GoodsReceiptNoteItem::class)
+            ->where('source_ref', 'accrual')
+            ->whereIn('details->purchase_order_item_id', $poItemIds)
+            ->whereNull('settled_by_bill_id')
+            ->update(['settled_by_bill_id' => $bill->id]);
     }
 
     /**
@@ -976,7 +1036,7 @@ class JournalPostingService
      *
      * @return array<int, array<string, mixed>>
      */
-    private function supplierInvoiceLegs(Bill $bill, string $gross, int $accrued, int $payable): array
+    private function supplierInvoiceLegs(Bill $bill, string $gross, int $debitAccountId, int $payable): array
     {
         $vat = $this->money($bill->vat_amount);
         $wht = $this->money($bill->wht_amount);
@@ -1000,10 +1060,12 @@ class JournalPostingService
         }
 
         $legs = [[
-            'account_id' => $accrued,
+            'account_id' => $debitAccountId,
             'entry_type' => 'debit',
             'amount' => $net,
-            'description' => 'Accrual cleared by supplier invoice '.$bill->bill_number,
+            'description' => $bill->isDirect()
+                ? 'Expense recognized on direct supplier invoice '.$bill->bill_number
+                : 'Accrual cleared by supplier invoice '.$bill->bill_number,
         ]];
 
         if (bccomp($vat, '0.00', 2) > 0) {
@@ -1044,6 +1106,10 @@ class JournalPostingService
      * legacy invoice — payable, but never posted — would relieve a payable it
      * never raised, and the control account would drift by exactly the value of
      * the grandfathered balances the legacy basis exists to let through.
+     *
+     * @deprecated Use postPayment() with the BillPayment's unified Payment instead.
+     *             This method will be removed in a future version after
+     *             all bill payments migrate to the unified payment architecture.
      */
     public function postSupplierPayment(BillPayment $payment): ?JournalEntry
     {
@@ -1253,6 +1319,9 @@ class JournalPostingService
      * Project payments are posted by the cost collector so their journal keeps
      * the project dimensions. Overhead and unmatched payments have no cost
      * line, but they still moved money and must not disappear from the GL.
+     *
+     * @deprecated Use postPayment() instead, which handles both allocated and unallocated payments.
+     *             This method will be removed in a future version.
      */
     public function postDirectPayment(Payment $payment): ?JournalEntry
     {
@@ -1673,5 +1742,200 @@ class JournalPostingService
             legs: $legs,
             createdBy: $requisition->surrender_reconciled_by ?? auth()->id(),
         );
+    }
+
+    /**
+     * Post a payment to the general ledger (Phase 5: Unified Payment Architecture).
+     *
+     * This replaces postSpendVoucher(), postSupplierPayment(), postDirectPayment()
+     * with one method that handles all payment types based on allocations.
+     *
+     * Journal structure depends on payment allocations:
+     * - Allocated to cost lines → Dr AP/Accrued (from cost line's original posting), Cr Cash
+     * - Unallocated (advance) → Dr Staff Advances, Cr Cash
+     * - Top-up (petty cash replenishment) → Dr Petty Cash Float, Cr Bank
+     *
+     * Transaction fees are posted separately via postPaymentFee().
+     *
+     * @param Payment $payment The payment to post
+     * @return JournalEntry|null The created journal entry, or null if already posted
+     * @throws InvalidArgumentException
+     */
+    public function postPayment(Payment $payment): ?JournalEntry
+    {
+        // Prevent posting voided payments
+        if ($payment->status === 'voided') {
+            return null;
+        }
+
+        // Prevent double-posting
+        $entryNo = 'JE-PAY-'.str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT);
+        if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
+            return $existing;
+        }
+
+        // Validate payment amount
+        $amount = $this->money($payment->amount);
+        if (bccomp($amount, '0.00', 2) <= 0) {
+            return null;
+        }
+
+        // Resolve accounting period
+        $period = AccountingPeriod::forDate($payment->date_disbursed ?? now());
+        $this->assertOpenPeriod($period?->id, "payment {$payment->payment_no}");
+
+        // Validate payment source
+        $paymentSource = $payment->paymentSource;
+        if (! $paymentSource || ! $paymentSource->is_active || ! ($paymentSource->can_make_payment ?? true)) {
+            throw new InvalidArgumentException(
+                "Payment {$payment->payment_no} cannot post: invalid or inactive payment source."
+            );
+        }
+
+        $creditAccountId = $paymentSource->gl_account_id;
+        if (! $creditAccountId || ! ChartOfAccount::postable()->whereKey($creditAccountId)->exists()) {
+            throw new InvalidArgumentException(
+                "Payment {$payment->payment_no} cannot post: payment source has no valid GL account."
+            );
+        }
+
+        return DB::transaction(function () use ($payment, $entryNo, $period, $amount) {
+            $debitLegs = [];
+
+            // Determine debit legs based on allocations
+            if ($payment->paymentAllocations->isNotEmpty()) {
+                // ALLOCATED PAYMENT: Debit the AP/Accrued account(s) recorded on
+                // each cost line's own posted liability journal — validated and
+                // reconciled by the same rule the spend-voucher settlement path
+                // relies on (see resolveVerifiedLiabilityAccount), so a cost line
+                // with a VAT/WHT-split liability can never have the wrong leg
+                // picked here.
+                $allocatedTotal = '0.00';
+                foreach ($payment->paymentAllocations as $allocation) {
+                    $costLine = $allocation->costLine;
+                    $allocationAmount = $this->money($allocation->amount);
+                    $accountId = $this->resolveVerifiedLiabilityAccount(
+                        $costLine,
+                        $allocationAmount,
+                        "Payment {$payment->payment_no}"
+                    );
+
+                    $debitLegs[] = [
+                        'account_id' => $accountId,
+                        'amount' => $allocationAmount,
+                        'description' => "Settlement: {$costLine->description}",
+                        'project_id' => $costLine->project_id,
+                        'project_enquiry_id' => $costLine->project_enquiry_id,
+                        'cost_centre_id' => $costLine->cost_centre_id,
+                    ];
+                    $allocatedTotal = bcadd($allocatedTotal, $allocationAmount, 2);
+                }
+
+                if (bccomp($allocatedTotal, $amount, 2) !== 0) {
+                    throw new InvalidArgumentException(
+                        "Payment {$payment->payment_no} amount {$amount} does not equal allocated liabilities {$allocatedTotal}."
+                    );
+                }
+            } else {
+                // UNALLOCATED PAYMENT: Determine from voucher type or payment context
+                $debitAccount = $this->resolveUnallocatedDebitAccount($payment);
+
+                if (! $debitAccount) {
+                    throw new InvalidArgumentException(
+                        "Cannot resolve debit account for unallocated payment {$payment->payment_no}. ".
+                        "Payment must either have allocations or be linked to a voucher with a type."
+                    );
+                }
+
+                $debitLegs[] = [
+                    'account_id' => $debitAccount->id,
+                    'amount' => $amount,
+                    'description' => $payment->description ?? 'Unallocated payment',
+                    'project_id' => $payment->project_id,
+                    'project_enquiry_id' => $payment->project_enquiry_id,
+                ];
+            }
+
+            // Use postCashSettlement for consistent cash leg treatment
+            return $this->postCashSettlement(
+                entryNo: $entryNo,
+                postingDate: (string) ($payment->date_disbursed?->toDateString() ?? now()->toDateString()),
+                sourceType: Payment::class,
+                sourceId: $payment->id,
+                sourceRef: $payment->payment_no,
+                description: $this->buildPaymentDescription($payment),
+                debitLegs: $debitLegs,
+                paymentSource: $payment->paymentSource,
+                creditDescription: "Payment via {$payment->paymentSource->name}",
+                createdBy: $payment->created_by,
+                accountingPeriodId: $period->id,
+                spendVoucherId: $payment->spend_voucher_id, // Legacy link
+                creditProjectId: $payment->project_id,
+                creditProjectEnquiryId: $payment->project_enquiry_id,
+            );
+        });
+    }
+
+    /**
+     * Resolve debit account for unallocated payments.
+     *
+     * Determines the expense/asset account to debit when a payment has no
+     * cost line allocations. This handles advances, top-ups, and direct payments.
+     */
+    private function resolveUnallocatedDebitAccount(Payment $payment): ?ChartOfAccount
+    {
+        // Check if payment was made via voucher
+        if ($payment->voucher) {
+            $accountCode = match ($payment->voucher->type) {
+                'advance' => self::STAFF_ADVANCE_CODE,     // 1300 Staff Advances
+                'top_up', 'replenishment' => '1030',       // Petty Cash Float
+                'refund' => self::PAYABLE_CODE,            // 2100 AP (refund to supplier)
+                default => null,
+            };
+
+            if ($accountCode) {
+                return ChartOfAccount::postable()
+                    ->where('code', $accountCode)
+                    ->first();
+            }
+        }
+
+        // Check source document type
+        if ($payment->sourceDocument instanceof Bill) {
+            return ChartOfAccount::postable()
+                ->where('code', self::PAYABLE_CODE)
+                ->first();
+        }
+
+        // Check if there's an expense code specified (direct payment)
+        if ($payment->expense_code_id) {
+            $expenseCode = \App\Modules\Finance\CostCollector\Models\ExpenseCode::find($payment->expense_code_id);
+            if ($expenseCode && $expenseCode->default_debit_account_id) {
+                return ChartOfAccount::find($expenseCode->default_debit_account_id);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Build descriptive text for payment journal entry.
+     */
+    private function buildPaymentDescription(Payment $payment): string
+    {
+        if ($payment->voucher) {
+            return "Payment via voucher {$payment->voucher->voucher_no}: {$payment->payee_name}";
+        }
+
+        if ($payment->sourceDocument) {
+            $docType = class_basename($payment->sourceDocument);
+            $docRef = $payment->sourceDocument->bill_number ??
+                      $payment->sourceDocument->requisition_no ??
+                      $payment->sourceDocument->id;
+
+            return "Payment for {$docType} {$docRef}: {$payment->payee_name}";
+        }
+
+        return "Payment {$payment->payment_no}: {$payment->payee_name}";
     }
 }

@@ -46,6 +46,7 @@ class ExpenseCodeController extends Controller
 
         $this->applyJobContext($request, $query);
         $this->applyProcurable($request, $query);
+        $this->applyDirectBillScope($request, $query);
 
         $codes = $query->orderBy('sort_order')->orderBy('expense_type')
             ->limit($validated['limit'] ?? 50)
@@ -171,6 +172,23 @@ class ExpenseCodeController extends Controller
     {
         if ($request->boolean('procurable')) {
             $query->where('is_procurable', true);
+        }
+    }
+
+    /**
+     * Narrow further, to what a bill with no purchase order can carry.
+     *
+     * `procurable=1` alone still returns every granular fabrication material
+     * — 42 of 76 procurable codes at the time this was written — because a
+     * PO genuinely needs them itemized line by line. A direct bill has one
+     * line and no receipt to check against, so a real materials purchase
+     * belongs on a PO (for the budget commitment and three-way match that
+     * gives), not classified here. See ExpenseCode::scopeForDirectBill().
+     */
+    private function applyDirectBillScope(Request $request, $query): void
+    {
+        if ($request->boolean('direct_bill')) {
+            $query->forDirectBill();
         }
     }
 

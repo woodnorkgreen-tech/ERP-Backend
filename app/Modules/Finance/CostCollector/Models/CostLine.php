@@ -148,6 +148,33 @@ class CostLine extends Model
         return $this->hasMany(SpendVoucherAllocation::class, 'cost_line_id');
     }
 
+    /**
+     * Direct link to settling payment (Phase 3: Architecture Redesign).
+     * Makes "Show me unsettled liabilities" a simple whereNull query.
+     */
+    public function settledByPayment(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Finance\Models\Payment::class, 'settled_by_payment_id');
+    }
+
+    /**
+     * Check if this cost line has been settled by a payment.
+     */
+    public function isSettled(): bool
+    {
+        return $this->settled_by_payment_id !== null || $this->funding_voucher_id !== null;
+    }
+
+    /**
+     * Check if this cost line is payable (accrued, verified, but not settled).
+     */
+    public function isPayable(): bool
+    {
+        return $this->nature === self::NATURE_ACCRUED
+            && $this->status === self::STATUS_VERIFIED
+            && !$this->isSettled();
+    }
+
     /** The planned line this fulfils. Null means unbudgeted spend. */
     public function consumesLine(): BelongsTo
     {
@@ -227,6 +254,37 @@ class CostLine extends Model
     public function scopeOfNature($query, string ...$natures)
     {
         return $query->whereIn('nature', $natures);
+    }
+
+    /**
+     * Scope for unsettled liabilities (Phase 3: Architecture Redesign).
+     * Accrued, verified costs that haven't been paid yet.
+     */
+    public function scopeUnsettled($query)
+    {
+        return $query->where('nature', self::NATURE_ACCRUED)
+            ->where('status', self::STATUS_VERIFIED)
+            ->whereNull('settled_by_payment_id')
+            // A GRN accrual whose bill has since been verified against it
+            // (see settled_by_bill_id / erp-grn-accrual-double-payment) is
+            // discharged the same as one settled_by_payment_id would mark —
+            // it moved to that bill's own Accounts Payable balance and is
+            // paid or payable through BillController, not this. Currently
+            // unused (settled_by_payment_id is set by nothing yet either),
+            // but wrong the moment it is: without this, every GRN-accrual
+            // cost line whose bill has already paid it would still count as
+            // an outstanding liability.
+            ->whereNull('settled_by_bill_id');
+    }
+
+    /**
+     * Scope for settled costs.
+     */
+    public function scopeSettled($query)
+    {
+        return $query->where(fn ($q) => $q
+            ->whereNotNull('settled_by_payment_id')
+            ->orWhereNotNull('settled_by_bill_id'));
     }
 
     public function scopeForProject($query, ?int $projectId, ?int $enquiryId = null, ?string $jobNumber = null)

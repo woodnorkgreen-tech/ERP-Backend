@@ -44,6 +44,7 @@ class SpendVoucher extends Model
         'vat_amount',
         'wht_amount',
         'net_cash_paid',
+        'transaction_cost',
         'tax_due_date',
         'petty_cash_disbursement_id',
         'petty_cash_top_up_id',
@@ -67,6 +68,7 @@ class SpendVoucher extends Model
         'vat_amount' => 'decimal:2',
         'wht_amount' => 'decimal:2',
         'net_cash_paid' => 'decimal:2',
+        'transaction_cost' => 'decimal:2',
         'buyer_pin_captured' => 'boolean',
         'approved_at' => 'datetime',
         'posted_at' => 'datetime',
@@ -116,6 +118,15 @@ class SpendVoucher extends Model
     public function payment(): BelongsTo
     {
         return $this->belongsTo(Payment::class, 'petty_cash_disbursement_id');
+    }
+
+    /**
+     * Inverse relationship (Phase 2: Architecture Redesign).
+     * A voucher may have multiple payments in theory, but current design is 1:1.
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class, 'voucher_id');
     }
 
     public function accountingPeriod(): BelongsTo

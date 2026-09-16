@@ -2,7 +2,11 @@
 
 namespace Tests\Feature\Finance;
 
+use App\Constants\Permissions;
 use App\Models\User;
+use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
+use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
@@ -185,6 +189,86 @@ class SupplierLedgerRailTest extends TestCase
         $this->assertSame('-50000.00', $this->movementOn(self::PAYABLE));
     }
 
+    /**
+     * A GRN accrual that a bill's three-way match clears must stop being a
+     * Payment Voucher liability — otherwise it stays "verified, posted,
+     * unsettled" forever and can be paid a second time. This happened live:
+     * see erp-grn-accrual-double-payment memory for the real figures.
+     */
+    public function test_verifying_a_bill_closes_the_grn_accrual_it_supersedes(): void
+    {
+        $this->deliverAndConfirm();
+
+        $period = AccountingPeriod::forDate(now());
+        $accruedAccountId = ChartOfAccount::where('code', self::ACCRUED)->value('id');
+        $bankAccountId = ChartOfAccount::where('code', self::BANK)->value('id');
+
+        $costLine = CostLine::create([
+            'ref' => 'CL-TEST-GRN-' . uniqid(),
+            'nature' => CostLine::NATURE_ACCRUED,
+            'status' => CostLine::STATUS_VERIFIED,
+            'amount' => '50000.00',
+            'net_amount' => '50000.00',
+            'tax_amount' => '0.00',
+            'base_net_amount' => '50000.00',
+            'fx_rate' => '1.00',
+            'accounting_period_id' => $period->id,
+            'submitted_by_user_id' => $this->accounts->id,
+            'source_type' => GoodsReceiptNoteItem::class,
+            'source_id' => 999999,
+            'source_ref' => 'accrual',
+            'details' => ['purchase_order_item_id' => $this->orderItem->id, 'grn_number' => 'GRN-TEST'],
+            'payee_id' => $this->supplier->id,
+            'description' => 'Accepted goods: GRN-TEST',
+        ]);
+
+        $entry = JournalEntry::create([
+            'entry_no' => 'JE-CL-TEST-' . $costLine->id,
+            'posting_date' => now()->toDateString(),
+            'accounting_period_id' => $period->id,
+            'cost_line_id' => $costLine->id,
+            'source_type' => CostLine::class,
+            'source_id' => $costLine->id,
+            'source_ref' => $costLine->ref,
+            'description' => 'Test GRN accrual',
+            'total_debit' => '50000.00',
+            'total_credit' => '50000.00',
+            'status' => 'posted',
+            'created_by' => $this->accounts->id,
+            'posted_at' => now(),
+        ]);
+        JournalLine::create(['journal_entry_id' => $entry->id, 'account_id' => $bankAccountId, 'entry_type' => 'debit', 'amount' => '50000.00', 'base_amount' => '50000.00', 'currency' => 'KES', 'fx_rate' => 1]);
+        JournalLine::create(['journal_entry_id' => $entry->id, 'account_id' => $accruedAccountId, 'entry_type' => 'credit', 'amount' => '50000.00', 'base_amount' => '50000.00', 'currency' => 'KES', 'fx_rate' => 1]);
+        $costLine->forceFill(['journal_entry_id' => $entry->id, 'posted_at' => now()])->save();
+
+        \Spatie\Permission\Models\Permission::findOrCreate(Permissions::FINANCE_SPEND_VOUCHERS_CREATE, 'web');
+        $this->accounts->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_CREATE);
+
+        $before = $this->getJson('/api/finance/spend-vouchers/eligible-liabilities')->assertOk();
+        $this->assertTrue(collect($before->json('data'))->contains('id', $costLine->id));
+
+        $bill = $this->bill();
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
+
+        $this->assertSame($bill->id, $costLine->fresh()->settled_by_bill_id);
+
+        $after = $this->getJson('/api/finance/spend-vouchers/eligible-liabilities')->assertOk();
+        $this->assertFalse(collect($after->json('data'))->contains('id', $costLine->id));
+
+        // The deeper gate: even a direct attempt to allocate it is refused.
+        $source = $this->payingAccount();
+        $this->postJson('/api/finance/spend-vouchers', [
+            'type' => 'payment',
+            'payee_name' => 'Timber & Board Ltd',
+            'total_amount' => 1000,
+            'payment_source_id' => $source->id,
+            'allocations' => [['cost_line_id' => $costLine->id, 'amount' => 1000]],
+        ])->assertStatus(422)->assertJsonPath(
+            'message',
+            "Cost line {$costLine->ref} was already settled when its bill was verified against the goods receipt. It is no longer this voucher's liability to pay.",
+        );
+    }
+
     public function test_verification_posts_once_however_many_times_it_runs(): void
     {
         $this->deliverAndConfirm();
@@ -219,6 +303,293 @@ class SupplierLedgerRailTest extends TestCase
         );
         $this->assertSame('0.00', $this->movementOn(self::ACCRUED));
         $this->assertSame('0.00', $this->movementOn(self::PAYABLE));
+    }
+
+    /**
+     * A credit purchase that never went through Requisition→PO→GRN — no
+     * order, no receipt, no three-way match — still belongs on the same
+     * supplier rail, taxed and paid the same way, rather than living as a
+     * separate Cost Collector `unpaid_invoice` cost line. It debits its own
+     * expense classification instead of clearing a receipt accrual that was
+     * never raised.
+     */
+    public function test_a_direct_bill_posts_to_its_own_expense_code_not_the_accrual(): void
+    {
+        $expenseAccountId = ChartOfAccount::where('code', '5100')->value('id');
+        $expenseCode = ExpenseCode::create([
+            'code' => 'TEST-DIRECT-001',
+            'simple_meaning' => 'Test direct expense',
+            'accounting_class' => 'expense',
+            'expense_family' => 'operations',
+            'expense_type' => 'direct',
+            'default_debit_account_id' => $expenseAccountId,
+            'job_id_rule' => 'not_allowed',
+            'cash_flow_class' => 'operating',
+            'requires_asset_record' => false,
+            'requires_supplier' => true,
+            'is_capex_review' => false,
+            'is_active' => true,
+            'is_procurable' => true,
+            'sort_order' => 1,
+        ]);
+
+        $response = $this->postJson('/api/procurement-stores/bills', [
+            'bill_date' => now()->toDateString(),
+            'due_date' => now()->addDays(30)->toDateString(),
+            'amount' => 11600, // 10,000 net + 16% VAT, non-recoverable by default treatment
+            'supplier_invoice_number' => 'SINV-DIRECT-' . uniqid(),
+            'supplier_id' => $this->supplier->id,
+            'expense_code_id' => $expenseCode->id,
+        ])->assertStatus(201);
+        $billId = $response->json('data.id') ?? $response->json('id');
+        $bill = Bill::findOrFail($billId);
+
+        $this->assertNull($bill->purchase_order_id);
+        $this->assertTrue($bill->isDirect());
+
+        $verifyResponse = $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();
+        $bill->refresh();
+
+        $this->assertSame('direct', $bill->verification_basis);
+        $this->assertNotNull($bill->verified_at);
+
+        $entry = $this->entryFor($bill);
+        $this->assertNotNull($entry, 'Verifying a direct bill must post a journal entry.');
+        $this->assertSame((string) $entry->total_debit, (string) $entry->total_credit);
+
+        // The expense code's own account was debited — 2150 Accrued was never
+        // touched, because no receipt ever credited it for this invoice.
+        $this->assertSame('0.00', $this->movementOn(self::ACCRUED));
+        $this->assertDatabaseHas('journal_lines', [
+            'journal_entry_id' => $entry->id,
+            'account_id' => $expenseAccountId,
+            'entry_type' => 'debit',
+        ]);
+
+        // Payable is credited for what the supplier is actually owed, exactly
+        // as a PO-backed invoice would be.
+        $this->assertSame((string) bcmul('-1', (string) $bill->payableAmount(), 2), $this->movementOn(self::PAYABLE));
+
+        // And it settles through the same rail as any other bill.
+        $source = $this->payingAccount();
+        BillPayment::create([
+            'bill_id' => $bill->id,
+            'amount_paid' => $bill->payableAmount(),
+            'payment_date' => now()->toDateString(),
+            'payment_method' => 'bank_transfer',
+            'payment_source_id' => $source->id,
+            'reference_number' => 'TRX-DIRECT-001',
+            'user_id' => $this->accounts->id,
+        ]);
+        $this->assertSame('0.00', $this->movementOn(self::PAYABLE));
+    }
+
+    /** A direct bill still needs a supplier and an expense code before it can be verified. */
+    public function test_a_direct_bill_cannot_be_verified_without_an_expense_code(): void
+    {
+        $bill = Bill::create([
+            'bill_number' => Bill::generateBillNumber(),
+            'purchase_order_id' => null,
+            'supplier_id' => $this->supplier->id,
+            'bill_date' => now()->toDateString(),
+            'due_date' => now()->addDays(30)->toDateString(),
+            'amount' => 5000,
+            'status' => 'pending',
+            'supplier_invoice_number' => 'SINV-NOCODE-' . uniqid(),
+            'user_id' => $this->accounts->id,
+        ]);
+
+        $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")
+            ->assertStatus(422)
+            ->assertJsonPath('blockers.0', 'Expense classification recorded');
+
+        $this->assertNull($bill->fresh()->verified_at);
+    }
+
+    /**
+     * Staff allowances, stores issues, VAT remitted and the like are real
+     * expense-catalogue rows — the cost collector and petty cash both post
+     * them — but a bill asks a supplier for something, exactly like a
+     * requisition line does, so the same `is_procurable` gate
+     * RequisitionApprovalCheck enforces for a purchase order must apply here.
+     */
+    public function test_a_direct_bill_refuses_a_non_procurable_expense_code(): void
+    {
+        $nonProcurableCode = ExpenseCode::create([
+            'code' => 'TEST-NONPROC-001',
+            'simple_meaning' => 'Staff welfare (not a purchase)',
+            'accounting_class' => 'expense',
+            'expense_family' => 'staff',
+            'expense_type' => 'allowance',
+            'default_debit_account_id' => ChartOfAccount::where('code', '5100')->value('id'),
+            'job_id_rule' => 'not_allowed',
+            'cash_flow_class' => 'operating',
+            'requires_asset_record' => false,
+            'requires_supplier' => false,
+            'is_capex_review' => false,
+            'is_active' => true,
+            'is_procurable' => false,
+            'sort_order' => 1,
+        ]);
+
+        $this->postJson('/api/procurement-stores/bills', [
+            'bill_date' => now()->toDateString(),
+            'due_date' => now()->addDays(30)->toDateString(),
+            'amount' => 5000,
+            'supplier_invoice_number' => 'SINV-BADCODE-' . uniqid(),
+            'supplier_id' => $this->supplier->id,
+            'expense_code_id' => $nonProcurableCode->id,
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath(
+                'error.expense_code_id.0',
+                'Choose a category for a service or overhead invoice. Staff payments, stores issues and non-purchase categories cannot classify a bill, and a materials purchase belongs on a purchase order, not a direct invoice.',
+            );
+
+        $this->assertSame(0, Bill::count());
+    }
+
+    /**
+     * `is_procurable` alone still lets through every granular fabrication
+     * material — 42 of 76 procurable codes at the time this was written. A
+     * real materials purchase should go through Requisition→PO→GRN for the
+     * budget commitment and three-way match that gives; a direct bill (one
+     * line, no receipt to check against) is for the exception a PO doesn't
+     * fit, not a shortcut around it.
+     */
+    public function test_a_direct_bill_refuses_a_direct_materials_expense_code(): void
+    {
+        $materialsCode = ExpenseCode::create([
+            'code' => 'TEST-MATERIALS-001',
+            'simple_meaning' => 'Test raw material',
+            'accounting_class' => 'expense',
+            'expense_family' => 'Direct materials',
+            'expense_type' => 'timber',
+            'default_debit_account_id' => ChartOfAccount::where('code', '5100')->value('id'),
+            'job_id_rule' => 'required',
+            'cash_flow_class' => 'operating',
+            'requires_asset_record' => false,
+            'requires_supplier' => false,
+            'is_capex_review' => false,
+            'is_active' => true,
+            'is_procurable' => true,
+            'sort_order' => 1,
+        ]);
+
+        $this->postJson('/api/procurement-stores/bills', [
+            'bill_date' => now()->toDateString(),
+            'due_date' => now()->addDays(30)->toDateString(),
+            'amount' => 5000,
+            'supplier_invoice_number' => 'SINV-MATERIALS-' . uniqid(),
+            'supplier_id' => $this->supplier->id,
+            'expense_code_id' => $materialsCode->id,
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath(
+                'error.expense_code_id.0',
+                'Choose a category for a service or overhead invoice. Staff payments, stores issues and non-purchase categories cannot classify a bill, and a materials purchase belongs on a purchase order, not a direct invoice.',
+            );
+
+        $this->assertSame(0, Bill::count());
+    }
+
+    /**
+     * A supplier credit invoice now has two doors — a direct bill, and the
+     * Cost Collector's unpaid_invoice capture — and nothing structural ties
+     * them together. Both directions of the guard, in one pair of tests.
+     */
+    public function test_a_direct_bill_refuses_a_supplier_invoice_already_captured_as_a_cost_line(): void
+    {
+        CostLine::create([
+            'ref' => 'CL-DUP-001',
+            'nature' => CostLine::NATURE_ACTUAL,
+            'status' => CostLine::STATUS_SUBMITTED,
+            'amount' => '5000.00',
+            'tax_amount' => '0.00',
+            'net_amount' => '5000.00',
+            'base_net_amount' => '5000.00',
+            'fx_rate' => '1.00',
+            'source_ref' => 'manual',
+            'payee_id' => $this->supplier->id,
+            'submitted_by_user_id' => $this->accounts->id,
+            'details' => ['funding_mode' => 'unpaid_invoice', 'external_ref' => 'DUP-INV-001'],
+        ]);
+
+        $expenseCode = ExpenseCode::create([
+            'code' => 'TEST-DUP-BILL-001',
+            'simple_meaning' => 'Test service',
+            'accounting_class' => 'expense',
+            'expense_family' => 'operations',
+            'expense_type' => 'service',
+            'default_debit_account_id' => ChartOfAccount::where('code', '5100')->value('id'),
+            'job_id_rule' => 'not_allowed',
+            'cash_flow_class' => 'operating',
+            'requires_asset_record' => false,
+            'requires_supplier' => false,
+            'is_capex_review' => false,
+            'is_active' => true,
+            'is_procurable' => true,
+            'sort_order' => 1,
+        ]);
+
+        $this->postJson('/api/procurement-stores/bills', [
+            'bill_date' => now()->toDateString(),
+            'due_date' => now()->addDays(30)->toDateString(),
+            'amount' => 5000,
+            'supplier_invoice_number' => 'dup-inv-001', // case-insensitive match
+            'supplier_id' => $this->supplier->id,
+            'expense_code_id' => $expenseCode->id,
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath(
+                'error.supplier_invoice_number.0',
+                'Invoice dup-inv-001 from this supplier is already recorded as cost line CL-DUP-001. Pay it as a payment voucher rather than recording it again here.',
+            );
+
+        $this->assertSame(0, Bill::count());
+    }
+
+    public function test_capturing_a_cost_line_refuses_a_supplier_invoice_already_recorded_as_a_bill(): void
+    {
+        $this->deliverAndConfirm();
+        $bill = $this->bill();
+        $bill->update(['supplier_invoice_number' => 'DUP-INV-002']);
+
+        \Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::FINANCE_COSTS_CREATE, 'web');
+        $this->accounts->givePermissionTo(\App\Constants\Permissions::FINANCE_COSTS_CREATE);
+
+        $expenseCode = ExpenseCode::create([
+            'code' => 'TEST-DUP-COST-001',
+            'simple_meaning' => 'Test service',
+            'accounting_class' => 'expense',
+            'expense_family' => 'operations',
+            'expense_type' => 'service',
+            'default_debit_account_id' => ChartOfAccount::where('code', '5100')->value('id'),
+            'job_id_rule' => 'not_allowed',
+            'cash_flow_class' => 'operating',
+            'requires_asset_record' => false,
+            'requires_supplier' => false,
+            'is_capex_review' => false,
+            'is_active' => true,
+            'is_procurable' => true,
+            'sort_order' => 1,
+        ]);
+
+        $this->postJson('/api/costs', [
+            'expense_code' => $expenseCode->code,
+            'amount' => 5000,
+            'funding_mode' => 'unpaid_invoice',
+            'payee_type' => 'SUPPLIER',
+            'payee_id' => $this->supplier->id,
+            'external_ref' => 'dup-inv-002', // case-insensitive match
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath(
+                'errors.external_ref.0',
+                "Invoice dup-inv-002 from this supplier is already recorded as bill {$bill->bill_number}. Pay it from Procurement rather than recording it again here.",
+            );
+
+        $this->assertSame(0, CostLine::count());
     }
 
     public function test_paying_a_posted_invoice_relieves_the_payable_and_credits_the_source(): void

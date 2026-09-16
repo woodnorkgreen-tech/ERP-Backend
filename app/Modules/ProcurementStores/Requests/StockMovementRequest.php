@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Requests;
 
+use App\Modules\MaterialsLibrary\Support\MaterialControl;
 use App\Modules\ProcurementStores\Services\StockMovementPoster;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -43,7 +44,12 @@ class StockMovementRequest extends FormRequest
             'logged_at' => 'nullable|date',
             'warehouse_code' => 'nullable|string|max:20',
             'lines' => 'required|array|min:1|max:100',
-            'lines.*.material_id' => 'required|exists:library_materials,id',
+            // A receive line may name an existing material OR describe a new one
+            // to register on the spot — see lines.*.new_material below. Every
+            // other movement type must reference something that already exists.
+            'lines.*.material_id' => $type === 'receive'
+                ? 'nullable|required_without:lines.*.new_material|exists:library_materials,id'
+                : 'required|exists:library_materials,id',
             'lines.*.quantity' => 'required|numeric|min:0.01',
             'lines.*.entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'lines.*.notes' => 'nullable|string',
@@ -63,6 +69,30 @@ class StockMovementRequest extends FormRequest
                 'lines.*.length' => 'nullable|numeric|min:0',
                 'lines.*.width' => 'nullable|numeric|min:0',
                 'lines.*.thickness' => 'nullable|numeric|min:0',
+                // The minimal shape needed to register a catalogue row inline is
+                // just name and category — the rest (item type, disposition,
+                // tracking mode, stock unit) the category already answers via
+                // MaterialDefaultsService. Everything below is that answer,
+                // shown as an editable suggestion rather than accepted blindly:
+                // a typist may know this particular delivery is different from
+                // its category's default. A category whose specifications need
+                // more than what is offered here is refused by
+                // StockMovementPoster, not here, since only the material knows
+                // what its category requires.
+                'lines.*.new_material' => 'nullable|array|required_without:lines.*.material_id',
+                'lines.*.new_material.material_name' => 'required_with:lines.*.new_material|string|max:255',
+                'lines.*.new_material.material_category_id' => 'required_with:lines.*.new_material|integer|exists:material_categories,id',
+                'lines.*.new_material.material_code' => 'nullable|string|max:100|unique:library_materials,material_code',
+                'lines.*.new_material.attributes' => 'nullable|array',
+                'lines.*.new_material.issue_disposition' => ['nullable', Rule::in(MaterialControl::DISPOSITIONS)],
+                'lines.*.new_material.tracking_mode' => ['nullable', Rule::in(MaterialControl::TRACKING_MODES)],
+                'lines.*.new_material.base_uom_id' => 'nullable|integer|exists:units_of_measure,id',
+                'lines.*.new_material.purchase_uom_id' => 'nullable|integer|exists:units_of_measure,id',
+                'lines.*.new_material.issue_uom_id' => 'nullable|integer|exists:units_of_measure,id',
+                'lines.*.new_material.uom_conversions' => 'nullable|array|max:2',
+                'lines.*.new_material.uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
+                'lines.*.new_material.uom_conversions.*.factor' => 'required|numeric|gt:0',
+                'lines.*.new_material.default_unit_cost' => 'nullable|numeric|min:0',
             ],
             'issue' => [
                 'lines.*.project_id' => 'nullable|exists:projects,id',

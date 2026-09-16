@@ -117,6 +117,13 @@ class SpendVoucherController extends Controller
             ->with(['expenseCode:id,code,expense_type'])
             ->where('status', CostLine::STATUS_VERIFIED)
             ->whereNotNull('journal_entry_id')
+            // A GRN accrual whose bill has since cleared it through the
+            // three-way match is no longer this line's liability to settle —
+            // it moved to that bill's own Accounts Payable balance and is paid
+            // (or payable) through BillController, not here. Without this, a
+            // cost line kept showing up as payable forever after its bill had
+            // already paid it: see erp-grn-accrual-double-payment memory.
+            ->whereNull('settled_by_bill_id')
             ->whereHas('journalEntry', function ($journal) use ($controlAccounts) {
                 $journal->where('status', 'posted')->whereHas('lines', fn ($line) =>
                     $line->where('entry_type', 'credit')->whereIn('account_id', $controlAccounts)
@@ -187,26 +194,36 @@ class SpendVoucherController extends Controller
         }
 
         $validated = $request->validate([
-            // Only the voucher types with complete capture, settlement and GL
-            // treatments are public here. Retirements live in the petty-cash
-            // requisition workflow; refunds, top-ups and reversals need their
-            // own source documents rather than a free-form AP debit.
-            'type' => 'required|string|in:advance,payment,reimbursement',
+            // Payment Voucher settles an already-verified liability; it is not
+            // a cash-advance mechanism. "advance" used to be accepted here but
+            // had no reconciliation of its own (no surrender, no reachable
+            // retirement — see erp-payment-voucher-naming-collapse memory), so
+            // it duplicated Cash Requisition's job without Cash Requisition's
+            // working surrender/reconcile loop. Cash Requisition owns "cash
+            // before spending" outright now. refund/top_up/retirement/reversal
+            // were never reachable through this endpoint either.
+            'type' => 'required|string|in:payment,reimbursement',
             'payee_name' => 'required|string|max:255',
             'payee_phone' => 'nullable|string|max:32',
             'payee_kra_pin' => 'nullable|string|max:32',
             'total_amount' => 'required|numeric|min:0.01',
             'payment_method' => 'nullable|string',
             'payment_reference' => 'nullable|string',
+            // What the bank or M-Pesa charged to send it — business overhead
+            // (GL 7800), never part of the liability being settled. On top of
+            // total_amount, same as a Bill payment's own transaction_cost.
+            'transaction_cost' => 'nullable|numeric|min:0|max:999999.99',
             'payment_source_id' => [
-                'required_unless:type,retirement',
-                'nullable',
+                'required',
                 // A voucher pays out of a real account money can leave. Supplier
-                // Credit (type payable) is the liability itself — picking it as
-                // the "paying account" settles a liability by crediting the same
-                // control account it owes, a wash entry, while still minting a
-                // Payment document that claims cash moved.
-                Rule::exists('payment_sources', 'id')->where(fn ($query) => $query->where('type', '!=', 'payable')),
+                // Credit (type payable) is filtered by the can_make_payment flag
+                // which is set to false for payables — picking it as the "paying
+                // account" settles a liability by crediting the same control
+                // account it owes, a wash entry, while still minting a Payment
+                // document that claims cash moved.
+                Rule::exists('payment_sources', 'id')->where(
+                    fn ($query) => $query->where('can_make_payment', true)
+                ),
             ],
             'notes' => 'nullable|string',
             'supplier_invoice_no' => 'nullable|string',
@@ -290,13 +307,13 @@ class SpendVoucherController extends Controller
             'action' => 'spend_voucher_created',
             'model_type' => SpendVoucher::class,
             'model_id' => $voucher->id,
-            'message' => "Spend voucher {$voucher->voucher_no} created for {$voucher->payee_name} of KES {$voucher->total_amount}.",
+            'message' => "Payment voucher {$voucher->voucher_no} created for {$voucher->payee_name} of KES {$voucher->total_amount}.",
             'ip_address' => request()->ip(),
         ]);
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Spend voucher created successfully',
+            'message' => 'Payment voucher created successfully',
             'data' => $voucher,
         ], 201);
     }
@@ -319,6 +336,13 @@ class SpendVoucherController extends Controller
         $supplierId = null;
 
         foreach ($lines as $line) {
+            if ($line->settled_by_bill_id !== null) {
+                throw new \DomainException(
+                    "Cost line {$line->ref} was already settled when its bill was verified against the goods receipt. "
+                    .'It is no longer this voucher\'s liability to pay.'
+                );
+            }
+
             $eligible = $line->status === CostLine::STATUS_VERIFIED
                 && $line->journal_entry_id !== null
                 && DB::table('journal_entries')->where('id', $line->journal_entry_id)->where('status', 'posted')->exists()
@@ -417,7 +441,7 @@ class SpendVoucherController extends Controller
                 'action' => 'spend_voucher_cancelled',
                 'model_type' => SpendVoucher::class,
                 'model_id' => $voucher->id,
-                'message' => "Spend voucher {$voucher->voucher_no} cancelled; reserved liabilities released.",
+                'message' => "Payment voucher {$voucher->voucher_no} cancelled; reserved liabilities released.",
                 'ip_address' => $request->ip(),
             ]);
 
@@ -443,7 +467,7 @@ class SpendVoucherController extends Controller
             }
 
             if ($voucher->requester_user_id === $request->user()->id && ! \App\Support\SelfApproval::allowedFor($request->user())) {
-                return ['error' => 'You requested this spend voucher, so someone else has to approve it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'];
+                return ['error' => 'You requested this payment voucher, so someone else has to approve it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'];
             }
 
             $voucher->update([
@@ -457,7 +481,7 @@ class SpendVoucherController extends Controller
                 'action' => 'spend_voucher_approved',
                 'model_type' => SpendVoucher::class,
                 'model_id' => $voucher->id,
-                'message' => "Spend voucher {$voucher->voucher_no} approved.",
+                'message' => "Payment voucher {$voucher->voucher_no} approved.",
                 'ip_address' => $request->ip(),
             ]);
 
@@ -524,12 +548,25 @@ class SpendVoucherController extends Controller
 
                 $entry = $this->journalPostingService->postSpendVoucher($voucher->fresh(['paymentSource', 'allocations']));
 
+                // Recording the fee on the Payment row isn't posting it. The
+                // only other caller of postPaymentFee() is a queued listener
+                // on an event vouchers deliberately never fire (it would also
+                // double-post the cost side) — so without this, a voucher's
+                // transaction fee would sit as data on the Payment forever,
+                // debited from the bank in reality but never reaching 7800 in
+                // the GL. Same transaction as the rest of posting: a fee that
+                // can't post (no GL mapping) must roll back the whole voucher,
+                // not leave it posted with an unrecorded charge.
+                if ($payment) {
+                    $this->journalPostingService->postPaymentFee($payment);
+                }
+
                 HRAuditLog::create([
                     'user_id' => $request->user()->id,
                     'action' => 'spend_voucher_posted',
                     'model_type' => SpendVoucher::class,
                     'model_id' => $voucher->id,
-                    'message' => "Spend voucher {$voucher->voucher_no} posted to General Ledger."
+                    'message' => "Payment voucher {$voucher->voucher_no} posted to General Ledger."
                         . ($payment ? " Payment {$payment->payment_no}." : '')
                         . ($usesSeparationOverride ? ' Separation-of-duties override used.' : ''),
                     'ip_address' => $request->ip(),
