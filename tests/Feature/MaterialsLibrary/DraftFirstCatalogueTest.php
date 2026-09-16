@@ -90,16 +90,24 @@ class DraftFirstCatalogueTest extends TestCase
         $this->assertNull($material->workstation_id, 'Workstation is routing, not identity.');
     }
 
+    /**
+     * Category is where item type, stock unit, disposition and tracking mode
+     * all come from — leaving it blank should not mean asking for all four by
+     * hand. MaterialRegistrationService files an uncategorized name under a
+     * placeholder ("Uncategorized" / UNCAT) that already answers all four,
+     * so the material is ready for Stores today and stays re-classifiable
+     * later through the existing bulk-repair / merge tools.
+     */
     public function test_a_material_saves_with_only_a_name(): void
     {
         $this->createMaterial(['material_category_id' => null])->assertCreated();
 
         $material = LibraryMaterial::with('materialCategory.parent')->sole();
         $this->assertSame('MDF 18mm Sheet', $material->material_name);
-        $this->assertNull($material->material_category_id);
-        $this->assertStringStartsWith('DRAFT-', $material->material_code);
-        $this->assertSame('Under Review', $material->item_status);
-        $this->assertArrayHasKey('material_category_id', MaterialCompleteness::missing($material));
+        $this->assertSame('Uncategorized', $material->materialCategory?->name);
+        $this->assertStringStartsWith('UNCAT-', $material->material_code);
+        $this->assertSame('Active', $material->item_status);
+        $this->assertSame([], MaterialCompleteness::missing($material));
     }
 
     public function test_an_alternative_name_is_stored_returned_and_searchable(): void
@@ -128,7 +136,15 @@ class DraftFirstCatalogueTest extends TestCase
      */
     public function test_a_freshly_saved_draft_is_still_findable_by_search(): void
     {
-        $this->createMaterial(['material_category_id' => null, 'material_name' => 'Unclassified Epoxy Resin'])
+        // A category that settles nothing (no item type) is what still
+        // produces a genuine draft now that a blank category no longer does.
+        $bare = MaterialCategory::create([
+            'name' => 'Bare Epoxy Group', 'code' => 'BARE'.random_int(100, 999),
+            'parent_id' => $this->group->id, 'is_active' => true, 'is_selectable' => true,
+        ]);
+        $bare->update(['item_type_id' => null]);
+
+        $this->createMaterial(['material_category_id' => $bare->id, 'material_name' => 'Unclassified Epoxy Resin'])
             ->assertCreated();
 
         $material = LibraryMaterial::sole();

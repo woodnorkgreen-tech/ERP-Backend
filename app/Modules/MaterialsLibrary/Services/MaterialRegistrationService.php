@@ -20,6 +20,15 @@ use App\Modules\MaterialsLibrary\Support\MaterialFieldSync;
  */
 class MaterialRegistrationService
 {
+    /**
+     * The category assigned when nobody names one, so a material can still
+     * reach Active without the taxonomy — see the migration that creates it.
+     */
+    private const UNCATEGORIZED_CODE = 'UNCAT';
+
+    private bool $uncategorizedIdResolved = false;
+    private ?int $uncategorizedId = null;
+
     public function __construct(private readonly MaterialDefaultsService $defaults)
     {
     }
@@ -36,6 +45,17 @@ class MaterialRegistrationService
         unset($data['uom_conversions']);
         $data['created_by'] = $userId;
         $data['updated_by'] = $userId;
+
+        // A name is the only thing creation truly demands. Category is where
+        // item type, stock unit, disposition and tracking mode all come from
+        // (MaterialDefaultsService), so leaving it blank would otherwise mean
+        // asking for all four by hand instead of one search box. Filing it
+        // under a placeholder keeps the material re-classifiable — the bulk
+        // repair and merge tools already move rows off a category later —
+        // while letting it reach Active today.
+        if (blank($data['material_category_id'] ?? null)) {
+            $data['material_category_id'] = $this->uncategorizedCategoryId();
+        }
 
         // Let the taxonomy answer what it can before anything is asked of the
         // typist. Only gaps are filled; a supplied value always wins.
@@ -82,5 +102,21 @@ class MaterialRegistrationService
         MaterialFieldSync::syncUomConversions($material, $conversions);
 
         return $material;
+    }
+
+    /**
+     * Memoized per instance so a bulk-create loop (one $registration shared
+     * across every variant) pays this lookup once, not once per row. Null
+     * when the migration hasn't run yet — the material simply falls back to
+     * the old draft-without-category behaviour rather than failing to save.
+     */
+    private function uncategorizedCategoryId(): ?int
+    {
+        if (! $this->uncategorizedIdResolved) {
+            $this->uncategorizedId = MaterialCategory::where('code', self::UNCATEGORIZED_CODE)->value('id');
+            $this->uncategorizedIdResolved = true;
+        }
+
+        return $this->uncategorizedId;
     }
 }
