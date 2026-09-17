@@ -378,50 +378,25 @@ class GoodsReceiptNoteController extends Controller
                                     && (int) $row->to_uom_id === (int) $material->base_uom_id)?->factor ?? 0);
                         }
 
-                        if ($factor <= 0) {
-                            $stockStatus = 'awaiting_unit_setup';
-                        } else {
-                            $log = app(InventoryService::class)->adjustStock(
-                                $material->id,
-                                (float) $item['received_quantity'],
-                                'check_in',
-                                [
-                                    'entered_uom_id' => $enteredUomId,
-                                    'receipt_unit_cost' => (float) $poItem->unit_price,
-                                    'batch_number' => $grn->batch_number,
-                                    'warehouse_code' => 'MAIN',
-                                    'location' => $request->store_location,
-                                    'reference_no' => $grn->grn_number,
-                                    'notes' => "Accepted through GRN {$grn->grn_number}",
-                                    'logged_at' => $grn->date,
-                                ],
-                            );
-                            // Posting to Stock here IS the store confirmation
-                            // for this line, so mark it confirmed too. Without
-                            // this it would stay store_status='pending' and
-                            // Stores could confirm it a second time through
-                            // confirmItem(), crediting the same stock twice.
-                            $grnItem->update([
-                                'entered_uom_id' => $enteredUomId,
-                                'stock_quantity' => abs((float) $log->quantity),
-                                'stock_status' => 'posted',
-                                'inventory_log_id' => $log->id,
-                                'unit_price' => (float) $poItem->unit_price,
-                                'store_status' => 'confirmed',
-                                'confirmed_by' => auth()->id(),
-                                'confirmed_at' => now(),
-                            ]);
-                            continue;
-                        }
+                        // Dock acceptance only classifies the line; it never
+                        // credits Stock itself. Every accepted line — plain or
+                        // controlled — waits for Stores to complete it from the
+                        // receiving queue (StockMovementPoster::postReceipt(),
+                        // reached via the "Complete" action on an
+                        // awaiting_stores_details line), which is the only
+                        // place a GRN line's stock is actually posted. See also
+                        // confirmItem() below, for lines Stores has to match to
+                        // a material first.
+                        $stockStatus = $factor > 0 ? 'awaiting_stores_details' : 'awaiting_unit_setup';
                     }
                 }
 
                 $grnItem->update(['stock_status' => $stockStatus]);
             }
 
-            // If every accepted line went straight to Stock, there is nothing
-            // left for Stores to confirm — close the GRN out rather than
-            // leaving it sitting at 'pending_confirmation'.
+            // If nothing on this GRN was accepted, there is nothing left for
+            // Stores to confirm — close the GRN out rather than leaving it
+            // sitting at 'pending_confirmation'.
             $stillPending = $grn->items()
                 ->where('accepted', true)
                 ->where('store_status', 'pending')
