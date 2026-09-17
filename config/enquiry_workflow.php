@@ -195,8 +195,20 @@ return [
         'quote'          => ['design'],
         'quote_approval' => ['quote'],
         'materials'      => ['quote_approval'],
-        'budget'         => ['materials'],
-        'procurement'    => ['quote_approval', 'materials', 'budget'],
+        // Budget and procurement used to require the materials task's own
+        // status to be 'completed' — which itself requires both Project
+        // Officer and Production sign-off — so a pending departmental
+        // approval locked both tasks in the kanban even though the data
+        // behind them was never actually gated: BudgetService already syncs
+        // from the materials list on every save (SyncBudgetWithMaterialsList)
+        // and pushes into procurement on every budget write
+        // (syncProcurementWithBudget), regardless of approval. The lock was
+        // pure friction with nothing backing it. Removed 2026-09-17; the
+        // approval workflow itself is untouched, it just no longer blocks
+        // these two tasks. (Production keeps the materials dependency —
+        // not part of this change.)
+        'budget'         => ['quote_approval'],
+        'procurement'    => ['quote_approval', 'budget'],
         'production'     => ['quote_approval', 'materials', 'budget'],
         'teams'          => ['quote_approval', 'design'],
         'logistics'      => ['production', 'procurement'],

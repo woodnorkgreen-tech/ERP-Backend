@@ -93,7 +93,7 @@ class ProjectWorkflowContractsTest extends TestCase
         }
     }
 
-    public function test_workflow_dependencies_follow_quote_approval_to_materials_to_internal_budget(): void
+    public function test_workflow_dependencies_follow_quote_approval_through_materials_and_no_longer_gate_budget_on_it(): void
     {
         $dependencies = config('enquiry_workflow.task_dependencies');
         $fullEventTasks = config('enquiry_workflow.task_presets.full_event.tasks');
@@ -101,13 +101,19 @@ class ProjectWorkflowContractsTest extends TestCase
         $this->assertSame(['design'], $dependencies['quote']);
         $this->assertSame(['quote'], $dependencies['quote_approval']);
         $this->assertSame(['quote_approval'], $dependencies['materials']);
-        $this->assertSame(['materials'], $dependencies['budget']);
+        // Budget and procurement no longer hard-block on the materials task's
+        // own completion (which requires both departmental sign-offs) — the
+        // data behind them already syncs continuously regardless of approval.
+        // They still follow quote_approval, and procurement still follows
+        // budget.
+        $this->assertSame(['quote_approval'], $dependencies['budget']);
+        $this->assertSame(['quote_approval', 'budget'], $dependencies['procurement']);
         $this->assertLessThan(array_search('materials', $fullEventTasks, true), array_search('quote_approval', $fullEventTasks, true));
         $this->assertLessThan(array_search('budget', $fullEventTasks, true), array_search('materials', $fullEventTasks, true));
         $this->assertLessThan(array_search('procurement', $fullEventTasks, true), array_search('budget', $fullEventTasks, true));
     }
 
-    public function test_workflow_state_blocks_materials_and_budget_until_approved_quote_scope_exists(): void
+    public function test_workflow_state_blocks_materials_until_approved_quote_scope_exists_but_not_budget_or_procurement(): void
     {
         $manager = $this->user('Project Manager');
         $enquiry = $this->enquiry([
@@ -135,10 +141,14 @@ class ProjectWorkflowContractsTest extends TestCase
         $this->assertSame(['Client Quote'], $tasks['quote_approval']['blocked_by']);
         $this->assertTrue($tasks['materials']['is_blocked']);
         $this->assertSame(['Client Quote Approval'], $tasks['materials']['blocked_by']);
+        // Budget and procurement are still blocked here, but only because
+        // quote_approval itself is not yet completed in this fixture — not
+        // because materials is pending. Materials no longer appears in
+        // either blocked_by list.
         $this->assertTrue($tasks['budget']['is_blocked']);
-        $this->assertSame(['Materials List'], $tasks['budget']['blocked_by']);
+        $this->assertSame(['Client Quote Approval'], $tasks['budget']['blocked_by']);
         $this->assertTrue($tasks['procurement']['is_blocked']);
-        $this->assertSame(['Client Quote Approval', 'Materials List', 'Internal Budget'], $tasks['procurement']['blocked_by']);
+        $this->assertSame(['Client Quote Approval', 'Internal Budget'], $tasks['procurement']['blocked_by']);
     }
 
     public function test_project_completion_syncs_enquiry_and_project_records(): void
