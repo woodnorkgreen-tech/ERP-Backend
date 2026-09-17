@@ -25,6 +25,7 @@ class StoreEmployeeRequest extends FormRequest
             'hikvision_id'         => 'nullable|string|max:50|unique:employees,hikvision_id',
             'first_name'           => 'required|string|max:255',
             'last_name'            => 'required|string|max:255',
+            'middle_name'          => 'required|string|max:255',
             'email'                => 'nullable|email|unique:employees,email',
             'phone'                => 'nullable|string|max:20',
             // Drives eligibility for gender-restricted leave types (Maternity/Paternity).
