@@ -814,8 +814,11 @@ class JournalPostingService
         // GRN accrual reach here (a stale allocation created before this guard
         // existed, a future caller that skips assertEligibleLiabilities), the
         // actual debit must never happen. This is the one method every
-        // liability-settling path shares — voucherDebitLegs() today,
-        // UnifiedPaymentService::postPayment() when it's ever wired up.
+        // liability-settling path shares — voucherDebitLegs() today, and
+        // postPayment() below (built for the same reconciliation guarantee,
+        // but currently unreachable — its only caller, UnifiedPaymentService,
+        // was removed 2026-09-17 as dead/broken code; nothing else calls
+        // postPayment() yet).
         if ($costLine->settled_by_bill_id !== null) {
             throw new InvalidArgumentException(
                 "{$context}: cost line {$costLine->ref} was already settled when bill #{$costLine->settled_by_bill_id} "
