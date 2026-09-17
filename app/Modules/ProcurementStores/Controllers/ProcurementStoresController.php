@@ -1128,7 +1128,6 @@ class ProcurementStoresController extends Controller
             'receive.width' => 'nullable|numeric|min:0',
             'receive.thickness' => 'nullable|numeric|min:0',
             'receive.location' => 'nullable|string|max:50',
-            'reason' => 'required|string|min:3|max:500',
         ]);
 
         if ($elementMaterial->library_material_id) {
@@ -1169,7 +1168,6 @@ class ProcurementStoresController extends Controller
                 'catalogue_resolution' => [
                     'resolved_by' => auth()->id(),
                     'resolved_at' => now()->toIso8601String(),
-                    'reason' => $validated['reason'],
                     'library_material_id' => $materialId,
                 ],
             ]);
