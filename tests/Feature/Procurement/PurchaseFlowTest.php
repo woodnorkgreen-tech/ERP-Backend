@@ -70,7 +70,14 @@ class PurchaseFlowTest extends TestCase
         // Approval refuses an uncoded line, and an office requisition may not
         // carry a code that demands a job. Looked up by code rather than id so
         // the fixture breaks loudly if the catalogue retires it.
-        $this->officeCode = ExpenseCode::where('code', 'OE-COM-001')->sole();
+        //
+        // Was OE-COM-001 (airtime/internet) until the 2026-09-12 expense-code
+        // narrowing (migration 2026_09_12_000002_narrow_procurement_expense_codes)
+        // marked it Finance-only (is_procurable=false) — procurement categories
+        // shouldn't include recurring bills with no supplier/PO shape. OE-OFF-001
+        // (office supplies and stationery) keeps the same job_id_rule=not_allowed
+        // this test relies on and is still procurable.
+        $this->officeCode = ExpenseCode::where('code', 'OE-OFF-001')->sole();
     }
 
     /** The smallest payload the create endpoint accepts. */
@@ -266,7 +273,7 @@ class PurchaseFlowTest extends TestCase
             'approved_by' => null,
         ]);
 
-        // OE-COM-001 is job_id_rule = not_allowed, so it may never be charged
+        // OE-OFF-001 is job_id_rule = not_allowed, so it may never be charged
         // to a job — legal on the office requisition it was created as, illegal
         // the moment the requisition became a project one.
         $response = $this->getJson('/api/procurement-stores/requisitions')->assertOk();
