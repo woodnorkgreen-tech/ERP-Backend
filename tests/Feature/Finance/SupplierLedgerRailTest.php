@@ -66,6 +66,14 @@ class SupplierLedgerRailTest extends TestCase
             'is_active' => true,
         ]);
         $this->accounts->assignRole('Accounts');
+        // One actor plays every role in this fixture — raising the order,
+        // recording the bill, verifying it — which is a convenience for
+        // pinning the supplier ledger rail, not a claim that self-verification
+        // should be allowed in production. See BillVerificationSegregationTest
+        // for the control this permission would otherwise correctly block.
+        $this->accounts->givePermissionTo(
+            \Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::APPROVALS_SELF_APPROVE, 'web'),
+        );
         Sanctum::actingAs($this->accounts);
 
         $this->supplier = Supplier::create([

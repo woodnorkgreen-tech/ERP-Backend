@@ -13,6 +13,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\ProcurementStores\Services\PurchaseApprovalPolicy;
 use App\Modules\ProcurementStores\Services\PurchaseOrderWorkflow;
 use App\Services\ProcurementOperationalSyncService;
+use App\Support\SelfApproval;
 use Barryvdh\DomPDF\Facade\Pdf;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 
@@ -512,6 +513,21 @@ class PurchaseOrderController extends Controller
 
         if ($purchaseOrder->status !== 'pending_approval') {
             return response(['error' => 'Only pending purchase orders can be approved'], 422);
+        }
+
+        // Separation of duties: whoever raised the order does not also
+        // approve it, unless explicitly granted the self-approve exception —
+        // the same rule already enforced on petty cash, spend vouchers,
+        // budget additions, cost verification and client receipts (see
+        // SelfApproval's own docblock), which this order approval had never
+        // joined. Approving a purchase order commits company money against a
+        // named supplier; it is exactly the kind of decision a second person
+        // is supposed to check.
+        if ((int) $purchaseOrder->user_id === (int) auth()->id() && ! SelfApproval::allowed()) {
+            return response([
+                'error' => 'You raised this purchase order, so someone else has to approve it. '
+                    . 'If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.',
+            ], 422);
         }
 
         $purchaseOrder->approve(auth()->id());

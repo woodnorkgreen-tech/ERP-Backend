@@ -82,6 +82,15 @@ class SupplierPaymentGateTest extends TestCase
             'is_active' => true,
         ]);
         $this->accounts->assignRole('Accounts');
+        // This fixture is one actor playing every role — raising the order,
+        // recording the bill, verifying it. That is a convenience for testing
+        // the three-way match, which is what this file is actually about; it
+        // is not a claim that self-verification should be allowed in
+        // production. See BillVerificationSegregationTest for the control
+        // this permission would otherwise correctly block.
+        $this->accounts->givePermissionTo(
+            Permission::findOrCreate(\App\Constants\Permissions::APPROVALS_SELF_APPROVE, 'web'),
+        );
         Sanctum::actingAs($this->accounts);
 
         $this->supplier = Supplier::create([
