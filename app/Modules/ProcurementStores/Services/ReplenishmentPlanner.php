@@ -4,6 +4,7 @@ namespace App\Modules\ProcurementStores\Services;
 
 use App\Modules\Finance\CostCollector\Services\MaterialExpenseCodeResolver;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
+use App\Modules\Printing\Models\PrintMaterialRequest;
 use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use App\Modules\ProcurementStores\Models\RequisitionItem;
@@ -53,7 +54,10 @@ class ReplenishmentPlanner
      */
     public function suggestions(): Collection
     {
-        $demandLines = $this->demand->pendingLines()->groupBy('library_material_id');
+        $printingDemandLines = $this->printingDemandLines();
+        $demandLines = $this->demand->pendingLines()
+            ->concat($printingDemandLines)
+            ->groupBy('library_material_id');
         $demandByMaterial = $demandLines->map(fn (Collection $lines) => (float) $lines->sum('pending'))->all();
 
         // Two populations, because there are two reasons to buy: something a
@@ -136,6 +140,70 @@ class ReplenishmentPlanner
         })
             ->filter()
             ->sortBy('projected_position')
+            ->values();
+    }
+
+    /**
+     * Printing shortages explicitly escalated by Stores.
+     *
+     * Requests are stored in metres while inventory planning is in the
+     * material's base unit. The issue-unit conversion therefore has to be
+     * applied before combining this demand with stock, incoming orders and
+     * approved project demand.
+     */
+    private function printingDemandLines(): Collection
+    {
+        return PrintMaterialRequest::query()
+            ->whereNotNull('purchase_requested_at')
+            ->whereIn('status', ['awaiting_purchase', 'partially_fulfilled'])
+            ->with([
+                'material.baseUom', 'material.issueUom', 'material.uomConversions',
+                'printJob.project.enquiry',
+            ])
+            ->withSum('fulfilments', 'issued_quantity_m')
+            ->get()
+            ->map(function (PrintMaterialRequest $request) {
+                $remainingMetres = max(
+                    0.0,
+                    (float) $request->requested_quantity_m - (float) ($request->fulfilments_sum_issued_quantity_m ?? 0),
+                );
+                if ($remainingMetres <= 0 || ! $request->material) {
+                    return null;
+                }
+
+                $material = $request->material;
+                $factor = 1.0;
+                $baseIsMetres = in_array(strtolower((string) $material->baseUom?->code), ['m', 'metre', 'meter'], true);
+                if (! $baseIsMetres) {
+                    $factor = (float) ($material->uomConversions->first(
+                        fn ($row) => (int) $row->from_uom_id === (int) $material->issue_uom_id
+                            && (int) $row->to_uom_id === (int) $material->base_uom_id
+                    )?->factor ?? 0);
+                }
+                if ($factor <= 0) {
+                    return null;
+                }
+
+                $job = $request->printJob;
+                $project = $job?->project;
+
+                return [
+                    'source_type' => 'printing_request',
+                    'library_material_id' => (int) $request->material_id,
+                    'printing_request_id' => (int) $request->id,
+                    'project_id' => $request->project_id,
+                    'project_code' => $project?->project_id ?? $job?->job_number ?? 'Printing',
+                    'project_title' => $job?->project_name ?? $project?->enquiry?->title ?? 'Printing department',
+                    'element' => $job?->title ?? 'Print material request',
+                    'specified' => round((float) $request->requested_quantity_m * $factor, 4),
+                    'issued' => round((float) ($request->fulfilments_sum_issued_quantity_m ?? 0) * $factor, 4),
+                    'pending' => round($remainingMetres * $factor, 4),
+                    'requested_metres' => round((float) $request->requested_quantity_m, 4),
+                    'remaining_metres' => round($remainingMetres, 4),
+                    'required_by' => $job?->due_date?->toDateString(),
+                ];
+            })
+            ->filter()
             ->values();
     }
 

@@ -3,6 +3,7 @@
 namespace App\Modules\Printing\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Project;
 use App\Modules\Assets\Models\AssetCategory;
 use App\Modules\Design\Resources\DesignItemResource;
 use App\Modules\Design\Services\DesignRedesignService;
@@ -12,9 +13,11 @@ use App\Modules\Printing\Resources\PrintJobConsumptionResource;
 use App\Modules\Printing\Resources\PrintJobResource;
 use App\Modules\Printing\Services\PrintJobService;
 use App\Modules\Printing\Services\PrintMaterialUsageService;
+use App\Modules\Printing\Support\PrintVarianceReason;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\DB;
 
 class PrintJobController extends Controller
 {
@@ -60,6 +63,69 @@ class PrintJobController extends Controller
     public function show(PrintJob $job): JsonResponse
     {
         return response()->json(['data' => new PrintJobResource($job->load(['consumptions.roll', 'operator', 'machine', 'events']))]);
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'project_id' => ['nullable', 'integer', 'exists:projects,id'],
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:5000'],
+            'due_date' => ['required', 'date'],
+            'priority' => ['required', 'in:normal,urgent'],
+            'request_source' => ['required', 'in:site_request,urgent_request,internal_work,client_request,other'],
+            'requested_by_name' => ['required', 'string', 'max:255'],
+            'bypass_reason' => ['required', 'string', 'max:2000'],
+            'final_artwork_url' => ['nullable', 'url', 'max:2000'],
+            'design_height_m' => ['nullable', 'numeric', 'min:0'],
+            'design_length_m' => ['nullable', 'numeric', 'min:0'],
+            'print_width_m' => ['nullable', 'numeric', 'min:0'],
+            'running_length_m' => ['nullable', 'numeric', 'min:0'],
+            'artwork_quantity' => ['nullable', 'numeric', 'min:0.001'],
+            'remarks' => ['nullable', 'string', 'max:3000'],
+        ]);
+
+        $job = DB::transaction(function () use ($data) {
+            $project = ! empty($data['project_id'])
+                ? Project::with('enquiry.client')->findOrFail($data['project_id'])
+                : null;
+            $enquiry = $project?->enquiry;
+
+            $job = PrintJob::create([
+                ...$data,
+                'origin' => 'manual',
+                'project_enquiry_id' => $project?->enquiry_id,
+                'client_id' => $enquiry?->client_id,
+                'job_number' => $enquiry?->job_number ?: null,
+                'project_name' => $enquiry?->title,
+                'client_name' => $enquiry?->client?->full_name,
+                'order_type' => 'original',
+                'status' => 'queued',
+                'artwork_version' => 1,
+                'created_by' => auth()->id(),
+                'updated_by' => auth()->id(),
+            ]);
+
+            if (! $job->job_number) {
+                $job->update(['job_number' => sprintf('PRN-MAN-%s-%04d', now()->format('ymd'), $job->id)]);
+            }
+
+            $job->events()->create([
+                'event_type' => 'manual_job_created',
+                'to_status' => 'queued',
+                'reason' => $data['bypass_reason'],
+                'payload' => [
+                    'request_source' => $data['request_source'],
+                    'requested_by_name' => $data['requested_by_name'],
+                    'project_id' => $project?->id,
+                ],
+                'created_by' => auth()->id(),
+            ]);
+
+            return $job->fresh(['consumptions.roll', 'operator', 'machine']);
+        });
+
+        return response()->json(['data' => new PrintJobResource($job)], 201);
     }
 
     public function update(Request $request, PrintJob $job): JsonResponse
@@ -147,6 +213,7 @@ class PrintJobController extends Controller
             'setup_allowance_m' => ['nullable', 'numeric', 'min:0'],
             'actual_running_m' => ['nullable', 'numeric', 'min:0'],
             'variance_reason' => ['nullable', 'string', 'max:255'],
+            'variance_reason_code' => ['nullable', Rule::in(PrintVarianceReason::VALUES)],
         ]);
 
         return response()->json(['data' => new PrintJobConsumptionResource($this->usage->saveJobConsumption($job, $data))], 201);
