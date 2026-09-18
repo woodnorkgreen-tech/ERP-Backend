@@ -91,6 +91,12 @@ class JournalPostingService
             return JournalEntry::find($line->journal_entry_id);
         }
 
+        // Cheap and read-only, so worth failing fast on here rather than only
+        // inside the funnel below: it names the cost line rather than the
+        // internal entry number, and it skips rule/account resolution on a
+        // line that cannot post anyway. postBalancedEntry() re-checks the
+        // same invariant — a guard clause ahead of the one writer, not a
+        // second copy of its rules.
         $this->assertOpenPeriod($line->accounting_period_id, "cost line {$line->ref}");
 
         return DB::transaction(function () use ($line) {
@@ -107,49 +113,35 @@ class JournalPostingService
                 return null;
             }
 
-            $accountIds = array_unique(array_column($legs, 'account_id'));
-            if (ChartOfAccount::postable()->whereIn('id', $accountIds)->count() !== count($accountIds)) {
-                throw new InvalidArgumentException(
-                    "Cost line {$line->ref} resolves to an inactive or non-postable account. Finance must correct the account mapping before posting."
-                );
-            }
+            // Every leg carries the cost line's own dimensions unless it
+            // already states its own (none of costLineLegs()'s branches do
+            // today) — the same default-then-override shape the old inline
+            // JournalLine::create() loop applied per leg. This is what lets
+            // WorkInProgressReleaseService find a job's cost by
+            // project_enquiry_id afterward; losing it here would silently
+            // break Stage 2's WIP-to-Cost-of-Sales matching.
+            $legs = array_map(fn (array $leg): array => [
+                'currency' => $line->currency ?? 'KES',
+                'fx_rate' => $line->fx_rate ?? 1,
+                'cost_centre_id' => $line->cost_centre_id,
+                'activity_id' => $line->activity_id,
+                'project_id' => $line->project_id,
+                'project_enquiry_id' => $line->project_enquiry_id,
+                ...$leg,
+            ], $legs);
 
-            $total = array_reduce(
-                array_filter($legs, fn (array $leg) => $leg['entry_type'] === 'debit'),
-                fn (string $carry, array $leg) => bcadd($carry, $leg['amount'], 2),
-                '0.00',
+            $entry = $this->postBalancedEntry(
+                entryNo: 'JE-CL-'.str_pad((string) $line->id, 7, '0', STR_PAD_LEFT),
+                postingDate: substr((string) ($line->incurred_at ?? now()->toDateString()), 0, 10),
+                sourceType: CostLine::class,
+                sourceId: $line->id,
+                sourceRef: $line->ref,
+                description: $line->description ?? 'Cost line posting: '.$line->ref,
+                legs: $legs,
+                createdBy: $line->verified_by ?? auth()->id(),
+                accountingPeriodId: $line->accounting_period_id,
+                costLineId: $line->id,
             );
-
-            $entryNo = 'JE-CL-'.str_pad((string) $line->id, 7, '0', STR_PAD_LEFT);
-
-            $entry = JournalEntry::create([
-                'entry_no' => $entryNo,
-                'posting_date' => substr((string) ($line->incurred_at ?? now()->toDateString()), 0, 10),
-                'accounting_period_id' => $line->accounting_period_id,
-                'cost_line_id' => $line->id,
-                'source_type' => CostLine::class,
-                'source_id' => $line->id,
-                'source_ref' => $line->ref,
-                'description' => $line->description ?? 'Cost line posting: '.$line->ref,
-                'total_debit' => $total,
-                'total_credit' => $total,
-                'status' => 'posted',
-                'created_by' => $line->verified_by ?? auth()->id(),
-                'posted_at' => now(),
-            ]);
-
-            foreach ($legs as $leg) {
-                JournalLine::create([
-                    'journal_entry_id' => $entry->id,
-                    'currency' => $line->currency ?? 'KES',
-                    'fx_rate' => $line->fx_rate ?? 1,
-                    'cost_centre_id' => $line->cost_centre_id,
-                    'activity_id' => $line->activity_id,
-                    'project_id' => $line->project_id,
-                    'project_enquiry_id' => $line->project_enquiry_id,
-                    ...$leg,
-                ]);
-            }
 
             $line->forceFill([
                 'journal_entry_id' => $entry->id,
@@ -1399,6 +1391,15 @@ class JournalPostingService
      * second, unreconciled ledger, and the fix there was the same as the fix
      * here: leave one door.
      *
+     * `postCostLine()` — the highest-volume producer — was the last caller
+     * still building its own `JournalEntry`/`JournalLine` rows directly rather
+     * than through this method, with its own copy of the postable-account
+     * check and no copy of rule 4 at all: two concurrent calls for the same
+     * cost line could both pass its own pre-check before either committed,
+     * and the second would hit a raw unique-constraint violation (a 500)
+     * instead of gracefully returning the entry the first had already
+     * written. It now funnels through here too (2026-09-18).
+     *
      * @param  array<int, array<string, mixed>>  $legs  each with account_id,
      *                                                  entry_type ('debit'|'credit'), amount, and optionally description,
      *                                                  project_id, project_enquiry_id, cost_centre_id, activity_id
@@ -1414,6 +1415,7 @@ class JournalPostingService
         ?int $createdBy = null,
         ?int $accountingPeriodId = null,
         ?int $spendVoucherId = null,
+        ?int $costLineId = null,
     ): JournalEntry {
         if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
             return $existing;
@@ -1464,13 +1466,14 @@ class JournalPostingService
         }
 
         return DB::transaction(function () use (
-            $entryNo, $postingDate, $period, $sourceType, $sourceId, $sourceRef, $description, $legs, $debit, $createdBy, $spendVoucherId
+            $entryNo, $postingDate, $period, $sourceType, $sourceId, $sourceRef, $description, $legs, $debit, $createdBy, $spendVoucherId, $costLineId
         ) {
             $entry = JournalEntry::create([
                 'entry_no' => $entryNo,
                 'posting_date' => $postingDate,
                 'accounting_period_id' => $period->id,
                 'spend_voucher_id' => $spendVoucherId,
+                'cost_line_id' => $costLineId,
                 'source_type' => $sourceType,
                 'source_id' => $sourceId,
                 'source_ref' => $sourceRef,
