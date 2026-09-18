@@ -112,6 +112,49 @@ class TaxScheduleController extends Controller
         return response()->json(['status' => 'success', 'data' => $data]);
     }
 
+    /** Output VAT charged to clients for a period — the sales side of the return. */
+    public function vatOutput(Request $request): JsonResponse|StreamedResponse
+    {
+        $this->authorise($request);
+
+        $filters = $request->validate([
+            'from' => ['required', 'date'],
+            'to' => ['required', 'date', 'after_or_equal:from'],
+            'format' => ['nullable', 'in:json,csv'],
+        ]);
+
+        $data = $this->schedules->vatOutputSchedule($filters['from'], $filters['to']);
+
+        if (($filters['format'] ?? 'json') === 'csv') {
+            return $this->csv(
+                "vat-output-schedule-{$filters['from']}-to-{$filters['to']}.csv",
+                ['Invoice', 'Invoice date', 'Job', 'Client', 'Description', 'Treatment', 'Rate %', 'Net', 'Output VAT'],
+                array_map(fn (array $row) => [
+                    $row['invoice_number'], $row['invoice_date'], $row['job_number'], $row['client_name'],
+                    $row['description'], $row['treatment_code'], $row['rate_percent'], $row['net_amount'], $row['vat_amount'],
+                ], $data['rows']),
+            );
+        }
+
+        return response()->json(['status' => 'success', 'data' => $data]);
+    }
+
+    /** Output minus input — the figure that goes on the return. */
+    public function vatReturnSummary(Request $request): JsonResponse
+    {
+        $this->authorise($request);
+
+        $filters = $request->validate([
+            'from' => ['required', 'date'],
+            'to' => ['required', 'date', 'after_or_equal:from'],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $this->schedules->vatReturn($filters['from'], $filters['to']),
+        ]);
+    }
+
     /**
      * Recoverable VAT with no eTIMS reference — input tax WNG is about to lose.
      */
