@@ -167,7 +167,11 @@ class GoodsReceiptNoteController extends Controller
         $log = $service->adjustStock($materialId, $quantity, 'check_in', $meta);
 
         // Reusable (board-tracked) materials also need board records, same
-        // as the manual Check-In flow.
+        // as the manual Check-In flow. $unitPrice is what Stores just entered
+        // for this delivery — it must value the boards themselves, the same
+        // as StockMovementPoster::postReceipt() does, or every board silently
+        // reverts to the catalogue's standing cost (zero on a first receipt,
+        // which per that same code path makes a board unissuable).
         if ($material->material_type === 'reusable') {
             try {
                 $registration = new BoardRegistrationService();
@@ -177,6 +181,7 @@ class GoodsReceiptNoteController extends Controller
                     quantity:    (int) $quantity,
                     batchNumber: $log->batch_number,
                     userId:      auth()->id(),
+                    unitValue:   $unitPrice > 0 ? $unitPrice : null,
                 );
                 $log->update(['usage_type' => 'reusable']);
             } catch (\InvalidArgumentException) {
@@ -421,14 +426,7 @@ class GoodsReceiptNoteController extends Controller
             // If nothing on this GRN was accepted, there is nothing left for
             // Stores to confirm — close the GRN out rather than leaving it
             // sitting at 'pending_confirmation'.
-            $stillPending = $grn->items()
-                ->where('accepted', true)
-                ->where('store_status', 'pending')
-                ->exists();
-
-            if (! $stillPending) {
-                $grn->update(['store_status' => 'confirmed']);
-            }
+            $grn->closeOutIfFullyConfirmed();
 
             DB::commit();
 
@@ -642,26 +640,34 @@ class GoodsReceiptNoteController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $grnItem = GoodsReceiptNoteItem::with('goodsReceiptNote')->find($grnItemId);
+        $precheck = GoodsReceiptNoteItem::find($grnItemId);
 
-        if (!$grnItem) {
+        if (!$precheck) {
             return response()->json(['message' => 'GRN item not found.'], 404);
         }
 
-        if (!$grnItem->accepted) {
+        if (!$precheck->accepted) {
             return response()->json(['message' => 'This item was not accepted at the dock and cannot be confirmed into stock.'], 422);
         }
 
-        if ($grnItem->store_status === 'confirmed') {
-            return response()->json(['message' => 'This item has already been confirmed.'], 422);
-        }
-
-        if ($grnItem->stock_status === 'awaiting_inspection') {
+        if ($precheck->stock_status === 'awaiting_inspection') {
             return response()->json(['message' => 'This item failed quality check at the dock. Record an inspection decision before it can be confirmed into stock.'], 422);
         }
 
         try {
             DB::beginTransaction();
+
+            // Re-fetched under lock rather than trusting the precheck above:
+            // two concurrent confirms for the same line (a double-click, two
+            // Stores staff both acting on it) must not both pass the
+            // store_status guard before either has written it, which is
+            // exactly how a delivery gets credited to stock twice.
+            $grnItem = GoodsReceiptNoteItem::with(['goodsReceiptNote', 'inspection'])
+                ->lockForUpdate()->find($grnItemId);
+
+            if ($grnItem->store_status === 'confirmed') {
+                throw ValidationException::withMessages(['grn_item' => 'This item has already been confirmed.']);
+            }
 
             $materialId = $request->input('material_id');
 
@@ -684,9 +690,22 @@ class GoodsReceiptNoteController extends Controller
 
             $grn = $grnItem->goodsReceiptNote;
 
+            // The quantity Stores may credit is what inspection approved, not
+            // what was delivered — a line reaches this screen with a formal
+            // inspection record whenever it was partially accepted (batch,
+            // expiry, serial or board-tracked materials all route here for
+            // Stores' own detail capture even when some of the delivery was
+            // rejected or quarantined). GoodsReceiptInspectionController's own
+            // guarantee is "only the accepted quantity can enter available
+            // stock" — crediting received_quantity here for an inspected line
+            // would put the rejected/quarantined portion into stock too.
+            $quantityToCredit = $grnItem->inspection
+                ? $grnItem->inspection->accepted_quantity
+                : $grnItem->received_quantity;
+
             $log = $this->creditStockForAcceptedItem($grn, [
                 'material_id'       => $materialId,
-                'received_quantity' => $grnItem->received_quantity,
+                'received_quantity' => $quantityToCredit,
             ], (float) $request->input('unit_price'));
 
             $grnItem->update([
@@ -701,15 +720,7 @@ class GoodsReceiptNoteController extends Controller
                 'confirmed_at'     => now(),
             ]);
 
-            // Once every accepted item on this GRN is confirmed, close it out.
-            $stillPending = $grn->items()
-                ->where('accepted', true)
-                ->where('store_status', 'pending')
-                ->exists();
-
-            if (!$stillPending) {
-                $grn->update(['store_status' => 'confirmed']);
-            }
+            $grn->closeOutIfFullyConfirmed();
 
             DB::commit();
 

@@ -6,6 +6,8 @@ use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Models\MaterialUomConversion;
+use App\Modules\ProcurementStores\Models\Board;
+use App\Modules\ProcurementStores\Models\GoodsReceiptInspection;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
@@ -170,6 +172,107 @@ class GoodsReceiptStoreConfirmationTest extends TestCase
 
         $this->assertSame('pending', $line->fresh()->store_status);
         $this->assertSame(0, (int) DB::table('stocks')->where('material_id', $material->id)->count());
+    }
+
+    /**
+     * GoodsReceiptInspectionController's own guarantee — its response even
+     * says so — is "only the accepted quantity can enter available stock."
+     * A batch/expiry/serial/board-tracked material inspected with a partial
+     * acceptance (some rejected or quarantined) still routes to
+     * `awaiting_stores_details` whenever any quantity was accepted at all,
+     * so this exact combination — an inspection record present, and it
+     * disagreeing with received_quantity — is reachable, not hypothetical.
+     */
+    public function test_confirming_credits_only_the_inspection_approved_quantity_not_the_full_delivery(): void
+    {
+        $material = LibraryMaterial::create([
+            'material_code' => 'MAT-'.uniqid(), 'material_name' => 'MDF 18mm sheet',
+            'item_status' => 'Active', 'material_type' => 'consumable', 'unit_of_measure' => 'pcs',
+        ]);
+
+        // Delivered 5, only 3 accepted at inspection — 2 quarantined.
+        $line = $this->pendingLine($material->id, receivedQuantity: 5);
+        GoodsReceiptInspection::create([
+            'goods_receipt_note_item_id' => $line->id,
+            'inspected_quantity' => 5, 'accepted_quantity' => 3, 'rejected_quantity' => 0,
+            'quarantined_quantity' => 2, 'outcome' => 'accepted_with_conditions', 'status' => 'resolved',
+            'findings' => 'Two sheets water-damaged in transit, quarantined for supplier credit.',
+            'inspected_by' => $this->stores->id, 'inspected_at' => now(),
+        ]);
+
+        $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$line->id}/confirm", [
+            'material_id' => $material->id,
+            'unit_price' => 4800,
+        ])->assertOk();
+
+        $this->assertSame(
+            3.0,
+            (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand'),
+            'The quarantined 2 must not reach available stock just because Stores confirmed the line.',
+        );
+        $this->assertSame(3.0, (float) $line->fresh()->stock_quantity);
+    }
+
+    /**
+     * Two concurrent confirms cannot both pass the store_status guard before
+     * either has written it — a double-click or two Stores staff acting on
+     * the same line at once must not credit stock twice. A synchronous test
+     * cannot force a true race, but it does prove the guard now lives inside
+     * the locked, transacted section rather than as a pre-check outside it:
+     * a second call, sequenced after the first has committed, is refused.
+     */
+    public function test_confirming_the_same_line_twice_only_credits_stock_once(): void
+    {
+        $material = LibraryMaterial::create([
+            'material_code' => 'MAT-'.uniqid(), 'material_name' => 'MDF 18mm sheet',
+            'item_status' => 'Active', 'material_type' => 'consumable', 'unit_of_measure' => 'pcs',
+        ]);
+
+        $line = $this->pendingLine($material->id);
+
+        $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$line->id}/confirm", [
+            'material_id' => $material->id, 'unit_price' => 4800,
+        ])->assertOk();
+
+        $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$line->id}/confirm", [
+            'material_id' => $material->id, 'unit_price' => 4800,
+        ])->assertStatus(422);
+
+        $this->assertSame(5.0, (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand'));
+        $this->assertSame(1, (int) DB::table('inventory_logs')->where('material_id', $material->id)->count());
+    }
+
+    /**
+     * StockMovementPoster::postReceipt() prices a received board at the price
+     * just paid for it, and refuses the receipt outright when no price is
+     * available anywhere. confirmItem()'s equivalent — creditStockForAcceptedItem()
+     * — used to skip that entirely: it never forwarded the unit price Stores
+     * had just entered into BoardRegistrationService::createBoardRecords(),
+     * so every board silently fell back to the catalogue's standing cost
+     * instead of what this specific delivery cost.
+     */
+    public function test_confirming_a_board_tracked_material_values_boards_at_the_confirmed_price(): void
+    {
+        $material = LibraryMaterial::create([
+            'material_code' => 'MAT-'.uniqid(), 'material_name' => 'MDF 18mm Sheet',
+            'material_type' => 'reusable', 'tracking_mode' => 'dimension_piece',
+            'issue_disposition' => 'recoverable_remainder', 'unit_of_measure' => 'sheet',
+            'item_status' => 'Active', 'unit_cost' => 3000.00,
+        ]);
+
+        $line = $this->pendingLine($material->id, receivedQuantity: 2);
+
+        $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$line->id}/confirm", [
+            'material_id' => $material->id,
+            'unit_price' => 4500,
+        ])->assertOk();
+
+        $boards = Board::where('library_material_id', $material->id)->get();
+        $this->assertCount(2, $boards);
+        $this->assertTrue(
+            $boards->every(fn (Board $board) => (float) $board->current_value === 4500.0),
+            'Boards confirmed from the Stores queue must be valued at this delivery\'s price, not the catalogue\'s standing cost.',
+        );
     }
 
     public function test_registering_a_new_material_from_the_confirm_screen_credits_stock(): void

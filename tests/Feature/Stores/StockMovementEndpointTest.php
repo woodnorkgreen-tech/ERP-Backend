@@ -8,7 +8,12 @@ use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Models\MaterialCategory;
 use App\Modules\MaterialsLibrary\Models\MaterialItemType;
 use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
+use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
+use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\InventoryLog;
+use App\Modules\ProcurementStores\Models\PurchaseOrder;
+use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
+use App\Modules\ProcurementStores\Models\Supplier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -360,5 +365,63 @@ class StockMovementEndpointTest extends TestCase
             'type' => 'receive',
             'lines' => [['quantity' => 4]],
         ])->assertStatus(422)->assertJsonValidationErrors(['lines.0.material_id', 'lines.0.new_material']);
+    }
+
+    /**
+     * GoodsReceiptNoteController::confirmItem() already rolled the parent
+     * GRN's own store_status to 'confirmed' once every accepted item was
+     * done; completing the same last line through this Check-In endpoint did
+     * not — the note stayed at 'pending_confirmation' forever, still showing
+     * "Awaiting stock confirmation" on the Deliveries list and the Stores
+     * confirmation queue with nothing actually left to confirm.
+     */
+    public function test_completing_the_last_grn_line_here_also_closes_out_the_note(): void
+    {
+        $material = $this->material('MDF 18mm sheet');
+
+        $supplier = Supplier::create([
+            'supplier_name' => 'Timber & Board Ltd', 'contact_person' => 'Contact',
+            'phone' => '0700000003', 'email' => uniqid().'@test.local',
+            'address' => 'Industrial Area', 'payment_terms' => '30 days', 'status' => 'Active',
+            'user_id' => auth()->id(),
+        ]);
+        $order = PurchaseOrder::create([
+            'po_number' => 'PO-'.uniqid(), 'date' => now()->toDateString(),
+            'supplier_id' => $supplier->id, 'due_date' => now()->addDays(7)->toDateString(),
+            'delivery_address' => 'Karen Village Store', 'description' => 'Board stock',
+            'total_amount' => 5000, 'status' => 'approved', 'user_id' => auth()->id(),
+        ]);
+        $orderItem = PurchaseOrderItem::create([
+            'purchase_order_id' => $order->id, 'material_id' => $material->id,
+            'quantity' => 5, 'unit_price' => 1000, 'total' => 5000,
+        ]);
+        $note = GoodsReceiptNote::create([
+            'grn_number' => 'GRN-'.uniqid(), 'date' => now()->toDateString(),
+            'purchase_order_id' => $order->id, 'batch_number' => 'BATCH-'.uniqid(),
+            'store_location' => 'Karen Village Store', 'quality_check' => 'pass',
+            'store_status' => 'pending_confirmation', 'received_by' => auth()->id(),
+        ]);
+        $grnItem = GoodsReceiptNoteItem::create([
+            'goods_receipt_note_id' => $note->id, 'purchase_order_item_id' => $orderItem->id,
+            'material_id' => $material->id, 'ordered_quantity' => 5, 'received_quantity' => 5,
+            'condition' => 'good', 'accepted' => true, 'store_status' => 'pending',
+            'stock_status' => 'awaiting_stores_details',
+        ]);
+
+        $this->postJson('/api/procurement-stores/movements', [
+            'type' => 'receive',
+            'material_id' => $material->id,
+            'quantity' => 5,
+            'receipt_unit_cost' => 1000,
+            'grn_item_id' => $grnItem->id,
+        ])->assertOk();
+
+        $this->assertSame('confirmed', $grnItem->fresh()->store_status);
+        $this->assertSame('posted', $grnItem->fresh()->stock_status);
+        $this->assertSame(
+            'confirmed',
+            $note->fresh()->store_status,
+            'The GRN header must close out once its only accepted item is confirmed.',
+        );
     }
 }
