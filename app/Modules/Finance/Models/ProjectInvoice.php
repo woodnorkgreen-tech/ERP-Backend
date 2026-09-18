@@ -4,6 +4,7 @@ namespace App\Modules\Finance\Models;
 
 use App\Models\ProjectEnquiry;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -26,6 +27,26 @@ class ProjectInvoice extends Model
     public function enquiry(): BelongsTo { return $this->belongsTo(ProjectEnquiry::class, 'project_enquiry_id'); }
     public function creator(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
     public function payments(): BelongsToMany { return $this->belongsToMany(\App\Models\EnquiryPayment::class, 'project_invoice_allocations')->withPivot('amount','allocated_by')->withTimestamps(); }
+
+    /**
+     * Adds `paid_amount` as the sum of this invoice's allocations, counting
+     * only verified, non-reversed payments — the one definition of "what
+     * counts as paid" shared by every reader of an invoice's balance.
+     *
+     * Before this scope existed, `EnquiryController::projectInvoices()` summed
+     * every allocation with no status filter, so a `pending` or `reversed`
+     * `EnquiryPayment` wrongly reduced the reported balance a client still
+     * owed. `FinanceService::getPaymentProgress()` already applied this same
+     * filter correctly on the quote-progress path; this scope is that pattern
+     * made reusable instead of a second, independent copy of the fix.
+     */
+    public function scopeWithVerifiedPaidAmount(Builder $query): Builder
+    {
+        return $query->withSum(['payments as paid_amount' => function ($q) {
+            $q->whereNull('enquiry_payments.reversed_at')
+                ->where('enquiry_payments.status', 'verified');
+        }], 'project_invoice_allocations.amount');
+    }
 
     /** What is being billed, priced line by line. Ordered as the client sees it. */
     public function lines(): HasMany

@@ -176,6 +176,35 @@ class JournalLedgerReadTest extends TestCase
         // Every posted account appears once, with its own side totalled.
         $codes = collect($response->json('data.accounts'))->pluck('code');
         $this->assertSame($codes->unique()->count(), $codes->count());
+
+        // account_type rides along so a caller can subtotal a Profit and Loss
+        // without a second query.
+        $this->assertArrayHasKey('account_type', collect($response->json('data.accounts'))->first());
+    }
+
+    public function test_the_coverage_disclosure_no_longer_claims_revenue_and_cash_are_excluded(): void
+    {
+        // Regression for the stale COVERAGE block: Stage 1 (revenue) and
+        // Stage 3 (bank/cash reconciliation) shipped after this text was
+        // written, and it never caught up until now.
+        $response = $this->actingAs($this->reader, 'sanctum')
+            ->getJson('/api/finance/journals/trial-balance')
+            ->assertOk();
+
+        $excludes = $response->json('data.coverage.excludes');
+        $includes = $response->json('data.coverage.includes');
+
+        $this->assertNotContains('Revenue, client invoices and receipts', $excludes);
+        $this->assertNotContains('Bank and cash movements not raised as a spend voucher', $excludes);
+        $this->assertContains(
+            'Opening balances, equity, depreciation and year-end adjustments',
+            $excludes,
+        );
+        $this->assertContains(
+            'Revenue recognised when an invoice is issued, and client receipts and deposit allocations',
+            $includes,
+        );
+        $this->assertFalse($response->json('data.coverage.is_statutory_trial_balance'));
     }
 
     public function test_trial_balance_is_not_shadowed_by_the_entry_route(): void

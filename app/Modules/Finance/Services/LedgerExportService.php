@@ -2,16 +2,20 @@
 
 namespace App\Modules\Finance\Services;
 
+use App\Modules\Finance\Support\LedgerCoverage;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
  * The hand-off to WNG's statutory books.
  *
- * WNG's P&L and balance sheet are prepared in an external accounting package.
- * This system is the subledger: it knows, transaction by transaction, what a
- * job cost and what tax rode on it. What the external package needs from it is
- * not that detail — it needs periodic journals that agree with it.
+ * WNG's statutory position (Profit and Loss, Balance Sheet) is still prepared
+ * in an external accounting package while this system's own reports — see
+ * ProfitAndLossService — cover only what it can currently prove: no
+ * depreciation, no opening balances, no equity. This system knows, transaction
+ * by transaction, what a job cost, what it earned and what tax rode on both.
+ * What the external package needs from it is not that detail — it needs
+ * periodic journals that agree with it.
  *
  * So the export batches. Internally every cost line posts its own journal
  * entry, which is right for traceability: each line reverses independently and
@@ -173,32 +177,26 @@ class LedgerExportService
     }
 
     /**
-     * What this export does NOT contain.
+     * What this export does and does not contain, from the single shared
+     * description in LedgerCoverage rather than a second, driftable copy of
+     * it — see that class for why the previous copy here was wrong.
      *
      * Stated in the payload, not only in documentation, because the one way
      * this file causes harm is by being imported as though it were a complete
-     * set of journals for the period. It is the cost side only. Whoever keys it
-     * still posts revenue, payroll and bank movements from their own records.
+     * set of journals for the period.
      *
      * @return array<string, mixed>
      */
     private function coverage(): array
     {
+        $shared = LedgerCoverage::describe();
+
         return [
-            'includes' => [
-                'Project and overhead costs verified in this system',
-                'Recoverable input VAT and withholding tax on those costs',
-                'Stores inventory movements and goods-received accruals',
-                'Payroll accruals and payments explicitly posted from HR',
-            ],
-            'excludes' => [
-                'Revenue, client invoices and receipts',
-                'Payroll not explicitly posted from HR',
-                'Bank and cash movements not raised as a spend voucher',
-                'Opening balances, equity, depreciation and year-end adjustments',
-            ],
-            'warning' => 'Cost side only. This is a subledger hand-off, not a complete set of journals '
-                . 'for the period, and importing it as one will not produce a balanced set of books.',
+            'includes' => $shared['includes'],
+            'excludes' => $shared['excludes'],
+            'warning' => 'This is a subledger hand-off, not a complete set of statutory journals for the '
+                . 'period — depreciation, opening balances and equity are still missing — and importing it '
+                . 'as one will not produce a balanced set of books.',
         ];
     }
 }

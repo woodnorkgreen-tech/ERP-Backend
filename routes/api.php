@@ -1035,6 +1035,13 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('{journal}/reverse', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'reverse']);
         });
 
+        // Portfolio-wide reports: read the same ledger as `journals` above,
+        // grouped differently (by period earned/spent, by what is owed).
+        Route::prefix('reports')->group(function () {
+            Route::get('profit-and-loss', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'profitAndLoss']);
+            Route::get('receivables-ageing', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'receivablesAgeing']);
+        });
+
         /*
          * Which departments' pay is a direct cost of client work rather than
          * office overhead. A Finance policy decision, so it lives here rather
@@ -1066,6 +1073,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // filing pack off one computation.
         Route::prefix('tax')->group(function () {
             Route::get('vat-input-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'vatInput']);
+            Route::get('vat-output-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'vatOutput']);
+            Route::get('vat-return', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'vatReturnSummary']);
             Route::get('etims-gap', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'etimsGap']);
             Route::get('wht-schedule', [\App\Modules\Finance\Controllers\TaxScheduleController::class, 'wht']);
             // Reference data for raising a client invoice: which Value Added Tax
