@@ -22,6 +22,7 @@ class PrintMaterialRequest extends Model
         'urgency',
         'reason',
         'status',
+        'purchase_requested_at',
         'stores_inventory_log_id',
         'requested_by',
         'approved_by',
@@ -30,6 +31,7 @@ class PrintMaterialRequest extends Model
 
     protected $casts = [
         'requested_quantity_m' => 'decimal:3',
+        'purchase_requested_at' => 'datetime',
     ];
 
     public function material(): BelongsTo
@@ -57,8 +59,18 @@ class PrintMaterialRequest extends Model
         return $this->belongsTo(InventoryLog::class, 'stores_inventory_log_id');
     }
 
+    public function requester(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'requested_by');
+    }
+
     public function rolls(): HasMany
     {
         return $this->hasMany(PrintRoll::class);
+    }
+
+    public function fulfilments(): HasMany
+    {
+        return $this->hasMany(PrintMaterialRequestFulfilment::class);
     }
 }

@@ -330,10 +330,18 @@ class TaskService
      * @return Task The updated task
      * @throws \InvalidArgumentException If status transition is not allowed
      */
-    public function updateStatus(Task $task, string $newStatus, int $userId, ?string $notes = null): Task
+    public function updateStatus(Task $task, string $newStatus, int $userId, ?string $notes = null, ?string $blockedReason = null): Task
     {
-        // Validate status transition
-        if (!$task->canTransitionTo($newStatus)) {
+        // Validate status transition. For 'blocked', check the reason being
+        // submitted with this request rather than the task's current (pre-update)
+        // blocked_reason, since the two normally arrive together in one call.
+        if ($newStatus === 'blocked') {
+            if (empty($blockedReason) && empty($task->blocked_reason)) {
+                throw new \InvalidArgumentException(
+                    "A reason is required to block task {$task->id}"
+                );
+            }
+        } elseif (!$task->canTransitionTo($newStatus)) {
             throw new \InvalidArgumentException(
                 "Cannot transition task {$task->id} from '{$task->status}' to '{$newStatus}'"
             );
@@ -346,6 +354,10 @@ class TaskService
         try {
             // Update status and related timestamps
             $updateData = ['status' => $newStatus];
+
+            if ($newStatus === 'blocked' && !empty($blockedReason)) {
+                $updateData['blocked_reason'] = $blockedReason;
+            }
 
             if ($newStatus === 'in_progress' && !$task->started_at) {
                 $updateData['started_at'] = now();

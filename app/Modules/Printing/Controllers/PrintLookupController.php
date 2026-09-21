@@ -4,6 +4,7 @@ namespace App\Modules\Printing\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Project;
 use App\Modules\Assets\Models\Asset;
 use App\Modules\HR\Models\Department;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
@@ -12,6 +13,35 @@ use Illuminate\Http\Request;
 
 class PrintLookupController extends Controller
 {
+    public function projects(Request $request): JsonResponse
+    {
+        $term = trim((string) $request->get('search', ''));
+        $projects = Project::query()
+            ->with('enquiry.client')
+            ->when($term !== '', function ($query) use ($term) {
+                $like = "%{$term}%";
+                $query->where(function ($inner) use ($like) {
+                    $inner->where('project_id', 'like', $like)
+                        ->orWhereHas('enquiry', fn ($enquiry) => $enquiry
+                            ->where('job_number', 'like', $like)
+                            ->orWhere('title', 'like', $like)
+                            ->orWhereHas('client', fn ($client) => $client->where('full_name', 'like', $like)));
+                });
+            })
+            ->latest('id')
+            ->limit((int) $request->get('limit', 15))
+            ->get()
+            ->map(fn (Project $project) => [
+                'id' => $project->id,
+                'project_code' => $project->project_id,
+                'job_number' => $project->enquiry?->job_number,
+                'project_name' => $project->enquiry?->title,
+                'client_name' => $project->enquiry?->client?->full_name,
+            ]);
+
+        return response()->json(['data' => $projects]);
+    }
+
     public function materials(Request $request): JsonResponse
     {
         $materials = LibraryMaterial::query()

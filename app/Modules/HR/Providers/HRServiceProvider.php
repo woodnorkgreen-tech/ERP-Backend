@@ -12,6 +12,7 @@ use App\Modules\HR\Console\Commands\ReprocessAttendance;
 use App\Modules\HR\Console\Commands\ReconcileAttendance;
 use App\Modules\HR\Console\Commands\SyncKenyaHolidays;
 use App\Modules\HR\Console\Commands\SyncAttendanceOvertime;
+use App\Modules\HR\Console\Commands\ImportPastLeave;
 use App\Modules\HR\Models\LeaveRequest;
 use App\Modules\HR\Observers\LeaveRequestObserver;
 
@@ -40,6 +41,7 @@ class HRServiceProvider extends ServiceProvider
                 ReconcileAttendance::class,
                 SyncKenyaHolidays::class,
                 SyncAttendanceOvertime::class,
+                ImportPastLeave::class,
             ]);
         }
 

@@ -35,6 +35,21 @@ class PrintMaterialUsageService
             $data['tile_count'] = $data['tile_count'] ?? 1;
             $calculated = $this->calculator->calculate($data);
             $actual = (float) ($data['actual_running_m'] ?? $calculated['calculated_running_m'] ?? 0);
+            $extraUse = $actual - (float) ($calculated['calculated_running_m'] ?? 0);
+            if ($extraUse > 0.0005 && empty($data['variance_reason_code'])) {
+                throw ValidationException::withMessages([
+                    'variance_reason_code' => ['Select a reason for the extra material used.'],
+                ]);
+            }
+            if ($extraUse > 0.0005 && ($data['variance_reason_code'] ?? null) === 'other' && empty(trim((string) ($data['variance_reason'] ?? '')))) {
+                throw ValidationException::withMessages([
+                    'variance_reason' => ['Describe the other reason for the extra material used.'],
+                ]);
+            }
+            if ($extraUse <= 0.0005) {
+                $data['variance_reason_code'] = null;
+                $data['variance_reason'] = null;
+            }
             $previousActual = $consumption ? (float) $consumption->actual_running_m : 0;
 
             $payload = array_merge($data, $calculated, [
