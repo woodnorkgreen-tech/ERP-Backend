@@ -168,6 +168,12 @@ class StockMovementPoster
                     'confirmed_by'      => auth()->id(),
                     'confirmed_at'      => now(),
                 ]);
+
+                // Without this, a note finished entirely through the receiving
+                // queue never leaves 'pending_confirmation' — it sits in the
+                // Stores confirmation queue and the Deliveries list forever,
+                // with nothing left on it to actually confirm.
+                $grnItem->goodsReceiptNote->closeOutIfFullyConfirmed();
             }
         });
 

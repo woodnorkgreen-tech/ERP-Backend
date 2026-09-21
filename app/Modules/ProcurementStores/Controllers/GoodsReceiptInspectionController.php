@@ -95,6 +95,7 @@ class GoodsReceiptInspectionController extends Controller
                         'confirmed_by' => auth()->id(),
                         'confirmed_at' => now(),
                     ]);
+                    $locked->goodsReceiptNote->closeOutIfFullyConfirmed();
                 }
             } else {
                 $status = (float) $validated['quarantined_quantity'] > 0 ? 'quarantined' : ($validated['outcome'] === 'replacement_requested' ? 'replacement_requested' : 'return_to_supplier');

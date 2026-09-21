@@ -161,14 +161,25 @@ class LedgerExportTest extends TestCase
         $this->assertSame('Paint', $document['description']);
     }
 
-    public function test_the_export_states_that_it_is_the_cost_side_only(): void
+    public function test_the_export_states_it_is_not_yet_a_complete_set_of_statutory_journals(): void
     {
         $export = $this->exporter->documentJournals('2026-03-01', '2026-03-31');
 
         // The one way this file causes harm is by being imported as a complete
-        // set of journals, so the warning travels in the payload.
+        // set of journals, so the warning travels in the payload. Revenue now
+        // posts (Stage 1) and so does bank/cash movement (Stage 3), so those
+        // must NOT still be claimed as excluded — only what is genuinely still
+        // missing belongs in that list.
         $this->assertStringContainsString('subledger hand-off', $export['coverage']['warning']);
-        $this->assertContains('Revenue, client invoices and receipts', $export['coverage']['excludes']);
+        $this->assertContains(
+            'Opening balances, equity, depreciation and year-end adjustments',
+            $export['coverage']['excludes'],
+        );
+        $this->assertNotContains('Revenue, client invoices and receipts', $export['coverage']['excludes']);
+        $this->assertContains(
+            'Revenue recognised when an invoice is issued, and client receipts and deposit allocations',
+            $export['coverage']['includes'],
+        );
     }
 
     public function test_the_csv_carries_one_row_per_account_per_document(): void

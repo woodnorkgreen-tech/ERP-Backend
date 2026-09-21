@@ -17,7 +17,13 @@ class ClientFilter
     public function handle(Builder $query, Closure $next)
     {
         if (request()->filled('client_id')) {
-            $query->where('client_id', request('client_id'));
+            $raw = request('client_id');
+            $ids = is_array($raw) ? $raw : explode(',', (string) $raw);
+            $ids = array_filter(array_map('trim', $ids), fn ($id) => $id !== '');
+
+            if (count($ids) > 0) {
+                $query->whereIn('client_id', $ids);
+            }
         }
 
         if (request()->filled('client_name')) {

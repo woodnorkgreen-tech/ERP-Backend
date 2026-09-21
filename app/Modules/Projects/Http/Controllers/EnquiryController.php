@@ -1447,8 +1447,12 @@ class EnquiryController extends Controller
 
     public function projectInvoices(ProjectEnquiry $enquiry): JsonResponse
     {
+        // withVerifiedPaidAmount() counts only verified, non-reversed payments
+        // toward paid_amount — see ProjectInvoice::scopeWithVerifiedPaidAmount()
+        // for why an unfiltered sum here previously understated a client's
+        // real outstanding balance.
         $invoices = \App\Modules\Finance\Models\ProjectInvoice::query()->where('project_enquiry_id', $enquiry->id)
-            ->withSum('payments as paid_amount', 'project_invoice_allocations.amount')->orderByDesc('invoice_date')->get()
+            ->withVerifiedPaidAmount()->orderByDesc('invoice_date')->get()
             ->map(function ($invoice) {
                 $paid = (float) ($invoice->paid_amount ?? 0); $balance = max(0, (float) $invoice->total_amount - $paid);
                 return array_merge($invoice->toArray(), ['paid_amount'=>$paid,'balance'=>$balance,'days_overdue'=>$invoice->status==='issued' && $balance>0 && $invoice->due_date->isPast() ? $invoice->due_date->diffInDays(now()) : 0]);

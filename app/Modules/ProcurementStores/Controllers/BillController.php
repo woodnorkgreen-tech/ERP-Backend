@@ -15,14 +15,57 @@ use App\Constants\Permissions;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Support\DocumentNumber;
 use App\Modules\Finance\Support\PaymentMethods;
+use App\Modules\ProcurementStores\Services\PayablesAgeingService;
 use App\Modules\ProcurementStores\Services\PurchaseOrderWorkflow;
 use App\Modules\ProcurementStores\Services\SupplierInvoiceTax;
 use App\Modules\ProcurementStores\Services\SupplierPaymentGuard;
 use App\Services\ProcurementOperationalSyncService;
+use App\Support\SelfApproval;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class BillController extends Controller
 {
+    /**
+     * Open bills still owed, bucketed by days overdue.
+     *
+     * Gated on `finance.reports.view` — the one permission check in this
+     * controller; every other Bill endpoint here carries none beyond the
+     * outer auth+active middleware. Reuses that Finance permission rather
+     * than a new `FINANCE_PAYABLES_*`/`PROCUREMENT_BILLS_*` constant, which
+     * would need its own seeding and role grant.
+     */
+    public function ageing(Request $request, PayablesAgeingService $ageingService)
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
+
+        $filters = $request->validate([
+            'as_of' => ['nullable', 'date'],
+            'bucket' => ['nullable', 'string', 'in:current,1_30,31_60,61_90,90_plus'],
+            'format' => ['nullable', 'in:json,csv'],
+        ]);
+
+        $data = $ageingService->summary($filters['as_of'] ?? null, $filters['bucket'] ?? null);
+
+        if (($filters['format'] ?? 'json') === 'csv') {
+            return response()->streamDownload(function () use ($data) {
+                $out = fopen('php://output', 'w');
+                fwrite($out, "\xEF\xBB\xBF");
+                fputcsv($out, ['Bill number', 'Supplier', 'Due date', 'Days overdue', 'Bucket', 'Amount', 'Paid amount', 'Balance']);
+
+                foreach ($data['rows'] as $row) {
+                    fputcsv($out, [
+                        $row['bill_number'], $row['supplier_name'], $row['due_date'], $row['days_overdue'],
+                        $row['bucket'], $row['amount'], $row['paid_amount'], $row['balance'],
+                    ]);
+                }
+
+                fclose($out);
+            }, "payables-ageing-{$data['as_of']}.csv", ['Content-Type' => 'text/csv; charset=UTF-8']);
+        }
+
+        return response()->json(['status' => 'success', 'data' => $data]);
+    }
+
     /**
      * Download Bill as PDF
      */
@@ -377,6 +420,21 @@ class BillController extends Controller
             return response([
                 'error' => 'Only Accounts can verify a supplier invoice for payment.',
             ], 403);
+        }
+
+        // Separation of duties: whoever recorded this bill does not also
+        // verify it for payment, unless explicitly granted the self-approve
+        // exception — the same rule already enforced on petty cash, spend
+        // vouchers, budget additions, cost verification and client receipts
+        // (see SelfApproval's own docblock), which bill verification had
+        // never joined. Verification is what moves a liability from
+        // "accrued against a receipt" to "owed and payable" — the exact
+        // decision a second person is supposed to check.
+        if ($bill->user_id !== null && (int) $bill->user_id === (int) auth()->id() && ! SelfApproval::allowed()) {
+            return response([
+                'error' => 'You recorded this invoice, so someone else has to verify it. '
+                    . 'If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.',
+            ], 422);
         }
 
         $validator = Validator::make($request->all(), [

@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use App\Http\Controllers\Controller;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
+use App\Support\SelfApproval;
 
 class RequisitionController extends Controller
 {
@@ -587,6 +588,21 @@ class RequisitionController extends Controller
 
         if ($requisition->status !== 'pending_approval') {
             return response(['error' => 'Only pending requisitions can be approved'], 422);
+        }
+
+        // Separation of duties: whoever raised the requisition does not also
+        // approve it, unless explicitly granted the self-approve exception —
+        // the same rule already enforced on petty cash, spend vouchers,
+        // budget additions, cost verification and client receipts (see
+        // SelfApproval's own docblock). Requisition approval is the first of
+        // three approval gates in the same buying chain (requisition, order,
+        // bill) that had never joined it; the other two are fixed alongside
+        // this one.
+        if ((int) $requisition->user_id === (int) auth()->id() && ! SelfApproval::allowed()) {
+            return response([
+                'error' => 'You raised this requisition, so someone else has to approve it. '
+                    . 'If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.',
+            ], 422);
         }
 
         /*

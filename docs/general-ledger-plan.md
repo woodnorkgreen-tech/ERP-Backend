@@ -374,6 +374,19 @@ the single most valuable output of the whole plan.
 **What you get:** the ledger's cash figure can be *proved* against the bank, monthly.
 Without this, every other number is only as trustworthy as the cash figure underneath it.
 
+> **Shipped 2026-09-13/14 — items 2 and 3.** `CashMovementService` posts every recorded
+> cash movement through `JournalPostingService::postBalancedEntry()`, not only vouchers and
+> payroll. Bank statement import, transaction matching (manual, suggested, and
+> auto-match), ignoring a statement-only row, and reconciling or reopening a statement all
+> exist behind `/api/finance/reconciliation/*` and the `/finance/reconciliation` screen.
+> **Item 1 has not shipped** — a bank account is still a `PaymentSource` mapped to a
+> ledger account, not its own record with an opening balance; that waits on Stage 6's
+> cutover date and opening entry.
+>
+> This entry was added 2026-09-18, after the work itself — the stage shipped in the
+> commits above but this document was never updated to say so. Caught while building the
+> Stage 7 reports subset, which re-read this whole plan and found the gap.
+
 ### Stage 4 — Make inventory true
 
 1. Stock count differences post a journal entry (debit or credit Raw-material Inventory
@@ -384,6 +397,16 @@ Without this, every other number is only as trustworthy as the cash figure under
    plan" compromise recorded in the August analysis.
 
 **What you get:** the ledger's inventory value equals the store's, and can be proved.
+
+> **Shipped 2026-09-09 — item 1 only.** `StockMovementPostingService::postStockCount()`
+> posts a stock count's difference — a cycle-count shortage debits `6800 Inventory
+> Adjustments & Shrinkage` and credits `1200`, a surplus the reverse — wired into
+> `StockCountController::approve` in the same transaction as the approval. **Item 2**
+> (opening inventory posting its value) has the mechanism built into the same service —
+> an opening-inventory count posts Dr `1200` / Cr `3900 Opening Balance Equity` — but
+> nothing has exercised it yet; it waits on Stage 6's cutover date and a valued stock
+> list from Stores, same as the rest of opening balances. **Item 3**, purchase price
+> variance, has not been started.
 
 ### Stage 5 — Fixed assets
 
@@ -416,6 +439,38 @@ loss statement stops ignoring the cost of using equipment.
 4. **Trial balance becomes statutory** — the `is_statutory_trial_balance: false` flag that
    the system currently returns honestly can finally be set to true.
 5. Accounts Receivable and Accounts Payable **ageing** — who owes what, and for how long.
+
+> **Shipped 2026-09-18 — item 1 (as management accounts) and item 5. Items 2, 3 and the
+> "becomes statutory" half of item 4 are deliberately NOT built yet.**
+>
+> - **Profit and Loss.** `ProfitAndLossService` + `GET /api/finance/reports/profit-and-loss`
+>   — revenue minus Cost of Sales minus overheads and operating expenses, for a period,
+>   grouped by the chart's `category` and `account_type`. Labelled "management accounts,
+>   not yet statutory" in its own payload: it is missing exactly what LedgerCoverage says
+>   the whole ledger is missing — depreciation, opening balances, equity. Period-over-period
+>   comparison (the other half of item 1) was not built.
+> - **Trial balance, richer but still not statutory.** `trialBalance()` now returns each
+>   account's `account_type` alongside `category`, so the screen can subtotal by section —
+>   but `is_statutory_trial_balance` stays `false`, correctly: that flag is gated on Stages
+>   5 and 6, not on this.
+> - **Ageing.** `ReceivablesAgeingService` (`GET /api/finance/reports/receivables-ageing`)
+>   and `PayablesAgeingService` (`GET /api/procurement-stores/bills/ageing`, since `Bill`
+>   lives in ProcurementStores) — both bucketed current / 1-30 / 31-60 / 61-90 / 90+ days
+>   overdue. Payables reuses `Bill`'s own maintained `balance`/`status`; receivables fixed
+>   a real bug found in the same pass — `EnquiryController::projectInvoices()` summed
+>   every payment allocation with no status filter, so a `pending` or later-`reversed`
+>   receipt understated what a client still owed. Both now go through
+>   `ProjectInvoice::scopeWithVerifiedPaidAmount()`, one definition of "what counts as
+>   paid" instead of two independent copies of it.
+> - **Balance Sheet and Cash Flow were deliberately not built in this pass.** Both would be
+>   actively misleading without Stages 5 and 6 — a Balance Sheet with no depreciation
+>   overstates assets, and with no opening balances it does not start from the truth.
+>   Building the P&L and ageing first, and holding the rest back, was the explicit choice.
+>
+> All-new `FinancialReportsView.vue` at `/finance/reports` (Finance → Controls & reports),
+> tabbed: Profit and loss, Trial balance (grouped), Receivables ageing, Payables ageing —
+> following `TaxSchedulesView.vue`'s tab/CSV/filter shell and `CostVerificationView.vue`'s
+> clickable ageing-bucket chips, not a new pattern.
 
 ### Stage 8 — Cutover: running both systems side by side
 

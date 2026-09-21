@@ -161,6 +161,87 @@ class TaxScheduleService
     }
 
     /**
+     * Output VAT charged to clients for a period — the sales side of the VAT
+     * return, which nothing computed before this: `vatInputSchedule()` covers
+     * only what WNG can reclaim, and the ledger has posted Output VAT Payable
+     * (2110) on every issued invoice since Stage 1 of the general ledger plan
+     * with no schedule anywhere to show what made up that balance for a
+     * filing period.
+     *
+     * Rows are keyed on the invoice date, not on when the job was delivered —
+     * the tax point for a sale is when the invoice is raised, and that is also
+     * the date `ReceivablesPostingService` posts the entry on, so this ties to
+     * the ledger by construction.
+     *
+     * Unlike the input side, there is no claim window or eTIMS-support test
+     * here: output tax is owed the moment it is charged, not claimed back
+     * within a deadline, so `claimRow()`'s window arithmetic does not apply.
+     *
+     * @return array<string, mixed>
+     */
+    public function vatOutputSchedule(string $from, string $to): array
+    {
+        $rows = $this->outputLines()
+            ->whereBetween('pi.invoice_date', [$from, $to])
+            ->orderBy('pi.invoice_date')
+            ->orderBy('pil.id')
+            ->get()
+            ->map(fn (object $line) => [
+                'invoice_id' => (int) $line->invoice_id,
+                'invoice_number' => $line->ref,
+                'invoice_date' => $line->tax_point_date,
+                'job_number' => $line->job_number,
+                'client_name' => $line->client_name,
+                'description' => $line->description,
+                'treatment_code' => $line->treatment_code,
+                'rate_percent' => $line->rate_percent,
+                'net_amount' => (string) $line->net_amount,
+                'vat_amount' => (string) $line->tax_amount,
+            ]);
+
+        return [
+            'period' => ['from' => $from, 'to' => $to],
+            'rows' => $rows->values()->all(),
+            'totals' => [
+                'output_vat' => $this->sum($rows, 'vat_amount'),
+                'net_sales' => $this->sum($rows, 'net_amount'),
+                'line_count' => $rows->count(),
+            ],
+            'due_date' => $this->dueDateFor($to),
+            'basis' => 'Issued or paid client invoice lines on a VAT-bearing treatment, dated by the invoice date, '
+                . 'excluding draft and voided invoices.',
+        ];
+    }
+
+    /**
+     * The figure that actually goes on the VAT return: output charged minus
+     * input claimed. Positive means WNG owes KRA the difference; negative is
+     * a credit carried forward. Built from the same two schedules Finance
+     * already reviews line by line — this is their headline, not a third
+     * computation of the same numbers.
+     *
+     * @return array<string, mixed>
+     */
+    public function vatReturn(string $from, string $to): array
+    {
+        $output = $this->vatOutputSchedule($from, $to);
+        $input = $this->vatInputSchedule($from, $to);
+
+        return [
+            'period' => ['from' => $from, 'to' => $to],
+            'output_vat' => $output['totals']['output_vat'],
+            'claimable_input_vat' => $input['totals']['claimable_vat'],
+            'unsupported_input_vat' => $input['totals']['unsupported_vat'],
+            'net_payable' => bcsub($output['totals']['output_vat'], $input['totals']['claimable_vat'], 2),
+            'due_date' => $output['due_date'],
+            'note' => $input['totals']['unsupported_count'] > 0
+                ? $input['totals']['unsupported_count'] . ' input VAT line(s) are excluded from this figure until '
+                    . 'their eTIMS evidence is recorded — see the input schedule.'
+                : null,
+        ];
+    }
+
+    /**
      * Withholding tax deducted in a month, by payee — the WHT remittance return.
      *
      * One row per payee for monthly reconciliation. This grouping is not a
@@ -436,6 +517,38 @@ class TaxScheduleService
             ->selectRaw('NULL as job_number')
             ->selectRaw("'bill' as source")
             ->selectRaw("CONCAT('Supplier invoice ', bills.bill_number) as description");
+    }
+
+    /**
+     * Client invoice lines that carry VAT, on an issued or paid invoice.
+     *
+     * Draft is excluded because it has never recognised revenue — nothing
+     * posted, nothing owed. Void is excluded because its revenue and tax
+     * were reversed; the reversal is the correction, so the original line
+     * must not still appear on a return.
+     */
+    private function outputLines()
+    {
+        return DB::table('project_invoice_lines as pil')
+            ->join('project_invoices as pi', 'pi.id', '=', 'pil.project_invoice_id')
+            ->join('vat_treatments as vt', 'vt.id', '=', 'pil.vat_treatment_id')
+            ->leftJoin('project_enquiries as pe', 'pe.id', '=', 'pi.project_enquiry_id')
+            ->leftJoin('clients as c', 'c.id', '=', 'pe.client_id')
+            ->whereNotIn('pi.status', ['draft', 'void'])
+            ->where('pil.tax_amount', '>', 0)
+            ->select([
+                'pil.id',
+                'pi.id as invoice_id',
+                'pi.invoice_number as ref',
+                'pi.invoice_date as tax_point_date',
+                'pe.job_number',
+                'pil.description',
+                'pil.net_amount',
+                'pil.tax_amount',
+                'vt.code as treatment_code',
+                'vt.rate_percent as rate_percent',
+                DB::raw('COALESCE(c.company_name, c.full_name) as client_name'),
+            ]);
     }
 
     /** @param  Collection<int, array<string, mixed>>  $rows */

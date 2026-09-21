@@ -5,6 +5,7 @@ namespace App\Modules\ProcurementStores\Controllers;
 use App\Events\GoodsReceiptRecorded;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
+use App\Modules\ProcurementStores\Models\InventoryLog;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Services\InventoryService;
 use App\Modules\ProcurementStores\Services\BoardRegistrationService;
@@ -14,6 +15,7 @@ use App\Http\Resources\PurchaseOrderResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use App\Http\Controllers\Controller;
 use App\Services\ProcurementOperationalSyncService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -119,33 +121,57 @@ class GoodsReceiptNoteController extends Controller
      * confirm each item first via confirmItem().
      *
      * Called once per item, only from confirmItem(), guarded there by
-     * store_status so an item can never be credited twice.
+     * store_status so an item can never be credited twice. Mirrors the UOM
+     * conversion and weighted-average-cost handling StockMovementPoster
+     * applies for the manual Check-In / receiving-queue path, so a line
+     * confirmed here produces the same kind of stock record either way.
      */
-    private function creditStockForAcceptedItem(GoodsReceiptNote $grn, array $item, float $unitPrice): void
+    private function creditStockForAcceptedItem(GoodsReceiptNote $grn, array $item, float $unitPrice): InventoryLog
     {
-        $materialId = $item['material_id'] ?? null;
-        $quantity   = (float) ($item['received_quantity'] ?? 0);
+        $materialId = $item['material_id'];
+        $quantity   = (float) $item['received_quantity'];
 
-        if (!$materialId || $quantity <= 0) {
-            return;
+        if ($quantity <= 0) {
+            throw ValidationException::withMessages([
+                'received_quantity' => 'This line has no received quantity to add to stock.',
+            ]);
         }
 
-        $material = LibraryMaterial::find($materialId);
-        if (!$material) {
-            return;
+        $material = LibraryMaterial::with('uomConversions')->findOrFail($materialId);
+
+        $enteredUomId = (int) ($material->purchase_uom_id ?: $material->base_uom_id);
+        $meta = [
+            'warehouse_code'    => $grn->store_location,
+            'reference_no'      => $grn->grn_number,
+            'supplier_id'       => $grn->purchaseOrder?->supplier_id,
+            'unit_price'        => $unitPrice,
+            'receipt_unit_cost' => $unitPrice,
+            'notes'             => "Store-confirmed via GRN {$grn->grn_number}",
+        ];
+
+        if ($material->base_uom_id && $enteredUomId !== (int) $material->base_uom_id) {
+            $hasConversion = $material->uomConversions->contains(fn ($row) => (int) $row->from_uom_id === $enteredUomId
+                && (int) $row->to_uom_id === (int) $material->base_uom_id
+                && (float) $row->factor > 0);
+
+            if (! $hasConversion) {
+                throw ValidationException::withMessages([
+                    'material_id' => "'{$material->material_name}' has no conversion from its buying unit to its stock unit. Set that up in the Material Library first.",
+                ]);
+            }
+
+            $meta['entered_uom_id'] = $enteredUomId;
         }
 
         $service = new InventoryService();
-        $log = $service->adjustStock($materialId, $quantity, 'check_in', [
-            'warehouse_code' => $grn->store_location,
-            'reference_no'   => $grn->grn_number,
-            'supplier_id'    => $grn->purchaseOrder?->supplier_id,
-            'unit_price'     => $unitPrice,
-            'notes'          => "Store-confirmed via GRN {$grn->grn_number}",
-        ]);
+        $log = $service->adjustStock($materialId, $quantity, 'check_in', $meta);
 
         // Reusable (board-tracked) materials also need board records, same
-        // as the manual Check-In flow.
+        // as the manual Check-In flow. $unitPrice is what Stores just entered
+        // for this delivery — it must value the boards themselves, the same
+        // as StockMovementPoster::postReceipt() does, or every board silently
+        // reverts to the catalogue's standing cost (zero on a first receipt,
+        // which per that same code path makes a board unissuable).
         if ($material->material_type === 'reusable') {
             try {
                 $registration = new BoardRegistrationService();
@@ -155,12 +181,15 @@ class GoodsReceiptNoteController extends Controller
                     quantity:    (int) $quantity,
                     batchNumber: $log->batch_number,
                     userId:      auth()->id(),
+                    unitValue:   $unitPrice > 0 ? $unitPrice : null,
                 );
                 $log->update(['usage_type' => 'reusable']);
             } catch (\InvalidArgumentException) {
                 // Not board-eligible — plain consumable check-in is enough
             }
         }
+
+        return $log;
     }
 
     private function syncProjectProcurement(GoodsReceiptNote|int $goodsReceiptNote): void
@@ -378,58 +407,26 @@ class GoodsReceiptNoteController extends Controller
                                     && (int) $row->to_uom_id === (int) $material->base_uom_id)?->factor ?? 0);
                         }
 
-                        if ($factor <= 0) {
-                            $stockStatus = 'awaiting_unit_setup';
-                        } else {
-                            $log = app(InventoryService::class)->adjustStock(
-                                $material->id,
-                                (float) $item['received_quantity'],
-                                'check_in',
-                                [
-                                    'entered_uom_id' => $enteredUomId,
-                                    'receipt_unit_cost' => (float) $poItem->unit_price,
-                                    'batch_number' => $grn->batch_number,
-                                    'warehouse_code' => 'MAIN',
-                                    'location' => $request->store_location,
-                                    'reference_no' => $grn->grn_number,
-                                    'notes' => "Accepted through GRN {$grn->grn_number}",
-                                    'logged_at' => $grn->date,
-                                ],
-                            );
-                            // Posting to Stock here IS the store confirmation
-                            // for this line, so mark it confirmed too. Without
-                            // this it would stay store_status='pending' and
-                            // Stores could confirm it a second time through
-                            // confirmItem(), crediting the same stock twice.
-                            $grnItem->update([
-                                'entered_uom_id' => $enteredUomId,
-                                'stock_quantity' => abs((float) $log->quantity),
-                                'stock_status' => 'posted',
-                                'inventory_log_id' => $log->id,
-                                'unit_price' => (float) $poItem->unit_price,
-                                'store_status' => 'confirmed',
-                                'confirmed_by' => auth()->id(),
-                                'confirmed_at' => now(),
-                            ]);
-                            continue;
-                        }
+                        // Dock acceptance only classifies the line; it never
+                        // credits Stock itself. Every accepted line — plain or
+                        // controlled — waits for Stores to complete it from the
+                        // receiving queue (StockMovementPoster::postReceipt(),
+                        // reached via the "Complete" action on an
+                        // awaiting_stores_details line), which is the only
+                        // place a GRN line's stock is actually posted. See also
+                        // confirmItem() below, for lines Stores has to match to
+                        // a material first.
+                        $stockStatus = $factor > 0 ? 'awaiting_stores_details' : 'awaiting_unit_setup';
                     }
                 }
 
                 $grnItem->update(['stock_status' => $stockStatus]);
             }
 
-            // If every accepted line went straight to Stock, there is nothing
-            // left for Stores to confirm — close the GRN out rather than
-            // leaving it sitting at 'pending_confirmation'.
-            $stillPending = $grn->items()
-                ->where('accepted', true)
-                ->where('store_status', 'pending')
-                ->exists();
-
-            if (! $stillPending) {
-                $grn->update(['store_status' => 'confirmed']);
-            }
+            // If nothing on this GRN was accepted, there is nothing left for
+            // Stores to confirm — close the GRN out rather than leaving it
+            // sitting at 'pending_confirmation'.
+            $grn->closeOutIfFullyConfirmed();
 
             DB::commit();
 
@@ -643,54 +640,87 @@ class GoodsReceiptNoteController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $grnItem = GoodsReceiptNoteItem::with('goodsReceiptNote')->find($grnItemId);
+        $precheck = GoodsReceiptNoteItem::find($grnItemId);
 
-        if (!$grnItem) {
+        if (!$precheck) {
             return response()->json(['message' => 'GRN item not found.'], 404);
         }
 
-        if (!$grnItem->accepted) {
+        if (!$precheck->accepted) {
             return response()->json(['message' => 'This item was not accepted at the dock and cannot be confirmed into stock.'], 422);
         }
 
-        if ($grnItem->store_status === 'confirmed') {
-            return response()->json(['message' => 'This item has already been confirmed.'], 422);
+        if ($precheck->stock_status === 'awaiting_inspection') {
+            return response()->json(['message' => 'This item failed quality check at the dock. Record an inspection decision before it can be confirmed into stock.'], 422);
         }
 
         try {
             DB::beginTransaction();
 
+            // Re-fetched under lock rather than trusting the precheck above:
+            // two concurrent confirms for the same line (a double-click, two
+            // Stores staff both acting on it) must not both pass the
+            // store_status guard before either has written it, which is
+            // exactly how a delivery gets credited to stock twice.
+            $grnItem = GoodsReceiptNoteItem::with(['goodsReceiptNote', 'inspection'])
+                ->lockForUpdate()->find($grnItemId);
+
+            if ($grnItem->store_status === 'confirmed') {
+                throw ValidationException::withMessages(['grn_item' => 'This item has already been confirmed.']);
+            }
+
             $materialId = $request->input('material_id');
 
             if (!$materialId) {
-                $material = LibraryMaterial::create($request->input('new_material'));
+                // Registered on the spot, from the receipt screen — Stores is
+                // vouching for it right now, so it goes straight to Active
+                // rather than the catalogue's usual 'Under Review' default,
+                // which adjustStock() would otherwise refuse to receive against.
+                // material_code is a required, unique column that this form
+                // never asks for, so one is minted the same way the governed
+                // registration flow does for a code-less item.
+                $material = LibraryMaterial::create([
+                    ...$request->input('new_material'),
+                    'material_code' => $request->input('new_material.material_code')
+                        ?: app(\App\Modules\MaterialsLibrary\Services\MaterialDefaultsService::class)->suggestDraftCode(),
+                    'item_status' => 'Active',
+                ]);
                 $materialId = $material->id;
             }
 
-            $grnItem->update([
-                'material_id'  => $materialId,
-                'unit_price'   => $request->input('unit_price'),
-                'store_status' => 'confirmed',
-                'confirmed_by' => auth()->id(),
-                'confirmed_at' => now(),
-            ]);
-
             $grn = $grnItem->goodsReceiptNote;
 
-            $this->creditStockForAcceptedItem($grn, [
+            // The quantity Stores may credit is what inspection approved, not
+            // what was delivered — a line reaches this screen with a formal
+            // inspection record whenever it was partially accepted (batch,
+            // expiry, serial or board-tracked materials all route here for
+            // Stores' own detail capture even when some of the delivery was
+            // rejected or quarantined). GoodsReceiptInspectionController's own
+            // guarantee is "only the accepted quantity can enter available
+            // stock" — crediting received_quantity here for an inspected line
+            // would put the rejected/quarantined portion into stock too.
+            $quantityToCredit = $grnItem->inspection
+                ? $grnItem->inspection->accepted_quantity
+                : $grnItem->received_quantity;
+
+            $log = $this->creditStockForAcceptedItem($grn, [
                 'material_id'       => $materialId,
-                'received_quantity' => $grnItem->received_quantity,
+                'received_quantity' => $quantityToCredit,
             ], (float) $request->input('unit_price'));
 
-            // Once every accepted item on this GRN is confirmed, close it out.
-            $stillPending = $grn->items()
-                ->where('accepted', true)
-                ->where('store_status', 'pending')
-                ->exists();
+            $grnItem->update([
+                'material_id'      => $materialId,
+                'unit_price'       => $request->input('unit_price'),
+                'entered_uom_id'   => $log->entered_uom_id,
+                'stock_quantity'   => abs((float) $log->quantity),
+                'stock_status'     => 'posted',
+                'inventory_log_id' => $log->id,
+                'store_status'     => 'confirmed',
+                'confirmed_by'     => auth()->id(),
+                'confirmed_at'     => now(),
+            ]);
 
-            if (!$stillPending) {
-                $grn->update(['store_status' => 'confirmed']);
-            }
+            $grn->closeOutIfFullyConfirmed();
 
             DB::commit();
 
@@ -701,6 +731,9 @@ class GoodsReceiptNoteController extends Controller
                 'purchaseOrder.supplier',
                 'receivedByUser'
             ]));
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Error confirming item: ' . $e->getMessage()], 500);

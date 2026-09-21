@@ -89,4 +89,25 @@ class GoodsReceiptNote extends Model
 
         return "BAT-{$year}-{$newNumber}";
     }
+
+    /**
+     * Move this GRN's own store_status to 'confirmed' once none of its
+     * accepted items are still 'pending'. Three different places can confirm
+     * the last item on a note — the Stores confirmation queue, the receiving
+     * queue's Check-In, and quality inspection — and the note-level status
+     * (what the Deliveries list and the confirmation queue's own filter both
+     * read) only ever moves here. Call this after any of them writes an
+     * item's store_status, inside the same transaction.
+     */
+    public function closeOutIfFullyConfirmed(): void
+    {
+        $stillPending = $this->items()
+            ->where('accepted', true)
+            ->where('store_status', 'pending')
+            ->exists();
+
+        if (! $stillPending) {
+            $this->update(['store_status' => 'confirmed']);
+        }
+    }
 }

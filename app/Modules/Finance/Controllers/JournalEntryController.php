@@ -12,6 +12,7 @@ use App\Modules\Finance\Models\SpendVoucher;
 use App\Modules\Finance\Resources\JournalEntryResource;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Services\LedgerExportService;
+use App\Modules\Finance\Support\LedgerCoverage;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,39 +39,6 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class JournalEntryController extends Controller
 {
-    /**
-     * What this ledger does and does not contain, returned with every summary.
-     *
-     * WNG's statutory accounts live in an external package. This ledger holds
-     * the cost side only — it has no revenue, no payroll, no opening balances
-     * and no equity movement, so its account summary is not a trial balance in
-     * the accounting sense and must never be read as one. It cannot be
-     * unbalanced either: every entry is constructed balanced, so `is_balanced`
-     * proves the posting code works and says nothing whatever about the
-     * business.
-     *
-     * Shipped in the payload rather than written on the screen, so the caveat
-     * travels with the numbers into whatever consumes them.
-     */
-    private const COVERAGE = [
-        'is_statutory_trial_balance' => false,
-        'includes' => [
-            'Verified project and overhead costs',
-            'Recoverable input VAT and withholding tax',
-            'Stores inventory movements and goods-received accruals',
-            'Payroll accruals and payments explicitly posted from HR',
-        ],
-        'excludes' => [
-            'Revenue, client invoices and receipts',
-            'Payroll not explicitly posted from HR',
-            'Bank and cash movements not raised as a spend voucher',
-            'Opening balances, equity, depreciation and year-end adjustments',
-        ],
-        'note' => 'A cost-side account summary, not a statutory trial balance. Every entry is '
-            . 'constructed balanced, so a balanced total confirms the posting logic, not the books. '
-            . 'The statutory position is prepared in WNG\'s external accounting package.',
-    ];
-
     /** Sources a caller may filter by, mapped to the stored FQCNs. */
     private const SOURCES = [
         'cost_line' => CostLine::class,
@@ -228,14 +196,16 @@ class JournalEntryController extends Controller
     }
 
     /**
-     * Debits and credits by account for a period — a cost-side account summary.
+     * Debits and credits by account for a period — a cost-and-revenue account
+     * summary.
      *
-     * Named `trialBalance` for its route, but see COVERAGE: it is not one, and
-     * the payload says so. With no revenue, payroll or opening balances in this
-     * ledger, the totals cannot describe a financial position; what they are
-     * genuinely good for is the detail behind a single account — how much hit
-     * Input VAT Recoverable in March, what accumulated in WHT Payable — which is
-     * the number Finance carries to the return and to the external package.
+     * Named `trialBalance` for its route, but see LedgerCoverage: it is not a
+     * statutory one yet, and the payload says so. Depreciation and opening
+     * balances are still missing, so the totals cannot describe a full
+     * financial position; what they are genuinely good for is the detail
+     * behind a single account — how much hit Input VAT Recoverable in March,
+     * what accumulated in WHT Payable — which is the number Finance carries to
+     * the return and to the external package.
      *
      * `is_balanced` is retained as an integrity check on the posting code, not
      * as an accounting assertion. Every entry builds its credit as a balancing
@@ -245,6 +215,13 @@ class JournalEntryController extends Controller
      * Draft entries are excluded. Reversed originals remain alongside their
      * compensating entries: removing an original rewrites its historical month
      * and leaves the reversal as an unsupported negative cost.
+     *
+     * `account_type` rides along additively (Profit and Loss sub-grouping —
+     * direct cost, overhead, opex, revenue — alongside the existing `category`
+     * which is the asset/liability/equity/revenue/expense split) so a caller
+     * can subtotal without a second query. It is not always populated — see
+     * ProfitAndLossService for how an unclassified account is handled rather
+     * than silently dropped.
      */
     public function trialBalance(Request $request): JsonResponse
     {
@@ -261,13 +238,20 @@ class JournalEntryController extends Controller
             ->whereIn('journal_entries.status', ['posted', 'reversed'])
             ->when($filters['from'] ?? null, fn ($q, $from) => $q->whereDate('journal_entries.posting_date', '>=', $from))
             ->when($filters['to'] ?? null, fn ($q, $to) => $q->whereDate('journal_entries.posting_date', '<=', $to))
-            ->groupBy('chart_of_accounts.id', 'chart_of_accounts.code', 'chart_of_accounts.name', 'chart_of_accounts.category')
+            ->groupBy(
+                'chart_of_accounts.id',
+                'chart_of_accounts.code',
+                'chart_of_accounts.name',
+                'chart_of_accounts.category',
+                'chart_of_accounts.account_type',
+            )
             ->orderBy('chart_of_accounts.code')
             ->get([
                 'chart_of_accounts.id as account_id',
                 'chart_of_accounts.code',
                 'chart_of_accounts.name',
                 'chart_of_accounts.category',
+                'chart_of_accounts.account_type',
                 DB::raw("SUM(CASE WHEN journal_lines.entry_type = 'debit' THEN journal_lines.base_amount ELSE 0 END) as debit"),
                 DB::raw("SUM(CASE WHEN journal_lines.entry_type = 'credit' THEN journal_lines.base_amount ELSE 0 END) as credit"),
             ]);
@@ -277,6 +261,7 @@ class JournalEntryController extends Controller
             'code' => $row->code,
             'name' => $row->name,
             'category' => $row->category,
+            'account_type' => $row->account_type,
             'debit' => number_format((float) $row->debit, 2, '.', ''),
             'credit' => number_format((float) $row->credit, 2, '.', ''),
             // Signed toward the side the account sits on, so a reader does not
@@ -301,7 +286,7 @@ class JournalEntryController extends Controller
                         2,
                     ) === 0,
                 ],
-                'coverage' => self::COVERAGE,
+                'coverage' => LedgerCoverage::describe(),
             ],
             'filters' => $filters,
         ]);

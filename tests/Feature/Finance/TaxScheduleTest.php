@@ -4,11 +4,16 @@ namespace Tests\Feature\Finance;
 
 use App\Constants\Permissions;
 use App\Models\User;
+use App\Constants\EnquiryConstants;
+use App\Models\ProjectEnquiry;
+use App\Modules\ClientService\Models\Client;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceTaxSeeder;
+use App\Modules\Finance\Models\ProjectInvoice;
+use App\Modules\Finance\Models\ProjectInvoiceLine;
 use App\Modules\Finance\Models\VatTreatment;
 use App\Modules\Finance\Models\WhtCategory;
 use App\Modules\Finance\Services\TaxScheduleService;
@@ -82,6 +87,105 @@ class TaxScheduleTest extends TestCase
             'supplier_invoice_no' => 'INV-778',
             'posted_at' => now(),
         ], $overrides));
+    }
+
+    /** An issued client invoice line, as the ledger would hold it once posted. */
+    private function invoicedLine(array $invoiceOverrides = [], array $lineOverrides = []): ProjectInvoiceLine
+    {
+        $client = Client::factory()->create(['email' => 'vat-out-' . uniqid() . '@test.local']);
+
+        $enquiry = ProjectEnquiry::create([
+            'date_received' => '2026-03-01',
+            'expected_delivery_date' => '2026-03-15',
+            'client_id' => $client->id,
+            'title' => 'Exhibition stand',
+            'description' => 'VAT output schedule test project',
+            'priority' => EnquiryConstants::PRIORITY_MEDIUM,
+            'status' => EnquiryConstants::STATUS_ENQUIRY_LOGGED,
+            'contact_person' => 'Jane Test',
+            'enquiry_number' => 'ENQ-VATOUT-' . uniqid(),
+            'job_number' => 'WNG-VO-2026-' . random_int(100, 999),
+            'created_by' => $this->reader->id,
+        ]);
+
+        $invoice = ProjectInvoice::create(array_merge([
+            'invoice_number' => 'INV-' . str_pad((string) random_int(1, 9999999), 7, '0', STR_PAD_LEFT),
+            'project_enquiry_id' => $enquiry->id,
+            'invoice_date' => '2026-03-10',
+            'due_date' => '2026-04-10',
+            'subtotal' => '10000.00',
+            'tax_amount' => '1600.00',
+            'total_amount' => '11600.00',
+            'status' => 'issued',
+            'created_by' => $this->reader->id,
+        ], $invoiceOverrides));
+
+        return ProjectInvoiceLine::create(array_merge([
+            'project_invoice_id' => $invoice->id,
+            'description' => 'Stand build',
+            'quantity' => 1,
+            'unit_price' => '10000.00',
+            'vat_treatment_id' => $this->treatment('STD16-REC')->id,
+            'net_amount' => '10000.00',
+            'tax_amount' => '1600.00',
+            'total_amount' => '11600.00',
+            'sort_order' => 0,
+        ], $lineOverrides));
+    }
+
+    public function test_the_output_schedule_totals_vat_charged_to_clients(): void
+    {
+        $first = $this->invoicedLine();
+        $this->invoicedLine([], ['net_amount' => '5000.00', 'tax_amount' => '800.00']);
+
+        $schedule = $this->schedules->vatOutputSchedule('2026-03-01', '2026-03-31');
+
+        $this->assertSame('2400.00', $schedule['totals']['output_vat']);
+        $this->assertSame('15000.00', $schedule['totals']['net_sales']);
+        $this->assertSame(2, $schedule['totals']['line_count']);
+        $this->assertSame($first->invoice->enquiry->job_number, $schedule['rows'][0]['job_number']);
+    }
+
+    public function test_draft_and_void_invoices_are_excluded_from_output_vat(): void
+    {
+        $this->invoicedLine(['status' => 'draft']);
+        $this->invoicedLine(['status' => 'void']);
+
+        $schedule = $this->schedules->vatOutputSchedule('2026-03-01', '2026-03-31');
+
+        $this->assertSame(0, $schedule['totals']['line_count']);
+        $this->assertSame('0.00', $schedule['totals']['output_vat']);
+    }
+
+    public function test_a_paid_invoice_still_counts_toward_output_vat(): void
+    {
+        $this->invoicedLine(['status' => 'paid']);
+
+        $this->assertSame('1600.00', $this->schedules->vatOutputSchedule('2026-03-01', '2026-03-31')['totals']['output_vat']);
+    }
+
+    public function test_the_vat_return_nets_output_against_claimable_input(): void
+    {
+        $this->invoicedLine(); // 1,600 output
+        $this->posted(); // 1,600 claimable input
+        $this->posted(['etims_invoice_no' => null, 'tax_amount' => '400.00', 'net_amount' => '2500.00']); // unsupported
+
+        $return = $this->schedules->vatReturn('2026-03-01', '2026-03-31');
+
+        $this->assertSame('1600.00', $return['output_vat']);
+        $this->assertSame('1600.00', $return['claimable_input_vat']);
+        $this->assertSame('400.00', $return['unsupported_input_vat']);
+        // Output and claimable input cancel out; the unsupported line is
+        // correctly excluded from the payable figure, not silently claimed.
+        $this->assertSame('0.00', $return['net_payable']);
+        $this->assertNotNull($return['note']);
+    }
+
+    public function test_the_vat_return_is_positive_when_wng_owes_kra(): void
+    {
+        $this->invoicedLine(); // 1,600 output, nothing claimable
+
+        $this->assertSame('1600.00', $this->schedules->vatReturn('2026-03-01', '2026-03-31')['net_payable']);
     }
 
     public function test_the_claim_schedule_totals_only_what_can_be_substantiated(): void
@@ -289,6 +393,29 @@ class TaxScheduleTest extends TestCase
                         'under_withheld', 'exposed_payee_count'],
                 ],
             ]);
+
+        $this->invoicedLine();
+
+        $this->actingAs($this->reader, 'sanctum')
+            ->getJson('/api/finance/tax/vat-output-schedule?from=2026-03-01&to=2026-03-31')
+            ->assertOk()
+            ->assertJsonStructure([
+                'data' => [
+                    'period' => ['from', 'to'],
+                    'rows' => [['invoice_id', 'invoice_number', 'invoice_date', 'job_number', 'client_name',
+                        'description', 'treatment_code', 'rate_percent', 'net_amount', 'vat_amount']],
+                    'totals' => ['output_vat', 'net_sales', 'line_count'],
+                    'due_date', 'basis',
+                ],
+            ]);
+
+        $this->actingAs($this->reader, 'sanctum')
+            ->getJson('/api/finance/tax/vat-return?from=2026-03-01&to=2026-03-31')
+            ->assertOk()
+            ->assertJsonStructure([
+                'data' => ['period' => ['from', 'to'], 'output_vat', 'claimable_input_vat',
+                    'unsupported_input_vat', 'net_payable', 'due_date', 'note'],
+            ]);
     }
 
     /**
@@ -319,6 +446,19 @@ class TaxScheduleTest extends TestCase
 
         $this->assertStringContainsString('ETIMS-0001', $csv);
         $this->assertStringContainsString('P051234567X', $csv);
+        $this->assertStringContainsString('1600.00', $csv);
+    }
+
+    public function test_the_output_schedule_downloads_as_csv(): void
+    {
+        $line = $this->invoicedLine();
+
+        $csv = $this->actingAs($this->reader, 'sanctum')
+            ->get('/api/finance/tax/vat-output-schedule?from=2026-03-01&to=2026-03-31&format=csv')
+            ->assertOk()
+            ->streamedContent();
+
+        $this->assertStringContainsString($line->invoice->invoice_number, $csv);
         $this->assertStringContainsString('1600.00', $csv);
     }
 }

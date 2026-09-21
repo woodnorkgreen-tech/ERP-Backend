@@ -112,6 +112,10 @@ Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 's
 // Bills - Specific routes FIRST (before resource)
 Route::get('/bills-stats', [BillController::class, 'stats']);
 Route::get('/pending-bills', [BillController::class, 'getPendingBills']);
+// Same hazard as the two routes above: this MUST stay ahead of the
+// apiResource below, or `GET /bills/ageing` resolves as `GET /bills/{bill}`
+// with bill=ageing instead of reaching this action.
+Route::get('/bills/ageing', [BillController::class, 'ageing']);
 Route::post('/search/bills', [BillController::class, 'search']);
 Route::post('/bills/{bill}/record-payment', [BillController::class, 'recordPayment']);
 Route::get('/bills/{bill}/verification', [BillController::class, 'verification']);
