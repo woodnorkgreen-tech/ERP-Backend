@@ -3,6 +3,7 @@
 namespace App\Modules\ProcurementStores\Providers;
 
 use App\Modules\ProcurementStores\Console\ValueUnpricedBoardsCommand;
+use App\Modules\ProcurementStores\Console\ProcessPendingFinancePostingsCommand;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Modules\ProcurementStores\Observers\PurchaseOrderObserver;
@@ -35,6 +36,7 @@ class ProcurementStoresServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 ValueUnpricedBoardsCommand::class,
+                ProcessPendingFinancePostingsCommand::class,
                 \App\Modules\ProcurementStores\Console\OperationsReadinessCommand::class,
             ]);
         }

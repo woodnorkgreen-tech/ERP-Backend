@@ -37,13 +37,11 @@ jobs:
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
-
-            # Tells any running queue worker to finish its current job and exit;
-            # the systemd service (Restart=always, see deploy/erp-queue-worker.service)
-            # brings it straight back up on the code this deploy just pulled. A no-op
-            # if that service was never installed — the worker just keeps running
-            # whatever it was already running, same as before this line existed.
-            php artisan queue:restart
+            # Stores-to-Finance now posts synchronously because production shared
+            # hosting has no service supervisor. Drain records left by the former
+            # queue-based implementation once on every deploy; new movements do
+            # not depend on this command or on a background worker.
+            php artisan stores:process-finance-postings
 
             # No key:generate. It rotates APP_KEY on every deploy, which
             # invalidates every session and every encrypted value. A key is
@@ -80,4 +78,4 @@ jobs:
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
-            php artisan queue:restart
+            php artisan stores:process-finance-postings

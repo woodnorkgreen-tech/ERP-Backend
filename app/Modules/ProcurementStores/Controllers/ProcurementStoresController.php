@@ -12,7 +12,6 @@ use App\Modules\ProcurementStores\Models\InventoryLot;
 use App\Modules\ProcurementStores\Models\InventorySerialItem;
 use App\Modules\ProcurementStores\Models\Stock;
 use App\Modules\ProcurementStores\Models\StoresFinancePosting;
-use App\Modules\ProcurementStores\Jobs\ProcessStoresFinancePosting;
 use App\Modules\ProcurementStores\Services\StockMovementPoster;
 use App\Modules\ProcurementStores\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
@@ -103,9 +102,10 @@ class ProcurementStoresController extends Controller
             'status' => 'pending', 'last_error' => null, 'next_retry_at' => null,
             'last_retried_by' => auth()->id(),
         ]);
-        ProcessStoresFinancePosting::dispatch($inventoryLog->id)->onQueue('stores-finance');
+        app(\App\Modules\ProcurementStores\Services\StoresFinanceOutbox::class)
+            ->processSynchronously($inventoryLog);
 
-        return response()->json(['message' => 'Finance posting queued. Stock will not move again.']);
+        return response()->json(['message' => 'Finance posting processed. Stock was not moved again.']);
     }
 
     public function resolveFinanceValuation(Request $request, StoresFinancePosting $inventoryLog): JsonResponse
@@ -132,10 +132,11 @@ class ProcurementStoresController extends Controller
                 'resolved_unit_cost' => $validated['unit_cost'], 'resolution_notes' => $validated['reason'],
                 'resolved_by' => auth()->id(), 'resolved_at' => now(), 'last_retried_by' => auth()->id(),
             ]);
-            ProcessStoresFinancePosting::dispatch($posting->id)->onQueue('stores-finance')->afterCommit();
+            app(\App\Modules\ProcurementStores\Services\StoresFinanceOutbox::class)
+                ->processSynchronously($posting);
         });
 
-        return response()->json(['message' => 'Valuation recorded and Finance posting queued.']);
+        return response()->json(['message' => 'Valuation recorded and Finance posting processed.']);
     }
 
     public function controlOptions(LibraryMaterial $material): JsonResponse

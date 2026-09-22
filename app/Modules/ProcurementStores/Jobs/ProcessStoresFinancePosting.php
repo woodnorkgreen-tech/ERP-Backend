@@ -68,8 +68,11 @@ class ProcessStoresFinancePosting implements ShouldQueue
             ]);
         } catch (Throwable $exception) {
             $posting->update([
-                'status' => 'pending', 'last_error' => mb_substr($exception->getMessage(), 0, 2000),
-                'next_retry_at' => now()->addSeconds($this->backoff[min(max($posting->attempts - 1, 0), count($this->backoff) - 1)]),
+                // This job now runs synchronously: there is no background worker
+                // to perform a later attempt. Surface the exception immediately
+                // and leave an explicit failed record for the guarded Retry action.
+                'status' => 'failed', 'last_error' => mb_substr($exception->getMessage(), 0, 2000),
+                'next_retry_at' => null,
                 'processing_started_at' => null,
             ]);
             throw $exception;
