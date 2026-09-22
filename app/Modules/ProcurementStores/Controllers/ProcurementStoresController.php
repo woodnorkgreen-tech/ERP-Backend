@@ -330,6 +330,11 @@ class ProcurementStoresController extends Controller
                     ? $material->materialCategory->name : $material->subcategory,
                 'unit_of_measure'   => $material->baseUom?->code ?? $material->unit_of_measure,
                 'unit_cost'         => $material->unit_cost,
+                // The receiving API accepts this fallback when a board has no
+                // receipt-derived average yet. Omitting it made both Stores
+                // clients falsely block a valid receipt as "no default price".
+                'default_unit_cost' => $material->default_unit_cost !== null
+                    ? (float) $material->default_unit_cost : null,
                 'workstation'       => $material->workstation,
                 'workstation_name'  => $material->workstation?->name ?? 'N/A',
                 'attributes'        => $material->attributes ?? [],

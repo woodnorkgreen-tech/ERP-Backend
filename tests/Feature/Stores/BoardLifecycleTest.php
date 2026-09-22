@@ -582,6 +582,16 @@ class BoardLifecycleTest extends TestCase
         $this->assertTrue($boards->every(fn (Board $board) => (float) $board->current_value === 2400.00));
     }
 
+    public function test_inventory_exposes_the_default_price_used_by_board_receiving(): void
+    {
+        $this->actAs('Stores');
+        $this->material->update(['unit_cost' => 0, 'default_unit_cost' => 2400.00]);
+
+        $this->getJson('/api/procurement-stores/inventory?include_unstocked=1')
+            ->assertOk()
+            ->assertJsonPath('data.data.0.default_unit_cost', 2400);
+    }
+
     public function test_a_receipt_price_outranks_the_default_price(): void
     {
         $this->actAs('Stores');
