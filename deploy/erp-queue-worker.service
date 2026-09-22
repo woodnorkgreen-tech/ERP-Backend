@@ -1,0 +1,38 @@
+# Keeps the Laravel queue worker alive on the production/staging box.
+#
+# Why this exists: nothing was supervising `queue:work` before this — it was
+# started by hand over SSH and died silently (server reboot, OOM, a crashed
+# job) with nothing to bring it back. Every OTHER queued job in the app uses
+# the default queue and looked fine, which is why the gap went unnoticed:
+# only `stores-finance` (ProcessStoresFinancePosting) is dispatched to a named
+# queue, so it's the one that silently stopped moving. See
+# docs/general-ledger-plan.md and the StoresFinancePosting flow for context.
+#
+# Install (one-time, per server — this file is not applied automatically by
+# the deploy pipeline, which cannot install a system service without root):
+#
+#   sudo cp deploy/erp-queue-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now erp-queue-worker
+#   sudo systemctl status erp-queue-worker
+#
+# Once installed, .github/workflows/deploy.yml's `php artisan queue:restart`
+# step makes every future deploy hand this a fresh copy of the code —
+# systemd's Restart=always brings it straight back up.
+#
+# Edit User/WorkingDirectory/ExecStart's php path below for the target box
+# before installing (confirm the php path with `which php` on that server).
+
+[Unit]
+Description=ERP Laravel Queue Worker (stores-finance, default)
+After=network.target mysql.service
+
+[Service]
+User=woodnork
+Restart=always
+RestartSec=5
+WorkingDirectory=/home/woodnork/erp-backend-master
+ExecStart=/usr/bin/php artisan queue:work --queue=stores-finance,default --sleep=3 --tries=3 --max-time=3600
+
+[Install]
+WantedBy=multi-user.target
