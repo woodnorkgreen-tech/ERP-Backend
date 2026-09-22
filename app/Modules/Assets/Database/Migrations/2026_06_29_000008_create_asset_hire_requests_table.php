@@ -17,6 +17,7 @@ return new class extends Migration
 
             // 'hire' = short-term, has an expected return date, flows through Returns Queue.
             // 'assign' = long-term company asset (e.g. a laptop) — held until reassigned, leads only.
+            // 'custodian' = temporarily, full responsibility assigned to one person, leads only.
             $table->string('request_type', 20)->default('hire');
 
             $table->foreignId('project_id')->nullable()->constrained('projects')->nullOnDelete();

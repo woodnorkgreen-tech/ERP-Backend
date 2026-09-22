@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChainCore | Supply Chain</title>
+  <!-- Font & Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <style>
+    /* ===== RESET & BASE ===== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: #f6f8fc; color: #0b1a2f; line-height: 1.5; }
+    a { text-decoration: none; color: inherit; }
+    ul { list-style: none; }
+    img { max-width: 100%; display: block; }
+
+    /* ===== LAYOUT ===== */
+    .container { max-width: 1280px; margin: 0 auto; padding: 0 2rem; }
+
+    /* ===== BUTTONS ===== */
+    .btn-primary {
+      background: #0b2b4f;
+      color: white;
+      padding: 0.75rem 2rem;
+      border-radius: 40px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      border: none;
+      cursor: pointer;
+      display: inline-block;
+      transition: 0.25s;
+    }
+    .btn-primary:hover { background: #1a3f62; transform: translateY(-2px); box-shadow: 0 8px 18px rgba(11,43,79,0.15); }
+    .btn-outline {
+      background: transparent;
+      border: 1.5px solid #0b2b4f;
+      color: #0b2b4f;
+      padding: 0.7rem 2rem;
+      border-radius: 40px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: 0.25s;
+      display: inline-block;
+    }
+    .btn-outline:hover { background: #0b2b4f; color: white; }
+
+    /* ===== HEADER ===== */
+    .navbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.2rem 2rem;
+      background: white;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.03);
+      flex-wrap: wrap;
+    }
+    .logo { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.5px; color: #0b2b4f; }
+    .logo span { color: #2a6b9c; }
+    .nav-links { display: flex; gap: 2.5rem; font-weight: 500; color: #1f3a57; }
+    .nav-links a { transition: 0.2s; }
+    .nav-links a:hover { color: #0b2b4f; }
+    .nav-actions { display: flex; gap: 1rem; align-items: center; }
+    .nav-actions i { font-size: 1.2rem; color: #1f3a57; }
+
+    /* ===== HERO ===== */
+    .hero {
+      background: linear-gradient(145deg, #eaf0f8, #dce5f0);
+      padding: 4rem 2rem 5rem;
+      border-radius: 0 0 40px 40px;
+      margin-bottom: 2rem;
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      align-items: center;
+    }
+    .hero h1 {
+      font-size: 3.2rem;
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: -1px;
+      color: #0b1a2f;
+    }
+    .hero h1 i { color: #1f6e9e; }
+    .hero p {
+      font-size: 1.15rem;
+      color: #1f3a57;
+      max-width: 500px;
+      margin: 1.5rem 0 2rem;
+    }
+    .hero-badge {
+      display: flex;
+      gap: 2rem;
+      margin-top: 2rem;
+      flex-wrap: wrap;
+    }
+    .hero-badge span { background: white; padding: 0.4rem 1rem; border-radius: 40px; font-size: 0.8rem; font-weight: 600; color: #0b2b4f; box-shadow: 0 2px 6px rgba(0,0,0,0.02); }
+
+    /* ===== SECTOR CARDS ===== */
+    .section-title {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 2rem;
+      color: #0b1a2f;
+    }
+    .sector-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 2rem;
+      margin: 3rem 0;
+    }
+    .sector-card {
+      background: white;
+      padding: 2rem 1.8rem;
+      border-radius: 24px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.02);
+      border: 1px solid #eef3f9;
+      transition: 0.2s;
+    }
+    .sector-card:hover { transform: translateY(-6px); border-color: #b6ccdf; }
+    .sector-card h3 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+    .sector-card p { color: #2f4a66; font-size: 0.95rem; }
+
+    /* ===== STATS ===== */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4,1fr);
+      gap: 2rem;
+      background: #0b2b4f;
+      color: white;
+      padding: 3rem 2rem;
+      border-radius: 40px;
+      margin: 3rem 0;
+      text-align: center;
+    }
+    .stats-grid h2 { font-size: 2.8rem; font-weight: 700; }
+    .stats-grid p { opacity: 0.8; font-weight: 500; }
+
+    /* ===== CLIENT VOICE ===== */
+    .testimonial {
+      background: white;
+      padding: 2.5rem 2.8rem;
+      border-radius: 32px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.02);
+      margin: 3rem 0;
+      border-left: 6px solid #0b2b4f;
+    }
+    .testimonial i { color: #a0bcd6; font-size: 2rem; margin-right: 0.5rem; }
+    .testimonial p { font-size: 1.2rem; font-weight: 500; color: #0b1a2f; }
+    .testimonial .author { margin-top: 1rem; font-weight: 600; color: #1f3a57; }
+
+    /* ===== 4 STEPS ===== */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4,1fr);
+      gap: 2rem;
+      margin: 3rem 0;
+    }
+    .step { background: white; padding: 2rem 1.5rem; border-radius: 24px; border: 1px solid #e5eef7; }
+    .step .num { font-size: 2.8rem; font-weight: 700; color: #0b2b4f; opacity: 0.2; margin-bottom: 0.5rem; }
+    .step h4 { font-size: 1.2rem; margin-bottom: 0.3rem; }
+    .step p { color: #3a5775; font-size: 0.9rem; }
+
+    /* ===== CAPABILITIES ===== */
+    .cap-grid {
+      display: grid;
+      grid-template-columns: repeat(3,1fr);
+      gap: 1.5rem;
+      margin: 2rem 0;
+    }
+    .cap-item { background: white; padding: 1.5rem; border-radius: 20px; border: 1px solid #eef3f9; font-weight: 600; display: flex; align-items: center; gap: 0.8rem; }
+    .cap-item i { color: #0b2b4f; font-size: 1.6rem; width: 2rem; }
+
+    /* ===== FOOTER ===== */
+    .footer {
+      background: #0b1a2f;
+      color: #b6ccdf;
+      padding: 4rem 2rem 2rem;
+      margin-top: 4rem;
+      border-radius: 40px 40px 0 0;
+    }
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 3rem;
+    }
+    .footer h4 { color: white; font-weight: 600; margin-bottom: 1rem; }
+    .footer a { display: block; margin: 0.5rem 0; transition: 0.2s; }
+    .footer a:hover { color: white; }
+    .footer .logo { color: white; font-size: 2rem; margin-bottom: 1rem; }
+    .footer .copy { border-top: 1px solid #1f3a57; margin-top: 3rem; padding-top: 2rem; text-align: center; font-size: 0.9rem; }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 900px) {
+      .hero-grid { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+      .steps { grid-template-columns: 1fr 1fr; }
+      .footer-grid { grid-template-columns: 1fr 1fr; }
+      .cap-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 600px) {
+      .nav-links { display: none; }
+      .stats-grid { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr; }
+      .footer-grid { grid-template-columns: 1fr; }
+      .cap-grid { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 2.4rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<header>
+  <div class="navbar">
+    <div class="logo">Chain<span>Core</span></div>
+    <ul class="nav-links">
+      <li><a href="#">Services</a></li>
+      <li><a href="#">Solutions</a></li>
+      <li><a href="#">Network</a></li>
+      <li><a href="#">About</a></li>
+      <li><a href="#">Insights</a></li>
+    </ul>
+    <div class="nav-actions">
+      <a href="#"><i class="fas fa-user-circle"></i></a>
+      <a href="#" class="btn-primary" style="padding:0.5rem 1.5rem;">Get a quote</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ===== HERO ===== -->
+  <section class="hero">
+    <div class="container hero-grid">
+      <div>
+        <h1>The world moves. <br><i>We make sure</i> your cargo keeps up.</h1>
+        <p>End-to-end supply chain management for demanding manufacturers, retailers, and distributors — 142 countries, 40 years of precision.</p>
+        <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+          <a href="#" class="btn-primary">Request free audit</a>
+          <a href="#" class="btn-outline">View capabilities</a>
+        </div>
+        <div class="hero-badge">
+          <span>EST. 1984</span>
+          <span>GLOBAL LOGISTICS</span>
+          <span><i class="fas fa-check-circle" style="color:#1f6e9e;"></i> AEO Certified</span>
+        </div>
+      </div>
+      <div style="background: #dce5f0; border-radius: 32px; min-height: 200px; display: flex; align-items: center; justify-content: center; color:#0b2b4f; font-weight: 600; padding:2rem; text-align:center;">
+        <div><i class="fas fa-map-marked-alt" style="font-size:3rem; opacity:0.4;"></i><br>4.2M sq ft smart warehousing</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== SECTORS ===== -->
+  <div class="container">
+    <h2 class="section-title">Built for your sector</h2>
+    <div class="sector-grid">
+      <div class="sector-card"><h3>Manufacturing</h3><p>Just-in-time delivery and supplier consolidation for complex BOM operations.</p></div>
+      <div class="sector-card"><h3>Retail & FMCG</h3><p>Demand-driven replenishment and omnichannel fulfillment from DC to shelf.</p></div>
+      <div class="sector-card"><h3>Pharmaceuticals</h3><p>GDP-compliant cold chain and serialization tracking from plant to pharmacy.</p></div>
+    </div>
+    <a href="#" style="color:#0b2b4f; font-weight:600;">Explore solutions →</a>
+  </div>
+
+  <!-- ===== STATS ===== -->
+  <div class="container">
+    <div class="stats-grid">
+      <div><h2>142</h2><p>Countries operating in</p></div>
+      <div><h2>98.7%</h2><p>On-time delivery</p></div>
+      <div><h2>3.2M</h2><p>Shipments per year</p></div>
+      <div><h2>40+</h2><p>Years of expertise</p></div>
+    </div>
+  </div>
+
+  <!-- ===== TESTIMONIAL ===== -->
+  <div class="container">
+    <div class="testimonial">
+      <i class="fas fa-quote-left"></i>
+      <p>ChainCore cut our landed cost per unit by 18% in twelve months. Their customs team alone prevented three seizures that would have stopped our European launch cold.</p>
+      <div class="author">— Margarethe Volkmann, VP Supply Chain, Henkel AG</div>
+    </div>
+  </div>
+
+  <!-- ===== 4 STEPS ===== -->
+  <div class="container">
+    <h2 class="section-title">Four steps to go-live</h2>
+    <div class="steps">
+      <div class="step"><div class="num">01</div><h4>Audit & Map</h4><p>Diagram every node, score bottlenecks, hand you a frank view of what’s costing you.</p></div>
+      <div class="step"><div class="num">02</div><h4>Design</h4><p>Custom routing, warehouse placement, carrier selection, customs corridors.</p></div>
+      <div class="step"><div class="num">03</div><h4>Integrate</h4><p>API-first connection to ERP/WMS. Parallel ops, data migration, you approve go-live.</p></div>
+      <div class="step"><div class="num">04</div><h4>Optimize</h4><p>24/7 control tower, continuous lane optimization, quarterly strategic reviews.</p></div>
+    </div>
+  </div>
+
+  <!-- ===== CAPABILITIES ===== -->
+  <div class="container">
+    <h2 class="section-title">Six capabilities, one partner</h2>
+    <div class="cap-grid">
+      <div class="cap-item"><i class="fas fa-ship"></i> Freight Transport</div>
+      <div class="cap-item"><i class="fas fa-warehouse"></i> Warehousing</div>
+      <div class="cap-item"><i class="fas fa-file-contract"></i> Customs Clearance</div>
+      <div class="cap-item"><i class="fas fa-chart-line"></i> Analytics</div>
+      <div class="cap-item"><i class="fas fa-snowflake"></i> Cold Chain</div>
+      <div class="cap-item"><i class="fas fa-truck"></i> Last-Mile Delivery</div>
+    </div>
+    <a href="#" style="display:inline-block; margin:1rem 0 2rem; font-weight:600;">View all services →</a>
+  </div>
+
+  <!-- ===== INFRASTRUCTURE ===== -->
+  <div class="container" style="background:#eaf0f8; padding:2.5rem 2rem; border-radius:40px; margin:2rem 0;">
+    <h2 style="font-size:2rem; font-weight:700;">The infrastructure your growth demands — without the capital cost.</h2>
+    <p style="max-width:600px; margin:1rem 0;">4.2M sq ft warehousing, 142-country trade lanes, 40 years of carrier relationships.</p>
+    <ul style="display:flex; flex-wrap:wrap; gap:2rem; margin:1.5rem 0;">
+      <li><i class="fas fa-check-circle" style="color:#0b2b4f;"></i> No minimum contract volume</li>
+      <li><i class="fas fa-check-circle" style="color:#0b2b4f;"></i> Dedicated account director</li>
+      <li><i class="fas fa-check-circle" style="color:#0b2b4f;"></i> Transparent cost-per-shipment</li>
+      <li><i class="fas fa-check-circle" style="color:#0b2b4f;"></i> Real-time visibility</li>
+    </ul>
+  </div>
+
+  <!-- ===== GET STARTED ===== -->
+  <div class="container" style="background:#0b2b4f; color:white; padding:3rem 2.5rem; border-radius:40px; margin:3rem 0;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
+      <div><h2 style="font-size:2.2rem;">Ready to rethink your supply chain?</h2>
+        <p style="opacity:0.8; margin:1rem 0;">deliver a ranked improvement roadmap at no obligation. Most clients receive a preliminary savings estimate within five business days.</p>
+        <p><i class="fas fa-check-circle"></i> No spam. Response within 1 business day.</p>
+      </div>
+      <div style="background:white; padding:2rem; border-radius:24px; color:#0b1a2f;">
+        <form>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+            <input type="text" placeholder="First name" style="padding:0.7rem; border:1px solid #dce5f0; border-radius:40px;">
+            <input type="text" placeholder="Last name" style="padding:0.7rem; border:1px solid #dce5f0; border-radius:40px;">
+          </div>
+          <input type="email" placeholder="Business email" style="width:100%; margin:1rem 0; padding:0.7rem; border:1px solid #dce5f0; border-radius:40px;">
+          <select style="width:100%; padding:0.7rem; border:1px solid #dce5f0; border-radius:40px; margin-bottom:1rem;">
+            <option>Annual shipment volume...</option>
+          </select>
+          <textarea placeholder="What's costing you the most margin or velocity today?" style="width:100%; padding:0.7rem; border:1px solid #dce5f0; border-radius:20px; height:70px;"></textarea>
+          <button class="btn-primary" style="width:100%; margin-top:1rem;">Submit request →</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ===== FOOTER ===== -->
+<footer class="footer">
+  <div class="container footer-grid">
+    <div>
+      <div class="logo">Chain<span style="color:#6f9fc9;">Core</span></div>
+      <p style="margin:0.5rem 0 1.5rem;">Forty years of supply chain excellence. Six continents. One point of accountability.</p>
+      <div style="display:flex; gap:0.8rem; flex-wrap:wrap;">
+        <span style="background:#1f3a57; padding:0.2rem 0.8rem; border-radius:30px; font-size:0.7rem;">ISO 9001:2015</span>
+        <span style="background:#1f3a57; padding:0.2rem 0.8rem; border-radius:30px; font-size:0.7rem;">AEO Certified</span>
+        <span style="background:#1f3a57; padding:0.2rem 0.8rem; border-radius:30px; font-size:0.7rem;">TAPA FSR A</span>
+      </div>
+    </div>
+    <div><h4>Services</h4><a href="#">Ocean & Air Freight</a><a href="#">Customs & Trade</a><a href="#">Warehousing</a><a href="#">Last-Mile</a><a href="#">Analytics</a><a href="#">Cold Chain</a></div>
+    <div><h4>Company</h4><a href="#">About</a><a href="#">Leadership</a><a href="#">Careers</a><a href="#">Press</a><a href="#">Sustainability</a></div>
+    <div><h4>Resources</h4><a href="#">Insights</a><a href="#">Case Studies</a><a href="#">Trust Center</a><a href="#">Compliance</a><a href="#">API Docs</a></div>
+  </div>
+  <div class="container copy">© 2026 ChainCore Logistics GmbH. All rights reserved.</div>
+</footer>
+
+</body>
+</html>
