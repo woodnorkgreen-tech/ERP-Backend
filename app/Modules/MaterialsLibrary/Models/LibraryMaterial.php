@@ -50,7 +50,6 @@ class LibraryMaterial extends Model
         'issue_uom_id',
         'unit_cost',
         'default_unit_cost',
-        'valuation_method',
         'revision_version',
         'effective_date',
         'attributes',

@@ -71,7 +71,6 @@ class LibraryMaterialResource extends JsonResource
                 'to_uom_id' => $conversion->to_uom_id,
                 'factor' => (float) $conversion->factor,
             ])->values()),
-            'valuation_method' => $this->valuation_method,
             'revision_version' => $this->revision_version,
             'effective_date' => $this->effective_date?->toDateString(),
             'unit_cost' => (float) $this->unit_cost,

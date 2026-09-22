@@ -42,7 +42,7 @@ class OperationsReadinessTest extends TestCase
         $this->assertFalse($checks['stock_balances']['ready']);
         $this->assertFalse($checks['stock_valuation']['ready']);
         $this->assertFalse($checks['stores_cost_capture']['ready']);
-        $this->assertSame(['READY-001'], $checks['material_controls']['examples']);
+        $this->assertSame([['code' => 'READY-001', 'material_id' => $material->id]], $checks['material_controls']['examples']);
         $this->assertSame('pending', $posting->fresh()->status);
         $this->assertSame(4.0, (float) $material->stock()->first()->quantity_reserved);
     }

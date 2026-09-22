@@ -66,7 +66,6 @@ class StoreMaterialRequest extends FormRequest
             // priced it yet. A fallback, not the valuation — `unit_cost` stays
             // derived from actual receipts.
             'default_unit_cost' => 'nullable|numeric|min:0',
-            'valuation_method' => 'sometimes|in:FIFO,Landed Cost,Weighted Average',
             'revision_version' => 'sometimes|string|max:20',
             'effective_date' => 'nullable|date',
             'attributes' => 'nullable|array',

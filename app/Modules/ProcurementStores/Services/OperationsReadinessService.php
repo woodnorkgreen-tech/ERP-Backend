@@ -38,8 +38,11 @@ class OperationsReadinessService
             && (float) $material->unit_cost <= 0 && (float) $material->default_unit_cost <= 0);
         $stockErrors = Stock::where('quantity_on_hand', '<', 0)->orWhere('quantity_reserved', '<', 0)
             ->orWhereColumn('quantity_reserved', '>', 'quantity_on_hand')->count();
-        $unvaluedBoards = Board::available()->where(fn ($query) =>
-            $query->whereNull('current_value')->orWhere('current_value', '<=', 0))->count();
+        $unvaluedBoardsQuery = Board::available()->where(fn ($query) =>
+            $query->whereNull('current_value')->orWhere('current_value', '<=', 0));
+        $unvaluedBoards = (clone $unvaluedBoardsQuery)->count();
+        $unvaluedBoardMaterials = (clone $unvaluedBoardsQuery)->with('libraryMaterial:id,material_code')
+            ->get()->pluck('libraryMaterial')->filter()->unique('id')->take(10);
         $unlabelledBoards = Board::available()->where('label_printed', false)->count();
         $failedPostings = StoresFinancePosting::where('status', 'failed')
             ->orWhere(fn ($q) => $q->where('status', 'pending')->where('updated_at', '<', now()->subMinutes(15)))
@@ -51,17 +54,17 @@ class OperationsReadinessService
             $this->check('catalogue', 'Active material catalogue', $materials->isNotEmpty(), $materials->count().' active materials available.',
                 'Register materials and complete their setup before activation.', '/materials-library'),
             $this->check('material_controls', 'Material handling setup', $incomplete->isEmpty(), $incomplete->count().' active materials need setup corrections.',
-                'Complete categories, units, required specifications and compatible handling controls.', '/materials-library', $incomplete->pluck('material_code')->take(10)->all()),
+                'Complete categories, units, required specifications and compatible handling controls.', '/materials-library', $this->materialExamples($incomplete)),
             $this->check('unit_conversions', 'Buying and issuing units', $units->isEmpty(), $units->count().' materials need unit corrections.',
-                'Configure conversions to the stock unit; individually tracked items use the stock unit.', '/materials-library', $units->pluck('material_code')->take(10)->all()),
+                'Configure conversions to the stock unit; individually tracked items use the stock unit.', '/materials-library', $this->materialExamples($units)),
             $this->check('suppliers', 'Active suppliers', Supplier::where('status', 'active')->exists(), Supplier::where('status', 'active')->count().' active suppliers available.',
                 'Register the suppliers needed for purchasing.', '/procurement/suppliers'),
             $this->check('stock_balances', 'Stock and reservations', $stockErrors === 0, $stockErrors.' invalid stock balances or reservations.',
                 'Reconcile stock counts and reservations before issuing.', '/stores/stock-counts'),
             $this->check('stock_valuation', 'Stock valuation', $unpriced->isEmpty(), $unpriced->count().' stocked materials have no valuation.',
-                'Record supported receipt or opening values before issuing to projects.', '/stores/inventory', $unpriced->pluck('material_code')->take(10)->all()),
+                'Record supported receipt or opening values before issuing to projects.', '/stores/inventory', $this->materialExamples($unpriced)),
             $this->check('board_valuation', 'Board valuation', $unvaluedBoards === 0, $unvaluedBoards.' available boards have no value.',
-                'Record receipt valuation for available boards.', '/stores/inventory'),
+                'Record receipt valuation for available boards.', '/stores/inventory', $this->materialExamples($unvaluedBoardMaterials)),
             $this->check('board_labels', 'Board identification', $unlabelledBoards === 0, $unlabelledBoards.' available boards await label confirmation.',
                 'Print and confirm physical board labels before allocation.', '/stores/inventory'),
             $this->check('stores_cost_capture', 'Stores to Finance cost capture', $failedPostings === 0, $failedPostings.' failed or stalled cost postings.',
@@ -80,5 +83,20 @@ class OperationsReadinessService
     private function check(string $key, string $label, bool $ready, string $message, string $directive, string $path, array $examples = []): array
     {
         return compact('key', 'label', 'ready', 'message', 'directive', 'path', 'examples');
+    }
+
+    /**
+     * Named examples a flagged check can point at, carrying the material id so
+     * the frontend can deep-link straight to that item instead of the generic
+     * list the check's `path` names.
+     *
+     * @param  \Illuminate\Support\Collection<int,LibraryMaterial>  $materials
+     * @return array<int,array{code:?string,material_id:int}>
+     */
+    private function materialExamples($materials): array
+    {
+        return $materials->take(10)
+            ->map(fn (LibraryMaterial $material) => ['code' => $material->material_code, 'material_id' => $material->id])
+            ->values()->all();
     }
 }

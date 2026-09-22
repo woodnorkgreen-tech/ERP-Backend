@@ -2,8 +2,10 @@
 
 namespace App\Modules\ProcurementStores\Models;
 
+use App\Modules\ProcurementStores\Services\PurchaseOrderPriceFeedback;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 
 
@@ -77,11 +79,15 @@ class PurchaseOrder extends Model
 
     public function approve($userId)
     {
-        $this->update([
-            'status' => 'approved',
-            'approved_at' => now(),
-            'approved_by' => $userId
-        ]);
+        DB::transaction(function () use ($userId) {
+            $this->update([
+                'status' => 'approved',
+                'approved_at' => now(),
+                'approved_by' => $userId,
+            ]);
+
+            app(PurchaseOrderPriceFeedback::class)->apply($this);
+        });
     }
     /** Backwards-compatible latest receipt for older resources. */
     public function goodsReceiptNote()
