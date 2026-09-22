@@ -161,6 +161,17 @@ class ReplenishmentController extends Controller
             return 'Stock replenishment';
         }
 
+        $printingSources = collect($suggestion['demand_sources'] ?? [])
+            ->where('source_type', 'printing_request');
+        if ($printingSources->isNotEmpty()) {
+            return sprintf(
+                'Printing requests need %s; %s free and %s on order.',
+                rtrim(rtrim(number_format($printingSources->sum('pending'), 2), '0'), '.'),
+                rtrim(rtrim(number_format($suggestion['free_stock'], 2), '0'), '.'),
+                rtrim(rtrim(number_format($suggestion['incoming'], 2), '0'), '.'),
+            );
+        }
+
         return $suggestion['reason'] === 'job_shortfall'
             ? sprintf(
                 'Approved jobs need %s; %s free and %s on order.',

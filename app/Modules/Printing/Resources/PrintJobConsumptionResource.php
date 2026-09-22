@@ -33,6 +33,7 @@ class PrintJobConsumptionResource extends JsonResource
             'actual_running_m' => $this->float('actual_running_m'),
             'variance_m' => $this->float('variance_m'),
             'variance_percent' => $this->float('variance_percent'),
+            'variance_reason_code' => $this->variance_reason_code,
             'variance_reason' => $this->variance_reason,
             'roll' => $this->whenLoaded('roll', fn () => new PrintRollResource($this->roll)),
             'job' => $this->whenLoaded('job', fn () => [

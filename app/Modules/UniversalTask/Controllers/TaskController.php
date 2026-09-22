@@ -381,6 +381,7 @@ class TaskController
         $validator = Validator::make($request->all(), [
             'status' => ['required', Rule::in(['pending', 'in_progress', 'blocked', 'review', 'completed', 'cancelled'])],
             'notes' => 'nullable|string|max:1000',
+            'blocked_reason' => 'required_if:status,blocked|nullable|string|max:1000',
         ]);
 
         if ($validator->fails()) {
@@ -412,7 +413,8 @@ class TaskController
                 $task,
                 $request->status,
                 $user->id,
-                $request->notes
+                $request->notes,
+                $request->blocked_reason
             );
 
             return response()->json([

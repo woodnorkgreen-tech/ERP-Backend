@@ -6,12 +6,15 @@ use App\Modules\Printing\Controllers\PrintManualConsumptionController;
 use App\Modules\Printing\Controllers\PrintMaterialRequestController;
 use App\Modules\Printing\Controllers\PrintRollController;
 use App\Modules\Printing\Controllers\PrintingDashboardController;
+use App\Modules\Printing\Controllers\UpcomingPrintJobController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/dashboard', [PrintingDashboardController::class, 'index']);
 Route::get('/dashboard/project-usage', [PrintingDashboardController::class, 'projectUsage']);
 
 Route::get('/jobs', [PrintJobController::class, 'index']);
+Route::post('/jobs', [PrintJobController::class, 'store']);
+Route::get('/upcoming-jobs', [UpcomingPrintJobController::class, 'index']);
 Route::get('/jobs/{job}', [PrintJobController::class, 'show']);
 Route::put('/jobs/{job}', [PrintJobController::class, 'update']);
 Route::post('/jobs/{job}/status', [PrintJobController::class, 'status']);
@@ -33,6 +36,8 @@ Route::get('/material-requests', [PrintMaterialRequestController::class, 'index'
 Route::post('/material-requests', [PrintMaterialRequestController::class, 'store']);
 Route::delete('/material-requests/{materialRequest}', [PrintMaterialRequestController::class, 'destroy']);
 Route::post('/material-requests/{materialRequest}/receive', [PrintMaterialRequestController::class, 'receive']);
+Route::post('/material-requests/{materialRequest}/issue', [PrintMaterialRequestController::class, 'issue']);
+Route::post('/material-requests/{materialRequest}/awaiting-purchase', [PrintMaterialRequestController::class, 'awaitingPurchase']);
 
 Route::get('/consumption/manual', [PrintManualConsumptionController::class, 'index']);
 Route::post('/consumption/manual', [PrintManualConsumptionController::class, 'store']);
@@ -40,3 +45,4 @@ Route::post('/consumption/manual', [PrintManualConsumptionController::class, 'st
 Route::get('/lookups/materials', [PrintLookupController::class, 'materials']);
 Route::get('/lookups/machines', [PrintLookupController::class, 'machines']);
 Route::get('/lookups/operators', [PrintLookupController::class, 'operators']);
+Route::get('/lookups/projects', [PrintLookupController::class, 'projects']);

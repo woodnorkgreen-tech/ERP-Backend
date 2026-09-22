@@ -5,6 +5,7 @@ namespace App\Modules\Design\Models;
 use App\Models\Project;
 use App\Models\ProjectEnquiry;
 use App\Models\User;
+use App\Modules\ClientService\Models\Client;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -43,6 +44,11 @@ class DesignJob extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id');
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(Client::class);
     }
 
     public function items(): HasMany

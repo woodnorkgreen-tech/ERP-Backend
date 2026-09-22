@@ -31,6 +31,7 @@ class PrintJobConsumption extends Model
         'actual_running_m',
         'variance_m',
         'variance_percent',
+        'variance_reason_code',
         'variance_reason',
     ];
 
