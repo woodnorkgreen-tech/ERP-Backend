@@ -35,6 +35,71 @@ class ProjectMaterialDemand
     private const ISSUE_TYPES = ['check_out', 'issue', 'consumption'];
 
     /**
+     * Fulfilment state for every approved-material line on one project.
+     *
+     * This is also the mobile/API projection. Keeping it here prevents clients
+     * from treating the immutable specification quantity as quantity still
+     * available to issue. Older movements without a project_material_id are
+     * allocated FIFO, exactly as the posting guard does.
+     *
+     * @param  Collection<int, ElementMaterial>  $lines
+     * @return array<int, array{required: float, issued: float, returned: float, net_issued: float, remaining: float, fully_issued: bool}>
+     */
+    public function fulfilmentForProject(Project $project, Collection $lines): array
+    {
+        $lines = $lines->filter(fn (ElementMaterial $line) => $line->is_included)
+            ->sortBy('id')->values();
+
+        if ($lines->isEmpty()) {
+            return [];
+        }
+
+        $movements = InventoryLog::query()
+            ->where('project_id', $project->id)
+            ->whereIn('type', [...self::ISSUE_TYPES, 'return'])
+            ->get(['type', 'quantity', 'material_id', 'project_material_id', 'return_kind', 'notes']);
+
+        $reopensRequirement = fn ($row): bool => $row->type === 'return'
+            && $row->return_kind !== 'recovered_offcut'
+            && ! str_starts_with((string) $row->notes, 'Offcut ');
+
+        $linkedIssues = $movements->whereIn('type', self::ISSUE_TYPES)
+            ->whereNotNull('project_material_id')->groupBy('project_material_id');
+        $linkedReturns = $movements->filter($reopensRequirement)
+            ->whereNotNull('project_material_id')->groupBy('project_material_id');
+        $legacyIssues = $movements->whereIn('type', self::ISSUE_TYPES)
+            ->whereNull('project_material_id')->groupBy('material_id')
+            ->map(fn (Collection $rows) => (float) $rows->sum(fn ($row) => abs((float) $row->quantity)));
+        $legacyReturns = $movements->filter($reopensRequirement)
+            ->whereNull('project_material_id')->groupBy('material_id')
+            ->map(fn (Collection $rows) => (float) $rows->sum(fn ($row) => abs((float) $row->quantity)));
+
+        $legacyNetRemaining = $legacyIssues->map(
+            fn (float $issued, $materialId) => max(0.0, $issued - (float) ($legacyReturns[$materialId] ?? 0)),
+        )->all();
+
+        return $lines->mapWithKeys(function (ElementMaterial $line) use ($linkedIssues, $linkedReturns, &$legacyNetRemaining) {
+            $required = (float) $line->quantity;
+            $issued = (float) ($linkedIssues->get($line->id)?->sum(fn ($row) => abs((float) $row->quantity)) ?? 0);
+            $returned = (float) ($linkedReturns->get($line->id)?->sum(fn ($row) => abs((float) $row->quantity)) ?? 0);
+            $materialId = (int) $line->library_material_id;
+            $legacyForLine = min($required, (float) ($legacyNetRemaining[$materialId] ?? 0));
+            $legacyNetRemaining[$materialId] = max(0.0, (float) ($legacyNetRemaining[$materialId] ?? 0) - $legacyForLine);
+            $netIssued = max(0.0, $issued - $returned + $legacyForLine);
+            $remaining = max(0.0, $required - $netIssued);
+
+            return [$line->id => [
+                'required' => round($required, 4),
+                'issued' => round($issued + $legacyForLine, 4),
+                'returned' => round($returned, 4),
+                'net_issued' => round($netIssued, 4),
+                'remaining' => round($remaining, 4),
+                'fully_issued' => $remaining <= 0.00001,
+            ]];
+        })->all();
+    }
+
+    /**
      * Approved, unissued demand per library material.
      *
      * @param  array<int, int>|null  $materialIds  Narrow to these materials; null for all.

@@ -96,6 +96,10 @@ class StockMovementRequest extends FormRequest
             ],
             'issue' => [
                 'lines.*.project_id' => 'nullable|exists:projects,id',
+                // A project issue must name the approved requirement it fulfils.
+                // Without this link a client can repeatedly present the original
+                // specification quantity and bypass the remaining-quantity guard.
+                'lines.*.project_material_id' => 'required_with:lines.*.project_id|exists:element_materials,id',
                 // Custody is the point of an issue: an issue nobody is named on
                 // is stock that has left the shelf with no one accountable for
                 // it. Batch issuing always demanded this and single issuing
@@ -133,6 +137,7 @@ class StockMovementRequest extends FormRequest
             'lines.*.quantity.min' => 'Every line needs a quantity greater than zero.',
             'lines.*.notes.required' => 'Say what happened — a write-off needs a reason.',
             'lines.*.recipient_name.required' => 'Name who is receiving the stock.',
+            'lines.*.project_material_id.required_with' => 'Choose the approved project material line being issued.',
         ];
     }
 

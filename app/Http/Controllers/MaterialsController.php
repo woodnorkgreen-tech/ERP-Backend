@@ -12,6 +12,8 @@ use App\Models\ElementTemplate;
 use App\Models\ElementTemplateMaterial;
 use App\Models\TaskQuoteData;
 use App\Modules\Projects\Models\EnquiryTask;
+use App\Models\Project;
+use App\Modules\ProcurementStores\Services\ProjectMaterialDemand;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
@@ -223,7 +225,7 @@ class MaterialsController extends Controller
         ]);
     }
 
-    public function getMaterialsByEnquiry(int $enquiryId): JsonResponse
+    public function getMaterialsByEnquiry(int $enquiryId, ProjectMaterialDemand $demand): JsonResponse
     {
         try {
             // Find materials task for this enquiry
@@ -238,8 +240,23 @@ class MaterialsController extends Controller
                 ], 404);
             }
 
-            // Get materials data using the materials task ID
-            return $this->getMaterialsData($materialsTask->id);
+            $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)
+                ->with(['elements.materials'])
+                ->first();
+
+            if (! $materialsData) {
+                return $this->getMaterialsData($materialsTask->id);
+            }
+
+            $project = Project::where('enquiry_id', $enquiryId)->first();
+            $lines = $materialsData->elements->flatMap->materials;
+            $fulfilment = $project ? $demand->fulfilmentForProject($project, $lines) : [];
+
+            return response()->json([
+                'data' => $this->formatMaterialsData($materialsData, $fulfilment),
+                'designGate' => $this->checkDesignApprovalGate($materialsTask->id),
+                'message' => 'Materials data retrieved successfully',
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to retrieve materials data',
@@ -1401,12 +1418,12 @@ class MaterialsController extends Controller
     /**
      * Format materials data for frontend
      */
-    private function formatMaterialsData(TaskMaterialsData $materialsData): array
+    private function formatMaterialsData(TaskMaterialsData $materialsData, array $fulfilment = []): array
     {
         try {
             return [
                 'projectInfo' => $materialsData->project_info ?? [],
-                'projectElements' => $materialsData->elements->map(function ($element) {
+                'projectElements' => $materialsData->elements->map(function ($element) use ($fulfilment) {
                     return [
                         'id' => (string) $element->id,
                         'templateId' => $element->template_id,
@@ -1419,7 +1436,8 @@ class MaterialsController extends Controller
                         'unitOfMeasurement' => $element->unit_of_measurement,
                         'dimensions' => $element->dimensions ?? ['length' => '', 'width' => '', 'height' => ''],
                         'isIncluded' => (bool) $element->is_included,
-                        'materials' => $element->materials->map(function ($material) {
+                        'materials' => $element->materials->map(function ($material) use ($fulfilment) {
+                            $state = $fulfilment[$material->id] ?? null;
                             return [
                                 'id' => (string) $material->id,
                                 'persistent_id' => $material->persistent_id,
@@ -1427,6 +1445,13 @@ class MaterialsController extends Controller
                                 'description' => $material->description,
                                 'unitOfMeasurement' => $material->unit_of_measurement,
                                 'quantity' => (float) $material->quantity,
+                                'requiredQuantity' => $state['required'] ?? (float) $material->quantity,
+                                'issuedQuantity' => $state['issued'] ?? 0.0,
+                                'returnedQuantity' => $state['returned'] ?? 0.0,
+                                'netIssuedQuantity' => $state['net_issued'] ?? 0.0,
+                                'remainingQuantity' => $state['remaining'] ?? (float) $material->quantity,
+                                'availableToIssue' => $state['remaining'] ?? (float) $material->quantity,
+                                'isFullyIssued' => $state['fully_issued'] ?? false,
                                 'unitCost' => $material->unit_cost !== null ? (float) $material->unit_cost : null,
                                 'isIncluded' => (bool) $material->is_included,
                                 'isAdditional' => (bool) $material->is_additional,

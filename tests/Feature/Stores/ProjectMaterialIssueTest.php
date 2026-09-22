@@ -294,6 +294,37 @@ class ProjectMaterialIssueTest extends TestCase
         $this->assertSame(10.0, $this->onHand($material));
     }
 
+    public function test_a_project_issue_must_name_the_approved_material_line(): void
+    {
+        $material = $this->material('Mobile issue material', 10);
+        $planned = $this->specify($material, 5);
+        $line = $this->line($material, $planned, 2);
+        unset($line['project_material_id']);
+
+        $this->issue([$line])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('lines.0.project_material_id');
+
+        $this->assertSame(10.0, $this->onHand($material));
+    }
+
+    public function test_enquiry_material_api_reports_only_the_quantity_remaining_to_issue(): void
+    {
+        $material = $this->material('Mobile API material', 10);
+        $planned = $this->specify($material, 5);
+
+        $this->issue([$this->line($material, $planned, 5)])->assertOk();
+
+        $this->getJson("/api/projects/enquiries/{$this->enquiryId}/materials")
+            ->assertOk()
+            ->assertJsonPath('data.projectElements.0.materials.0.quantity', 5)
+            ->assertJsonPath('data.projectElements.0.materials.0.requiredQuantity', 5)
+            ->assertJsonPath('data.projectElements.0.materials.0.issuedQuantity', 5)
+            ->assertJsonPath('data.projectElements.0.materials.0.remainingQuantity', 0)
+            ->assertJsonPath('data.projectElements.0.materials.0.availableToIssue', 0)
+            ->assertJsonPath('data.projectElements.0.materials.0.isFullyIssued', true);
+    }
+
     /** The whole desk selection posts, or none of it does. */
     public function test_one_refused_line_rolls_the_whole_selection_back(): void
     {
