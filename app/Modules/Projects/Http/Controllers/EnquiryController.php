@@ -1450,14 +1450,237 @@ class EnquiryController extends Controller
         // withVerifiedPaidAmount() counts only verified, non-reversed payments
         // toward paid_amount — see ProjectInvoice::scopeWithVerifiedPaidAmount()
         // for why an unfiltered sum here previously understated a client's
-        // real outstanding balance.
+        // real outstanding balance. withNetTotal() adds net_total_amount —
+        // total_amount after any non-void credit note — so a credited
+        // invoice's balance drops here too, not only in the enquiry-wide
+        // over-billing cap that already summed credit notes for free.
         $invoices = \App\Modules\Finance\Models\ProjectInvoice::query()->where('project_enquiry_id', $enquiry->id)
-            ->withVerifiedPaidAmount()->orderByDesc('invoice_date')->get()
+            ->withVerifiedPaidAmount()->withNetTotal()->orderByDesc('invoice_date')->get()
             ->map(function ($invoice) {
-                $paid = (float) ($invoice->paid_amount ?? 0); $balance = max(0, (float) $invoice->total_amount - $paid);
-                return array_merge($invoice->toArray(), ['paid_amount'=>$paid,'balance'=>$balance,'days_overdue'=>$invoice->status==='issued' && $balance>0 && $invoice->due_date->isPast() ? $invoice->due_date->diffInDays(now()) : 0]);
+                $paid = (float) ($invoice->paid_amount ?? 0);
+                $netTotal = (float) ($invoice->net_total_amount ?? $invoice->total_amount);
+                $balance = max(0, $netTotal - $paid);
+                return array_merge($invoice->toArray(), [
+                    'paid_amount' => $paid,
+                    'net_total_amount' => $netTotal,
+                    'balance' => $balance,
+                    'is_credit_note' => $invoice->credits_invoice_id !== null,
+                    'days_overdue' => $invoice->status === 'issued' && $balance > 0 && $invoice->due_date->isPast() ? $invoice->due_date->diffInDays(now()) : 0,
+                ]);
             });
         return response()->json(['data'=>$invoices]);
+    }
+
+    /**
+     * Raise a credit note against an issued or paid invoice: a separate
+     * document that reduces what the client owes, without editing the
+     * original invoice.
+     *
+     * ## Why a new document rather than an edited invoice
+     *
+     * The original invoice stays exactly as issued — the same audit-safety
+     * rule every other correction in this ledger follows (a reversal is an
+     * additional posting, never an edit). `InvoicePricer::priceLine()` already
+     * refuses a negative invoice line for this reason ("Raise a credit note to
+     * reduce an invoice") — this is that credit note.
+     *
+     * ## Why its money is stored negative
+     *
+     * A credit note's lines and totals are stored as the negative of what
+     * they would be as an ordinary invoice line. That single convention is
+     * what lets `createProjectInvoice()`'s over-billing cap and
+     * `WorkInProgressReleaseService::billedFraction()` — both enquiry-wide
+     * sums across every invoice row — net a credit note against its invoice
+     * automatically, with no change to either. Per-invoice balance reads
+     * (this invoice's own list row, receivables ageing, the allocation cap
+     * below) key off one specific row rather than an enquiry-wide sum, so
+     * they read `ProjectInvoice::scopeWithNetTotal()` instead.
+     *
+     * ## Why it is capped against what is still owed, not what was billed
+     *
+     * A credit note cannot take an invoice's net position below what has
+     * already been allocated to it. Voiding an allocated invoice is refused
+     * for the same reason ("reverse the allocation first") — this mirrors
+     * that rule rather than silently unwinding somebody's cash matching.
+     *
+     * ## What this deliberately does not do
+     *
+     * It does not reverse any share of the Work in Progress this job's
+     * revenue already released into Cost of Sales — that would need
+     * `WorkInProgressReleaseService` to support releasing a NEGATIVE share,
+     * which it was not built to do and is a real, separate gap, not an
+     * oversight. Company-level profit still corrects itself the moment the
+     * credited revenue reverses; the per-job Cost of Sales split stays
+     * slightly ahead of the credit until that is built.
+     */
+    public function createCreditNote(Request $request, ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
+    {
+        abort_unless((int) $invoice->project_enquiry_id === (int) $enquiry->id, 404);
+
+        if ($invoice->credits_invoice_id !== null) {
+            return response()->json(['message' => 'A credit note cannot itself be credited. Void it instead if it was raised in error.'], 422);
+        }
+
+        $data = $request->validate([
+            'invoice_date' => 'required|date',
+            'reason' => 'required|string|min:5|max:500',
+            'lines' => 'required|array|min:1',
+            'lines.*.description' => 'required|string|max:500',
+            'lines.*.quantity' => 'required|numeric|gt:0',
+            'lines.*.unit_price' => 'required|numeric|min:0',
+            'lines.*.vat_treatment_id' => 'nullable|integer|exists:vat_treatments,id',
+            'lines.*.revenue_account_id' => 'nullable|integer|exists:chart_of_accounts,id',
+        ]);
+
+        if (! in_array($invoice->status, ['issued', 'paid'], true)) {
+            return response()->json([
+                'message' => 'Only an issued or paid invoice can be credited. A draft has nothing to correct, and a voided invoice has already reversed itself.',
+            ], 422);
+        }
+
+        $pricer = app(\App\Modules\Finance\Services\InvoicePricer::class);
+        $creditDate = \Illuminate\Support\Carbon::parse($data['invoice_date'])->toDateString();
+
+        try {
+            $priced = collect($data['lines'])->values()->map(function (array $line, int $index) use ($pricer, $creditDate) {
+                $treatment = $pricer->treatmentFor($line['vat_treatment_id'] ?? null, $creditDate);
+                $line_ = $pricer->priceLine($line['quantity'], $line['unit_price'], $treatment);
+
+                return array_merge(
+                    [
+                        'net_amount' => bcmul($line_['net_amount'], '-1', 2),
+                        'tax_amount' => bcmul($line_['tax_amount'], '-1', 2),
+                        'total_amount' => bcmul($line_['total_amount'], '-1', 2),
+                    ],
+                    [
+                        'description' => $line['description'],
+                        'quantity' => $line['quantity'],
+                        'unit_price' => $line['unit_price'],
+                        'vat_treatment_id' => $line['vat_treatment_id'] ?? null,
+                        'revenue_account_id' => $line['revenue_account_id'] ?? null,
+                        'sort_order' => $index,
+                    ],
+                );
+            })->all();
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        $creditTotal = array_reduce(
+            $priced,
+            fn (string $carry, array $line) => bcadd($carry, $line['total_amount'], 2),
+            '0.00',
+        );
+
+        if (bccomp($creditTotal, '0.00', 2) >= 0) {
+            return response()->json(['message' => 'A credit note has to credit something. Every line priced to zero.'], 422);
+        }
+
+        try {
+            $creditNote = DB::transaction(function () use ($invoice, $enquiry, $data, $creditTotal, $priced) {
+                // Same lock discipline as createProjectInvoice(): without it,
+                // two credit notes raised in parallel could each observe the
+                // same "remaining to credit" balance and over-credit the invoice.
+                $lockedInvoice = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
+
+                $existingCredits = number_format((float) (DB::table('project_invoices')
+                    ->where('credits_invoice_id', $lockedInvoice->id)
+                    ->where('status', '!=', 'void')
+                    ->sum('total_amount') ?: 0), 2, '.', '');
+                $netBeforeThis = bcadd((string) $lockedInvoice->total_amount, $existingCredits, 2);
+                $creditAbs = bcmul($creditTotal, '-1', 2);
+
+                if (bccomp($creditAbs, $netBeforeThis, 2) > 0) {
+                    throw new \DomainException(
+                        'This credit note is for ' . number_format((float) $creditAbs, 2)
+                        . ', but only ' . number_format((float) $netBeforeThis, 2) . ' of invoice '
+                        . $lockedInvoice->invoice_number . ' remains to be credited.'
+                    );
+                }
+
+                $allocated = number_format((float) (DB::table('project_invoice_allocations')
+                    ->where('project_invoice_id', $lockedInvoice->id)->sum('amount') ?: 0), 2, '.', '');
+                $netAfterThis = bcsub($netBeforeThis, $creditAbs, 2);
+
+                if (bccomp($netAfterThis, $allocated, 2) < 0) {
+                    throw new \DomainException(
+                        'A receipt totalling ' . number_format((float) $allocated, 2)
+                        . ' has already been allocated to this invoice, more than the '
+                        . number_format((float) $netAfterThis, 2) . ' this credit note would leave owed. '
+                        . 'Reverse the excess allocation first.'
+                    );
+                }
+
+                $creditNote = \App\Modules\Finance\Models\ProjectInvoice::create([
+                    'invoice_date' => $data['invoice_date'],
+                    'due_date' => $data['invoice_date'],
+                    'notes' => $data['reason'],
+                    // Placeholders; InvoicePricer::retotal() below makes these
+                    // true, from the (already-negative) lines.
+                    'subtotal' => 0, 'tax_amount' => 0, 'total_amount' => 0,
+                    'invoice_number' => 'TMP-' . \Illuminate\Support\Str::uuid(),
+                    'project_enquiry_id' => $enquiry->id,
+                    'credits_invoice_id' => $lockedInvoice->id,
+                    'created_by' => Auth::id(),
+                ]);
+                $creditNote->update(['invoice_number' => 'CN-' . now()->format('Ym') . '-' . str_pad((string) $creditNote->id, 6, '0', STR_PAD_LEFT)]);
+                $creditNote->lines()->createMany($priced);
+
+                return app(\App\Modules\Finance\Services\InvoicePricer::class)->retotal($creditNote);
+            });
+        } catch (\DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['message' => 'Draft credit note created.', 'data' => $creditNote], 201);
+    }
+
+    /**
+     * Issue a draft credit note — and reverse the revenue it corrects.
+     *
+     * The mirror of {@see issueProjectInvoice()}. Deliberately does not touch
+     * Work in Progress / Cost of Sales — see the note on createCreditNote()
+     * for why that is a named, deferred limitation rather than an oversight.
+     */
+    public function issueCreditNote(ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice, \App\Modules\Finance\Models\ProjectInvoice $creditNote): JsonResponse
+    {
+        abort_unless((int) $invoice->project_enquiry_id === (int) $enquiry->id, 404);
+        abort_unless((int) $creditNote->credits_invoice_id === (int) $invoice->id, 404);
+
+        try {
+            $creditNote = DB::transaction(function () use ($creditNote) {
+                $locked = $creditNote->newQuery()->lockForUpdate()->findOrFail($creditNote->id);
+                abort_unless($locked->status === 'draft', 422, 'Only a draft credit note can be issued.');
+                $locked->update(['status' => 'issued', 'issued_by' => Auth::id(), 'issued_at' => now()]);
+
+                app(\App\Modules\Finance\Services\ReceivablesPostingService::class)
+                    ->postCreditNoteIssued($locked, Auth::id());
+
+                return $locked->fresh();
+            });
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        \App\Models\GovernanceAuditLog::create([
+            'project_enquiry_id' => $creditNote->project_enquiry_id,
+            'user_id' => Auth::id(),
+            'gate_type' => 'Credit Note Issued',
+            'action_status' => 'authorized',
+            'model_type' => \App\Modules\Finance\Models\ProjectInvoice::class,
+            'model_id' => $creditNote->id,
+            'message' => "Credit note {$creditNote->invoice_number} of " . number_format((float) $creditNote->total_amount * -1, 2)
+                . " issued against invoice #{$creditNote->credits_invoice_id}",
+            'context' => [
+                'credits_invoice_id' => $creditNote->credits_invoice_id,
+                'amount' => $creditNote->total_amount,
+                'reason' => $creditNote->notes,
+                'journal_entry_id' => $creditNote->journal_entry_id,
+            ],
+            'ip_address' => request()->ip(),
+        ]);
+
+        return response()->json(['message' => 'Credit note issued. Invoice balance reduced.', 'data' => $creditNote]);
     }
 
     /**
@@ -1669,6 +1892,9 @@ class EnquiryController extends Controller
                 if (DB::table('project_invoice_allocations')->where('project_invoice_id', $lockedInvoice->id)->exists()) {
                     throw new \DomainException('A receipt has been applied to this invoice, so it cannot be voided. Reverse the allocation first.');
                 }
+                if (\App\Modules\Finance\Models\ProjectInvoice::where('credits_invoice_id', $lockedInvoice->id)->where('status', '!=', 'void')->exists()) {
+                    throw new \DomainException('A credit note has been issued against this invoice, so it cannot be voided. Void the credit note first.');
+                }
 
                 // Costs first, then revenue — the mirror of issuing, which
                 // recognised the revenue and then released the cost against it.
@@ -1749,7 +1975,10 @@ class EnquiryController extends Controller
                 }
                 $paymentUsed=(float)DB::table('project_invoice_allocations')->where('enquiry_payment_id',$lockedPayment->id)->sum('amount');
                 $invoicePaid=(float)DB::table('project_invoice_allocations')->where('project_invoice_id',$lockedInvoice->id)->sum('amount');
-                if ((float)$data['amount']>(float)$lockedPayment->amount-$paymentUsed || (float)$data['amount']>(float)$lockedInvoice->total_amount-$invoicePaid) throw new \DomainException('Allocation exceeds the available payment or invoice balance.');
+                // Net of any non-void credit note, so a credited invoice
+                // cannot be over-allocated up to its ORIGINAL total.
+                $creditedTotal=(float)$lockedInvoice->total_amount+(float)DB::table('project_invoices')->where('credits_invoice_id',$lockedInvoice->id)->where('status','!=','void')->sum('total_amount');
+                if ((float)$data['amount']>(float)$lockedPayment->amount-$paymentUsed || (float)$data['amount']>$creditedTotal-$invoicePaid) throw new \DomainException('Allocation exceeds the available payment or invoice balance.');
                 $allocationId = DB::table('project_invoice_allocations')->insertGetId(['project_invoice_id'=>$lockedInvoice->id,'enquiry_payment_id'=>$lockedPayment->id,'amount'=>$data['amount'],'allocated_by'=>Auth::id(),'created_at'=>now(),'updated_at'=>now()]);
 
                 // Matching money already held to the invoice it settles: debit
@@ -1763,7 +1992,7 @@ class EnquiryController extends Controller
                         ->update(['journal_entry_id' => $entry->id]);
                 }
 
-                if ($invoicePaid+(float)$data['amount'] >= (float)$lockedInvoice->total_amount) $lockedInvoice->update(['status'=>'paid']);
+                if ($invoicePaid+(float)$data['amount'] >= $creditedTotal) $lockedInvoice->update(['status'=>'paid']);
             });
         } catch (\DomainException|\InvalidArgumentException $e) {
             return response()->json(['message'=>$e->getMessage()],422);

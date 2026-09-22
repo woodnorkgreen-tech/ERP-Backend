@@ -130,7 +130,8 @@ final class RolePermissions
                 Permissions::MATERIALS_LIBRARY_VIEW, Permissions::PROCUREMENT_ORDERS_APPROVE,
                 Permissions::PROCUREMENT_REQUISITIONS_APPROVE, Permissions::PROJECT_ASSIGN_USERS,
                 Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::STORES_MANAGE,
-                Permissions::STORES_REVIEW, Permissions::STORES_VIEW, Permissions::TASK_ASSIGN,
+                Permissions::STORES_REVIEW, Permissions::STORES_VIEW, Permissions::STORES_ADJUST_QUANTITY,
+                Permissions::TASK_ASSIGN,
                 Permissions::TASK_READ, Permissions::TASK_UPDATE, Permissions::USER_READ,
                 Permissions::USER_UPDATE,
             ],
@@ -258,6 +259,7 @@ final class RolePermissions
                 Permissions::HR_VIEW_EMPLOYEES, Permissions::MATERIALS_LIBRARY_IMPORT,
                 Permissions::MATERIALS_LIBRARY_MANAGE, Permissions::MATERIALS_LIBRARY_VIEW,
                 Permissions::PROJECT_READ, Permissions::STORES_MANAGE, Permissions::STORES_VIEW,
+                Permissions::STORES_ADJUST_QUANTITY,
                 Permissions::TASK_READ, Permissions::TASK_UPDATE, Permissions::USER_READ,
             ],
             'Logistics' => [

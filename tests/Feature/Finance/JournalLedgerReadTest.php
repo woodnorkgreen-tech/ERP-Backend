@@ -218,6 +218,38 @@ class JournalLedgerReadTest extends TestCase
             ->assertJsonPath('data.totals.is_balanced', true);
     }
 
+    public function test_an_account_statement_has_brought_forward_and_running_balances(): void
+    {
+        $first = $this->postedCostLine('CL-BOOK-OLD', '5000.00');
+        $second = $this->postedCostLine('CL-BOOK-NEW', '3000.00');
+        $accountId = $first->lines()->where('entry_type', 'debit')->value('account_id');
+
+        $first->update(['posting_date' => '2026-01-31']);
+        $second->update(['posting_date' => '2026-02-10']);
+
+        $response = $this->actingAs($this->reader, 'sanctum')
+            ->getJson("/api/finance/journals/accounts/{$accountId}/statement?from=2026-02-01&to=2026-02-28")
+            ->assertOk()
+            ->assertJsonPath('data.opening_balance', '5000.00')
+            ->assertJsonPath('data.closing_balance', '8000.00')
+            ->assertJsonPath('data.balance_basis', 'debit_less_credit')
+            ->assertJsonPath('meta.total', 1);
+
+        $this->assertSame('CL-BOOK-NEW', $response->json('data.rows.0.source_ref'));
+        $this->assertSame('3000.00', $response->json('data.rows.0.debit'));
+        $this->assertSame('8000.00', $response->json('data.rows.0.balance'));
+    }
+
+    public function test_an_account_statement_requires_the_reports_permission(): void
+    {
+        $entry = $this->postedCostLine('CL-BOOK-PRIVATE');
+        $accountId = $entry->lines()->firstOrFail()->account_id;
+
+        $this->actingAs($this->outsider, 'sanctum')
+            ->getJson("/api/finance/journals/accounts/{$accountId}/statement")
+            ->assertForbidden();
+    }
+
     public function test_an_inverted_date_range_is_refused(): void
     {
         $this->actingAs($this->reader, 'sanctum')

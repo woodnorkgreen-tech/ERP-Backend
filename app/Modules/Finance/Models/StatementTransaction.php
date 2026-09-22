@@ -14,7 +14,7 @@ class StatementTransaction extends Model
     protected $fillable = [
         'statement_id', 'transaction_date', 'external_reference', 'description',
         'debit', 'credit', 'statement_balance', 'fingerprint', 'match_status',
-        'matched_by', 'matched_at', 'metadata',
+        'ignore_reason', 'matched_by', 'matched_at', 'metadata',
     ];
 
     protected $casts = [

@@ -22,11 +22,50 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class ProjectInvoice extends Model
 {
-    protected $fillable = ['invoice_number','project_enquiry_id','invoice_date','due_date','subtotal','tax_amount','total_amount','status','notes','created_by','issued_by','issued_at','voided_by','voided_at','void_reason','journal_entry_id','accounting_period_id'];
+    protected $fillable = ['invoice_number','project_enquiry_id','credits_invoice_id','invoice_date','due_date','subtotal','tax_amount','total_amount','status','notes','created_by','issued_by','issued_at','voided_by','voided_at','void_reason','journal_entry_id','accounting_period_id'];
     protected $casts = ['invoice_date'=>'date','due_date'=>'date','subtotal'=>'decimal:2','tax_amount'=>'decimal:2','total_amount'=>'decimal:2','issued_at'=>'datetime','voided_at'=>'datetime'];
     public function enquiry(): BelongsTo { return $this->belongsTo(ProjectEnquiry::class, 'project_enquiry_id'); }
     public function creator(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
     public function payments(): BelongsToMany { return $this->belongsToMany(\App\Models\EnquiryPayment::class, 'project_invoice_allocations')->withPivot('amount','allocated_by')->withTimestamps(); }
+
+    /** The invoice this row corrects. Null on an ordinary invoice. */
+    public function creditedInvoice(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'credits_invoice_id');
+    }
+
+    /** Credit notes raised against this invoice. Always empty on a credit note itself. */
+    public function creditNotes(): HasMany
+    {
+        return $this->hasMany(self::class, 'credits_invoice_id');
+    }
+
+    public function isCreditNote(): bool
+    {
+        return $this->credits_invoice_id !== null;
+    }
+
+    /**
+     * Adds `net_total_amount` — this invoice's total after every non-void
+     * credit note raised against it. Credit note totals are stored negative
+     * (see the migration that added `credits_invoice_id`), so this is a plain
+     * sum, not a subtraction that could be applied to the wrong sign by a
+     * future caller.
+     *
+     * The one definition of "what this invoice is really worth now" that the
+     * invoice list, receivables ageing and the allocation cap all share —
+     * mirroring why `scopeWithVerifiedPaidAmount()` exists.
+     */
+    public function scopeWithNetTotal(Builder $query): Builder
+    {
+        return $query->addSelect([
+            'net_total_amount' => self::query()
+                ->selectRaw('project_invoices.total_amount + COALESCE(SUM(credit_notes.total_amount), 0)')
+                ->from('project_invoices as credit_notes')
+                ->whereColumn('credit_notes.credits_invoice_id', 'project_invoices.id')
+                ->where('credit_notes.status', '!=', 'void'),
+        ]);
+    }
 
     /**
      * Adds `paid_amount` as the sum of this invoice's allocations, counting

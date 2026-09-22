@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Constants\Permissions;
 use App\Http\Controllers\Controller;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Support\MaterialControl;
@@ -631,6 +632,13 @@ class ProcurementStoresController extends Controller
                 // movement, so the ledger stays the only account of the balance.
                 $difference = round($counted - (float) $stock->quantity_on_hand, 2);
                 if (abs($difference) >= 0.01) {
+                    // Narrower than the "Stores team member" gate above: someone
+                    // can be trusted to hold stock settings generally without
+                    // being handed the ability to move the ledger via a count.
+                    if (! auth()->user()?->can(Permissions::STORES_ADJUST_QUANTITY)) {
+                        abort(403, 'You do not have permission to adjust stock quantities.');
+                    }
+
                     if (blank($validated['stock_adjustment_reason'] ?? null)) {
                         throw ValidationException::withMessages([
                             'stock_adjustment_reason' => 'Say what the new count is based on — this posts a stock adjustment.',

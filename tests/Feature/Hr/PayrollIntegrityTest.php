@@ -174,6 +174,102 @@ class PayrollIntegrityTest extends TestCase
         $this->assertDatabaseCount('journal_entries', 1);
     }
 
+    public function test_the_preparer_cannot_also_lock_their_own_payroll_run(): void
+    {
+        $this->financeConfiguration();
+        $preparer = $this->actingAsPayrollManager();
+
+        $run = app(PayrollService::class)->initializeRun('2026-08');
+        app(PayrollService::class)->processEmployee($this->employee(), $run);
+        $run->update(['status' => 'processing']);
+
+        Sanctum::actingAs($preparer);
+        $response = $this->postJson("/api/hr/payroll/runs/{$run->id}/lock");
+
+        $response->assertStatus(403);
+        $this->assertStringContainsString('cannot also lock it', $response->json('message'));
+        $this->assertSame('processing', $run->fresh()->status);
+    }
+
+    public function test_a_different_finance_user_can_lock_a_run_someone_else_prepared(): void
+    {
+        $this->financeConfiguration();
+        $this->actingAsPayrollManager();
+
+        $run = app(PayrollService::class)->initializeRun('2026-08');
+        app(PayrollService::class)->processEmployee($this->employee(), $run);
+        $run->update(['status' => 'processing']);
+
+        $checker = $this->actingAsPayrollManager();
+        $response = $this->postJson("/api/hr/payroll/runs/{$run->id}/lock");
+
+        $response->assertOk();
+        $run->refresh();
+        $this->assertSame('locked', $run->status);
+        $this->assertSame($checker->id, $run->locked_by);
+    }
+
+    public function test_the_locker_cannot_also_mark_their_own_run_paid(): void
+    {
+        $this->financeConfiguration();
+        $locker = $this->actingAsPayrollManager();
+        $run = PayrollRun::create([
+            'payroll_month' => '2026-08', 'status' => 'locked', 'locked_by' => $locker->id,
+            'total_gross' => 100000, 'total_net' => 80000, 'total_statutory' => 20000,
+        ]);
+        Payslip::create([
+            'payroll_run_id' => $run->id, 'employee_id' => $this->employee()->id,
+            'payroll_month' => '2026-08', 'basic_salary' => 100000,
+            'gross_pay' => 100000, 'net_pay' => 80000,
+            'tax_breakdown' => ['paye' => 15000, 'nssf' => 1000, 'shif' => 2500, 'housing_levy' => 1500],
+            'ledger_breakdown' => [], 'status' => 'locked',
+        ]);
+        $source = PaymentSource::firstOrFail();
+        app(PayrollFinancePostingService::class)->postAccrual($run->fresh());
+
+        Sanctum::actingAs($locker);
+        $response = $this->postJson("/api/hr/payroll/runs/{$run->id}/mark-paid", [
+            'payment_source_id' => $source->id,
+            'payment_date' => '2026-08-31',
+            'payment_reference' => 'BANK-2026-08',
+        ]);
+
+        $response->assertStatus(403);
+        $this->assertStringContainsString('cannot also mark it paid', $response->json('message'));
+        $this->assertSame('locked', $run->fresh()->status);
+    }
+
+    public function test_a_different_finance_user_can_mark_paid_a_run_someone_else_locked(): void
+    {
+        $this->financeConfiguration();
+        $locker = $this->actingAsPayrollManager();
+        $run = PayrollRun::create([
+            'payroll_month' => '2026-08', 'status' => 'locked', 'locked_by' => $locker->id,
+            'total_gross' => 100000, 'total_net' => 80000, 'total_statutory' => 20000,
+        ]);
+        Payslip::create([
+            'payroll_run_id' => $run->id, 'employee_id' => $this->employee()->id,
+            'payroll_month' => '2026-08', 'basic_salary' => 100000,
+            'gross_pay' => 100000, 'net_pay' => 80000,
+            'tax_breakdown' => ['paye' => 15000, 'nssf' => 1000, 'shif' => 2500, 'housing_levy' => 1500],
+            'ledger_breakdown' => [], 'status' => 'locked',
+        ]);
+        $source = PaymentSource::firstOrFail();
+        app(PayrollFinancePostingService::class)->postAccrual($run->fresh());
+
+        $payer = $this->actingAsPayrollManager();
+        $response = $this->postJson("/api/hr/payroll/runs/{$run->id}/mark-paid", [
+            'payment_source_id' => $source->id,
+            'payment_date' => '2026-08-31',
+            'payment_reference' => 'BANK-2026-08',
+        ]);
+
+        $response->assertOk();
+        $run->refresh();
+        $this->assertSame('paid', $run->status);
+        $this->assertSame($payer->id, $run->paid_by);
+    }
+
     private function runWithPayslip(int $net): PayrollRun
     {
         $run = PayrollRun::create(['payroll_month' => '2026-08', 'status' => 'locked']);

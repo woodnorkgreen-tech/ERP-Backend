@@ -173,8 +173,10 @@ class ReconciliationController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_PAYMENT_SOURCES_MANAGE), 403);
 
+        $data = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:500']]);
+
         try {
-            return response()->json(['data' => $service->ignore($statement, $transaction, $request->user()->id)]);
+            return response()->json(['data' => $service->ignore($statement, $transaction, $request->user()->id, $data['reason'])]);
         } catch (InvalidArgumentException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }

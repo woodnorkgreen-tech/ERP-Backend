@@ -13,6 +13,7 @@ use App\Modules\HR\Services\Payroll\PayrollFinancePostingService;
 use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Constants\Permissions;
+use App\Support\SelfApproval;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -177,9 +178,22 @@ class PayrollRunController extends Controller
             ], 422);
         }
 
+        // Separation of duties: whoever initialized/prepared this run is not
+        // also the one who reviews and locks it, mirroring SpendVoucher's
+        // requester-vs-approver check. Same documented override as the rest
+        // of Finance (Super Admin, or APPROVALS_SELF_APPROVE).
+        $isSelfApproval = SelfApproval::isPermittedSelfApproval(auth()->id(), $payrollRun->created_by);
+        if ($payrollRun->created_by !== null && (int) $payrollRun->created_by === (int) auth()->id() && !$isSelfApproval) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The person who prepared this payroll run cannot also lock it. Ask another Finance user to review and lock, or use the self-approval override for a genuine exception.',
+            ], 403);
+        }
+
         DB::transaction(function () use ($payrollRun) {
             $this->payrollService->finalizeRun($payrollRun);
             $this->financePosting->postAccrual($payrollRun->fresh());
+            $payrollRun->update(['locked_by' => auth()->id()]);
         });
         $payrollRun->refresh();
 
@@ -192,7 +206,8 @@ class PayrollRunController extends Controller
             'context' => [
                 'payroll_month' => $payrollRun->payroll_month,
                 'total_gross' => $payrollRun->total_gross,
-                'total_net' => $payrollRun->total_net
+                'total_net' => $payrollRun->total_net,
+                'self_approval_override' => $isSelfApproval,
             ],
             'ip_address' => request()->ip()
         ]);
@@ -225,6 +240,18 @@ class PayrollRunController extends Controller
         ]);
         $paymentSource = PaymentSource::findOrFail($validated['payment_source_id']);
 
+        // Separation of duties: whoever reviewed and locked this run (the
+        // checker) is not also the one who releases payment (the poster) —
+        // same requester/approver/poster split SpendVoucher enforces, same
+        // documented override.
+        $isSelfApproval = SelfApproval::isPermittedSelfApproval(auth()->id(), $payrollRun->locked_by);
+        if ($payrollRun->locked_by !== null && (int) $payrollRun->locked_by === (int) auth()->id() && !$isSelfApproval) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The person who locked this payroll run cannot also mark it paid. Ask another Finance user to release payment, or use the self-approval override for a genuine exception.',
+            ], 403);
+        }
+
         DB::transaction(function () use ($payrollRun, $paymentSource, $validated) {
             $lockedRun = PayrollRun::whereKey($payrollRun->id)->lockForUpdate()->firstOrFail();
             if ($lockedRun->status !== 'locked') {
@@ -237,7 +264,7 @@ class PayrollRunController extends Controller
                 $validated['payment_date'],
                 $validated['payment_reference'],
             );
-            $lockedRun->update(['status' => 'paid']);
+            $lockedRun->update(['status' => 'paid', 'paid_by' => auth()->id()]);
             $lockedRun->payslips()->update(['status' => 'paid', 'payment_date' => $validated['payment_date']]);
         });
         $payrollRun->refresh();
@@ -253,6 +280,7 @@ class PayrollRunController extends Controller
                 'payment_date' => $payrollRun->payment_date?->toDateString(),
                 'payment_reference' => $payrollRun->payment_reference,
                 'payment_journal_entry_id' => $payrollRun->payment_journal_entry_id,
+                'self_approval_override' => $isSelfApproval,
             ],
             'ip_address' => request()->ip()
         ]);

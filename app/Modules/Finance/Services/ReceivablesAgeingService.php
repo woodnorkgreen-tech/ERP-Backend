@@ -70,12 +70,17 @@ class ReceivablesAgeingService
     {
         return ProjectInvoice::query()
             ->whereNotIn('status', ['draft', 'void'])
+            // A credit note has no due date of its own to be overdue against —
+            // its effect is already folded into its invoice's net_total_amount
+            // below, via withNetTotal().
+            ->whereNull('credits_invoice_id')
             ->whereNotNull('due_date')
             ->with(['enquiry:id,job_number,title,client_id', 'enquiry.client:id,full_name,company_name'])
             ->withVerifiedPaidAmount()
+            ->withNetTotal()
             ->get()
             ->map(function (ProjectInvoice $invoice) use ($asOf) {
-                $total = number_format((float) $invoice->total_amount, 2, '.', '');
+                $total = number_format((float) ($invoice->net_total_amount ?? $invoice->total_amount), 2, '.', '');
                 $paid = number_format((float) ($invoice->paid_amount ?? 0), 2, '.', '');
                 $balance = bcsub($total, $paid, 2);
                 $dueDate = Carbon::parse($invoice->due_date)->startOfDay();

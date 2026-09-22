@@ -56,7 +56,9 @@ class ReconciliationTest extends TestCase
             ->assertStatus(422);
 
         $this->actingAs($this->financeUser, 'sanctum')
-            ->postJson("/api/finance/reconciliation/statements/{$statementId}/transactions/{$transactionId}/ignore")
+            ->postJson("/api/finance/reconciliation/statements/{$statementId}/transactions/{$transactionId}/ignore", [
+                'reason' => 'Bank charge confirmed on statement; no ERP journal required.',
+            ])
             ->assertOk();
 
         $this->actingAs($this->financeUser, 'sanctum')
@@ -66,6 +68,51 @@ class ReconciliationTest extends TestCase
         $this->assertDatabaseHas('finance_reconciliation_statements', [
             'id' => $statementId,
             'status' => 'reconciled',
+        ]);
+
+        $this->assertDatabaseHas('finance_statement_transactions', [
+            'id' => $transactionId,
+            'match_status' => 'ignored',
+            'ignore_reason' => 'Bank charge confirmed on statement; no ERP journal required.',
+        ]);
+    }
+
+    public function test_ignoring_a_transaction_requires_a_reason(): void
+    {
+        $csv = implode("\n", [
+            'date,reference,description,debit,credit,balance',
+            '2026-09-10,BANK-001,Bank charge,0,0,1000.00',
+        ]);
+
+        $response = $this->actingAs($this->financeUser, 'sanctum')
+            ->post('/api/finance/reconciliation/statements/import', [
+                'payment_source_id' => (int) \DB::table('payment_sources')->where('code', 'PC-MAIN')->value('id'),
+                'period_start' => '2026-09-01',
+                'period_end' => '2026-09-30',
+                'opening_balance' => '1000.00',
+                'closing_balance' => '1000.00',
+                'statement' => UploadedFile::fake()->createWithContent('statement.csv', $csv),
+            ])
+            ->assertCreated();
+
+        $statementId = $response->json('data.id');
+        $transactionId = $response->json('data.transactions.0.id');
+
+        $this->actingAs($this->financeUser, 'sanctum')
+            ->postJson("/api/finance/reconciliation/statements/{$statementId}/transactions/{$transactionId}/ignore")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('reason');
+
+        $this->actingAs($this->financeUser, 'sanctum')
+            ->postJson("/api/finance/reconciliation/statements/{$statementId}/transactions/{$transactionId}/ignore", [
+                'reason' => 'no',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('reason');
+
+        $this->assertDatabaseHas('finance_statement_transactions', [
+            'id' => $transactionId,
+            'match_status' => 'unmatched',
         ]);
     }
 
@@ -106,7 +153,11 @@ class ReconciliationTest extends TestCase
     public function test_create_and_match_posts_movement_and_matches_statement_transaction(): void
     {
         $sourceId = (int) \DB::table('payment_sources')->where('code', 'PC-MAIN')->value('id');
-        $bankChargesAccount = (int) \DB::table('chart_of_accounts')->where('is_active', true)->where('account_type', 'expense')->value('id');
+        $bankChargesAccount = (int) \DB::table('chart_of_accounts')
+            ->where('is_active', true)
+            ->where('is_postable', true)
+            ->where('category', 'expense')
+            ->value('id');
 
         $csv = implode("\n", [
             'date,reference,description,debit,credit,balance',

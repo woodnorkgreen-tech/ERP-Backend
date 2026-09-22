@@ -1896,6 +1896,16 @@ class PettyCashRequisitionController extends Controller
                 ], 422);
             }
 
+            // Guards the same invariant submitSurrender() enforces: without this, calling
+            // reconcile a second time on an already-'surrendered' requisition would re-post
+            // its cost lines and clearing journal, double-counting the spend.
+            if (!in_array($requisition->status, ['disbursed', 'received', 'surrender_pending'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "This requisition's surrender has already been reconciled (status: {$requisition->status}).",
+                ], 422);
+            }
+
             DB::beginTransaction();
 
             $enquiry = $requisition->enquiry ?? $requisition->project?->enquiry;

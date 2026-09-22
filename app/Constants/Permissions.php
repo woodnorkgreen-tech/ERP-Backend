@@ -292,6 +292,11 @@ class Permissions
     const STORES_VIEW = 'stores.view';
     const STORES_MANAGE = 'stores.manage';
     const STORES_REVIEW = 'stores.review';
+    // Narrower than STORES_MANAGE on purpose: correcting a counted balance
+    // posts a stock adjustment straight to the ledger, and a business may
+    // want to hand that out to one trusted person without also granting
+    // everything else STORES_MANAGE covers.
+    const STORES_ADJUST_QUANTITY = 'stores.adjust_quantity';
 
     // ===========================================
     // LOGISTICS MANAGEMENT PERMISSIONS
@@ -500,7 +505,7 @@ class Permissions
             self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
             self::PROCUREMENT_REQUISITIONS_APPROVE, self::PROCUREMENT_ORDERS_APPROVE,
             self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
-            self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW,
+            self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW, self::STORES_ADJUST_QUANTITY,
 
             // System Admin Permissions
             self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
@@ -625,7 +630,7 @@ class Permissions
             ],
             'materials_stores' => [
                 self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
-                self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW,
+                self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW, self::STORES_ADJUST_QUANTITY,
             ],
             'admin' => [
                 self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
@@ -733,6 +738,8 @@ class Permissions
             // Admin
             self::APPROVALS_SELF_APPROVE => 'Approve Your Own Submissions (bypasses separation of duties)',
             self::FINANCE_EXPENDITURE_EXCEPTION_APPROVE => 'Authorize Spending Beyond an Approved Project Budget',
+
+            self::STORES_ADJUST_QUANTITY => 'Correct Counted Stock Quantities',
 
             self::ADMIN_ACCESS => 'Access System Control Panel',
             self::ADMIN_SETTINGS => 'Modify Global System Config',

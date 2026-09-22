@@ -21,6 +21,8 @@ class PayrollRun extends Model
         'total_net',
         'total_statutory',
         'created_by',
+        'locked_by',
+        'paid_by',
         'accrual_journal_entry_id',
         'payment_journal_entry_id',
         'payment_source_id',
@@ -50,6 +52,16 @@ class PayrollRun extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(\App\Models\User::class, 'created_by');
+    }
+
+    public function lockedByUser(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class, 'locked_by');
+    }
+
+    public function paidByUser(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class, 'paid_by');
     }
 
     public function accrualJournal(): BelongsTo

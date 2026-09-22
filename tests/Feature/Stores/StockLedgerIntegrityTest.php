@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Stores;
 
+use App\Constants\Permissions;
 use App\Models\User;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\ProcurementStores\Models\InventoryLog;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -37,6 +39,8 @@ class StockLedgerIntegrityTest extends TestCase
         foreach (['Stores', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);
         }
+        Permission::findOrCreate(Permissions::STORES_ADJUST_QUANTITY);
+        Role::findByName('Stores')->givePermissionTo(Permissions::STORES_ADJUST_QUANTITY);
 
         $workstationId = DB::table('workstations')->insertGetId([
             'name' => 'General', 'code' => 'WS-GEN-' . uniqid(),

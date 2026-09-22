@@ -5,6 +5,7 @@ namespace App\Modules\Finance\Controllers;
 use App\Constants\Permissions;
 use App\Http\Controllers\Controller;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\JournalLine;
 use App\Modules\Finance\Models\Payment;
@@ -287,6 +288,129 @@ class JournalEntryController extends Controller
                     ) === 0,
                 ],
                 'coverage' => LedgerCoverage::describe(),
+            ],
+            'filters' => $filters,
+        ]);
+    }
+
+    /**
+     * The chronological book for one ledger account.
+     *
+     * A trial balance proves the totals agree, but it cannot answer which
+     * documents make up an account balance.  This statement carries the
+     * balance brought forward, every debit and credit in posting order, and a
+     * running balance. Reversed originals remain visible beside their
+     * compensating entries: an account book is an audit record, not a view of
+     * only the transactions that survived correction.
+     */
+    public function accountStatement(Request $request, ChartOfAccount $account): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_REPORTS_VIEW), 403);
+
+        $filters = $request->validate([
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
+        ]);
+
+        $signedAmount = "CASE WHEN journal_lines.entry_type = 'debit' "
+            . "THEN journal_lines.base_amount ELSE -journal_lines.base_amount END";
+
+        $openingBalance = JournalLine::query()
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->where('journal_lines.account_id', $account->id)
+            ->whereIn('journal_entries.status', ['posted', 'reversed'])
+            ->when($filters['from'] ?? null, fn ($q, $from) => $q->whereDate('journal_entries.posting_date', '<', $from))
+            // With no lower boundary there is, by definition, no brought-forward balance.
+            ->when(! ($filters['from'] ?? null), fn ($q) => $q->whereRaw('1 = 0'))
+            ->selectRaw("COALESCE(SUM({$signedAmount}), 0) as balance")
+            ->value('balance');
+
+        $query = JournalLine::query()
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->where('journal_lines.account_id', $account->id)
+            ->whereIn('journal_entries.status', ['posted', 'reversed'])
+            ->when($filters['from'] ?? null, fn ($q, $from) => $q->whereDate('journal_entries.posting_date', '>=', $from))
+            ->when($filters['to'] ?? null, fn ($q, $to) => $q->whereDate('journal_entries.posting_date', '<=', $to))
+            ->orderBy('journal_entries.posting_date')
+            ->orderBy('journal_entries.id')
+            ->orderBy('journal_lines.id')
+            ->select([
+                'journal_lines.id',
+                'journal_lines.journal_entry_id',
+                'journal_lines.entry_type',
+                'journal_lines.base_amount',
+                'journal_lines.description',
+                'journal_entries.entry_no',
+                'journal_entries.posting_date',
+                'journal_entries.source_ref',
+                'journal_entries.status',
+            ]);
+
+        $periodMovement = (float) (clone $query)
+            ->reorder()
+            ->select([])
+            ->selectRaw("COALESCE(SUM({$signedAmount}), 0) as movement")
+            ->value('movement');
+
+        $perPage = $filters['per_page'] ?? 50;
+        $page = $query->paginate($perPage);
+
+        // Seed this page with all earlier movements in the selected period so
+        // the running balance stays correct on page two and beyond.
+        $priorMovement = 0.0;
+        if ($page->currentPage() > 1) {
+            $priorMovement = (float) (clone $query)
+                ->limit(($page->currentPage() - 1) * $perPage)
+                ->get(['journal_lines.entry_type', 'journal_lines.base_amount'])
+                ->sum(fn ($line) => $line->entry_type === 'debit'
+                    ? (float) $line->base_amount
+                    : - (float) $line->base_amount);
+        }
+
+        $running = (float) $openingBalance + $priorMovement;
+        $rows = collect($page->items())->map(function ($line) use (&$running) {
+            $debit = $line->entry_type === 'debit' ? (float) $line->base_amount : 0.0;
+            $credit = $line->entry_type === 'credit' ? (float) $line->base_amount : 0.0;
+            $running += $debit - $credit;
+
+            return [
+                'id' => (int) $line->id,
+                'journal_entry_id' => (int) $line->journal_entry_id,
+                'entry_no' => $line->entry_no,
+                'posting_date' => $line->posting_date,
+                'source_ref' => $line->source_ref,
+                'description' => $line->description,
+                'status' => $line->status,
+                'debit' => number_format($debit, 2, '.', ''),
+                'credit' => number_format($credit, 2, '.', ''),
+                'balance' => number_format($running, 2, '.', ''),
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'account' => [
+                    'id' => $account->id,
+                    'code' => $account->code,
+                    'name' => $account->name,
+                    'category' => $account->category,
+                    'normal_balance' => $account->normal_balance,
+                ],
+                'opening_balance' => number_format((float) $openingBalance, 2, '.', ''),
+                'rows' => $rows,
+                // This is the selected period's actual closing balance, not
+                // merely the last row of the current page.
+                'closing_balance' => number_format((float) $openingBalance + $periodMovement, 2, '.', ''),
+                'balance_basis' => 'debit_less_credit',
+            ],
+            'meta' => [
+                'current_page' => $page->currentPage(),
+                'last_page' => $page->lastPage(),
+                'per_page' => $page->perPage(),
+                'total' => $page->total(),
             ],
             'filters' => $filters,
         ]);

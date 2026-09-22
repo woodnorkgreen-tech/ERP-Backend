@@ -864,6 +864,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('enquiries/{enquiry}/invoices/{invoice}/issue', [EnquiryController::class, 'issueProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
         Route::post('enquiries/{enquiry}/invoices/{invoice}/allocate', [EnquiryController::class, 'allocatePaymentToInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
         Route::post('enquiries/{enquiry}/invoices/{invoice}/void', [EnquiryController::class, 'voidProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_REVERSE);
+        // A credit note is a ProjectInvoice row with credits_invoice_id set, so
+        // the /void route above already voids one correctly with no new code —
+        // create and issue are the only two actions that need their own route.
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/credit-notes', [EnquiryController::class, 'createCreditNote'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_REVERSE);
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/credit-notes/{creditNote}/issue', [EnquiryController::class, 'issueCreditNote'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_REVERSE);
         Route::post('enquiries/{enquiry}/payments', [EnquiryController::class, 'logPayment'])
             ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
         Route::post('enquiries/{enquiry}/payments/{payment}/verify', [EnquiryController::class, 'verifyPayment'])
@@ -1024,6 +1029,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::prefix('journals')->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'index']);
             Route::get('trial-balance', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'trialBalance']);
+            Route::get('accounts/{account}/statement', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'accountStatement']);
             // Document-batched journals for WNG's external accounting package.
             // Also ahead of `{journal}`.
             Route::get('export', [\App\Modules\Finance\Controllers\JournalEntryController::class, 'export']);

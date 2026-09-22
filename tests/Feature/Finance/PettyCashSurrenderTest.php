@@ -224,4 +224,88 @@ class PettyCashSurrenderTest extends TestCase
         $this->assertSame($advanceAccount->id, $creditLine->account_id);
         $this->assertSame('10000.00', $creditLine->amount);
     }
+
+    public function test_reconciling_an_already_surrendered_requisition_is_refused_and_does_not_double_post(): void
+    {
+        $enquiryId = $this->enquiry('WNG-01-2026-100');
+
+        $type = PettyCashRequisitionType::create([
+            'code' => 'MAT-' . uniqid(),
+            'name' => 'Site Materials',
+            'default_expense_code_id' => $this->expenseCodeId,
+            'is_active' => true,
+        ]);
+
+        $requisition = PettyCashRequisition::create([
+            'requisition_number' => 'PCR-TEST-002',
+            'user_id' => $this->user->id,
+            'department_id' => $this->departmentId,
+            'category' => 'Site Materials',
+            'requisition_type_id' => $type->id,
+            'purpose' => 'Buying nails for site',
+            'total_amount' => 2000.00,
+            'status' => 'approved',
+            'enquiry_id' => $enquiryId,
+            'payee_name' => 'John Field Worker',
+        ]);
+
+        app(PettyCashCostProducer::class)->commitFor($requisition);
+
+        $this->actingAs($this->financeUser);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/disburse", [
+            'idempotency_key' => (string) Str::uuid(),
+            'expense_code_id' => $this->expenseCodeId,
+            'payment_source_id' => $this->paymentSourceId,
+            'payment_method' => 'cash',
+            'amount' => 2000.00,
+            'payee_name' => 'John Field Worker',
+            'description' => 'Disbursing site float',
+            'date_disbursed' => now()->toDateString(),
+            'receipt_type' => 'none',
+        ])->assertStatus(200);
+
+        $this->actingAs($this->user);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/surrender", [
+            'items' => [[
+                'expense_code_id' => $this->expenseCodeId,
+                'amount' => 2000.00,
+                'tax_amount' => 0.00,
+                'receipt_type' => 'non_etr',
+                'supplier_name' => 'Hardware Shop',
+                'description' => 'Nails',
+            ]],
+            'cash_returned_amount' => 0.00,
+        ])->assertStatus(200);
+
+        $this->actingAs($this->financeUser);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/reconcile")
+            ->assertStatus(200);
+
+        $requisition->refresh();
+        $this->assertSame('surrendered', $requisition->status);
+        $firstJournalId = $requisition->surrender_journal_entry_id;
+        $this->assertNotNull($firstJournalId);
+
+        $costLineCountAfterFirstReconcile = CostLine::where('nature', CostLine::NATURE_ACTUAL)
+            ->where('source_type', \App\Modules\Finance\PettyCash\Models\PettyCashSurrenderItem::class)
+            ->where('source_id', $requisition->surrenderItems->first()->id)
+            ->count();
+        $this->assertSame(1, $costLineCountAfterFirstReconcile);
+
+        // Reconciling an already-'surrendered' requisition a second time must be refused,
+        // not silently re-post the same cost lines and clearing journal a second time.
+        $secondAttempt = $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/reconcile");
+        $secondAttempt->assertStatus(422);
+        $this->assertStringContainsString('already been reconciled', $secondAttempt->json('message'));
+
+        $requisition->refresh();
+        $this->assertSame('surrendered', $requisition->status);
+        $this->assertSame($firstJournalId, $requisition->surrender_journal_entry_id);
+
+        $costLineCountAfterSecondAttempt = CostLine::where('nature', CostLine::NATURE_ACTUAL)
+            ->where('source_type', \App\Modules\Finance\PettyCash\Models\PettyCashSurrenderItem::class)
+            ->where('source_id', $requisition->surrenderItems->first()->id)
+            ->count();
+        $this->assertSame(1, $costLineCountAfterSecondAttempt);
+    }
 }

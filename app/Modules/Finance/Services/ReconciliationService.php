@@ -286,6 +286,7 @@ class ReconciliationService
             ]);
             $transaction->forceFill([
                 'match_status' => 'matched',
+                'ignore_reason' => null,
                 'matched_by' => $actorId,
                 'matched_at' => now(),
             ])->save();
@@ -294,7 +295,7 @@ class ReconciliationService
         return $transaction->fresh('matches');
     }
 
-    public function ignore(ReconciliationStatement $statement, StatementTransaction $transaction, ?int $actorId): StatementTransaction
+    public function ignore(ReconciliationStatement $statement, StatementTransaction $transaction, ?int $actorId, string $reason): StatementTransaction
     {
         if ($statement->status === 'reconciled') {
             throw new InvalidArgumentException('A reconciled statement cannot be changed. Reopen it first.');
@@ -306,6 +307,7 @@ class ReconciliationService
         $transaction->matches()->delete();
         $transaction->forceFill([
             'match_status' => 'ignored',
+            'ignore_reason' => $reason,
             'matched_by' => $actorId,
             'matched_at' => now(),
         ])->save();
@@ -327,6 +329,7 @@ class ReconciliationService
             $transaction->matches()->delete();
             $transaction->forceFill([
                 'match_status' => 'unmatched',
+                'ignore_reason' => null,
                 'matched_by' => null,
                 'matched_at' => null,
             ])->save();

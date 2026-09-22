@@ -189,6 +189,125 @@ class ReceivablesPostingService
     }
 
     /**
+     * Correct an issued invoice's revenue: a credit note.
+     *
+     * The mirror image of {@see postInvoiceIssued()} — the same three legs,
+     * debit and credit swapped, because a credit note takes back exactly what
+     * issuing recognised:
+     *
+     *   Debit  Project Revenue         the amount before tax, reversed
+     *   Debit  Output VAT Payable      the tax portion, reversed
+     *   Credit Accounts Receivable     the client owes this much less
+     *
+     * `$creditNote`'s own money columns and lines are stored NEGATIVE (see the
+     * migration that added `credits_invoice_id`) so that every enquiry-wide
+     * sum nets it against the invoice automatically. This method works in
+     * absolute values because a journal leg's amount is never negative —
+     * `entry_type` alone carries the direction.
+     */
+    public function postCreditNoteIssued(ProjectInvoice $creditNote, ?int $actorId = null): ?JournalEntry
+    {
+        if ($creditNote->journal_entry_id) {
+            return JournalEntry::find($creditNote->journal_entry_id);
+        }
+
+        $lines = $creditNote->lines()->with('vatTreatment')->get();
+
+        if ($lines->isEmpty()) {
+            return null;
+        }
+
+        $postingDate = $creditNote->invoice_date->toDateString();
+        $period = AccountingPeriod::forDate($creditNote->invoice_date);
+
+        if (! $period || ! $period->isOpen()) {
+            throw new InvalidArgumentException(
+                'The accounting month containing ' . $postingDate . ' is not open, '
+                . 'so this credit note cannot be issued into it.'
+            );
+        }
+
+        $receivable = $this->account(self::RECEIVABLE_CODE, 'Accounts Receivable');
+        $outputVat = $this->account(self::OUTPUT_VAT_CODE, 'Output Value Added Tax Payable');
+        $defaultRevenue = $this->account(self::REVENUE_CODE, 'Project Revenue');
+
+        $revenueByAccount = [];
+        $taxTotal = '0.00';
+
+        foreach ($lines as $line) {
+            $accountId = $line->revenue_account_id ?: $defaultRevenue;
+            // Stored negative; abs() here is what keeps every leg amount
+            // non-negative, as postBalancedEntry requires.
+            $revenueByAccount[$accountId] = bcadd(
+                $revenueByAccount[$accountId] ?? '0.00',
+                bcmul($this->money($line->net_amount), '-1', 2),
+                2,
+            );
+            $taxTotal = bcadd($taxTotal, bcmul($this->money($line->tax_amount), '-1', 2), 2);
+        }
+
+        $legs = [];
+
+        foreach ($revenueByAccount as $accountId => $amount) {
+            if (bccomp($amount, '0.00', 2) === 0) {
+                continue;
+            }
+
+            $legs[] = [
+                'account_id' => (int) $accountId,
+                'entry_type' => 'debit',
+                'amount' => $amount,
+                'description' => 'Revenue reversed by ' . $creditNote->invoice_number,
+                'project_enquiry_id' => $creditNote->project_enquiry_id,
+            ];
+        }
+
+        if (bccomp($taxTotal, '0.00', 2) > 0) {
+            $legs[] = [
+                'account_id' => $outputVat,
+                'entry_type' => 'debit',
+                'amount' => $taxTotal,
+                'description' => 'Output Value Added Tax reversed by ' . $creditNote->invoice_number,
+                'project_enquiry_id' => $creditNote->project_enquiry_id,
+            ];
+        }
+
+        $totalAbs = bcmul($this->money($creditNote->total_amount), '-1', 2);
+
+        if (bccomp($totalAbs, '0.00', 2) <= 0) {
+            return null;
+        }
+
+        $legs[] = [
+            'account_id' => $receivable,
+            'entry_type' => 'credit',
+            'amount' => $totalAbs,
+            'description' => 'Invoice balance reduced by ' . $creditNote->invoice_number,
+            'project_enquiry_id' => $creditNote->project_enquiry_id,
+        ];
+
+        return DB::transaction(function () use ($creditNote, $legs, $postingDate, $period, $actorId) {
+            $entry = $this->posting->postBalancedEntry(
+                entryNo: 'JE-CN-' . str_pad((string) $creditNote->id, 7, '0', STR_PAD_LEFT),
+                postingDate: $postingDate,
+                sourceType: ProjectInvoice::class,
+                sourceId: $creditNote->id,
+                sourceRef: $creditNote->invoice_number,
+                description: 'Credit note ' . $creditNote->invoice_number,
+                legs: $legs,
+                createdBy: $actorId,
+            );
+
+            $creditNote->forceFill([
+                'journal_entry_id' => $entry->id,
+                'accounting_period_id' => $period->id,
+            ])->save();
+
+            return $entry;
+        });
+    }
+
+    /**
      * Cash has arrived from a client and been confirmed.
      *
      * Posted on VERIFICATION rather than on capture, deliberately. Recording it
