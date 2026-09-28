@@ -158,13 +158,36 @@ class PettyCashService
                 $expenseCode = \App\Modules\Finance\CostCollector\Models\ExpenseCode::active()
                     ->find($data['expense_code_id'] ?? 0);
                 $paymentSource = \App\Modules\Finance\Models\PaymentSource::query()
-                    ->where('is_active', true)->find($data['payment_source_id'] ?? 0);
+                    ->paymentCapable()->find($data['payment_source_id'] ?? 0);
 
                 if (! $expenseCode || ! $paymentSource) {
                     return ['success' => false, 'errors' => [
                         'expense_code_id' => $expenseCode ? [] : ['Select an active expense type.'],
-                        'payment_source_id' => $paymentSource ? [] : ['Select an active payment source.'],
+                        'payment_source_id' => $paymentSource ? [] : ['Select an active paying account with a mapped postable GL account.'],
                     ]];
+                }
+
+                // A direct payment becomes an expense immediately. Refuse it
+                // before the balance is reduced unless both sides of that
+                // journal are configured. Requisition payments are advances:
+                // their controlled post-commit failure/retry path (STAB-4)
+                // remains authoritative and their itemised expense is posted
+                // only on surrender (STAB-7).
+                if (empty($data['requisition_id'])) {
+                    $expenseAccount = $expenseCode->debitAccount;
+                    $sourceAccount = $paymentSource->glAccount;
+
+                    if (! $expenseAccount?->is_active || ! $expenseAccount?->is_postable) {
+                        return ['success' => false, 'errors' => [
+                            'expense_code_id' => ['This expense type is not mapped to an active, postable GL account. Ask Finance to complete the mapping before paying.'],
+                        ]];
+                    }
+
+                    if (! $sourceAccount?->is_active || ! $sourceAccount?->is_postable) {
+                        return ['success' => false, 'errors' => [
+                            'payment_source_id' => ['This paying account is not mapped to an active, postable GL account. Ask Finance to complete the mapping before paying.'],
+                        ]];
+                    }
                 }
 
                 if (! empty($data['requisition_id'])) {
@@ -574,48 +597,13 @@ class PettyCashService
 
 
 
-    /**
-     * Clear all petty cash data (disbursements, top-ups, and reset balance).
-     * CAUTION: This is a destructive action and cannot be undone.
-     */
-    public function clearAllData(): array
-    {
-        DB::beginTransaction();
-
-        try {
-            // Delete all dependent allocations first
-            $allocationCount = \App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation::count();
-            \App\Modules\Finance\PettyCash\Models\PettyCashDisbursementAllocation::query()->delete();
-
-            // Delete all disbursements and top-ups
-            $disbursementsCount = Payment::count();
-            Payment::query()->delete();
-
-            $topUpsCount = PettyCashTopUp::count();
-            PettyCashTopUp::query()->delete();
-
-            // Delete ledger history and rebuild balance projection from the remaining ledger (none)
-            DB::table('petty_cash_ledger_entries')->delete();
-            $ledger = new LedgerService();
-            $ledger->rebuildFromLedger();
-
-            // Log activity
-            $this->logActivity('cleared', null, null, "All petty cash data cleared. Deleted {$topUpsCount} top-ups, {$disbursementsCount} disbursements, and {$allocationCount} allocations.");
-
-            DB::commit();
-
-            return [
-                'success' => true,
-                'allocations_deleted' => $allocationCount,
-                'disbursements_deleted' => $disbursementsCount,
-                'top_ups_deleted' => $topUpsCount,
-                'message' => 'All petty cash data has been cleared and balance reset to zero via ledger rebuild.'
-            ];
-        } catch (Exception $e) {
-            DB::rollBack();
-            throw new Exception('Failed to clear petty cash data: ' . $e->getMessage());
-        }
-    }
+    // clearAllData() was removed here and its logic moved to
+    // App\Modules\Finance\PettyCash\Console\ClearAllPettyCashDataCommand.
+    // Critical Risk C6 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+    // a full-history wipe is not something an HTTP-reachable service method
+    // should offer at all, in any environment — a console command that
+    // refuses to run outside local/testing is the narrower, harder-to-
+    // trigger-by-mistake equivalent.
 
     /**
      * Get current balance with status information.

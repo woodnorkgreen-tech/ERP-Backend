@@ -32,7 +32,9 @@ class FundCustodyService
                 'source' => $topUp->payment_method,
                 'external_reference' => $topUp->external_reference,
                 'description' => $topUp->description,
-                'custodian' => $topUp->creator?->name,
+                // W5-3: who RECORDED the top-up. Who physically holds the float is
+                // petty_cash_balances.held_by — see PettyCashControlController::custody().
+                'recorded_by' => $topUp->creator?->name,
                 'received' => $received,
                 'consumed' => $used,
                 'remaining' => $remaining,

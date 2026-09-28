@@ -270,7 +270,7 @@ class PettyCashController extends Controller
     {
         try {
             $filters = $request->only([
-                'status', 'classification', 'payment_method', 'project_name', 
+                'status', 'classification', 'transaction_classification', 'payment_method', 'project_name',
                 'creator_id', 'start_date', 'end_date', 'search'
             ]);
 
@@ -428,7 +428,36 @@ class PettyCashController extends Controller
             $query->where('status', $request->string('status')->toString());
         }
 
-        return response()->json(['success' => true, 'data' => $query->paginate(25)]);
+        $page = $query->paginate(25);
+        $balance = (string) \App\Modules\Finance\PettyCash\Models\PettyCashBalance::current()->current_balance;
+        $page->getCollection()->transform(function (DirectDisbursementRequest $row) use ($balance) {
+            $payload = $row->payload ?: [];
+            $outstanding = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::query()
+                ->where('user_id', $row->requested_by)
+                ->whereIn('status', \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::OUTSTANDING_ADVANCE_STATUSES)
+                ->get(['id', 'requisition_number', 'total_amount', 'surrender_due_at', 'status']);
+            // W3-5: the same payee + receipt + amount already claimed. Flagged
+            // for the independent approver; the approver is the control here.
+            $duplicate = null;
+            if (filled($payload['payee_name'] ?? null) && filled($payload['receipt_number'] ?? null)) {
+                $match = app(\App\Modules\Finance\Services\DuplicateDetectionService::class)->checkExpenseReceipt(
+                    (string) $payload['payee_name'], (string) $payload['receipt_number'], (string) ($payload['amount'] ?? 0)
+                );
+                $duplicate = $match['status'] === 'confirmed' ? ['type' => $match['matched_type'], 'id' => $match['matched_id']] : null;
+            }
+            $row->setAttribute('approval_signals', [
+                'requested_amount' => $payload['amount'] ?? null,
+                'project_or_overhead' => $payload['project_name'] ?? ($payload['classification'] ?? 'overhead'),
+                'justification' => $payload['direct_payment_reason'] ?? null,
+                'float_available' => $balance,
+                'recent_direct_requests' => DirectDisbursementRequest::query()->where('requested_by', $row->requested_by)
+                    ->whereKeyNot($row->id)->where('created_at', '>=', now()->subDays(90))->count(),
+                'outstanding_advances' => $outstanding,
+                'duplicate_receipt_match' => $duplicate,
+            ]);
+            return $row;
+        });
+        return response()->json(['success' => true, 'data' => $page]);
     }
 
     public function rejectDirectRequest(Request $request, int $id): JsonResponse
@@ -544,41 +573,66 @@ class PettyCashController extends Controller
         }
     }
 
-
-
     /**
-     * Clear all petty cash data.
+     * Wave 1 Closure Gate §3.D: the controlled retry path for a disbursement
+     * whose cost/GL entry did not reach the ledger. Safe to call as many
+     * times as needed — PettyCashCostPoster posts through the producer's own
+     * idempotent posting calls, so a disbursement whose cost already posted
+     * is simply confirmed, not duplicated.
      */
-    public function clearAll(): JsonResponse
+    public function retryCostPosting(int $id): JsonResponse
     {
-        if (! app()->environment(['local', 'testing'])) {
+        if (!Auth::user()?->can('reviewRequisition', Payment::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Clearing Finance history is disabled outside local development. Use voids and reversals to preserve the audit trail.',
+                'message' => 'You are not authorized to correct petty cash postings',
             ], 403);
         }
 
-        // Routed through the policy like everything else, but the policy keeps
-        // this one Super-Admin-only on purpose — see PettyCashPolicy::clearAll().
-        if (!Auth::user()?->can('clearAll', Payment::class)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Only a Super Admin may clear petty cash history.',
-            ], 403);
+        $disbursement = $this->repository->findDisbursement($id);
+
+        if (!$disbursement) {
+            return response()->json(['success' => false, 'message' => 'Disbursement not found'], 404);
         }
 
-        try {
-            $result = $this->service->clearAllData();
+        if (!$disbursement->cost_gl_posting_failed_at) {
+            return response()->json([
+                'success' => true,
+                'message' => 'This disbursement has no failed cost posting to retry.',
+                'data' => $disbursement,
+            ]);
+        }
 
-            return response()->json($result);
-        } catch (Exception $e) {
+        $outcome = app(\App\Modules\Finance\CostCollector\Services\PettyCashCostPoster::class)
+            ->attempt($disbursement);
+
+        $disbursement->refresh();
+
+        if ($disbursement->cost_gl_posting_failed_at) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to clear petty cash data',
-                'error' => $e->getMessage(),
-            ], 400);
+                'message' => 'The cost/GL entry still could not be posted: '.$disbursement->cost_gl_posting_error,
+                'data' => $disbursement,
+            ], 422);
         }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'The disbursement now has a cost/GL outcome of: '.$outcome,
+            'data' => $disbursement,
+        ]);
     }
+
+
+
+    // clearAll() was removed here. Critical Risk C6
+    // (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md): a full
+    // petty-cash data wipe should not be reachable from the API at all,
+    // regardless of environment or who could pass the authorization gate.
+    // The equivalent capability now exists only as
+    // `php artisan petty-cash:clear-all-non-production`, which refuses to
+    // run outside local/testing environments — see
+    // App\Modules\Finance\PettyCash\Console\ClearAllPettyCashDataCommand.
 
     /**
      * Get hierarchical transaction view (top-ups with disbursements).

@@ -17,6 +17,7 @@ class SpendVoucher extends Model
         'voucher_no',
         'type',
         'status',
+        'review_state',
         'transacted_at',
         'posting_date',
         'accounting_period_id',
@@ -50,6 +51,10 @@ class SpendVoucher extends Model
         'petty_cash_top_up_id',
         'approved_by',
         'approved_at',
+        'returned_by', 'returned_at', 'return_reason',
+        'resubmitted_by', 'resubmitted_at',
+        'rejected_by', 'rejected_at', 'rejection_reason',
+        'senior_approved_by', 'senior_approved_at',
         'posted_by',
         'posted_at',
         'received_by',
@@ -71,6 +76,10 @@ class SpendVoucher extends Model
         'transaction_cost' => 'decimal:2',
         'buyer_pin_captured' => 'boolean',
         'approved_at' => 'datetime',
+        'returned_at' => 'datetime',
+        'resubmitted_at' => 'datetime',
+        'rejected_at' => 'datetime',
+        'senior_approved_at' => 'datetime',
         'posted_at' => 'datetime',
         'received_at' => 'datetime',
     ];
@@ -85,6 +94,11 @@ class SpendVoucher extends Model
     public function allocations(): HasMany
     {
         return $this->hasMany(SpendVoucherAllocation::class, 'spend_voucher_id');
+    }
+
+    public function reviews(): HasMany
+    {
+        return $this->hasMany(SpendVoucherReview::class)->oldest();
     }
 
     /**
