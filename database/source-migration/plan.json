@@ -1,0 +1,1609 @@
+{
+    "meta": {
+        "generated_at": "2026-09-28T11:30:54+03:00",
+        "generated_from": "config/source_migration.php (Report 50A rules; WNG decisions D1\u2013D8 as recorded in Report 51)",
+        "decisions": {
+            "D1": "CONFIRMED \u2014 import all non-DATA-1 operational tables by default",
+            "D2": "PENDING \u2014 source-data evidence (migration:evidence d2)",
+            "D3": "PENDING \u2014 accountant decision; chart_of_accounts not loaded",
+            "D4": "CONFIRMED \u2014 preserve and map; migration:evidence roles",
+            "D5": "CONFIRMED \u2014 preserve all projects; planned CostLines for active/open projects only",
+            "D6": "CONFIRMED \u2014 not hard-coded; departments classified in the UI at cutover",
+            "D7": "CONFIRMED \u2014 accountant input at cutover; nothing derived from excluded history",
+            "D8": "DEFERRED \u2014 until the rehearsal passes"
+        },
+        "review_status": "GENERATED \u2014 review before execution"
+    },
+    "tables": {
+        "accounting_periods": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "action_logs": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "active_trip_locations": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "activities": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "announcement_reads": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "announcements": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "app_notification_preferences": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "app_notifications": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "archival_item_placements": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "archival_reports": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "archival_setup_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "asset_assignment_history": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "asset_categories": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "asset_hire_requests": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "asset_service_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "assets": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "attendance_device_raw_events": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "attendance_device_sync_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "attendance_holidays": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "attendance_records": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "attendance_schedule_assignments": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "attendance_sync_requests": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "attendance_work_schedules": {
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "D1",
+            "natural_key": [
+                "name"
+            ]
+        },
+        "bill_payments": {
+            "mode": "decision-pending",
+            "reason": "D2",
+            "group": "D2"
+        },
+        "bills": {
+            "mode": "decision-pending",
+            "reason": "D2",
+            "group": "D2"
+        },
+        "board_movements": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "board_reconciliations": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "board_requests": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "board_return_batch_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "board_return_batches": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "board_workflow_tasks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "boards": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "budget_additions": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "budget_approvals": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "budget_versions": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "cache": {
+            "mode": "skip",
+            "reason": "Transient",
+            "group": "skip"
+        },
+        "cache_locks": {
+            "mode": "skip",
+            "reason": "Transient",
+            "group": "skip"
+        },
+        "chart_of_accounts": {
+            "mode": "decision-pending",
+            "reason": "D3 \u2014 accountant decision: source chart vs reference chart",
+            "group": "D3"
+        },
+        "client_interactions": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "client_receipts": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q2",
+            "group": "finance-excluded"
+        },
+        "clients": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "compensations": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "cost_causes": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "cost_centres": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "cost_line_allocations": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "cost_line_transfers": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "cost_lines": {
+            "mode": "exclude",
+            "reason": "DATA-1 \u2014 Finance cost lines are regenerated or start fresh",
+            "group": "finance-excluded"
+        },
+        "daily_issues": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "daily_tasks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "deliverables_blueprints": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "deliveries": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "delivery_stops": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "departments": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "design_assets": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "design_bom_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "design_documents": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "design_handoffs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "design_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "design_jobs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "design_requirements": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "design_task_contexts": {
+            "mode": "skip",
+            "reason": "Legacy table from a since-deleted migration; the target schema has no such table",
+            "group": "skip"
+        },
+        "design_types": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "direct_disbursement_requests": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "disciplinary_activity_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "disciplinary_cases": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "disciplinary_comments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "dispatch_batches": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "document_sequences": {
+            "mode": "skip",
+            "reason": "Target sequence state \u2014 starts fresh",
+            "group": "skip"
+        },
+        "drivers": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "element_materials": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "element_template_materials": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "element_templates": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "element_types": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "employee_certifications": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "employee_documents": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "employee_salary_histories": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "employee_skills": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "employee_staging_records": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "employees": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "enquiry_payments": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q2 \u2014 client receipts",
+            "group": "finance-excluded"
+        },
+        "enquiry_task_user": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "enquiry_tasks": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "events": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "expense_codes": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated (same migrations seed staging and target)",
+            "group": "skip"
+        },
+        "failed_jobs": {
+            "mode": "skip",
+            "reason": "Transient",
+            "group": "skip"
+        },
+        "finance_attachments": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "finance_cash_movements": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "finance_period_audit_logs": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "finance_reconciliation_statements": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "finance_settings": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "finance_statement_matches": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "finance_statement_transactions": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "finance_task_contexts": {
+            "mode": "skip",
+            "reason": "Legacy table from a since-deleted migration; the target schema has no such table",
+            "group": "skip"
+        },
+        "finance_work_assignment_events": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "finance_work_assignments": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "goods_receipt_inspections": {
+            "mode": "decision-pending",
+            "reason": "D2",
+            "group": "D2"
+        },
+        "goods_receipt_note_items": {
+            "mode": "decision-pending",
+            "reason": "D2",
+            "group": "D2"
+        },
+        "goods_receipt_notes": {
+            "mode": "decision-pending",
+            "reason": "D2",
+            "group": "D2"
+        },
+        "governance_audit_logs": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "grievance_activity_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "grievance_comments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "grievances": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "handover_surveys": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "hr_action_attachments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_action_types": {
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "D1",
+            "natural_key": [
+                "code"
+            ]
+        },
+        "hr_actions": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "hr_audit_logs": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "hr_candidate_documents": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_candidate_education": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_candidate_experiences": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_candidate_references": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_candidates": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_interviews": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_job_postings": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_activity_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_asset_returns": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_attachments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_cards": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_cases": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_clearances": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_exit_interviews": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_final_settlements": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_offboarding_tasks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_onboarding_activity_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_onboarding_cards": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_onboarding_cases": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_onboarding_document_requirements": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_onboarding_handovers": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_onboarding_reviews": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_onboarding_tasks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "hr_onboarding_welcome_kit_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "incident_activity_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "incident_comments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "incidents": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "inventory_logs": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "inventory_lots": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "inventory_movement_allocations": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "inventory_serial_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "job_batches": {
+            "mode": "skip",
+            "reason": "Transient",
+            "group": "skip"
+        },
+        "job_cards": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "jobs": {
+            "mode": "skip",
+            "reason": "Transient",
+            "group": "skip"
+        },
+        "journal_entries": {
+            "mode": "exclude",
+            "reason": "DATA-1 \u2014 journals start fresh (GL opening needs D3/D7)",
+            "group": "finance-excluded"
+        },
+        "journal_lines": {
+            "mode": "exclude",
+            "reason": "DATA-1 \u2014 journals start fresh",
+            "group": "finance-excluded"
+        },
+        "leave_balance_adjustments": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "leave_handovers": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "leave_requests": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "leave_types": {
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "DATA-1",
+            "natural_key": [
+                "code"
+            ]
+        },
+        "ledger_entries": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "library_materials": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "locations": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "logistics_checklist_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "logistics_checklists": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "logistics_loading_confirmation_links": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "logistics_log_entries": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "logistics_manifest_links": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "logistics_manifest_submissions": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "logistics_return_confirmation_links": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "logistics_task_contexts": {
+            "mode": "skip",
+            "reason": "Legacy table from a since-deleted migration; the target schema has no such table",
+            "group": "skip"
+        },
+        "logistics_tasks": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "material_attribute_normalization_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "material_attribute_normalization_runs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "material_categories": {
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "DATA-1",
+            "natural_key": [
+                "name",
+                "parent_id"
+            ]
+        },
+        "material_item_types": {
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "D1",
+            "natural_key": [
+                "code"
+            ]
+        },
+        "material_uom_conversions": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "material_versions": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "material_workstations": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "migrations": {
+            "mode": "skip",
+            "reason": "Target has its own ledger (clean 607-migration chain)",
+            "group": "skip"
+        },
+        "model_has_permissions": {
+            "mode": "import-mapped",
+            "reason": "Direct grants mapped by permission name; unmapped grants reported, never created",
+            "group": "security"
+        },
+        "model_has_roles": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "ncr_reports": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "ot_entries": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "ot_flags": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "password_reset_tokens": {
+            "mode": "skip",
+            "reason": "Transient",
+            "group": "skip"
+        },
+        "payee_types": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "payment_allocations": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "payment_sources": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "payment_terms": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "payments": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1 \u2014 petty-cash disbursements (renamed from petty_cash_disbursements in Stage 1)",
+            "group": "finance-excluded"
+        },
+        "payroll_ledgers": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q3",
+            "group": "finance-excluded"
+        },
+        "payroll_runs": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q3",
+            "group": "finance-excluded"
+        },
+        "payroll_tax_bands": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "payroll_variables": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "payslips": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q3",
+            "group": "finance-excluded"
+        },
+        "performance_reviews": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "permissions": {
+            "mode": "skip",
+            "reason": "Regenerated \u2014 RoleAndPermissionSeeder + permissions:sync",
+            "group": "skip"
+        },
+        "personal_access_tokens": {
+            "mode": "skip",
+            "reason": "Transient \u2014 users sign in again",
+            "group": "skip"
+        },
+        "petty_cash_activity_logs": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_balances": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1 \u2014 the float restarts from the physical count (D7)",
+            "group": "finance-excluded"
+        },
+        "petty_cash_cash_counts": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_custody_handovers": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_disbursement_allocations": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_ledger_entries": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_offline_batches": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_offline_rows": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_requisition_items": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_requisition_types": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "petty_cash_requisitions": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_surrender_items": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_surrender_reviews": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "petty_cash_top_ups": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q1",
+            "group": "finance-excluded"
+        },
+        "posting_rules": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "print_job_consumptions": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "print_job_events": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "print_jobs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "print_manual_consumptions": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "print_material_request_fulfilments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "print_material_requests": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "print_rolls": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_completion_criteria": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_defect_codes": {
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "D1",
+            "natural_key": [
+                "code"
+            ]
+        },
+        "production_elements": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_issues": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_ncr_assignments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_ncr_closures": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_ncr_events": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_ncrs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_quality_checkpoints": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "production_root_cause_codes": {
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "D1",
+            "natural_key": [
+                "code"
+            ]
+        },
+        "profile_update_requests": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "project_deliverables": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "project_elements": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "project_enquiries": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "project_invoice_allocations": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 receivables start fresh",
+            "group": "finance-excluded"
+        },
+        "project_invoice_lines": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 receivables start fresh",
+            "group": "finance-excluded"
+        },
+        "project_invoices": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 receivables start fresh",
+            "group": "finance-excluded"
+        },
+        "project_labour_actual_returns": {
+            "mode": "exclude",
+            "reason": "W7 \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "project_labour_actuals": {
+            "mode": "exclude",
+            "reason": "W7 \u2014 labour records start fresh",
+            "group": "finance-excluded"
+        },
+        "projects": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "public_leads": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "purchase_order_amendments": {
+            "mode": "decision-pending",
+            "reason": "D2",
+            "group": "D2"
+        },
+        "purchase_order_corrections": {
+            "mode": "decision-pending",
+            "reason": "D2",
+            "group": "D2"
+        },
+        "purchase_order_items": {
+            "mode": "decision-pending",
+            "reason": "D2",
+            "group": "D2"
+        },
+        "purchase_orders": {
+            "mode": "decision-pending",
+            "reason": "D2 \u2014 pending source-data evidence",
+            "group": "D2"
+        },
+        "quote_approvals": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "quote_versions": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "requisition_items": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "requisitions": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "role_has_permissions": {
+            "mode": "skip",
+            "reason": "Regenerated \u2014 permissions:sync from RolePermissions matrix",
+            "group": "skip"
+        },
+        "roles": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "salary_advance_recoveries": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q3",
+            "group": "finance-excluded"
+        },
+        "salary_advance_requests": {
+            "mode": "exclude",
+            "reason": "DATA-1 Q3",
+            "group": "finance-excluded"
+        },
+        "sessions": {
+            "mode": "skip",
+            "reason": "Transient \u2014 users sign in again",
+            "group": "skip"
+        },
+        "setdown_checklists": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "setdown_task_issues": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "setdown_task_photos": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "setdown_tasks": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "setup_task_issues": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "setup_task_photos": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "setup_tasks": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "site_surveys": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "spend_voucher_allocations": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "spend_voucher_reviews": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "spend_vouchers": {
+            "mode": "exclude",
+            "reason": "Finance \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "stock_count_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "stock_counts": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "stocks": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "stores_finance_postings": {
+            "mode": "exclude",
+            "reason": "Finance outbox \u2014 starts fresh",
+            "group": "finance-excluded"
+        },
+        "suppliers": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "support_ticket_activities": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "support_ticket_attachments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "support_ticket_messages": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "support_tickets": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "system_events": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "task_assignment_history": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "task_assignments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_attachments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_budget_data": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "task_comments": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_dependencies": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_experience_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_history": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_issues": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_materials_data": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "task_procurement_data": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "task_production_data": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "task_quote_data": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "task_saved_views": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_templates": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "task_time_entries": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "tasks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "team_categories": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "team_category_types": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "team_types": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "teams_activity_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "teams_members": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "teams_tasks": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "technical_labours": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "transport_items": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "trip_requests": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "units_of_measure": {
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "DATA-1",
+            "natural_key": [
+                "code"
+            ]
+        },
+        "user_device_tokens": {
+            "mode": "skip",
+            "reason": "Transient \u2014 push devices re-register",
+            "group": "skip"
+        },
+        "users": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "vat_treatments": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "vehicle_inspections": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "vehicle_maintenance_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "vehicles": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "wht_categories": {
+            "mode": "skip",
+            "reason": "Target reference \u2014 regenerated",
+            "group": "skip"
+        },
+        "work_centers": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_final_qc_checks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_handovers": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_mid_qc_checks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_rework_evidence": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_reworks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_scrap_logs": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_task_assignees": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_task_evidence": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_order_tasks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "work_orders": {
+            "mode": "import",
+            "reason": "DATA-1 preserved (FinanceResetBoundary::PROTECTED)",
+            "group": "DATA-1"
+        },
+        "workflow_instances": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "workflow_tasks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "workflow_template_tasks": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "workflow_templates": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        },
+        "workstations": {
+            "mode": "import",
+            "reason": "D1 \u2014 non-Finance operational history, imported by default",
+            "group": "D1"
+        }
+    }
+}
