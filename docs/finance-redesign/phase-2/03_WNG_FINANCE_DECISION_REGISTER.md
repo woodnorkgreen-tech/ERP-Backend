@@ -11,6 +11,8 @@ creating a second register.
 
 > **Engineering Rule (Phase 2B Alignment Pass, 2026-09-24):** A confirmed interactive Finance workflow must be implemented end-to-end: Business Decision → Backend → Permission → Functional Frontend → Accounting/Cost Integration → Audit Trail → Backend Tests → Frontend Tests. A workflow is marked **FULLY IMPLEMENTED** only when all applicable layers are complete and verified. Backend-only workflows remain classified as **Backend Implemented / UI Incomplete**.
 
+> **ENG-1 — Frontend Type-Check Baseline (decided by WNG/Engineering, 2026-09-28):** The Finance redesign inherited a documented frontend repository baseline of **256 pre-existing TypeScript errors** (measured in `31_PHASE_2B_WAVE_3_IMPLEMENTATION_REPORT.md`; identical to the committed pre-Phase-2B HEAD). Finance workflow closure uses a **zero-new-errors rule** against that baseline until the repository-wide TypeScript debt is addressed separately. This baseline does **not** classify the legacy errors as correct or permanently acceptable: they are pre-existing repository technical debt, not charged against a Finance workflow's closure unless that workflow modifies or directly depends on the defective code. The rule applies to **W8 onward** unless WNG/Engineering explicitly changes it. Evidence and first application: `43_PHASE_2B_W7_FINAL_CLOSURE_REPORT.md`.
+
 ---
 
 ## Stabilization-dependent decisions (from Part B)
@@ -178,7 +180,7 @@ W6 PROJECT COSTING DECISIONS & PREPARE W7 LABOUR COST").**
 
 **W7 INDEPENDENT CLOSURE GATE — FAILED (2026-09-27, Report 40):** The prior Report 39 implementation-completion statement is **REJECTED** (Technical Labour was not retired, frontend tests were not N/A, and W7 was not complete). Report 40 found blockers A–O.
 
-**W7 REMEDIATION & RE-CLOSURE GATE — FAIL, W7 REMAINS OPEN (2026-09-28, Report 41 — `41_PHASE_2B_W7_REMEDIATION_AND_RECLOSURE_REPORT.md`):** Report 40 blockers A–N are remediated and independently verified:
+**W7 REMEDIATION & RE-CLOSURE GATE — FAIL at the time (2026-09-28, Report 41 — `41_PHASE_2B_W7_REMEDIATION_AND_RECLOSURE_REPORT.md`):** Report 40 blockers A–N are remediated and independently verified:
 - Return → Correct → Resubmit is a real lifecycle with immutable return history.
 - Finance unbudgeted-rate resolution and verified-correction/reclassification UI are built.
 - W7-13 is reconciled to the W6-4 reversing pair. `CostTransferService::correct()` handles same-project corrections, posted on Finance verification of the successor; `transfer()` handles cross-project reclassification. KES 20,000 → 16,000 gives Project Costing 16,000.
@@ -189,7 +191,17 @@ W6 PROJECT COSTING DECISIONS & PREPARE W7 LABOUR COST").**
 
 Evidence: W7 backend 84 tests / 400 assertions pass; the full backend suite passes 1,427 tests / 9,421 assertions with 0 failures; W7 frontend 23 tests pass; frontend regression passes 166 tests; the production build succeeds.
 
-**Remaining blocker (O):** the frontend repository type-check fails, with 256 errors already at committed HEAD, 2 from uncommitted procurement work, and **0 from W7**. No formally accepted type-check baseline exists, and none is invented to close W7. W7 closes once WNG/Engineering formally adopts a baseline or the repository type-checks cleanly. Separate non-blocking policy question: should WNG approve a standing unbudgeted-labour rate source beyond the per-actual Finance authorization (W7-6 control)? Do not mark any confirmed W7 row FULLY IMPLEMENTED until the re-closure gate passes. W8 has not started.
+**Report 41's remaining blocker (O)**, since resolved: the frontend repository type-check failed (256 errors pre-existing at committed HEAD, 2 from uncommitted procurement work, 0 from W7) with no formally accepted baseline.
+
+**W7 FINAL CLOSURE — PASS: W7 CONFIRMED ANALYTICAL SUBSET CLOSED (2026-09-28, Report 43 — `43_PHASE_2B_W7_FINAL_CLOSURE_REPORT.md`):**
+- ENG-1 adopted the 256-error legacy baseline with a zero-new-errors rule.
+- The 2 procurement errors (`useOrderWorkflow.ts` action union) were fixed at the type level, bringing type-check to **256, identical to HEAD, with 0 in any W7-touched file**.
+- Re-verified: W7 backend 84 tests / 400 assertions; full backend 1,427 tests / 9,421 assertions, 0 failures; W7 frontend 23 tests; full frontend 166 tests; production build succeeds.
+- **Closure scope = W7-1 through W7-14** (the scope set in Reports 40/41): budget-line actual labour, standard-rate costing, attribution, the two-stage operational check plus Finance verification, unbudgeted labour, overrun alerts, unused budget, forward-only, Technical Labour decommissioning of the in-use workflows, privacy, one-cost-once, W6-4 corrections, and closure interaction. These are **FULLY IMPLEMENTED** under the Engineering Rule.
+- W7-15 to W7-23 remain confirmed attribution rules. Of these, only rework tagging (W7-19/W7-20) and work-phase classification through labour category (W7-17) are implemented in W7. W7-15 (project overtime) depends on the overtime module, which WNG states is not in use. They are not claimed as separately implemented.
+- **WNG scope instruction (2026-09-28):** work orders, overtime/compensatory leave and Technical Labour screens are not in use and were left out of W7-10. Their historical residue is classified, not changed (Report 41 §4).
+- W7-24, W7-25 and W7-26 remain open and do not block the analytical subset. The unbudgeted-labour standing-rate policy question stays a separate, non-blocking item.
+- **Not released:** nothing is merged to `master` or deployed. The next activity is the Phase 2B Controlled Release Readiness Gate. W8 has not started.
 
 ### Confirmed WNG Current-State Facts
 1. **Project Budget is the labour-planning source:** At WNG, project labour is normally planned during Project Budget creation (`task_budget_data.labour_data`), capturing role (`COMMON_TEAM_TYPES`), category, unit, quantity, days, rate, and amount. It already projects into `cost_lines` as `nature = 'planned'` and `budget_category = 'labour'`. No second labour-budgeting workflow will be created.

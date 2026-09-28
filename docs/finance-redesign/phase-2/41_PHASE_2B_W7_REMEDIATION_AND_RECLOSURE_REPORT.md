@@ -416,3 +416,21 @@ Both repositories have large pre-existing uncommitted trees; those were preserve
 - Technical Labour references in work orders, overtime and compensatory leave, left out by WNG instruction because those modules are not in use.
 
 W8 was not started. W7-24, W7-25 and W7-26 were not implemented.
+
+---
+
+## Engineering Baseline Resolution and Final Re-Closure
+
+**Appended 2026-09-28.** The FAIL verdict above is preserved as the result at the time it was issued. This section records what followed. Full evidence is in `43_PHASE_2B_W7_FINAL_CLOSURE_REPORT.md`.
+
+- **Baseline decision (ENG-1, WNG/Engineering):** the Finance redesign inherited a documented frontend repository baseline of 256 pre-existing TypeScript errors (measured in Report 31). Finance workflow closure uses a zero-new-errors rule against that baseline until the repository-wide TypeScript debt is addressed separately. This baseline does not classify the legacy errors as correct or permanently acceptable. It applies to W8 onward unless explicitly changed.
+- **Correction to §27 above:** a baseline *measurement* was documented (Report 31). What was missing was a baseline *acceptance*, which ENG-1 now provides.
+- **2 errors fixed:** `procurement-stores/shared/composables/useOrderWorkflow.ts`. The `NextStep.key` union now includes the real W2-6 `'correct'` and W2-1 `'senior-approve'` steps. There is no suppression and no `any`.
+- **Type-check:** 258 → **256**. The error set is identical to committed HEAD: 0 new, 0 in any W7-touched file.
+- **W7 regression (re-executed):**
+  - Backend W7: 84 tests / 400 assertions pass.
+  - Full backend: 1,427 tests / 9,421 assertions, 0 failures, 0 errors, 0 skipped.
+  - Frontend W7: 23/23.
+  - Full frontend unit suite: 27 files / 166 tests pass.
+  - Production build succeeds.
+- **Final re-closure result:** **PASS — W7 CONFIRMED ANALYTICAL SUBSET CLOSED.** W7-24/25/26 remain open. Nothing has been released to production.
