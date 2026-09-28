@@ -10,6 +10,7 @@ use App\Modules\MaterialsLibrary\Models\UnitOfMeasure;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use App\Modules\ProcurementStores\Models\Supplier;
+use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -21,6 +22,16 @@ use Tests\TestCase;
  * PurchaseOrderPriceFeedback writes that price forward into the material's
  * default_unit_cost so the catalogue estimate tracks reality instead of
  * freezing at whatever was typed once on the material form (or never typed).
+ *
+ * Wave 2 entry gate: approving a PO now also dispatches PurchaseOrderApproved
+ * -> RecordPurchaseOrderCommitments -> ProcurementCostProducer, which posts a
+ * committed cost line and therefore needs an open accounting period for the
+ * PO's date. This test predates that side effect and never seeded one — an
+ * unrelated newer requirement this file's own concern (price feedback) never
+ * needed until now. Confirmed transactionally safe (PurchaseOrder::approve()
+ * wraps status + price feedback in one DB::transaction(), so the missing
+ * period throws and rolls back cleanly — no partial/silent approval), so this
+ * is fixture drift, not a financial-integrity defect.
  */
 class PurchaseOrderApprovalPricingTest extends TestCase
 {
@@ -30,6 +41,7 @@ class PurchaseOrderApprovalPricingTest extends TestCase
     {
         parent::setUp();
         Permission::findOrCreate(Permissions::PROCUREMENT_ORDERS_APPROVE, 'web');
+        $this->seed(AccountingPeriodSeeder::class);
     }
 
     private function approver(): User
@@ -82,8 +94,11 @@ class PurchaseOrderApprovalPricingTest extends TestCase
 
     public function test_approving_a_po_converts_a_line_priced_in_the_purchase_unit_down_to_the_base_unit(): void
     {
-        $base = UnitOfMeasure::create(['code' => 'M', 'name' => 'Metre', 'dimension' => 'length', 'is_active' => true]);
-        $roll = UnitOfMeasure::create(['code' => 'ROLL', 'name' => 'Roll', 'dimension' => 'length', 'is_active' => true]);
+        // firstOrCreate, not create: these are reference-catalogue units that
+        // other fixtures/seeders may already have registered (case-insensitive
+        // on the unique code), not per-test data this test owns exclusively.
+        $base = UnitOfMeasure::firstOrCreate(['code' => 'M'], ['name' => 'Metre', 'dimension' => 'length', 'is_active' => true]);
+        $roll = UnitOfMeasure::firstOrCreate(['code' => 'ROLL'], ['name' => 'Roll', 'dimension' => 'length', 'is_active' => true]);
 
         $requester = $this->approver();
         $order = $this->pendingOrder($requester->id);

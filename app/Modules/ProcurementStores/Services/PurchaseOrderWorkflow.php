@@ -101,6 +101,21 @@ class PurchaseOrderWorkflow
         $awaitingStores = $items->contains(fn ($item) => $item['awaiting_stores']);
         $approved = $order->status === 'approved';
         $bill = $order->bills->sortBy('id')->first();
+        // W2-3 introduced staged/multiple Bills per order; this single-bill
+        // "stage" (see the class docblock) still reflects only the first one
+        // raised, kept for the existing screens that read it. But "complete"
+        // is a claim of settlement, and closure-gate §16 found it could be
+        // reached from the first Bill alone while later ones were still
+        // unpaid — a PO showing "Settled" with a real outstanding balance.
+        // That specific claim is corrected to require every non-cancelled
+        // Bill actually settled; the rest of the single-bill stage sequence
+        // is deliberately left as the same known, documented limitation
+        // rather than a full multi-bill stage model nobody has confirmed —
+        // see 'bills_count' etc. below for the aggregate figures that make
+        // the true multi-bill position visible regardless of this stage.
+        $validBills = $order->bills->where('status', '!=', 'cancelled');
+        $allBillsSettled = $validBills->isNotEmpty()
+            && $validBills->every(fn (Bill $b) => bccomp((string) $b->balance, '0.00', 2) <= 0);
 
         $stage = match (true) {
             ! $approved => 'approval',
@@ -111,7 +126,7 @@ class PurchaseOrderWorkflow
         };
 
         if ($bill && $stage === 'verification') {
-            if (bccomp((string) $bill->balance, '0.00', 2) <= 0) {
+            if ($allBillsSettled) {
                 $stage = 'complete';
             } elseif ($bill->verified_at) {
                 $stage = 'payment';
@@ -143,6 +158,12 @@ class PurchaseOrderWorkflow
             ])->values()->all(),
             'bill_id' => $bill?->id,
             'bill_number' => $bill?->bill_number,
+            // W2-3/closure-gate §16: the true multi-bill position, alongside
+            // (never replacing) the single-bill fields above.
+            'bills_count' => $validBills->count(),
+            'bills_paid_count' => $validBills->filter(fn (Bill $b) => bccomp((string) $b->balance, '0.00', 2) <= 0)->count(),
+            'total_billed' => $order->totalBilled(),
+            'remaining_billable' => $order->remainingBillable(),
         ];
     }
 
@@ -199,6 +220,27 @@ class PurchaseOrderWorkflow
          */
         $amount = $bill->netAmount();
 
+        // W2-3: excludes this bill itself — re-verifying an existing bill
+        // must not count its own amount against its own remaining balance.
+        // For a persisted bill this is a real exclusion; for one not yet
+        // saved (id is null), excluding null is a no-op, which is correct —
+        // it is not yet among "other" bills either way.
+        $remainingBillable = $order->remainingBillable(excludingBillId: $bill->id);
+
+        // Closure-gate §6: while only one Bill could ever exist per order,
+        // "this invoice's amount ≤ total accepted value" WAS the cumulative
+        // check — there was only one invoice to compare. W2-3 allowed
+        // several, and without this exclusion three staged Bills for 20/20/1
+        // units against a 40-unit receipt would each individually still
+        // pass (20k, 20k and 1k are each ≤ 40k accepted), jointly billing
+        // more than Stores ever accepted. Mirrors remainingBillable's own
+        // exclusion above, applied to the receipt basis instead of the PO's
+        // approved value.
+        $remainingAccepted = bcsub(
+            $workflow['accepted_value'], $order->totalBilled(excludingBillId: $bill->id), 2
+        );
+        $remainingAccepted = bccomp($remainingAccepted, '0.00', 2) > 0 ? $remainingAccepted : '0.00';
+
         $checks = [
             [
                 'key' => 'order',
@@ -228,17 +270,28 @@ class PurchaseOrderWorkflow
             ],
             [
                 'key' => 'accepted_value',
-                'label' => 'Invoice does not exceed the value accepted into stock',
+                // W2-3: measured against what is still unbilled of the
+                // accepted receipt — Accepted Value minus every OTHER valid
+                // bill already raised against it — not the full accepted
+                // value, now that more than one bill may exist. Unchanged
+                // for any order with only this one bill.
+                'label' => 'Invoice does not exceed the remaining accepted (unbilled) value',
                 'detail' => number_format((float) $amount, 2).' invoiced against '
-                    .number_format((float) $workflow['accepted_value'], 2).' accepted',
-                'passed' => bccomp($amount, $workflow['accepted_value'], 2) <= 0,
+                    .number_format((float) $remainingAccepted, 2).' remaining accepted',
+                'passed' => bccomp($amount, $remainingAccepted, 2) <= 0,
             ],
             [
                 'key' => 'order_total',
-                'label' => 'Invoice does not exceed the approved order',
+                // W2-3: measured against what is still billable on this order
+                // — Approved Value minus every OTHER valid bill already
+                // raised against it — not the order's full value, now that
+                // more than one bill may exist. For an order with only this
+                // one bill, remaining billable equals the order total, so
+                // this is unchanged for every pre-existing single-bill order.
+                'label' => 'Invoice does not exceed the order\'s remaining billable amount',
                 'detail' => number_format((float) $amount, 2).' invoiced against '
-                    .number_format((float) $workflow['order_total'], 2).' approved',
-                'passed' => bccomp($amount, $workflow['order_total'], 2) <= 0,
+                    .number_format((float) $remainingBillable, 2).' remaining billable',
+                'passed' => bccomp($amount, $remainingBillable, 2) <= 0,
             ],
         ];
 
@@ -287,6 +340,16 @@ class PurchaseOrderWorkflow
             'bill_vat' => (string) ($bill->vat_amount ?? 0),
             'bill_wht' => (string) ($bill->wht_amount ?? 0),
             'bill_payable' => $bill->payableAmount(),
+            // W2-3: the staged-billing position for THIS invoice, net of tax
+            // throughout (the basis the cap is enforced on). The screen shows
+            // these figures; it never recomputes them.
+            'billing_position' => [
+                'order_value' => (string) $order->total_amount,
+                'previously_billed' => $order->totalBilled(excludingBillId: $bill->id),
+                'this_bill' => (string) $amount,
+                'total_billed' => bcadd($order->totalBilled(excludingBillId: $bill->id), (string) $amount, 2),
+                'remaining_billable' => $order->remainingBillable(),
+            ],
             'bill_balance' => (string) $bill->balance,
             'supplier_invoice_number' => $bill->supplier_invoice_number,
             'checks' => $checks,

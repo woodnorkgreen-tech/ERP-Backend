@@ -39,6 +39,11 @@ class Bill extends Model
         'project_enquiry_id',
         'job_number',
         'department_id',
+        // W2-5: duplicate detection override trail.
+        'duplicate_of_bill_id',
+        'duplicate_override_reason',
+        'duplicate_override_by',
+        'duplicate_override_at',
     ];
 
     protected $casts = [
@@ -52,6 +57,7 @@ class Bill extends Model
         'vat_amount' => 'decimal:2',
         'wht_amount' => 'decimal:2',
         'tax_point_date' => 'date',
+        'duplicate_override_at' => 'datetime',
     ];
 
     protected static function boot()
@@ -196,6 +202,12 @@ class Bill extends Model
     public function expenseCode()
     {
         return $this->belongsTo(\App\Modules\Finance\CostCollector\Models\ExpenseCode::class);
+    }
+
+    /** W2-2: supplier evidence — the same generic finance_attachments the Wave 1 invoice uses. */
+    public function attachments()
+    {
+        return $this->morphMany(\App\Modules\Finance\Models\FinanceAttachment::class, 'source');
     }
 
     /**

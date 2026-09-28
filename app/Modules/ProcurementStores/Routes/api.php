@@ -16,6 +16,8 @@ use App\Modules\ProcurementStores\Controllers\StockCountController;
 use App\Modules\ProcurementStores\Controllers\StoresResetController;
 use App\Modules\ProcurementStores\Controllers\GoodsReceiptInspectionController;
 use App\Modules\ProcurementStores\Controllers\OperationsReadinessController;
+use App\Modules\ProcurementStores\Controllers\ProcurementAttachmentController;
+use App\Modules\ProcurementStores\Controllers\PurchaseOrderAmendmentController;
 
 Route::get('/readiness', [OperationsReadinessController::class, 'show']);
 
@@ -101,6 +103,10 @@ Route::get('/approved-purchase-orders', [PurchaseOrderController::class, 'getApp
 Route::post('/search/purchase-orders', [PurchaseOrderController::class, 'search']);
 Route::post('/purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController::class, 'submitForApproval']);
 Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve']);
+Route::post('/purchase-orders/{purchaseOrder}/senior-approve', [PurchaseOrderController::class, 'seniorApprove']);
+Route::post('/purchase-orders/{purchaseOrder}/return-for-correction', [PurchaseOrderController::class, 'returnForCorrection']);
+Route::post('/purchase-orders/{purchaseOrder}/resubmit', [PurchaseOrderController::class, 'resubmit']);
+Route::get('/purchase-orders/{purchaseOrder}/corrections', [PurchaseOrderController::class, 'corrections']);
 Route::post('/purchase-orders/{purchaseOrder}/send-email', [PurchaseOrderController::class, 'sendEmail']);
 Route::get('/purchase-orders/{purchaseOrder}/download', [PurchaseOrderController::class, 'downloadPdf']);
 Route::get('/purchase-orders/{purchaseOrder}/workflow', [PurchaseOrderController::class, 'workflow']);
@@ -108,6 +114,20 @@ Route::post('/purchase-orders/workflow-summary', [PurchaseOrderController::class
 Route::apiResource('/purchase-orders', PurchaseOrderController::class);
 Route::get('/purchase-orders/link/{requisition}', [PurchaseOrderController::class, 'link'])->name('purchase-orders.link');
 Route::post('/purchase-orders/store-linked', [PurchaseOrderController::class, 'storeLinked'])->name('purchase-orders.storeLinked');
+
+// W2-2: supplier evidence, on the generic finance_attachments mechanism.
+Route::get('/purchase-orders/{purchaseOrder}/attachments', [ProcurementAttachmentController::class, 'poIndex']);
+Route::post('/purchase-orders/{purchaseOrder}/attachments', [ProcurementAttachmentController::class, 'poStore']);
+Route::get('/purchase-orders/{purchaseOrder}/attachments/{attachment}/download', [ProcurementAttachmentController::class, 'poDownload']);
+Route::get('/bills/{bill}/attachments', [ProcurementAttachmentController::class, 'billIndex']);
+Route::post('/bills/{bill}/attachments', [ProcurementAttachmentController::class, 'billStore']);
+Route::get('/bills/{bill}/attachments/{attachment}/download', [ProcurementAttachmentController::class, 'billDownload']);
+
+// W2-4: formal PO amendment / change-order.
+Route::get('/purchase-orders/{purchaseOrder}/amendments', [PurchaseOrderAmendmentController::class, 'index']);
+Route::post('/purchase-orders/{purchaseOrder}/amendments', [PurchaseOrderAmendmentController::class, 'store']);
+Route::post('/purchase-orders/{purchaseOrder}/amendments/{amendment}/approve', [PurchaseOrderAmendmentController::class, 'approve']);
+Route::post('/purchase-orders/{purchaseOrder}/amendments/{amendment}/reject', [PurchaseOrderAmendmentController::class, 'reject']);
 
 // Bills - Specific routes FIRST (before resource)
 Route::get('/bills-stats', [BillController::class, 'stats']);

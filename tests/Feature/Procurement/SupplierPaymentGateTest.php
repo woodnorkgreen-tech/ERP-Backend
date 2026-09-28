@@ -284,7 +284,7 @@ class SupplierPaymentGateTest extends TestCase
             ->assertStatus(422);
 
         $this->assertContains(
-            'Invoice does not exceed the value accepted into stock',
+            'Invoice does not exceed the remaining accepted (unbilled) value',
             $response->json('blockers')
         );
     }

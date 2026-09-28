@@ -70,6 +70,20 @@ class BillResource extends JsonResource
                 'name' => $this->verifiedBy?->name,
             ]),
             'verification_notes' => $this->verification_notes,
+            // W2-3: this invoice's own net value — the figure the order's
+            // cumulative billing cap is measured in.
+            'net_amount' => (float) $this->net_amount,
+            // W2-5: the recorded override, when this bill was knowingly accepted
+            // despite matching an existing one.
+            'duplicate_of_bill_id' => $this->duplicate_of_bill_id,
+            'duplicate_override_reason' => $this->duplicate_override_reason,
+            'duplicate_override_at' => $this->duplicate_override_at?->toISOString(),
+            'duplicate_override_by' => $this->duplicate_override_by
+                ? \App\Models\User::whereKey($this->duplicate_override_by)->value('name') : null,
+            'abilities' => $request->user() ? [
+                'attach_evidence' => $request->user()->can(\App\Constants\Permissions::PROCUREMENT_ORDERS_CREATE),
+                'override_duplicate' => $request->user()->can(\App\Constants\Permissions::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE),
+            ] : [],
             'payments' => $this->whenLoaded('payments', function () {
                 return $this->payments->map(function ($payment) {
                     return [
@@ -86,6 +100,9 @@ class BillResource extends JsonResource
                         'payment_method' => $payment->payment_method,
                         'payment_method_label' => $payment->payment_method_label,
                         'reference_number' => $payment->reference_number, // CHANGED from 'notes'
+                        'duplicate_of_payment_id' => $payment->duplicate_of_payment_id,
+                        'duplicate_override_reason' => $payment->duplicate_override_reason,
+                        'duplicate_override_at' => $payment->duplicate_override_at?->toISOString(),
                         'created_by' => $payment->createdBy ? [
                             'id' => $payment->createdBy->id,
                             'name' => $payment->createdBy->name,

@@ -302,6 +302,11 @@ class BillController extends Controller
             'project_enquiry_id' => 'nullable|exists:project_enquiries,id',
             'job_number' => 'nullable|string|max:64',
             'department_id' => 'nullable|exists:departments,id',
+            // W2-5: only consulted if this exact supplier + invoice number is
+            // already on record — supplying it does not by itself authorize
+            // anything; the requester must separately hold the override
+            // permission, checked below.
+            'duplicate_override_reason' => 'nullable|string|min:5|max:1000',
         ], [
             'expense_code_id.exists' => 'Choose a category for a service or overhead invoice. '
                 .'Staff payments, stores issues and non-purchase categories cannot classify a bill, '
@@ -322,8 +327,11 @@ class BillController extends Controller
                     return response(['error' => 'Only approved purchase orders can have bills'], 422);
                 }
 
-                if ($purchaseOrder->bills()->exists()) {
-                    return response(['error' => 'This purchase order already has a bill'], 422);
+                // W2-4: the order's approved terms are not yet settled while
+                // a commercial amendment awaits its own approval — billing
+                // against a proposed value nobody has agreed to yet must wait.
+                if ($purchaseOrder->hasPendingCommercialAmendment()) {
+                    return response(['error' => 'This order has a commercial amendment awaiting approval. Billing is paused until it is approved or rejected.'], 422);
                 }
 
                 $input['supplier_id'] = $purchaseOrder->supplier_id;
@@ -355,6 +363,45 @@ class BillController extends Controller
                 ]], 422);
             }
 
+            // W2-5: the confirmed-duplicate case — this exact supplier and
+            // this exact invoice number already has a Bill. Supplier A's
+            // invoice 123 is not a duplicate of Supplier B's invoice 123, so
+            // this is always scoped to one supplier.
+            $duplicateBill = app(\App\Modules\Finance\Services\DuplicateDetectionService::class)
+                ->checkBillInvoiceNumber((int) $input['supplier_id'], (string) $input['supplier_invoice_number']);
+
+            if ($duplicateBill['status'] === 'confirmed') {
+                $overridden = filled($input['duplicate_override_reason'] ?? null)
+                    && $request->user()?->can(\App\Constants\Permissions::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE);
+
+                if (! $overridden) {
+                    $existing = Bill::with('supplier:id,supplier_name')->find($duplicateBill['matched_id']);
+                    return response([
+                        'error' => [
+                            'supplier_invoice_number' => ["Invoice {$input['supplier_invoice_number']} from this supplier is already recorded as bill {$existing?->bill_number}. "
+                                .'An authorized override with a reason is required to record it again.'],
+                        ],
+                        // W2-5: the explainable facts behind the refusal.
+                        'code' => 'DUPLICATE_BILL',
+                        'duplicate' => [
+                            'rule' => 'Same supplier and same supplier invoice number',
+                            'supplier' => $existing?->supplier?->supplier_name,
+                            'supplier_invoice_number' => $input['supplier_invoice_number'],
+                            'matched_bill_id' => $existing?->id,
+                            'matched_bill_number' => $existing?->bill_number,
+                            'matched_amount' => $existing ? (string) $existing->amount : null,
+                            'matched_date' => $existing?->bill_date?->toDateString(),
+                            'matched_status' => $existing?->status,
+                            'can_override' => (bool) $request->user()?->can(\App\Constants\Permissions::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE),
+                        ],
+                    ], 422);
+                }
+
+                $input['duplicate_of_bill_id'] = $duplicateBill['matched_id'];
+                $input['duplicate_override_by'] = auth()->id();
+                $input['duplicate_override_at'] = now();
+            }
+
             $input['bill_number'] = Bill::generateBillNumber();
             $input['user_id'] = auth()->id();
             $input['status'] = 'pending';
@@ -370,6 +417,29 @@ class BillController extends Controller
              */
             $bill->forceFill(app(SupplierInvoiceTax::class)->priceFor($bill->fresh(), $input))->save();
             $bill->refresh();
+
+            // W2-3 (confirmed 2026-09-23, Option A): staged/multiple bills
+            // against one PO — capped at what the order can still absorb,
+            // not restricted to exactly one. Checked here, after the real
+            // net/VAT split above, not from the raw request: an invoice's
+            // net amount depends on the supplier's resolved tax treatment,
+            // which SupplierInvoiceTax::priceFor() computes from the bill
+            // once it exists — a pre-creation estimate using only the
+            // request's raw amount/vat_amount would be wrong whenever VAT is
+            // derived rather than explicitly stated on the invoice.
+            if (! $isDirect) {
+                $remainingBillable = $purchaseOrder->remainingBillable(excludingBillId: $bill->id);
+                if (bccomp((string) $bill->net_amount, $remainingBillable, 2) > 0) {
+                    $bill->delete();
+
+                    return response(['error' => [
+                        'amount' => ["This bill's net amount (".number_format((float) $bill->net_amount, 2).
+                            ') exceeds the '.number_format((float) $remainingBillable, 2).
+                            ' still billable on this order (Approved Value minus bills already recorded).'],
+                    ]], 422);
+                }
+            }
+
             $bill->updatePaymentStatus();
 
             $this->syncProjectProcurementFromBill($bill);
@@ -569,6 +639,7 @@ class BillController extends Controller
             ],
             'payment_method' => ['required', Rule::in(PaymentMethods::values())],
             'reference_number' => 'nullable|required_unless:payment_method,cash|string|max:255',
+            'duplicate_override_reason' => 'nullable|string|min:5|max:1000',
             // What the bank or M-Pesa charged us to send it. On top of the
             // invoice, never part of it.
             'transaction_cost' => 'nullable|numeric|min:0|max:999999.99',
@@ -595,6 +666,7 @@ class BillController extends Controller
                 'payment_source_id' => $request->payment_source_id,
                 'reference_number' => $request->reference_number,
                 'transaction_cost' => $request->transaction_cost ?? 0,
+                'duplicate_override_reason' => $request->duplicate_override_reason,
                 'user_id' => auth()->id(),
             ]);
 
@@ -602,7 +674,10 @@ class BillController extends Controller
 
             return new BillResource($bill->fresh()->load(['purchaseOrder', 'supplier', 'createdBy', 'verifiedBy', 'payments.createdBy']));
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json(['error' => $e->getMessage(), 'errors' => $e->errors()], 422);
+            return response()->json([
+                'error' => $e->getMessage(), 'errors' => $e->errors(),
+                ...($e instanceof \App\Modules\Finance\Exceptions\DuplicateTransactionException ? $e->payload() : []),
+            ], 422);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         } catch (\Exception $e) {
@@ -629,6 +704,7 @@ class BillController extends Controller
             ],
             'payment_method' => ['required', Rule::in(PaymentMethods::values())],
             'reference_number' => 'nullable|required_unless:payment_method,cash|string|max:255',
+            'duplicate_override_reason' => 'nullable|string|min:5|max:1000',
             // One transfer, one charge — however many invoices it clears.
             'transaction_cost' => 'nullable|numeric|min:0|max:999999.99',
         ], [
@@ -720,6 +796,7 @@ class BillController extends Controller
                     'payment_source_id' => $request->payment_source_id,
                     'reference_number' => $request->reference_number,
                     'transaction_cost' => $request->transaction_cost ?? 0,
+                    'duplicate_override_reason' => $request->duplicate_override_reason,
                     'user_id' => auth()->id(),
                 ]);
 
@@ -756,7 +833,10 @@ class BillController extends Controller
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
-            return response()->json(['error' => $e->getMessage(), 'errors' => $e->errors()], 422);
+            return response()->json([
+                'error' => $e->getMessage(), 'errors' => $e->errors(),
+                ...($e instanceof \App\Modules\Finance\Exceptions\DuplicateTransactionException ? $e->payload() : []),
+            ], 422);
         } catch (\RuntimeException $e) {
             DB::rollBack();
             return response()->json(['error' => $e->getMessage()], 422);

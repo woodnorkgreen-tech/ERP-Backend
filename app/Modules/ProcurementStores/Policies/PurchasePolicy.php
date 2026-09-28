@@ -72,6 +72,36 @@ class PurchasePolicy
         return $this->holdsApproval($user, Permissions::PROCUREMENT_ORDERS_APPROVE);
     }
 
+    /**
+     * W2-1: the additional sign-off a high-value order needs above the
+     * WNG-configured threshold. Deliberately no legacy-role fallback — Super
+     * Admin already bypasses everything via before(), and granting this to
+     * the same Admin/Accounts roles that already hold ordinary approval
+     * would make the senior tier meaningless the day it goes live.
+     */
+    public function approveOrderSenior(User $user, ?PurchaseOrder $order = null): bool
+    {
+        return $user->can(Permissions::PROCUREMENT_ORDERS_APPROVE_SENIOR);
+    }
+
+    /** W2-6: send a `pending_approval` order back — the reviewer's own decision, same authority as approving it. */
+    public function returnOrder(User $user, ?PurchaseOrder $order = null): bool
+    {
+        return $this->holdsApproval($user, Permissions::PROCUREMENT_ORDERS_APPROVE);
+    }
+
+    /** W2-6: correct a returned order and resubmit — the requesting/procurement side's authority, not the reviewer's. */
+    public function correctOrder(User $user, ?PurchaseOrder $order = null): bool
+    {
+        return $user->can(Permissions::PROCUREMENT_ORDERS_CREATE) || $user->hasAnyRole(self::LEGACY_APPROVERS);
+    }
+
+    /** W2-4: approve, reject or return an amendment to an already-approved order. */
+    public function amendOrder(User $user, ?PurchaseOrder $order = null): bool
+    {
+        return $user->can(Permissions::PROCUREMENT_ORDERS_AMEND);
+    }
+
     private function holdsApproval(User $user, string $permission): bool
     {
         return $user->can($permission) || $user->hasAnyRole(self::LEGACY_APPROVERS);
