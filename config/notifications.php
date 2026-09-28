@@ -272,6 +272,23 @@ return [
             'default_channels' => ['database'], 'urgency' => 'warning',
         ],
 
+        // Critical Risk C5 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+        // a petty-cash advance that could not be posted to the general
+        // ledger used to disappear into a log line. Push as well as
+        // database — this means real cash and the books currently disagree.
+        'petty_cash_advance_posting_failed' => [
+            'module' => 'finance', 'label' => 'Petty Cash Advance Posting Failed',
+            'default_channels' => ['database', 'push'], 'urgency' => 'critical',
+        ],
+
+        // Wave 1 Closure Gate §3.D: the same shape of problem one step later
+        // in a disbursement's life — its cost/GL entry, not its advance,
+        // failed to post.
+        'petty_cash_cost_posting_failed' => [
+            'module' => 'finance', 'label' => 'Petty Cash Cost Posting Failed',
+            'default_channels' => ['database', 'push'], 'urgency' => 'critical',
+        ],
+
         // ICT support
         'support_ticket_received' => [
             'module' => 'support', 'label' => 'Support Ticket Received',
