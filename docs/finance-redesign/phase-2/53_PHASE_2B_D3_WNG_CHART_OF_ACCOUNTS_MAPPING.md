@@ -324,7 +324,7 @@ The Accounts role now holds `finance.reports.view`. This opens the Finance repor
 
 ## 17. R-2 — Petty-Cash Custody (remains open)
 
-`finance.petty_cash.custody` is **not assigned** to any role other than Super Admin, and a test enforces this.
+`finance.petty_cash.manage_custody` is **not assigned** to any role other than Super Admin, and a test enforces this.
 
 Roles that could technically hold it, because they already work the petty-cash screens:
 

@@ -315,6 +315,25 @@ class ReceivablesPostingTest extends TestCase
         $this->assertSame(0.0, $this->movement('4100')['credit']);
     }
 
+    /** Report 55: a disabled paying account (e.g. WNG's unlinked M-Pesa) answered 500. */
+    public function test_a_receipt_into_a_disabled_paying_account_is_refused_with_a_reason(): void
+    {
+        $enquiry = $this->enquiry();
+        $source = PaymentSource::where('type', 'bank')->firstOrFail();
+        $source->update(['is_active' => false]);
+
+        $this->actingAs($this->accountant, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/payments", [
+                'amount' => 1000, 'received_amount' => 1000, 'payment_date' => '2026-09-05',
+                'payment_method' => 'bank_transfer', 'payment_source_id' => $source->id,
+                'transaction_reference' => 'DISABLED-001',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('payment_source_id');
+
+        $this->assertSame(0, \App\Models\EnquiryPayment::where('project_enquiry_id', $enquiry->id)->count());
+    }
+
     public function test_every_receivables_entry_balances(): void
     {
         $vat = $this->standardRatedTreatment();

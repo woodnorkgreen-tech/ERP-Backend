@@ -1056,7 +1056,9 @@ class EnquiryController extends Controller
             'received_amount' => 'required|numeric|gte:amount',
             'payment_date' => 'nullable|date',
             'payment_method' => 'required|in:bank_transfer,mpesa,cash,cheque',
-            'payment_source_id' => 'required|integer|exists:payment_sources,id',
+            // Active only: a disabled account (e.g. one awaiting its ledger link)
+            // is a reason to give the user, not a server error.
+            'payment_source_id' => ['required', 'integer', Rule::exists('payment_sources', 'id')->where('is_active', true)],
             'transaction_reference' => [
                 Rule::requiredIf(fn () => $request->input('payment_method') !== 'cash'),
                 'nullable',

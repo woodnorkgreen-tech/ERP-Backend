@@ -21,6 +21,15 @@ use Illuminate\Support\Facades\DB;
  *  - an existing account is never modified, and ids are never touched.
  * Any refusal stops the whole run before anything is written.
  *
+ * Two further steps run only when asked (Report 55):
+ *  --classify-existing          fills account_type / normal_balance of the company's
+ *                               own accounts from the profile's explicit list, ONLY where
+ *                               they are NULL. A different non-null value is refused.
+ *                               Nothing else about an existing account changes.
+ *  --disable-unlinked-sources   disables the paying accounts the profile lists as
+ *                               "disable until linked", only while they have no ledger
+ *                               account and no document uses them.
+ *
  * Dry run by default. --execute needs --confirm=<database name>. It never runs
  * against the live source, and against the live target only with --cutover.
  */
@@ -32,6 +41,8 @@ class CompleteChartCommand extends Command
         {--execute : Create the missing accounts (default: dry run)}
         {--confirm= : The target database name, typed exactly (required with --execute)}
         {--cutover : Allow execution against the live target database}
+        {--classify-existing : Also fill NULL account_type / normal_balance of existing accounts from the profile}
+        {--disable-unlinked-sources : Also disable unlinked, unused paying accounts the profile lists}
         {--output= : Directory for the JSON report}';
 
     protected $description = "Create the accounts a company's chart lacks for the redesigned Finance, and verify every posting function resolves";
@@ -63,13 +74,33 @@ class CompleteChartCommand extends Command
 
         $chart = $db->table('chart_of_accounts')->get()->keyBy('code');
         [$plan, $problems] = $this->plan((array) ($profile['new_accounts'] ?? []), $chart, $profile);
+        [$classify, $classifyProblems] = $this->option('classify-existing')
+            ? $this->classificationPlan((array) ($profile['existing_classification']['accounts'] ?? []), $chart) : [[], []];
+        $problems = [...$problems, ...$classifyProblems];
         if ($problems !== []) {
             return $this->refuse($problems);
         }
+        $sources = $this->option('disable-unlinked-sources')
+            ? $this->sourcePlan($db, (array) ($profile['payment_source_state']['disable_until_linked'] ?? [])) : [];
 
         $created = [];
         if ($execute) {
-            $created = $db->transaction(fn () => $this->create($db, $plan));
+            $created = $db->transaction(function () use ($db, $plan, $classify, $sources) {
+                $created = $this->create($db, $plan);
+                foreach ($classify as $code => $columns) {
+                    // Re-checked: only a column still NULL is written.
+                    foreach ($columns as $column => $value) {
+                        $db->table('chart_of_accounts')->where('code', $code)->whereNull($column)->update([$column => $value, 'updated_at' => now()]);
+                    }
+                }
+                foreach ($sources as $code => $action) {
+                    if ($action === 'disable') {
+                        $db->table('payment_sources')->where('code', $code)->whereNull('gl_account_id')->update(['is_active' => false, 'updated_at' => now()]);
+                    }
+                }
+
+                return $created;
+            });
             $chart = $db->table('chart_of_accounts')->get()->keyBy('code');
         }
 
@@ -98,6 +129,7 @@ class CompleteChartCommand extends Command
         $catalogue = collect((array) ($profile['catalogue'] ?? []))->map(fn ($c, $ref) => [
             'account' => $c['account'] ?? null, 'resolves' => $postable($c['account'] ?? null), 'meaning' => $c['meaning'] ?? null,
         ])->all();
+        $sourceStates = $sources;
         $sources = collect((array) ($profile['payment_sources'] ?? []))->map(fn ($code) => [
             'account' => $code, 'resolves' => $postable($code),
         ])->all();
@@ -115,6 +147,8 @@ class CompleteChartCommand extends Command
             'functions' => $functions,
             'catalogue' => $catalogue,
             'payment_sources' => $sources,
+            'classified_existing' => array_map(fn ($c) => array_keys($c), $classify),
+            'source_state' => $sourceStates,
         ];
 
         if ($dir = $this->option('output')) {
@@ -127,6 +161,13 @@ class CompleteChartCommand extends Command
         $this->table(['Code', 'Account', 'Action'], array_map(fn ($a) => [$a['code'], $a['name'], $a['action']], $report['accounts']));
         $this->table(['Function', 'Ref', 'Account', 'Name', 'Resolves'], collect($functions)->map(fn ($f, $k) => [$k, $f['reference'], $f['account'] ?? '—', $f['name'] ?? '—', $f['resolves'] ? 'yes' : 'NO'])->values()->all());
         $this->line('Functions resolved: '.$report['functions_resolved'].($unresolved ? ' — unresolved: '.implode(', ', $unresolved) : ''));
+        if ($this->option('classify-existing')) {
+            $this->line('Existing accounts classified (NULL columns filled): '.count($classify).' account(s)'.($execute ? '' : ' (dry run)').'; pending decision: '
+                .implode(', ', array_keys((array) ($profile['existing_classification']['unclassified_pending_decision'] ?? []))));
+        }
+        foreach ($sourceStates as $code => $action) {
+            $this->line("Paying account {$code}: {$action}".($execute || $action !== 'disable' ? '' : ' (dry run)'));
+        }
         $this->line('Catalogue references resolved: '.collect($catalogue)->where('resolves', true)->count().' / '.count($catalogue)
             .'; payment sources linked: '.collect($sources)->where('resolves', true)->count().' / '.count($sources));
 
@@ -206,6 +247,74 @@ class CompleteChartCommand extends Command
         }
 
         return [$plan, $problems];
+    }
+
+    /**
+     * code => [column => value] for the NULL columns the profile classifies. A
+     * different non-null value is a refusal: an account's classification that
+     * somebody has already set is never overwritten.
+     *
+     * @return array{0: array<string, array<string, string>>, 1: list<string>}
+     */
+    private function classificationPlan(array $accounts, $chart): array
+    {
+        $plan = [];
+        $problems = [];
+        foreach ($accounts as $code => $spec) {
+            $existing = $chart->get($code);
+            if (! $existing) {
+                $problems[] = "Classification names {$code}, which is not in this chart.";
+
+                continue;
+            }
+            if (($spec['account_type'] ?? null) !== null && ! in_array($spec['account_type'], self::ACCOUNT_TYPES, true)) {
+                $problems[] = "Classification of {$code}: account_type '{$spec['account_type']}' is not valid.";
+
+                continue;
+            }
+            foreach (['account_type', 'normal_balance'] as $column) {
+                $value = $spec[$column] ?? null;
+                if ($value === null) {
+                    continue;
+                }
+                if ($existing->{$column} === null) {
+                    $plan[$code][$column] = $value;
+                } elseif ((string) $existing->{$column} !== (string) $value) {
+                    $problems[] = "{$code} already has {$column} '{$existing->{$column}}'; the profile says '{$value}'. An existing classification is never overwritten.";
+                }
+            }
+        }
+
+        return [$plan, $problems];
+    }
+
+    /**
+     * code => what happens to each "disable until linked" paying account.
+     *
+     * @return array<string, string>
+     */
+    private function sourcePlan(Connection $db, array $codes): array
+    {
+        $users = collect($db->select(
+            "SELECT TABLE_NAME AS t, COLUMN_NAME AS c FROM information_schema.KEY_COLUMN_USAGE
+             WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'payment_sources'"
+        ));
+        $plan = [];
+        foreach ($codes as $code) {
+            $source = $db->table('payment_sources')->where('code', $code)->first();
+            if (! $source) {
+                $plan[$code] = 'not present';
+            } elseif ($source->gl_account_id !== null) {
+                $plan[$code] = 'linked — left active';
+            } elseif (! $source->is_active) {
+                $plan[$code] = 'already disabled';
+            } else {
+                $used = $users->first(fn ($u) => $db->table($u->t)->where($u->c, $source->id)->exists());
+                $plan[$code] = $used ? "in use by {$used->t} — left active" : 'disable';
+            }
+        }
+
+        return $plan;
     }
 
     /** @return list<string> */

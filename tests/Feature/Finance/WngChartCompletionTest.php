@@ -298,6 +298,85 @@ class WngChartCompletionTest extends TestCase
         $this->assertSame('WIP-002', DB::table('chart_of_accounts')->where('id', $id)->value('code'));
     }
 
+    public function test_classification_fills_only_null_columns_and_touches_nothing_else(): void
+    {
+        $identity = fn () => DB::table('chart_of_accounts')->orderBy('id')->get(['id', 'code', 'name', 'category', 'parent_id', 'is_postable', 'is_active'])
+            ->map(fn ($a) => (array) $a)->all();
+        $before = $identity();
+
+        $this->complete(['--execute' => true, '--confirm' => $this->database(), '--classify-existing' => true])->assertSuccessful();
+
+        $type = fn (string $code) => DB::table('chart_of_accounts')->where('code', $code)->first(['account_type', 'normal_balance']);
+        $this->assertSame(['direct_cost', 'debit'], array_values((array) $type('COS-008')));
+        $this->assertSame(['direct_cost', 'debit'], array_values((array) $type('PE-007')), 'the existing direct-labour account');
+        $this->assertSame(['overhead', 'debit'], array_values((array) $type('COS-019')));
+        $this->assertSame(['opex', 'debit'], array_values((array) $type('PE-006')));
+        $this->assertSame(['balance_sheet', 'credit'], array_values((array) $type('AP-001')));
+        $this->assertSame(['revenue', 'credit'], array_values((array) $type('RI-001')), 'contra-revenue keeps a credit normal balance so the P&L deducts it');
+        foreach (['OPE-026', 'ITX-001', 'LDO-001', 'EQE-001'] as $pending) {
+            $this->assertNull($type($pending)->account_type, "{$pending} is left for the accountant");
+        }
+
+        // Only account_type / normal_balance changed; new accounts were added after the existing ones.
+        $after = array_slice($identity(), 0, count($before));
+        $this->assertSame($before, $after, 'code, name, id, parent, postability and active flag are untouched');
+
+        // Idempotent.
+        $snapshot = $this->snapshot();
+        $this->complete(['--execute' => true, '--confirm' => $this->database(), '--classify-existing' => true])->assertSuccessful();
+        $this->assertSame($snapshot, $this->snapshot());
+    }
+
+    public function test_an_existing_classification_is_never_overwritten(): void
+    {
+        DB::table('chart_of_accounts')->where('code', 'OPE-006')->update(['account_type' => 'direct_cost']);
+        $before = $this->snapshot();
+
+        $this->complete(['--execute' => true, '--confirm' => $this->database(), '--classify-existing' => true])
+            ->expectsOutputToContain('never overwritten')->assertFailed();
+
+        $this->assertSame($before, $this->snapshot(), 'the whole run refuses: nothing created, nothing classified');
+    }
+
+    public function test_unlinked_unused_paying_accounts_are_disabled_not_given_an_invented_account(): void
+    {
+        $this->execute()->assertSuccessful();
+        $this->activateProfile();
+        DB::table('payment_sources')->update(['gl_account_id' => null, 'is_active' => true]);
+        $this->seed(PaymentSourceSeeder::class);
+
+        $this->complete(['--execute' => true, '--confirm' => $this->database(), '--disable-unlinked-sources' => true])->assertSuccessful();
+
+        $state = DB::table('payment_sources')->pluck('is_active', 'code')->map(fn ($v) => (bool) $v)->all();
+        $this->assertFalse($state['MPESA']);
+        $this->assertFalse($state['CARD']);
+        $this->assertTrue($state['BANK-MAIN']);
+        $this->assertNull(DB::table('payment_sources')->where('code', 'MPESA')->value('gl_account_id'), 'no account invented');
+
+        // Once Finance links it, re-enabling sticks: the step never disables a linked source.
+        DB::table('payment_sources')->where('code', 'CARD')->update(['is_active' => true, 'gl_account_id' => DB::table('chart_of_accounts')->where('code', 'KCB-001')->value('id')]);
+        $this->complete(['--execute' => true, '--confirm' => $this->database(), '--disable-unlinked-sources' => true])->assertSuccessful();
+        $this->assertTrue((bool) DB::table('payment_sources')->where('code', 'CARD')->value('is_active'));
+    }
+
+    public function test_the_unconfigured_loan_code_is_reported_but_does_not_block_readiness(): void
+    {
+        $this->execute()->assertSuccessful();
+        $this->activateProfile();
+        $this->seed(ExpenseCodeSeeder::class);
+        $this->seed(RoleAndPermissionSeeder::class);
+        $user = User::factory()->create(['is_active' => true]);
+        $user->assignRole('Accounts');
+
+        $check = collect($this->actingAs($user, 'sanctum')->getJson('/api/finance/readiness')->assertOk()->json('data.checks'))
+            ->firstWhere('key', 'expense_code_mapping');
+
+        $this->assertTrue($check['ready'], $check['message']);
+        $this->assertStringContainsString('off by design', $check['message']);
+        $this->assertStringContainsString('2300', $check['message']);
+        $this->assertFalse((bool) DB::table('expense_codes')->where('default_debit_gl', 'like', '2300%')->value('is_active'), 'the loan code stays inactive');
+    }
+
     public function test_readiness_reports_the_profile_and_all_functions_resolving(): void
     {
         $this->execute()->assertSuccessful();

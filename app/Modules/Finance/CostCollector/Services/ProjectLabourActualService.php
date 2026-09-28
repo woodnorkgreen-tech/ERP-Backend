@@ -301,7 +301,7 @@ class ProjectLabourActualService
                 nature: CostLine::NATURE_ACTUAL,
                 enquiryId: $actual->project_enquiry_id,
                 jobNumber: $actual->enquiry?->job_number,
-                sourceType: 'ProjectLabourActual',
+                sourceType: ProjectLabourActual::COST_SOURCE_TYPE,
                 sourceId: $actual->id,
                 sourceRef: (string) $actual->id,
                 consumesLineId: $consumesLineId,

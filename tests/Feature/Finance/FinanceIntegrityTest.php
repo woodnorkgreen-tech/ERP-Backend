@@ -93,6 +93,19 @@ class FinanceIntegrityTest extends TestCase
             ->assertJsonPath('data.integrity.verified_costs_without_journal', 1);
     }
 
+    public function test_analytical_w7_labour_lines_are_not_reported_as_missing_journals(): void
+    {
+        // W7-12: a labour actual is analytical; payroll already books the expense.
+        $labour = $this->cost('2026-09-01');
+        $labour->forceFill(['source_type' => \App\Modules\Finance\CostCollector\Models\ProjectLabourActual::COST_SOURCE_TYPE, 'source_id' => 1])->save();
+        $this->getJson('/api/finance/readiness')->assertOk()
+            ->assertJsonPath('data.integrity.verified_costs_without_journal', 0);
+
+        $this->cost('2026-09-01');
+        $this->getJson('/api/finance/readiness')->assertOk()
+            ->assertJsonPath('data.integrity.verified_costs_without_journal', 1, 'an ordinary verified cost without a journal is still caught');
+    }
+
     public function test_inactive_control_accounts_block_readiness(): void
     {
         ChartOfAccount::where('code', '1030')->update(['is_active' => false]);

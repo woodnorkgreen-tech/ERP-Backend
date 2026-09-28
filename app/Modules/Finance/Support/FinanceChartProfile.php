@@ -126,6 +126,22 @@ final class FinanceChartProfile
         return $problems;
     }
 
+    /**
+     * Catalogue reference codes the profile deliberately leaves unconfigured
+     * (account null, with the reason recorded), e.g. WNG's loans payable: no
+     * evidence of a loan. Codes posting there stay inactive by design, so readiness
+     * reports them without counting them as a configuration gap.
+     *
+     * @return array<string, string> reference => reason
+     */
+    public static function intentionallyUnconfigured(?string $profile): array
+    {
+        return collect((array) (self::load($profile)['catalogue'] ?? []))
+            ->filter(fn ($entry) => array_key_exists('account', (array) $entry) && $entry['account'] === null)
+            ->map(fn ($entry) => (string) ($entry['note'] ?? $entry['meaning'] ?? 'not configured'))
+            ->all();
+    }
+
     /** Test seam: forget decoded profiles. */
     public static function flush(): void
     {

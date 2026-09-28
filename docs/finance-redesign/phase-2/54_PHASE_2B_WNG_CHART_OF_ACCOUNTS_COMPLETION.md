@@ -398,7 +398,7 @@ Creating the accounts does not decide which one applies.
 
 ## 23. R-2 Petty Cash Custody
 
-Unchanged and **still open.** `finance.petty_cash.custody` is assigned to no role other than Super Admin, and the Report 53 test enforces this. It is pending WNG's operational confirmation.
+Unchanged and **still open.** `finance.petty_cash.manage_custody` is assigned to no role other than Super Admin, and the Report 53 test enforces this. It is pending WNG's operational confirmation.
 
 ## 24. Tests
 

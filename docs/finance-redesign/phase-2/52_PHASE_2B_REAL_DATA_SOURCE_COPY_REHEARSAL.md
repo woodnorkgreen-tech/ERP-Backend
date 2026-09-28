@@ -150,7 +150,7 @@ There are no statuses, date ranges, project or supplier links, or test indicator
 | # | Issue |
 |---|---|
 | R-1 | The **Project Officer** role holds **no W7 labour permission** in source or target. W7 recording and PO-verification go to Project Manager, Costing and Admin (migration `2026_09_24_000006`). Should the 18 Project Officers record or verify labour? |
-| R-2 | **No role holds `finance.petty_cash.custody`** (cash counts, custody handovers). Only Super Admin, by bypass. Who is the petty-cash custodian? |
+| R-2 | **No role holds `finance.petty_cash.manage_custody`** (cash counts, custody handovers). Only Super Admin, by bypass. Who is the petty-cash custodian? |
 | R-3 | **Accounts lacks `finance.reports.view`**, so it cannot open Finance readiness or reports. Source: Super Admin only |
 | R-4 | 14 dangling role assignments of 12 deleted users (§6) |
 | R-5 | `finance.petty_cash.delete_disbursement`, held by 4 source roles, is **obsolete** (not in the permission registry) and correctly not carried |

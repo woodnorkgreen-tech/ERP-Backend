@@ -36,6 +36,9 @@ use Illuminate\Database\Eloquent\Builder;
  */
 class ProjectLabourActual extends Model
 {
+    /** cost_lines.source_type written for every labour CostLine (analytical: W7-12). */
+    public const COST_SOURCE_TYPE = 'ProjectLabourActual';
+
     protected $table = 'project_labour_actuals';
 
     protected $fillable = [

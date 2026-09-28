@@ -12,6 +12,7 @@ use App\Modules\Finance\Support\CatalogueDimensionMap;
 use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\Finance\Support\FinanceAccountFunctions;
 use App\Modules\Finance\Support\FinanceChartProfile;
+use App\Modules\Finance\CostCollector\Models\ProjectLabourActual;
 use Illuminate\Support\Facades\DB;
 
 /** A read-only pre-flight check for the reference data Finance depends on. */
@@ -65,10 +66,15 @@ class FinanceReadinessController extends Controller
         // no single default to configure. An unanchored pattern read the range
         // hint inside that prose as a reference and reported two deliberately
         // indirect capex codes as a chart misconfiguration that never cleared.
-        $unresolvedCatalogue = DB::table('expense_codes')
+        // A reference the chart profile deliberately leaves unconfigured (WNG's
+        // loans payable: no loan) is reported, not counted as a gap (Report 55).
+        $intentional = array_map('strval', array_keys(FinanceChartProfile::intentionallyUnconfigured($profile)));
+        $unconfigured = DB::table('expense_codes')
             ->whereNull('default_debit_account_id')
             ->where('default_debit_gl', 'REGEXP', '^[0-9]{4}')
-            ->count();
+            ->pluck('default_debit_gl');
+        $intentionallyOff = $unconfigured->filter(fn ($gl) => in_array(substr((string) $gl, 0, 4), $intentional, true))->count();
+        $unresolvedCatalogue = $unconfigured->count() - $intentionallyOff;
         // Active codes that name a department or a stage the catalogue map does
         // not turn into a real dimension row. Counted only where the catalogue
         // states one: "Asset-owning department" genuinely names no single centre
@@ -129,9 +135,10 @@ class FinanceReadinessController extends Controller
                 'Map or deactivate every unusable expense code.'),
             $this->check('expense_code_mapping', 'Expense catalogue account mapping',
                 $unresolvedCatalogue === 0,
-                $unresolvedCatalogue === 0
+                ($unresolvedCatalogue === 0
                     ? 'Every catalogue code naming an account resolves to one in this chart.'
-                    : number_format($unresolvedCatalogue).' catalogue code(s) name an account this chart does not have, and are switched off.',
+                    : number_format($unresolvedCatalogue).' catalogue code(s) name an account this chart does not have, and are switched off.')
+                    .($intentionallyOff > 0 ? ' '.$intentionallyOff.' code(s) are off by design: the chart profile leaves '.implode(', ', $intentional).' unconfigured.' : ''),
                 'Map the reference codes to this chart in config/finance_accounts.php, then re-run the expense code seeder.'),
             $this->check('payment_sources', 'Payment sources',
                 DB::table('payment_sources')->where('is_active', true)->exists() && $invalidPaymentSources === 0,
@@ -186,9 +193,14 @@ class FinanceReadinessController extends Controller
             ) === 0 ? 0 : 1,
             // Budgets and commitments do not post: only accrued and actual costs
             // are accounting events. Match the verification service's posting gate.
+            // W7 labour lines are analytical by contract (W7-12): payroll already
+            // books the company expense, so they never carry a journal. Counting
+            // them reported every recorded labour day as a missing posting and kept
+            // readiness red for ever (found in the Report 55 real-data rehearsal).
             'verified_costs_without_journal' => DB::table('cost_lines')
                 ->where('status', 'verified')
                 ->whereIn('nature', [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL])
+                ->where(fn ($q) => $q->whereNull('source_type')->orWhere('source_type', '<>', ProjectLabourActual::COST_SOURCE_TYPE))
                 ->whereNull('journal_entry_id')->count(),
             'posted_journals_without_period' => DB::table('journal_entries')
                 ->where('status', 'posted')->whereNull('accounting_period_id')->count(),
