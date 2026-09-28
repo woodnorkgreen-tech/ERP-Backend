@@ -3,6 +3,7 @@
 namespace App\Modules\Finance\Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use App\Modules\Finance\Support\ChartAccountMap;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -51,6 +52,9 @@ class PaymentSourceSeeder extends Seeder
     public function run(): void
     {
         $accounts = DB::table('chart_of_accounts')->pluck('id', 'code');
+        // The reference code each source names is translated through the account
+        // map, so a company on its own chart (WNG, D3) links to its own accounts.
+        $resolve = fn (string $reference) => $accounts[ChartAccountMap::local($reference)] ?? null;
         $now = now();
 
         foreach (self::SOURCES as $source) {
@@ -72,7 +76,11 @@ class PaymentSourceSeeder extends Seeder
                     // structural fact about the account, not an admin
                     // preference such as `is_active`.
                     'can_make_payment' => $type !== 'payable',
-                    'gl_account_id' => $accounts[$accountCode] ?? null,
+                    // Never wipe a link Finance has set on the paying-accounts screen:
+                    // a generic reference code (all banks name 1010) cannot say which
+                    // real bank account a source is, so only fill an empty link.
+                    'gl_account_id' => $resolve($accountCode)
+                        ?? DB::table('payment_sources')->where('code', $code)->value('gl_account_id'),
                     'currency' => 'KES',
                     'updated_at' => $now,
                     'created_at' => $now,

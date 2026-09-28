@@ -9,6 +9,7 @@ use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Models\ProjectInvoice;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -66,10 +67,10 @@ use InvalidArgumentException;
 class ReceivablesPostingService
 {
     /** Reference chart codes. Resolved through ChartAccountMap at use. */
-    private const RECEIVABLE_CODE = '1100';       // money clients owe us
-    private const REVENUE_CODE = '4100';          // what we earned, before tax
-    private const OUTPUT_VAT_CODE = '2110';       // tax charged, owed to the Authority
-    private const CLIENT_DEPOSIT_CODE = '2200';   // money held but not yet earned
+    private const RECEIVABLE_CODE = FinanceAccountFunctions::ACCOUNTS_RECEIVABLE;       // money clients owe us
+    private const REVENUE_CODE = FinanceAccountFunctions::PROJECT_REVENUE;          // what we earned, before tax
+    private const OUTPUT_VAT_CODE = FinanceAccountFunctions::OUTPUT_VAT;       // tax charged, owed to the Authority
+    private const CLIENT_DEPOSIT_CODE = FinanceAccountFunctions::CLIENT_DEPOSITS;   // money held but not yet earned
 
     public function __construct(private JournalPostingService $posting)
     {

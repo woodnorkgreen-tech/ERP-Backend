@@ -15,6 +15,7 @@ use App\Modules\Finance\Models\SpendVoucherAllocation;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Services\SpendVoucherSettlementService;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use App\Modules\HR\Models\HRAuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -113,7 +114,7 @@ class SpendVoucherController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_CREATE), 403);
 
-        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany(['2100', '2150']))->pluck('id');
+        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany([FinanceAccountFunctions::ACCOUNTS_PAYABLE, FinanceAccountFunctions::ACCRUED_EXPENSES]))->pluck('id');
         $lines = CostLine::query()
             ->withReferenceNames()
             ->with(['expenseCode:id,code,expense_type'])
@@ -332,7 +333,7 @@ class SpendVoucherController extends Controller
             throw new \DomainException('One or more selected liabilities no longer exist. Refresh the list and try again.');
         }
 
-        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany(['2100', '2150']))->pluck('id');
+        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany([FinanceAccountFunctions::ACCOUNTS_PAYABLE, FinanceAccountFunctions::ACCRUED_EXPENSES]))->pluck('id');
         $beneficiaryKey = null;
         $beneficiaryName = null;
         $supplierId = null;

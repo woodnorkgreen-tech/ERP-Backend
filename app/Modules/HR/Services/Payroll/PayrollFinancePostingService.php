@@ -9,6 +9,7 @@ use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Services\PaymentSettlementService;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use App\Modules\Finance\Support\DocumentNumber;
 use App\Modules\HR\Models\PayrollRun;
 use Carbon\Carbon;
@@ -23,11 +24,11 @@ class PayrollFinancePostingService
     ) {
     }
 
-    private const SALARIES_EXPENSE = '7550';        // office and admin staff — overhead
-    private const DIRECT_LABOUR_EXPENSE = '5200';   // people delivering client work — cost of sales
-    private const PAYE_PAYABLE = '2130';
-    private const STATUTORY_PAYABLE = '2140';
-    private const NET_PAYROLL_PAYABLE = '2160';
+    private const SALARIES_EXPENSE = FinanceAccountFunctions::SALARIES_EXPENSE;        // office and admin staff — overhead
+    private const DIRECT_LABOUR_EXPENSE = FinanceAccountFunctions::COS_DIRECT_LABOUR;   // people delivering client work — cost of sales
+    private const PAYE_PAYABLE = FinanceAccountFunctions::PAYE_PAYABLE;
+    private const STATUTORY_PAYABLE = FinanceAccountFunctions::STATUTORY_PAYABLE;
+    private const NET_PAYROLL_PAYABLE = FinanceAccountFunctions::NET_PAYROLL_PAYABLE;
 
     public function postAccrual(PayrollRun $run): JournalEntry
     {

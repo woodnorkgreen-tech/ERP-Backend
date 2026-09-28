@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Modules\Finance\Support\CatalogueDimensionMap;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use Illuminate\Support\Facades\DB;
 
 /** A read-only pre-flight check for the reference data Finance depends on. */
@@ -34,14 +35,14 @@ class FinanceReadinessController extends Controller
         // credits an adjustment expense. Without them an approved count is
         // refused rather than silently diverging, which is the better failure —
         // but it should be visible here first.
-        $requiredAccounts = ChartAccountMap::localMany([
-            '1030', '1100', '1200', '1300', '1330',
-            '2100', '2110', '2120', '2150', '2200',
-            '3900', '4100', '6800',
-        ]);
-        $availableRequiredAccounts = DB::table('chart_of_accounts')
-            ->whereIn('code', $requiredAccounts)->where('is_postable', true)->where('is_active', true)->pluck('code');
-        $missingRequiredAccounts = array_values(array_diff($requiredAccounts, $availableRequiredAccounts->all()));
+        // Every account the posting code needs, by function (FinanceAccountFunctions),
+        // resolved through the account map. This replaced a hand-kept list of 13
+        // codes that had fallen behind the code: payroll, WIP release, bank charges
+        // and the default bank were posted to but never checked (Report 53).
+        $accountFunctions = FinanceAccountFunctions::resolution();
+        $missingRequiredAccounts = collect($accountFunctions)->reject(fn ($f) => $f['resolved'])
+            ->map(fn ($f, $key) => $f['local_code'] === $f['code'] ? "{$key} ({$f['code']})" : "{$key} ({$f['code']} → {$f['local_code']})")
+            ->values()->all();
         $unmappedExpenseCodes = DB::table('expense_codes as ec')
             ->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ec.default_debit_account_id')
             ->where('ec.is_active', true)
@@ -106,9 +107,9 @@ class FinanceReadinessController extends Controller
             $this->check('required_accounts', 'Required control accounts',
                 $missingRequiredAccounts === [],
                 $missingRequiredAccounts === []
-                    ? 'All required cash, advance, payable and tax control accounts are postable.'
-                    : 'Missing or non-postable account code(s): '.implode(', ', $missingRequiredAccounts).'.',
-                'Configure every named control account before posting.'),
+                    ? 'Every account the posting code needs resolves to a postable, active account.'
+                    : count($missingRequiredAccounts).' posting function(s) do not resolve to a postable, active account: '.implode(', ', $missingRequiredAccounts).'.',
+                'Map each function to this chart in config/finance_accounts.php (accountant-approved), or create the account.'),
             $this->check('expense_codes', 'Expense catalogue',
                 DB::table('expense_codes')->where('is_active', true)->exists() && $unmappedExpenseCodes === 0,
                 $unmappedExpenseCodes === 0
@@ -204,6 +205,9 @@ class FinanceReadinessController extends Controller
                 ? 'Finance setup is ready for controlled posting.'
                 : 'Finance setup needs attention before live posting.',
             'checks' => $checks->values(),
+            // Per posting function: reference code, the local code the map gives it,
+            // and whether it resolves. Additive; the readiness screen reads `checks`.
+            'account_functions' => $accountFunctions,
             'integrity' => $integrity,
             'operations' => app(\App\Modules\ProcurementStores\Services\OperationsReadinessService::class)->report(),
             'setup_command' => app()->environment(['local', 'testing'])

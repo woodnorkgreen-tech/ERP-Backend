@@ -16,6 +16,7 @@ use App\Modules\Finance\Models\VatTreatment;
 use App\Modules\Finance\Models\WhtCategory;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
@@ -34,9 +35,9 @@ class JournalPostingService
      * itself references (`1330 Input VAT Recoverable`, `2120 Withholding Tax
      * Payable`).
      */
-    private const VAT_INPUT_CODE = '1330';
+    private const VAT_INPUT_CODE = FinanceAccountFunctions::INPUT_VAT;
 
-    private const WHT_PAYABLE_CODE = '2120';
+    private const WHT_PAYABLE_CODE = FinanceAccountFunctions::WHT_PAYABLE;
 
     /**
      * Settlement accounts, by chart code.
@@ -47,13 +48,13 @@ class JournalPostingService
      * bought. Getting the two confused is what put every journal in this system
      * against the bank.
      */
-    private const INVENTORY_CODE = '1200';      // material relieved from the shelf
+    private const INVENTORY_CODE = FinanceAccountFunctions::INVENTORY;      // material relieved from the shelf
 
-    private const ACCRUED_CODE = '2150';        // goods received, not yet invoiced
+    private const ACCRUED_CODE = FinanceAccountFunctions::ACCRUED_EXPENSES;        // goods received, not yet invoiced
 
-    private const PAYABLE_CODE = '2100';        // incurred, still owed to someone
+    private const PAYABLE_CODE = FinanceAccountFunctions::ACCOUNTS_PAYABLE;        // incurred, still owed to someone
 
-    private const STAFF_ADVANCE_CODE = '1300';  // staff float/advance imprest asset
+    private const STAFF_ADVANCE_CODE = FinanceAccountFunctions::STAFF_ADVANCES;  // staff float/advance imprest asset
 
     /**
      * What a bank, card or mobile-money operator charges us to move the money.
@@ -61,7 +62,7 @@ class JournalPostingService
      * The account the expense catalogue already names as the debit for
      * `OE-FIN-001`, which is why it is referenced by code here too.
      */
-    private const BANK_CHARGES_CODE = '7800';
+    private const BANK_CHARGES_CODE = FinanceAccountFunctions::BANK_CHARGES;
 
     /**
      * Create a balanced GL journal entry for a verified CostLine.
@@ -608,20 +609,15 @@ class JournalPostingService
         // Fallback debit only for historical/source-produced lines that carry
         // no expense-code identity at all.
         //
-        // `12%` is the Project WIP band (1211–1219) — but it also matches 1200
-        // Raw-material Inventory, which sorts first. An unmapped cost therefore
-        // debited Inventory, and since a stores issue credits Inventory too, the
-        // entry hit the same account on both sides: balanced, and meaningless.
-        // Inventory is a stock account, never a destination for cost, so it is
-        // excluded explicitly.
+        // This used to be a query for "the first WIP-band or expense account by
+        // code". On the reference chart that is always 1211 (direct materials WIP);
+        // on any other chart it was whatever sorted first — on WNG's QuickBooks
+        // chart, ADM-001 Administration expenses — a silent guess (Report 53). It is
+        // now that same reference account, resolved through the account map: the
+        // reference chart posts exactly as before, and a chart that has not mapped
+        // it gets no debit, so the entry is refused below instead of guessed.
         if (! $debitId) {
-            $debitId = ChartOfAccount::postable()
-                ->where('code', '!=', self::INVENTORY_CODE)
-                ->where(function ($q) {
-                    $q->where('code', 'COS-001')->orWhere('code', 'like', '121%')->orWhere('category', 'expense');
-                })
-                ->orderBy('code')
-                ->value('id');
+            $debitId = $this->accountByCode(FinanceAccountFunctions::UNCODED_COST_FALLBACK);
         }
 
         $creditId ??= $this->settlementAccountFor($line);
@@ -713,7 +709,7 @@ class JournalPostingService
     private function voucherPaymentSourceAccount(SpendVoucher $voucher): ?int
     {
         if ($voucher->type === 'retirement') {
-            return $this->accountByCode('1300');
+            return $this->accountByCode(FinanceAccountFunctions::STAFF_ADVANCES);
         }
 
         $creditId = $voucher->paymentSource?->gl_account_id;
@@ -1575,7 +1571,7 @@ class JournalPostingService
         $sourceAccount = $disbursement->payment_source_id
             ? PaymentSource::whereKey($disbursement->payment_source_id)->value('gl_account_id')
             : null;
-        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', ChartAccountMap::local('1010'))->value('id');
+        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', ChartAccountMap::local(FinanceAccountFunctions::BANK_DEFAULT))->value('id');
 
         if (! $advanceAccount || ! $sourceAccount) {
             throw new InvalidArgumentException(
@@ -1643,7 +1639,7 @@ class JournalPostingService
         $sourceAccount = $requisition->disbursement?->payment_source_id
             ? PaymentSource::whereKey($requisition->disbursement->payment_source_id)->value('gl_account_id')
             : null;
-        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', ChartAccountMap::local('1010'))->value('id');
+        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', ChartAccountMap::local(FinanceAccountFunctions::BANK_DEFAULT))->value('id');
 
         if (! $advanceAccount || ! $sourceAccount) {
             throw new InvalidArgumentException(
@@ -1910,7 +1906,7 @@ class JournalPostingService
         if ($payment->voucher) {
             $accountCode = match ($payment->voucher->type) {
                 'advance' => self::STAFF_ADVANCE_CODE,     // 1300 Staff Advances
-                'top_up', 'replenishment' => '1030',       // Petty Cash Float
+                'top_up', 'replenishment' => FinanceAccountFunctions::PETTY_CASH_FLOAT,       // Petty Cash Float
                 'refund' => self::PAYABLE_CODE,            // 2100 AP (refund to supplier)
                 default => null,
             };

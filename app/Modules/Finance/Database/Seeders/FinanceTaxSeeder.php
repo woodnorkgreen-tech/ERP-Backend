@@ -3,6 +3,8 @@
 namespace App\Modules\Finance\Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -32,8 +34,8 @@ class FinanceTaxSeeder extends Seeder
      * inside `net_amount` and posts to the expense account with everything else
      * — a null here is that statement, not a missing configuration.
      */
-    private const VAT_INPUT_ACCOUNT = '1330';     // Input VAT Recoverable
-    private const WHT_PAYABLE_ACCOUNT = '2120';   // Withholding Tax Payable
+    private const VAT_INPUT_ACCOUNT = FinanceAccountFunctions::INPUT_VAT;     // Input VAT Recoverable
+    private const WHT_PAYABLE_ACCOUNT = FinanceAccountFunctions::WHT_PAYABLE;   // Withholding Tax Payable
 
     /** [code, name, rate, recoverable, requires_etims, claim_window_months, gl_code] */
     private const VAT_TREATMENTS = [
@@ -62,9 +64,11 @@ class FinanceTaxSeeder extends Seeder
             // Resolved once by chart code rather than held as ids: the chart is
             // reseeded independently and its primary keys are not stable, but
             // the codes are what the expense catalogue itself references.
-            $accounts = DB::table('chart_of_accounts')
-                ->whereIn('code', [self::VAT_INPUT_ACCOUNT, self::WHT_PAYABLE_ACCOUNT])
-                ->pluck('id', 'code');
+            // Through the account map, so a company on its own chart (WNG, D3)
+            // links these to its own accounts once Finance has mapped them.
+            $accounts = collect([self::VAT_INPUT_ACCOUNT, self::WHT_PAYABLE_ACCOUNT])->mapWithKeys(fn ($reference) => [
+                $reference => DB::table('chart_of_accounts')->where('code', ChartAccountMap::local($reference))->value('id'),
+            ])->filter();
 
             foreach (self::VAT_TREATMENTS as [$code, $name, $rate, $recoverable, $etims, $window, $glCode]) {
                 DB::table('vat_treatments')->updateOrInsert(
@@ -75,7 +79,10 @@ class FinanceTaxSeeder extends Seeder
                         'is_recoverable' => $recoverable,
                         'requires_etims' => $etims,
                         'claim_window_months' => $window,
-                        'gl_account_id' => $glCode ? $accounts->get($glCode) : null,
+                        // Never wipe a link Finance has already made when the map
+                        // does not (yet) resolve the reference account.
+                        'gl_account_id' => ($glCode ? $accounts->get($glCode) : null)
+                            ?? DB::table('vat_treatments')->where(['code' => $code, 'effective_from' => self::FLOOR])->value('gl_account_id'),
                         'effective_to' => null,
                         'is_active' => true,
                         'updated_at' => $now,
@@ -93,7 +100,8 @@ class FinanceTaxSeeder extends Seeder
                         'residency' => $residency,
                         'threshold_amount' => $threshold,
                         'aggregate_monthly' => $monthly,
-                        'gl_account_id' => $glCode ? $accounts->get($glCode) : null,
+                        'gl_account_id' => ($glCode ? $accounts->get($glCode) : null)
+                            ?? DB::table('wht_categories')->where(['code' => $code, 'effective_from' => self::FLOOR])->value('gl_account_id'),
                         'effective_to' => null,
                         'is_active' => true,
                         'updated_at' => $now,

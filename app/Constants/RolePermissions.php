@@ -183,6 +183,8 @@ final class RolePermissions
                 Permissions::FINANCE_COSTS_TRANSFER, Permissions::FINANCE_COSTS_CLOSE,
                 Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
                 Permissions::FINANCE_LABOUR_FINANCE_VERIFY, Permissions::FINANCE_LABOUR_CORRECT,
+                // R-3 (WNG, Report 53): Accounts opens Finance readiness and the reports.
+                Permissions::FINANCE_REPORTS_VIEW,
             ],
             'Costing' => [
                 Permissions::DASHBOARD_FINANCE, Permissions::FINANCE_BUDGET_APPROVE,
@@ -254,6 +256,13 @@ final class RolePermissions
                 Permissions::PROJECT_COSTS_READ_ASSIGNED, Permissions::PROJECT_READ,
                 Permissions::PROJECT_UPDATE, Permissions::TASK_ASSIGN, Permissions::TASK_READ,
                 Permissions::TASK_UPDATE, Permissions::USER_READ,
+                // R-1 (WNG, Report 53): Project Officers record and Project-Officer-verify
+                // labour on the projects they are assigned to — ProjectFinancialAccess
+                // still scopes both to assignment. Finance verification stays with
+                // Accounts: FINANCE_LABOUR_FINANCE_VERIFY is deliberately NOT here, and
+                // holding it would also lift the assignment scope.
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_PO_VERIFY,
             ],
             'Production' => [
                 Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_READ,

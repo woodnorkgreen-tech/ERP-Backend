@@ -68,54 +68,21 @@ return [
          | belongs to whoever signs the accounts.
          */
 
-        // ---- Control accounts that exist with same 4-digit codes in WNG chart
-        '1030' => '1030',   // Petty cash float
-        '2100' => '2100',   // Accounts payable
-        '1100' => '1100',   // Accounts receivable
-        '1200' => '1200',   // Raw-material inventory
-        '1300' => '1300',   // Staff advances / imprest
-        '1330' => '1330',   // Input VAT recoverable
-        '2110' => '2110',   // Output VAT payable
-        '2120' => '2120',   // Withholding tax payable
-        '2150' => '2150',   // Accrued expenses
-        '2200' => '2200',   // Client deposits
-        '3900' => '3900',   // Opening balance equity
-        '4100' => '4100',   // Project revenue
-        '6800' => '6800',   // Inventory adjustments & shrinkage
-
-        // ---- WIP accounts (1211-1219) map to COS accounts (5100-5900)
-        // WNG has no WIP; costs go straight to COS on purchase
-        // '1211' => '5100',   // WIP direct materials      -> Cost of Sales: Direct Materials
-        // '1212' => '5200',   // WIP direct labour         -> Cost of Sales: Direct Labour
-        // '1213' => '5300',   // WIP subcontractors        -> Cost of Sales: Subcontractors
-        // '1214' => '5400',   // WIP transport & logistics -> Cost of Sales: Transport & Logistics
-        // '1215' => '5500',   // WIP equipment & site      -> Cost of Sales: Equipment & Site
-        // '1216' => '5600',   // WIP project utilities     -> Cost of Sales: Project Utilities
-        // '1217' => '5700',   // WIP project facilitation  -> Cost of Sales: Project Facilitation
-        // '1218' => '5800',   // WIP venue & statutory     -> Cost of Sales: Venue & Statutory
-        // '1219' => '5900',   // WIP rework & warranty     -> Cost of Sales: Rework & Warranty
-
-        // ---- Production overhead (6xxx) - same codes exist in WNG chart
-        '6100' => '6100',   // Workshop electricity
-        '6200' => '6200',   // Machinery repairs & maintenance
-        '6400' => '6400',   // Small tools & workshop consumables
-        '6600' => '6600',   // PPE & workshop safety
-        '6700' => '6700',   // Cleaning & waste disposal
-
-        // ---- Operating expenses (7xxx) - same codes exist in WNG chart
-        '7100' => '7100',   // Office rent & electricity
-        '7150' => '7150',   // Office supplies & stationery
-        '7200' => '7200',   // Administration airtime & internet
-        '7400' => '7400',   // Office transport
-        '7600' => '7600',   // Staff welfare
-        '7800' => '7800',   // Bank & mobile-money charges
-
-        // ---- Control accounts that may need creating (map to themselves for now)
-        '1310' => '1310',   // Supplier advances (create if missing)
-        '1320' => '1320',   // Refundable deposits (create if missing)
-        '1340' => '1340',   // Prepaid expenses (create if missing)
-        '1600' => '1600',   // Leasehold improvements (create if missing)
-        '2300' => '2300',   // Loans payable (create if missing)
+        /*
+         | (Report 53, 2026-09-28) The identity entries that stood here ('1100' =>
+         | '1100', …, added 2026-09-13) claimed those codes exist in WNG's chart.
+         | They do not: WNG's chart is 120 QuickBooks accounts with mnemonic codes
+         | (AR-001, AP-001, PETTY-001, EQB-001, COS-008, OPE-030, …). An identity
+         | entry is also a no-op — an unmapped code already resolves to itself — so
+         | removing them changes nothing except the false claim.
+         |
+         | The evidence-based mapping for WNG's chart (D3 Option A: WNG keeps its
+         | chart) is database/finance/wng-coa-mapping-proposal.json, evaluated by
+         | `php artisan finance:account-mapping`. A line is added here only once the
+         | accountant has approved it; `finance:account-mapping --emit-map` prints
+         | exactly the approved lines. Until then Finance posting refuses cleanly
+         | (Finance readiness names every unresolved function).
+         */
 
     ],
 
