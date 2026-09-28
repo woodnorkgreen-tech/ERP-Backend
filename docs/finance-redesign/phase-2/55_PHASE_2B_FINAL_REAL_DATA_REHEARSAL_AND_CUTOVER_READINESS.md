@@ -627,8 +627,9 @@ The frontend was validated against the backend's real route table (`routes55.jso
 These are recorded separately and are not defects in the backend:
 
 1. **Fixed, needs WNG to see it working.** On the petty-cash requisition list, the Approve, Disburse and Reconcile quick actions were gated on permissions that do not exist: `finance.petty_cash.approve` and `finance.petty_cash.disburse`. They were **hidden from everyone**, so users had to open each requisition. The gates now match the backend policies:
-   - Approve and Reconcile use `edit_disbursement`;
+   - Approve uses `edit_disbursement`;
    - Disburse uses `create_disbursement`.
+   - *Correction (Report 56 §9):* this report first gated Reconcile on `edit_disbursement`. The backend authorises reconcile with `create_disbursement` (`can('create', Payment::class)`), and Stream A (Report 57) corrected the gate. The same roles hold both permissions today, so nobody lost access.
 2. **Fixed (backend).** Recording a client receipt into a disabled paying account returned a generic "Failed to log payment" with **HTTP 500**. It is now a 422 field error on the receiving account. The receipt form already shows the API message and lists only active accounts. With MPESA disabled, choosing the "M-Pesa" method therefore offers no receiving account. That is the intended MIG-P1 behaviour, but users will need to be told why.
 3. **Dead code.** `usePettyCash.ts:141` `updateDisbursement` calls `PUT /api/finance/petty-cash/disbursements/{id}`, which has no route. No screen calls it. This is a cleanup item and is non-blocking.
 4. **Carried into the redesign:** Finance screens are functional but fragmented across modules. This is the justification for the Finance frontend redesign stream (§40), which was **not started**.
