@@ -86,6 +86,9 @@ class OvertimeController extends Controller
             });
         }
 
+        // W7-10: Technical Labour operational paths decommissioned.
+        // Historical technical_labour_id data is preserved in the database.
+
         return response()->json($query->latest()->get());
     }
 
@@ -98,7 +101,6 @@ class OvertimeController extends Controller
         
         $validated = $request->validate([
             'employee_id' => 'nullable|exists:employees,id',
-            'technical_labour_id' => 'nullable|exists:technical_labours,id',
             'project_id' => 'nullable|exists:project_enquiries,id',
             'job_title' => 'nullable|string|max:255',
             'location' => 'nullable|string|max:255',
@@ -109,13 +111,12 @@ class OvertimeController extends Controller
         ]);
 
         $employeeId = $validated['employee_id'] ?? null;
-        $techId = $validated['technical_labour_id'] ?? null;
 
-        if (!$employeeId && !$techId && $user->employee_id) {
+        if (!$employeeId && $user->employee_id) {
             $employeeId = $user->employee_id;
         }
 
-        if (!$employeeId && !$techId) {
+        if (!$employeeId) {
             return response()->json(['message' => 'No personnel specified.'], 422);
         }
 
@@ -124,17 +125,10 @@ class OvertimeController extends Controller
         $isOwn = $employeeId && ($employeeId == $user->employee_id);
         
         if (!$isGlobal && !$isOwn) {
-            if ($employeeId) {
-                $employee = Employee::find($employeeId);
-                $isManager = $employee->manager_id === $user->employee_id;
-                $isDeptLead = $employee->department?->manager_id === $user->employee_id;
-                if (!$isManager && !$isDeptLead) abort(403, 'Unauthorized.');
-            } else {
-                // For Technical Labour, regarded under Production department
-                $productionDept = Department::where('name', 'Production')->first();
-                $isProductionLead = $productionDept && ($productionDept->manager_id === $user->employee_id);
-                if (!$isProductionLead) abort(403, 'Unauthorized to record for technical labour.');
-            }
+            $employee = Employee::find($employeeId);
+            $isManager = $employee->manager_id === $user->employee_id;
+            $isDeptLead = $employee->department?->manager_id === $user->employee_id;
+            if (!$isManager && !$isDeptLead) abort(403, 'Unauthorized.');
         }
 
         // Calculate hours with Midnight Awareness
@@ -147,7 +141,6 @@ class OvertimeController extends Controller
 
         $entry = OTEntry::create(array_merge($validated, [
             'employee_id' => $employeeId,
-            'technical_labour_id' => $techId,
             'hours' => $hours,
             'status' => 'draft',
             'submitted_by' => $user->id,
@@ -158,12 +151,12 @@ class OvertimeController extends Controller
 
     /**
      * Bulk store OT entries for multiple employees.
+     * W7-10: Technical Labour operational paths decommissioned.
      */
     public function bulkStore(Request $request)
     {
         $user = auth()->user();
         
-        // Permission Check: HR, Admins, Managers, Dept Leads, and Project Officers can do bulk
         if (!$user->hasRole(['Super Admin', 'Admin', 'HR', 'Project Officer', 'Project Manager', 'Production']) && !$user->isManager() && !$user->isDeptLead()) {
             abort(403, 'Unauthorized to perform bulk overtime recording.');
         }
@@ -171,8 +164,6 @@ class OvertimeController extends Controller
         $validated = $request->validate([
             'employee_ids'          => 'nullable|array',
             'employee_ids.*'        => 'exists:employees,id',
-            'technical_labour_ids'  => 'nullable|array',
-            'technical_labour_ids.*'=> 'exists:technical_labours,id',
             'project_id'            => 'nullable|exists:project_enquiries,id',
             'job_title'             => 'nullable|string|max:255',
             'location'              => 'nullable|string|max:255',
@@ -217,23 +208,7 @@ class OvertimeController extends Controller
             }
         }
 
-        // Process Technical Labour — Dept Leads can now also log tech labour
-        if (!empty($validated['technical_labour_ids'])) {
-            $productionDept = Department::where('name', 'Production')->first();
-            $isProductionLead = $productionDept && ($productionDept->manager_id === $user->employee_id);
-
-            if ($isGlobal || $isProductionLead) {
-                foreach ($validated['technical_labour_ids'] as $techId) {
-                    $entry = OTEntry::create(array_merge($sharedData, ['technical_labour_id' => $techId]));
-                    $this->overtimeService->generateIntelligenceFlags($entry);
-                    $entries[] = $entry;
-                }
-            } else {
-                abort(403, 'Unauthorized to record overtime for technical labour.');
-            }
-        }
-
-        \App\Modules\HR\Models\SystemEvent::log('bulk_submitted', 'ot_entry', 0, [
+                \App\Modules\HR\Models\SystemEvent::log('bulk_submitted', 'ot_entry', 0, [
             'actor'   => $user->name,
             'count'   => count($entries),
             'date'    => $validated['work_date'],

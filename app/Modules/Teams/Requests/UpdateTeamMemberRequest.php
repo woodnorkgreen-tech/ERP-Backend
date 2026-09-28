@@ -13,8 +13,9 @@ class UpdateTeamMemberRequest extends FormRequest
 
     public function rules(): array
     {
+        // W7-10: technical_labour_id is no longer accepted — Employee Records are the
+        // active personnel master. All other update rules are unchanged.
         return [
-            'technical_labour_id' => 'nullable|integer|exists:technical_labours,id',
             'member_name' => 'sometimes|string|min:2|max:100|regex:/^[a-zA-Z\s\-.\']+$/',
             'member_email' => 'nullable|email|max:255',
             'member_phone' => 'nullable|string|max:20|regex:/^[\+]?[0-9\s\-()]+$/',

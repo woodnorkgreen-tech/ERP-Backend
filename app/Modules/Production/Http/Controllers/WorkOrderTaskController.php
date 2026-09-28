@@ -46,8 +46,9 @@ class WorkOrderTaskController extends Controller
             'safety_checks.color' => 'nullable|boolean',
             'safety_checks.finish' => 'nullable|boolean',
             'assignees' => 'nullable|array',
-            'assignees.*.type' => 'required_with:assignees|string|in:employee,technical_labour',
-            'assignees.*.id' => 'required_with:assignees|integer'
+            // W7-10: Only employee type allowed for new operations. Legacy technical_labour preserved for historical data.
+            'assignees.*.type' => 'required_with:assignees|string|in:employee',
+            'assignees.*.id' => 'required_with:assignees|integer|exists:employees,id'
         ]);
 
         $task = WorkOrderTask::create([
@@ -99,8 +100,9 @@ class WorkOrderTaskController extends Controller
             'safety_checks.color' => 'nullable|boolean',
             'safety_checks.finish' => 'nullable|boolean',
             'assignees' => 'sometimes|array',
-            'assignees.*.type' => 'required_with:assignees|string|in:employee,technical_labour',
-            'assignees.*.id' => 'required_with:assignees|integer'
+            // W7-10: Only employee type allowed for new operations. Legacy technical_labour preserved for historical data.
+            'assignees.*.type' => 'required_with:assignees|string|in:employee',
+            'assignees.*.id' => 'required_with:assignees|integer|exists:employees,id'
         ]);
 
         if (array_key_exists('status', $validated)) {
@@ -176,39 +178,40 @@ class WorkOrderTaskController extends Controller
     private function formatTasks($tasks)
     {
         $employeeIds = [];
-        $labourIds = [];
 
         foreach ($tasks as $task) {
             foreach ($task->assignees as $assignee) {
+                // W7-10: Migrated to Employee Records only. Historical technical_labour type
+                // preserved for data integrity but new operations use employee type.
                 if ($assignee->assignee_type === 'employee') {
                     $employeeIds[] = $assignee->assignee_id;
                 } elseif ($assignee->assignee_type === 'technical_labour') {
-                    $labourIds[] = $assignee->assignee_id;
+                    // Legacy technical_labour references are treated as employee IDs for migration
+                    $employeeIds[] = $assignee->assignee_id;
                 }
             }
         }
 
         $employees = Employee::whereIn('id', array_unique($employeeIds))->get()->keyBy('id');
-        $labours = TechnicalLabour::whereIn('id', array_unique($labourIds))->get()->keyBy('id');
 
-        return $tasks->map(function ($task) use ($employees, $labours) {
-            $assignees = $task->assignees->map(function ($assignee) use ($employees, $labours) {
-                if ($assignee->assignee_type === 'employee') {
-                    $person = $employees->get($assignee->assignee_id);
+        return $tasks->map(function ($task) use ($employees) {
+            $assignees = $task->assignees->map(function ($assignee) use ($employees) {
+                $person = $employees->get($assignee->assignee_id);
+                if ($assignee->assignee_type === 'technical_labour') {
+                    // Legacy type - normalize to employee for display
                     return [
                         'id' => $assignee->assignee_id,
                         'type' => 'employee',
-                        'name' => $person?->name ?? 'Unknown',
-                        'label' => $person ? $person->name . ' (Employee)' : 'Unknown'
+                        'name' => $person ? ($person->first_name . ' ' . $person->last_name) : 'Unknown',
+                        'label' => $person ? ($person->first_name . ' ' . $person->last_name) . ' (Employee)' : 'Unknown'
                     ];
                 }
-
-                $person = $labours->get($assignee->assignee_id);
+                
                 return [
                     'id' => $assignee->assignee_id,
-                    'type' => 'technical_labour',
-                    'name' => $person?->full_name ?? 'Unknown',
-                    'label' => $person ? $person->full_name . ' (Technician)' : 'Unknown'
+                    'type' => 'employee',
+                    'name' => $person ? ($person->first_name . ' ' . $person->last_name) : 'Unknown',
+                    'label' => $person ? ($person->first_name . ' ' . $person->last_name) . ' (Employee)' : 'Unknown'
                 ];
             });
 

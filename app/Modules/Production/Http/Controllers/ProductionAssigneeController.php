@@ -4,7 +4,6 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\HR\Models\Employee;
-use App\Modules\HR\Models\TechnicalLabour;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -35,30 +34,10 @@ class ProductionAssigneeController extends Controller
                 ];
             });
 
-        $labours = TechnicalLabour::query()
-            ->where('status', 'active')
-            ->when($search, function ($query) use ($search) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('full_name', 'like', "%{$search}%")
-                      ->orWhere('email', 'like', "%{$search}%")
-                      ->orWhere('phone', 'like', "%{$search}%")
-                      ->orWhere('specialization', 'like', "%{$search}%");
-                });
-            })
-            ->limit($limit)
-            ->get()
-            ->map(function ($labour) {
-                return [
-                    'id' => $labour->id,
-                    'type' => 'technical_labour',
-                    'name' => $labour->full_name,
-                    'label' => $labour->full_name . ' (Technician)'
-                ];
-            });
-
+        // W7-10: Technical Labour decommissioned. Only Employee Records returned.
         return response()->json([
             'success' => true,
-            'data' => $employees->merge($labours)->values()
+            'data' => $employees->values()
         ]);
     }
 }
