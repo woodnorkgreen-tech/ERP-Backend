@@ -73,8 +73,9 @@ class TableLoader
             return false;
         }
         $columns = array_keys($this->source->columns($table));
-        $source = TableFingerprint::of($this->source, $table, $columns);
-        $target = TableFingerprint::of($this->target, $table, $columns);
+        $key = LoadValidator::comparisonKey($this->source, $this->target, $table, $columns);
+        $source = TableFingerprint::of($this->source, $table, $columns, $key);
+        $target = TableFingerprint::of($this->target, $table, $columns, $key);
 
         return $source['count'] > 0 && $source === $target;
     }

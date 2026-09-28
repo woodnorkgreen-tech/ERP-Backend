@@ -88,6 +88,15 @@ class SchemaGate
 
     private function compareColumns(string $table): void
     {
+        $sourceKey = $this->source->primaryKey($table);
+        $targetKey = $this->target->primaryKey($table);
+        if ($sourceKey !== $targetKey) {
+            // Not a blocker: the load keeps every value and the target's key then enforces
+            // uniqueness (a duplicate would fail the load loudly). Reconciliation compares
+            // both sides on the target's key.
+            $this->notes[] = sprintf('Primary key differs on %s: staging [%s], target [%s].', $table, implode(',', $sourceKey) ?: 'none', implode(',', $targetKey) ?: 'none');
+        }
+
         $source = $this->source->columns($table);
         $target = $this->target->columns($table);
 

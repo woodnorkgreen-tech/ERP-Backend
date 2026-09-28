@@ -116,6 +116,12 @@ final class RolePermissions
                 Permissions::PROJECT_COSTS_READ_ASSIGNED, Permissions::PROJECT_READ, Permissions::ROLE_READ,
                 Permissions::SUPPORT_MANAGE, Permissions::USER_ASSIGN_ROLE, Permissions::USER_CREATE,
                 Permissions::USER_READ, Permissions::USER_UPDATE,
+                // W7 (2026_09_24_000006): full labour access. Declared here because a
+                // migration's grant only lands where the role already exists — on a
+                // freshly built database it silently grants nothing (Report 52).
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_PO_VERIFY, Permissions::FINANCE_LABOUR_FINANCE_VERIFY,
+                Permissions::FINANCE_LABOUR_CORRECT,
             ],
             'Manager' => [
                 Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_ACCESS, Permissions::DEPARTMENT_READ,
@@ -170,6 +176,13 @@ final class RolePermissions
                 Permissions::HR_VIEW_EMPLOYEES, Permissions::PROCUREMENT_ORDERS_APPROVE,
                 Permissions::PROCUREMENT_REQUISITIONS_APPROVE, Permissions::PROJECT_COSTS_READ_ASSIGNED,
                 Permissions::PROJECT_READ, Permissions::USER_READ,
+                // W6 (2026_09_24_000004) and W7 (2026_09_24_000006): Accounts is the
+                // Finance authority for project costing and labour. Reopen stays with
+                // Super Admin. Declared here so a fresh build carries them (Report 52).
+                Permissions::FINANCE_COSTS_PORTFOLIO, Permissions::FINANCE_COSTS_ALLOCATE,
+                Permissions::FINANCE_COSTS_TRANSFER, Permissions::FINANCE_COSTS_CLOSE,
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_FINANCE_VERIFY, Permissions::FINANCE_LABOUR_CORRECT,
             ],
             'Costing' => [
                 Permissions::DASHBOARD_FINANCE, Permissions::FINANCE_BUDGET_APPROVE,
@@ -181,6 +194,9 @@ final class RolePermissions
                 Permissions::HR_VIEW_EMPLOYEES, Permissions::PROJECT_COSTS_READ_ASSIGNED,
                 Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::TASK_READ,
                 Permissions::TASK_UPDATE, Permissions::USER_READ,
+                // W7 (2026_09_24_000006): record and Project-Officer-verify labour.
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_PO_VERIFY,
             ],
             'HR' => [
                 Permissions::DASHBOARD_HR, Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_READ,
@@ -227,6 +243,9 @@ final class RolePermissions
                 Permissions::PROJECT_DELETE, Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE,
                 Permissions::TASK_ASSIGN, Permissions::TASK_CREATE, Permissions::TASK_READ,
                 Permissions::TASK_UPDATE, Permissions::USER_READ,
+                // W7 (2026_09_24_000006): record and Project-Officer-verify labour.
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_PO_VERIFY,
             ],
             'Project Officer' => [
                 Permissions::DASHBOARD_PROJECTS, Permissions::DEPARTMENT_READ, Permissions::ENQUIRY_CREATE,

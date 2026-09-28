@@ -16,6 +16,19 @@ class LoadValidator
     ) {}
 
     /**
+     * The key both sides are ordered and ranged by: the target's primary key, else the
+     * source's, else `id` — never each side's own, which differ when a source table lacks
+     * the primary key the target declares.
+     *
+     * @param  list<string>  $columns
+     * @return list<string>
+     */
+    public static function comparisonKey(SchemaInspector $source, SchemaInspector $target, string $table, array $columns): array
+    {
+        return $target->primaryKey($table) ?: ($source->primaryKey($table) ?: (in_array('id', $columns, true) ? ['id'] : $columns));
+    }
+
+    /**
      * @param  list<string>  $tables  tables to reconcile (default: every loaded table except import-mapped)
      * @param  list<array<string, mixed>>  $preImportOrphans  findings from the staging scan
      */
@@ -30,8 +43,9 @@ class LoadValidator
                 continue;
             }
             $columns = array_keys($this->source->columns($table));
-            $s = TableFingerprint::of($this->source, $table, $columns);
-            $t = TableFingerprint::of($this->target, $table, $columns);
+            $key = self::comparisonKey($this->source, $this->target, $table, $columns);
+            $s = TableFingerprint::of($this->source, $table, $columns, $key);
+            $t = TableFingerprint::of($this->target, $table, $columns, $key);
             $match = $s === $t;
             $reconciliation[$table] = [
                 'staging_count' => $s['count'], 'target_count' => $t['count'],

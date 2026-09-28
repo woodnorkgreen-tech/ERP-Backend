@@ -203,7 +203,9 @@ return [
         'hr_onboarding_cases.department_id' => 'departments',
         'hr_offboarding_cases.employee_id' => 'employees',
         'hr_offboarding_cases.department_id' => 'departments',
-        'production_elements.material_id' => 'library_materials',
+        // A string column "Reference to materials task item" (create_production_elements_table):
+        // it points at element_materials, not library_materials — found on real data (Report 52).
+        'production_elements.material_id' => 'element_materials',
         'goods_receipt_note_items.material_id' => 'library_materials',
         'purchase_order_items.material_id' => 'library_materials',
         'inventory_logs.project_id' => 'projects',
@@ -218,13 +220,15 @@ return [
     ],
 
     /*
-    | Headline counts the operator observed on the live source (2026-09-28).
-    | Informational: during rehearsal the source-copy counts are the authority.
+    | Headline counts the operator observed on the live source, just after the
+    | rehearsal snapshot erpsystem-20260928-0918 (the earlier observation that day
+    | was 731 projects; the source is live). Informational: during rehearsal the
+    | restored-copy counts are the authority (Report 52: they matched these).
     */
     'reference_counts' => [
-        'observed_on' => '2026-09-28',
+        'observed_on' => '2026-09-28 (post-snapshot)',
         'counts' => [
-            'projects' => 731,
+            'projects' => 737,
             'employees' => 93,
             'project_enquiries' => 1387,
             'task_budget_data' => 658,

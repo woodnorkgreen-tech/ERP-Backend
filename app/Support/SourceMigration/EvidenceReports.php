@@ -138,6 +138,33 @@ class EvidenceReports
             'employee_user_links_identical' => $linkage($source) === $linkage($target),
             'role_assignments' => ['source' => $sourceRoles, 'target' => $targetRoles, 'identical' => $sourceRoles === $targetRoles],
             'permissions_regenerated' => self::matrixCoverage($target),
+            'grant_gap' => self::grantGap($source, $target),
+        ];
+    }
+
+    /**
+     * Role grants the (Stage 1–upgraded) source holds that the regenerated target does not.
+     *
+     * A lost grant on a CURRENT permission is a defect: the regeneration dropped an
+     * authority somebody relies on (found on real data: the W6/W7 grants, which their
+     * migrations make only where the role already exists). A lost grant on a permission
+     * no longer in the registry is obsolete and correctly left behind.
+     */
+    public static function grantGap(SchemaInspector $source, SchemaInspector $target): array
+    {
+        $grants = fn (SchemaInspector $db) => $db->connection()->table('role_has_permissions as rp')
+            ->join('roles as r', 'r.id', '=', 'rp.role_id')->join('permissions as p', 'p.id', '=', 'rp.permission_id')
+            ->get(['r.name as role', 'p.name as permission'])->map(fn ($g) => "{$g->role}|{$g->permission}")->all();
+
+        $current = array_flip(\App\Constants\Permissions::all());
+        $lost = array_values(array_diff($grants($source), $grants($target)));
+        sort($lost);
+        $defects = array_values(array_filter($lost, fn ($g) => isset($current[explode('|', $g, 2)[1]])));
+
+        return [
+            'lost_current_permission_grants' => $defects,
+            'lost_obsolete_permission_grants' => array_values(array_diff($lost, $defects)),
+            'passes' => $defects === [],
         ];
     }
 

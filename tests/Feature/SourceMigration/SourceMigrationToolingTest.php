@@ -284,6 +284,36 @@ class SourceMigrationToolingTest extends SourceMigrationTestCase
         $this->assertSame(['finance.obsolete_legacy_permission' => 1], $this->latestReport('load')['completed']['model_has_permissions']['unmapped']);
     }
 
+    public function test_the_matrix_carries_the_w6_and_w7_grants_a_fresh_build_would_otherwise_lose(): void
+    {
+        // Report 52: on a clean target the W6/W7 permission migrations run before any role
+        // exists and grant nothing; regeneration from the matrix is the only source.
+        $matrix = \App\Constants\RolePermissions::matrix();
+        $expect = [
+            'Accounts' => ['finance.labour.view', 'finance.labour.record', 'finance.labour.finance_verify', 'finance.labour.correct',
+                'finance.costs.portfolio', 'finance.costs.allocate', 'finance.costs.transfer', 'finance.costs.close'],
+            'Admin' => ['finance.labour.view', 'finance.labour.record', 'finance.labour.po_verify', 'finance.labour.finance_verify', 'finance.labour.correct'],
+            'Project Manager' => ['finance.labour.view', 'finance.labour.record', 'finance.labour.po_verify'],
+            'Costing' => ['finance.labour.view', 'finance.labour.record', 'finance.labour.po_verify'],
+        ];
+        foreach ($expect as $role => $permissions) {
+            foreach ($permissions as $permission) {
+                $this->assertContains($permission, $matrix[$role], "{$role} must hold {$permission}");
+            }
+        }
+
+        // And the grant-gap check reports a lost current grant as a defect, an obsolete one separately.
+        $this->execute()->assertSuccessful();
+        $roleId = $this->staging()->table('roles')->where('name', 'Admin')->value('id');
+        DB::purge('source_staging');
+        $this->staging()->table('permissions')->insert(['id' => 950, 'name' => 'finance.petty_cash.delete_disbursement', 'guard_name' => 'web']);
+        $this->staging()->table('role_has_permissions')->insert(['permission_id' => 950, 'role_id' => $roleId]);
+        $gap = EvidenceReports::grantGap(new SchemaInspector('source_staging'), new SchemaInspector('mysql'));
+        $this->assertContains('Admin|finance.petty_cash.delete_disbursement', $gap['lost_obsolete_permission_grants']);
+        $this->assertContains("Admin|{$this->knownPermission}", $gap['lost_current_permission_grants'], 'target permissions not yet regenerated');
+        $this->assertFalse($gap['passes']);
+    }
+
     public function test_the_role_mapping_report_classifies_every_source_role_and_deletes_none(): void
     {
         $report = (new EvidenceReports(new SchemaInspector('source_staging')))->roles();

@@ -15,12 +15,15 @@ class TableFingerprint
 {
     /**
      * @param  list<string>|null  $columns  default: every column of the table on $db
+     * @param  list<string>|null  $key  the ordering key. Pass the SAME key for both sides of a
+     *                                  comparison: a source table can lack the primary key the
+     *                                  target declares (found on real data: app_notifications).
      * @return array{count: int, min_key: ?string, max_key: ?string, checksum: string}
      */
-    public static function of(SchemaInspector $db, string $table, ?array $columns = null, int $chunk = 1000): array
+    public static function of(SchemaInspector $db, string $table, ?array $columns = null, ?array $key = null, int $chunk = 1000): array
     {
         $columns ??= array_keys($db->columns($table));
-        $key = $db->primaryKey($table) ?: $columns;
+        $key = $key ?: ($db->primaryKey($table) ?: $columns);
         $connection = $db->connection();
 
         $count = (int) $connection->table($table)->count();
