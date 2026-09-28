@@ -32,6 +32,7 @@ class BudgetProjector
         private CostCollectorService $collector,
         private UnbudgetedSpendAdopter $adopter,
         private \App\Services\Governance\BudgetRevisionRecorder $revisions,
+        private ProjectBudgetAuthority $authority,
     ) {}
 
     /**
@@ -42,7 +43,9 @@ class BudgetProjector
     {
         $task = $budget->task;
 
-        if (! $task) {
+        // Only the project's current budget is its planning basis (the same record
+        // W7 reads — ProjectBudgetAuthority). A row on any other task is not a budget.
+        if (! $task || ! $this->authority->isCurrent($budget)) {
             return ['projected' => 0, 'skipped' => 0, 'retired' => 0, 'adopted' => 0, 'revised' => false];
         }
 

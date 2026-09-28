@@ -319,6 +319,8 @@ class ProjectLabourActualController extends Controller
         return [
             'financial_closure_status' => $enquiry->financial_closure_status ?? 'open',
             'financially_closed_at' => $enquiry->financially_closed_at?->toIso8601String(),
+            // none | in_progress | finalized: budgeted labour needs a finalized Project Budget.
+            'budget_state' => $this->service->budgetState($enquiry),
         ];
     }
 

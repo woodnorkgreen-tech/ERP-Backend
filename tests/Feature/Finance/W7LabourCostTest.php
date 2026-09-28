@@ -96,11 +96,12 @@ class W7LabourCostTest extends TestCase
         $this->enquiry = $this->createEnquiry($this->financier->id);
         $this->createProject($this->enquiry->id);
 
-        // Create budget task and approved budget
+        // Budget task completed = the Project Budget is finalized (ProjectBudgetAuthority).
         $this->budgetTask = EnquiryTask::create([
             'project_enquiry_id' => $this->enquiry->id,
             'title' => 'Budget',
             'type' => 'budget',
+            'status' => 'completed',
             'created_by' => $this->financier->id,
         ]);
 
@@ -173,7 +174,9 @@ class W7LabourCostTest extends TestCase
             'expenses_data' => [],
             'logistics_data' => [],
             'budget_summary' => ['grandTotal' => 27000],
-            'status' => 'approved',
+            // Production state since 2026-07-07: budgets stay 'draft'; the completed
+            // budget task is what finalizes them (ProjectBudgetAuthority).
+            'status' => 'draft',
         ]);
 
         // Also create planned cost lines via BudgetProjector pattern
@@ -262,7 +265,7 @@ class W7LabourCostTest extends TestCase
         // Rate resolution comes from the budget.
         $this->assertSame(ProjectLabourActual::RATE_RESOLVED, $actual->rate_resolution_status);
         $this->assertNotNull($actual->rate_source);
-        $this->assertSame('approved_project_budget', $actual->rate_source['type']);
+        $this->assertSame('project_budget', $actual->rate_source['type']);
     }
 
     public function test_calculated_cost_uses_server_owned_rate_not_client_rate(): void
@@ -866,7 +869,7 @@ class W7LabourCostTest extends TestCase
         $verified = $this->service->financeVerify($actual, $this->financier);
 
         $this->assertSame('1500.00', (string) $verified->unit_rate);
-        $this->assertSame('approved_project_budget', $verified->rate_source['type']);
+        $this->assertSame('project_budget', $verified->rate_source['type']);
 
         $corrected = $this->service->correct(
             $verified,
@@ -877,7 +880,7 @@ class W7LabourCostTest extends TestCase
 
         // Rate snapshot preserved through correction.
         $this->assertSame('1500.00', (string) $corrected->unit_rate);
-        $this->assertSame('approved_project_budget', $corrected->rate_source['type']);
+        $this->assertSame('project_budget', $corrected->rate_source['type']);
     }
 
     public function test_correct_requires_finance_verified_status(): void
@@ -984,7 +987,7 @@ class W7LabourCostTest extends TestCase
             'reversal_of_id' => $verified->id,  // violates unique constraint
             'correction_reason' => 'Should fail.',
             'rate_resolution_status' => ProjectLabourActual::RATE_RESOLVED,
-            'rate_source' => ['type' => 'approved_project_budget'],
+            'rate_source' => ['type' => 'project_budget'],
         ]);
     }
 
@@ -1586,7 +1589,7 @@ class W7LabourCostTest extends TestCase
             $this->assertSame('2000.00', $response->json('data.unit_rate'));
             $this->assertSame('2000.00', $response->json('data.calculated_cost'));
             $this->assertSame('PAX', $response->json('data.budget_unit'));
-            $this->assertSame('approved_project_budget', $response->json('data.rate_source.type'));
+            $this->assertSame('project_budget', $response->json('data.rate_source.type'));
         }
     }
 
@@ -1874,20 +1877,126 @@ class W7LabourCostTest extends TestCase
         $this->assertSame($this->financier->id, $logs->firstWhere('action_status', 'reclassify')->user_id);
     }
 
+    // ══ Report 47: authoritative Project Budget (W7-1 / Q4) ═════════════════
+
+    public function test_q4_scenario_a_a_finalized_draft_budget_authorizes_budgeted_labour(): void
+    {
+        // Production state: task_budget_data.status stays 'draft'; the completed budget task finalizes it.
+        $enquiry = $this->makeProject([$this->labourLine('line-a', 10, 1, 2000)]);
+        $this->assertSame('draft', TaskBudgetData::whereHas('task', fn ($q) => $q->where('project_enquiry_id', $enquiry->id))->value('status'));
+
+        $response = $this->actingAs($this->recorder)->getJson("/api/costs/projects/{$enquiry->id}/budget-labour-lines")->assertOk();
+        $this->assertSame('finalized', $response->json('meta.budget_state'));
+        $this->assertTrue($response->json('data.0.recordable'));
+
+        $actual = $this->verifiedActual($enquiry, 'line-a', 3);
+        $this->assertSame('6000.00', (string) $actual->actualCostLine->net_amount);
+        $this->assertSame('project_budget', $actual->rate_source['type']);
+    }
+
+    public function test_q4_scenario_b_an_in_progress_budget_cannot_authorize_budgeted_labour(): void
+    {
+        $enquiry = $this->makeProject([$this->labourLine('line-a', 10, 1, 2000)], 'in_progress');
+
+        $lines = $this->actingAs($this->recorder)->getJson("/api/costs/projects/{$enquiry->id}/budget-labour-lines")->assertOk();
+        $this->assertSame('in_progress', $lines->json('meta.budget_state'));
+        $this->assertSame('line-a', $lines->json('data.0.id'));      // the plan is visible
+        $this->assertFalse($lines->json('data.0.recordable'));       // but not recordable
+
+        $response = $this->actingAs($this->recorder)->postJson("/api/costs/projects/{$enquiry->id}/labour-actuals", [
+            'budget_line_id' => 'line-a', 'actual_quantity' => 1, 'actual_days' => 1,
+            'work_date' => now()->toDateString(), 'is_unbudgeted' => false,
+        ])->assertStatus(422);
+        $this->assertStringContainsString('still in progress', $response->json('errors.budget_line_id.0'));
+
+        // Unbudgeted labour does not depend on the budget and still records.
+        $this->actingAs($this->recorder)->postJson("/api/costs/projects/{$enquiry->id}/labour-actuals", [
+            'is_unbudgeted' => true, 'labour_role' => 'Rigger', 'labour_category' => 'site_labour', 'budget_unit' => 'PAX',
+            'actual_quantity' => 1, 'actual_days' => 1, 'work_date' => now()->toDateString(), 'unbudgeted_reason' => 'Extra crew',
+        ])->assertCreated();
+    }
+
+    public function test_q4_scenario_b_a_reopened_budget_stops_new_labour_until_completed_again(): void
+    {
+        $enquiry = $this->makeProject([$this->labourLine('line-a', 10, 1, 2000)]);
+        $this->verifiedActual($enquiry, 'line-a', 1);
+
+        // A materials change reopens the budget task (BudgetService::syncFromMaterialsList).
+        EnquiryTask::where('project_enquiry_id', $enquiry->id)->where('type', 'budget')->update(['status' => 'in_progress']);
+        try {
+            $this->service->record($this->recordData(['project_enquiry_id' => $enquiry->id, 'budget_line_id' => 'line-a']), $this->recorder);
+            $this->fail('A reopened budget must not authorize new labour.');
+        } catch (\Illuminate\Validation\ValidationException) {
+        }
+
+        EnquiryTask::where('project_enquiry_id', $enquiry->id)->where('type', 'budget')->update(['status' => 'completed']);
+        $this->assertSame('2000.00', (string) $this->service->record(
+            $this->recordData(['project_enquiry_id' => $enquiry->id, 'budget_line_id' => 'line-a', 'actual_quantity' => 1]), $this->recorder,
+        )->calculated_cost);
+    }
+
+    public function test_q4_scenario_c_a_line_from_a_superseded_budget_version_cannot_authorize_labour(): void
+    {
+        $enquiry = $this->makeProject([$this->labourLine('line-old', 10, 1, 2000)]);
+        $budget = TaskBudgetData::whereHas('task', fn ($q) => $q->where('project_enquiry_id', $enquiry->id))->firstOrFail();
+
+        // Revision removes line-old and adds line-new (the real save path + projection).
+        $budget->update(['labour_data' => [$this->labourLine('line-new', 5, 1, 3000)]]);
+        $this->app->make(\App\Modules\Finance\CostCollector\Services\BudgetProjector::class)->project($budget->fresh());
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->service->record($this->recordData(['project_enquiry_id' => $enquiry->id, 'budget_line_id' => 'line-old']), $this->recorder);
+    }
+
+    public function test_q4_scenario_c_a_budget_row_outside_the_project_budget_task_is_ignored(): void
+    {
+        $enquiry = $this->makeProject([$this->labourLine('line-a', 10, 1, 2000)]);
+        $stray = EnquiryTask::create(['project_enquiry_id' => $enquiry->id, 'title' => 'Materials', 'type' => 'materials',
+            'status' => 'completed', 'created_by' => $this->financier->id]);
+        $orphan = TaskBudgetData::create(['enquiry_task_id' => $stray->id, 'project_info' => [], 'materials_data' => [],
+            'labour_data' => [$this->labourLine('line-stray', 1, 1, 99999)], 'expenses_data' => [], 'logistics_data' => [],
+            'budget_summary' => [], 'status' => 'draft']);
+
+        $result = $this->app->make(\App\Modules\Finance\CostCollector\Services\BudgetProjector::class)->project($orphan);
+        $this->assertSame(0, $result['projected']);
+        $this->assertSame(['line-a'], collect($this->service->getBudgetLabourLines($enquiry))->pluck('id')->all());
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->service->record($this->recordData(['project_enquiry_id' => $enquiry->id, 'budget_line_id' => 'line-stray']), $this->recorder);
+    }
+
+    public function test_q4_scenario_f_and_g_project_budgets_command_regenerates_planned_lines_once(): void
+    {
+        $enquiry = $this->makeProject([$this->labourLine('line-a', 10, 1, 2000), $this->labourLine('line-b', 2, 3, 1500)], 'in_progress');
+        CostLine::where('project_enquiry_id', $enquiry->id)->delete();   // as after the controlled reset
+        $planned = fn () => CostLine::where('project_enquiry_id', $enquiry->id)->where('nature', 'planned')->counting()->count();
+
+        $this->artisan('finance:project-budgets', ['--dry-run' => true])->assertSuccessful();
+        $this->assertSame(0, $planned());                                // dry run writes nothing
+
+        $this->artisan('finance:project-budgets')->assertSuccessful();
+        $this->assertSame(2, $planned());                                // F: exactly one per labour line, draft budget included
+        $this->assertSame('29000.00', bcadd((string) CostLine::where('project_enquiry_id', $enquiry->id)->counting()->sum('net_amount'), '0', 2));
+
+        $this->artisan('finance:project-budgets')->assertSuccessful();
+        $this->assertSame(2, $planned());                                // G: re-run adds nothing
+        $this->assertSame(2, CostLine::where('project_enquiry_id', $enquiry->id)->count());
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     /** A W6-shaped project with its own approved budget, projected by the real BudgetProjector. */
-    private function makeProject(array $labourLines): ProjectEnquiry
+    private function makeProject(array $labourLines, string $budgetTaskStatus = 'completed'): ProjectEnquiry
     {
         $enquiry = $this->createEnquiry($this->financier->id);
         $this->createProject($enquiry->id);
         $task = EnquiryTask::create([
-            'project_enquiry_id' => $enquiry->id, 'title' => 'Budget', 'type' => 'budget', 'created_by' => $this->financier->id,
+            'project_enquiry_id' => $enquiry->id, 'title' => 'Budget', 'type' => 'budget', 'status' => $budgetTaskStatus, 'created_by' => $this->financier->id,
         ]);
         $budget = TaskBudgetData::create([
             'enquiry_task_id' => $task->id, 'project_info' => [], 'materials_data' => [],
             'labour_data' => $labourLines, 'expenses_data' => [], 'logistics_data' => [],
-            'budget_summary' => [], 'status' => 'approved',
+            'budget_summary' => [], 'status' => 'draft',
         ]);
         $this->app->make(\App\Modules\Finance\CostCollector\Services\BudgetProjector::class)->project($budget);
 

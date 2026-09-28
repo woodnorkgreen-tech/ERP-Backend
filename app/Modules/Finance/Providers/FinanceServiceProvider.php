@@ -45,6 +45,7 @@ class FinanceServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 \App\Modules\Finance\CostCollector\Console\ProjectBudgetsCommand::class,
+                \App\Modules\Finance\Console\FinanceResetPlanCommand::class,
                 \App\Modules\Finance\CostCollector\Console\BackfillPettyCashCostsCommand::class,
                 \App\Modules\Finance\CostCollector\Console\AuditCostIdentityCommand::class,
                 \App\Modules\Finance\CostCollector\Console\RepairCostLineDetailCommand::class,

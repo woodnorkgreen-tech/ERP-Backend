@@ -276,14 +276,14 @@ class W7LabourConcurrencyTest extends TestCase
             'assigned_users' => json_encode([$this->recorder->id]),
             'created_by' => $this->financier->id, 'created_at' => now(), 'updated_at' => now(),
         ]));
-        $task = EnquiryTask::create(['project_enquiry_id' => $enquiry->id, 'title' => 'Budget', 'type' => 'budget', 'created_by' => $this->financier->id]);
+        $task = EnquiryTask::create(['project_enquiry_id' => $enquiry->id, 'title' => 'Budget', 'type' => 'budget', 'status' => 'completed', 'created_by' => $this->financier->id]);
         $budget = TaskBudgetData::create([
             'enquiry_task_id' => $task->id, 'project_info' => [], 'materials_data' => [],
             'labour_data' => [[
                 'id' => 'race-line', 'type' => 'Crew', 'category' => 'site_labour', 'description' => 'Crew',
                 'unit' => 'PAX', 'quantity' => 10, 'days' => 1, 'unitRate' => 2000, 'amount' => 20000, 'isIncluded' => true,
             ]],
-            'expenses_data' => [], 'logistics_data' => [], 'budget_summary' => [], 'status' => 'approved',
+            'expenses_data' => [], 'logistics_data' => [], 'budget_summary' => [], 'status' => 'draft',
         ]);
         app(BudgetProjector::class)->project($budget);
 

@@ -203,6 +203,17 @@ Evidence: W7 backend 84 tests / 400 assertions pass; the full backend suite pass
 - W7-24, W7-25 and W7-26 remain open and do not block the analytical subset. The unbudgeted-labour standing-rate policy question stays a separate, non-blocking item.
 - **Not released:** nothing is merged to `master` or deployed. The next activity is the Phase 2B Controlled Release Readiness Gate. W8 has not started.
 
+**W7-1 / W7-2 PROJECT BUDGET AUTHORITY: CORRECTED (2026-09-28, WNG Q4, Report 47 — `47_PHASE_2B_DATA1_AND_W7_BUDGET_AUTHORITY_IMPLEMENTATION.md`):**
+- **The defect:** Report 46 found that W7 required `task_budget_data.status = 'approved'`, a state no budget has reached since internal budget approval was retired (2026-07-07). On real data, W7 could not record budgeted labour.
+- **The rule now:** per WNG, W7 uses the **authoritative current Project Budget**, defined from existing repository state (no new approval):
+  - The project's budget is the `task_budget_data` row of its budget task (`enquiry_tasks.type = 'budget'`; one per project, latest wins deterministically).
+  - It is **finalized**, and so authorizes budgeted labour, when that budget task is **`completed`**. That signal already replaces the retired approval (`EnquiryWorkflowService::validateTaskCompletion`): completion is explicit, requires a priced budget, never happens on autosave, and a materials change reopens it.
+- **One canonical service:** `ProjectBudgetAuthority`.
+  - **W6** projects the project's current budget into planned CostLines.
+  - **W7** reads the same record and requires it to be finalized.
+  - Snapshots in `budget_versions`, superseded planned lines, and budget rows outside the budget task never authorize labour.
+- **Unchanged:** the rate-snapshot rule. Existing verified actuals keep their rate; future labour uses the current budget.
+
 ### Confirmed WNG Current-State Facts
 1. **Project Budget is the labour-planning source:** At WNG, project labour is normally planned during Project Budget creation (`task_budget_data.labour_data`), capturing role (`COMMON_TEAM_TYPES`), category, unit, quantity, days, rate, and amount. It already projects into `cost_lines` as `nature = 'planned'` and `budget_category = 'labour'`. No second labour-budgeting workflow will be created.
 2. **Employee Records (`employees`) are the sole personnel master:** W7 does not create or maintain a competing casual/technical register. All worker identity, role, and department data must use the existing Employee architecture, including casual/contract personnel where maintained.
@@ -320,6 +331,12 @@ additional candidate decisions are in `26_W8_LOGISTICS_FLEET_COST_DECISION_BRIEF
 | RPT-2 | Reporting | Is a company-wide financial KPI dashboard (revenue, cash, outstanding, at a glance) wanted on the main landing page? | No financial figure appears anywhere outside Finance's own module today | Yes, build one | No, current per-module model is acceptable | A lightweight version only (e.g. 2–3 headline figures) | Pull from the existing report services (P&L, AR Ageing, etc.) — do not build a fourth, separate calculation | Management | AWAITING WNG CONFIRMATION |
 
 ---
+
+## Data Preservation (DATA-1)
+
+| ID | Business Area | Decision | Decision Owner | Status |
+|---|---|---|---|---|
+| DATA-1 | Release / Data | **Production data preservation boundary for the Phase 2B release.** Preserve: **Projects** and **Employee Records** (primary); project operational data (project enquiries, tasks and task children, Project Budgets with additions/versions, quotes and approved commercial basis, deliverables, elements/material planning, crew history); required dependencies (**clients**, **departments**, **users** — clients and departments are CASCADE parents of projects/employees); WNG master data (suppliers, materials, Finance/HR reference); security/system data and all audit logs; `technical_labours` as historical compatibility only (not the labour master). Resettable non-authoritative Finance data: the imported petty-cash register (payments, ledger, top-ups, activity, float balance) and development-era petty-cash requisitions (**Q1**); existing `enquiry_payments` (**Q2**); the existing payroll run/ledger and salary advance (**Q3**); development/test `cost_lines` and journals; other Finance transactional tables classified resettable, after production confirmation. A reset may run **only** through an approved, rehearsed, controlled release procedure: ordered `DELETE` (no `TRUNCATE`, no disabled FK checks), in a transaction, with preservation counts identical before and after, and accounting counters never reset. The boundary is encoded in `FinanceResetBoundary` / `php artisan finance:reset-plan` (read-only; fails closed). **The reset has NOT been executed.** See Reports 46–47. | WNG Management | **CONFIRMED (2026-09-28)**. Q1 RESET, Q2 RESET, Q3 RESET; not yet executed |
 
 ## How to use this register
 

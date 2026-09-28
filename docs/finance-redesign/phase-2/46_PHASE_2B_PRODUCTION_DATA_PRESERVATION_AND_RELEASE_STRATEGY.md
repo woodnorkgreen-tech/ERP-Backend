@@ -396,3 +396,21 @@ Separately, **Q4** must be answered for W7 to work on real budgets.
 **Decision Register:** not updated. DATA-1 is not yet unambiguous (per the directive).
 
 Nothing was reset, deployed, or migrated. No production or staging connection was made. W8 has not started.
+
+---
+
+# WNG Decision Resolution — Q1–Q4
+
+**Appended 2026-09-28.** The analysis and the verdict above are preserved as issued.
+
+| Question | WNG decision / resolution | Effect |
+|---|---|---|
+| **Q1** Imported petty-cash history | **RESET** | The petty-cash register, float balance and development-era petty-cash requisitions join the controlled reset set |
+| **Q2** Existing `enquiry_payments` | **RESET** | Client receipts join the reset set. Projects, clients, quotes and the commercial basis stay protected |
+| **Q3** Payroll run / ledger / salary advance | **RESET** | They join the reset set. Employee Records, salary history and all HR history stay protected |
+| **Q4** W7 Project Budget authority | **CONFIRMED from repository state** | Authoritative Project Budget = the `task_budget_data` of the project's budget task, when that task is `completed`. This is the finalization signal since approval was retired (`EnquiryWorkflowService::validateTaskCompletion`). No new approval was introduced. Implemented in `ProjectBudgetAuthority`, shared by W6 and W7 (Report 47) |
+
+**Result:**
+- DATA-1 is **CONFIRMED** and recorded in the Decision Register.
+- The staging requirement resolves to **§23 option B:** a reduced, preservation-focused rehearsal on a recent production copy, restorable locally. The stale shared staging environment is no longer mandatory.
+- Nothing has been reset. The implementation, reset specification and remaining preconditions are in `47_PHASE_2B_DATA1_AND_W7_BUDGET_AUTHORITY_IMPLEMENTATION.md`.

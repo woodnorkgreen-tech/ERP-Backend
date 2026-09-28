@@ -29,7 +29,7 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
  *    half-up to 2dp once at the end:
  *      hours unit:    actual_hours × unit_rate
  *      PAX/days unit: actual_quantity × actual_days × unit_rate
- *    The rate is a snapshot of the approved budget line at record time (or a Finance
+ *    The rate is a snapshot of the finalized Project Budget line at record time (or a Finance
  *    rate resolution for unbudgeted labour) and is never recalculated afterwards.
  *
  * 3. postsIndependently = false — every CostLine created here is analytical only.
@@ -71,6 +71,7 @@ class ProjectLabourActualService
     public function __construct(
         private CostCollectorService $collector,
         private CostTransferService $transfers,
+        private ProjectBudgetAuthority $budgets,
         private ProjectFinancialAccess $access,
     ) {}
 
@@ -101,8 +102,10 @@ class ProjectLabourActualService
     }
 
     /**
-     * The project's approved budget labour lines, with the authoritative position of
-     * each. Every money figure is a 2dp string computed in bcmath.
+     * The labour lines of the project's current budget (ProjectBudgetAuthority), with
+     * the authoritative position of each. Every money figure is a 2dp string computed
+     * in bcmath. Lines are listed while the budget is still in progress so the plan is
+     * visible, but `recordable` is true only once the budget is finalized.
      *
      *   budget_amount  — the active planned CostLine (what Project Costing plans)
      *   verified_cost  — verified Actual CostLines for this line (what Project Costing
@@ -114,11 +117,12 @@ class ProjectLabourActualService
      */
     public function getBudgetLabourLines(ProjectEnquiry $enquiry): array
     {
-        $budget = $this->approvedBudget($enquiry);
+        $budget = $this->budgets->currentBudget($enquiry->id);
 
         if (!$budget || empty($budget->labour_data)) {
             return [];
         }
+        $finalized = $this->budgets->isFinalized($budget);
 
         $planned = CostLine::query()
             ->where('project_enquiry_id', $enquiry->id)
@@ -134,7 +138,7 @@ class ProjectLabourActualService
 
         return collect($budget->labour_data)
             ->filter(fn ($row) => is_array($row) && !empty($row['id']))
-            ->map(function ($row) use ($planned, $verified, $pending) {
+            ->map(function ($row) use ($planned, $verified, $pending, $finalized) {
                 $id = $row['id'];
                 $budgetAmount = $this->money($planned[$id] ?? ($row['amount'] ?? '0'));
                 $verifiedCost = $verified[$id] ?? '0.00';
@@ -158,16 +162,24 @@ class ProjectLabourActualService
                     'projected_remaining_cost' => bcsub($budgetAmount, $projected, 2),
                     'is_over_budget' => bccomp($verifiedCost, $budgetAmount, 2) === 1,
                     'is_included'    => (bool) ($row['isIncluded'] ?? true),
+                    // Budgeted labour needs a finalized budget and an active planned line.
+                    'recordable'     => $finalized && (bool) ($row['isIncluded'] ?? true) && isset($planned[$id]),
                 ];
             })
             ->values()
             ->all();
     }
 
+    /** none | in_progress | finalized — see ProjectBudgetAuthority. */
+    public function budgetState(ProjectEnquiry $enquiry): string
+    {
+        return $this->budgets->state($enquiry->id);
+    }
+
     // ── Lifecycle transitions ─────────────────────────────────────────────────
 
     /**
-     * Record actual labour usage against an approved budget line or as unbudgeted.
+     * Record actual labour usage against a finalized Project Budget line or as unbudgeted.
      * Permission: finance.labour.record + project assignment (or Finance).
      */
     public function record(array $data, User $recorder): ProjectLabourActual
@@ -381,7 +393,7 @@ class ProjectLabourActualService
      * Transitions: returned_for_correction → recorded (Project Officer review restarts).
      *
      * Budget-derived fields are never taken from the client: changing the budget line
-     * re-derives role, category, unit and rate from the approved budget. For
+     * re-derives role, category, unit and rate from the finalized Project Budget. For
      * unbudgeted labour the operational classification may be corrected; if it
      * changes, a previously resolved Finance rate no longer applies and is reset.
      *
@@ -734,27 +746,27 @@ class ProjectLabourActualService
 
     // ── Private: budget ───────────────────────────────────────────────────────
 
-    private function approvedBudget(ProjectEnquiry $enquiry): ?TaskBudgetData
+    /** W7 records budgeted labour only against the finalized project budget (ProjectBudgetAuthority). */
+    private function authoritativeBudget(ProjectEnquiry $enquiry): ?TaskBudgetData
     {
-        return TaskBudgetData::query()
-            ->whereHas('task', fn ($query) => $query->where('project_enquiry_id', $enquiry->id))
-            ->where('status', 'approved')
-            ->latest('id')
-            ->first();
+        return $this->budgets->authoritativeBudget($enquiry->id);
     }
 
     private function authoritativeBudgetData(ProjectEnquiry $enquiry, string $lineId): array
     {
-        // The budget must belong to this project (cross-project guard).
-        $budget = $this->approvedBudget($enquiry);
+        // The budget must be this project's own finalized budget (cross-project guard).
+        $budget = $this->authoritativeBudget($enquiry);
 
         if (!$budget) {
-            throw ValidationException::withMessages(['budget_line_id' => ['No approved budget exists for this project.']]);
+            $message = $this->budgets->state($enquiry->id) === ProjectBudgetAuthority::STATE_IN_PROGRESS
+                ? 'The Project Budget is still in progress. Complete the Budget task before recording budgeted labour.'
+                : 'This project has no Project Budget.';
+            throw ValidationException::withMessages(['budget_line_id' => [$message]]);
         }
 
         $line = collect($budget->labour_data ?? [])->firstWhere('id', $lineId);
         if (!$line || !($line['isIncluded'] ?? true)) {
-            throw ValidationException::withMessages(['budget_line_id' => ['The selected line is not active labour in this project current approved budget.']]);
+            throw ValidationException::withMessages(['budget_line_id' => ['The selected line is not active labour in this project\'s current Project Budget.']]);
         }
 
         if (!isset($line['type']) && !isset($line['description'])) {
@@ -766,7 +778,7 @@ class ProjectLabourActualService
             ->where('source_id', $budget->id)->where('source_ref', $lineId)
             ->where('details->budget_category', 'labour')->first();
         if (!$planned) {
-            throw ValidationException::withMessages(['budget_line_id' => ['The approved labour line has no active planned CostLine.']]);
+            throw ValidationException::withMessages(['budget_line_id' => ['This budget labour line has no active planned CostLine. Re-save the Project Budget (or run finance:project-budgets) to project it.']]);
         }
 
         return [
@@ -775,7 +787,7 @@ class ProjectLabourActualService
             'labour_category' => (string) ($line['category'] ?? 'Other'),
             'budget_unit' => (string) ($line['unit'] ?? 'PAX'),
             'unit_rate' => $this->money($line['unitRate'] ?? '0'),
-            'rate_source' => ['type' => 'approved_project_budget', 'id' => $budget->id, 'line_id' => $lineId],
+            'rate_source' => ['type' => 'project_budget', 'id' => $budget->id, 'line_id' => $lineId],
             'rate_resolution_status' => ProjectLabourActual::RATE_RESOLVED,
         ];
     }
@@ -805,7 +817,7 @@ class ProjectLabourActualService
 
         if (!$current) {
             throw ValidationException::withMessages(['budget_line_id' => [
-                'This budget line is no longer in the approved budget. Return the actual for correction to re-select a line.',
+                'This budget line is no longer in the current Project Budget. Return the actual for correction to re-select a line.',
             ]]);
         }
 

@@ -21,7 +21,7 @@ class ProjectBudgetsCommand extends Command
                             {--budget= : Project a single task_budget_data id}
                             {--dry-run : Roll back instead of committing}';
 
-    protected $description = 'Project approved budgets into planned cost lines';
+    protected $description = 'Project every project\'s current budget into planned cost lines (idempotent)';
 
     public function handle(BudgetProjector $projector): int
     {
