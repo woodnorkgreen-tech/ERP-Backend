@@ -241,3 +241,66 @@ B1 is resolved and verified. No production action was taken.
 **Production B3:** NOT PERFORMED
 **Production Deployment:** NOT PERFORMED
 **W8 Started:** NO
+
+---
+
+# Staging Validation Resumption
+
+**Attempted:** 2026-09-28, after WNG reported that the §8 infrastructure prerequisites were complete. The original BLOCKED verdict above is preserved.
+
+## R1. Independent verification of the reported human actions (§1 of the resumption directive)
+
+| Prerequisite | How verified | Finding | Status |
+|---|---|---|---|
+| **A. Production-like staging database** | Requires staging DB or host access | Cannot be observed from this environment: no DB credentials, no SSH, and the staging API sits behind the host's bot-protection interstitial | **UNVERIFIED** |
+| **B. Staging code parity** | `git fetch` in both repos, then `origin/staging` vs `origin/master` | **Not aligned.** Backend `origin/staging` is still `d784899` (2026-08-25), **223 commits** behind master `60491b1`. Frontend `origin/staging` is still `9a3a3a8` (2026-08-26), **186 commits** behind master `d24a3f7`. Identical to the original audit (§6), so the fast-forward (§8 step 4) has **not** happened | **NOT DONE** |
+| **C. Migration parity** (`migrate:status` at master) | Requires host access | Not observable. And since staging code is not at master (B), parity cannot hold | **NOT DONE / UNVERIFIED** |
+| **D. Validator access** | Local environment check | SSH `known_hosts` still contains only `github.com`. No `~/.ssh/config` host entry. GitHub CLI not installed. No MySQL client or staging DB credentials. No new files in the workspace since the original gate. No staging-related environment variables | **NOT PROVIDED** |
+
+Per the resumption directive §1D, the gate stops here. **No push to `staging` was made**, no migration was run, and nothing was changed. Sections §3–§22 of the resumption directive (P0–P10, snapshot, deploy, migrations, permission sync, smoke tests, logs, integrity) were **not executed**, because each depends on A–D. The development and test evidence (backend 1,432 / 0 failures, frontend 166, ENG-1 256/0, build) is **not** offered as staging evidence.
+
+## R2. Remaining actions, precisely
+
+Complete **all** of the following, then re-run this resumption:
+
+1. **Restore:** restore a recent production copy into the staging database (§8 steps 1–3). Note the date, and whether and how it was sanitised.
+2. **Parity:** `git push origin origin/master:staging` in **ERP-Backend and ERP-Frontend**, then confirm the backend Actions run reports **"Nothing to migrate"**. After this, `origin/staging` must equal `origin/master` (`60491b1` / `d24a3f7`). That is checkable from here, and it is currently false.
+3. **Access:** provide **one** of these:
+   - **(a) Host access:** add this machine's public key (`~/.ssh/id_ed25519.pub`) to the hosting account's authorised keys, and supply the host, port and user. That lets the validator run `migrate:status`, the preflight, `permissions:sync` and log reads directly.
+   - **(b) Operator relay:** an operator runs the read-only script in R3 on the host at each step and supplies the complete output. It must be complete and unedited, and include the Actions logs for every staging deploy.
+4. **Deploy logs:** install and authenticate the GitHub CLI (`gh auth login`) on this machine, or export the Actions logs of each staging deploy.
+
+## R3. Read-only staging evidence script (for option 3b; run on the host in `~/erp-backend-staging`)
+
+Nothing below writes to the database. Record the output before Phase 2B (baseline) and again after it.
+
+```bash
+cd ~/erp-backend-staging
+git rev-parse HEAD
+php artisan --version
+php artisan migrate:status | tail -40
+php artisan tinker --execute="echo DB::connection()->getDatabaseName(), PHP_EOL;"   # name only, no credentials
+# Report 44 §4 preflight P0–P10 (paste the SQL block from Report 44 into a file first):
+mysql --defaults-extra-file=<(printf "[client]\nuser=%s\npassword=%s\nhost=%s\n" "$DB_USERNAME" "$DB_PASSWORD" "$DB_HOST") "$DB_DATABASE" < preflight.sql
+# Snapshot counts:
+mysql ... "$DB_DATABASE" -e "SELECT 'project_invoices',COUNT(*) FROM project_invoices UNION ALL SELECT 'purchase_orders',COUNT(*) FROM purchase_orders
+ UNION ALL SELECT 'payments',COUNT(*) FROM payments UNION ALL SELECT 'petty_cash_requisitions',COUNT(*) FROM petty_cash_requisitions
+ UNION ALL SELECT 'project_enquiries',COUNT(*) FROM project_enquiries UNION ALL SELECT 'cost_lines',COUNT(*) FROM cost_lines
+ UNION ALL SELECT 'journal_entries',COUNT(*) FROM journal_entries UNION ALL SELECT 'spend_vouchers',COUNT(*) FROM spend_vouchers
+ UNION ALL SELECT 'bills',COUNT(*) FROM bills UNION ALL SELECT 'bill_payments',COUNT(*) FROM bill_payments;"
+tail -200 storage/logs/laravel.log
+```
+
+`DB_*` values are read from staging's `.env`, e.g. `set -a; . ./.env; set +a`. They are never printed.
+
+## R4. Resumption verdict
+
+### BLOCKED — STAGING OBSERVABILITY STILL INCOMPLETE
+
+The reported prerequisites could not be verified. Staging code parity is demonstrably **not** in place (R1-B), and no validator access exists (R1-D). Evidence standards were not weakened.
+
+B1 remains resolved. No production action was taken (B2 and B3 not performed, no deployment). W8 has not started.
+
+**Transition:** BLOCKED (original gate) → prerequisites reported complete → independent verification failed (parity not done; no access) → **BLOCKED**.
+
+**Next:** complete R2, then re-run this resumption from §1.
