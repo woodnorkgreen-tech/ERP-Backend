@@ -22,8 +22,10 @@ class DesignDocumentController extends Controller
         $document = DesignDocument::create([
             'design_job_id' => $request->input('design_job_id'),
             'design_item_id' => $request->input('design_item_id'),
+            'design_revision_id' => $request->input('design_revision_id'),
             'document_type' => $request->input('document_type', 'other'),
             'name' => $request->input('name') ?: pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME),
+            'notes' => $request->input('notes'),
             'original_name' => $file->getClientOriginalName(),
             'source' => 'file',
             'file_path' => $path,
@@ -43,8 +45,10 @@ class DesignDocumentController extends Controller
         $validated = $request->validate([
             'design_job_id' => 'nullable|integer|exists:design_jobs,id|required_without:design_item_id',
             'design_item_id' => 'nullable|integer|exists:design_items,id|required_without:design_job_id',
+            'design_revision_id' => 'nullable|integer|exists:design_revisions,id',
             'document_type' => 'nullable|string|max:80',
             'name' => 'nullable|string|max:255',
+            'notes' => 'nullable|string|max:2000',
             'url' => 'required|url|max:2048',
         ]);
 
@@ -53,8 +57,10 @@ class DesignDocumentController extends Controller
         $document = DesignDocument::create([
             'design_job_id' => $validated['design_job_id'] ?? null,
             'design_item_id' => $validated['design_item_id'] ?? null,
+            'design_revision_id' => $validated['design_revision_id'] ?? null,
             'document_type' => $validated['document_type'] ?? 'reference',
             'name' => $name,
+            'notes' => $validated['notes'] ?? null,
             'original_name' => $name,
             'source' => 'link',
             'external_url' => $validated['url'],

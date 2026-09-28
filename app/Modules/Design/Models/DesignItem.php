@@ -27,6 +27,7 @@ class DesignItem extends Model
         'redesign_reason',
         'redesign_requested_at',
         'stream',
+        'destination',
         'title',
         'description',
         'status',
@@ -109,5 +110,25 @@ class DesignItem extends Model
     public function handoffs(): HasMany
     {
         return $this->hasMany(DesignHandoff::class);
+    }
+
+    public function workSessions(): HasMany
+    {
+        return $this->hasMany(DesignWorkSession::class)->latest('started_at');
+    }
+
+    public function revisions(): HasMany
+    {
+        return $this->hasMany(DesignRevision::class)->orderByDesc('version_number');
+    }
+
+    public function changeRequests(): HasMany
+    {
+        return $this->hasMany(DesignChangeRequest::class)->latest('received_at');
+    }
+
+    public function updates(): HasMany
+    {
+        return $this->hasMany(DesignUpdate::class)->latest();
     }
 }

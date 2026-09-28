@@ -125,10 +125,16 @@ class DesignHandoffService
 
     private function finalArtworkLink(DesignItem $item)
     {
+        $approvedRevisionId = $item->revisions()
+            ->where('status', 'approved')
+            ->orderByDesc('version_number')
+            ->value('id');
+
         $artwork = $item->documents
             ->where('status', 'active')
             ->where('document_type', 'artwork')
             ->where('source', 'link')
+            ->when($approvedRevisionId, fn ($documents) => $documents->where('design_revision_id', $approvedRevisionId))
             ->sortByDesc(fn ($document) => sprintf(
                 '%010d-%010d-%s',
                 (int) ($document->version ?? 0),

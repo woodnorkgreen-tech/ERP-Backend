@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Modules\ClientService\Models\Client;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -54,6 +55,12 @@ class DesignJob extends Model
     public function items(): HasMany
     {
         return $this->hasMany(DesignItem::class);
+    }
+
+    public function designers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'design_items', 'design_job_id', 'assigned_to')
+            ->wherePivotNull('deleted_at')->distinct();
     }
 
     public function documents(): HasMany

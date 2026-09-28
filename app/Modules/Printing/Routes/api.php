@@ -13,12 +13,16 @@ Route::get('/dashboard', [PrintingDashboardController::class, 'index']);
 Route::get('/dashboard/project-usage', [PrintingDashboardController::class, 'projectUsage']);
 
 Route::get('/jobs', [PrintJobController::class, 'index']);
+Route::get('/job-bundles', [PrintJobController::class, 'bundles']);
 Route::post('/jobs', [PrintJobController::class, 'store']);
 Route::get('/upcoming-jobs', [UpcomingPrintJobController::class, 'index']);
 Route::get('/jobs/{job}', [PrintJobController::class, 'show']);
 Route::put('/jobs/{job}', [PrintJobController::class, 'update']);
 Route::post('/jobs/{job}/status', [PrintJobController::class, 'status']);
 Route::post('/jobs/{job}/complete', [PrintJobController::class, 'complete']);
+Route::post('/jobs/{job}/work/begin', [PrintJobController::class, 'beginWork']);
+Route::post('/jobs/{job}/work/pause', [PrintJobController::class, 'pauseWork']);
+Route::post('/jobs/{job}/acknowledge-stop', [PrintJobController::class, 'acknowledgeStop']);
 Route::post('/jobs/{job}/reprint', [PrintJobController::class, 'reprint']);
 Route::post('/jobs/{job}/redesign', [PrintJobController::class, 'redesign']);
 Route::post('/jobs/{job}/correction', [PrintJobController::class, 'correction']);

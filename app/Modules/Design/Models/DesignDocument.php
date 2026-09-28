@@ -11,8 +11,10 @@ class DesignDocument extends Model
     protected $fillable = [
         'design_job_id',
         'design_item_id',
+        'design_revision_id',
         'document_type',
         'name',
+        'notes',
         'original_name',
         'source',
         'external_url',
@@ -39,6 +41,11 @@ class DesignDocument extends Model
     public function item(): BelongsTo
     {
         return $this->belongsTo(DesignItem::class, 'design_item_id');
+    }
+
+    public function revision(): BelongsTo
+    {
+        return $this->belongsTo(DesignRevision::class, 'design_revision_id');
     }
 
     public function uploader(): BelongsTo

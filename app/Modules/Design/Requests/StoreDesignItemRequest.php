@@ -19,6 +19,7 @@ class StoreDesignItemRequest extends FormRequest
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'status' => 'nullable|in:pending,in_design,awaiting_client_approval,client_changes_requested,done,cancelled,print_ready,production_ready',
+            'destination' => 'nullable|in:design_only,printing,production',
             'assigned_to' => 'nullable|integer|exists:users,id',
             'quantity' => 'nullable|numeric|min:0',
             'dimension_unit' => 'nullable|in:m,cm,mm',
