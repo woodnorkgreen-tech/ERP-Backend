@@ -86,7 +86,9 @@ class TableLoader
         $mode = $this->plan->mode($table);
 
         return $this->target->connection()->transaction(function () use ($table, $mode) {
+            $remap = [];
             if ($mode === MigrationPlan::REPLACE_SEEDED) {
+                $remap = $this->seededIdRemap($table);
                 $this->target->connection()->table($table)->delete();
             }
 
@@ -94,8 +96,77 @@ class TableLoader
                 return $this->loadMappedPermissions($table);
             }
 
-            return ['table' => $table, 'mode' => $mode, 'rows' => $this->copy($table)];
+            $result = ['table' => $table, 'mode' => $mode, 'rows' => $this->copy($table)];
+            if ($remap !== []) {
+                $result['repointed'] = $this->repointTargetReferences($table, $remap);
+            }
+
+            return $result;
         });
+    }
+
+    /**
+     * Target id => staging id for each seeded row whose id differs, matched by
+     * natural key. Coverage is total: preconditionProblems() refuses the table
+     * unless every target row is on staging by that key.
+     *
+     * @return array<int, int>
+     */
+    private function seededIdRemap(string $table): array
+    {
+        if (! $this->target->hasColumn($table, 'id')) {
+            return [];
+        }
+        $key = (array) ($this->plan->tables[$table]['natural_key'] ?? []);
+        $staging = array_flip($this->keyedRows($this->source, $table, $key));
+        $remap = [];
+        foreach ($this->keyedRows($this->target, $table, $key) as $id => $naturalKey) {
+            $stagingId = $staging[$naturalKey] ?? null;
+            if ($stagingId !== null && (int) $stagingId !== (int) $id) {
+                $remap[(int) $id] = (int) $stagingId;
+            }
+        }
+
+        return $remap;
+    }
+
+    /**
+     * Rows the TARGET keeps (reference data it regenerates itself, never loaded
+     * from staging) may reference a seeded row by the id the target's migration
+     * gave it. Replacing the seeded rows with staging's gives the same row a
+     * staging id, so those references are re-pointed in one statement per
+     * column, or they would dangle. Rows loaded from staging already carry
+     * staging ids and are left alone.
+     *
+     * @param  array<int, int>  $remap
+     * @return array<string, int> "child.column" => rows re-pointed
+     */
+    private function repointTargetReferences(string $table, array $remap): array
+    {
+        $db = $this->target->connection();
+        $done = [];
+        foreach ($this->target->foreignKeys() as $fk) {
+            if ($fk['parent'] !== $table || $fk['parent_column'] !== 'id' || $fk['table'] === $table
+                || in_array($this->plan->mode($fk['table']), MigrationPlan::LOAD_MODES, true)) {
+                continue;
+            }
+            $column = $fk['column'];
+            $case = implode(' ', array_map(fn ($old) => 'WHEN ? THEN ?', array_keys($remap)));
+            $bindings = [];
+            foreach ($remap as $old => $new) {
+                array_push($bindings, $old, $new);
+            }
+            $in = implode(',', array_fill(0, count($remap), '?'));
+            $count = $db->update(
+                "UPDATE `{$fk['table']}` SET `{$column}` = CASE `{$column}` {$case} END WHERE `{$column}` IN ({$in})",
+                [...$bindings, ...array_keys($remap)],
+            );
+            if ($count > 0) {
+                $done["{$fk['table']}.{$column}"] = $count;
+            }
+        }
+
+        return $done;
     }
 
     private function copy(string $table): int
@@ -196,18 +267,27 @@ class TableLoader
     /** @return list<string> */
     public function naturalKeys(SchemaInspector $db, string $table, array $key): array
     {
+        return array_values($this->keyedRows($db, $table, $key));
+    }
+
+    /** @return array<int, string> id => natural key */
+    private function keyedRows(SchemaInspector $db, string $table, array $key): array
+    {
         $rows = $db->connection()->table($table)->get(array_values(array_unique(['id', ...$key])));
         $names = in_array('parent_id', $key, true) ? $rows->pluck('name', 'id')->all() : [];
 
-        return $rows->map(function ($row) use ($key, $names) {
-            return implode('|', array_map(function ($column) use ($row, $names) {
-                $value = $row->{$column};
-                if ($column === 'parent_id') {
-                    return $value === null ? '<root>' : ($names[$value] ?? "<missing parent {$value}>");
-                }
+        return $rows->mapWithKeys(fn ($row) => [$row->id => $this->naturalKey($row, $key, $names)])->all();
+    }
 
-                return $value === null ? '<null>' : mb_strtolower(trim((string) $value));
-            }, $key));
-        })->values()->all();
+    private function naturalKey(object $row, array $key, array $names): string
+    {
+        return implode('|', array_map(function ($column) use ($row, $names) {
+            $value = $row->{$column};
+            if ($column === 'parent_id') {
+                return $value === null ? '<root>' : ($names[$value] ?? "<missing parent {$value}>");
+            }
+
+            return $value === null ? '<null>' : mb_strtolower(trim((string) $value));
+        }, $key));
     }
 }

@@ -109,8 +109,8 @@ return [
         'finance_period_audit_logs' => 'Finance — starts fresh',
     ],
 
-    // D2 — pending source-data evidence (`migration:evidence d2`). D3 — the chart
-    // of accounts is the accountant's decision. Never loaded while pending.
+    // D2 — CLOSED 2026-09-28: the source has no PO/GRN/bill rows, so these stay
+    // held back and load nothing. Never loaded while pending.
     'decision_pending' => [
         'purchase_orders' => 'D2 — pending source-data evidence',
         'purchase_order_items' => 'D2',
@@ -121,7 +121,14 @@ return [
         'goods_receipt_inspections' => 'D2',
         'bills' => 'D2',
         'bill_payments' => 'D2',
-        'chart_of_accounts' => 'D3 — accountant decision: source chart vs reference chart',
+        // chart_of_accounts left this list on 2026-09-28: D3 was decided (Option A,
+        // WNG keeps its chart). It is replace-seeded below.
+    ],
+
+    // A WNG decision that authorises loading a table MigrationPlan otherwise holds
+    // back (D2/D3). The generator stamps it on the table's plan entry as 'decision'.
+    'recorded_decisions' => [
+        'chart_of_accounts' => 'D3 Option A — WNG keeps its own chart (WNG decision 2026-09-28; Reports 53–54)',
     ],
 
     'd2_tables' => [
@@ -184,6 +191,12 @@ return [
         'attendance_work_schedules' => ['name'],
         'production_defect_codes' => ['code'],
         'production_root_cause_codes' => ['code'],
+        // D3 Option A (2026-09-28): WNG's own chart is the chart. Staging holds
+        // WNG's 120 accounts plus the 3 the target migrations insert (2160, 7150,
+        // 7550), so the target's 3 are covered by code and replaced; target-owned
+        // rows that referenced them (expense codes) are re-pointed by the loader.
+        // The accounts WNG lacks are created after the load by finance:complete-chart.
+        'chart_of_accounts' => ['code'],
     ],
 
     /*

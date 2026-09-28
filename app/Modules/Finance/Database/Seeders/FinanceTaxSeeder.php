@@ -81,8 +81,8 @@ class FinanceTaxSeeder extends Seeder
                         'claim_window_months' => $window,
                         // Never wipe a link Finance has already made when the map
                         // does not (yet) resolve the reference account.
-                        'gl_account_id' => ($glCode ? $accounts->get($glCode) : null)
-                            ?? DB::table('vat_treatments')->where(['code' => $code, 'effective_from' => self::FLOOR])->value('gl_account_id'),
+                        'gl_account_id' => DB::table('vat_treatments')->where(['code' => $code, 'effective_from' => self::FLOOR])->value('gl_account_id')
+                            ?? ($glCode ? $accounts->get($glCode) : null),
                         'effective_to' => null,
                         'is_active' => true,
                         'updated_at' => $now,
@@ -100,8 +100,8 @@ class FinanceTaxSeeder extends Seeder
                         'residency' => $residency,
                         'threshold_amount' => $threshold,
                         'aggregate_monthly' => $monthly,
-                        'gl_account_id' => ($glCode ? $accounts->get($glCode) : null)
-                            ?? DB::table('wht_categories')->where(['code' => $code, 'effective_from' => self::FLOOR])->value('gl_account_id'),
+                        'gl_account_id' => DB::table('wht_categories')->where(['code' => $code, 'effective_from' => self::FLOOR])->value('gl_account_id')
+                            ?? ($glCode ? $accounts->get($glCode) : null),
                         'effective_to' => null,
                         'is_active' => true,
                         'updated_at' => $now,

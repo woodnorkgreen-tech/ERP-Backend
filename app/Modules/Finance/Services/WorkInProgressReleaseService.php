@@ -94,6 +94,7 @@ class WorkInProgressReleaseService
 
         $legs = [];
         $total = '0.00';
+        $releasedFrom = [];
 
         foreach (self::RELEASE_MAP as $wipCode => $costCode) {
             $wipAccount = $this->accountId($wipCode);
@@ -120,6 +121,16 @@ class WorkInProgressReleaseService
             if ($wipAccount === $costAccount) {
                 continue;
             }
+
+            // Each family reads its own WIP balance. Two families mapped to one
+            // WIP account would each release that whole balance, twice over.
+            if (isset($releasedFrom[$wipAccount])) {
+                throw new InvalidArgumentException(
+                    "Work in Progress accounts {$releasedFrom[$wipAccount]} and {$wipCode} resolve to the same "
+                    . 'account, so its balance would be released twice. Each WIP function needs its own account.'
+                );
+            }
+            $releasedFrom[$wipAccount] = $wipCode;
 
             $movement = $this->movementOn($wipAccount, $enquiryId);
 

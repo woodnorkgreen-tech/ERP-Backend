@@ -27,7 +27,7 @@ class PlanGenerator
         foreach ($tables as $table) {
             $entries[$table] = match (true) {
                 isset($exclude[$table]) => ['mode' => MigrationPlan::EXCLUDE, 'reason' => $exclude[$table], 'group' => 'finance-excluded'],
-                isset($pending[$table]) => ['mode' => MigrationPlan::DECISION_PENDING, 'reason' => $pending[$table], 'group' => $table === 'chart_of_accounts' ? 'D3' : 'D2'],
+                isset($pending[$table]) => ['mode' => MigrationPlan::DECISION_PENDING, 'reason' => $pending[$table], 'group' => 'D2'],
                 isset($skip[$table]) => ['mode' => MigrationPlan::SKIP, 'reason' => $skip[$table], 'group' => 'skip'],
                 isset($mapped[$table]) => ['mode' => MigrationPlan::IMPORT_MAPPED, 'reason' => $mapped[$table], 'group' => 'security'],
                 isset($seeded[$table]) => ['mode' => MigrationPlan::REPLACE_SEEDED, 'reason' => 'Target migrations seed this table; staging rows (source + the same seeds) are authoritative', 'group' => in_array($table, $protected, true) ? 'DATA-1' : 'D1', 'natural_key' => array_values($seeded[$table])],
@@ -36,13 +36,19 @@ class PlanGenerator
             };
         }
 
+        foreach ((array) config('source_migration.recorded_decisions', []) as $table => $decision) {
+            if (isset($entries[$table]) && in_array($entries[$table]['mode'], MigrationPlan::LOAD_MODES, true)) {
+                $entries[$table]['decision'] = $decision;
+            }
+        }
+
         return new MigrationPlan($entries, [
             'generated_at' => now()->toIso8601String(),
             'generated_from' => 'config/source_migration.php (Report 50A rules; WNG decisions D1–D8 as recorded in Report 51)',
             'decisions' => [
                 'D1' => 'CONFIRMED — import all non-DATA-1 operational tables by default',
-                'D2' => 'PENDING — source-data evidence (migration:evidence d2)',
-                'D3' => 'PENDING — accountant decision; chart_of_accounts not loaded',
+                'D2' => 'CLOSED — no historical PO/GRN/bill data to migrate (0 rows; tables stay held back)',
+                'D3' => 'CONFIRMED — Option A: WNG keeps its chart; chart_of_accounts replace-seeded by code; missing accounts created by finance:complete-chart (mappings: accountant sign-off before production)',
                 'D4' => 'CONFIRMED — preserve and map; migration:evidence roles',
                 'D5' => 'CONFIRMED — preserve all projects; planned CostLines for active/open projects only',
                 'D6' => 'CONFIRMED — not hard-coded; departments classified in the UI at cutover',

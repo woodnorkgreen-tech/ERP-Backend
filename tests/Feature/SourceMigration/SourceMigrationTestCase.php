@@ -276,6 +276,13 @@ abstract class SourceMigrationTestCase extends TestCase
         $this->stage('enquiry_payments', ['id' => 1, 'project_enquiry_id' => 101, 'recorded_by' => 5]);
         $s->table('sessions')->insert(['id' => 'sess-1', 'user_id' => 5, 'payload' => 'x', 'last_activity' => 1]);
         $this->stage('purchase_orders', ['id' => 1, 'po_number' => 'PO-TEST-0001', 'supplier_id' => 1, 'status' => 'approved', 'total_amount' => '0.00']);
+        // D3 Option A: the company's chart is replace-seeded by code. Stage 1 would
+        // have added the target's seeded accounts to the source copy under new ids,
+        // so staging carries them shifted — the loader must re-point the target's
+        // own references (expense codes) onto the staging ids.
+        foreach (DB::table('chart_of_accounts')->orderBy('id')->get() as $row) {
+            $s->table('chart_of_accounts')->insert(array_merge((array) $row, ['id' => $row->id + 10000, 'parent_id' => $row->parent_id ? $row->parent_id + 10000 : null]));
+        }
         $this->stage('chart_of_accounts', ['id' => 9001, 'name' => 'Source Chart Account', 'code' => 'SRC-1']);
 
         $this->stage('assets', ['id' => 1]);

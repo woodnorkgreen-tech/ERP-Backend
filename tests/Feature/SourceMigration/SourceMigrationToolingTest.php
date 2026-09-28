@@ -178,14 +178,11 @@ class SourceMigrationToolingTest extends SourceMigrationTestCase
 
     public function test_excluded_transient_and_pending_tables_are_not_loaded(): void
     {
-        $chartBefore = DB::table('chart_of_accounts')->count();
         $this->execute()->assertSuccessful();
 
         $this->assertSame(0, DB::table('enquiry_payments')->count(), 'DATA-1 Q2 excluded');
         $this->assertSame(0, DB::table('sessions')->count(), 'transient');
         $this->assertSame(0, DB::table('purchase_orders')->count(), 'D2 pending');
-        $this->assertSame($chartBefore, DB::table('chart_of_accounts')->count(), 'D3 pending: target chart untouched');
-        $this->assertFalse(DB::table('chart_of_accounts')->where('code', 'SRC-1')->exists());
         $this->assertFalse(DB::table('permissions')->where('name', 'finance.obsolete_legacy_permission')->exists(), 'permissions are regenerated, not imported');
 
         $exclusions = EvidenceReports::exclusions(new SchemaInspector('source_staging'), new SchemaInspector('mysql'), MigrationPlan::load($this->planPath));
@@ -466,14 +463,38 @@ class SourceMigrationToolingTest extends SourceMigrationTestCase
         $this->assertGreaterThan(0, CostLine::query()->where('project_enquiry_id', 101)->where('nature', CostLine::NATURE_PLANNED)->count());
     }
 
-    public function test_regeneration_requires_confirmation_and_never_seeds_the_chart_while_d3_is_pending(): void
+    public function test_the_company_chart_replaces_the_seeded_chart_and_target_references_follow_it(): void
+    {
+        // Target-owned rows that reference the seeded chart by its target id.
+        $before = DB::table('expense_codes as ec')->join('chart_of_accounts as coa', 'coa.id', '=', 'ec.default_debit_account_id')
+            ->pluck('coa.code', 'ec.code')->all();
+        $targetCodes = DB::table('chart_of_accounts')->pluck('code')->all();
+        $this->assertNotEmpty($before, 'fixture: the target seeds expense codes that reference its chart');
+
+        $this->execute()->assertSuccessful();
+
+        // The chart is staging's: every account with staging's id, including the source-only one.
+        $this->assertSame(9001, (int) DB::table('chart_of_accounts')->where('code', 'SRC-1')->value('id'));
+        foreach ($targetCodes as $code) {
+            $this->assertSame((int) $this->staging()->table('chart_of_accounts')->where('code', $code)->value('id'),
+                (int) DB::table('chart_of_accounts')->where('code', $code)->value('id'), "{$code} carries its staging id");
+        }
+        // The target's own expense codes still point at the SAME accounts (by code), now under staging ids.
+        $after = DB::table('expense_codes as ec')->join('chart_of_accounts as coa', 'coa.id', '=', 'ec.default_debit_account_id')
+            ->pluck('coa.code', 'ec.code')->all();
+        $this->assertSame($before, $after);
+        $this->assertSame(0, DB::table('expense_codes as ec')->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ec.default_debit_account_id')
+            ->whereNotNull('ec.default_debit_account_id')->whereNull('coa.id')->count(), 'no dangling reference');
+    }
+
+    public function test_regeneration_requires_confirmation_and_never_seeds_the_reference_chart(): void
     {
         $this->artisan('migration:regenerate', ['step' => 'reference', '--execute' => true])->expectsOutputToContain('REFUSED')->assertFailed();
 
         config(['finance_accounts.seed_reference_chart' => true]);
         $before = DB::table('chart_of_accounts')->count();
         $this->artisan('migration:regenerate', ['step' => 'reference', '--execute' => true, '--confirm' => $this->targetDatabase()])->assertSuccessful();
-        $this->assertSame($before, DB::table('chart_of_accounts')->count(), 'D3 pending: the reference chart is never seeded by the migration');
+        $this->assertSame($before, DB::table('chart_of_accounts')->count(), 'D3: the company keeps its own chart; the reference chart is never seeded by the migration');
     }
 
     // ── Plan integrity ───────────────────────────────────────────────────
@@ -488,7 +509,9 @@ class SourceMigrationToolingTest extends SourceMigrationTestCase
         foreach (config('source_migration.d2_tables') as $table) {
             $this->assertSame(MigrationPlan::DECISION_PENDING, $plan->mode($table));
         }
-        $this->assertSame(MigrationPlan::DECISION_PENDING, $plan->mode('chart_of_accounts'));
+        // D3 decided (Option A): the company's chart loads, carrying the recorded decision.
+        $this->assertSame(MigrationPlan::REPLACE_SEEDED, $plan->mode('chart_of_accounts'));
+        $this->assertStringContainsString('D3 Option A', $plan->tables['chart_of_accounts']['decision']);
         foreach (FinanceResetBoundary::RESET_ORDER as $finance) {
             $this->assertNotContains($plan->mode($finance), MigrationPlan::LOAD_MODES, "{$finance} must not load");
         }

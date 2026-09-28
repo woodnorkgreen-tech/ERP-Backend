@@ -45,46 +45,39 @@ return [
      * The local account must be POSTABLE and ACTIVE. A header account resolves,
      * then fails at posting time, which is worse than not resolving at all.
      */
-    'map' => [
+    'map' => \App\Modules\Finance\Support\FinanceChartProfile::map(
+        env('FINANCE_ACCOUNT_PROFILE'),
+        env('FINANCE_WIP_POLICY'),
+    ),
 
-        /*
-         | DRAFT for WNG's chart, 7 September 2026. Every line is commented:
-         | uncommenting one starts posting to that account, so this is a
-         | proposal awaiting Finance's sign-off, not a configuration.
-         |
-         | READ THIS BEFORE UNCOMMENTING ANYTHING
-         |
-         | The reference chart capitalises project cost: 1211-1219 are Work in
-         | Progress *assets*, debited as a job runs and released to cost of
-         | sales when it completes. WNG's chart has no WIP accounts, so every
-         | proposal below sends those costs straight to Cost of Sales instead.
-         |
-         | That is not a rename. It changes when cost hits the profit and loss
-         | account — on purchase rather than on completion — so a job spanning
-         | a month end no longer carries its cost forward to sit against the
-         | revenue it earned. For an events business whose jobs are short that
-         | may be entirely acceptable, and it is what QuickBooks appears to
-         | have been doing already. It is still an accounting decision, and it
-         | belongs to whoever signs the accounts.
-         */
+    /*
+     | THE MAP COMES FROM A CHART PROFILE (Report 54)
+     |
+     | WNG keeps its QuickBooks chart (D3 Option A). The profile
+     | database/finance/wng-chart-profile.json names, for every posting function,
+     | the WNG account it posts to, including the accounts the chart lacked, which
+     | `php artisan finance:complete-chart --profile=wng` creates. Set
+     | FINANCE_ACCOUNT_PROFILE=wng to activate it. It is active in the rehearsal
+     | checkout; production activation waits for the accountant's sign-off.
+     |
+     | FINANCE_WIP_POLICY picks HOW project cost is carried: `capitalise` (default,
+     | what the engine implements: WIP until invoiced) or `expense_on_capture`
+     | (WIP functions map onto their Cost of Sales twins). This is a Finance policy
+     | and is still open. Creating the WIP accounts does not decide it.
+     |
+     | With no profile the map is empty: development and the test suite keep the
+     | reference chart, where every code resolves to itself.
+     */
+    'profile' => env('FINANCE_ACCOUNT_PROFILE'),
+    'wip_policy' => env('FINANCE_WIP_POLICY'),
 
-        /*
-         | (Report 53, 2026-09-28) The identity entries that stood here ('1100' =>
-         | '1100', …, added 2026-09-13) claimed those codes exist in WNG's chart.
-         | They do not: WNG's chart is 120 QuickBooks accounts with mnemonic codes
-         | (AR-001, AP-001, PETTY-001, EQB-001, COS-008, OPE-030, …). An identity
-         | entry is also a no-op — an unmapped code already resolves to itself — so
-         | removing them changes nothing except the false claim.
-         |
-         | The evidence-based mapping for WNG's chart (D3 Option A: WNG keeps its
-         | chart) is database/finance/wng-coa-mapping-proposal.json, evaluated by
-         | `php artisan finance:account-mapping`. A line is added here only once the
-         | accountant has approved it; `finance:account-mapping --emit-map` prints
-         | exactly the approved lines. Until then Finance posting refuses cleanly
-         | (Finance readiness names every unresolved function).
-         */
-
-    ],
+    /*
+     | Payment source code => the local account it is linked to (null = leave it
+     | unlinked). Only a profile fills this: the seeder names every bank by one
+     | generic reference code, so a map alone would link every bank to the same
+     | account.
+     */
+    'payment_sources' => \App\Modules\Finance\Support\FinanceChartProfile::paymentSources(env('FINANCE_ACCOUNT_PROFILE')),
 
     /*
      * Does this installation keep the reference chart as its own?

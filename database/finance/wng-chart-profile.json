@@ -1,0 +1,149 @@
+{
+  "meta": {
+    "title": "WNG chart of accounts profile: existing WNG chart plus the missing control and posting accounts (Report 54)",
+    "prepared": "2026-09-28",
+    "report": "docs/finance-redesign/phase-2/54_PHASE_2B_WNG_CHART_OF_ACCOUNTS_COMPLETION.md",
+    "authority": "WNG decision 2026-09-28: keep WNG's chart (D3 Option A) and create the genuinely missing accounts. Mappings to existing WNG accounts carry the evidence recorded in Report 53. The accountant's sign-off is still required before this profile is activated in production (FINANCE_ACCOUNT_PROFILE=wng).",
+    "activation": "Set FINANCE_ACCOUNT_PROFILE=wng. Accounts are created by `php artisan finance:complete-chart --profile=wng --execute --confirm=<database>`, which is idempotent and never modifies an existing account.",
+    "coding_convention": "WNG codes are a mnemonic prefix plus a 3-digit sequence (AR-001, COS-008), with QuickBooks-style 'Parent:Child' names. New accounts use a new, unused prefix, or the next free number in an existing WNG family (COS-021..023). Each new header is non-postable; its children are postable."
+  },
+
+  "new_accounts": [
+    {"code": "SAL-001", "name": "Sales", "category": "revenue", "account_type": "revenue", "normal_balance": "credit", "parent": null, "is_postable": false, "rationale": "Header matching WNG's QuickBooks 'Sales' parent (history codes to 'Sales:Printing'). Non-postable: revenue posts to a child."},
+    {"code": "SAL-002", "name": "Sales:Project Revenue", "category": "revenue", "account_type": "revenue", "normal_balance": "credit", "parent": "SAL-001", "is_postable": true, "serves": ["project_revenue"], "rationale": "The only revenue account among the 120 is RI-001 Return Inwards. Invoices earn into one default revenue account; the invoice UI never selects a per-line revenue account (revenue_account_id is never sent). Revenue by line of business is already available from the enquiry/project dimension, so one account is sufficient."},
+
+    {"code": "VAT-001", "name": "Output VAT Payable", "category": "liability", "account_type": "balance_sheet", "normal_balance": "credit", "parent": null, "is_postable": true, "serves": ["output_vat"], "rationale": "VAT charged on WNG's invoices (W1). WNG is VAT-registered: its chart has VP-001 Vat Penalty, and the eTIMS claim gate is live."},
+    {"code": "VAT-002", "name": "Input VAT Recoverable", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": null, "is_postable": true, "serves": ["input_vat"], "rationale": "Recoverable VAT on supplier bills and coded spend (W2, W3). Kept separate from output VAT because the VAT return reports them separately."},
+    {"code": "WHT-001", "name": "Withholding Tax Payable", "category": "liability", "account_type": "balance_sheet", "normal_balance": "credit", "parent": null, "is_postable": true, "serves": ["wht_payable"], "rationale": "WHT that WNG deducts from supplier payments (W2). There is no WHT receivable: receivables never record tax withheld by a client."},
+
+    {"code": "PL-001", "name": "Payroll liabilities", "category": "liability", "account_type": "balance_sheet", "normal_balance": "credit", "parent": null, "is_postable": false, "rationale": "Header in WNG's own terminology (history codes to 'Payroll liabilities:Net Pay' and 'Payroll liabilities:Helb Repayment')."},
+    {"code": "PL-002", "name": "Payroll liabilities:PAYE", "category": "liability", "account_type": "balance_sheet", "normal_balance": "credit", "parent": "PL-001", "is_postable": true, "serves": ["paye_payable"], "rationale": "The payroll accrual credits PAYE separately (W6)."},
+    {"code": "PL-003", "name": "Payroll liabilities:Statutory & Other Deductions", "category": "liability", "account_type": "balance_sheet", "normal_balance": "credit", "parent": "PL-001", "is_postable": true, "serves": ["statutory_payable"], "rationale": "The payroll engine posts ONE pooled leg: gross minus net minus PAYE, which covers NSSF, SHIF, housing levy, HELB and other deductions, plus the employer's NSSF and housing-levy share. Separate NSSF, SHIF and housing-levy accounts would receive nothing until the engine splits that leg (Report 54 section 8)."},
+
+    {"code": "AE-001", "name": "Accrued Expenses", "category": "liability", "account_type": "balance_sheet", "normal_balance": "credit", "parent": null, "is_postable": true, "serves": ["accrued_expenses"], "rationale": "Goods received not yet invoiced (GRN accrual) and the liability allocated by spend vouchers (W2, W4). One account: the engine has a single accrual function and no separate procurement-clearing function."},
+    {"code": "CD-001", "name": "Client Deposits", "category": "liability", "account_type": "balance_sheet", "normal_balance": "credit", "parent": null, "is_postable": true, "serves": ["client_deposits"], "rationale": "A client receipt that no invoice has earned yet is held here, not in Sales (W1). Applied to an invoice when allocated."},
+
+    {"code": "IA-001", "name": "Inventory Asset", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": null, "is_postable": true, "serves": ["inventory"], "rationale": "WNG's own QuickBooks name (20 petty-cash history lines code to 'Inventory Asset'). Stores is perpetual: a receipt debits it, and an issue or count credits it (W5). INV-001 is Inventory Shrinkage, an expense."},
+
+    {"code": "WIP-001", "name": "Work in Progress", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": null, "is_postable": false, "rationale": "Header for project cost carried on the balance sheet until it is billed. Having the accounts does NOT decide the timing policy (see wip_policies)."},
+    {"code": "WIP-002", "name": "Work in Progress:Materials", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_direct_materials"], "rationale": "Twin of COS-008."},
+    {"code": "WIP-003", "name": "Work in Progress:Direct Labour", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_direct_labour"], "rationale": "Twin of PE-007; W7 Finance verify posts direct labour here."},
+    {"code": "WIP-004", "name": "Work in Progress:Subcontractors", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_subcontractors"], "rationale": "Twin of COS-020."},
+    {"code": "WIP-005", "name": "Work in Progress:Transport & Delivery", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_transport_logistics"], "rationale": "Twin of COS-016."},
+    {"code": "WIP-006", "name": "Work in Progress:Equipment Hire & Site", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_equipment_site"], "rationale": "Twin of COS-021."},
+    {"code": "WIP-007", "name": "Work in Progress:Project Utilities", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_project_utilities"], "rationale": "Twin of COS-022."},
+    {"code": "WIP-008", "name": "Work in Progress:Field Facilitation", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_project_facilitation"], "rationale": "Twin of COS-006."},
+    {"code": "WIP-009", "name": "Work in Progress:Venue & Permits", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_venue_statutory"], "rationale": "Twin of COS-023."},
+    {"code": "WIP-010", "name": "Work in Progress:Rework & Warranty", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "WIP-001", "is_postable": true, "serves": ["wip_rework_warranty"], "rationale": "Twin of COS-018."},
+
+    {"code": "COS-021", "name": "Cost of Sales:Equipment Hire & Site", "category": "expense", "account_type": "direct_cost", "normal_balance": "debit", "parent": "COS-002", "is_postable": true, "serves": ["cos_equipment_site"], "rationale": "5 job-required expense codes (plant, equipment and site costs of a job). WNG's OPE-013 Equipment Rental is an operating expense and would take job cost out of gross margin."},
+    {"code": "COS-022", "name": "Cost of Sales:Project Utilities", "category": "expense", "account_type": "direct_cost", "normal_balance": "debit", "parent": "COS-002", "is_postable": true, "serves": ["cos_project_utilities"], "rationale": "4 job-required expense codes. UTIL-001 and OPE-012 are WNG's office utilities, not a job's."},
+    {"code": "COS-023", "name": "Cost of Sales:Venue & Permits", "category": "expense", "account_type": "direct_cost", "normal_balance": "debit", "parent": "COS-002", "is_postable": true, "serves": ["cos_venue_statutory"], "rationale": "4 job-required expense codes (venue fees and event permits). OPE-017 Licenses and permits is WNG's own business licensing."},
+
+    {"code": "PRE-001", "name": "Prepayments & Deposits", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": null, "is_postable": false, "rationale": "Header for money paid out ahead of the goods, service or refund it buys."},
+    {"code": "PRE-002", "name": "Prepayments & Deposits:Supplier Advances", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "PRE-001", "is_postable": true, "serves": ["catalogue:1310"], "rationale": "Catalogue code for advances to suppliers; cleared by the supplier's invoice."},
+    {"code": "PRE-003", "name": "Prepayments & Deposits:Refundable Deposits", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "PRE-001", "is_postable": true, "serves": ["catalogue:1320"], "rationale": "Catalogue code for venue, utility and rent deposits; cleared on refund."},
+    {"code": "PRE-004", "name": "Prepayments & Deposits:Prepaid Expenses", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": "PRE-001", "is_postable": true, "serves": ["catalogue:1340"], "rationale": "Catalogue codes for insurance and subscriptions paid ahead; expensed over the period covered."},
+
+    {"code": "OI-001", "name": "Office Improvement", "category": "asset", "account_type": "balance_sheet", "normal_balance": "debit", "parent": null, "is_postable": true, "serves": ["catalogue:1600"], "rationale": "WNG's own QuickBooks fixed-asset name (petty-cash history codes to 'Office Improvement'; ADM-003 depreciation exists). Takes the leasehold-improvement capex code."}
+  ],
+
+  "functions": {
+    "bank_default":            {"account": "EQB-001",   "basis": "EXISTING", "note": "Default operating bank; the seeded operating source is 'Equity Bank – Operating Account'."},
+    "petty_cash_float":        {"account": "PETTY-001", "basis": "EXISTING"},
+    "accounts_receivable":     {"account": "AR-001",    "basis": "EXISTING", "note": "AR-002 is EUR; the ERP invoices in KES."},
+    "staff_advances":          {"account": "STD-001",   "basis": "EXISTING", "note": "Short Term Debtors. Trade debtors are AR-001 and no history uses STD-001 for anything else, so staff imprest is its natural use. A separate account is needed only if WNG uses STD-001 for other debtors."},
+    "input_vat":               {"account": "VAT-002",   "basis": "NEW"},
+    "inventory":               {"account": "IA-001",    "basis": "NEW"},
+    "accounts_payable":        {"account": "AP-001",    "basis": "EXISTING"},
+    "output_vat":              {"account": "VAT-001",   "basis": "NEW"},
+    "wht_payable":             {"account": "WHT-001",   "basis": "NEW"},
+    "paye_payable":            {"account": "PL-002",    "basis": "NEW"},
+    "statutory_payable":       {"account": "PL-003",    "basis": "NEW"},
+    "accrued_expenses":        {"account": "AE-001",    "basis": "NEW"},
+    "net_payroll_payable":     {"account": "2160",      "basis": "ERP_ADDED", "note": "Reused: 2160 Net Payroll Payable (added by migration 2026_08_24_000001). WNG's QuickBooks 'Payroll liabilities:Net Pay' was not in the export, so the chart holds no duplicate."},
+    "client_deposits":         {"account": "CD-001",    "basis": "NEW"},
+    "opening_balance_equity":  {"account": "OBE-001",   "basis": "EXISTING"},
+    "project_revenue":         {"account": "SAL-002",   "basis": "NEW"},
+    "cos_direct_materials":    {"account": "COS-008",   "basis": "EXISTING"},
+    "cos_direct_labour":       {"account": "PE-007",    "basis": "EXISTING", "note": "Personnel Expenses:Wages-Direct Labour. Not duplicated as a COS account: gross margin reads account_type, not the name hierarchy, so classifying PE-007 as direct_cost (an open accountant decision) is enough."},
+    "cos_subcontractors":      {"account": "COS-020",   "basis": "EXISTING"},
+    "cos_transport_logistics": {"account": "COS-016",   "basis": "EXISTING"},
+    "cos_equipment_site":      {"account": "COS-021",   "basis": "NEW"},
+    "cos_project_utilities":   {"account": "COS-022",   "basis": "NEW"},
+    "cos_project_facilitation":{"account": "COS-006",   "basis": "EXISTING"},
+    "cos_venue_statutory":     {"account": "COS-023",   "basis": "NEW"},
+    "cos_rework_warranty":     {"account": "COS-018",   "basis": "EXISTING", "note": "Other - COS."},
+    "inventory_adjustments":   {"account": "INV-001",   "basis": "EXISTING", "note": "Inventory Shrinkage; count GAINS post here too (net shrinkage)."},
+    "salaries_expense":        {"account": "PE-006",    "basis": "EXISTING", "note": "Personnel Expenses:Salaries. The ERP-added 7550 duplicates it and is not used."},
+    "bank_charges":            {"account": "FIN-003",   "basis": "EXISTING", "note": "WNG's FIN-005 Mpesa charges stays for M-Pesa fees if Finance splits fees by paying account later."}
+  },
+
+  "wip_policies": {
+    "default": "capitalise",
+    "note": "HOW cost is carried is a Finance policy, not a chart fact. 'capitalise' is what the engine implements: project cost is debited to WIP on capture and released to Cost of Sales pro rata as the job is invoiced. 'expense_on_capture' maps each WIP function onto its Cost of Sales twin, so cost reaches the P&L when captured; the release then has nothing to move, because it skips a family whose WIP and COS accounts are the same. Selected by FINANCE_WIP_POLICY. Still OPEN for Finance confirmation.",
+    "capitalise": {
+      "wip_direct_materials": "WIP-002", "wip_direct_labour": "WIP-003", "wip_subcontractors": "WIP-004",
+      "wip_transport_logistics": "WIP-005", "wip_equipment_site": "WIP-006", "wip_project_utilities": "WIP-007",
+      "wip_project_facilitation": "WIP-008", "wip_venue_statutory": "WIP-009", "wip_rework_warranty": "WIP-010"
+    },
+    "expense_on_capture": {
+      "wip_direct_materials": "COS-008", "wip_direct_labour": "PE-007", "wip_subcontractors": "COS-020",
+      "wip_transport_logistics": "COS-016", "wip_equipment_site": "COS-021", "wip_project_utilities": "COS-022",
+      "wip_project_facilitation": "COS-006", "wip_venue_statutory": "COS-023", "wip_rework_warranty": "COS-018"
+    }
+  },
+
+  "catalogue": {
+    "1310": {"account": "PRE-002", "meaning": "Supplier advances"},
+    "1320": {"account": "PRE-003", "meaning": "Refundable deposits"},
+    "1340": {"account": "PRE-004", "meaning": "Prepaid expenses"},
+    "1600": {"account": "OI-001",  "meaning": "Leasehold improvements (capex)"},
+    "2300": {"account": null,      "meaning": "Loans payable", "note": "NOT created. No loan liability among WNG's accounts or in history; FK-001 Faulu Kenya is recorded as an ASSET. Whether WNG borrows, and from whom, is the accountant's. The one loan-repayment code stays switched off."},
+    "6100": {"account": "OPE-012", "meaning": "Workshop electricity"},
+    "6200": {"account": "OPE-023", "meaning": "Machinery repairs & maintenance"},
+    "6400": {"account": "OPE-006", "meaning": "Small tools & workshop consumables"},
+    "6600": {"account": "OPE-006", "meaning": "PPE & workshop safety", "note": "Consumables; WNG has no separate safety account."},
+    "6700": {"account": "OPE-014", "meaning": "Cleaning & waste disposal"},
+    "7100": {"account": "OPE-022", "meaning": "Office rent"},
+    "7150": {"account": "OPE-030", "meaning": "Office supplies & stationery", "note": "WNG's Stationery & Printing, not the ERP-added 7150."},
+    "7200": {"account": "OPE-031", "meaning": "Administration airtime & internet"},
+    "7400": {"account": "OPE-032", "meaning": "Office transport"},
+    "7600": {"account": "OPE-029", "meaning": "Staff welfare"}
+  },
+
+  "payment_sources": {
+    "PC-MAIN":      "PETTY-001",
+    "BANK-MAIN":    "EQB-001",
+    "BANK-ALT":     "NCBA-001",
+    "BANK-STANBIC": "STB-001",
+    "BANK-KCB":     "KCB-001",
+    "BANK-FAMILY":  "FMB-001",
+    "AP":           "AP-001",
+    "MPESA":        null,
+    "CARD":         null
+  },
+  "payment_source_notes": {
+    "why_explicit": "The seeder names every bank by the generic reference 1010. Translated through a map, Stanbic, KCB, Family and Card would all have linked to Equity Bank. A profile therefore names each source's account explicitly, and null means 'leave unlinked'.",
+    "MPESA": "No M-Pesa balance account among WNG's accounts (only FIN-005 Mpesa charges). Operational decision: a separate M-Pesa asset, or settle through a bank?",
+    "CARD": "Which account settles company-card spend? Left unlinked until Finance decides; an unlinked active source keeps readiness red until it is linked or retired."
+  },
+
+  "erp_added_accounts": {
+    "2160": {"decision": "REMAIN — canonical posting account", "reason": "Net Payroll Payable. WNG's equivalent ('Payroll liabilities:Net Pay') was not in the export, so the chart has no duplicate. net_payroll_payable maps here."},
+    "7150": {"decision": "DUPLICATE — not mapped; deprecation recommended", "reason": "Office Supplies & Stationery duplicates OPE-030 Stationery & Printing, which the catalogue now uses. Left active and unchanged; Finance may deactivate it once confirmed (no posting reaches it)."},
+    "7550": {"decision": "DUPLICATE — not mapped; deprecation recommended", "reason": "Salaries & Wages duplicates PE-006 Personnel Expenses:Salaries, which salaries_expense now uses. Left active and unchanged; Finance may deactivate it."}
+  },
+
+  "not_created": [
+    {"name": "Printing / Branding / Fabrication / Events-Exhibition / Signage / Merchandise revenue sub-accounts", "reason": "No ERP path posts to a per-line revenue account (the invoice UI never selects one), and revenue by line of business comes from the enquiry/project dimension. Add a child of SAL-001 if the accountant wants it in the ledger itself."},
+    {"name": "NSSF Payable, SHIF/SHA Payable, Housing Levy Payable (separate)", "reason": "The payroll accrual posts one pooled leg (PL-003). Separate accounts would receive nothing until the engine splits that leg by authority; recommended as a follow-up."},
+    {"name": "NITA Payable", "reason": "Payroll does not compute NITA (PE-004 Nita Levy is WNG's expense account, booked outside payroll)."},
+    {"name": "Withholding Tax Receivable / Credit", "reason": "Receivables never record tax a client withheld."},
+    {"name": "Inventory Clearing / Goods Received Not Invoiced (separate)", "reason": "The GRN accrual posts to the single accrued_expenses function (AE-001)."},
+    {"name": "Procurement clearing", "reason": "No engine function; AP-001 and AE-001 carry the procurement liabilities."},
+    {"name": "Staff Advances (separate)", "reason": "STD-001 Short Term Debtors serves it (see functions.staff_advances)."},
+    {"name": "Cost of Sales:Direct Labour (separate)", "reason": "PE-007 Wages-Direct Labour serves it; a duplicate would be cosmetic."},
+    {"name": "Loans payable", "reason": "No evidence WNG carries a loan liability (see catalogue.2300)."}
+  ]
+}

@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use App\Modules\Finance\Support\CatalogueDimensionMap;
 use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\Finance\Support\FinanceAccountFunctions;
+use App\Modules\Finance\Support\FinanceChartProfile;
 use Illuminate\Support\Facades\DB;
 
 /** A read-only pre-flight check for the reference data Finance depends on. */
@@ -40,6 +41,8 @@ class FinanceReadinessController extends Controller
         // codes that had fallen behind the code: payroll, WIP release, bank charges
         // and the default bank were posted to but never checked (Report 53).
         $accountFunctions = FinanceAccountFunctions::resolution();
+        $profile = config('finance_accounts.profile');
+        $profileProblems = FinanceChartProfile::problems($profile, config('finance_accounts.wip_policy'));
         $missingRequiredAccounts = collect($accountFunctions)->reject(fn ($f) => $f['resolved'])
             ->map(fn ($f, $key) => $f['local_code'] === $f['code'] ? "{$key} ({$f['code']})" : "{$key} ({$f['code']} → {$f['local_code']})")
             ->values()->all();
@@ -110,6 +113,14 @@ class FinanceReadinessController extends Controller
                     ? 'Every account the posting code needs resolves to a postable, active account.'
                     : count($missingRequiredAccounts).' posting function(s) do not resolve to a postable, active account: '.implode(', ', $missingRequiredAccounts).'.',
                 'Map each function to this chart in config/finance_accounts.php (accountant-approved), or create the account.'),
+            $this->check('chart_profile', 'Chart profile',
+                $profileProblems === [],
+                $profileProblems !== []
+                    ? implode(' ', $profileProblems)
+                    : ($profile
+                        ? "Chart profile '{$profile}' is active; WIP policy: ".(config('finance_accounts.wip_policy') ?: 'profile default').'.'
+                        : 'No chart profile: this installation keeps the reference chart.'),
+                'Fix FINANCE_ACCOUNT_PROFILE / FINANCE_WIP_POLICY, or the profile file it names.'),
             $this->check('expense_codes', 'Expense catalogue',
                 DB::table('expense_codes')->where('is_active', true)->exists() && $unmappedExpenseCodes === 0,
                 $unmappedExpenseCodes === 0

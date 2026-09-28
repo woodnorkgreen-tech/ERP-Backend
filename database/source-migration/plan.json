@@ -1,11 +1,11 @@
 {
     "meta": {
-        "generated_at": "2026-09-28T11:30:54+03:00",
+        "generated_at": "2026-09-28T17:28:17+03:00",
         "generated_from": "config/source_migration.php (Report 50A rules; WNG decisions D1\u2013D8 as recorded in Report 51)",
         "decisions": {
             "D1": "CONFIRMED \u2014 import all non-DATA-1 operational tables by default",
-            "D2": "PENDING \u2014 source-data evidence (migration:evidence d2)",
-            "D3": "PENDING \u2014 accountant decision; chart_of_accounts not loaded",
+            "D2": "CLOSED \u2014 no historical PO/GRN/bill data to migrate (0 rows; tables stay held back)",
+            "D3": "CONFIRMED \u2014 Option A: WNG keeps its chart; chart_of_accounts replace-seeded by code; missing accounts created by finance:complete-chart (mappings: accountant sign-off before production)",
             "D4": "CONFIRMED \u2014 preserve and map; migration:evidence roles",
             "D5": "CONFIRMED \u2014 preserve all projects; planned CostLines for active/open projects only",
             "D6": "CONFIRMED \u2014 not hard-coded; departments classified in the UI at cutover",
@@ -204,9 +204,13 @@
             "group": "skip"
         },
         "chart_of_accounts": {
-            "mode": "decision-pending",
-            "reason": "D3 \u2014 accountant decision: source chart vs reference chart",
-            "group": "D3"
+            "mode": "replace-seeded",
+            "reason": "Target migrations seed this table; staging rows (source + the same seeds) are authoritative",
+            "group": "DATA-1",
+            "natural_key": [
+                "code"
+            ],
+            "decision": "D3 Option A \u2014 WNG keeps its own chart (WNG decision 2026-09-28; Reports 53\u201354)"
         },
         "client_interactions": {
             "mode": "import",

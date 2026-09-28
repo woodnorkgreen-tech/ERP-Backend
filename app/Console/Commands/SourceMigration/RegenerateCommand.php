@@ -22,7 +22,9 @@ use Spatie\Permission\Models\Role;
  *   permissions         RoleAndPermissionSeeder + permissions:sync (additive; imported
  *                       roles keep their users; obsolete permissions are not imported)
  *   reference           FinanceReferenceSeeder — target-only Finance masters. The
- *                       reference chart of accounts is forced OFF: D3 is pending
+ *                       reference chart of accounts is forced OFF: under D3 the
+ *                       company's own chart is loaded (and completed by
+ *                       finance:complete-chart) instead
  *   planned-cost-lines  BudgetProjector for ACTIVE/OPEN projects only (D5)
  *   all                 the three, in that order
  *
@@ -99,7 +101,7 @@ class RegenerateCommand extends Command
 
     private function reference(bool $execute): bool
     {
-        $this->line('Reference: FinanceReferenceSeeder (chart of accounts seeding forced OFF — D3 pending).');
+        $this->line('Reference: FinanceReferenceSeeder (reference chart seeding forced OFF — D3: the company keeps its own chart).');
         if ($execute) {
             config(['finance_accounts.seed_reference_chart' => false]);
             $seeder = new FinanceReferenceSeeder;
