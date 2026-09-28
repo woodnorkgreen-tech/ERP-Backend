@@ -238,11 +238,15 @@ class SupplierInvoiceTaxTest extends TestCase
 
     public function test_a_stated_vat_beats_the_derived_one(): void
     {
-        // A rounded figure on the document is the claimable one.
-        $bill = Bill::findOrFail($this->recordBill(['vat_amount' => 7999.50])->assertSuccessful()->json('data.id'));
+        // A rounded figure on the document is the claimable one. Stated
+        // slightly ABOVE the derived 8,000 (not below, as an earlier version
+        // of this test had it) so the resulting net stays within the order's
+        // 50,000 commitment — W2-3's cumulative-billing cap now correctly
+        // refuses a net that would exceed it, which a net of 50,000.50 would.
+        $bill = Bill::findOrFail($this->recordBill(['vat_amount' => 8000.50])->assertSuccessful()->json('data.id'));
 
-        $this->assertSame('7999.50', (string) $bill->vat_amount);
-        $this->assertSame('50000.50', (string) $bill->net_amount);
+        $this->assertSame('8000.50', (string) $bill->vat_amount);
+        $this->assertSame('49999.50', (string) $bill->net_amount);
     }
 
     public function test_an_unregistered_supplier_is_charged_no_vat(): void

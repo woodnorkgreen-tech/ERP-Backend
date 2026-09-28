@@ -7,6 +7,9 @@ use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\PaymentSource;
 use App\Modules\Finance\Services\JournalPostingService;
+use App\Modules\Finance\Services\PaymentSettlementService;
+use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\DocumentNumber;
 use App\Modules\HR\Models\PayrollRun;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -14,8 +17,10 @@ use InvalidArgumentException;
 
 class PayrollFinancePostingService
 {
-    public function __construct(private JournalPostingService $posting)
-    {
+    public function __construct(
+        private JournalPostingService $posting,
+        private PaymentSettlementService $settlements,
+    ) {
     }
 
     private const SALARIES_EXPENSE = '7550';        // office and admin staff — overhead
@@ -146,6 +151,33 @@ class PayrollFinancePostingService
             $postingDate = Carbon::parse($date);
             $period = $this->openPeriod($postingDate);
             $net = $this->money($run->payslips()->sum('net_pay'));
+
+            // Critical Risk C7 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+            // give payroll's cash-out the same independent money-movement
+            // record every other payment rail already has, through the same
+            // engine (PaymentSettlementService) rather than a bespoke one.
+            // Forward-only: historical runs paid before this existed are not
+            // backfilled here — see STAB-6/W10-1 in
+            // finance-redesign/phase-2/03_WNG_FINANCE_DECISION_REGISTER.md.
+            $payment = $this->settlements->settle([
+                'payment_no' => DocumentNumber::next(DocumentNumber::PAYMENT, (string) $postingDate->year),
+                'payment_type' => 'direct',
+                'payment_source_id' => $source->id,
+                'payee_name' => "Payroll {$run->payroll_month}",
+                'account' => 'Payroll settlement',
+                'amount' => $net,
+                'description' => "Net payroll for {$run->payroll_month}",
+                'date_disbursed' => $postingDate->toDateString(),
+                'external_reference' => $reference,
+                'classification' => 'admin',
+                'tax' => 'no_etr',
+                'receipt_type' => 'none',
+                'created_by' => auth()->id(),
+                'source_document_type' => PayrollRun::class,
+                'source_document_id' => $run->id,
+                'idempotency_key' => 'payroll-run:'.$run->id,
+            ]);
+
             $legs = [
                 [$this->account(self::NET_PAYROLL_PAYABLE), 'debit', $net, 'Settle net payroll payable'],
                 [(int) $source->gl_account_id, 'credit', $net, "Payroll payment via {$source->name}"],
@@ -160,6 +192,7 @@ class PayrollFinancePostingService
                 'payment_source_id' => $source->id,
                 'payment_date' => $postingDate->toDateString(),
                 'payment_reference' => $reference,
+                'payment_id' => $payment->id,
             ]);
 
             return $entry;
@@ -275,9 +308,11 @@ class PayrollFinancePostingService
 
     private function account(string $code): int
     {
-        $id = ChartOfAccount::postable()->where('code', $code)->value('id');
+        $localCode = ChartAccountMap::local($code);
+        $id = ChartOfAccount::postable()->where('code', $localCode)->value('id');
         if (! $id) {
-            throw new InvalidArgumentException("Payroll GL account {$code} is not configured as postable.");
+            $suffix = $localCode === $code ? '' : " (mapped from reference code {$code})";
+            throw new InvalidArgumentException("Payroll GL account {$localCode}{$suffix} is not configured as postable.");
         }
         return (int) $id;
     }

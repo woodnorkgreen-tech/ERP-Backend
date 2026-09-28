@@ -7,6 +7,11 @@ use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\HRAuditLog;
 use App\Modules\HR\Models\PayrollLedger;
 use App\Modules\HR\Models\SalaryAdvanceRequest;
+use App\Modules\HR\Models\SalaryAdvanceRecovery;
+use App\Constants\Permissions;
+use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\Finance\Services\PaymentSettlementService;
+use App\Modules\Finance\Support\DocumentNumber;
 use App\Modules\Notifications\Services\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,7 +25,7 @@ class SalaryAdvanceController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = SalaryAdvanceRequest::with(['employee.department', 'ledger']);
+        $query = SalaryAdvanceRequest::with(['employee.department', 'ledger', 'ledgers', 'payment', 'recoveries']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -134,6 +139,7 @@ class SalaryAdvanceController extends Controller
 
                     $ledger = PayrollLedger::create([
                         'employee_id' => $advance->employee_id,
+                        'salary_advance_request_id' => $advance->id,
                         'name' => 'Salary Advance Recovery (Split KES ' . number_format($monthlyInstallment) . '/mo)',
                         'description' => "Recovery of approved advance requested on " . $advance->created_at->format('Y-m-d') . " (Split) | Total Principal: KES " . number_format($principal, 2),
                         'type' => 'deduction',
@@ -152,6 +158,7 @@ class SalaryAdvanceController extends Controller
 
                     $ledger = PayrollLedger::create([
                         'employee_id' => $advance->employee_id,
+                        'salary_advance_request_id' => $advance->id,
                         'name' => 'Salary Advance Recovery (Remainder)',
                         'description' => "Remainder recovery of approved advance requested on " . $advance->created_at->format('Y-m-d') . " | Total Principal: KES " . number_format($principal, 2),
                         'type' => 'deduction',
@@ -168,6 +175,7 @@ class SalaryAdvanceController extends Controller
             } else {
                 $ledger = PayrollLedger::create([
                     'employee_id' => $advance->employee_id,
+                    'salary_advance_request_id' => $advance->id,
                     'name' => 'Salary Advance Recovery',
                     'description' => "Recovery of approved advance requested on " . $advance->created_at->format('Y-m-d') . " | Total Principal: KES " . number_format($advance->amount, 2),
                     'type' => 'deduction',
@@ -283,6 +291,83 @@ class SalaryAdvanceController extends Controller
     }
 
     /**
+     * W3-2 (confirmed 2026-09-23): the payout of an approved advance becomes a
+     * real Payment through the one settlement engine, so it is visible in
+     * Payments, cash position and reconciliation.
+     *
+     * Deliberately NO journal. How a salary advance sits in the general ledger
+     * — a Staff Advances receivable, and how payroll recovery clears it — is an
+     * open Finance/accountant decision (W3-2/W3-8). Payroll accrual today
+     * credits advance deductions to 2140 "Other payroll deductions payable",
+     * so debiting 1300 here would leave a receivable nothing ever clears.
+     * Approval ≠ Payment ≠ Recovery: this records the Payment only.
+     */
+    public function disburse(Request $request, int $id, PaymentSettlementService $settlements): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_POST), 403);
+        $validated = $request->validate([
+            'payment_source_id' => ['required', 'integer', 'exists:payment_sources,id'],
+            'payment_method' => ['nullable', 'string'], 'payment_reference' => ['required', 'string', 'max:100'],
+            'payment_date' => ['required', 'date'], 'transaction_cost' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        $advance = DB::transaction(function () use ($request, $id, $validated, $settlements) {
+            $advance = SalaryAdvanceRequest::query()->with('employee')->lockForUpdate()->findOrFail($id);
+            if ($advance->status !== 'approved' || $advance->payment_id) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['advance' => 'Only an approved, unpaid salary advance can be disbursed.']);
+            }
+            if ($request->user()->employee_id && (int) $request->user()->employee_id === (int) $advance->employee_id) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['advance' => 'You cannot record the payout of your own salary advance.']);
+            }
+            $source = PaymentSource::query()->paymentCapable()->findOrFail($validated['payment_source_id']);
+            $payment = $settlements->settle([
+                'payment_no' => DocumentNumber::next(DocumentNumber::PAYMENT, substr($validated['payment_date'], 0, 4)),
+                'payment_type' => 'advance', 'payment_source_id' => $source->id,
+                'payee_name' => trim(($advance->employee?->first_name ?? '').' '.($advance->employee?->last_name ?? '')) ?: 'Employee', 'payee_type' => 'employee', 'payee_id' => $advance->employee_id,
+                'account' => 'Staff advances', 'amount' => $advance->amount,
+                'description' => "Salary advance #{$advance->id}", 'date_disbursed' => $validated['payment_date'],
+                'external_reference' => $validated['payment_reference'], 'payment_method' => $validated['payment_method'] ?? null,
+                'transaction_cost' => $validated['transaction_cost'] ?? 0,
+                // payments.classification is the client-segment enum; payroll's
+                // own net-pay Payment uses 'admin' for the same reason.
+                'classification' => 'admin',
+                'tax' => 'no_etr', 'receipt_type' => 'none', 'created_by' => $request->user()->id,
+                'source_document_type' => SalaryAdvanceRequest::class, 'source_document_id' => $advance->id,
+                'idempotency_key' => 'salary-advance:'.$advance->id,
+            ]);
+            $advance->update(['status' => 'disbursed', 'payment_id' => $payment->id, 'paid_at' => now()]);
+            return $advance->fresh(['payment', 'ledgers', 'recoveries']);
+        });
+        return response()->json([
+            'success' => true,
+            'message' => 'Salary advance payout recorded as a Payment. Its ledger treatment awaits Finance/accountant confirmation, so no journal was posted.',
+            'data' => $advance,
+        ]);
+    }
+
+    public function recordRecovery(Request $request, int $id): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_POST), 403);
+        $validated = $request->validate(['amount' => ['required', 'numeric', 'gt:0'], 'recovered_on' => ['required', 'date'],
+            'payroll_run_id' => ['nullable', 'integer', 'exists:payroll_runs,id'], 'reference' => ['nullable', 'string', 'max:100']]);
+        $advance = DB::transaction(function () use ($request, $id, $validated) {
+            $advance = SalaryAdvanceRequest::query()->lockForUpdate()->findOrFail($id);
+            $remaining = bcsub((string) $advance->amount, (string) $advance->amount_recovered, 2);
+            if (! $advance->payment_id || bccomp((string) $validated['amount'], $remaining, 2) === 1) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['amount' => 'Recovery requires a paid advance and cannot exceed its outstanding balance.']);
+            }
+            if (! empty($validated['payroll_run_id']) && $advance->recoveries()->where('payroll_run_id', $validated['payroll_run_id'])->exists()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['payroll_run_id' => 'A recovery for this payroll run is already recorded against this advance.']);
+            }
+            SalaryAdvanceRecovery::query()->create([...$validated, 'salary_advance_request_id' => $advance->id, 'recorded_by' => $request->user()->id]);
+            $recovered = bcadd((string) $advance->amount_recovered, (string) $validated['amount'], 2);
+            $advance->update(['amount_recovered' => $recovered, 'fully_recovered_at' => bccomp($recovered, (string) $advance->amount, 2) === 0 ? now() : null]);
+            return $advance->fresh(['payment', 'ledgers', 'recoveries']);
+        });
+        return response()->json(['success' => true, 'message' => 'Recovery recorded for operational reconciliation; no recovery GL policy was assumed.', 'data' => $advance]);
+    }
+
+    /**
      * List my own requests (for Employee Self-Service).
      */
     public function myRequests(): JsonResponse
@@ -292,7 +377,7 @@ class SalaryAdvanceController extends Controller
             return response()->json(['message' => 'No employee profile found'], 404);
         }
 
-        $requests = SalaryAdvanceRequest::with('ledger')->where('employee_id', $user->employee_id)
+        $requests = SalaryAdvanceRequest::with(['ledger', 'ledgers', 'payment', 'recoveries'])->where('employee_id', $user->employee_id)
             ->latest()
             ->get();
 

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * A client invoice.
@@ -22,11 +23,30 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class ProjectInvoice extends Model
 {
-    protected $fillable = ['invoice_number','project_enquiry_id','credits_invoice_id','invoice_date','due_date','subtotal','tax_amount','total_amount','status','notes','created_by','issued_by','issued_at','voided_by','voided_at','void_reason','journal_entry_id','accounting_period_id'];
-    protected $casts = ['invoice_date'=>'date','due_date'=>'date','subtotal'=>'decimal:2','tax_amount'=>'decimal:2','total_amount'=>'decimal:2','issued_at'=>'datetime','voided_at'=>'datetime'];
+    protected $fillable = ['invoice_number','project_enquiry_id','credits_invoice_id','invoice_date','due_date','subtotal','tax_amount','total_amount','status','notes','created_by','issued_by','issued_at','voided_by','voided_at','void_reason','journal_entry_id','accounting_period_id','checked_by','checked_at','returned_by','returned_at','return_reason','resubmitted_at','no_quote_exception_reason','no_quote_exception_requested_by','no_quote_exception_approved_by','no_quote_exception_approved_at','no_quote_exception_evidence_reference','payment_term_id'];
+    protected $casts = ['invoice_date'=>'date','due_date'=>'date','subtotal'=>'decimal:2','tax_amount'=>'decimal:2','total_amount'=>'decimal:2','issued_at'=>'datetime','voided_at'=>'datetime','checked_at'=>'datetime','returned_at'=>'datetime','resubmitted_at'=>'datetime','no_quote_exception_approved_at'=>'datetime'];
     public function enquiry(): BelongsTo { return $this->belongsTo(ProjectEnquiry::class, 'project_enquiry_id'); }
     public function creator(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
     public function payments(): BelongsToMany { return $this->belongsToMany(\App\Models\EnquiryPayment::class, 'project_invoice_allocations')->withPivot('amount','allocated_by')->withTimestamps(); }
+
+    /** W1-1: who checked/reviewed this draft — never the preparer (`created_by`). */
+    public function checkedBy(): BelongsTo { return $this->belongsTo(User::class, 'checked_by'); }
+
+    /** Return for Correction: who sent it back, if it ever was. */
+    public function returnedBy(): BelongsTo { return $this->belongsTo(User::class, 'returned_by'); }
+
+    /** W1-2: who requested, and who authorized, issuing without an approved commercial basis. */
+    public function noQuoteExceptionRequestedBy(): BelongsTo { return $this->belongsTo(User::class, 'no_quote_exception_requested_by'); }
+    public function noQuoteExceptionApprovedBy(): BelongsTo { return $this->belongsTo(User::class, 'no_quote_exception_approved_by'); }
+
+    /** W1-7: the configured term this invoice's due date was computed from, if any. */
+    public function paymentTerm(): BelongsTo { return $this->belongsTo(PaymentTerm::class, 'payment_term_id'); }
+
+    /** Private evidence retrieved only through authenticated Finance routes. */
+    public function attachments(): MorphMany
+    {
+        return $this->morphMany(FinanceAttachment::class, 'source');
+    }
 
     /** The invoice this row corrects. Null on an ordinary invoice. */
     public function creditedInvoice(): BelongsTo

@@ -34,6 +34,7 @@ class ProjectInvoicesBalanceTest extends TestCase
 
     private User $accountant;
     private User $verifier;
+    private User $checker;
 
     protected function setUp(): void
     {
@@ -46,6 +47,7 @@ class ProjectInvoicesBalanceTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_RECORD,
             Permissions::FINANCE_RECEIVABLES_VERIFY,
             Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
         ] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
@@ -62,6 +64,11 @@ class ProjectInvoicesBalanceTest extends TestCase
         // needs its own user — the same split ReceivablesPostingTest uses.
         $this->verifier = User::factory()->create(['is_active' => true]);
         $this->verifier->givePermissionTo(Permissions::FINANCE_RECEIVABLES_VERIFY);
+
+        // W1-1: a draft invoice must be checked by someone other than its
+        // preparer before it can be issued.
+        $this->checker = User::factory()->create(['is_active' => true]);
+        $this->checker->givePermissionTo(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK);
     }
 
     /** A project with an approved quote, which is what makes it billable. */
@@ -115,6 +122,11 @@ class ProjectInvoicesBalanceTest extends TestCase
             ])->assertCreated();
 
         $invoice = ProjectInvoice::findOrFail($created->json('data.id'));
+
+        // W1-1: preparer (accountant) may not check their own invoice.
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
 
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")

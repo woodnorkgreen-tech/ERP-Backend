@@ -36,6 +36,7 @@ class WorkInProgressReleaseTest extends TestCase
     use RefreshDatabase;
 
     private User $accountant;
+    private User $checker;
 
     protected function setUp(): void
     {
@@ -48,6 +49,7 @@ class WorkInProgressReleaseTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
             Permissions::FINANCE_RECEIVABLES_REVERSE,
             Permissions::FINANCE_REPORTS_VIEW,
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
         ] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
@@ -59,6 +61,10 @@ class WorkInProgressReleaseTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_REVERSE,
             Permissions::FINANCE_REPORTS_VIEW,
         ]);
+
+        // W1-1: the preparer (accountant, above) must not be their own checker.
+        $this->checker = User::factory()->create(['is_active' => true]);
+        $this->checker->givePermissionTo(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK);
     }
 
     private function enquiry(float $agreedPrice): ProjectEnquiry
@@ -129,6 +135,10 @@ class WorkInProgressReleaseTest extends TestCase
             ])->assertCreated();
 
         $invoice = ProjectInvoice::findOrFail($created->json('data.id'));
+
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
 
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
@@ -272,6 +282,10 @@ class WorkInProgressReleaseTest extends TestCase
             ])->assertCreated();
 
         $invoice = ProjectInvoice::findOrFail($created->json('data.id'));
+
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
 
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")

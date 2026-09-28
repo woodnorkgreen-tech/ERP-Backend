@@ -31,6 +31,18 @@ class PayrollIntegrityTest extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 
+    /**
+     * config() mutates the application config array directly, which
+     * RefreshDatabase does not touch and PHPUnit does not reset between
+     * tests sharing one process — a map entry set in one test would
+     * otherwise leak into every test that runs after it in the same run.
+     */
+    protected function tearDown(): void
+    {
+        config(['finance_accounts.map' => []]);
+        parent::tearDown();
+    }
+
     public function test_payroll_api_requires_manage_payroll_permission(): void
     {
         Sanctum::actingAs($this->user());
@@ -131,6 +143,129 @@ class PayrollIntegrityTest extends TestCase
         $this->assertSame($payment->id, $run->fresh()->payment_journal_entry_id);
         $this->assertSame($accrual->id, $posting->postAccrual($run->fresh())->id);
         $this->assertSame($payment->id, $posting->postPayment($run->fresh(), $source, '2026-08-31', 'DUPLICATE')->id);
+    }
+
+    /**
+     * Critical Risk C1 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+     * every literal reference-chart code payroll posts against must be
+     * translated through ChartAccountMap before it is looked up, so an
+     * installation whose real chart uses different codes for these accounts
+     * still resolves correctly instead of throwing at posting time.
+     */
+    public function test_payroll_accrual_resolves_accounts_through_the_chart_account_map(): void
+    {
+        $this->actingAsPayrollManager();
+        $this->financeConfiguration();
+        $employee = $this->employee();
+
+        // Simulate an installation whose real chart uses a mnemonic code for
+        // Salaries & Wages, distinct from the reference chart's 7550. Both
+        // rows exist: 7550 stays present but unused, proving resolution truly
+        // followed the map rather than happening to find 7550 anyway.
+        $mappedSalaries = \App\Modules\Finance\Models\ChartOfAccount::create([
+            'code' => 'SAL-001', 'name' => 'Salaries & Wages (local chart)',
+            'category' => 'expense', 'account_type' => 'opex',
+            'normal_balance' => 'debit', 'is_postable' => true, 'is_active' => true,
+        ]);
+        config(['finance_accounts.map.7550' => 'SAL-001']);
+
+        $run = PayrollRun::create([
+            'payroll_month' => '2026-08', 'status' => 'locked',
+            'total_gross' => 100000, 'total_net' => 80000, 'total_statutory' => 20000,
+        ]);
+        Payslip::create([
+            'payroll_run_id' => $run->id, 'employee_id' => $employee->id,
+            'payroll_month' => '2026-08', 'basic_salary' => 100000,
+            'gross_pay' => 100000, 'net_pay' => 80000,
+            'tax_breakdown' => ['paye' => 15000, 'nssf' => 1000, 'shif' => 2500, 'housing_levy' => 1500],
+            'ledger_breakdown' => [], 'status' => 'locked',
+        ]);
+
+        $accrual = app(PayrollFinancePostingService::class)->postAccrual($run);
+
+        $this->assertTrue($accrual->isBalanced());
+        $this->assertDatabaseHas('journal_lines', [
+            'journal_entry_id' => $accrual->id,
+            'account_id' => $mappedSalaries->id,
+            'entry_type' => 'debit',
+        ]);
+        $this->assertDatabaseMissing('journal_lines', [
+            'journal_entry_id' => $accrual->id,
+            'account_id' => ChartOfAccount::where('code', '7550')->value('id'),
+        ]);
+    }
+
+    /**
+     * The companion case: an installation that has NOT mapped 7550 (the
+     * default in development and in every other test in this file) must
+     * resolve exactly as it always has. This is what makes the fix additive
+     * rather than a behaviour change for every existing deployment.
+     */
+    public function test_payroll_accrual_still_resolves_to_the_reference_code_when_unmapped(): void
+    {
+        $this->actingAsPayrollManager();
+        $this->financeConfiguration();
+        $employee = $this->employee();
+
+        $run = PayrollRun::create([
+            'payroll_month' => '2026-08', 'status' => 'locked',
+            'total_gross' => 100000, 'total_net' => 80000, 'total_statutory' => 20000,
+        ]);
+        Payslip::create([
+            'payroll_run_id' => $run->id, 'employee_id' => $employee->id,
+            'payroll_month' => '2026-08', 'basic_salary' => 100000,
+            'gross_pay' => 100000, 'net_pay' => 80000,
+            'tax_breakdown' => ['paye' => 15000, 'nssf' => 1000, 'shif' => 2500, 'housing_levy' => 1500],
+            'ledger_breakdown' => [], 'status' => 'locked',
+        ]);
+
+        $accrual = app(PayrollFinancePostingService::class)->postAccrual($run);
+
+        $this->assertDatabaseHas('journal_lines', [
+            'journal_entry_id' => $accrual->id,
+            'account_id' => ChartOfAccount::where('code', '7550')->value('id'),
+            'entry_type' => 'debit',
+        ]);
+    }
+
+    /**
+     * Critical Risk C7 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+     * payroll's cash-out used to create only a JournalEntry and reference
+     * columns on the run itself — no Payment row, so payroll was invisible
+     * to every Payment-based control (fund custody, reversal, bank
+     * reconciliation). This pins that a real, correctly-linked Payment now
+     * exists, through the same settlement engine every other payment uses.
+     */
+    public function test_marking_a_run_paid_creates_a_real_payment_record(): void
+    {
+        $this->actingAsPayrollManager();
+        $this->financeConfiguration();
+        $run = $this->runWithPayslip(80000);
+        $source = PaymentSource::firstOrFail();
+        $posting = app(PayrollFinancePostingService::class);
+        $posting->postAccrual($run);
+
+        $posting->postPayment($run->fresh(), $source, '2026-08-31', 'BANK-2026-08');
+
+        $run->refresh();
+        $this->assertNotNull($run->payment_id);
+
+        $payment = \App\Modules\Finance\Models\Payment::find($run->payment_id);
+        $this->assertNotNull($payment, 'markPaid() must create an independent Payment row, not just a journal entry.');
+        $this->assertSame('80000.00', (string) $payment->amount);
+        $this->assertSame($source->id, $payment->payment_source_id);
+        $this->assertSame('active', $payment->status);
+        $this->assertSame(\App\Modules\HR\Models\PayrollRun::class, $payment->source_document_type);
+        $this->assertSame($run->id, $payment->source_document_id);
+        $this->assertNotNull($payment->payment_no);
+
+        // Retrying postPayment() for the same run must not mint a second
+        // Payment — the funnel's own idempotency (entry_no) already made the
+        // journal side safe to retry; the settlement idempotency_key does
+        // the same job for the cash side.
+        $again = $posting->postPayment($run->fresh(), $source, '2026-08-31', 'DUPLICATE');
+        $this->assertSame(1, \App\Modules\Finance\Models\Payment::where('source_document_type', \App\Modules\HR\Models\PayrollRun::class)
+            ->where('source_document_id', $run->id)->count());
     }
 
     public function test_inconsistent_payslips_cannot_create_a_balanced_looking_header(): void

@@ -277,7 +277,7 @@ class JournalPostingService
             ? VatTreatment::whereKey($line->vat_treatment_id)->value('gl_account_id')
             : null;
 
-        $account ??= ChartOfAccount::postable()->where('code', self::VAT_INPUT_CODE)->value('id');
+        $account ??= ChartOfAccount::postable()->where('code', ChartAccountMap::local(self::VAT_INPUT_CODE))->value('id');
 
         if (! $account) {
             throw new InvalidArgumentException(
@@ -295,7 +295,7 @@ class JournalPostingService
             ? WhtCategory::whereKey($line->wht_category_id)->value('gl_account_id')
             : null;
 
-        $account ??= ChartOfAccount::postable()->where('code', self::WHT_PAYABLE_CODE)->value('id');
+        $account ??= ChartOfAccount::postable()->where('code', ChartAccountMap::local(self::WHT_PAYABLE_CODE))->value('id');
 
         if (! $account) {
             throw new InvalidArgumentException(
@@ -496,43 +496,42 @@ class JournalPostingService
             );
         }
 
-        return DB::transaction(function () use ($original, $period, $actorId, $reason) {
-            $entry = JournalEntry::create([
-                'entry_no' => $this->reversalEntryNo($original),
-                'posting_date' => now()->toDateString(),
-                'accounting_period_id' => $period->id,
-                // Identity travels with the reversal so the compensating entry
-                // is reachable from the same document the original was.
-                'cost_line_id' => $original->cost_line_id,
-                'spend_voucher_id' => $original->spend_voucher_id,
-                'source_type' => $original->source_type,
-                'source_id' => $original->source_id,
-                'source_ref' => $original->source_ref,
-                'description' => 'Reversal of '.$original->entry_no.': '.$reason,
-                'total_debit' => $original->total_credit,
-                'total_credit' => $original->total_debit,
-                'status' => 'posted',
-                'reversal_of_id' => $original->id,
-                'created_by' => $actorId,
-                'posted_at' => now(),
-            ]);
+        // Critical Risk C4 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+        // this used to write JournalEntry/JournalLine directly, trusting the
+        // original entry's own stored total_debit/total_credit rather than
+        // re-summing the flipped legs. Routing through postBalancedEntry
+        // means a reversal of an entry whose stored totals do not actually
+        // match its lines — however that happened — is now caught here
+        // rather than silently propagated into a second, equally wrong entry.
+        $legs = $original->lines->map(fn ($originalLine) => [
+            'account_id' => $originalLine->account_id,
+            'entry_type' => $originalLine->entry_type === 'debit' ? 'credit' : 'debit',
+            'amount' => $originalLine->amount,
+            'currency' => $originalLine->currency,
+            'fx_rate' => $originalLine->fx_rate,
+            'base_amount' => $originalLine->base_amount,
+            'description' => 'Reversal: '.($originalLine->description ?? $original->source_ref),
+            'cost_centre_id' => $originalLine->cost_centre_id,
+            'activity_id' => $originalLine->activity_id,
+            'project_id' => $originalLine->project_id,
+            'project_enquiry_id' => $originalLine->project_enquiry_id,
+        ])->all();
 
-            foreach ($original->lines as $originalLine) {
-                JournalLine::create([
-                    'journal_entry_id' => $entry->id,
-                    'account_id' => $originalLine->account_id,
-                    'entry_type' => $originalLine->entry_type === 'debit' ? 'credit' : 'debit',
-                    'amount' => $originalLine->amount,
-                    'currency' => $originalLine->currency,
-                    'fx_rate' => $originalLine->fx_rate,
-                    'base_amount' => $originalLine->base_amount,
-                    'description' => 'Reversal: '.($originalLine->description ?? $original->source_ref),
-                    'cost_centre_id' => $originalLine->cost_centre_id,
-                    'activity_id' => $originalLine->activity_id,
-                    'project_id' => $originalLine->project_id,
-                    'project_enquiry_id' => $originalLine->project_enquiry_id,
-                ]);
-            }
+        return DB::transaction(function () use ($original, $period, $actorId, $reason, $legs) {
+            $entry = $this->postBalancedEntry(
+                entryNo: $this->reversalEntryNo($original),
+                postingDate: now()->toDateString(),
+                sourceType: $original->source_type,
+                sourceId: $original->source_id,
+                sourceRef: $original->source_ref,
+                description: 'Reversal of '.$original->entry_no.': '.$reason,
+                legs: $legs,
+                createdBy: $actorId,
+                accountingPeriodId: $period->id,
+                spendVoucherId: $original->spend_voucher_id,
+                costLineId: $original->cost_line_id,
+                reversalOfId: $original->id,
+            );
 
             $original->forceFill(['status' => 'reversed'])->save();
 
@@ -679,9 +678,16 @@ class JournalPostingService
         return $this->accountByCode(self::PAYABLE_CODE);
     }
 
+    /**
+     * Resolves a reference-chart code to a postable account id, translating it
+     * through {@see ChartAccountMap} first. An installation whose chart agrees
+     * with the reference codes sees no change: unmapped codes resolve to
+     * themselves. This is the one place every literal code constant in this
+     * class must pass through — see the stabilization note on Critical Risk C1.
+     */
     private function accountByCode(string $code): ?int
     {
-        return ChartOfAccount::postable()->where('code', $code)->value('id');
+        return ChartOfAccount::postable()->where('code', ChartAccountMap::local($code))->value('id');
     }
 
     /** No financial fact may enter an unassigned or closed reporting month. */
@@ -938,55 +944,41 @@ class JournalPostingService
             );
         }
 
-        $legs = $this->supplierInvoiceLegs($bill, $gross, $debitAccountId, $payable);
-
-        $accountIds = array_unique(array_column($legs, 'account_id'));
-        if (ChartOfAccount::postable()->whereIn('id', $accountIds)->count() !== count($accountIds)) {
-            throw new InvalidArgumentException(
-                "Supplier invoice {$bill->bill_number} resolves to an inactive or non-postable account. "
-                .'Finance must correct the account mapping before posting.'
-            );
-        }
-
         $requisition = $bill->purchaseOrder?->requisition;
         $projectId = $requisition?->project_id ?? $bill->project_id;
         $projectEnquiryId = $requisition?->project_enquiry_id ?? $bill->project_enquiry_id;
-        $total = array_reduce(
-            array_filter($legs, fn (array $leg) => $leg['entry_type'] === 'debit'),
-            fn (string $carry, array $leg) => bcadd($carry, $leg['amount'], 2),
-            '0.00',
-        );
 
-        return DB::transaction(function () use ($bill, $entryNo, $period, $projectId, $projectEnquiryId, $legs, $total) {
-            $entry = JournalEntry::create([
-                'entry_no' => $entryNo,
-                'posting_date' => (string) ($bill->bill_date?->toDateString() ?? now()->toDateString()),
-                'accounting_period_id' => $period->id,
-                'source_type' => Bill::class,
-                'source_id' => $bill->id,
-                'source_ref' => $bill->bill_number,
-                'description' => $bill->isDirect()
-                    ? 'Direct supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
-                    : 'Supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
-                        .' accepted against '.($bill->purchaseOrder?->po_number ?? 'order'),
-                'total_debit' => $total,
-                'total_credit' => $total,
-                'status' => 'posted',
-                'created_by' => $bill->verified_by ?? auth()->id(),
-                'posted_at' => now(),
-            ]);
+        // Each leg carries its own project dimension so postBalancedEntry can
+        // write them exactly as it would for any other producer. Account
+        // postability is re-checked there too (Critical Risk C4 — this
+        // method used to write JournalEntry/JournalLine directly, with
+        // total_debit/total_credit both set from the debit legs' sum alone
+        // and no independent bccomp assertion that the credit legs actually
+        // matched. The funnel is the one place that assertion is made).
+        $legs = array_map(function (array $leg) use ($projectId, $projectEnquiryId) {
+            $leg['project_id'] ??= $projectId;
+            $leg['project_enquiry_id'] ??= $projectEnquiryId;
 
-            foreach ($legs as $leg) {
-                JournalLine::create([
-                    'journal_entry_id' => $entry->id,
-                    'currency' => 'KES',
-                    'fx_rate' => 1,
-                    'base_amount' => $leg['amount'],
-                    'project_id' => $projectId,
-                    'project_enquiry_id' => $projectEnquiryId,
-                    ...$leg,
-                ]);
-            }
+            return $leg;
+        }, $this->supplierInvoiceLegs($bill, $gross, $debitAccountId, $payable));
+
+        $description = $bill->isDirect()
+            ? 'Direct supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
+            : 'Supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
+                .' accepted against '.($bill->purchaseOrder?->po_number ?? 'order');
+
+        return DB::transaction(function () use ($bill, $entryNo, $period, $legs, $description) {
+            $entry = $this->postBalancedEntry(
+                entryNo: $entryNo,
+                postingDate: (string) ($bill->bill_date?->toDateString() ?? now()->toDateString()),
+                sourceType: Bill::class,
+                sourceId: $bill->id,
+                sourceRef: $bill->bill_number,
+                description: $description,
+                legs: $legs,
+                createdBy: $bill->verified_by ?? auth()->id(),
+                accountingPeriodId: $period->id,
+            );
 
             $this->markGrnAccrualsSettledByBill($bill);
 
@@ -1407,8 +1399,8 @@ class JournalPostingService
     public function postBalancedEntry(
         string $entryNo,
         string $postingDate,
-        string $sourceType,
-        int $sourceId,
+        ?string $sourceType,
+        ?int $sourceId,
         ?string $sourceRef,
         string $description,
         array $legs,
@@ -1416,6 +1408,7 @@ class JournalPostingService
         ?int $accountingPeriodId = null,
         ?int $spendVoucherId = null,
         ?int $costLineId = null,
+        ?int $reversalOfId = null,
     ): JournalEntry {
         if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
             return $existing;
@@ -1466,7 +1459,7 @@ class JournalPostingService
         }
 
         return DB::transaction(function () use (
-            $entryNo, $postingDate, $period, $sourceType, $sourceId, $sourceRef, $description, $legs, $debit, $createdBy, $spendVoucherId, $costLineId
+            $entryNo, $postingDate, $period, $sourceType, $sourceId, $sourceRef, $description, $legs, $debit, $createdBy, $spendVoucherId, $costLineId, $reversalOfId
         ) {
             $entry = JournalEntry::create([
                 'entry_no' => $entryNo,
@@ -1474,6 +1467,7 @@ class JournalPostingService
                 'accounting_period_id' => $period->id,
                 'spend_voucher_id' => $spendVoucherId,
                 'cost_line_id' => $costLineId,
+                'reversal_of_id' => $reversalOfId,
                 'source_type' => $sourceType,
                 'source_id' => $sourceId,
                 'source_ref' => $sourceRef,
@@ -1581,7 +1575,7 @@ class JournalPostingService
         $sourceAccount = $disbursement->payment_source_id
             ? PaymentSource::whereKey($disbursement->payment_source_id)->value('gl_account_id')
             : null;
-        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', '1010')->value('id');
+        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', ChartAccountMap::local('1010'))->value('id');
 
         if (! $advanceAccount || ! $sourceAccount) {
             throw new InvalidArgumentException(
@@ -1633,9 +1627,14 @@ class JournalPostingService
      */
     public function postPettyCashSurrender(PettyCashRequisition $requisition): ?JournalEntry
     {
-        $requisition->loadMissing(['surrenderItems.expenseCode', 'disbursement.paymentSource']);
+        $requisition->loadMissing(['surrenderItems.expenseCode', 'surrenderItems.costLine', 'disbursement.paymentSource']);
 
-        $entryNo = 'JE-PCS-'.str_pad((string) $requisition->id, 7, '0', STR_PAD_LEFT);
+        // W3-7: after a controlled reversal the corrected surrender posts a new
+        // generation. Generation 0 keeps the historical number, so every entry
+        // already posted stays idempotent exactly as before.
+        $generation = (int) ($requisition->surrender_posting_generation ?? 0);
+        $entryNo = 'JE-PCS-'.str_pad((string) $requisition->id, 7, '0', STR_PAD_LEFT)
+            .($generation > 0 ? '-G'.($generation + 1) : '');
         if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
             return $existing;
         }
@@ -1644,7 +1643,7 @@ class JournalPostingService
         $sourceAccount = $requisition->disbursement?->payment_source_id
             ? PaymentSource::whereKey($requisition->disbursement->payment_source_id)->value('gl_account_id')
             : null;
-        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', '1010')->value('id');
+        $sourceAccount ??= ChartOfAccount::postable()->where('category', 'asset')->where('code', ChartAccountMap::local('1010'))->value('id');
 
         if (! $advanceAccount || ! $sourceAccount) {
             throw new InvalidArgumentException(
@@ -1738,7 +1737,7 @@ class JournalPostingService
 
         $postingDate = (string) ($requisition->surrender_reconciled_at?->toDateString() ?? now()->toDateString());
 
-        return $this->postBalancedEntry(
+        $entry = $this->postBalancedEntry(
             entryNo: $entryNo,
             postingDate: $postingDate,
             sourceType: PettyCashRequisition::class,
@@ -1748,6 +1747,23 @@ class JournalPostingService
             legs: $legs,
             createdBy: $requisition->surrender_reconciled_by ?? auth()->id(),
         );
+
+        // STAB-7: each surrender item's own CostLine was created with
+        // postsIndependently: false (see reconcileSurrender()) precisely
+        // because this entry — not a separate one per line — is its real,
+        // single posting. Stamp it here so the CostLine reads as posted and
+        // points at the entry that actually recognised its amount, instead
+        // of sitting unposted forever.
+        foreach ($requisition->surrenderItems as $item) {
+            if ($item->costLine && ! $item->costLine->posted_at) {
+                $item->costLine->forceFill([
+                    'journal_entry_id' => $entry->id,
+                    'posted_at' => now(),
+                ])->save();
+            }
+        }
+
+        return $entry;
     }
 
     /**
@@ -1901,7 +1917,7 @@ class JournalPostingService
 
             if ($accountCode) {
                 return ChartOfAccount::postable()
-                    ->where('code', $accountCode)
+                    ->where('code', ChartAccountMap::local($accountCode))
                     ->first();
             }
         }
@@ -1909,7 +1925,7 @@ class JournalPostingService
         // Check source document type
         if ($payment->sourceDocument instanceof Bill) {
             return ChartOfAccount::postable()
-                ->where('code', self::PAYABLE_CODE)
+                ->where('code', ChartAccountMap::local(self::PAYABLE_CODE))
                 ->first();
         }
 
