@@ -159,6 +159,10 @@ final class RolePermissions
                 Permissions::FINANCE_RECEIVABLES_CORRECT, Permissions::FINANCE_RECEIVABLES_READ,
                 Permissions::FINANCE_RECEIVABLES_RECORD, Permissions::FINANCE_RECEIVABLES_RELEASE,
                 Permissions::FINANCE_RECEIVABLES_REVERSE, Permissions::FINANCE_RECEIVABLES_VERIFY,
+                // B1 (WNG, 2026-09-28): Accounts is the independent invoice checker (W1-1).
+                // Holding this does not let anyone check an invoice they prepared: the
+                // check action refuses the preparer, so segregation holds per invoice.
+                Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
                 Permissions::FINANCE_PAYMENT_SOURCES_MANAGE,
                 Permissions::FINANCE_REQUISITION_TYPES_MANAGE, Permissions::FINANCE_SPEND_VOUCHERS_APPROVE,
                 Permissions::FINANCE_SPEND_VOUCHERS_CREATE, Permissions::FINANCE_SPEND_VOUCHERS_POST,

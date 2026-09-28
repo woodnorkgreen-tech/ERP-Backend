@@ -150,6 +150,110 @@ class InvoiceReviewWorkflowTest extends TestCase
         $this->assertNull($invoice->journal_entry_id);
     }
 
+    /**
+     * An Accounts user built from the canonical role matrix — not ad-hoc grants —
+     * so these tests prove the B1 production configuration itself.
+     */
+    private function accountsUser(): User
+    {
+        $role = \Spatie\Permission\Models\Role::findOrCreate('Accounts', 'web');
+        foreach (\App\Constants\RolePermissions::matrix()['Accounts'] as $permission) {
+            Permission::findOrCreate($permission, 'web');
+        }
+        $role->syncPermissions(\App\Constants\RolePermissions::matrix()['Accounts']);
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $user = User::factory()->create(['is_active' => true]);
+        $user->assignRole($role);
+
+        return $user;
+    }
+
+    private function draftInvoiceBy(User $preparer, ProjectEnquiry $enquiry): ProjectInvoice
+    {
+        $response = $this->actingAs($preparer, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices", [
+                'invoice_date' => '2026-09-08',
+                'due_date' => '2026-10-08',
+                'lines' => [
+                    ['description' => 'Stand build', 'quantity' => 1, 'unit_price' => 100000, 'vat_treatment_id' => $this->vat()->id],
+                ],
+            ])->assertCreated();
+
+        return ProjectInvoice::findOrFail($response->json('data.id'));
+    }
+
+    public function test_b1_the_accounts_role_holds_the_invoice_check_permission(): void
+    {
+        $this->assertContains(
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
+            \App\Constants\RolePermissions::matrix()['Accounts'],
+        );
+        $this->assertTrue($this->accountsUser()->can(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK));
+    }
+
+    public function test_b1_scenario_a_an_accounts_preparer_cannot_check_their_own_invoice(): void
+    {
+        $enquiry = $this->enquiryWithApprovedQuote();
+        $userA = $this->accountsUser();
+        $invoice = $this->draftInvoiceBy($userA, $enquiry);
+
+        $this->actingAs($userA, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertStatus(422);
+
+        $this->assertNull($invoice->fresh()->checked_at);
+    }
+
+    public function test_b1_scenario_b_and_d_another_accounts_user_checks_then_the_invoice_issues_once(): void
+    {
+        $enquiry = $this->enquiryWithApprovedQuote();
+        $userA = $this->accountsUser();
+        $userB = $this->accountsUser();
+        $invoice = $this->draftInvoiceBy($userA, $enquiry);
+
+        // B: independent Accounts checker succeeds.
+        $this->actingAs($userB, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+        $this->assertSame($userB->id, $invoice->fresh()->checked_by);
+
+        // D: the checked invoice issues (Accounts holds the issue permission).
+        $this->actingAs($userA, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
+            ->assertOk();
+
+        $invoice->refresh();
+        $this->assertSame('issued', $invoice->status);
+        $this->assertNotNull($invoice->journal_entry_id);
+        $this->assertSame(1, DB::table('journal_entries')
+            ->where('source_type', ProjectInvoice::class)->where('source_id', $invoice->id)->count());
+    }
+
+    public function test_b1_scenario_c_a_user_without_the_check_permission_gets_403(): void
+    {
+        $enquiry = $this->enquiryWithApprovedQuote();
+        $invoice = $this->draftInvoiceBy($this->accountsUser(), $enquiry);
+
+        $this->actingAs($this->outsider, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertForbidden();
+    }
+
+    public function test_b1_scenario_e_an_unchecked_invoice_cannot_be_issued_by_accounts(): void
+    {
+        $enquiry = $this->enquiryWithApprovedQuote();
+        $userA = $this->accountsUser();
+        $invoice = $this->draftInvoiceBy($userA, $enquiry);
+
+        $this->actingAs($this->accountsUser(), 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
+            ->assertStatus(422);
+
+        $this->assertSame('draft', $invoice->fresh()->status);
+        $this->assertNull($invoice->fresh()->journal_entry_id);
+    }
+
     public function test_the_preparer_cannot_check_their_own_invoice(): void
     {
         $enquiry = $this->enquiryWithApprovedQuote();
