@@ -5,6 +5,7 @@ namespace App\Modules\ClientService\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\ClientService\Http\Requests\ClientRequest;
 use App\Modules\ClientService\Models\Client;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -97,7 +98,16 @@ class ClientController extends Controller
      */
     public function store(ClientRequest $request): JsonResponse
     {
-        $client = Client::create($this->withResolvedName($request->validated()));
+        $data = $request->validated();
+        $contacts = $data['contacts'] ?? [];
+        unset($data['contacts']);
+
+        $client = DB::transaction(function () use ($data, $contacts) {
+            $client = Client::create($this->withResolvedName($data));
+            $this->syncContacts($client, $contacts);
+
+            return $client->load('contacts');
+        });
 
         return response()->json([
             'message' => 'Client created successfully',
@@ -153,7 +163,16 @@ class ClientController extends Controller
     public function update(ClientRequest $request, $id): JsonResponse
     {
         $client = Client::findOrFail($id);
-        $client->update($this->withResolvedName($request->validated()));
+        $data = $request->validated();
+        $contacts = $data['contacts'] ?? [];
+        unset($data['contacts']);
+
+        $client = DB::transaction(function () use ($client, $data, $contacts) {
+            $client->update($this->withResolvedName($data));
+            $this->syncContacts($client, $contacts);
+
+            return $client->load('contacts');
+        });
 
         return response()->json([
             'message' => 'Client updated successfully',
@@ -203,13 +222,14 @@ class ClientController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Client::query()
+        $query = Client::with('contacts')
             ->when($request->filled('search'), function ($builder) use ($request) {
                 $search = $request->string('search');
                 $builder->where(fn ($nested) => $nested
                     ->where('full_name', 'like', "%{$search}%")
                     ->orWhere('email', 'like', "%{$search}%")
-                    ->orWhere('contact_person', 'like', "%{$search}%"));
+                    ->orWhere('contact_person', 'like', "%{$search}%")
+                    ->orWhereHas('contacts', fn ($contacts) => $contacts->where('name', 'like', "%{$search}%")));
             })
             ->when($request->filled('status'), fn ($builder) => $builder->where('status', $request->status))
             ->when($request->filled('company'), fn ($builder) => $builder->where('company_name', 'like', "%{$request->company}%"))
@@ -252,7 +272,7 @@ class ClientController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $client = Client::findOrFail($id);
+        $client = Client::with('contacts')->findOrFail($id);
 
         return response()->json([
             'data' => $client
@@ -365,6 +385,23 @@ class ClientController extends Controller
         return response()->json([
             'data' => $leadSources
         ]);
+    }
+
+    private function syncContacts(Client $client, array $contacts): void
+    {
+        $primaryIndex = collect($contacts)->search(fn (array $contact) => !empty($contact['is_primary']));
+        $primaryIndex = $primaryIndex === false ? 0 : $primaryIndex;
+
+        $client->contacts()->delete();
+        foreach (array_values($contacts) as $index => $contact) {
+            $client->contacts()->create([
+                'name' => $contact['name'],
+                'email' => $contact['email'],
+                'phone' => $contact['phone'],
+                'job_title' => $contact['job_title'] ?? null,
+                'is_primary' => $index === $primaryIndex,
+            ]);
+        }
     }
 
     /**

@@ -58,4 +58,9 @@ class Client extends Model
     {
         return $this->hasMany(ClientInteraction::class, 'client_id');
     }
+
+    public function contacts(): HasMany
+    {
+        return $this->hasMany(ClientContact::class, 'client_id')->orderByDesc('is_primary')->orderBy('name');
+    }
 }

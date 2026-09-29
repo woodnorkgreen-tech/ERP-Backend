@@ -72,6 +72,27 @@ class ClientDirectoryTest extends TestCase
         $this->assertNull(Client::firstOrFail()->company_name);
     }
 
+    public function test_a_company_can_store_multiple_contact_persons_with_one_primary_contact(): void
+    {
+        $response = $this->postJson('/api/clientservice/clients', $this->payload([
+            'customer_type' => 'company',
+            'company_name' => 'Bright Events Ltd',
+            'full_name' => '',
+            'contact_person' => 'Grace Wanjiku',
+            'contacts' => [
+                ['name' => 'Grace Wanjiku', 'email' => 'grace@example.com', 'phone' => '+254712345678', 'is_primary' => true],
+                ['name' => 'Peter Otieno', 'email' => 'peter@example.com', 'phone' => '+254722222222', 'job_title' => 'Procurement Lead', 'is_primary' => false],
+            ],
+        ]))->assertCreated();
+
+        $client = Client::firstOrFail();
+        $this->assertCount(2, $client->contacts);
+        $this->assertSame('Grace Wanjiku', $client->contacts->firstWhere('is_primary', true)->name);
+        $this->assertSame('email', $client->preferred_contact);
+        $this->assertSame('Procurement Lead', $client->contacts->firstWhere('name', 'Peter Otieno')->job_title);
+        $response->assertJsonPath('data.contacts.1.name', 'Peter Otieno');
+    }
+
     public function test_each_client_type_requires_only_the_name_that_applies_to_it(): void
     {
         $this->postJson('/api/clientservice/clients', $this->payload([

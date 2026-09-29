@@ -32,6 +32,12 @@ class ClientRequest extends FormRequest
             'company_name' => ['required_unless:customer_type,individual', 'nullable', 'string', 'max:255'],
 
             'contact_person' => ['nullable', 'string', 'max:255'],
+            'contacts' => ['nullable', 'array'],
+            'contacts.*.name' => ['required', 'string', 'max:255'],
+            'contacts.*.email' => ['required', 'email:filter', 'max:255'],
+            'contacts.*.phone' => ['required', 'string', 'max:20'],
+            'contacts.*.job_title' => ['nullable', 'string', 'max:255'],
+            'contacts.*.is_primary' => ['sometimes', 'boolean'],
             // `email:filter` keeps the permissive intent of the hand-rolled
             // regex this replaced, without accepting addresses PHP itself
             // rejects.
