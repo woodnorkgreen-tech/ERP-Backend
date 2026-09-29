@@ -22,6 +22,7 @@ class TripRequestController extends Controller
         'assignedDriver.employee',
         'assignedVehicle',
         'assignedBy',
+        'loadingResponsible',
     ];
 
     public function index(Request $request): AnonymousResourceCollection
@@ -31,10 +32,15 @@ class TripRequestController extends Controller
         $isClientService = $user?->hasAnyRole(['Client Service']) ?? false;
 
         $query = TripRequest::with($this->with)
-            // Client Service follows every client/project trip; ordinary users
-            // only see requests they personally submitted.
-            ->when($isClientService && !$isLogistics, fn($q) => $q->whereNotNull('project_id'))
-            ->when(!$isLogistics && !$isClientService, fn($q) => $q->where('requested_by_id', $user->employee?->id))
+            // Project-linked trips are the merged Logistics Log — everyone
+            // needs to see the schedule for those, the same way the old Log
+            // was visible to the whole team. A personal ("other") request
+            // with no project stays private to its requester unless you're
+            // Logistics or Client Service, who see everything regardless.
+            ->when(!$isLogistics && !$isClientService, fn($q) => $q->where(function ($q2) use ($user) {
+                $q2->whereNotNull('project_id')
+                    ->orWhere('requested_by_id', $user->employee?->id);
+            }))
             ->when($request->status,     fn($q) => $q->where('status', $request->status))
             ->when($request->priority,   fn($q) => $q->where('priority', $request->priority))
             ->when($request->project_id, fn($q) => $q->where('project_id', $request->project_id))
@@ -47,19 +53,39 @@ class TripRequestController extends Controller
     public function store(Request $request): TripRequestResource|JsonResponse
     {
         $validated = $request->validate([
-            'context_type'        => 'required|in:project,other',
-            'project_id'          => 'required_if:context_type,project|nullable|exists:project_enquiries,id',
-            'delivery_type_label' => 'required|string|max:150',
-            'requested_by_id'     => 'required|exists:employees,id',
-            'priority'            => 'required|in:low,medium,high,emergency',
-            'pickup_location'     => 'required|string|max:300',
-            'pickup_lat'          => 'nullable|numeric|between:-90,90',
-            'pickup_lng'          => 'nullable|numeric|between:-180,180',
-            'destination'         => 'required|string|max:300',
-            'destination_lat'     => 'nullable|numeric|between:-90,90',
-            'destination_lng'     => 'nullable|numeric|between:-180,180',
-            'required_date'       => 'required|date|after_or_equal:today',
-            'notes'               => 'nullable|string|max:1000',
+            'context_type'          => 'required|in:project,other',
+            'transport_arrangement' => 'sometimes|in:company,client',
+            'project_id'            => 'required_if:context_type,project|nullable|exists:project_enquiries,id',
+            'delivery_type_label'   => 'required|string|max:150',
+            'requested_by_id'       => 'required|exists:employees,id',
+            'priority'              => 'required|in:low,medium,high,emergency',
+            'pickup_location'       => 'required|string|max:300',
+            'pickup_lat'            => 'nullable|numeric|between:-90,90',
+            'pickup_lng'            => 'nullable|numeric|between:-180,180',
+            'destination'           => 'required|string|max:300',
+            'destination_lat'       => 'nullable|numeric|between:-90,90',
+            'destination_lng'       => 'nullable|numeric|between:-180,180',
+            'required_date'         => 'required|date|after_or_equal:today',
+            'loading_time'          => 'nullable|string|max:20',
+            'departure_time'        => 'nullable|string|max:20',
+            // A literal "to be communicated" string is never sent for
+            // setdown_time — the client leaves it out and says so in notes
+            // instead, matching how the old Log avoided this exact field
+            // failing "must be a valid date" validation.
+            'setdown_time'          => 'nullable|date',
+            'vehicle_note'          => 'nullable|string|max:150',
+            // Backward-calculation from the delivery deadline (optional —
+            // a trip can still just use the plain loading_time/
+            // departure_time fields above instead).
+            'required_delivery_at'      => 'nullable|date',
+            'estimated_loading_minutes' => 'nullable|integer|min:0|max:1440',
+            // Purely informational tag driving the create form's minute
+            // presets — doesn't change the calculation itself.
+            'load_size'                 => 'nullable|in:small,medium,large',
+            'estimated_travel_minutes'  => 'nullable|integer|min:0|max:1440',
+            'buffer_minutes'            => 'nullable|integer|min:0|max:1440',
+            'loading_responsible_id'    => 'nullable|exists:employees,id',
+            'notes'                 => 'nullable|string|max:1000',
         ]);
 
         $trip = TripRequest::create($validated);
@@ -81,19 +107,30 @@ class TripRequestController extends Controller
         }
 
         $validated = $request->validate([
-            'context_type'        => 'sometimes|in:project,other',
-            'project_id'          => 'nullable|exists:project_enquiries,id',
-            'delivery_type_label' => 'sometimes|string|max:150',
-            'requested_by_id'     => 'sometimes|exists:employees,id',
-            'priority'            => 'sometimes|in:low,medium,high,emergency',
-            'pickup_location'     => 'sometimes|string|max:300',
-            'pickup_lat'          => 'nullable|numeric|between:-90,90',
-            'pickup_lng'          => 'nullable|numeric|between:-180,180',
-            'destination'         => 'sometimes|string|max:300',
-            'destination_lat'     => 'nullable|numeric|between:-90,90',
-            'destination_lng'     => 'nullable|numeric|between:-180,180',
-            'required_date'       => 'sometimes|date|after_or_equal:today',
-            'notes'               => 'nullable|string|max:1000',
+            'context_type'          => 'sometimes|in:project,other',
+            'transport_arrangement' => 'sometimes|in:company,client',
+            'project_id'            => 'nullable|exists:project_enquiries,id',
+            'delivery_type_label'   => 'sometimes|string|max:150',
+            'requested_by_id'       => 'sometimes|exists:employees,id',
+            'priority'              => 'sometimes|in:low,medium,high,emergency',
+            'pickup_location'       => 'sometimes|string|max:300',
+            'pickup_lat'            => 'nullable|numeric|between:-90,90',
+            'pickup_lng'            => 'nullable|numeric|between:-180,180',
+            'destination'           => 'sometimes|string|max:300',
+            'destination_lat'       => 'nullable|numeric|between:-90,90',
+            'destination_lng'       => 'nullable|numeric|between:-180,180',
+            'required_date'         => 'sometimes|date|after_or_equal:today',
+            'loading_time'          => 'nullable|string|max:20',
+            'departure_time'        => 'nullable|string|max:20',
+            'setdown_time'          => 'nullable|date',
+            'vehicle_note'          => 'nullable|string|max:150',
+            'required_delivery_at'      => 'nullable|date',
+            'estimated_loading_minutes' => 'nullable|integer|min:0|max:1440',
+            'load_size'                 => 'nullable|in:small,medium,large',
+            'estimated_travel_minutes'  => 'nullable|integer|min:0|max:1440',
+            'buffer_minutes'            => 'nullable|integer|min:0|max:1440',
+            'loading_responsible_id'    => 'nullable|exists:employees,id',
+            'notes'                 => 'nullable|string|max:1000',
         ]);
 
         $tripRequest->update($validated);
@@ -152,6 +189,28 @@ class TripRequestController extends Controller
         }
         if ($tripRequest->status !== 'approved') {
             return response()->json(['message' => 'Only approved requests can be assigned.'], 422);
+        }
+
+        // A client-arranged pickup (the Log's old "Client to pick" option)
+        // has no company driver/vehicle to assign — it just needs a note on
+        // who's collecting, so it can move straight to "assigned" without
+        // the fleet-availability checks below.
+        if ($tripRequest->transport_arrangement === 'client') {
+            $validated = $request->validate([
+                'vehicle_note'     => 'nullable|string|max:150',
+                'assignment_notes' => 'nullable|string|max:500',
+            ]);
+
+            $tripRequest->update([
+                'status'           => 'assigned',
+                'vehicle_note'     => $validated['vehicle_note'] ?? $tripRequest->vehicle_note,
+                'assigned_by_id'   => Auth::user()->employee?->id,
+                'assigned_at'      => now(),
+                'assignment_notes' => $validated['assignment_notes'] ?? null,
+            ]);
+
+            $tripRequest->load($this->with);
+            return new TripRequestResource($tripRequest);
         }
 
         $validated = $request->validate([
@@ -237,6 +296,62 @@ class TripRequestController extends Controller
         $tripRequest->update(['status' => 'cancelled']);
         $tripRequest->load($this->with);
         return new TripRequestResource($tripRequest);
+    }
+
+    /**
+     * The PO/responsible person confirms loading has actually started —
+     * the "check when the loading has started" half of Kevin's request.
+     * Open to the assigned responsible person (falling back to the
+     * original requester if none was set) or the Logistics team, not
+     * locked to any particular trip status, since loading can genuinely
+     * start any time after the trip is planned.
+     */
+    public function markLoadingStarted(TripRequest $tripRequest): TripRequestResource|JsonResponse
+    {
+        if (!$this->canMarkLoading(Auth::user(), $tripRequest)) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+        if ($tripRequest->loading_started_at) {
+            return response()->json(['message' => 'Loading was already marked as started.'], 422);
+        }
+
+        $tripRequest->update(['loading_started_at' => now()]);
+        $tripRequest->load($this->with);
+        return new TripRequestResource($tripRequest);
+    }
+
+    /**
+     * The other half — marks when loading actually finished, so it can be
+     * compared against departure_by for the overdue check.
+     */
+    public function markLoadingEnded(TripRequest $tripRequest): TripRequestResource|JsonResponse
+    {
+        if (!$this->canMarkLoading(Auth::user(), $tripRequest)) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+        if (!$tripRequest->loading_started_at) {
+            return response()->json(['message' => 'Mark loading as started first.'], 422);
+        }
+        if ($tripRequest->loading_ended_at) {
+            return response()->json(['message' => 'Loading was already marked as ended.'], 422);
+        }
+
+        $tripRequest->update(['loading_ended_at' => now()]);
+        $tripRequest->load($this->with);
+        return new TripRequestResource($tripRequest);
+    }
+
+    private function canMarkLoading($user, TripRequest $tripRequest): bool
+    {
+        if ($this->isLogisticsTeam($user)) {
+            return true;
+        }
+        $employeeId = $user?->employee?->id;
+        if (!$employeeId) {
+            return false;
+        }
+        $responsible = $tripRequest->loading_responsible_id ?: $tripRequest->requested_by_id;
+        return $employeeId === $responsible;
     }
 
     public function destroy(TripRequest $tripRequest): JsonResponse

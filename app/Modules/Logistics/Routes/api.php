@@ -49,6 +49,13 @@ Route::prefix('logistics')->group(function () {
     Route::patch('/trip-requests/{tripRequest}/start',    [TripRequestController::class, 'start']);
     Route::patch('/trip-requests/{tripRequest}/complete', [TripRequestController::class, 'complete']);
     Route::patch('/trip-requests/{tripRequest}/cancel',   [TripRequestController::class, 'cancel']);
+    Route::patch('/trip-requests/{tripRequest}/loading-started', [TripRequestController::class, 'markLoadingStarted']);
+    Route::patch('/trip-requests/{tripRequest}/loading-ended',   [TripRequestController::class, 'markLoadingEnded']);
+
+    // Real drive-time between the picked pickup/destination points, to
+    // auto-fill "Travel Takes (min)" on the loading-timeline auto-calc
+    // instead of it being a guess.
+    Route::post('/travel-estimate', [\App\Modules\Logistics\Controllers\TravelEstimateController::class, 'estimate']);
 
     // Dispatch Board
     Route::get('/dispatch-batches/available-requests',        [DispatchBatchController::class, 'availableRequests']);
