@@ -28,3 +28,5 @@ Thumbs.db
 
 # graphify generated knowledge graph (not source)
 graphify-out/
+*.tar.gz
+/Modules/
