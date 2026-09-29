@@ -12,10 +12,12 @@ use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\GrantsMatrixPermissions;
 use Tests\TestCase;
 
 class OpeningInventoryTest extends TestCase
 {
+    use GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private User $storekeeper;
@@ -30,6 +32,7 @@ class OpeningInventoryTest extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         foreach (['Stores', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);
+            $this->grantMatrixPermissions($role);
         }
 
         $this->workstationId = DB::table('workstations')->insertGetId([

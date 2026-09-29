@@ -8,6 +8,7 @@ class PayrollLedger extends Model
 {
     protected $fillable = [
         'employee_id',
+        'salary_advance_request_id',
         'ledger_month',
         'type',
         'amount_type',

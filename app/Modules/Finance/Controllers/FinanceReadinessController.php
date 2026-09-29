@@ -10,6 +10,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Modules\Finance\Support\CatalogueDimensionMap;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
+use App\Modules\Finance\Support\FinanceChartProfile;
+use App\Modules\Finance\CostCollector\Models\ProjectLabourActual;
 use Illuminate\Support\Facades\DB;
 
 /** A read-only pre-flight check for the reference data Finance depends on. */
@@ -34,14 +37,16 @@ class FinanceReadinessController extends Controller
         // credits an adjustment expense. Without them an approved count is
         // refused rather than silently diverging, which is the better failure —
         // but it should be visible here first.
-        $requiredAccounts = ChartAccountMap::localMany([
-            '1030', '1100', '1200', '1300', '1330',
-            '2100', '2110', '2120', '2150', '2200',
-            '3900', '4100', '6800',
-        ]);
-        $availableRequiredAccounts = DB::table('chart_of_accounts')
-            ->whereIn('code', $requiredAccounts)->where('is_postable', true)->where('is_active', true)->pluck('code');
-        $missingRequiredAccounts = array_values(array_diff($requiredAccounts, $availableRequiredAccounts->all()));
+        // Every account the posting code needs, by function (FinanceAccountFunctions),
+        // resolved through the account map. This replaced a hand-kept list of 13
+        // codes that had fallen behind the code: payroll, WIP release, bank charges
+        // and the default bank were posted to but never checked (Report 53).
+        $accountFunctions = FinanceAccountFunctions::resolution();
+        $profile = config('finance_accounts.profile');
+        $profileProblems = FinanceChartProfile::problems($profile, config('finance_accounts.wip_policy'));
+        $missingRequiredAccounts = collect($accountFunctions)->reject(fn ($f) => $f['resolved'])
+            ->map(fn ($f, $key) => $f['local_code'] === $f['code'] ? "{$key} ({$f['code']})" : "{$key} ({$f['code']} → {$f['local_code']})")
+            ->values()->all();
         $unmappedExpenseCodes = DB::table('expense_codes as ec')
             ->leftJoin('chart_of_accounts as coa', 'coa.id', '=', 'ec.default_debit_account_id')
             ->where('ec.is_active', true)
@@ -61,10 +66,15 @@ class FinanceReadinessController extends Controller
         // no single default to configure. An unanchored pattern read the range
         // hint inside that prose as a reference and reported two deliberately
         // indirect capex codes as a chart misconfiguration that never cleared.
-        $unresolvedCatalogue = DB::table('expense_codes')
+        // A reference the chart profile deliberately leaves unconfigured (WNG's
+        // loans payable: no loan) is reported, not counted as a gap (Report 55).
+        $intentional = array_map('strval', array_keys(FinanceChartProfile::intentionallyUnconfigured($profile)));
+        $unconfigured = DB::table('expense_codes')
             ->whereNull('default_debit_account_id')
             ->where('default_debit_gl', 'REGEXP', '^[0-9]{4}')
-            ->count();
+            ->pluck('default_debit_gl');
+        $intentionallyOff = $unconfigured->filter(fn ($gl) => in_array(substr((string) $gl, 0, 4), $intentional, true))->count();
+        $unresolvedCatalogue = $unconfigured->count() - $intentionallyOff;
         // Active codes that name a department or a stage the catalogue map does
         // not turn into a real dimension row. Counted only where the catalogue
         // states one: "Asset-owning department" genuinely names no single centre
@@ -106,9 +116,17 @@ class FinanceReadinessController extends Controller
             $this->check('required_accounts', 'Required control accounts',
                 $missingRequiredAccounts === [],
                 $missingRequiredAccounts === []
-                    ? 'All required cash, advance, payable and tax control accounts are postable.'
-                    : 'Missing or non-postable account code(s): '.implode(', ', $missingRequiredAccounts).'.',
-                'Configure every named control account before posting.'),
+                    ? 'Every account the posting code needs resolves to a postable, active account.'
+                    : count($missingRequiredAccounts).' posting function(s) do not resolve to a postable, active account: '.implode(', ', $missingRequiredAccounts).'.',
+                'Map each function to this chart in config/finance_accounts.php (accountant-approved), or create the account.'),
+            $this->check('chart_profile', 'Chart profile',
+                $profileProblems === [],
+                $profileProblems !== []
+                    ? implode(' ', $profileProblems)
+                    : ($profile
+                        ? "Chart profile '{$profile}' is active; WIP policy: ".(config('finance_accounts.wip_policy') ?: 'profile default').'.'
+                        : 'No chart profile: this installation keeps the reference chart.'),
+                'Fix FINANCE_ACCOUNT_PROFILE / FINANCE_WIP_POLICY, or the profile file it names.'),
             $this->check('expense_codes', 'Expense catalogue',
                 DB::table('expense_codes')->where('is_active', true)->exists() && $unmappedExpenseCodes === 0,
                 $unmappedExpenseCodes === 0
@@ -117,9 +135,10 @@ class FinanceReadinessController extends Controller
                 'Map or deactivate every unusable expense code.'),
             $this->check('expense_code_mapping', 'Expense catalogue account mapping',
                 $unresolvedCatalogue === 0,
-                $unresolvedCatalogue === 0
+                ($unresolvedCatalogue === 0
                     ? 'Every catalogue code naming an account resolves to one in this chart.'
-                    : number_format($unresolvedCatalogue).' catalogue code(s) name an account this chart does not have, and are switched off.',
+                    : number_format($unresolvedCatalogue).' catalogue code(s) name an account this chart does not have, and are switched off.')
+                    .($intentionallyOff > 0 ? ' '.$intentionallyOff.' code(s) are off by design: the chart profile leaves '.implode(', ', $intentional).' unconfigured.' : ''),
                 'Map the reference codes to this chart in config/finance_accounts.php, then re-run the expense code seeder.'),
             $this->check('payment_sources', 'Payment sources',
                 DB::table('payment_sources')->where('is_active', true)->exists() && $invalidPaymentSources === 0,
@@ -174,9 +193,14 @@ class FinanceReadinessController extends Controller
             ) === 0 ? 0 : 1,
             // Budgets and commitments do not post: only accrued and actual costs
             // are accounting events. Match the verification service's posting gate.
+            // W7 labour lines are analytical by contract (W7-12): payroll already
+            // books the company expense, so they never carry a journal. Counting
+            // them reported every recorded labour day as a missing posting and kept
+            // readiness red for ever (found in the Report 55 real-data rehearsal).
             'verified_costs_without_journal' => DB::table('cost_lines')
                 ->where('status', 'verified')
                 ->whereIn('nature', [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL])
+                ->where(fn ($q) => $q->whereNull('source_type')->orWhere('source_type', '<>', ProjectLabourActual::COST_SOURCE_TYPE))
                 ->whereNull('journal_entry_id')->count(),
             'posted_journals_without_period' => DB::table('journal_entries')
                 ->where('status', 'posted')->whereNull('accounting_period_id')->count(),
@@ -204,6 +228,9 @@ class FinanceReadinessController extends Controller
                 ? 'Finance setup is ready for controlled posting.'
                 : 'Finance setup needs attention before live posting.',
             'checks' => $checks->values(),
+            // Per posting function: reference code, the local code the map gives it,
+            // and whether it resolves. Additive; the readiness screen reads `checks`.
+            'account_functions' => $accountFunctions,
             'integrity' => $integrity,
             'operations' => app(\App\Modules\ProcurementStores\Services\OperationsReadinessService::class)->report(),
             'setup_command' => app()->environment(['local', 'testing'])

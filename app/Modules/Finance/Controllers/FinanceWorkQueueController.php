@@ -19,6 +19,7 @@ class FinanceWorkQueueController extends Controller
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
             'work_type' => ['nullable', 'string', 'max:64'],
+            'area' => ['nullable', 'in:'.implode(',', FinanceWorkQueueService::AREAS)],
             'priority' => ['nullable', 'in:normal,watch,overdue,exception'],
             'assignment' => ['nullable', 'in:all,mine,unassigned'],
             'page' => ['nullable', 'integer', 'min:1'],

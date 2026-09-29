@@ -114,5 +114,21 @@ final class CostContext
          * and defeat the separation of duties the whole design rests on.
          */
         public readonly bool $sourceApproved = false,
+
+        /**
+         * False when some OTHER component already owns posting this economic
+         * event to the general ledger, and this CostLine exists only for
+         * project-cost attribution/reporting.
+         *
+         * Added for STAB-7 (finance-redesign/phase-2/14_STAB_7_PETTY_CASH_TRIPLE_POSTING_ANALYSIS.md):
+         * a petty-cash requisition's surrender is posted as one balanced
+         * clearing entry by JournalPostingService::postPettyCashSurrender(),
+         * covering every surrender item at once — CollectsCost::postFromSource()
+         * must record the same items for project-cost visibility without
+         * ALSO posting each one independently, which would recognise the
+         * same spend a second time. Every other caller leaves this true and
+         * is unaffected.
+         */
+        public readonly bool $postsIndependently = true,
     ) {}
 }

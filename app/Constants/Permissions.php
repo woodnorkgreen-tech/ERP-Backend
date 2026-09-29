@@ -114,6 +114,35 @@ class Permissions
     const FINANCE_COSTS_READ = 'finance.costs.read';
     const FINANCE_COSTS_VERIFY = 'finance.costs.verify';
     const FINANCE_COSTS_REVERSE = 'finance.costs.reverse';
+
+    // W6 Project Costing — confirmed subset.
+    // PORTFOLIO: opt-in batched margin view for the portfolio (Finance role).
+    // ALLOCATE:  split a verified cost across multiple projects (Finance role).
+    // TRANSFER:  move a cost to another project via reversing pair (Finance role).
+    // CLOSE:     initiate project financial closure (Finance role).
+    // REOPEN:    override closure for a late cost — created but deliberately
+    //            unassigned to any role; WNG must grant this per event.
+    const FINANCE_COSTS_PORTFOLIO = 'finance.costs.portfolio';
+    const FINANCE_COSTS_ALLOCATE   = 'finance.costs.allocate';
+    const FINANCE_COSTS_TRANSFER   = 'finance.costs.transfer';
+    const FINANCE_COSTS_CLOSE      = 'finance.costs.close';
+    const FINANCE_COSTS_REOPEN     = 'finance.costs.reopen';
+
+    // W7 Labour Cost — confirmed subset.
+    // VIEW:           View project labour actuals and budget-vs-actual.
+    // RECORD:         Record actual labour usage against an approved Project Budget labour line
+    //                 or as Unbudgeted Labour (Site Captain / Production Lead / authorised lead).
+    // PO_VERIFY:      Project Officer operational verification before it reaches Finance.
+    // FINANCE_VERIFY: Finance verifies the monetary labour cost and posts the analytical CostLine
+    //                 (postsIndependently=false — zero duplicate company payroll GL debit).
+    // CORRECT:        Finance corrects / reclassifies a verified actual via reversing pair.
+    const FINANCE_LABOUR_VIEW           = 'finance.labour.view';
+    const FINANCE_LABOUR_RECORD         = 'finance.labour.record';
+    const FINANCE_LABOUR_PO_VERIFY      = 'finance.labour.po_verify';
+    const FINANCE_LABOUR_FINANCE_VERIFY = 'finance.labour.finance_verify';
+    const FINANCE_LABOUR_CORRECT        = 'finance.labour.correct';
+
+    const FINANCE_EXPENSE_DUPLICATE_OVERRIDE = 'finance.expenses.override_duplicate';
     const FINANCE_EXPENSE_CODES_MANAGE = 'finance.expense_codes.manage';
 
     // Requisition types define what every requester is asked for and what
@@ -140,6 +169,7 @@ class Permissions
     const FINANCE_SPEND_VOUCHERS_READ = 'finance.spend_vouchers.read';
     const FINANCE_SPEND_VOUCHERS_CREATE = 'finance.spend_vouchers.create';
     const FINANCE_SPEND_VOUCHERS_APPROVE = 'finance.spend_vouchers.approve';
+    const FINANCE_SPEND_VOUCHERS_APPROVE_SENIOR = 'finance.spend_vouchers.approve_senior';
     const FINANCE_SPEND_VOUCHERS_POST = 'finance.spend_vouchers.post';
 
     const FINANCE_RECEIVABLES_READ = 'finance.receivables.read';
@@ -150,6 +180,21 @@ class Permissions
     const FINANCE_RECEIVABLES_BILLING_BASIS = 'finance.receivables.billing_basis';
     const FINANCE_RECEIVABLES_RELEASE = 'finance.receivables.release';
     const FINANCE_RECEIVABLES_OVERRIDE = 'finance.receivables.override';
+    // W1-1: the review/check authority on a draft invoice — distinct from
+    // FINANCE_RECEIVABLES_BILLING_BASIS (prepare/issue), so a preparer and a
+    // checker can be genuinely different permission holders if WNG chooses,
+    // even though the confirmed rule only requires them to be different
+    // PEOPLE, not different permission grants.
+    const FINANCE_RECEIVABLES_INVOICE_CHECK = 'finance.receivables.invoice_check';
+
+    // W2 Purchasing & payables (Report 60). Supplier-bill verification used to be
+    // "is the user's role named Super Admin, Admin or Accounts" in two private
+    // methods; it is now a permission like every other Finance control, so who
+    // may verify is configuration, visible on the admin screens. Verifying is the
+    // accounting event (the invoice posts to Accounts Payable), and the verifier
+    // also returns a bill for correction and may delete an unverified draft.
+    const FINANCE_PAYABLES_READ = 'finance.payables.read';
+    const FINANCE_PAYABLES_VERIFY = 'finance.payables.verify';
 
     const FINANCE_INVOICE_CREATE = 'finance.invoice.create';
     const FINANCE_INVOICE_READ = 'finance.invoice.read';
@@ -211,6 +256,12 @@ class Permissions
     const FINANCE_PETTY_CASH_EXPORT_DATA = 'finance.petty_cash.export_data';
     const FINANCE_PETTY_CASH_MANAGE_SETTINGS = 'finance.petty_cash.manage_settings';
     const FINANCE_PETTY_CASH_RECALCULATE_BALANCE = 'finance.petty_cash.recalculate_balance';
+    const FINANCE_PETTY_CASH_CUSTODY = 'finance.petty_cash.manage_custody';
+    const FINANCE_PETTY_CASH_REVIEW_CASH_COUNT = 'finance.petty_cash.review_cash_count';
+    // W5-9 (confirmed 2026-09-23): the authorised exception that lets another
+    // advance be approved while the requester holds an overdue one. Granted to
+    // no role by default — WNG has not named the exception authority.
+    const FINANCE_PETTY_CASH_ADVANCE_EXCEPTION = 'finance.petty_cash.advance_exception';
 
     /**
      * Legacy short forms, kept only so nobody loses access.
@@ -284,6 +335,24 @@ class Permissions
     // that outgrew its requisition or never had one reaches a person.
     const PROCUREMENT_REQUISITIONS_APPROVE = 'procurement.requisitions.approve';
     const PROCUREMENT_ORDERS_APPROVE = 'procurement.orders.approve';
+
+    // W2-1 (confirmed 2026-09-23): the additional sign-off a high-value order
+    // needs above a WNG-configured threshold, layered on top of — never a
+    // substitute for — PROCUREMENT_ORDERS_APPROVE above. Distinct so WNG can
+    // grant it to a smaller, more senior group than ordinary order approval.
+    const PROCUREMENT_ORDERS_APPROVE_SENIOR = 'procurement.orders.approve_senior';
+
+    // W2-4 (confirmed 2026-09-23): amending an order after it has already
+    // been approved is a materially different decision from approving one
+    // for the first time, so it is authorized separately rather than folding
+    // into PROCUREMENT_ORDERS_APPROVE.
+    const PROCUREMENT_ORDERS_AMEND = 'procurement.orders.amend';
+
+    // W2-5 (confirmed 2026-09-23): the authorized, auditable override for a
+    // Bill or payment the duplicate check has flagged — never self-certified,
+    // and never satisfied merely by holding the ordinary create/approve
+    // permission for that document.
+    const PROCUREMENT_BILLS_OVERRIDE_DUPLICATE = 'procurement.bills.override_duplicate';
 
     // Materials master and physical Stores custody
     const MATERIALS_LIBRARY_VIEW = 'materials_library.view';
@@ -453,13 +522,20 @@ class Permissions
             self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
             self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PAYMENTS_REVERSE, self::FINANCE_PERIODS_MANAGE,
             self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
-            self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
+            self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE, self::FINANCE_EXPENSE_DUPLICATE_OVERRIDE,
+            self::FINANCE_COSTS_PORTFOLIO, self::FINANCE_COSTS_ALLOCATE,
+            self::FINANCE_COSTS_TRANSFER, self::FINANCE_COSTS_CLOSE,
+            self::FINANCE_COSTS_REOPEN,
+             self::FINANCE_LABOUR_VIEW, self::FINANCE_LABOUR_RECORD,
+             self::FINANCE_LABOUR_PO_VERIFY, self::FINANCE_LABOUR_FINANCE_VERIFY,
+             self::FINANCE_LABOUR_CORRECT,
             self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
-            self::FINANCE_SPEND_VOUCHERS_APPROVE, self::FINANCE_SPEND_VOUCHERS_POST,
+            self::FINANCE_SPEND_VOUCHERS_APPROVE, self::FINANCE_SPEND_VOUCHERS_APPROVE_SENIOR, self::FINANCE_SPEND_VOUCHERS_POST,
             self::FINANCE_RECEIVABLES_READ, self::FINANCE_RECEIVABLES_RECORD, self::FINANCE_RECEIVABLES_VERIFY,
             self::FINANCE_RECEIVABLES_CORRECT, self::FINANCE_RECEIVABLES_REVERSE,
             self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
-            self::FINANCE_RECEIVABLES_OVERRIDE,
+            self::FINANCE_RECEIVABLES_OVERRIDE, self::FINANCE_RECEIVABLES_INVOICE_CHECK,
+            self::FINANCE_PAYABLES_READ, self::FINANCE_PAYABLES_VERIFY,
 
             // Cross-cutting approvals
             self::APPROVALS_SELF_APPROVE,
@@ -483,6 +559,9 @@ class Permissions
             self::FINANCE_PETTY_CASH_EXPORT_DATA,
             self::FINANCE_PETTY_CASH_MANAGE_SETTINGS,
             self::FINANCE_PETTY_CASH_RECALCULATE_BALANCE,
+            self::FINANCE_PETTY_CASH_CUSTODY,
+            self::FINANCE_PETTY_CASH_REVIEW_CASH_COUNT,
+            self::FINANCE_PETTY_CASH_ADVANCE_EXCEPTION,
             self::FINANCE_PETTY_CASH_CREATE_LEGACY,
             self::FINANCE_PETTY_CASH_UPDATE_LEGACY,
             self::FINANCE_PETTY_CASH_VOID_LEGACY,
@@ -504,6 +583,8 @@ class Permissions
             self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
             self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
             self::PROCUREMENT_REQUISITIONS_APPROVE, self::PROCUREMENT_ORDERS_APPROVE,
+            self::PROCUREMENT_ORDERS_APPROVE_SENIOR, self::PROCUREMENT_ORDERS_AMEND,
+            self::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE,
             self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
             self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW, self::STORES_ADJUST_QUANTITY,
 
@@ -582,12 +663,19 @@ class Permissions
                 self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PAYMENTS_REVERSE, self::FINANCE_PERIODS_MANAGE,
                 self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
                 self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
+                self::FINANCE_COSTS_PORTFOLIO, self::FINANCE_COSTS_ALLOCATE,
+                self::FINANCE_COSTS_TRANSFER, self::FINANCE_COSTS_CLOSE, self::FINANCE_COSTS_REOPEN,
+                 self::FINANCE_LABOUR_VIEW, self::FINANCE_LABOUR_RECORD,
+                 self::FINANCE_LABOUR_PO_VERIFY, self::FINANCE_LABOUR_FINANCE_VERIFY,
+                 self::FINANCE_LABOUR_CORRECT,
                 self::FINANCE_SPEND_VOUCHERS_READ, self::FINANCE_SPEND_VOUCHERS_CREATE,
-                self::FINANCE_SPEND_VOUCHERS_APPROVE, self::FINANCE_SPEND_VOUCHERS_POST,
+                self::FINANCE_SPEND_VOUCHERS_APPROVE, self::FINANCE_SPEND_VOUCHERS_APPROVE_SENIOR,
+                self::FINANCE_SPEND_VOUCHERS_POST, self::FINANCE_EXPENSE_DUPLICATE_OVERRIDE,
                 self::FINANCE_RECEIVABLES_READ, self::FINANCE_RECEIVABLES_RECORD, self::FINANCE_RECEIVABLES_VERIFY,
                 self::FINANCE_RECEIVABLES_CORRECT, self::FINANCE_RECEIVABLES_REVERSE,
                 self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
-                self::FINANCE_RECEIVABLES_OVERRIDE,
+                self::FINANCE_RECEIVABLES_OVERRIDE, self::FINANCE_RECEIVABLES_INVOICE_CHECK,
+                self::FINANCE_PAYABLES_READ, self::FINANCE_PAYABLES_VERIFY,
                 self::FINANCE_PETTY_CASH_VIEW,
                 self::FINANCE_PETTY_CASH_VIEW_BALANCE,
                 self::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -609,6 +697,9 @@ class Permissions
                 self::FINANCE_PETTY_CASH_CREATE_LEGACY,
                 self::FINANCE_PETTY_CASH_UPDATE_LEGACY,
                 self::FINANCE_PETTY_CASH_VOID_LEGACY,
+                self::FINANCE_PETTY_CASH_CUSTODY,
+                self::FINANCE_PETTY_CASH_REVIEW_CASH_COUNT,
+                self::FINANCE_PETTY_CASH_ADVANCE_EXCEPTION,
             ],
             'hr' => [
                 self::HR_VIEW_EMPLOYEES, self::HR_MANAGE_PAYROLL, self::HR_CREATE_POSITION, self::HR_MANAGE_ATTENDANCE,
@@ -627,6 +718,8 @@ class Permissions
                 self::PROCUREMENT_VIEW, self::PROCUREMENT_MATERIALS_REQUEST, self::PROCUREMENT_ORDERS_CREATE,
                 self::PROCUREMENT_VENDORS_MANAGE, self::PROCUREMENT_QUOTATIONS_MANAGE,
                 self::PROCUREMENT_REQUISITIONS_APPROVE, self::PROCUREMENT_ORDERS_APPROVE,
+            self::PROCUREMENT_ORDERS_APPROVE_SENIOR, self::PROCUREMENT_ORDERS_AMEND,
+            self::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE,
             ],
             'materials_stores' => [
                 self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,

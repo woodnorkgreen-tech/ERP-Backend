@@ -6,6 +6,7 @@ use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\ProjectInvoice;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -58,15 +59,15 @@ class WorkInProgressReleaseService
      * as against subcontractors.
      */
     private const RELEASE_MAP = [
-        '1211' => '5100',   // direct materials
-        '1212' => '5200',   // direct labour
-        '1213' => '5300',   // subcontractors
-        '1214' => '5400',   // transport and logistics
-        '1215' => '5500',   // equipment and site
-        '1216' => '5600',   // project utilities
-        '1217' => '5700',   // project facilitation
-        '1218' => '5800',   // venue and statutory
-        '1219' => '5900',   // rework and warranty
+        FinanceAccountFunctions::WIP_DIRECT_MATERIALS => FinanceAccountFunctions::COS_DIRECT_MATERIALS,
+        FinanceAccountFunctions::WIP_DIRECT_LABOUR => FinanceAccountFunctions::COS_DIRECT_LABOUR,
+        FinanceAccountFunctions::WIP_SUBCONTRACTORS => FinanceAccountFunctions::COS_SUBCONTRACTORS,
+        FinanceAccountFunctions::WIP_TRANSPORT_LOGISTICS => FinanceAccountFunctions::COS_TRANSPORT_LOGISTICS,
+        FinanceAccountFunctions::WIP_EQUIPMENT_SITE => FinanceAccountFunctions::COS_EQUIPMENT_SITE,
+        FinanceAccountFunctions::WIP_PROJECT_UTILITIES => FinanceAccountFunctions::COS_PROJECT_UTILITIES,
+        FinanceAccountFunctions::WIP_PROJECT_FACILITATION => FinanceAccountFunctions::COS_PROJECT_FACILITATION,
+        FinanceAccountFunctions::WIP_VENUE_STATUTORY => FinanceAccountFunctions::COS_VENUE_STATUTORY,
+        FinanceAccountFunctions::WIP_REWORK_WARRANTY => FinanceAccountFunctions::COS_REWORK_WARRANTY,
     ];
 
     public function __construct(private JournalPostingService $posting)
@@ -93,6 +94,7 @@ class WorkInProgressReleaseService
 
         $legs = [];
         $total = '0.00';
+        $releasedFrom = [];
 
         foreach (self::RELEASE_MAP as $wipCode => $costCode) {
             $wipAccount = $this->accountId($wipCode);
@@ -119,6 +121,16 @@ class WorkInProgressReleaseService
             if ($wipAccount === $costAccount) {
                 continue;
             }
+
+            // Each family reads its own WIP balance. Two families mapped to one
+            // WIP account would each release that whole balance, twice over.
+            if (isset($releasedFrom[$wipAccount])) {
+                throw new InvalidArgumentException(
+                    "Work in Progress accounts {$releasedFrom[$wipAccount]} and {$wipCode} resolve to the same "
+                    . 'account, so its balance would be released twice. Each WIP function needs its own account.'
+                );
+            }
+            $releasedFrom[$wipAccount] = $wipCode;
 
             $movement = $this->movementOn($wipAccount, $enquiryId);
 

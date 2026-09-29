@@ -53,6 +53,7 @@ class Payment extends Model
         'project_enquiry_id',
         'venue',
         'classification',
+        'transaction_classification',
         'job_number',
         'payment_method',
         'payment_source_id',
@@ -81,6 +82,8 @@ class Payment extends Model
         'planned_cost_line_id',
         'idempotency_key',
         'created_at',
+        'cost_gl_posting_failed_at',
+        'cost_gl_posting_error',
     ];
 
     /**
@@ -98,6 +101,7 @@ class Payment extends Model
         'archived_at' => 'datetime',
         'transaction_cost' => 'decimal:2',
         'tax_amount' => 'decimal:2',
+        'cost_gl_posting_failed_at' => 'datetime',
     ];
 
     /**

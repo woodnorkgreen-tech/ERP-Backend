@@ -328,7 +328,7 @@ class PurchaseOrderController extends Controller
     public function show(PurchaseOrder $purchaseOrder)
     {
         return new PurchaseOrderResource($purchaseOrder->load([
-            'items.material', 'supplier', 'createdBy', 'approvedBy',
+            'items.material', 'supplier', 'createdBy', 'approvedBy', 'seniorApprovedBy', 'returnedBy',
             'requisition.project', 'requisition.department', 'requisition.projectEnquiry', 'requisition.employee',
         ]));
     }
@@ -374,8 +374,35 @@ class PurchaseOrderController extends Controller
         ]);
     }
 
+    /**
+     * Critical Risk C2 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+     * this method previously accepted a full item/supplier/total rewrite of
+     * any order regardless of status, including one already approved,
+     * delivered against, invoiced, or paid. A pending order is still typed in
+     * by hand and corrected freely; once submitted, its approved facts are
+     * exactly what the three-way match downstream is trusting, so they no
+     * longer go through this endpoint. See STAB-3 in
+     * finance-redesign/phase-2/03_WNG_FINANCE_DECISION_REGISTER.md for the
+     * confirmed decision — a formal PO amendment/change-order workflow is the
+     * separate, larger piece of work this guard makes room for; it is not
+     * built here.
+     */
     public function update(Request $request, PurchaseOrder $purchaseOrder)
     {
+        // W2-6: a returned order may also be edited, by the requester/
+        // procurement side specifically — the approver who returned it must
+        // never need to make the fix themselves.
+        if ($purchaseOrder->status === 'returned_for_correction') {
+            if (!Gate::allows('correctOrder', $purchaseOrder)) {
+                return response(['error' => 'You do not have permission to correct this purchase order.'], 403);
+            }
+        } elseif ($purchaseOrder->status !== 'pending') {
+            return response([
+                'error' => "Purchase order {$purchaseOrder->po_number} is {$purchaseOrder->status} and can no longer be edited directly. "
+                    .'Propose an amendment from the order page to change an approved order.',
+            ], 422);
+        }
+
         $input = $request->all();
 
         $validator = Validator::make($input, [
@@ -422,6 +449,17 @@ class PurchaseOrderController extends Controller
         }
     }
 
+    /**
+     * Critical Risk C3 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+     * the pending-only guard below was commented out in source, leaving only
+     * the approveOrder permission gate. purchase_order_items,
+     * goods_receipt_notes and bills all cascade-delete on purchase_order_id,
+     * so deleting an approved, delivered, invoiced or already-paid order
+     * silently destroyed part of the audited general ledger trail. The guard
+     * is reinstated and extended: a linked Bill or GoodsReceiptNote blocks
+     * deletion regardless of the order's own status, since either means real
+     * accounting/receiving history now depends on this order existing.
+     */
     public function destroy(PurchaseOrder $purchaseOrder)
     {
         // ROLE RESTRICTION ADDED HERE
@@ -431,10 +469,19 @@ class PurchaseOrderController extends Controller
             ], 403);
         }
 
-        // Only allow deletion if pending
-        // if ($purchaseOrder->status !== 'pending') {
-        //     return response(['error' => 'Only pending purchase orders can be deleted'], 422);
-        // }
+        if ($purchaseOrder->status !== 'pending') {
+            return response([
+                'error' => "Purchase order {$purchaseOrder->po_number} is {$purchaseOrder->status} and cannot be deleted. "
+                    .'Only a pending order may be removed; an approved, delivered, invoiced or cancelled order is a record, not a draft.',
+            ], 422);
+        }
+
+        if ($purchaseOrder->bills()->exists() || $purchaseOrder->goodsReceiptNotes()->exists()) {
+            return response([
+                'error' => "Purchase order {$purchaseOrder->po_number} has a linked bill or goods receipt and cannot be deleted. "
+                    .'Reverse or cancel those records first.',
+            ], 422);
+        }
 
         $requisitionId = $purchaseOrder->requisition_id;
         $purchaseOrder->delete();
@@ -530,10 +577,109 @@ class PurchaseOrderController extends Controller
             ], 422);
         }
 
+        // W2-1: layered on top of the checks above, never instead of them —
+        // an order above the senior-approval threshold still needs the
+        // ordinary approval this method already gates; it additionally
+        // needs the senior sign-off to have already happened.
+        if ($purchaseOrder->senior_approval_required && ! $purchaseOrder->senior_approved_at) {
+            return response([
+                'error' => 'This order is above the senior-approval threshold and needs senior approval before it can be approved.',
+            ], 422);
+        }
+
         $purchaseOrder->approve(auth()->id());
         $this->syncProjectProcurement($purchaseOrder);
 
         return new PurchaseOrderResource($purchaseOrder->load(['items.material', 'supplier', 'createdBy', 'approvedBy']));
+    }
+
+    /**
+     * W2-1: the additional senior sign-off a high-value order needs before
+     * the ordinary approve() above will finalise it. A separate action, not
+     * a flag on approve(), so the two authorities are genuinely two people
+     * making two decisions rather than one permission check with an extra
+     * box ticked.
+     */
+    public function seniorApprove(PurchaseOrder $purchaseOrder)
+    {
+        if (!Gate::allows('approveOrderSenior', PurchaseOrder::class)) {
+            return response(['error' => 'You do not have permission to give senior approval on purchase orders.'], 403);
+        }
+
+        if ($purchaseOrder->status !== 'pending_approval') {
+            return response(['error' => 'Only an order awaiting approval can receive senior approval.'], 422);
+        }
+        if (!$purchaseOrder->senior_approval_required) {
+            return response(['error' => 'This order is not above the senior-approval threshold.'], 422);
+        }
+        if ($purchaseOrder->senior_approved_at) {
+            return response(['error' => 'This order already has senior approval.'], 422);
+        }
+
+        // The requester satisfying their own senior approval is exactly the
+        // control this tier exists to prevent — the same self-approval rule
+        // as ordinary approval, with no exception for this one.
+        if ((int) $purchaseOrder->user_id === (int) auth()->id()) {
+            return response([
+                'error' => 'You raised this purchase order, so you cannot give its senior approval.',
+            ], 422);
+        }
+
+        $purchaseOrder->seniorApprove(auth()->id());
+
+        return new PurchaseOrderResource($purchaseOrder->fresh()->load(['items.material', 'supplier', 'createdBy', 'approvedBy', 'seniorApprovedBy']));
+    }
+
+    /**
+     * W2-6: send a `pending_approval` order back to whoever raised it. Not
+     * the amendment workflow (W2-4) — this is for an order that was never
+     * approved in the first place, so there is nothing yet to amend.
+     */
+    public function returnForCorrection(Request $request, PurchaseOrder $purchaseOrder)
+    {
+        if (!Gate::allows('returnOrder', $purchaseOrder)) {
+            return response(['error' => 'You do not have permission to return purchase orders for correction.'], 403);
+        }
+
+        $validated = $request->validate(['reason' => 'required|string|min:5|max:1000']);
+
+        if ($purchaseOrder->status !== 'pending_approval') {
+            return response(['error' => 'Only an order awaiting approval can be returned for correction.'], 422);
+        }
+
+        $purchaseOrder->returnForCorrection(auth()->id(), $validated['reason']);
+
+        return new PurchaseOrderResource($purchaseOrder->fresh()->load(['items.material', 'supplier', 'createdBy', 'returnedBy']));
+    }
+
+    /**
+     * W2-6: the requester/procurement side corrects a returned order (via
+     * the existing update() below, now permitted in this status too) and
+     * resubmits it here — approval restarts from scratch, including the
+     * senior-approval determination, since a correction may have changed
+     * the total.
+     */
+    public function resubmit(PurchaseOrder $purchaseOrder)
+    {
+        if (!Gate::allows('correctOrder', $purchaseOrder)) {
+            return response(['error' => 'You do not have permission to resubmit this purchase order.'], 403);
+        }
+
+        if ($purchaseOrder->status !== 'returned_for_correction') {
+            return response(['error' => 'Only an order returned for correction can be resubmitted.'], 422);
+        }
+
+        $purchaseOrder->resubmit(auth()->id());
+
+        return new PurchaseOrderResource($purchaseOrder->fresh()->load(['items.material', 'supplier', 'createdBy']));
+    }
+
+    /** W2-6 closure-gate §14: the full return/correct/resubmit history for this order. */
+    public function corrections(PurchaseOrder $purchaseOrder)
+    {
+        return response()->json(['data' => $purchaseOrder->corrections()
+            ->with(['returnedBy:id,name', 'correctedBy:id,name'])
+            ->get()]);
     }
 
     private function buyingUomId(mixed $materialId, mixed $requisitionItemId = null): ?int
@@ -549,11 +695,24 @@ class PurchaseOrderController extends Controller
 
     public function getApprovedPurchaseOrders()
     {
+        // W2-3 (staged billing): an order stays billable until its valid bills
+        // reach the approved value. This used to list only orders with NO bill
+        // at all, so a second staged bill could never be raised from the screen
+        // even though the backend accepts it. The cap itself is still enforced
+        // in BillController::store(); this only stops hiding billable orders.
         $purchaseOrders = PurchaseOrder::with(['supplier'])
             ->where('status', 'approved')
-            ->whereDoesntHave('bills') // Only POs without bills
+            ->withSum(['bills as billed_net' => fn ($query) => $query->where('status', '!=', 'cancelled')], 'net_amount')
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            // Same arithmetic as PurchaseOrder::remainingBillable(), from the
+            // eager-loaded sum rather than one query per order.
+            ->each(function ($po) {
+                $remaining = bcsub((string) $po->total_amount, number_format((float) ($po->billed_net ?? 0), 2, '.', ''), 2);
+                $po->setAttribute('remaining_billable', bccomp($remaining, '0.00', 2) > 0 ? $remaining : '0.00');
+            })
+            ->filter(fn ($po) => bccomp($po->remaining_billable, '0.00', 2) === 1)
+            ->values();
 
         return response()->json([
             'data' => $purchaseOrders->map(function ($po) {
@@ -565,6 +724,8 @@ class PurchaseOrderController extends Controller
                         'supplier_name' => $po->supplier->supplier_name,
                     ],
                     'total_amount' => $po->total_amount,
+                    'total_billed' => number_format((float) ($po->billed_net ?? 0), 2, '.', ''),
+                    'remaining_billable' => $po->remaining_billable,
                     'due_date' => $po->due_date->format('Y-m-d'),
                 ];
             })

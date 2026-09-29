@@ -72,6 +72,11 @@ class OffboardingController extends Controller
             'attachments.uploader',
         ])->findOrFail($id);
 
+        // W3-8 (confirmed 2026-09-23): an exit with a salary advance still
+        // outstanding is flagged from the advance record itself, not left to a
+        // hand-typed deduction figure.
+        $case->setAttribute('outstanding_salary_advances', \App\Modules\HR\Models\SalaryAdvanceRequest::outstandingFor($case->employee_id));
+
         return response()->json($case);
     }
 

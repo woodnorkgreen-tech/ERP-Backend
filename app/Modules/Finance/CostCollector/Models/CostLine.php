@@ -312,4 +312,24 @@ class CostLine extends Model
     {
         return $this->nature !== self::NATURE_PLANNED && $this->consumes_line_id === null;
     }
+
+    /**
+     * W6-3: Cost lines allocated from this parent to other projects.
+     *
+     * When allocations exist, the parent line is excluded from its own
+     * project's margin; only the slices appear in each recipient project.
+     */
+    public function allocations()
+    {
+        return $this->hasMany(CostLineAllocation::class);
+    }
+
+    /**
+     * Whether this line has been split across projects via W6-3 allocation.
+     * Excludes the parent from per-project margin when true.
+     */
+    public function isAllocated(): bool
+    {
+        return $this->allocations()->exists();
+    }
 }

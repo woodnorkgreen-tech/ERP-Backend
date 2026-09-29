@@ -32,6 +32,28 @@ class PettyCashController extends Controller
     }
 
     /**
+     * Report 61 (D-1): the petty-cash register and float were readable by any
+     * signed-in user — PettyCashPolicy defined viewAny/viewBalance but nothing
+     * called them. The register (disbursements, transactions, vouchers, search)
+     * needs `finance.petty_cash.view`; anything revealing the float needs
+     * `finance.petty_cash.view_balance`. Requesters keep their own requisitions
+     * through PettyCashRequisitionController::mayView, which is unaffected.
+     */
+    private function refuse(string $ability): ?JsonResponse
+    {
+        if (Auth::user()?->can($ability, Payment::class)) {
+            return null;
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $ability === 'viewBalance'
+                ? 'You do not have permission to view the petty cash balance.'
+                : 'You do not have permission to view the petty cash register.',
+        ], 403);
+    }
+
+    /**
      * Get approved projects list for petty cash forms
      * Proxies to the Projects module logic to ensure consistent data access
      */
@@ -268,9 +290,13 @@ class PettyCashController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
-                'status', 'classification', 'payment_method', 'project_name', 
+                'status', 'classification', 'transaction_classification', 'payment_method', 'project_name',
                 'creator_id', 'start_date', 'end_date', 'search'
             ]);
 
@@ -428,7 +454,36 @@ class PettyCashController extends Controller
             $query->where('status', $request->string('status')->toString());
         }
 
-        return response()->json(['success' => true, 'data' => $query->paginate(25)]);
+        $page = $query->paginate(25);
+        $balance = (string) \App\Modules\Finance\PettyCash\Models\PettyCashBalance::current()->current_balance;
+        $page->getCollection()->transform(function (DirectDisbursementRequest $row) use ($balance) {
+            $payload = $row->payload ?: [];
+            $outstanding = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::query()
+                ->where('user_id', $row->requested_by)
+                ->whereIn('status', \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::OUTSTANDING_ADVANCE_STATUSES)
+                ->get(['id', 'requisition_number', 'total_amount', 'surrender_due_at', 'status']);
+            // W3-5: the same payee + receipt + amount already claimed. Flagged
+            // for the independent approver; the approver is the control here.
+            $duplicate = null;
+            if (filled($payload['payee_name'] ?? null) && filled($payload['receipt_number'] ?? null)) {
+                $match = app(\App\Modules\Finance\Services\DuplicateDetectionService::class)->checkExpenseReceipt(
+                    (string) $payload['payee_name'], (string) $payload['receipt_number'], (string) ($payload['amount'] ?? 0)
+                );
+                $duplicate = $match['status'] === 'confirmed' ? ['type' => $match['matched_type'], 'id' => $match['matched_id']] : null;
+            }
+            $row->setAttribute('approval_signals', [
+                'requested_amount' => $payload['amount'] ?? null,
+                'project_or_overhead' => $payload['project_name'] ?? ($payload['classification'] ?? 'overhead'),
+                'justification' => $payload['direct_payment_reason'] ?? null,
+                'float_available' => $balance,
+                'recent_direct_requests' => DirectDisbursementRequest::query()->where('requested_by', $row->requested_by)
+                    ->whereKeyNot($row->id)->where('created_at', '>=', now()->subDays(90))->count(),
+                'outstanding_advances' => $outstanding,
+                'duplicate_receipt_match' => $duplicate,
+            ]);
+            return $row;
+        });
+        return response()->json(['success' => true, 'data' => $page]);
     }
 
     public function rejectDirectRequest(Request $request, int $id): JsonResponse
@@ -477,6 +532,10 @@ class PettyCashController extends Controller
      */
     public function show(int $id): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $disbursement = $this->repository->findDisbursement($id);
 
@@ -544,47 +603,76 @@ class PettyCashController extends Controller
         }
     }
 
-
-
     /**
-     * Clear all petty cash data.
+     * Wave 1 Closure Gate §3.D: the controlled retry path for a disbursement
+     * whose cost/GL entry did not reach the ledger. Safe to call as many
+     * times as needed — PettyCashCostPoster posts through the producer's own
+     * idempotent posting calls, so a disbursement whose cost already posted
+     * is simply confirmed, not duplicated.
      */
-    public function clearAll(): JsonResponse
+    public function retryCostPosting(int $id): JsonResponse
     {
-        if (! app()->environment(['local', 'testing'])) {
+        if (!Auth::user()?->can('reviewRequisition', Payment::class)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Clearing Finance history is disabled outside local development. Use voids and reversals to preserve the audit trail.',
+                'message' => 'You are not authorized to correct petty cash postings',
             ], 403);
         }
 
-        // Routed through the policy like everything else, but the policy keeps
-        // this one Super-Admin-only on purpose — see PettyCashPolicy::clearAll().
-        if (!Auth::user()?->can('clearAll', Payment::class)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Only a Super Admin may clear petty cash history.',
-            ], 403);
+        $disbursement = $this->repository->findDisbursement($id);
+
+        if (!$disbursement) {
+            return response()->json(['success' => false, 'message' => 'Disbursement not found'], 404);
         }
 
-        try {
-            $result = $this->service->clearAllData();
+        if (!$disbursement->cost_gl_posting_failed_at) {
+            return response()->json([
+                'success' => true,
+                'message' => 'This disbursement has no failed cost posting to retry.',
+                'data' => $disbursement,
+            ]);
+        }
 
-            return response()->json($result);
-        } catch (Exception $e) {
+        $outcome = app(\App\Modules\Finance\CostCollector\Services\PettyCashCostPoster::class)
+            ->attempt($disbursement);
+
+        $disbursement->refresh();
+
+        if ($disbursement->cost_gl_posting_failed_at) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to clear petty cash data',
-                'error' => $e->getMessage(),
-            ], 400);
+                'message' => 'The cost/GL entry still could not be posted: '.$disbursement->cost_gl_posting_error,
+                'data' => $disbursement,
+            ], 422);
         }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'The disbursement now has a cost/GL outcome of: '.$outcome,
+            'data' => $disbursement,
+        ]);
     }
+
+
+
+    // clearAll() was removed here. Critical Risk C6
+    // (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md): a full
+    // petty-cash data wipe should not be reachable from the API at all,
+    // regardless of environment or who could pass the authorization gate.
+    // The equivalent capability now exists only as
+    // `php artisan petty-cash:clear-all-non-production`, which refuses to
+    // run outside local/testing environments — see
+    // App\Modules\Finance\PettyCash\Console\ClearAllPettyCashDataCommand.
 
     /**
      * Get hierarchical transaction view (top-ups with disbursements).
      */
     public function transactions(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'payment_method', 'creator_id', 'start_date', 'end_date', 
@@ -620,6 +708,10 @@ class PettyCashController extends Controller
      */
     public function balance(): JsonResponse
     {
+        if ($denied = $this->refuse('viewBalance')) {
+            return $denied;
+        }
+
         try {
             $balance = $this->repository->getCurrentBalance();
 
@@ -641,6 +733,10 @@ class PettyCashController extends Controller
      */
     public function summary(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'start_date', 'end_date', 'classification', 'project_name'
@@ -667,6 +763,10 @@ class PettyCashController extends Controller
      */
     public function voucher(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'start_date', 'end_date', 'classification', 'project_name'
@@ -690,6 +790,10 @@ class PettyCashController extends Controller
 
     public function downloadVoucherPdf(Request $request)
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'start_date', 'end_date', 'classification', 'project_name'
@@ -733,6 +837,10 @@ class PettyCashController extends Controller
      */
     public function recent(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $limit = $request->get('limit', 10);
             $recentTransactions = $this->service->getRecentTransactions($limit);
@@ -755,6 +863,10 @@ class PettyCashController extends Controller
      */
     public function search(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $request->validate([
                 'query' => 'required|string|min:2',
@@ -793,6 +905,12 @@ class PettyCashController extends Controller
      */
     public function recalculateBalance(): JsonResponse
     {
+        // Report 61 (D-1): rebuilding the stored balance is a write. It was open to
+        // any signed-in user; it now needs the purpose-built permission.
+        if (! Auth::user()?->can(Permissions::FINANCE_PETTY_CASH_RECALCULATE_BALANCE)) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to recalculate the petty cash balance.'], 403);
+        }
+
         try {
             $result = $this->service->recalculateBalance();
 

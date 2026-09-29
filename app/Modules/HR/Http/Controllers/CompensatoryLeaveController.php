@@ -48,12 +48,6 @@ class CompensatoryLeaveController extends Controller
                         $q->orWhereHas('employee', function ($sub) use ($accessibleDeptIds) {
                             $sub->whereIn('department_id', $accessibleDeptIds);
                         });
-
-                        // 4. Technical Labour (regarded under Production department)
-                        $productionDept = \App\Modules\HR\Models\Department::where('name', 'Production')->first();
-                        if ($productionDept && in_array($productionDept->id, $accessibleDeptIds)) {
-                            $q->orWhereNotNull('technical_labour_id');
-                        }
                     }
                 });
             } else {
@@ -61,6 +55,7 @@ class CompensatoryLeaveController extends Controller
             }
         }
 
+        // W7-10: Technical Labour operational paths decommissioned.
         return response()->json($query->latest()->get());
     }
 
@@ -73,25 +68,21 @@ class CompensatoryLeaveController extends Controller
         
         $validated = $request->validate([
             'employee_id' => 'nullable|exists:employees,id',
-            'technical_labour_id' => 'nullable|exists:technical_labours,id',
             'comp_date' => 'required|date',
             'type' => 'required|in:full_day,half_day',
         ]);
 
-        $targetEmployeeId = $validated['employee_id'] ?? null;
-        $targetTechId = $validated['technical_labour_id'] ?? null;
+$targetEmployeeId = $validated['employee_id'] ?? null;
 
-        if (!$targetEmployeeId && !$targetTechId && $user->employee_id) {
+        if (!$targetEmployeeId && $user->employee_id) {
             $targetEmployeeId = $user->employee_id;
         }
 
-        if (!$targetEmployeeId && !$targetTechId) {
+        if (!$targetEmployeeId) {
             return response()->json(['message' => 'Target personnel profile not found.'], 422);
         }
 
-        $subject = $targetEmployeeId 
-            ? Employee::findOrFail($targetEmployeeId) 
-            : \App\Modules\HR\Models\TechnicalLabour::findOrFail($targetTechId);
+        $subject = Employee::findOrFail($targetEmployeeId);
 
         // Security: Can I request for this person?
         $isGlobal = $user->hasRole(['Super Admin', 'HR']);
@@ -102,10 +93,10 @@ class CompensatoryLeaveController extends Controller
             $isDeptLead = $subject->department?->manager_id === $user->employee_id;
             $isProductionLead = false;
         } else {
+            // Technical Labour paths are decommissioned - this path should never be reached
             $isManager = false;
             $isDeptLead = false;
-            $productionDept = \App\Modules\HR\Models\Department::where('name', 'Production')->first();
-            $isProductionLead = $productionDept && ($productionDept->manager_id === $user->employee_id);
+            $isProductionLead = false;
         }
 
         if (!$isGlobal && !$isOwn && !$isManager && !$isDeptLead && !$isProductionLead) {
@@ -120,7 +111,6 @@ class CompensatoryLeaveController extends Controller
 
         $comp = Compensation::create([
             'employee_id' => $targetEmployeeId,
-            'technical_labour_id' => $targetTechId,
             'comp_date' => $validated['comp_date'],
             'type' => $validated['type'],
             'hours' => $hoursNeeded,
@@ -128,7 +118,7 @@ class CompensatoryLeaveController extends Controller
             'requested_by' => $user->id,
         ]);
 
-        return response()->json($comp->load(['employee', 'technicalLabour']), 201);
+        return response()->json($comp->load(['employee']), 201);
     }
 
     /**
@@ -156,21 +146,19 @@ class CompensatoryLeaveController extends Controller
             if (!$isGlobal) {
                 abort(403, 'Manager/Department Lead entries must be validated by HR compliance.');
             }
-        } else {
+} else {
             $isManager = $employee && $employee->manager_id === $user->employee_id;
             $isDeptLead = $employee && $employee->department?->manager_id === $user->employee_id;
             
+            // Technical Labour paths are decommissioned
             $isProductionDeptManager = false;
-            if (!$employee && $user->employee_id) {
-                $productionDept = \App\Modules\HR\Models\Department::where('name', 'Production')->first();
-                if ($productionDept && $productionDept->manager_id === $user->employee_id) {
-                    $isProductionDeptManager = true;
-                }
-            }
             
-            if (!$isGlobal && !$isManager && !$isDeptLead && !$isProductionDeptManager) {
-                abort(403, 'Unauthorized to approve this request.');
-            }
+            // W7-10: Technical Labour authorization paths decommissioned
+            // Historical technical_labour_id data is preserved in the database
+        }
+
+        if (!$isGlobal && !$isManager && !$isDeptLead && !$isProductionDeptManager) {
+            abort(403, 'Unauthorized to approve this request.');
         }
 
         $this->overtimeService->supervisorApproveCompensation($compensation);
@@ -206,18 +194,12 @@ class CompensatoryLeaveController extends Controller
         $user = auth()->user();
         $isGlobal = $user->hasRole(['Super Admin', 'Admin', 'HR']);
         $employee = $compensation->employee;
-        $technicalLabour = $compensation->technicalLabour;
 
         $isManager = $employee && $employee->manager_id === $user->employee_id;
         $isDeptLead = $employee && $employee->department?->manager_id === $user->employee_id;
         
+        // W7-10: Technical Labour paths are decommissioned
         $isProductionDeptManager = false;
-        if (!$employee && $user->employee_id) {
-            $productionDept = \App\Modules\HR\Models\Department::where('name', 'Production')->first();
-            if ($productionDept && $productionDept->manager_id === $user->employee_id) {
-                $isProductionDeptManager = true;
-            }
-        }
 
         if (!$isGlobal && !$isManager && !$isDeptLead && !$isProductionDeptManager) {
             abort(403, 'Unauthorized to reject this request.');
@@ -231,7 +213,7 @@ class CompensatoryLeaveController extends Controller
 
         $compensation->update($updateData);
         
-        $subjectName = $employee ? $employee->name : ($technicalLabour ? $technicalLabour->full_name : 'Unknown');
+        $subjectName = $employee ? $employee->name : 'Unknown';
 
         \App\Modules\HR\Models\SystemEvent::log('rejected', 'compensation', $compensation->id, [
             'actor' => $user->name,

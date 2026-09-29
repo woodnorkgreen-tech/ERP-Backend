@@ -64,6 +64,14 @@ class PaymentReversalService
 
             $payment->void($actorId, $reason);
 
+            // A voided payment settled nothing: a liability it had completed is
+            // payable again, so the fully-settled marker must not outlive it.
+            $settledLineIds = \App\Modules\Finance\Models\PaymentAllocation::query()
+                ->where('payment_id', $payment->id)->pluck('cost_line_id');
+            foreach (\App\Modules\Finance\CostCollector\Models\CostLine::query()->whereKey($settledLineIds)->lockForUpdate()->get() as $line) {
+                SpendVoucherSettlementService::syncSettlementMarker($line);
+            }
+
             if ($payment->spendVoucher) {
                 $payment->spendVoucher->forceFill(['status' => 'reversed'])->save();
             }

@@ -330,9 +330,23 @@ class ExpenditureExceptionTest extends TestCase
      * cash left the tin — and the cost account would show an unexplained overrun
      * where a minute earlier it showed an authorised one.
      */
+    /**
+     * STAB-7 (finance-redesign/phase-2/14_STAB_7_PETTY_CASH_TRIPLE_POSTING_ANALYSIS.md):
+     * the ACTUAL cost line this justification must survive onto is no longer
+     * created immediately at disbursement — PettyCashCostProducer::postFor()
+     * now correctly excludes any requisition-linked disbursement, since that
+     * used to recognise the same spend a second time on top of the advance and
+     * the surrender's own clearing entry. The real, final ACTUAL cost line now
+     * comes from reconcileSurrender(), so this test drives the full
+     * disburse → surrender → reconcile flow rather than calling postFor()
+     * directly, and PettyCashRequisitionController::reconcileSurrender() now
+     * carries the same budget_exception reason onto each surrender item's
+     * CostLine that postFor() used to carry at disbursement time.
+     */
     public function test_the_justification_survives_the_payment(): void
     {
         $this->seedFinanceCatalogue();
+        $this->seed(\App\Modules\Finance\Database\Seeders\PaymentSourceSeeder::class);
         $this->budget('1650.00');
 
         $this->approver->givePermissionTo(Permissions::FINANCE_EXPENDITURE_EXCEPTION_APPROVE);
@@ -346,32 +360,53 @@ class ExpenditureExceptionTest extends TestCase
             'budget_exception_funding_source' => 'Q3 contingency',
         ])->assertOk();
 
-        $topUpId = \App\Modules\Finance\PettyCash\Models\PettyCashTopUp::create([
+        \Spatie\Permission\Models\Role::findOrCreate('Super Admin', 'web');
+        $financeUser = User::factory()->create(['is_active' => true]);
+        $financeUser->assignRole('Super Admin');
+
+        \App\Modules\Finance\PettyCash\Models\PettyCashTopUp::create([
             'amount' => 500000.00,
             'payment_method' => 'cash',
             'date_topped_up' => now()->subMonth()->toDateString(),
-            'created_by' => $this->approver->id,
-        ])->id;
+            'created_by' => $financeUser->id,
+        ]);
+        \App\Modules\Finance\PettyCash\Models\PettyCashBalance::current()->update(['current_balance' => 500000.00]);
 
-        $payment = \App\Modules\Finance\Models\Payment::create([
-            'top_up_id' => $topUpId,
-            'requisition_id' => $requisition->id,
+        $expenseCodeId = (int) \Illuminate\Support\Facades\DB::table('expense_codes')
+            ->where('job_id_rule', '!=', 'not_allowed')->value('id');
+        $paymentSourceId = (int) \Illuminate\Support\Facades\DB::table('payment_sources')
+            ->where('code', 'PC-MAIN')->value('id');
+
+        $this->actingAs($financeUser);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/disburse", [
+            'idempotency_key' => (string) \Illuminate\Support\Str::uuid(),
+            'expense_code_id' => $expenseCodeId,
+            'payment_source_id' => $paymentSourceId,
+            'payment_method' => 'cash',
             'amount' => 4999.99,
             'payee_name' => 'Supplier',
-            'account' => 'Cost of Sales:Materials',
             'description' => 'Site materials',
-            'classification' => 'operations',
-            'payment_method' => 'cash',
-            'status' => 'active',
-            'job_number' => $this->enquiry->job_number,
             'date_disbursed' => now()->toDateString(),
-            'created_by' => $this->approver->id,
-        ]);
+            'receipt_type' => 'none',
+        ])->assertStatus(200);
 
-        app(PettyCashCostProducer::class)->postFor($payment);
+        $this->actingAs($this->requester);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/surrender", [
+            'items' => [[
+                'expense_code_id' => $expenseCodeId,
+                'amount' => 4999.99,
+                'tax_amount' => 0.00,
+                'receipt_type' => 'non_etr',
+                'supplier_name' => 'Supplier',
+                'description' => 'Site materials',
+            ]],
+            'cash_returned_amount' => 0.00,
+        ])->assertStatus(200);
 
-        $actual = CostLine::where('source_type', \App\Modules\Finance\Models\Payment::class)
-            ->where('source_id', $payment->id)
+        $this->actingAs($financeUser);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/reconcile")->assertStatus(200);
+
+        $actual = CostLine::where('source_type', \App\Modules\Finance\PettyCash\Models\PettyCashSurrenderItem::class)
             ->where('nature', CostLine::NATURE_ACTUAL)
             ->firstOrFail();
 

@@ -52,40 +52,95 @@ class ProcurementCostProducer
         $departmentId = $po->requisition?->department_id;
 
         foreach ($po->items as $item) {
-            $requisitionItem = $item->requisitionItem;
-            ['project_enquiry_id' => $enquiryId, 'job_number' => $jobNumber] =
-                $this->identityFor($requisitionItem, $po->requisition);
-
-            $planned = $this->plannedLine($requisitionItem);
-            $description = $item->custom_description ?: $item->material?->name ?: "PO item {$item->id}";
-            $amount = bcmul((string) $item->quantity, (string) $item->unit_price, 2);
-            $this->collector->postFromSource(new CostContext(
-                expenseCode: (string) ($requisitionItem?->expenseCode?->code ?? ''),
-                amount: $amount,
-                nature: CostLine::NATURE_COMMITTED,
-                enquiryId: $enquiryId ? (int) $enquiryId : null,
-                jobNumber: $jobNumber,
-                departmentId: $departmentId ? (int) $departmentId : null,
-                sourceType: PurchaseOrderItem::class, sourceId: $item->id,
-                sourceRef: 'commitment',
-                incurredAt: (string) ($po->approved_at ?? $po->date),
-                payeeType: 'SUPPLIER', payeeId: $po->supplier_id,
-                payeeName: $po->supplier?->supplier_name,
-                consumesLineId: $planned?->id,
-                description: $description,
-                details: array_filter([
-                    'budget_category' => $planned?->details['budget_category'] ?? null,
-                    'element' => $planned?->details['element'] ?? null,
-                    'po_number' => $po->po_number,
-                    'quantity' => $item->quantity,
-                    'unit_price' => $item->unit_price,
-                    'requisition_item_id' => $requisitionItem?->id,
-                    'purchase_order_item_id' => $item->id,
-                ], fn ($value) => $value !== null),
-            ));
+            $this->postItemCommitment($po, $item, $departmentId, 'commitment');
             $posted++;
         }
         return $posted;
+    }
+
+    /**
+     * W2-4: an approved commercial amendment that changes items (quantity,
+     * price, material or the item set itself) supersedes every original
+     * per-item commitment with a fresh one at the revised terms.
+     *
+     * Only reachable when the order has no goods receipt or bill yet —
+     * `PurchaseOrderAmendmentController::approve()` blocks an item-changing
+     * amendment otherwise, since reconciling a partially-received or
+     * partially-billed order's commitment (what happens to an accrual
+     * already posted against the original quantity?) has no WNG-confirmed
+     * treatment. With that precondition guaranteed, every existing
+     * commitment for this order is still untouched by any receipt, so
+     * releasing all of them and reposting the current item set is exact,
+     * not an approximation.
+     *
+     * A fresh `source_ref` (not the original 'commitment') is required: the
+     * collector's idempotency key is `(source_type, source_id, source_ref)`
+     * and does not distinguish by status, so re-using 'commitment' after
+     * releasing the original would just hand back the now-reversed row
+     * instead of creating a new one — the same reason `postGoodsReceipt()`
+     * below never reposts a commitment under the key it just released.
+     *
+     * @param array<int, int> $originalItemIds every item id the order had
+     *   before the amendment was applied — including any since removed.
+     */
+    public function reconcileAmendedCommitments(PurchaseOrder $po, array $originalItemIds, int $amendmentNumber): int
+    {
+        $po = $po->fresh(['supplier', 'requisition', 'items.requisitionItem.expenseCode']);
+
+        if ($originalItemIds !== []) {
+            CostLine::where('source_type', PurchaseOrderItem::class)
+                ->whereIn('source_id', $originalItemIds)
+                ->where('nature', CostLine::NATURE_COMMITTED)
+                ->where('status', CostLine::STATUS_VERIFIED)
+                ->get()
+                ->each(fn (CostLine $line) => $this->collector->releaseCommitment(
+                    $line, "Superseded by purchase order amendment #{$amendmentNumber}."
+                ));
+        }
+
+        $posted = 0;
+        $departmentId = $po->requisition?->department_id;
+
+        foreach ($po->items as $item) {
+            $this->postItemCommitment($po, $item, $departmentId, "commitment-amend-{$amendmentNumber}");
+            $posted++;
+        }
+        return $posted;
+    }
+
+    private function postItemCommitment(PurchaseOrder $po, PurchaseOrderItem $item, ?int $departmentId, string $sourceRef): void
+    {
+        $requisitionItem = $item->requisitionItem;
+        ['project_enquiry_id' => $enquiryId, 'job_number' => $jobNumber] =
+            $this->identityFor($requisitionItem, $po->requisition);
+
+        $planned = $this->plannedLine($requisitionItem);
+        $description = $item->custom_description ?: $item->material?->name ?: "PO item {$item->id}";
+        $amount = bcmul((string) $item->quantity, (string) $item->unit_price, 2);
+        $this->collector->postFromSource(new CostContext(
+            expenseCode: (string) ($requisitionItem?->expenseCode?->code ?? ''),
+            amount: $amount,
+            nature: CostLine::NATURE_COMMITTED,
+            enquiryId: $enquiryId ? (int) $enquiryId : null,
+            jobNumber: $jobNumber,
+            departmentId: $departmentId ? (int) $departmentId : null,
+            sourceType: PurchaseOrderItem::class, sourceId: $item->id,
+            sourceRef: $sourceRef,
+            incurredAt: (string) ($po->approved_at ?? $po->date),
+            payeeType: 'SUPPLIER', payeeId: $po->supplier_id,
+            payeeName: $po->supplier?->supplier_name,
+            consumesLineId: $planned?->id,
+            description: $description,
+            details: array_filter([
+                'budget_category' => $planned?->details['budget_category'] ?? null,
+                'element' => $planned?->details['element'] ?? null,
+                'po_number' => $po->po_number,
+                'quantity' => $item->quantity,
+                'unit_price' => $item->unit_price,
+                'requisition_item_id' => $requisitionItem?->id,
+                'purchase_order_item_id' => $item->id,
+            ], fn ($value) => $value !== null),
+        ));
     }
 
     /** Accepted quantities become accruals; only the unreceived balance stays committed. */

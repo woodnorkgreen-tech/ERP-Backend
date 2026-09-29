@@ -116,6 +116,15 @@ final class RolePermissions
                 Permissions::PROJECT_COSTS_READ_ASSIGNED, Permissions::PROJECT_READ, Permissions::ROLE_READ,
                 Permissions::SUPPORT_MANAGE, Permissions::USER_ASSIGN_ROLE, Permissions::USER_CREATE,
                 Permissions::USER_READ, Permissions::USER_UPDATE,
+                // W7 (2026_09_24_000006): full labour access. Declared here because a
+                // migration's grant only lands where the role already exists — on a
+                // freshly built database it silently grants nothing (Report 52).
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_PO_VERIFY, Permissions::FINANCE_LABOUR_FINANCE_VERIFY,
+                Permissions::FINANCE_LABOUR_CORRECT,
+                // W2 (Report 60): supplier-bill verification, previously granted by the
+                // role NAME Admin. Same population, now an assignable permission.
+                Permissions::FINANCE_PAYABLES_READ, Permissions::FINANCE_PAYABLES_VERIFY,
             ],
             'Manager' => [
                 Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_ACCESS, Permissions::DEPARTMENT_READ,
@@ -159,6 +168,10 @@ final class RolePermissions
                 Permissions::FINANCE_RECEIVABLES_CORRECT, Permissions::FINANCE_RECEIVABLES_READ,
                 Permissions::FINANCE_RECEIVABLES_RECORD, Permissions::FINANCE_RECEIVABLES_RELEASE,
                 Permissions::FINANCE_RECEIVABLES_REVERSE, Permissions::FINANCE_RECEIVABLES_VERIFY,
+                // B1 (WNG, 2026-09-28): Accounts is the independent invoice checker (W1-1).
+                // Holding this does not let anyone check an invoice they prepared: the
+                // check action refuses the preparer, so segregation holds per invoice.
+                Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
                 Permissions::FINANCE_PAYMENT_SOURCES_MANAGE,
                 Permissions::FINANCE_REQUISITION_TYPES_MANAGE, Permissions::FINANCE_SPEND_VOUCHERS_APPROVE,
                 Permissions::FINANCE_SPEND_VOUCHERS_CREATE, Permissions::FINANCE_SPEND_VOUCHERS_POST,
@@ -166,6 +179,17 @@ final class RolePermissions
                 Permissions::HR_VIEW_EMPLOYEES, Permissions::PROCUREMENT_ORDERS_APPROVE,
                 Permissions::PROCUREMENT_REQUISITIONS_APPROVE, Permissions::PROJECT_COSTS_READ_ASSIGNED,
                 Permissions::PROJECT_READ, Permissions::USER_READ,
+                // W6 (2026_09_24_000004) and W7 (2026_09_24_000006): Accounts is the
+                // Finance authority for project costing and labour. Reopen stays with
+                // Super Admin. Declared here so a fresh build carries them (Report 52).
+                Permissions::FINANCE_COSTS_PORTFOLIO, Permissions::FINANCE_COSTS_ALLOCATE,
+                Permissions::FINANCE_COSTS_TRANSFER, Permissions::FINANCE_COSTS_CLOSE,
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_FINANCE_VERIFY, Permissions::FINANCE_LABOUR_CORRECT,
+                // R-3 (WNG, Report 53): Accounts opens Finance readiness and the reports.
+                Permissions::FINANCE_REPORTS_VIEW,
+                // W2 (Report 60): Accounts verifies supplier bills (previously by role name).
+                Permissions::FINANCE_PAYABLES_READ, Permissions::FINANCE_PAYABLES_VERIFY,
             ],
             'Costing' => [
                 Permissions::DASHBOARD_FINANCE, Permissions::FINANCE_BUDGET_APPROVE,
@@ -177,6 +201,9 @@ final class RolePermissions
                 Permissions::HR_VIEW_EMPLOYEES, Permissions::PROJECT_COSTS_READ_ASSIGNED,
                 Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::TASK_READ,
                 Permissions::TASK_UPDATE, Permissions::USER_READ,
+                // W7 (2026_09_24_000006): record and Project-Officer-verify labour.
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_PO_VERIFY,
             ],
             'HR' => [
                 Permissions::DASHBOARD_HR, Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_READ,
@@ -223,6 +250,9 @@ final class RolePermissions
                 Permissions::PROJECT_DELETE, Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE,
                 Permissions::TASK_ASSIGN, Permissions::TASK_CREATE, Permissions::TASK_READ,
                 Permissions::TASK_UPDATE, Permissions::USER_READ,
+                // W7 (2026_09_24_000006): record and Project-Officer-verify labour.
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_PO_VERIFY,
             ],
             'Project Officer' => [
                 Permissions::DASHBOARD_PROJECTS, Permissions::DEPARTMENT_READ, Permissions::ENQUIRY_CREATE,
@@ -231,6 +261,13 @@ final class RolePermissions
                 Permissions::PROJECT_COSTS_READ_ASSIGNED, Permissions::PROJECT_READ,
                 Permissions::PROJECT_UPDATE, Permissions::TASK_ASSIGN, Permissions::TASK_READ,
                 Permissions::TASK_UPDATE, Permissions::USER_READ,
+                // R-1 (WNG, Report 53): Project Officers record and Project-Officer-verify
+                // labour on the projects they are assigned to — ProjectFinancialAccess
+                // still scopes both to assignment. Finance verification stays with
+                // Accounts: FINANCE_LABOUR_FINANCE_VERIFY is deliberately NOT here, and
+                // holding it would also lift the assignment scope.
+                Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
+                Permissions::FINANCE_LABOUR_PO_VERIFY,
             ],
             'Production' => [
                 Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_READ,

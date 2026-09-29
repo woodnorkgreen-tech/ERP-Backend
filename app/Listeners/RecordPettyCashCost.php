@@ -3,7 +3,7 @@
 namespace App\Listeners;
 
 use App\Events\PettyCashDisbursementPaid;
-use App\Modules\Finance\CostCollector\Services\PettyCashCostProducer;
+use App\Modules\Finance\CostCollector\Services\PettyCashCostPoster;
 use App\Modules\Finance\Models\Payment;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
@@ -25,13 +25,19 @@ use Throwable;
  * Re-running is safe: the producer posts through `postFromSource()`, which is
  * idempotent on `(source_type, source_id)`, so a retry is a no-op rather than a
  * double charge.
+ *
+ * Posting is delegated to `PettyCashCostPoster` (Wave 1 Closure Gate §3.D)
+ * rather than calling the producer directly: the cash already left the float
+ * by the time this queued job runs, so a posting failure here must be
+ * recorded as Finance-visible state and become retryable — not just logged —
+ * the same STAB-4 principle already applied to requisition advances.
  */
 class RecordPettyCashCost implements ShouldQueue
 {
     public int $tries = 3;
     public int $backoff = 30;
 
-    public function __construct(private PettyCashCostProducer $producer) {}
+    public function __construct(private PettyCashCostPoster $poster) {}
 
     public function handle(PettyCashDisbursementPaid $event): void
     {
@@ -48,11 +54,13 @@ class RecordPettyCashCost implements ShouldQueue
             return;
         }
 
-        $outcome = $this->producer->postFor($disbursement);
+        $outcome = $this->poster->attempt($disbursement);
 
         // The skips are ordinary, not failures: spend with no job number and
         // ADM-coded overhead have no cost object to attach to. Logged at info so
         // an unattributed payment is still traceable when a project looks light.
+        // 'gl_posting_failed' is not ordinary — the poster has already flagged
+        // the disbursement and alerted Finance for that outcome.
         Log::info('Petty cash cost recorded', [
             'disbursement_id' => $disbursement->id,
             'job_number' => $disbursement->job_number,

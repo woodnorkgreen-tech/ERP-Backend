@@ -37,7 +37,7 @@ class PettyCashCostProducer
      * this run can influence a later chunk's window. A cursor takes one stable
      * result set up front and is not exposed to that.
      *
-     * @return array{examined: int, posted: int, skipped_no_job: int, skipped_unmatched: int, skipped_inactive: int, skipped_supplier_settlement: int}
+     * @return array{examined: int, posted: int, skipped_no_job: int, skipped_unmatched: int, skipped_inactive: int, skipped_supplier_settlement: int, skipped_voucher_settlement: int, skipped_requisition_advance: int}
      */
     public function backfill(): array
     {
@@ -47,7 +47,8 @@ class PettyCashCostProducer
         $tally = [
             'examined' => 0, 'posted' => 0,
             'skipped_no_job' => 0, 'skipped_unmatched' => 0, 'skipped_inactive' => 0,
-            'skipped_supplier_settlement' => 0,
+            'skipped_supplier_settlement' => 0, 'skipped_voucher_settlement' => 0,
+            'skipped_requisition_advance' => 0,
         ];
 
         foreach (Payment::query()->orderBy('id')->cursor() as $disbursement) {
@@ -58,7 +59,7 @@ class PettyCashCostProducer
         return $tally;
     }
 
-    /** @return 'posted'|'skipped_no_job'|'skipped_unmatched'|'skipped_inactive'|'skipped_supplier_settlement' */
+    /** @return 'posted'|'skipped_no_job'|'skipped_unmatched'|'skipped_inactive'|'skipped_supplier_settlement'|'skipped_voucher_settlement'|'skipped_requisition_advance' */
     public function postFor(Payment $disbursement): string
     {
         // A voided or archived payment is not a project cost. Voids already have
@@ -120,6 +121,25 @@ class PettyCashCostProducer
         if ($disbursement->spend_voucher_id
             || SpendVoucher::where('petty_cash_disbursement_id', $disbursement->id)->exists()) {
             return 'skipped_voucher_settlement';
+        }
+
+        // STAB-7 (finance-redesign/phase-2/14_STAB_7_PETTY_CASH_TRIPLE_POSTING_ANALYSIS.md):
+        // a disbursement raised against a PettyCashRequisition is an advance,
+        // not yet a substantiated expense — PettyCashAdvancePoster already
+        // posts it as one (Dr Staff Advance / Cr Float) the moment it is
+        // created, and the requisition's own surrender/reconciliation later
+        // posts the real, itemised expense and clears that advance
+        // (JournalPostingService::postPettyCashSurrender()). Posting an
+        // actual cost here as well would recognise the same spend a second
+        // and third time — the same double-charge this method already
+        // refuses above for a supplier- or voucher-settled disbursement; an
+        // unreconciled requisition advance is the same shape of problem, not
+        // a different one. This is unconditional on requisition_id alone
+        // (not on job_number or the requisition's current status), because
+        // the advance/surrender lifecycle owns this disbursement's posting
+        // either way, project-costed or overhead.
+        if ($disbursement->requisition_id) {
+            return 'skipped_requisition_advance';
         }
 
         if (blank($disbursement->job_number)) {

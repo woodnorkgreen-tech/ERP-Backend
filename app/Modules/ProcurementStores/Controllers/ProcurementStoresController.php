@@ -22,9 +22,29 @@ use Illuminate\Validation\ValidationException;
 
 class ProcurementStoresController extends Controller
 {
+    /**
+     * Report 61 (role-name audit): these Stores controls were `hasAnyRole([...])`
+     * lists. Each is now the permission held by exactly the same roles —
+     * stores.manage = Super Admin, Manager, Stores; stores.review = Super Admin,
+     * Manager; the Finance leg (Accounts) = finance.reports.view. The lists also
+     * named 'Finance', 'Finance Manager' and 'Accountant', roles that do not
+     * exist, so no real holder gains or loses access.
+     */
+    private function allows(string ...$permissions): bool
+    {
+        $user = auth()->user();
+        foreach ($permissions as $permission) {
+            if ($user?->can($permission)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function financeSyncExceptions(): JsonResponse
     {
-        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_MANAGE, Permissions::FINANCE_REPORTS_VIEW)) {
             return response()->json(['message' => 'You are not permitted to view Stores accounting exceptions.'], 403);
         }
 
@@ -87,7 +107,7 @@ class ProcurementStoresController extends Controller
 
     public function retryFinanceSync(StoresFinancePosting $inventoryLog): JsonResponse
     {
-        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_MANAGE, Permissions::FINANCE_REPORTS_VIEW)) {
             return response()->json(['message' => 'You are not permitted to retry Stores accounting.'], 403);
         }
         $isStale = ($inventoryLog->status === 'processing'
@@ -110,7 +130,7 @@ class ProcurementStoresController extends Controller
 
     public function resolveFinanceValuation(Request $request, StoresFinancePosting $inventoryLog): JsonResponse
     {
-        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_MANAGE, Permissions::FINANCE_REPORTS_VIEW)) {
             return response()->json(['message' => 'You are not permitted to resolve Stores valuation.'], 403);
         }
         $validated = $request->validate([
@@ -294,18 +314,11 @@ class ProcurementStoresController extends Controller
             ->filter(fn($m) => $m->isBoardTrackable())
             ->pluck('id');
 
-        $boardCounts = $boardMaterialIds->isNotEmpty()
-            ? Board::whereIn('library_material_id', $boardMaterialIds)
-                ->selectRaw("library_material_id,
-                    SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) AS available_cnt,
-                    SUM(CASE WHEN status IN ('Available', 'Quarantine') THEN 1 ELSE 0 END) AS in_stores_cnt,
-                    SUM(CASE WHEN status IN ('Available', 'Quarantine') THEN current_value ELSE 0 END) AS in_stores_value")
-                ->groupBy('library_material_id')
-                ->get()
-                ->keyBy('library_material_id')
-            : collect();
+        // Report 61: one valuation, shared with the Finance inventory position.
+        $valuation = app(\App\Modules\ProcurementStores\Services\InventoryValuationService::class);
+        $boardCounts = $valuation->boardCounts($boardMaterialIds);
 
-        $formatMaterial = function ($material) use ($boardCounts) {
+        $formatMaterial = function ($material) use ($boardCounts, $valuation) {
             // The governed master controls behaviour. stocks.tracking_mode is a
             // compatibility projection and must never override master data.
             $isBoard = $material->isBoardTrackable();
@@ -379,9 +392,7 @@ class ProcurementStoresController extends Controller
                 'can_set_stock_quantity' => !$isBoard
                     && !$material->is_serialized
                     && !$material->is_batch_controlled,
-                '_stock_value'      => $isBoard
-                    ? (float) ($bc?->in_stores_value ?? 0)
-                    : $onHand * (float) $material->unit_cost,
+                '_stock_value'      => $valuation->valueOf($material, (float) $onHand, $bc),
             ];
         };
 
@@ -425,9 +436,7 @@ class ProcurementStoresController extends Controller
 
             $summary['total_items']++;
             $stock ? $summary['stocked_item_count']++ : $summary['unstocked_item_count']++;
-            $summary['total_value'] += $isBoard
-                ? (float) ($bc?->in_stores_value ?? 0)
-                : $onHand * (float) $material->unit_cost;
+            $summary['total_value'] += $valuation->valueOf($material, (float) $onHand, $bc);
 
             if ($minLevel > 0 && $available <= $minLevel) {
                 $summary['low_stock_count']++;
@@ -499,7 +508,7 @@ class ProcurementStoresController extends Controller
      */
     public function checkIn(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can check stock in.'], 403);
         }
 
@@ -555,7 +564,7 @@ class ProcurementStoresController extends Controller
      */
     public function checkOut(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
         }
 
@@ -588,7 +597,7 @@ class ProcurementStoresController extends Controller
      */
     public function updateStockSettings(Request $request): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can update stock settings.'], 403);
         }
 
@@ -689,7 +698,7 @@ class ProcurementStoresController extends Controller
      */
     public function bulkStockSettings(Request $request): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can update stock settings.'], 403);
         }
 
@@ -744,7 +753,7 @@ class ProcurementStoresController extends Controller
      */
     public function returns(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can record returns.'], 403);
         }
 
@@ -773,7 +782,7 @@ class ProcurementStoresController extends Controller
      */
     public function markDefective(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can mark stock defective.'], 403);
         }
 
@@ -801,7 +810,7 @@ class ProcurementStoresController extends Controller
      */
     public function batchCheckIn(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can check stock in.'], 403);
         }
 
@@ -836,7 +845,7 @@ class ProcurementStoresController extends Controller
      */
     public function batchCheckOut(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
         }
 
@@ -1035,7 +1044,7 @@ class ProcurementStoresController extends Controller
      */
     public function linkProjectMaterial(Request $request, InventoryLog $inventoryLog): JsonResponse
     {
-        if (! auth()->user()?->hasAnyRole(['Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_REVIEW)) {
             return response()->json(['message' => 'A Manager must approve project-material linkage corrections.'], 403);
         }
         $validated = $request->validate([
@@ -1108,7 +1117,7 @@ class ProcurementStoresController extends Controller
      */
     public function resolveProjectMaterialCatalogue(Request $request, \App\Models\ElementMaterial $elementMaterial, StockMovementPoster $poster): JsonResponse
     {
-        if (! auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can resolve a material to the catalogue.'], 403);
         }
 
@@ -1207,7 +1216,7 @@ class ProcurementStoresController extends Controller
      */
     public function materialLedger(Request $request): JsonResponse
     {
-        if (! auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_MANAGE, Permissions::FINANCE_REPORTS_VIEW)) {
             return response()->json(['message' => 'You are not permitted to view the material ledger.'], 403);
         }
 
@@ -1329,7 +1338,7 @@ class ProcurementStoresController extends Controller
      */
     public function destroyLog($id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (!$this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can delete inventory logs.'], 403);
         }
 
@@ -1381,7 +1390,7 @@ class ProcurementStoresController extends Controller
      */
     public function materialDemandForecast(): JsonResponse
     {
-        if (! auth()->user()?->hasAnyRole(['Stores', 'Procurement', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_MANAGE, Permissions::PROCUREMENT_VIEW)) {
             return response()->json(['message' => 'You are not permitted to view material demand forecasts.'], 403);
         }
 

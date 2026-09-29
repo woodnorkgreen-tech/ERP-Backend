@@ -647,49 +647,54 @@ class JobCardController extends Controller
 
     /**
      * Get technicians for dropdown.
-     * Only pulls from technical labour table.
+     * W7-10: Migrated to Employee Records. Historical TechnicalLabour table preserved
+     * but new operations use Employee Records for worker selection.
      */
     public function technicians(Request $request): JsonResponse
     {
         $search = $request->get('q', '');
 
-        // Get technical labour from HR module only
-        $technicalLabourQuery = \App\Modules\HR\Models\TechnicalLabour::active();
+        // Get employees from HR module (W7-10: consolidated on Employee Records)
+        $employeeQuery = \App\Modules\HR\Models\Employee::active();
 
-        // Handle search for technical labour
+        // Handle search for employees
         if ($search) {
-            $technicalLabourQuery->where(function ($q) use ($search) {
-                $q->where('full_name', 'like', "%{$search}%")
+            $employeeQuery->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                  ->orWhere('last_name', 'like', "%{$search}%")
+                  ->orWhere('employee_id', 'like', "%{$search}%")
                   ->orWhere('phone', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhere('specialization', 'like', "%{$search}%");
+                  ->orWhere('email', 'like', "%{$search}%");
             });
         }
 
-        $technicalLabours = $technicalLabourQuery->orderBy('full_name')->get([
-            'id',
-            'full_name',
-            'phone',
-            'email',
-            'specialization',
-            'day_rate'
-        ])->map(function ($tech) {
-            $nameParts = explode(' ', $tech->full_name);
-            return [
-                'id' => $tech->id, // Use simple integer ID (1, 2, 3...)
-                'first_name' => $nameParts[0] ?? '',
-                'last_name' => implode(' ', array_slice($nameParts, 1)),
-                'employee_number' => $tech->phone ?? 'TECH-' . $tech->id,
-                'source' => 'technical_labour',
-                'department' => 'Technical Resource Pool',
-                'specialization' => $tech->specialization,
-                'day_rate' => $tech->day_rate
-            ];
-        });
+        $employees = $employeeQuery->with('department:id,name')
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get([
+                'id',
+                'first_name',
+                'last_name',
+                'employee_id',
+                'phone',
+                'email',
+                'department_id'
+            ])->map(function ($employee) {
+                return [
+                    'id' => $employee->id,
+                    'first_name' => $employee->first_name,
+                    'last_name' => $employee->last_name,
+                    'employee_number' => $employee->employee_id ?? 'EMP-' . $employee->id,
+                    'source' => 'employee',
+                    'department' => $employee->department->name ?? 'Unknown',
+                    'specialization' => $employee->department->name ?? 'General',
+                    'day_rate' => 150.00
+                ];
+            });
 
         return response()->json([
             'success' => true,
-            'data' => $technicalLabours
+            'data' => $employees
         ]);
     }
 

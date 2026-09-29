@@ -47,6 +47,7 @@ class ReceivablesAgeingTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_VERIFY,
             Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
             Permissions::FINANCE_RECEIVABLES_REVERSE,
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
         ] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
@@ -62,7 +63,13 @@ class ReceivablesAgeingTest extends TestCase
         $this->verifier->givePermissionTo(Permissions::FINANCE_RECEIVABLES_VERIFY);
 
         $this->reverser = User::factory()->create(['is_active' => true]);
-        $this->reverser->givePermissionTo(Permissions::FINANCE_RECEIVABLES_REVERSE);
+        $this->reverser->givePermissionTo([
+            Permissions::FINANCE_RECEIVABLES_REVERSE,
+            // Doubles as the W1-1 invoice checker in this file — a distinct
+            // person from the preparer (accountant) is all the confirmed rule
+            // requires.
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
+        ]);
 
         $this->outsider = User::factory()->create(['is_active' => true]);
     }
@@ -114,6 +121,10 @@ class ReceivablesAgeingTest extends TestCase
     private function issuedInvoice(ProjectEnquiry $enquiry, float $unitPrice): ProjectInvoice
     {
         $invoice = $this->draftInvoice($enquiry, $unitPrice);
+
+        $this->actingAs($this->reverser, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
 
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")

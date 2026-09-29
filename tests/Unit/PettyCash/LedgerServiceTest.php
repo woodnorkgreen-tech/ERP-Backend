@@ -17,12 +17,17 @@ class LedgerServiceTest extends TestCase
     {
         parent::setUp();
 
+        // Wave 3's custody and cash-count tables reference petty_cash_balances,
+        // so the swap below has to run with foreign-key checks suspended.
+        Schema::disableForeignKeyConstraints();
         Schema::dropIfExists('petty_cash_balances');
         Schema::dropIfExists('petty_cash_ledger_entries');
+        Schema::enableForeignKeyConstraints();
 
         Schema::create('petty_cash_balances', function ($table) {
             $table->id();
             $table->decimal('current_balance', 10, 2)->default(0.00);
+            $table->unsignedBigInteger('held_by')->nullable();
             $table->unsignedBigInteger('last_transaction_id')->nullable();
             $table->string('last_transaction_type')->nullable();
             $table->timestamp('updated_at')->nullable();

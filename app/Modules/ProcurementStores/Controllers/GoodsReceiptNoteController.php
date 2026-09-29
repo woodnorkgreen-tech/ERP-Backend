@@ -346,6 +346,17 @@ class GoodsReceiptNoteController extends Controller
 
             $purchaseOrder = PurchaseOrder::with(['items.material.materialCategory.parent', 'items.material.baseUom', 'items.material.purchaseUom', 'items.material.uomConversions'])->lockForUpdate()
                 ->findOrFail($request->purchase_order_id);
+
+            // W2-4: while a commercial amendment awaits approval, the order's
+            // approved terms are not yet settled — receiving against them
+            // must wait until the amendment resolves one way or the other.
+            if ($purchaseOrder->hasPendingCommercialAmendment()) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'This order has a commercial amendment awaiting approval. Receiving is paused until it is approved or rejected.',
+                ], 422);
+            }
+
             foreach ($request->items as $item) {
                 $poItem = $purchaseOrder->items->firstWhere('id', (int) $item['purchase_order_item_id']);
                 if (! $poItem) {

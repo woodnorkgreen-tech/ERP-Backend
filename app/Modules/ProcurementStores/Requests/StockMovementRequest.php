@@ -21,7 +21,9 @@ class StockMovementRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return (bool) $this->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin']);
+        // Report 61: was hasAnyRole(['Stores', 'Manager', 'Super Admin']) — the
+        // holders of stores.manage exactly. Moving stock is that permission.
+        return (bool) $this->user()?->can(\App\Constants\Permissions::STORES_MANAGE);
     }
 
     /**

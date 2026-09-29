@@ -32,6 +32,7 @@ class CreditNoteTest extends TestCase
     use RefreshDatabase;
 
     private User $accountant;
+    private User $approver;
 
     protected function setUp(): void
     {
@@ -46,6 +47,7 @@ class CreditNoteTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_REVERSE,
             Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
             Permissions::FINANCE_REPORTS_VIEW,
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
         ] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
@@ -58,6 +60,15 @@ class CreditNoteTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_REVERSE,
             Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
             Permissions::FINANCE_REPORTS_VIEW,
+        ]);
+
+        // W1-1/W1-6: the preparer (accountant, above) must not be their own
+        // invoice checker or credit-note approver.
+        $this->approver = User::factory()->create(['is_active' => true]);
+        $this->approver->givePermissionTo([
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
+            Permissions::FINANCE_RECEIVABLES_REVERSE,
+            Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
         ]);
     }
 
@@ -135,7 +146,11 @@ class CreditNoteTest extends TestCase
             ['description' => 'Stand build', 'quantity' => 1, 'unit_price' => $unitPrice, 'vat_treatment_id' => $vat->id],
         ]);
 
-        $this->actingAs($this->accountant, 'sanctum')
+        $this->actingAs($this->approver, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+
+        $this->actingAs($this->approver, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
             ->assertOk();
 
@@ -168,7 +183,7 @@ class CreditNoteTest extends TestCase
         $this->assertSame($invoice->id, $creditNote->credits_invoice_id);
         $this->assertStringStartsWith('CN-', $creditNote->invoice_number);
 
-        $this->actingAs($this->accountant, 'sanctum')
+        $this->actingAs($this->approver, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/credit-notes/{$creditNoteId}/issue")
             ->assertOk();
 
@@ -206,7 +221,7 @@ class CreditNoteTest extends TestCase
                 'lines' => [['description' => 'Correction', 'quantity' => 1, 'unit_price' => 100000, 'vat_treatment_id' => $vat->id]],
             ])->assertCreated();
         $creditNoteId = $create->json('data.id');
-        $this->actingAs($this->accountant, 'sanctum')
+        $this->actingAs($this->approver, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/credit-notes/{$creditNoteId}/issue")
             ->assertOk();
 
@@ -297,7 +312,7 @@ class CreditNoteTest extends TestCase
                 'lines' => [['description' => 'Correction', 'quantity' => 1, 'unit_price' => 100000, 'vat_treatment_id' => $vat->id]],
             ])->assertCreated();
         $creditNoteId = $create->json('data.id');
-        $this->actingAs($this->accountant, 'sanctum')
+        $this->actingAs($this->approver, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/credit-notes/{$creditNoteId}/issue")
             ->assertOk();
 
@@ -334,7 +349,7 @@ class CreditNoteTest extends TestCase
                 'reason' => 'Partial correction',
                 'lines' => [['description' => 'Correction', 'quantity' => 1, 'unit_price' => 50000, 'vat_treatment_id' => $vat->id]],
             ])->assertCreated();
-        $this->actingAs($this->accountant, 'sanctum')
+        $this->actingAs($this->approver, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/credit-notes/{$create->json('data.id')}/issue")
             ->assertOk();
 
@@ -376,7 +391,7 @@ class CreditNoteTest extends TestCase
                 'lines' => [['description' => 'Correction', 'quantity' => 1, 'unit_price' => 50000, 'vat_treatment_id' => $vat->id]],
             ])->assertCreated();
         $creditNoteId = $create->json('data.id');
-        $this->actingAs($this->accountant, 'sanctum')
+        $this->actingAs($this->approver, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/credit-notes/{$creditNoteId}/issue")
             ->assertOk();
 
@@ -417,7 +432,7 @@ class CreditNoteTest extends TestCase
                 'reason' => 'Partial correction',
                 'lines' => [['description' => 'Correction', 'quantity' => 1, 'unit_price' => 150000, 'vat_treatment_id' => $vat->id]],
             ])->assertCreated();
-        $this->actingAs($this->accountant, 'sanctum')
+        $this->actingAs($this->approver, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/credit-notes/{$create->json('data.id')}/issue")
             ->assertOk();
 

@@ -25,7 +25,6 @@ use App\Http\Controllers\API\PublicHandoverController;
 use App\Modules\Production\Http\Controllers\JobCardController;
 use App\Modules\Logistics\Controllers\DriverDeliveryController;
 use App\Http\Controllers\DesignRequirementController;
-use App\Modules\HR\Http\Controllers\TechnicalLabourController;
 
 use App\Modules\Finance\PettyCash\Controllers\PettyCashController;
 use App\Modules\Finance\PettyCash\Controllers\PettyCashTopUpController;
@@ -185,6 +184,47 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('accounts', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'index']);
         Route::get('account/{enquiry}', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'show']);
         Route::get('account/{enquiry}/category-lines', [App\Modules\Finance\CostCollector\Http\Controllers\CostAccountController::class, 'categoryLines']);
+
+        // W6-2: Portfolio margin — opt-in, batched query (not N+1).
+        Route::post('portfolio-margin', [App\Modules\Finance\CostCollector\Http\Controllers\PortfolioMarginController::class, 'store'])
+            ->middleware('throttle:30,1');
+
+        // W6-3: Cost allocation across projects.
+        Route::get('lines/{cost}/allocations', [App\Modules\Finance\CostCollector\Http\Controllers\CostAllocationController::class, 'show']);
+        Route::post('lines/{cost}/allocations', [App\Modules\Finance\CostCollector\Http\Controllers\CostAllocationController::class, 'store'])
+            ->middleware('throttle:30,1');
+        Route::delete('lines/{cost}/allocations', [App\Modules\Finance\CostCollector\Http\Controllers\CostAllocationController::class, 'destroy'])
+            ->middleware('throttle:30,1');
+
+        // W6-4: Cost transfer (reclassification via reversing pair).
+        Route::post('lines/{cost}/transfer', [App\Modules\Finance\CostCollector\Http\Controllers\CostTransferController::class, 'store'])
+            ->middleware('throttle:30,1');
+
+        // W6-5 / W6-6: Project financial closure.
+        Route::get('projects/{enquiry}/closure-check', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectFinancialClosureController::class, 'check']);
+        Route::post('projects/{enquiry}/close', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectFinancialClosureController::class, 'close'])
+            ->middleware('throttle:10,1');
+        Route::post('projects/{enquiry}/reopen', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectFinancialClosureController::class, 'reopen'])
+            ->middleware('throttle:10,1');
+
+        // W7: Project Labour Actuals — actual labour usage against Project Budget lines.
+        // All routes are project-scoped. Rate-limited to prevent duplicate recordings.
+        Route::prefix('projects/{enquiry}/labour-actuals')->middleware('throttle:60,1')->group(function () {
+            Route::get('/', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'index']);
+            Route::post('/', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'store']);
+            Route::get('{actual}', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'show']);
+            Route::post('{actual}/po-verify', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'poVerify']);
+            Route::post('{actual}/finance-verify', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'financeVerify']);
+            Route::post('{actual}/return', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'returnForCorrection']);
+            Route::post('{actual}/resolve-rate', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'resolveRate']);
+            Route::post('{actual}/correct', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'correct']);
+            Route::post('{actual}/resubmit', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'resubmit']);
+            Route::post('{actual}/reclassify', [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'reclassify']);
+        });
+
+        // W7: Budget labour lines with consumption breakdown.
+        Route::get('projects/{enquiry}/budget-labour-lines',
+            [App\Modules\Finance\CostCollector\Http\Controllers\ProjectLabourActualController::class, 'budgetLines']);
 
         // Verification. Policy-gated, and the service additionally refuses to let
         // anyone verify a cost they reported themselves.
@@ -861,7 +901,15 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
         Route::get('enquiries/{enquiry}/invoices', [EnquiryController::class, 'projectInvoices'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
         Route::post('enquiries/{enquiry}/invoices', [EnquiryController::class, 'createProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::put('enquiries/{enquiry}/invoices/{invoice}', [EnquiryController::class, 'updateProjectInvoiceLines'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        // W1-1: review/check, separate from prepare (above) and issue (below).
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/check', [EnquiryController::class, 'checkProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK);
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/return-for-correction', [EnquiryController::class, 'returnInvoiceForCorrection'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK);
         Route::post('enquiries/{enquiry}/invoices/{invoice}/issue', [EnquiryController::class, 'issueProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::get('enquiries/{enquiry}/financial-position', [EnquiryController::class, 'financialPosition'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::get('enquiries/{enquiry}/invoices/{invoice}/attachments', [\App\Modules\Finance\Controllers\FinanceAttachmentController::class, 'index'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::post('enquiries/{enquiry}/invoices/{invoice}/attachments', [\App\Modules\Finance\Controllers\FinanceAttachmentController::class, 'store'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::get('enquiries/{enquiry}/invoices/{invoice}/attachments/{attachment}/download', [\App\Modules\Finance\Controllers\FinanceAttachmentController::class, 'download'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
         Route::post('enquiries/{enquiry}/invoices/{invoice}/allocate', [EnquiryController::class, 'allocatePaymentToInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_RECORD);
         Route::post('enquiries/{enquiry}/invoices/{invoice}/void', [EnquiryController::class, 'voidProjectInvoice'])->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_REVERSE);
         // A credit note is a ProjectInvoice row with credits_invoice_id set, so
@@ -958,6 +1006,24 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Finance Module Routes
     Route::prefix('finance')->group(function () {
+        // W1 read projections for the Sales & receivables workspace (Report 58).
+        // Changes still go through the per-project enquiry routes.
+        Route::get('invoices', [\App\Modules\Finance\Controllers\ReceivablesController::class, 'invoices']);
+        Route::get('invoices/{invoice}', [\App\Modules\Finance\Controllers\ReceivablesController::class, 'invoice'])->whereNumber('invoice');
+        Route::get('receipts', [\App\Modules\Finance\Controllers\ReceivablesController::class, 'receipts']);
+        // Project billing controls (Report 59): the read that replaced EnquiryFinanceModal's.
+        Route::get('project-billing/{enquiry}', [\App\Modules\Finance\Controllers\ProjectBillingController::class, 'show'])->whereNumber('enquiry');
+        // W2 Purchasing & payables read projections (Report 60). Changes still go
+        // through the Procurement bill routes (verify, return, correct, pay).
+        Route::get('payables/bills', [\App\Modules\Finance\Controllers\PayablesController::class, 'bills']);
+        Route::get('payables/bills/{bill}', [\App\Modules\Finance\Controllers\PayablesController::class, 'bill'])->whereNumber('bill');
+        Route::get('payables/payments', [\App\Modules\Finance\Controllers\PayablesController::class, 'payments']);
+        Route::get('payables/position', [\App\Modules\Finance\Controllers\PayablesController::class, 'position']);
+        Route::get('payables/wht', [\App\Modules\Finance\Controllers\PayablesController::class, 'wht']);
+        // W5 Finance-facing inventory (Report 61): read-only; Stores owns every movement.
+        Route::get('inventory/position', [\App\Modules\Finance\Controllers\InventoryFinanceController::class, 'position']);
+        Route::get('inventory/issues', [\App\Modules\Finance\Controllers\InventoryFinanceController::class, 'issues']);
+        Route::get('inventory/adjustments', [\App\Modules\Finance\Controllers\InventoryFinanceController::class, 'adjustments']);
         Route::get('work-queue/count', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'count']);
         Route::get('work-queue', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'index']);
         Route::post('work-queue/{workType}/{sourceId}/claim', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'claim']);
@@ -965,6 +1031,15 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('work-queue/{workType}/{sourceId}/assignment', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'reassign']);
         Route::get('work-queue/{workType}/{sourceId}/assignment-history', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'history']);
         Route::get('readiness', [\App\Modules\Finance\Controllers\FinanceReadinessController::class, 'show']);
+
+        // W1-7: configurable payment-term templates. Same permission as other
+        // receivables-policy configuration (quote-waiver, receivables-terms).
+        Route::get('payment-terms', [\App\Modules\Finance\Controllers\PaymentTermController::class, 'index'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_READ);
+        Route::post('payment-terms', [\App\Modules\Finance\Controllers\PaymentTermController::class, 'store'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
+        Route::put('payment-terms/{paymentTerm}', [\App\Modules\Finance\Controllers\PaymentTermController::class, 'update'])
+            ->middleware('permission:' . Permissions::FINANCE_RECEIVABLES_BILLING_BASIS);
 
         /*
          * The paying-account master. One place, replacing four endpoints that
@@ -1018,6 +1093,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('/{id}', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'show']);
             Route::post('/{id}/cancel', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'cancel']);
             Route::post('/{id}/approve', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'approve']);
+            Route::post('/{id}/return', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'returnForCorrection']);
+            Route::put('/{id}/correction', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'correct']);
+            Route::post('/{id}/resubmit', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'resubmit']);
+            Route::post('/{id}/reject', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'reject']);
+            Route::post('/{id}/senior-approve', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'seniorApprove']);
             Route::post('/{id}/post', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'post']);
         });
 
@@ -1108,12 +1188,15 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('direct-disbursement-requests/{id}/reject', [PettyCashController::class, 'rejectDirectRequest']);
             Route::get('disbursements/{id}', [PettyCashController::class, 'show']);
             Route::post('disbursements/{id}/void', [PettyCashController::class, 'void']);
+            Route::post('disbursements/{id}/retry-cost-posting', [PettyCashController::class, 'retryCostPosting']);
             Route::post('transactions/{id}/archive', [PettyCashController::class, 'archive']);
             Route::post('transactions/{id}/archive-group', [PettyCashController::class, 'archiveGroup']);
             Route::post('transactions/bulk-archive', [PettyCashController::class, 'bulkArchive']);
             Route::post('transactions/bulk-archive-groups', [PettyCashController::class, 'bulkArchiveGroups']);
             Route::get('activity-logs', [PettyCashController::class, 'getActivityLogs']);
-            Route::delete('clear-all', [PettyCashController::class, 'clearAll']);
+            // clear-all removed — Critical Risk C6. A full petty-cash data
+            // wipe is no longer reachable via the API in any environment;
+            // see App\Modules\Finance\PettyCash\Console\ClearAllPettyCashDataCommand.
 
             // Projects reference for job numbers
             Route::get('projects', [PettyCashController::class, 'getProjects']);
@@ -1150,6 +1233,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             // the `viewReports` ability, applied inside the controller.
             Route::get('analytics', [PettyCashReportController::class, 'analytics']);
             Route::get('custody', [PettyCashReportController::class, 'custody']);
+            Route::get('cash-counts', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'cashCounts']);
+            Route::post('cash-counts', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'storeCashCount']);
+            Route::post('cash-counts/{id}/review', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'reviewCashCount']);
+            Route::post('custody/handovers', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'handover']);
             Route::get('custody/statement', [PettyCashReportController::class, 'custodyStatement']);
             Route::get('custody/top-ups/{id}', [PettyCashReportController::class, 'topUpCustody']);
             Route::get('custody/top-ups/{id}/statement', [PettyCashReportController::class, 'topUpStatement']);
@@ -1186,11 +1273,24 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('requisitions/{id}', [PettyCashRequisitionController::class, 'show']);
             Route::post('requisitions/{id}/approve', [PettyCashRequisitionController::class, 'approve']);
             Route::post('requisitions/{id}/disburse', [PettyCashRequisitionController::class, 'disburse']);
+            Route::post('requisitions/{id}/retry-advance-posting', [PettyCashRequisitionController::class, 'retryAdvancePosting']);
             Route::post('requisitions/{id}/reject', [PettyCashRequisitionController::class, 'reject']);
             Route::post('requisitions/{id}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmReceipt']);
             Route::post('requisitions/{id}/items/{itemId}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmItemReceipt']);
             Route::get('requisitions/{id}/voucher', [PettyCashRequisitionController::class, 'downloadVoucher']);
             Route::post('requisitions/{id}/surrender', [PettyCashRequisitionController::class, 'submitSurrender']);
+            Route::post('requisitions/{id}/surrender/return', [PettyCashRequisitionController::class, 'returnSurrenderForCorrection']);
+            Route::post('requisitions/{id}/surrender/reverse', [PettyCashRequisitionController::class, 'reverseSurrender']);
+            Route::get('advances/outstanding', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'outstandingAdvances']);
+            // W3 Finance workspace read projections (Report 61); workflow changes stay on the routes above.
+            Route::get('finance/overview', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'overview']);
+            Route::get('finance/requisitions', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'requisitions']);
+            Route::get('finance/requisitions/{id}', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'requisition'])->whereNumber('id');
+            Route::get('requisitions/{id}/attachments', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'attachments'])->whereNumber('id');
+            Route::post('requisitions/{id}/attachments', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'storeAttachment'])->whereNumber('id');
+            Route::get('requisitions/{id}/attachments/{attachment}/download', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'downloadAttachment'])->whereNumber('id')->whereNumber('attachment');
+            Route::get('custody/current', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'custody']);
+            Route::post('custody/handovers/{id}/confirm', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'confirmHandover']);
             Route::post('requisitions/{id}/reconcile', [PettyCashRequisitionController::class, 'reconcileSurrender']);
         });
     });

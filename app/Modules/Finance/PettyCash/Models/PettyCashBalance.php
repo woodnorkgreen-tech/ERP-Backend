@@ -28,6 +28,7 @@ class PettyCashBalance extends Model
      */
     protected $fillable = [
         'current_balance',
+        'held_by',
         'last_transaction_id',
         'last_transaction_type',
         'updated_at',
@@ -115,16 +116,18 @@ class PettyCashBalance extends Model
     /**
      * Check if the balance is low (less than a threshold).
      */
-    public function isLow(float $threshold = 1000.00): bool
+    public function isLow(?float $threshold = null): bool
     {
+        $threshold ??= (float) \App\Modules\Finance\Models\FinanceSetting::approvedValue('petty_cash_low_balance_threshold', 1000.00);
         return $this->current_balance < $threshold;
     }
 
     /**
      * Check if the balance is critical (less than a critical threshold).
      */
-    public function isCritical(float $threshold = 500.00): bool
+    public function isCritical(?float $threshold = null): bool
     {
+        $threshold ??= (float) \App\Modules\Finance\Models\FinanceSetting::approvedValue('petty_cash_critical_balance_threshold', 500.00);
         return $this->current_balance < $threshold;
     }
 

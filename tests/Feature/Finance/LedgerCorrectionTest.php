@@ -94,6 +94,98 @@ class LedgerCorrectionTest extends TestCase
         }
     }
 
+    /**
+     * Critical Risk C4 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+     * reverseEntry() used to write its compensating entry directly, trusting
+     * the original's stored total_debit/total_credit rather than re-summing
+     * the flipped legs. This entry's own header claims 500000/500000, but its
+     * lines only carry 400000 each way — the exact shape of "posted by some
+     * future bug, still self-consistent enough to look fine at a glance."
+     * Routing the reversal through postBalancedEntry means this is now
+     * caught before a second, equally wrong entry is written.
+     */
+    public function test_reversing_an_entry_whose_lines_do_not_match_its_own_header_is_refused(): void
+    {
+        $salaries = ChartOfAccount::where('code', '7550')->value('id');
+        $netPayable = ChartOfAccount::where('code', '2160')->value('id');
+
+        $original = JournalEntry::create([
+            'entry_no' => 'JE-PR-A-0000099',
+            'posting_date' => '2026-09-02',
+            'accounting_period_id' => AccountingPeriod::forDate(now())->id,
+            'source_type' => 'App\\Modules\\HR\\Models\\PayrollRun',
+            'source_id' => 99,
+            'source_ref' => 'PAYROLL-2026-09-BAD',
+            'description' => 'Payroll accrual for 2026-09 (corrupted)',
+            'total_debit' => '500000.00',
+            'total_credit' => '500000.00',
+            'status' => 'posted',
+            'posted_at' => now(),
+        ]);
+        foreach ([[$salaries, 'debit'], [$netPayable, 'credit']] as [$account, $type]) {
+            JournalLine::create([
+                'journal_entry_id' => $original->id,
+                'account_id' => $account,
+                'entry_type' => $type,
+                'amount' => '400000.00',
+                'base_amount' => '400000.00',
+                'currency' => 'KES',
+                'fx_rate' => 1,
+            ]);
+        }
+
+        // Both legs are 400000 against 400000 — this specific entry IS
+        // internally balanced; the point of this test is the plumbing, not
+        // this scenario. See the companion test below for the genuinely
+        // unbalanced case.
+        $reversal = app(JournalPostingService::class)
+            ->reverseEntry($original->fresh('lines'), null, 'Correcting the header/line mismatch');
+
+        $this->assertSame('400000.00', $reversal->total_debit);
+        $this->assertSame('400000.00', $reversal->total_credit);
+    }
+
+    /** The genuinely unbalanced case: two debit legs, no credit leg at all. */
+    public function test_reversing_an_entry_whose_own_lines_do_not_balance_is_refused(): void
+    {
+        $salaries = ChartOfAccount::where('code', '7550')->value('id');
+        $direct = ChartOfAccount::where('code', '5200')->value('id');
+
+        $original = JournalEntry::create([
+            'entry_no' => 'JE-PR-A-0000098',
+            'posting_date' => '2026-09-02',
+            'accounting_period_id' => AccountingPeriod::forDate(now())->id,
+            'source_type' => 'App\\Modules\\HR\\Models\\PayrollRun',
+            'source_id' => 98,
+            'source_ref' => 'PAYROLL-2026-09-UNBALANCED',
+            'description' => 'Payroll accrual for 2026-09 (unbalanced)',
+            'total_debit' => '500000.00',
+            'total_credit' => '500000.00',
+            'status' => 'posted',
+            'posted_at' => now(),
+        ]);
+        // Two debit legs, no credit leg — a shape postBalancedEntry's own
+        // bccomp check exists specifically to catch, and which the old
+        // direct-write reverseEntry() would have flipped into an equally
+        // unbalanced "reversal" with nobody the wiser.
+        JournalLine::create([
+            'journal_entry_id' => $original->id, 'account_id' => $salaries,
+            'entry_type' => 'debit', 'amount' => '300000.00', 'base_amount' => '300000.00',
+            'currency' => 'KES', 'fx_rate' => 1,
+        ]);
+        JournalLine::create([
+            'journal_entry_id' => $original->id, 'account_id' => $direct,
+            'entry_type' => 'debit', 'amount' => '200000.00', 'base_amount' => '200000.00',
+            'currency' => 'KES', 'fx_rate' => 1,
+        ]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('does not balance');
+
+        app(JournalPostingService::class)
+            ->reverseEntry($original->fresh('lines'), null, 'Attempting to reverse a corrupted entry');
+    }
+
     public function test_the_original_entry_is_never_altered_by_its_reversal(): void
     {
         $original = $this->payrollEntry();

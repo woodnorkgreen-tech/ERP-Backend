@@ -81,43 +81,42 @@ class BillController extends Controller
         
         return $pdf->download($filename);
     }
-    /**
-     * Check if user has delete permissions
-     * Only Super Admin, Admin, and Accounts roles can delete
-     */
-    private function canDelete()
-    {
-        $user = auth()->user();
-        
-        if (!$user || !$user->roles) {
-            return false;
-        }
-        
-        $allowedRoles = ['Super Admin', 'Admin', 'Accounts'];
-        $userRoles = $user->roles->pluck('name')->toArray();
-        
-        foreach ($allowedRoles as $role) {
-            if (in_array($role, $userRoles)) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
-
-    /**
-     * Who may sign off a supplier invoice for payment.
-     *
-     * Deliberately the same list that may delete a bill: verification is the
-     * decision that releases money, so it answers to Accounts rather than to
-     * whoever can reach the screen. Self-verification is recorded rather than
-     * blocked — Accounts here is one or two people, and a maker-checker split
-     * would simply deadlock them. `verified_by` is what makes the separation
-     * auditable when the business is ready to enforce it.
+    /*
+     * Who may verify, return or delete a supplier bill: the holder of
+     * `finance.payables.verify` (Report 60 §17). This was the role NAME list
+     * Super Admin/Admin/Accounts; the same people hold the permission (Admin and
+     * Accounts by grant, Super Admin through Gate::before), and a role named
+     * "Accounts" without it no longer carries the power.
      */
     private function canVerify(): bool
     {
-        return $this->canDelete();
+        return (bool) auth()->user()?->can(Permissions::FINANCE_PAYABLES_VERIFY);
+    }
+
+    /** The project enquiry a bill is costed against, for its audit entries. */
+    private function enquiryIdFor(Bill $bill): ?int
+    {
+        if ($bill->project_enquiry_id) {
+            return (int) $bill->project_enquiry_id;
+        }
+        $projectId = $bill->purchaseOrder?->requisition?->project_id ?? $bill->project_id;
+
+        return $projectId ? \App\Models\Project::whereKey($projectId)->value('enquiry_id') : null;
+    }
+
+    private function audit(Bill $bill, string $event, string $message, array $context = []): void
+    {
+        \App\Models\GovernanceAuditLog::create([
+            'project_enquiry_id' => $this->enquiryIdFor($bill),
+            'user_id' => auth()->id(),
+            'gate_type' => $event,
+            'action_status' => 'authorized',
+            'model_type' => Bill::class,
+            'model_id' => $bill->id,
+            'message' => $message,
+            'context' => $context,
+            'ip_address' => request()->ip(),
+        ]);
     }
 
     private function syncProjectProcurementFromBill(Bill|int $bill): void
@@ -302,6 +301,11 @@ class BillController extends Controller
             'project_enquiry_id' => 'nullable|exists:project_enquiries,id',
             'job_number' => 'nullable|string|max:64',
             'department_id' => 'nullable|exists:departments,id',
+            // W2-5: only consulted if this exact supplier + invoice number is
+            // already on record — supplying it does not by itself authorize
+            // anything; the requester must separately hold the override
+            // permission, checked below.
+            'duplicate_override_reason' => 'nullable|string|min:5|max:1000',
         ], [
             'expense_code_id.exists' => 'Choose a category for a service or overhead invoice. '
                 .'Staff payments, stores issues and non-purchase categories cannot classify a bill, '
@@ -322,8 +326,11 @@ class BillController extends Controller
                     return response(['error' => 'Only approved purchase orders can have bills'], 422);
                 }
 
-                if ($purchaseOrder->bills()->exists()) {
-                    return response(['error' => 'This purchase order already has a bill'], 422);
+                // W2-4: the order's approved terms are not yet settled while
+                // a commercial amendment awaits its own approval — billing
+                // against a proposed value nobody has agreed to yet must wait.
+                if ($purchaseOrder->hasPendingCommercialAmendment()) {
+                    return response(['error' => 'This order has a commercial amendment awaiting approval. Billing is paused until it is approved or rejected.'], 422);
                 }
 
                 $input['supplier_id'] = $purchaseOrder->supplier_id;
@@ -355,6 +362,45 @@ class BillController extends Controller
                 ]], 422);
             }
 
+            // W2-5: the confirmed-duplicate case — this exact supplier and
+            // this exact invoice number already has a Bill. Supplier A's
+            // invoice 123 is not a duplicate of Supplier B's invoice 123, so
+            // this is always scoped to one supplier.
+            $duplicateBill = app(\App\Modules\Finance\Services\DuplicateDetectionService::class)
+                ->checkBillInvoiceNumber((int) $input['supplier_id'], (string) $input['supplier_invoice_number']);
+
+            if ($duplicateBill['status'] === 'confirmed') {
+                $overridden = filled($input['duplicate_override_reason'] ?? null)
+                    && $request->user()?->can(\App\Constants\Permissions::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE);
+
+                if (! $overridden) {
+                    $existing = Bill::with('supplier:id,supplier_name')->find($duplicateBill['matched_id']);
+                    return response([
+                        'error' => [
+                            'supplier_invoice_number' => ["Invoice {$input['supplier_invoice_number']} from this supplier is already recorded as bill {$existing?->bill_number}. "
+                                .'An authorized override with a reason is required to record it again.'],
+                        ],
+                        // W2-5: the explainable facts behind the refusal.
+                        'code' => 'DUPLICATE_BILL',
+                        'duplicate' => [
+                            'rule' => 'Same supplier and same supplier invoice number',
+                            'supplier' => $existing?->supplier?->supplier_name,
+                            'supplier_invoice_number' => $input['supplier_invoice_number'],
+                            'matched_bill_id' => $existing?->id,
+                            'matched_bill_number' => $existing?->bill_number,
+                            'matched_amount' => $existing ? (string) $existing->amount : null,
+                            'matched_date' => $existing?->bill_date?->toDateString(),
+                            'matched_status' => $existing?->status,
+                            'can_override' => (bool) $request->user()?->can(\App\Constants\Permissions::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE),
+                        ],
+                    ], 422);
+                }
+
+                $input['duplicate_of_bill_id'] = $duplicateBill['matched_id'];
+                $input['duplicate_override_by'] = auth()->id();
+                $input['duplicate_override_at'] = now();
+            }
+
             $input['bill_number'] = Bill::generateBillNumber();
             $input['user_id'] = auth()->id();
             $input['status'] = 'pending';
@@ -370,6 +416,29 @@ class BillController extends Controller
              */
             $bill->forceFill(app(SupplierInvoiceTax::class)->priceFor($bill->fresh(), $input))->save();
             $bill->refresh();
+
+            // W2-3 (confirmed 2026-09-23, Option A): staged/multiple bills
+            // against one PO — capped at what the order can still absorb,
+            // not restricted to exactly one. Checked here, after the real
+            // net/VAT split above, not from the raw request: an invoice's
+            // net amount depends on the supplier's resolved tax treatment,
+            // which SupplierInvoiceTax::priceFor() computes from the bill
+            // once it exists — a pre-creation estimate using only the
+            // request's raw amount/vat_amount would be wrong whenever VAT is
+            // derived rather than explicitly stated on the invoice.
+            if (! $isDirect) {
+                $remainingBillable = $purchaseOrder->remainingBillable(excludingBillId: $bill->id);
+                if (bccomp((string) $bill->net_amount, $remainingBillable, 2) > 0) {
+                    $bill->delete();
+
+                    return response(['error' => [
+                        'amount' => ["This bill's net amount (".number_format((float) $bill->net_amount, 2).
+                            ') exceeds the '.number_format((float) $remainingBillable, 2).
+                            ' still billable on this order (Approved Value minus bills already recorded).'],
+                    ]], 422);
+                }
+            }
+
             $bill->updatePaymentStatus();
 
             $this->syncProjectProcurementFromBill($bill);
@@ -418,7 +487,7 @@ class BillController extends Controller
     {
         if (! $this->canVerify()) {
             return response([
-                'error' => 'Only Accounts can verify a supplier invoice for payment.',
+                'error' => 'You do not have permission to verify supplier invoices.',
             ], 403);
         }
 
@@ -434,6 +503,12 @@ class BillController extends Controller
             return response([
                 'error' => 'You recorded this invoice, so someone else has to verify it. '
                     . 'If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.',
+            ], 422);
+        }
+
+        if ($bill->awaitingCorrection()) {
+            return response([
+                'error' => 'This bill was returned to its preparer for correction and cannot be verified until they resubmit it.',
             ], 422);
         }
 
@@ -487,6 +562,18 @@ class BillController extends Controller
                 ])->save();
 
                 app(JournalPostingService::class)->postSupplierInvoice($bill->fresh());
+
+                // Report 60 §32: a direct bill (no PO, so no receipt accrual to
+                // carry its cost) is the project's ACTUAL cost from here.
+                $this->recordDirectBillCost($bill->fresh());
+
+                $this->audit($bill, 'Supplier Bill Verified', "Supplier bill {$bill->bill_number} verified"
+                    .($bill->isDirect() ? ' (direct bill)' : ' against the three-way match'), [
+                    'reason' => $request->input('verification_notes'),
+                    'amount' => (string) $bill->amount,
+                    'prepared_by' => $bill->user_id,
+                    'self_verified' => (int) $bill->user_id === (int) auth()->id(),
+                ]);
             });
         } catch (\Throwable $e) {
             return response([
@@ -497,6 +584,201 @@ class BillController extends Controller
         return response()->json([
             'message' => 'Invoice verified against the order and the accepted receipt.',
             'data' => $workflow->bill($bill->fresh()),
+        ]);
+    }
+
+    /**
+     * The project cost of a verified DIRECT bill (Report 60 §32).
+     *
+     * A PO-backed bill adds no project cost: the goods were costed when Stores
+     * accepted them (ACCRUED) and, for stock, when issued to the job (ACTUAL);
+     * verification only moves that accrued liability onto Accounts Payable. A
+     * direct bill has no receipt behind it, so without this line its cost
+     * reached the ledger but never the project — the cost account and margin
+     * understated the job. Analytical only (`postsIndependently: false`): the
+     * journal is postSupplierInvoice()'s, so the spend is recognised once.
+     * Idempotent on the bill, so re-verification never adds a second line.
+     * The amount is exactly what the ledger expensed: net of recoverable VAT.
+     */
+    private function recordDirectBillCost(Bill $bill): void
+    {
+        if (! $bill->isDirect() || ! $bill->verified_at) {
+            return;
+        }
+
+        $enquiryId = $this->enquiryIdFor($bill);
+        if (! $enquiryId && ! $bill->department_id) {
+            return; // company overhead: no project or cost centre to attribute to
+        }
+
+        $recoverable = $bill->vatTreatment?->is_recoverable && (float) $bill->vat_amount > 0;
+        $amount = $recoverable ? $bill->netAmount() : number_format((float) $bill->amount, 2, '.', '');
+
+        app(\App\Modules\Finance\CostCollector\Services\CostCollectorService::class)->postFromSource(
+            new \App\Modules\Finance\CostCollector\Contracts\CostContext(
+                expenseCode: (string) ($bill->expenseCode?->code ?? ''),
+                amount: $amount,
+                nature: \App\Modules\Finance\CostCollector\Models\CostLine::NATURE_ACTUAL,
+                enquiryId: $enquiryId,
+                departmentId: $enquiryId ? null : (int) $bill->department_id,
+                sourceType: Bill::class,
+                sourceId: $bill->id,
+                sourceRef: 'direct-bill',
+                incurredAt: (string) ($bill->bill_date?->toDateString() ?? now()->toDateString()),
+                payeeType: 'SUPPLIER',
+                payeeId: $bill->supplier_id,
+                payeeName: $bill->supplier?->supplier_name,
+                description: 'Direct supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number),
+                details: array_filter([
+                    'bill_id' => $bill->id,
+                    'bill_number' => $bill->bill_number,
+                    'supplier_invoice_number' => $bill->supplier_invoice_number,
+                ]),
+                postsIndependently: false,
+            ),
+        );
+    }
+
+    /**
+     * Return an unverified bill to its preparer for correction (Report 60 §16).
+     *
+     * The verifier's alternative to verifying: the bill is wrong, and the person
+     * who keyed it fixes it. It cannot be verified or paid until corrected, and
+     * correcting it resubmits it for independent verification. Same authority as
+     * verifying, and — like W1 invoices — never by the bill's own preparer.
+     */
+    public function returnForCorrection(Request $request, Bill $bill)
+    {
+        if (! $this->canVerify()) {
+            return response(['error' => 'You do not have permission to return supplier bills for correction.'], 403);
+        }
+
+        $validated = $request->validate(['reason' => 'required|string|min:5|max:1000']);
+
+        try {
+            $returned = DB::transaction(function () use ($bill, $validated) {
+                $locked = Bill::whereKey($bill->id)->lockForUpdate()->firstOrFail();
+
+                if ($locked->verified_at) {
+                    throw new \DomainException('This bill has already been verified. A verified bill is corrected by credit or reversal, not returned.');
+                }
+                if ($locked->payments()->exists() || in_array($locked->status, ['paid', 'cancelled'], true)) {
+                    throw new \DomainException('A paid or cancelled bill cannot be returned for correction.');
+                }
+                if ($locked->awaitingCorrection()) {
+                    throw new \DomainException('This bill is already with its preparer for correction.');
+                }
+                if ($locked->user_id !== null && (int) $locked->user_id === (int) auth()->id()) {
+                    throw new \DomainException('You recorded this bill, so someone else has to return it.');
+                }
+
+                $locked->forceFill([
+                    'returned_by' => auth()->id(),
+                    'returned_at' => now(),
+                    'return_reason' => $validated['reason'],
+                ])->save();
+
+                $this->audit($locked, 'Supplier Bill Returned', "Supplier bill {$locked->bill_number} returned for correction", [
+                    'reason' => $validated['reason'],
+                    'prepared_by' => $locked->user_id,
+                ]);
+
+                return $locked;
+            });
+        } catch (\DomainException $e) {
+            return response(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => 'Bill returned to its preparer for correction.',
+            'data' => app(PurchaseOrderWorkflow::class)->bill($returned->fresh()),
+        ]);
+    }
+
+    /**
+     * The preparer corrects a returned bill and resubmits it (Report 60 §16).
+     *
+     * This is the handler `PUT /bills/{bill}` has been routed to all along
+     * without one existing. It only accepts a bill awaiting correction, only
+     * from its preparer, and re-applies every rule a new bill meets: the
+     * duplicate check (excluding itself), the tax pricing, and the staged
+     * billing cap. The correction is logged with what changed and why.
+     */
+    public function update(Request $request, Bill $bill)
+    {
+        if (! $bill->awaitingCorrection()) {
+            return response(['error' => 'Only a bill returned for correction can be changed. Ask the verifier to return it first.'], 422);
+        }
+        if ((int) $bill->user_id !== (int) auth()->id()) {
+            return response(['error' => 'Only the person who recorded this bill can correct it.'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'bill_date' => 'required|date',
+            'due_date' => 'required|date|after_or_equal:bill_date',
+            'amount' => 'required|numeric|gt:0',
+            'supplier_invoice_number' => 'required|string|max:120',
+            'vat_amount' => 'nullable|numeric|min:0',
+            'wht_amount' => 'nullable|numeric|min:0',
+            'etims_invoice_no' => 'nullable|string|max:64',
+            'supplier_pin' => 'nullable|string|max:20',
+            'tax_point_date' => 'nullable|date',
+            'notes' => 'nullable|string|max:2000',
+            'correction_note' => 'required|string|min:5|max:1000',
+        ]);
+        if ($validator->fails()) {
+            return response(['error' => $validator->errors()], 422);
+        }
+        $input = $validator->validated();
+
+        $duplicate = app(\App\Modules\Finance\Services\DuplicateDetectionService::class)
+            ->checkBillInvoiceNumber((int) $bill->supplier_id, (string) $input['supplier_invoice_number']);
+        if ($duplicate['status'] === 'confirmed' && (int) $duplicate['matched_id'] !== (int) $bill->id
+            && strcasecmp(trim((string) $bill->supplier_invoice_number), trim((string) $input['supplier_invoice_number'])) !== 0) {
+            return response(['error' => ['supplier_invoice_number' => [
+                "Invoice {$input['supplier_invoice_number']} from this supplier is already recorded as another bill.",
+            ]], 'code' => 'DUPLICATE_BILL'], 422);
+        }
+
+        try {
+            $corrected = DB::transaction(function () use ($bill, $input) {
+                $locked = Bill::whereKey($bill->id)->lockForUpdate()->firstOrFail();
+                $before = $locked->only(['bill_date', 'due_date', 'amount', 'supplier_invoice_number', 'vat_amount', 'wht_amount']);
+
+                $locked->fill(collect($input)->except('correction_note')->all());
+                $locked->save();
+                $locked->forceFill(app(SupplierInvoiceTax::class)->priceFor($locked->fresh(), $input))->save();
+                $locked->refresh();
+
+                if (! $locked->isDirect()) {
+                    $remaining = $locked->purchaseOrder->remainingBillable(excludingBillId: $locked->id);
+                    if (bccomp((string) $locked->net_amount, $remaining, 2) > 0) {
+                        throw new \DomainException('The corrected net amount ('.number_format((float) $locked->net_amount, 2)
+                            .') exceeds the '.number_format((float) $remaining, 2).' still billable on this order.');
+                    }
+                }
+
+                $locked->forceFill(['resubmitted_at' => now()])->save();
+                $locked->updatePaymentStatus();
+
+                $this->audit($locked, 'Supplier Bill Corrected', "Supplier bill {$locked->bill_number} corrected and resubmitted for verification", [
+                    'reason' => $input['correction_note'],
+                    'before' => array_map(fn ($v) => $v instanceof \DateTimeInterface ? $v->format('Y-m-d') : (string) $v, $before),
+                    'after' => array_map(fn ($v) => $v instanceof \DateTimeInterface ? $v->format('Y-m-d') : (string) $v,
+                        $locked->only(array_keys($before))),
+                ]);
+
+                return $locked;
+            });
+        } catch (\DomainException $e) {
+            return response(['error' => ['amount' => [$e->getMessage()]]], 422);
+        }
+
+        $this->syncProjectProcurementFromBill($corrected);
+
+        return response()->json([
+            'message' => 'Bill corrected and resubmitted for independent verification.',
+            'data' => app(PurchaseOrderWorkflow::class)->bill($corrected->fresh()),
         ]);
     }
 
@@ -569,6 +851,7 @@ class BillController extends Controller
             ],
             'payment_method' => ['required', Rule::in(PaymentMethods::values())],
             'reference_number' => 'nullable|required_unless:payment_method,cash|string|max:255',
+            'duplicate_override_reason' => 'nullable|string|min:5|max:1000',
             // What the bank or M-Pesa charged us to send it. On top of the
             // invoice, never part of it.
             'transaction_cost' => 'nullable|numeric|min:0|max:999999.99',
@@ -595,6 +878,7 @@ class BillController extends Controller
                 'payment_source_id' => $request->payment_source_id,
                 'reference_number' => $request->reference_number,
                 'transaction_cost' => $request->transaction_cost ?? 0,
+                'duplicate_override_reason' => $request->duplicate_override_reason,
                 'user_id' => auth()->id(),
             ]);
 
@@ -602,7 +886,10 @@ class BillController extends Controller
 
             return new BillResource($bill->fresh()->load(['purchaseOrder', 'supplier', 'createdBy', 'verifiedBy', 'payments.createdBy']));
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json(['error' => $e->getMessage(), 'errors' => $e->errors()], 422);
+            return response()->json([
+                'error' => $e->getMessage(), 'errors' => $e->errors(),
+                ...($e instanceof \App\Modules\Finance\Exceptions\DuplicateTransactionException ? $e->payload() : []),
+            ], 422);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         } catch (\Exception $e) {
@@ -629,6 +916,7 @@ class BillController extends Controller
             ],
             'payment_method' => ['required', Rule::in(PaymentMethods::values())],
             'reference_number' => 'nullable|required_unless:payment_method,cash|string|max:255',
+            'duplicate_override_reason' => 'nullable|string|min:5|max:1000',
             // One transfer, one charge — however many invoices it clears.
             'transaction_cost' => 'nullable|numeric|min:0|max:999999.99',
         ], [
@@ -720,6 +1008,7 @@ class BillController extends Controller
                     'payment_source_id' => $request->payment_source_id,
                     'reference_number' => $request->reference_number,
                     'transaction_cost' => $request->transaction_cost ?? 0,
+                    'duplicate_override_reason' => $request->duplicate_override_reason,
                     'user_id' => auth()->id(),
                 ]);
 
@@ -756,7 +1045,10 @@ class BillController extends Controller
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
-            return response()->json(['error' => $e->getMessage(), 'errors' => $e->errors()], 422);
+            return response()->json([
+                'error' => $e->getMessage(), 'errors' => $e->errors(),
+                ...($e instanceof \App\Modules\Finance\Exceptions\DuplicateTransactionException ? $e->payload() : []),
+            ], 422);
         } catch (\RuntimeException $e) {
             DB::rollBack();
             return response()->json(['error' => $e->getMessage()], 422);
@@ -801,10 +1093,9 @@ class BillController extends Controller
      */
     public function destroy(Bill $bill)
     {
-        // Check authorization
-        if (!$this->canDelete()) {
+        if (! $this->canVerify()) {
             return response([
-                'error' => 'Unauthorized. Only Super Admin, Admin, and Accounts can delete bills.'
+                'error' => 'You do not have permission to delete supplier bills.'
             ], 403);
         }
 

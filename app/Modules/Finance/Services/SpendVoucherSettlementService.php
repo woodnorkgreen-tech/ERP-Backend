@@ -97,24 +97,62 @@ class SpendVoucherSettlementService
                 ],
             );
 
-            $updated = \App\Modules\Finance\CostCollector\Models\CostLine::query()
-                ->whereKey($allocation->cost_line_id)
-                ->whereNull('settled_by_payment_id')
-                ->update(['settled_by_payment_id' => $payment->id]);
+            // The guard is on amounts, not on "some payment touched this line":
+            // a liability may be settled in instalments by several vouchers
+            // (W4 partial settlement), but never beyond what it is payable for.
+            // Found in Wave 3: the old single-marker check refused every second
+            // partial payment at posting, and — since reversal never cleared the
+            // marker — every re-payment of a reversed one.
+            $line = \App\Modules\Finance\CostCollector\Models\CostLine::query()
+                ->lockForUpdate()->findOrFail($allocation->cost_line_id);
+            $payable = self::payableAmount($line);
+            $settled = self::settledAmount($line->id);
 
-            if ($updated === 0) {
-                $settledBy = \App\Modules\Finance\CostCollector\Models\CostLine::query()
-                    ->whereKey($allocation->cost_line_id)
-                    ->value('settled_by_payment_id');
-                if ((int) $settledBy !== (int) $payment->id) {
-                    throw ValidationException::withMessages([
-                        'allocations' => "Liability {$allocation->cost_line_id} was already paid by another payment.",
-                    ]);
-                }
+            if (bccomp($settled, $payable, 2) === 1) {
+                throw ValidationException::withMessages([
+                    'allocations' => "Liability {$line->ref} would be paid KES {$settled} against a payable amount of KES {$payable}.",
+                ]);
             }
+
+            self::syncSettlementMarker($line, $payment->id);
         }
 
         return $payment;
+    }
+
+    /** What the liability is payable for: net + VAT − withholding. */
+    public static function payableAmount(\App\Modules\Finance\CostCollector\Models\CostLine $line): string
+    {
+        return bcsub(
+            bcadd((string) ($line->net_amount ?? 0), (string) ($line->tax_amount ?? 0), 2),
+            (string) ($line->wht_amount ?? 0),
+            2
+        );
+    }
+
+    /** Paid so far by payments that are still active (a voided one paid nothing). */
+    public static function settledAmount(int $costLineId): string
+    {
+        return number_format((float) PaymentAllocation::query()
+            ->join('payments', 'payments.id', '=', 'payment_allocations.payment_id')
+            ->where('payment_allocations.cost_line_id', $costLineId)
+            ->where('payments.status', 'active')
+            ->sum('payment_allocations.amount'), 2, '.', '');
+    }
+
+    /**
+     * settled_by_payment_id means FULLY settled, naming the payment that
+     * completed it. Cleared again when a reversal leaves the line short.
+     */
+    public static function syncSettlementMarker(\App\Modules\Finance\CostCollector\Models\CostLine $line, ?int $completingPaymentId = null): void
+    {
+        $full = bccomp(self::settledAmount($line->id), self::payableAmount($line), 2) >= 0;
+
+        if ($full && ! $line->settled_by_payment_id && $completingPaymentId) {
+            $line->forceFill(['settled_by_payment_id' => $completingPaymentId])->save();
+        } elseif (! $full && $line->settled_by_payment_id) {
+            $line->forceFill(['settled_by_payment_id' => null])->save();
+        }
     }
 
     private function paymentTypeFor(string $voucherType): string

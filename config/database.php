@@ -43,6 +43,28 @@ return [
             'transaction_mode' => 'DEFERRED',
         ],
 
+        // Source-to-target data migration (Report 50/51). The Stage 1 staging
+        // database — an upgraded COPY of the source ERP, never the live source.
+        // No defaults on purpose: `migration:import-source` refuses to run until
+        // every value here has been set explicitly, and it never falls back to
+        // the application's own connection.
+        'source_staging' => [
+            'driver' => 'mysql',
+            'host' => env('SOURCE_STAGING_DB_HOST'),
+            'port' => env('SOURCE_STAGING_DB_PORT', '3306'),
+            'database' => env('SOURCE_STAGING_DB_DATABASE'),
+            'username' => env('SOURCE_STAGING_DB_USERNAME'),
+            'password' => env('SOURCE_STAGING_DB_PASSWORD'),
+            'unix_socket' => '',
+            'charset' => env('DB_CHARSET', 'utf8'),
+            'collation' => env('DB_COLLATION', 'utf8_unicode_ci'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => env('DB_ENGINE', 'InnoDB'),
+            'timezone' => env('DB_TIMEZONE', '+03:00'),
+        ],
+
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),

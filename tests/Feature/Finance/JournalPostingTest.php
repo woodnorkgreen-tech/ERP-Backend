@@ -60,6 +60,18 @@ class JournalPostingTest extends TestCase
         $this->poster->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_POST);
     }
 
+    /**
+     * config() mutates the application config array directly, which
+     * RefreshDatabase does not touch and PHPUnit does not reset between
+     * tests sharing one process — a map entry set in one test would
+     * otherwise leak into every test that runs after it in the same run.
+     */
+    protected function tearDown(): void
+    {
+        config(['finance_accounts.map' => []]);
+        parent::tearDown();
+    }
+
     public function test_journal_posting_service_posts_cost_line(): void
     {
         $line = CostLine::create([
@@ -90,6 +102,81 @@ class JournalPostingTest extends TestCase
 
         $this->assertEquals('5000.00', $lines[0]->amount);
         $this->assertEquals('5000.00', $lines[1]->amount);
+    }
+
+    /**
+     * Critical Risk C1 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+     * accountByCode() must translate every literal reference-chart code
+     * through ChartAccountMap before it queries chart_of_accounts, so an
+     * installation whose real chart uses a different code for Staff
+     * Advances still resolves correctly. This proves the routing end-to-end
+     * through a real posting path, not just at the ChartAccountMap unit level.
+     */
+    public function test_petty_cash_advance_resolves_the_staff_advance_account_through_the_chart_account_map(): void
+    {
+        // The reference row (1300) stays present and postable but must go
+        // unused, so a passing test proves the map was consulted rather than
+        // 1300 happening to resolve anyway.
+        $mappedAdvance = ChartOfAccount::create([
+            'code' => 'STAFF-ADV-001', 'name' => 'Staff Advances (local chart)',
+            'category' => 'asset', 'account_type' => 'balance_sheet',
+            'normal_balance' => 'debit', 'is_postable' => true, 'is_active' => true,
+        ]);
+        config(['finance_accounts.map.1300' => 'STAFF-ADV-001']);
+
+        $disbursement = \App\Modules\Finance\Models\Payment::create([
+            'amount' => 4500.00,
+            'payee_name' => 'Site Requester',
+            'account' => 'Petty Cash',
+            'description' => 'Advance for site expenses',
+            'classification' => 'operations',
+            'payment_method' => 'cash',
+            'status' => 'active',
+            'date_disbursed' => now()->toDateString(),
+            'created_by' => $this->user->id,
+        ]);
+
+        $entry = $this->postingService->postPettyCashAdvance($disbursement);
+
+        $this->assertNotNull($entry);
+        $this->assertDatabaseHas('journal_lines', [
+            'journal_entry_id' => $entry->id,
+            'account_id' => $mappedAdvance->id,
+            'entry_type' => 'debit',
+        ]);
+        $this->assertDatabaseMissing('journal_lines', [
+            'journal_entry_id' => $entry->id,
+            'account_id' => ChartOfAccount::where('code', '1300')->value('id'),
+        ]);
+    }
+
+    /**
+     * The companion case: with no mapping configured (development, the test
+     * suite, and any installation whose chart already agrees with the
+     * reference codes), resolution is unchanged — proving the fix is
+     * additive, not a behaviour change.
+     */
+    public function test_petty_cash_advance_still_resolves_to_the_reference_code_when_unmapped(): void
+    {
+        $disbursement = \App\Modules\Finance\Models\Payment::create([
+            'amount' => 4500.00,
+            'payee_name' => 'Site Requester',
+            'account' => 'Petty Cash',
+            'description' => 'Advance for site expenses',
+            'classification' => 'operations',
+            'payment_method' => 'cash',
+            'status' => 'active',
+            'date_disbursed' => now()->toDateString(),
+            'created_by' => $this->user->id,
+        ]);
+
+        $entry = $this->postingService->postPettyCashAdvance($disbursement);
+
+        $this->assertDatabaseHas('journal_lines', [
+            'journal_entry_id' => $entry->id,
+            'account_id' => ChartOfAccount::where('code', '1300')->value('id'),
+            'entry_type' => 'debit',
+        ]);
     }
 
     public function test_spend_voucher_endpoints_flow(): void

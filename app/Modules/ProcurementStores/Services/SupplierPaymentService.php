@@ -50,6 +50,46 @@ class SupplierPaymentService
                 $total = bcadd($total, $amount, 2);
             }
 
+            // W2-5: the same bank/mobile-money reference recorded twice
+            // against the same paying account is the confirmed duplicate
+            // signal — cash carries no reference at all, so it is excluded
+            // rather than false-flagged on "no reference" every time.
+            $duplicatePayment = null;
+            $reference = trim((string) ($data['reference_number'] ?? ''));
+            if ($reference !== '' && ($data['payment_source_id'] ?? null)) {
+                $duplicatePayment = app(\App\Modules\Finance\Services\DuplicateDetectionService::class)
+                    ->checkPaymentReference((int) $data['payment_source_id'], $reference);
+
+                if ($duplicatePayment['status'] === 'confirmed') {
+                    $overridden = filled($data['duplicate_override_reason'] ?? null)
+                        && \App\Models\User::find($data['user_id'] ?? null)?->can(\App\Constants\Permissions::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE);
+
+                    if (! $overridden) {
+                        $existing = \App\Modules\ProcurementStores\Models\BillPayment::with(['bill:id,bill_number', 'paymentSource:id,name'])
+                            ->find($duplicatePayment['matched_id']);
+                        throw \App\Modules\Finance\Exceptions\DuplicateTransactionException::because(
+                            'DUPLICATE_PAYMENT',
+                            'reference_number',
+                            "Reference \"{$reference}\" on this account is already recorded on payment {$existing?->payment_code}. "
+                                .'An authorized override with a reason is required to record it again.',
+                            [
+                                // The facts the match was made on — and nothing else.
+                                'rule' => 'Same payment reference on the same paying account',
+                                'reference' => $reference,
+                                'paying_account' => $existing?->paymentSource?->name,
+                                'matched_payment_id' => $existing?->id,
+                                'matched_payment_code' => $existing?->payment_code,
+                                'matched_bill_number' => $existing?->bill?->bill_number,
+                                'matched_amount' => $existing ? (string) $existing->amount_paid : null,
+                                'matched_date' => $existing?->payment_date?->toDateString(),
+                                'can_override' => (bool) \App\Models\User::find($data['user_id'] ?? null)
+                                    ?->can(\App\Constants\Permissions::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE),
+                            ],
+                        );
+                    }
+                }
+            }
+
             // What the provider charged us to move it. Carried on the payment,
             // never folded into what the supplier was credited — the supplier
             // received the invoice amount, not the fee.
@@ -109,6 +149,10 @@ class SupplierPaymentService
                     'disbursement_id' => $disbursement->id,
                     'reference_number' => $data['reference_number'] ?? null,
                     'user_id' => $data['user_id'] ?? null,
+                    'duplicate_of_payment_id' => $duplicatePayment['status'] === 'confirmed' ? $duplicatePayment['matched_id'] : null,
+                    'duplicate_override_reason' => $duplicatePayment['status'] === 'confirmed' ? $data['duplicate_override_reason'] : null,
+                    'duplicate_override_by' => $duplicatePayment['status'] === 'confirmed' ? $data['user_id'] : null,
+                    'duplicate_override_at' => $duplicatePayment['status'] === 'confirmed' ? now() : null,
                 ]);
 
                 $entry['bill']->updatePaymentStatus();

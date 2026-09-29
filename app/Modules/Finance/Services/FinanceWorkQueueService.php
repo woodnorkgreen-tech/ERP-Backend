@@ -14,57 +14,67 @@ use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\Requisition;
+use App\Modules\HR\Models\PayrollRun;
+use App\Models\ProjectEnquiry;
+use App\Modules\Finance\CostCollector\Models\ProjectLabourActual;
+use App\Modules\Finance\Models\ProjectInvoice;
+use App\Services\ProjectFinancialAccess;
+use App\Support\SelfApproval;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * A read-only projection of work Finance can perform in existing workflows.
+ * A read-only projection of work a user can perform in existing workflows.
  * Source records remain authoritative; this service never approves anything.
+ *
+ * Each work type is defined once (definitions()): who may act, the query for
+ * outstanding records, and how a record reads as a queue item. The count and
+ * the list are both derived from that one query, so the badge and the rows
+ * cannot disagree. A type's query applies the same maker/checker exclusions its
+ * controller enforces, so the queue never offers work the backend would refuse
+ * (Report 56 §12): "You prepared this invoice, so someone else has to check it"
+ * is a reason not to list it, not an error to discover by clicking.
  */
 class FinanceWorkQueueService
 {
+    /** Queue areas, in the order the Finance overview presents them. */
+    public const AREAS = ['sales', 'purchasing', 'cash', 'project', 'payroll'];
+
+    private const LIST_LIMIT = 100;
+
+    public function __construct(private ProjectFinancialAccess $access)
+    {
+    }
+
     public function countsForUser(User $user): array
     {
         $byType = [];
-        if ($user->can(Permissions::FINANCE_COSTS_VERIFY)) $byType['cost_verification'] = CostLine::query()->where('nature', '!=', CostLine::NATURE_PLANNED)->where('status', CostLine::STATUS_SUBMITTED)->count();
-        if ($user->can(Permissions::PROCUREMENT_REQUISITIONS_APPROVE)) $byType['purchase_requisition'] = Requisition::query()->where('status', 'pending_approval')->count();
-        if ($user->can(Permissions::PROCUREMENT_ORDERS_APPROVE)) $byType['purchase_order'] = PurchaseOrder::query()->where('status', 'pending_approval')->count();
-        if ($this->canVerifySupplierBills($user)) $byType['supplier_invoice'] = Bill::query()->whereNull('verified_at')->whereNotIn('status', ['paid', 'cancelled'])->count();
-        if ($user->can(Permissions::FINANCE_PETTY_CASH_UPDATE)) $byType['fund_requisition'] = PettyCashRequisition::query()->where('status', 'pending')->count();
-        if ($user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE)) $byType['direct_disbursement'] = DirectDisbursementRequest::query()->where('status', 'pending_approval')->count();
-        if ($user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE)) $byType['spend_voucher'] = SpendVoucher::query()->where('status', 'pending_approval')->count();
-        if ($user->can(Permissions::FINANCE_RECEIVABLES_VERIFY)) $byType['client_receipt'] = EnquiryPayment::query()->where('status', 'pending')->whereNull('reversed_at')->count();
+        $typeAreas = [];
+        $byArea = array_fill_keys(self::AREAS, 0);
+        foreach ($this->definitions($user) as $type => $definition) {
+            $count = $definition['count']();
+            if ($count > 0) {
+                $byType[$type] = $count;
+                $typeAreas[$type] = $definition['area'];
+                $byArea[$definition['area']] += $count;
+            }
+        }
 
-        return ['total' => array_sum($byType), 'by_type' => $byType];
+        return [
+            'total' => array_sum($byType),
+            'by_type' => $byType,
+            'by_area' => $byArea,
+            'type_labels' => array_intersect_key(self::LABELS, $byType),
+            'type_areas' => $typeAreas,
+        ];
     }
 
     public function forUser(User $user, array $filters = []): array
     {
         $items = collect();
-
-        if ($user->can(Permissions::FINANCE_COSTS_VERIFY)) {
-            $this->costs($items);
-        }
-        if ($user->can(Permissions::PROCUREMENT_REQUISITIONS_APPROVE)) {
-            $this->purchaseRequisitions($items);
-        }
-        if ($user->can(Permissions::PROCUREMENT_ORDERS_APPROVE)) {
-            $this->purchaseOrders($items);
-        }
-        if ($this->canVerifySupplierBills($user)) {
-            $this->supplierBills($items);
-        }
-        if ($user->can(Permissions::FINANCE_PETTY_CASH_UPDATE)) {
-            $this->fundRequisitions($items);
-        }
-        if ($user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE)) {
-            $this->directDisbursements($items);
-        }
-        if ($user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE)) {
-            $this->spendVouchers($items);
-        }
-        if ($user->can(Permissions::FINANCE_RECEIVABLES_VERIFY)) {
-            $this->clientReceipts($items);
+        foreach ($this->definitions($user) as $definition) {
+            $items = $items->concat($definition['items']());
         }
 
         $assignments = FinanceWorkAssignment::query()->with('assignee:id,name')
@@ -89,6 +99,7 @@ class FinanceWorkQueueService
 
         $filtered = $sorted
             ->when(! empty($filters['work_type']), fn (Collection $rows) => $rows->where('work_type', $filters['work_type']))
+            ->when(! empty($filters['area']), fn (Collection $rows) => $rows->where('area', $filters['area']))
             ->when(! empty($filters['priority']), function (Collection $rows) use ($filters) {
                 return $filters['priority'] === 'exception'
                     ? $rows->whereIn('priority', ['watch', 'overdue'])
@@ -118,6 +129,9 @@ class FinanceWorkQueueService
                 'overdue' => $sorted->where('priority', 'overdue')->count(),
                 'exceptions' => $sorted->whereIn('priority', ['watch', 'overdue'])->count(),
                 'by_type' => $sorted->countBy('work_type')->all(),
+                'by_area' => array_merge(array_fill_keys(self::AREAS, 0), $sorted->countBy('area')->all()),
+                'type_labels' => $sorted->pluck('type_label', 'work_type')->all(),
+                'type_areas' => $sorted->pluck('area', 'work_type')->all(),
             ],
             'meta' => [
                 'current_page' => $page,
@@ -209,118 +223,242 @@ class FinanceWorkQueueService
 
     private function mayAccessType(User $user, string $type): bool
     {
-        return match ($type) {
-            'cost_verification' => $user->can(Permissions::FINANCE_COSTS_VERIFY),
-            'purchase_requisition' => $user->can(Permissions::PROCUREMENT_REQUISITIONS_APPROVE),
-            'purchase_order' => $user->can(Permissions::PROCUREMENT_ORDERS_APPROVE),
-            'supplier_invoice' => $this->canVerifySupplierBills($user),
-            'fund_requisition' => $user->can(Permissions::FINANCE_PETTY_CASH_UPDATE),
-            'direct_disbursement' => $user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE),
-            'spend_voucher' => $user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE),
-            'client_receipt' => $user->can(Permissions::FINANCE_RECEIVABLES_VERIFY),
-            default => false,
+        return array_key_exists($type, $this->definitions($user));
+    }
+
+    /**
+     * Every work type the user may act on, keyed by type.
+     *
+     * @return array<string, array{area: string, count: \Closure(): int, items: \Closure(): Collection}>
+     */
+    private function definitions(User $user): array
+    {
+        $self = SelfApproval::allowedFor($user);
+        $uid = (int) $user->id;
+        $types = [];
+
+        // Adds a type whose outstanding records are one query. The builder is
+        // produced afresh for each use; `map` turns a record into a queue item.
+        $add = function (string $type, string $area, bool $allowed, \Closure $query, \Closure $map) use (&$types): void {
+            if (! $allowed) {
+                return;
+            }
+            $types[$type] = [
+                'area' => $area,
+                'count' => fn () => $query()->count(),
+                'items' => fn () => $query()->limit(self::LIST_LIMIT)->get()->map($map)->values(),
+            ];
         };
-    }
+        // Excludes the viewer's own records unless they hold the self-approval exception.
+        $notMine = fn (Builder $query, string $column) => $self ? $query
+            : $query->where(fn (Builder $q) => $q->whereNull($column)->orWhere($column, '!=', $uid));
 
-    private function costs(Collection $items): void
-    {
-        CostLine::query()->where('nature', '!=', CostLine::NATURE_PLANNED)
-            ->where('status', CostLine::STATUS_SUBMITTED)->oldest('incurred_at')->limit(100)
-            ->get()->each(fn (CostLine $cost) => $items->push($this->item(
-                'cost_verification', 'Cost verification', $cost->id, $cost->ref ?: "COST-{$cost->id}",
-                $cost->payee_name ?: 'Unspecified payee', $cost->net_amount, $cost->currency ?: 'KES',
-                $cost->incurred_at ?? $cost->created_at, 'Verify cost', "/finance/costs/verification?cost={$cost->ref}",
-                $cost->job_number,
-            )));
-    }
+        // ── Sales & receivables (W1) ──────────────────────────────────────
+        $invoices = fn () => ProjectInvoice::query()->with('enquiry.client:id,full_name,company_name')
+            ->whereNull('credits_invoice_id')->where('status', 'draft');
+        $awaitingCorrection = fn (Builder $q) => $q->whereNotNull('returned_at')
+            ->where(fn (Builder $r) => $r->whereNull('resubmitted_at')->orWhereColumn('returned_at', '>', 'resubmitted_at'));
+        $invoiceItem = fn (string $type, string $action) => fn (ProjectInvoice $invoice) => $this->item(
+            $type, 'sales', $invoice->id, $invoice->invoice_number, $this->clientName($invoice->enquiry),
+            $invoice->total_amount, 'KES', $invoice->resubmitted_at ?? $invoice->created_at, $action,
+            "/finance/invoices/{$invoice->id}", $invoice->enquiry?->job_number,
+        );
 
-    private function purchaseRequisitions(Collection $items): void
-    {
-        Requisition::query()->where('status', 'pending_approval')->oldest('submitted_at')->limit(100)
-            ->get()->each(fn (Requisition $request) => $items->push($this->item(
-                'purchase_requisition', 'Purchase requisition', $request->id, $request->requisition_number,
-                'Internal request', $request->total_amount, 'KES', $request->submitted_at ?? $request->created_at,
-                'Approve purchase', "/procurement/requisition/{$request->id}", $request->job_number,
-            )));
-    }
+        $add('invoice_check', 'sales', $user->can(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK),
+            // The preparer never checks their own invoice; unlike the other
+            // controls this has no self-approval exception (checkProjectInvoice).
+            fn () => $invoices()->whereNull('checked_at')->whereNot($awaitingCorrection)
+                ->where(fn (Builder $q) => $q->whereNull('created_by')->orWhere('created_by', '!=', $uid))->oldest(),
+            $invoiceItem('invoice_check', 'Check invoice'));
+        $add('invoice_issue', 'sales', $user->can(Permissions::FINANCE_RECEIVABLES_BILLING_BASIS),
+            fn () => $invoices()->whereNotNull('checked_at')->oldest('checked_at'),
+            $invoiceItem('invoice_issue', 'Issue invoice'));
+        $add('invoice_correction', 'sales', $user->can(Permissions::FINANCE_RECEIVABLES_BILLING_BASIS),
+            fn () => $awaitingCorrection($invoices()->where('created_by', $uid))->oldest('returned_at'),
+            $invoiceItem('invoice_correction', 'Correct invoice'));
 
-    private function purchaseOrders(Collection $items): void
-    {
-        PurchaseOrder::query()->with('supplier')->where('status', 'pending_approval')->oldest()->limit(100)
-            ->get()->each(fn (PurchaseOrder $order) => $items->push($this->item(
-                'purchase_order', 'Purchase order exception', $order->id, $order->po_number ?? "PO-{$order->id}",
-                $order->supplier?->name ?? 'Supplier', $order->total_amount ?? 0, 'KES', $order->created_at,
+        $add('client_receipt', 'sales', $user->can(Permissions::FINANCE_RECEIVABLES_VERIFY),
+            fn () => $notMine(EnquiryPayment::query()->with('enquiry.client:id,full_name,company_name')
+                ->where('status', 'pending')->whereNull('reversed_at'), 'recorded_by')->oldest('payment_date'),
+            fn (EnquiryPayment $receipt) => $this->item(
+                'client_receipt', 'sales', $receipt->id, $receipt->transaction_reference ?: "RECEIPT-{$receipt->id}",
+                $this->clientName($receipt->enquiry), $receipt->amount, 'KES', $receipt->payment_date ?? $receipt->created_at,
+                'Verify receipt', "/finance/receipts?receipt_id={$receipt->id}", $receipt->enquiry?->job_number,
+            ));
+
+        // ── Purchasing & payables (W2) ────────────────────────────────────
+        $add('purchase_requisition', 'purchasing', $user->can(Permissions::PROCUREMENT_REQUISITIONS_APPROVE),
+            fn () => Requisition::query()->where('status', 'pending_approval')->oldest('submitted_at'),
+            fn (Requisition $request) => $this->item(
+                'purchase_requisition', 'purchasing', $request->id, $request->requisition_number, 'Internal request',
+                $request->total_amount, 'KES', $request->submitted_at ?? $request->created_at, 'Approve purchase',
+                "/procurement/requisition/{$request->id}", $request->job_number,
+            ));
+        $add('purchase_order', 'purchasing', $user->can(Permissions::PROCUREMENT_ORDERS_APPROVE),
+            fn () => PurchaseOrder::query()->with('supplier:id,supplier_name')->where('status', 'pending_approval')->oldest(),
+            fn (PurchaseOrder $order) => $this->item(
+                'purchase_order', 'purchasing', $order->id, $order->po_number ?? "PO-{$order->id}",
+                $order->supplier?->supplier_name ?? 'Supplier', $order->total_amount ?? 0, 'KES', $order->created_at,
                 'Approve order', "/procurement/purchase-order/{$order->id}", null,
-            )));
-    }
+            ));
+        // Report 60: supplier bills. A bill returned for correction is with its
+        // preparer, not the verifier, until it is resubmitted.
+        $billAwaitingCorrection = fn (Builder $q) => $q->whereNotNull('returned_at')
+            ->where(fn (Builder $r) => $r->whereNull('resubmitted_at')->orWhereColumn('returned_at', '>', 'resubmitted_at'));
+        $billItem = fn (string $type, string $action) => fn (Bill $bill) => $this->item(
+            $type, 'purchasing', $bill->id, $bill->bill_number, $bill->supplier?->supplier_name ?? 'Supplier',
+            $type === 'supplier_payment' ? $bill->balance : $bill->amount, 'KES',
+            $type === 'supplier_invoice_correction' ? $bill->returned_at : ($bill->bill_date ?? $bill->created_at), $action,
+            "/finance/payables/bills/{$bill->id}", $bill->job_number,
+        );
+        $add('supplier_invoice', 'purchasing', $user->can(Permissions::FINANCE_PAYABLES_VERIFY),
+            fn () => $notMine(Bill::query()->with('supplier:id,supplier_name')->whereNull('verified_at')
+                ->whereNotIn('status', ['paid', 'cancelled']), 'user_id')->whereNot($billAwaitingCorrection)->oldest('bill_date'),
+            $billItem('supplier_invoice', 'Verify supplier invoice'));
+        $add('supplier_invoice_correction', 'purchasing', true,
+            fn () => $billAwaitingCorrection(Bill::query()->with('supplier:id,supplier_name')->where('user_id', $uid)
+                ->whereNull('verified_at')->whereNotIn('status', ['paid', 'cancelled']))->oldest('returned_at'),
+            $billItem('supplier_invoice_correction', 'Correct supplier invoice'));
+        // Verified, not yet settled, and payable directly by this person (the
+        // same permission and legacy exclusion BillController::directPaymentRefusal
+        // applies; the payment gate re-checks the fingerprint when they pay).
+        $add('supplier_payment', 'purchasing', $user->can(Permissions::FINANCE_PETTY_CASH_CREATE),
+            fn () => Bill::query()->with('supplier:id,supplier_name')->whereNotNull('verified_at')
+                ->where('verification_basis', '!=', 'legacy')->where('balance', '>', 0)
+                ->whereNotIn('status', ['paid', 'cancelled'])->oldest('due_date'),
+            $billItem('supplier_payment', 'Pay supplier invoice'));
 
-    private function supplierBills(Collection $items): void
-    {
-        Bill::query()->whereNull('verified_at')->whereNotIn('status', ['paid', 'cancelled'])
-            ->oldest('bill_date')->limit(100)->get()
-            ->each(fn (Bill $bill) => $items->push($this->item(
-                'supplier_invoice', 'Supplier invoice', $bill->id, $bill->bill_number,
-                'Supplier', $bill->amount, 'KES', $bill->bill_date ?? $bill->created_at,
-                'Run three-way check', "/procurement/billing/{$bill->id}", null,
-            )));
-    }
+        // ── Expenses & cash (W3/W4) ───────────────────────────────────────
+        $fund = fn (string $type, string $action) => fn (PettyCashRequisition $request) => $this->item(
+            $type, 'cash', $request->id, $request->requisition_number,
+            $request->payee_name ?: $request->requester_name ?: 'Internal requester', $request->total_amount, 'KES',
+            $request->updated_at ?? $request->created_at, $action, "/finance/petty-cash/requisitions/{$request->id}",
+            $request->project_name,
+        );
+        $add('fund_requisition', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_UPDATE),
+            fn () => $notMine(PettyCashRequisition::query()->where('status', 'pending'), 'user_id')->oldest(),
+            $fund('fund_requisition', 'Review request'));
+        // Report 61: the disburser and the reviewer of a surrender are never the
+        // requester (disburse and return refuse them), so their own requests are
+        // not offered to them as work.
+        $add('fund_disbursement', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_CREATE),
+            fn () => $notMine(PettyCashRequisition::query()->where('status', 'approved'), 'user_id')->oldest('approved_at'),
+            $fund('fund_disbursement', 'Disburse'));
+        $add('fund_surrender_review', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_CREATE),
+            fn () => $notMine(PettyCashRequisition::query()->where('status', 'surrender_pending'), 'user_id')->oldest('surrendered_at'),
+            $fund('fund_surrender_review', 'Review surrender'));
+        // STAB-4: cash left but its journal did not post. The retry is a human
+        // decision (the cause — a closed period, an unmapped account — must be
+        // fixed first) and it is idempotent.
+        $add('petty_cash_posting_failed', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_UPDATE),
+            fn () => PettyCashRequisition::query()->whereNotNull('advance_gl_posting_failed_at')->oldest('advance_gl_posting_failed_at'),
+            $fund('petty_cash_posting_failed', 'Retry ledger posting'));
+        $add('fund_surrender', 'cash', true,
+            fn () => PettyCashRequisition::query()->where('user_id', $uid)
+                ->whereIn('status', ['disbursed', 'received', 'surrender_returned'])->oldest(),
+            $fund('fund_surrender', 'Record surrender'));
 
-    private function fundRequisitions(Collection $items): void
-    {
-        PettyCashRequisition::query()->where('status', 'pending')->oldest()->limit(100)->get()
-            ->each(fn (PettyCashRequisition $request) => $items->push($this->item(
-                'fund_requisition', 'Fund requisition', $request->id, $request->requisition_number,
-                $request->payee_name ?: $request->requester_name ?: 'Internal requester', $request->total_amount,
-                'KES', $request->created_at, 'Review request', "/finance/petty-cash/requisitions/{$request->id}",
-                $request->project_name,
-            )));
-    }
-
-    private function directDisbursements(Collection $items): void
-    {
-        DirectDisbursementRequest::query()->where('status', 'pending_approval')->oldest()->limit(100)->get()
-            ->each(function (DirectDisbursementRequest $request) use ($items): void {
+        $add('direct_disbursement', 'cash', $user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE),
+            fn () => $notMine(DirectDisbursementRequest::query()->where('status', 'pending_approval'), 'requested_by')->oldest(),
+            function (DirectDisbursementRequest $request) {
                 $payload = $request->payload ?? [];
-                $items->push($this->item(
-                    'direct_disbursement', 'Direct disbursement', $request->id,
-                    $payload['payment_no'] ?? "DIRECT-{$request->id}", $payload['payee_name'] ?? 'Payee',
-                    $payload['amount'] ?? 0, $payload['currency'] ?? 'KES', $request->created_at,
-                    'Approve disbursement', "/finance/petty-cash?direct_request={$request->id}#direct-request-{$request->id}", $payload['project_name'] ?? null,
-                ));
+
+                return $this->item(
+                    'direct_disbursement', 'cash', $request->id, $payload['payment_no'] ?? "DIRECT-{$request->id}",
+                    $payload['payee_name'] ?? 'Payee', $payload['amount'] ?? 0, $payload['currency'] ?? 'KES',
+                    $request->created_at, 'Approve disbursement',
+                    "/finance/petty-cash?direct_request={$request->id}#direct-request-{$request->id}", $payload['project_name'] ?? null,
+                );
             });
+
+        $voucher = fn (string $type, string $action) => fn (SpendVoucher $v) => $this->item(
+            $type, 'cash', $v->id, $v->voucher_no, $v->payee_name ?: 'Payee', $v->total_amount, $v->currency ?: 'KES',
+            $v->resubmitted_at ?? $v->approved_at ?? $v->created_at, $action, "/finance/spend-vouchers?voucher={$v->voucher_no}", null,
+        );
+        $returned = ['returned_for_correction', 'corrected'];
+        $add('spend_voucher', 'cash', $user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE),
+            fn () => $notMine(SpendVoucher::query()->where('status', 'pending_approval')
+                ->where(fn (Builder $q) => $q->whereNull('review_state')->orWhereNotIn('review_state', $returned)), 'requester_user_id')->oldest(),
+            $voucher('spend_voucher', 'Approve voucher'));
+        $add('spend_voucher_correction', 'cash', $user->can(Permissions::FINANCE_SPEND_VOUCHERS_CREATE),
+            fn () => SpendVoucher::query()->where('requester_user_id', $uid)->whereIn('review_state', $returned)->oldest('returned_at'),
+            $voucher('spend_voucher_correction', 'Correct voucher'));
+        $independent = fn (Builder $q) => $self ? $q : $q
+            ->where(fn (Builder $r) => $r->whereNull('requester_user_id')->orWhere('requester_user_id', '!=', $uid))
+            ->where(fn (Builder $r) => $r->whereNull('approved_by')->orWhere('approved_by', '!=', $uid));
+        $add('spend_voucher_senior', 'cash', $user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE_SENIOR),
+            fn () => $independent(SpendVoucher::query()->where('status', 'approved')->where('review_state', 'awaiting_senior_approval'))->oldest('approved_at'),
+            $voucher('spend_voucher_senior', 'Give senior approval'));
+        $add('spend_voucher_post', 'cash', $user->can(Permissions::FINANCE_SPEND_VOUCHERS_POST),
+            fn () => $independent(SpendVoucher::query()->where('status', 'approved')->whereNull('posted_at')
+                ->where(fn (Builder $q) => $q->whereNull('review_state')->orWhere('review_state', '!=', 'awaiting_senior_approval')))->oldest('approved_at'),
+            $voucher('spend_voucher_post', 'Post voucher'));
+
+        // ── Project finance (W7) ──────────────────────────────────────────
+        $add('cost_verification', 'project', $user->can(Permissions::FINANCE_COSTS_VERIFY),
+            fn () => CostLine::query()->where('nature', '!=', CostLine::NATURE_PLANNED)
+                ->where('status', CostLine::STATUS_SUBMITTED)->oldest('incurred_at'),
+            fn (CostLine $cost) => $this->item(
+                'cost_verification', 'project', $cost->id, $cost->ref ?: "COST-{$cost->id}", $cost->payee_name ?: 'Unspecified payee',
+                $cost->net_amount, $cost->currency ?: 'KES', $cost->incurred_at ?? $cost->created_at, 'Verify cost',
+                "/finance/costs/verification?cost={$cost->ref}", $cost->job_number,
+            ));
+        $labour = fn (string $type, string $action) => fn (ProjectLabourActual $actual) => $this->item(
+            $type, 'project', $actual->id, $actual->enquiry?->job_number ? "{$actual->enquiry->job_number} · {$actual->labour_role}" : "LABOUR-{$actual->id}",
+            trim(($actual->employee?->first_name ?? '').' '.($actual->employee?->last_name ?? '')) ?: 'Employee', $actual->calculated_cost, 'KES',
+            $actual->po_verified_at ?? $actual->recorded_at ?? $actual->created_at, $action,
+            "/finance/costs?tab=account&enquiry={$actual->project_enquiry_id}", $actual->enquiry?->title,
+        );
+        $add('labour_finance_verify', 'project', $this->access->canFinanceVerifyLabour($user),
+            fn () => ProjectLabourActual::query()->with(['enquiry:id,job_number,title', 'employee:id,first_name,last_name'])
+                ->where('status', ProjectLabourActual::STATUS_PO_VERIFIED)->oldest('po_verified_at'),
+            $labour('labour_finance_verify', 'Finance-verify labour'));
+        if ($user->can(Permissions::FINANCE_LABOUR_PO_VERIFY)) {
+            // Project-scoped: the same rule the service enforces, applied per
+            // project, so an officer sees only their own projects' labour.
+            $eligible = function () use ($user) {
+                return ProjectLabourActual::query()->with(['enquiry', 'employee:id,first_name,last_name'])
+                    ->where('status', ProjectLabourActual::STATUS_RECORDED)->oldest('recorded_at')->limit(500)->get()
+                    ->filter(fn (ProjectLabourActual $actual) => $actual->enquiry && $this->access->canPoVerifyLabour($user, $actual->enquiry))
+                    ->values();
+            };
+            $types['labour_po_verify'] = [
+                'area' => 'project',
+                'count' => fn () => $eligible()->count(),
+                'items' => fn () => $eligible()->take(self::LIST_LIMIT)->map($labour('labour_po_verify', 'PO-verify labour'))->values(),
+            ];
+        }
+
+        // ── Payroll (W6) ──────────────────────────────────────────────────
+        $run = fn (string $type, string $action, string $url) => fn (PayrollRun $run) => $this->item(
+            $type, 'payroll', $run->id, "PAYROLL {$run->payroll_month}", 'Payroll run', $run->total_net, 'KES',
+            $run->updated_at ?? $run->created_at, $action, $url, null,
+        );
+        $manage = $user->can(Permissions::HR_MANAGE_PAYROLL);
+        $add('payroll_lock', 'payroll', $manage,
+            fn () => $notMine(PayrollRun::query()->where('status', 'processing'), 'created_by')->oldest(),
+            $run('payroll_lock', 'Lock payroll', '/hr/payroll'));
+        $add('payroll_payment', 'payroll', $manage,
+            fn () => $notMine(PayrollRun::query()->where('status', 'locked'), 'locked_by')->oldest(),
+            $run('payroll_payment', 'Mark payroll paid', '/finance/payroll-disbursement'));
+
+        return $types;
     }
 
-    private function spendVouchers(Collection $items): void
+    private function clientName(?ProjectEnquiry $enquiry): string
     {
-        SpendVoucher::query()->where('status', 'pending_approval')->oldest()->limit(100)->get()
-            ->each(fn (SpendVoucher $voucher) => $items->push($this->item(
-                'spend_voucher', 'Spend voucher', $voucher->id, $voucher->voucher_no,
-                $voucher->payee_name ?: 'Payee', $voucher->total_amount, $voucher->currency ?: 'KES',
-                $voucher->created_at, 'Approve voucher', "/finance/spend-vouchers?voucher={$voucher->voucher_no}", null,
-            )));
+        return $enquiry?->client?->company_name ?: $enquiry?->client?->full_name ?: 'Client';
     }
 
-    private function clientReceipts(Collection $items): void
-    {
-        EnquiryPayment::query()->where('status', 'pending')->whereNull('reversed_at')
-            ->oldest('payment_date')->limit(100)->get()
-            ->each(fn (EnquiryPayment $receipt) => $items->push($this->item(
-                'client_receipt', 'Client receipt', $receipt->id,
-                $receipt->transaction_reference ?: "RECEIPT-{$receipt->id}", 'Client', $receipt->amount,
-                'KES', $receipt->payment_date ?? $receipt->created_at, 'Verify receipt',
-                "/finance/project-receivables?enquiry={$receipt->project_enquiry_id}", null,
-            )));
-    }
-
-    private function item(string $workType, string $label, int $id, ?string $reference, string $counterparty,
+    private function item(string $workType, string $area, int $id, ?string $reference, string $counterparty,
         mixed $amount, string $currency, mixed $submittedAt, string $action, string $targetUrl, ?string $context): array
     {
         $date = $submittedAt ? \Illuminate\Support\Carbon::parse($submittedAt) : now();
         $age = (int) $date->diffInDays(now());
 
         return [
-            'key' => "{$workType}:{$id}", 'work_type' => $workType, 'type_label' => $label,
-            'source_id' => $id, 'reference' => $reference ?: "#{$id}", 'counterparty' => $counterparty,
+            'key' => "{$workType}:{$id}", 'work_type' => $workType, 'type_label' => self::LABELS[$workType] ?? $workType,
+            'area' => $area, 'source_id' => $id, 'reference' => $reference ?: "#{$id}", 'counterparty' => $counterparty,
             'amount' => number_format((float) $amount, 2, '.', ''), 'currency' => $currency,
             'submitted_at' => $date->toIso8601String(), 'age_days' => $age,
             'priority' => $age > 30 ? 'overdue' : ($age > 7 ? 'watch' : 'normal'),
@@ -329,8 +467,31 @@ class FinanceWorkQueueService
         ];
     }
 
-    private function canVerifySupplierBills(User $user): bool
-    {
-        return $user->roles()->whereIn('name', ['Super Admin', 'Admin', 'Accounts'])->exists();
-    }
+    /** Plain-language name of each work type, shown as the item's kind. */
+    public const LABELS = [
+        'invoice_check' => 'Invoice to check',
+        'invoice_issue' => 'Invoice to issue',
+        'invoice_correction' => 'Invoice returned to you',
+        'client_receipt' => 'Client receipt',
+        'purchase_requisition' => 'Purchase requisition',
+        'purchase_order' => 'Purchase order exception',
+        'supplier_invoice' => 'Supplier invoice',
+        'supplier_invoice_correction' => 'Supplier invoice returned to you',
+        'supplier_payment' => 'Supplier invoice to pay',
+        'fund_requisition' => 'Cash requisition',
+        'fund_disbursement' => 'Cash to disburse',
+        'fund_surrender_review' => 'Surrender to review',
+        'fund_surrender' => 'Cash to account for',
+        'petty_cash_posting_failed' => 'Petty cash posting failed',
+        'direct_disbursement' => 'Direct disbursement',
+        'spend_voucher' => 'Payment voucher',
+        'spend_voucher_correction' => 'Voucher returned to you',
+        'spend_voucher_senior' => 'Voucher for senior approval',
+        'spend_voucher_post' => 'Voucher to post',
+        'cost_verification' => 'Cost verification',
+        'labour_po_verify' => 'Labour to PO-verify',
+        'labour_finance_verify' => 'Labour to Finance-verify',
+        'payroll_lock' => 'Payroll to lock',
+        'payroll_payment' => 'Payroll to pay',
+    ];
 }

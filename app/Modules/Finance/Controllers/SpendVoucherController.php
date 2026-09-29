@@ -8,11 +8,14 @@ use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
 use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\Finance\Models\FinanceSetting;
 use App\Modules\Finance\Models\SpendVoucher;
+use App\Modules\Finance\Models\SpendVoucherReview;
 use App\Modules\Finance\Models\SpendVoucherAllocation;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Services\SpendVoucherSettlementService;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use App\Modules\HR\Models\HRAuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -111,7 +114,7 @@ class SpendVoucherController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_CREATE), 403);
 
-        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany(['2100', '2150']))->pluck('id');
+        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany([FinanceAccountFunctions::ACCOUNTS_PAYABLE, FinanceAccountFunctions::ACCRUED_EXPENSES]))->pluck('id');
         $lines = CostLine::query()
             ->withReferenceNames()
             ->with(['expenseCode:id,code,expense_type'])
@@ -172,7 +175,7 @@ class SpendVoucherController extends Controller
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_READ), 403);
 
-        $voucher = SpendVoucher::with(['paymentSource', 'costLines'])->findOrFail($id);
+        $voucher = SpendVoucher::with(['paymentSource', 'costLines', 'reviews'])->findOrFail($id);
 
         return response()->json([
             'status' => 'success',
@@ -330,7 +333,7 @@ class SpendVoucherController extends Controller
             throw new \DomainException('One or more selected liabilities no longer exist. Refresh the list and try again.');
         }
 
-        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany(['2100', '2150']))->pluck('id');
+        $controlAccounts = ChartOfAccount::postable()->whereIn('code', ChartAccountMap::localMany([FinanceAccountFunctions::ACCOUNTS_PAYABLE, FinanceAccountFunctions::ACCRUED_EXPENSES]))->pluck('id');
         $beneficiaryKey = null;
         $beneficiaryName = null;
         $supplierId = null;
@@ -466,15 +469,23 @@ class SpendVoucherController extends Controller
                 return ['error' => 'Only vouchers awaiting approval can be approved'];
             }
 
+            // W4-1: a returned voucher is with its requester, not the approver.
+            if (in_array($voucher->review_state, ['returned_for_correction', 'corrected'], true)) {
+                return ['error' => 'This voucher was returned for correction. It can be approved once the requester resubmits it.'];
+            }
+
             if ($voucher->requester_user_id === $request->user()->id && ! \App\Support\SelfApproval::allowedFor($request->user())) {
                 return ['error' => 'You requested this payment voucher, so someone else has to approve it. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'];
             }
 
             $voucher->update([
                 'status' => 'approved',
+                'review_state' => $this->needsSeniorApproval($voucher) ? 'awaiting_senior_approval' : 'approved',
                 'approved_by' => $request->user()->id,
                 'approved_at' => now(),
             ]);
+
+            $this->recordReview($voucher, 'approved', $request->user()->id);
 
             HRAuditLog::create([
                 'user_id' => $request->user()->id,
@@ -499,6 +510,110 @@ class SpendVoucherController extends Controller
         ]);
     }
 
+    public function returnForCorrection(Request $request, int $id): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE), 403);
+        $validated = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:1000']]);
+
+        $voucher = DB::transaction(function () use ($request, $id, $validated) {
+            $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
+            if (! in_array($voucher->status, ['pending_approval', 'draft'], true)) {
+                throw ValidationException::withMessages(['voucher' => 'Only a voucher awaiting approval can be returned.']);
+            }
+            if ((int) $voucher->requester_user_id === (int) $request->user()->id
+                && ! \App\Support\SelfApproval::allowedFor($request->user())) {
+                throw ValidationException::withMessages(['voucher' => 'The requester cannot review their own voucher.']);
+            }
+            $this->recordReview($voucher, 'returned', $request->user()->id, $validated['reason']);
+            $voucher->update([
+                'review_state' => 'returned_for_correction', 'returned_by' => $request->user()->id,
+                'returned_at' => now(), 'return_reason' => $validated['reason'],
+            ]);
+            return $voucher;
+        });
+
+        return response()->json(['status' => 'success', 'message' => 'Voucher returned for correction.', 'data' => $voucher]);
+    }
+
+    public function correct(Request $request, int $id): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_CREATE), 403);
+        $validated = $request->validate([
+            'payment_source_id' => [Rule::exists('payment_sources', 'id')->where(fn ($q) => $q->where('can_make_payment', true))],
+            'payment_method' => ['nullable', 'string'], 'payment_reference' => ['nullable', 'string', 'max:64'],
+            'supplier_invoice_no' => ['nullable', 'string', 'max:64'], 'etims_invoice_no' => ['nullable', 'string', 'max:64'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+        ]);
+        $voucher = DB::transaction(function () use ($request, $id, $validated) {
+            $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
+            if ($voucher->review_state !== 'returned_for_correction' || (int) $voucher->requester_user_id !== (int) $request->user()->id) {
+                throw ValidationException::withMessages(['voucher' => 'Only the original requester can correct a returned voucher.']);
+            }
+            $this->recordReview($voucher, 'corrected', $request->user()->id);
+            $voucher->update(array_merge($validated, ['review_state' => 'corrected']));
+            return $voucher;
+        });
+        return response()->json(['status' => 'success', 'message' => 'Voucher correction saved.', 'data' => $voucher]);
+    }
+
+    public function resubmit(Request $request, int $id): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_CREATE), 403);
+        $voucher = DB::transaction(function () use ($request, $id) {
+            $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
+            if (! in_array($voucher->review_state, ['returned_for_correction', 'corrected'], true)
+                || (int) $voucher->requester_user_id !== (int) $request->user()->id) {
+                throw ValidationException::withMessages(['voucher' => 'Only the original requester can resubmit a returned voucher.']);
+            }
+            $this->recordReview($voucher, 'resubmitted', $request->user()->id);
+            $voucher->update(['status' => 'pending_approval', 'review_state' => 'resubmitted',
+                'resubmitted_by' => $request->user()->id, 'resubmitted_at' => now()]);
+            return $voucher;
+        });
+        return response()->json(['status' => 'success', 'message' => 'Voucher resubmitted for approval.', 'data' => $voucher]);
+    }
+
+    public function reject(Request $request, int $id): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE), 403);
+        $validated = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:1000']]);
+        $voucher = DB::transaction(function () use ($request, $id, $validated) {
+            $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
+            if (! in_array($voucher->status, ['pending_approval', 'draft'], true)) {
+                throw ValidationException::withMessages(['voucher' => 'Only a voucher awaiting approval can be rejected.']);
+            }
+            // The requester withdraws their own voucher with cancel(); reject is a reviewer's decision.
+            if ((int) $voucher->requester_user_id === (int) $request->user()->id
+                && ! \App\Support\SelfApproval::allowedFor($request->user())) {
+                throw ValidationException::withMessages(['voucher' => 'The requester cannot reject their own voucher — cancel it instead.']);
+            }
+            $this->recordReview($voucher, 'rejected', $request->user()->id, $validated['reason']);
+            $voucher->update(['status' => 'rejected', 'review_state' => 'rejected',
+                'rejected_by' => $request->user()->id, 'rejected_at' => now(), 'rejection_reason' => $validated['reason']]);
+            return $voucher;
+        });
+        return response()->json(['status' => 'success', 'message' => 'Voucher rejected.', 'data' => $voucher]);
+    }
+
+    public function seniorApprove(Request $request, int $id): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE_SENIOR), 403);
+        $voucher = DB::transaction(function () use ($request, $id) {
+            $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
+            if ($voucher->status !== 'approved' || $voucher->review_state !== 'awaiting_senior_approval') {
+                throw ValidationException::withMessages(['voucher' => 'This voucher is not awaiting senior approval.']);
+            }
+            if (in_array((int) $request->user()->id, [(int) $voucher->requester_user_id, (int) $voucher->approved_by], true)
+                && ! \App\Support\SelfApproval::allowedFor($request->user())) {
+                throw ValidationException::withMessages(['voucher' => 'Senior approval must be independent of the requester and ordinary approver.']);
+            }
+            $this->recordReview($voucher, 'senior_approved', $request->user()->id);
+            $voucher->update(['review_state' => 'approved', 'senior_approved_by' => $request->user()->id, 'senior_approved_at' => now()]);
+            return $voucher;
+        });
+        return response()->json(['status' => 'success', 'message' => 'Senior approval recorded.', 'data' => $voucher]);
+    }
+
     public function post(Request $request, int $id): JsonResponse
     {
         abort_unless($request->user()?->can(Permissions::FINANCE_SPEND_VOUCHERS_POST), 403);
@@ -509,6 +624,13 @@ class SpendVoucherController extends Controller
 
                 if ($voucher->status !== 'approved' || $voucher->posted_at) {
                     return ['error' => 'Only an approved, unposted voucher can be posted.'];
+                }
+
+                // W4-2: ordinary approval is already expressed by status; the
+                // one additional review state that holds posting back is a
+                // senior approval the voucher's value requires and lacks.
+                if ($voucher->review_state === 'awaiting_senior_approval') {
+                    return ['error' => 'This voucher is above the senior-approval threshold and needs senior approval before it can be posted.'];
                 }
 
                 $usesSeparationOverride = in_array(
@@ -599,6 +721,23 @@ class SpendVoucherController extends Controller
                 'journal_entry' => $result['journal_entry'],
                 'payment' => $result['payment'],
             ],
+        ]);
+    }
+
+    private function needsSeniorApproval(SpendVoucher $voucher): bool
+    {
+        $threshold = FinanceSetting::approvedValue('spend_voucher_senior_approval_threshold');
+        return is_numeric($threshold) && bccomp((string) $voucher->total_amount, (string) $threshold, 2) === 1;
+    }
+
+    private function recordReview(SpendVoucher $voucher, string $action, int $actor, ?string $reason = null): void
+    {
+        SpendVoucherReview::query()->create([
+            'spend_voucher_id' => $voucher->id, 'action' => $action, 'actor_user_id' => $actor,
+            'reason' => $reason, 'snapshot' => $voucher->only([
+                'status', 'review_state', 'payment_source_id', 'payment_method', 'payment_reference',
+                'supplier_invoice_no', 'etims_invoice_no', 'notes', 'total_amount',
+            ]),
         ]);
     }
 }
