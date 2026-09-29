@@ -1,0 +1,1112 @@
+{
+ "source": "wng_source_rehearsal.chart_of_accounts (rehearsal copy of WNG snapshot 2026-09-28): 120 WNG QuickBooks accounts + 3 inserted by target migrations. Codes, names and flags only.",
+ "accounts": [
+  {
+   "code": "AP-001",
+   "name": "Accounts Payable (A/P)",
+   "category": "liability",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "AR-001",
+   "name": "Accounts Receivable (A/R)",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "AR-002",
+   "name": "Accounts Receivable (A/R) - EUR",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "STD-001",
+   "name": "Short Term Debtors",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "CASH-001",
+   "name": "Cash Account",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "EQB-001",
+   "name": "Equity Bank",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "FMB-001",
+   "name": "Family Bank",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "FK-001",
+   "name": "Faulu Kenya",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "KCB-001",
+   "name": "KCB Bank",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "NCBA-001",
+   "name": "NCBA",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "NIC-001",
+   "name": "NIC Dollar Account",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PETTY-001",
+   "name": "Petty cash",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "SBM-001",
+   "name": "SBM",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "STB-001",
+   "name": "Stanbic Bank",
+   "category": "asset",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-001",
+   "name": "Change in inventory - COS",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-002",
+   "name": "Cost of Sales",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-003",
+   "name": "Cost of Sales:Branding",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-004",
+   "name": "Cost of Sales:Courier - Projects",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-005",
+   "name": "Cost of Sales:Fabrication",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-006",
+   "name": "Cost of Sales:Field Facilitation",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-007",
+   "name": "Cost of Sales:Jomat hardware",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-008",
+   "name": "Cost of Sales:Materials",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-009",
+   "name": "Cost of Sales:Motor bike and motor vehicle fuel",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-010",
+   "name": "Cost of Sales:Paints & Hardware",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-011",
+   "name": "Cost of Sales:Parking Fees",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-012",
+   "name": "Cost of Sales:Plotting & Cutting",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-013",
+   "name": "Cost of Sales:Printing",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-014",
+   "name": "Cost of Sales:Team Meals",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-015",
+   "name": "Cost of Sales:Teams accomodation",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-016",
+   "name": "Cost of Sales:Transport & Delivery",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-017",
+   "name": "Discounts given - COS",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "INV-001",
+   "name": "Inventory Shrinkage",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-018",
+   "name": "Other - COS",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-019",
+   "name": "Overhead - COS",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "EXP-001",
+   "name": "Pasting Expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "COS-020",
+   "name": "Subcontractors - COS",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "DIV-001",
+   "name": "Dividend disbursed",
+   "category": "equity",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "EQE-001",
+   "name": "Equity in earnings of subsidiaries",
+   "category": "equity",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OBE-001",
+   "name": "Opening Balance Equity",
+   "category": "equity",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OCI-001",
+   "name": "Other comprehensive income",
+   "category": "equity",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "RE-001",
+   "name": "Retained Earnings",
+   "category": "equity",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "SC-001",
+   "name": "Share capital",
+   "category": "equity",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "ADM-001",
+   "name": "Administration expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "ADM-002",
+   "name": "Administration expenses:Courier & Postage",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "ADM-003",
+   "name": "Administration expenses:Depreciation Expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "AMO-001",
+   "name": "Amortisation expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "ATM-001",
+   "name": "Atm charges",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "BD-001",
+   "name": "Bad Debts",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "DEL-001",
+   "name": "Delivery/Trolley expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "EXD-001",
+   "name": "EXCISE DUTY",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "FIN-001",
+   "name": "Finance cost",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "FIN-002",
+   "name": "Finance cost:Bad debts",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "FIN-003",
+   "name": "Finance cost:Bank charges",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "FIN-004",
+   "name": "Finance cost:Interest expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "FIN-005",
+   "name": "Finance cost:Mpesa charges",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "ITX-001",
+   "name": "Income tax expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "INS-001",
+   "name": "Insurance - Disability",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "INS-002",
+   "name": "Insurance - General",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "INS-003",
+   "name": "Insurance - Liability",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "LPF-001",
+   "name": "Legal and professional fees",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "LDO-001",
+   "name": "Loss on discontinued operations, net of tax",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "MC-001",
+   "name": "Management compensation",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "MAE-001",
+   "name": "Meals and entertainment",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "MED-001",
+   "name": "Medical expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "MBMV-001",
+   "name": "Motor bike and motor vehicle car wash",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "MBMV-002",
+   "name": "Motor bike and motor vehicles Repair",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-001",
+   "name": "Operating Expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-002",
+   "name": "Operating Expenses:Advertising/Promotional",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-003",
+   "name": "Operating Expenses:Audit & Accountancy Fees",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-004",
+   "name": "Operating Expenses:Commissions and fees",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-005",
+   "name": "Operating Expenses:Consultancy Fees",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-006",
+   "name": "Operating Expenses:Consumables",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-007",
+   "name": "Operating Expenses:Corporate social Responsibility",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-008",
+   "name": "Operating Expenses:Director Expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-009",
+   "name": "Operating Expenses:Director Expenses:Courier - Director's Errands",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-010",
+   "name": "Operating Expenses:Dues and subacriptions",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-011",
+   "name": "Operating Expenses:Dues and subscriptions",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-012",
+   "name": "Operating Expenses:Electricity & Water",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-013",
+   "name": "Operating Expenses:Equipment Rental",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-014",
+   "name": "Operating Expenses:Garbage Collections",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-015",
+   "name": "Operating Expenses:Generator fuel, Repair and Maintenance",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-016",
+   "name": "Operating Expenses:Insurance premium",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-017",
+   "name": "Operating Expenses:Licenses and permits",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-018",
+   "name": "Operating Expenses:Office Casual/Stipend",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-019",
+   "name": "Operating Expenses:Office expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-020",
+   "name": "Operating Expenses:Packaging and Delivery",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-021",
+   "name": "Operating Expenses:Professional Fees",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-022",
+   "name": "Operating Expenses:Rent & lease Payments",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-023",
+   "name": "Operating Expenses:Repairs and Maintenance",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-024",
+   "name": "Operating Expenses:Samples",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-025",
+   "name": "Operating Expenses:Security And Fees",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-026",
+   "name": "Operating Expenses:Set Up Casuals",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-027",
+   "name": "Operating Expenses:Shipping & Delivery Expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-028",
+   "name": "Operating Expenses:Site Visist",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-029",
+   "name": "Operating Expenses:Staff Welfare",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-030",
+   "name": "Operating Expenses:Stationery & Printing",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-031",
+   "name": "Operating Expenses:Telephone & Internet",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OPE-032",
+   "name": "Operating Expenses:Transport & Delivery",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OGAE-001",
+   "name": "Other general and administrative expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OSE-001",
+   "name": "Other selling expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OTEA-001",
+   "name": "Other Types of Expenses-Advertising Expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "OTE-001",
+   "name": "Overtime expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PE-001",
+   "name": "Payroll Expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PE-002",
+   "name": "Personnel Expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PE-003",
+   "name": "Personnel Expenses:Housing levy",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PE-004",
+   "name": "Personnel Expenses:Nita Levy",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PE-005",
+   "name": "Personnel Expenses:NSSF Expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PE-006",
+   "name": "Personnel Expenses:Salaries",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PE-007",
+   "name": "Personnel Expenses:Wages-Direct Labour",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "PS-001",
+   "name": "Printing Supplies",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "RI-001",
+   "name": "Return Inwards",
+   "category": "revenue",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "RE-002",
+   "name": "Rider's Expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "SUP-001",
+   "name": "Supplies",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "TSE-001",
+   "name": "Travel expenses - selling expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "UCBPE-001",
+   "name": "Unapplied Cash Bill Payment Expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "UE-001",
+   "name": "Uncategorised Expense",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "UTIL-001",
+   "name": "Utilities",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "VP-001",
+   "name": "Vat Penalty",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "WE-001",
+   "name": "Wage expenses",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "WNGA-001",
+   "name": "WNG Give aways",
+   "category": "expense",
+   "account_type": null,
+   "normal_balance": null,
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "2160",
+   "name": "Net Payroll Payable",
+   "category": "liability",
+   "account_type": "balance_sheet",
+   "normal_balance": "credit",
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "7550",
+   "name": "Salaries & Wages",
+   "category": "expense",
+   "account_type": "opex",
+   "normal_balance": "debit",
+   "is_postable": true,
+   "is_active": true
+  },
+  {
+   "code": "7150",
+   "name": "Office Supplies & Stationery",
+   "category": "expense",
+   "account_type": "opex",
+   "normal_balance": "debit",
+   "is_postable": true,
+   "is_active": true
+  }
+ ]
+}
