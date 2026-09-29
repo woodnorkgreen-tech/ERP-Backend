@@ -611,50 +611,59 @@ class RealDataRehearsalSmokeTest extends BaseTestCase
 
     private function w4PaymentVouchers(): void
     {
-        // W2's accrual was billed and paid there, so W4 raises its own: an unbilled
-        // GRN accrual (Dr expense / Cr Accrued Expenses) is exactly the liability a
-        // payment voucher exists to settle.
-        $this->step('W4', 'Raise an unbilled goods receipt (requisition → PO → GRN) to create a payable accrual', function () {
-            $code = DB::table('expense_codes')->where('is_active', true)->where('is_procurable', true)->where('job_id_rule', 'not_allowed')->orderBy('id')->value('id');
-            $r = $this->expectOk($this->as($this->superA)->postJson('/api/procurement-stores/requisitions', [
-                'date' => now()->toDateString(), 'requested_by_type' => 'office', 'department_id' => (int) DB::table('departments')->orderBy('id')->value('id'), 'urgency' => 'normal',
-                'items' => [['quantity' => 1, 'unit_price' => 3000, 'purpose' => 'office_use', 'custom_description' => 'Rehearsal voucher item',
-                    'supplier_id' => DB::table('suppliers')->orderBy('id')->value('id'), 'expense_code_id' => $code]],
-            ]), 201);
-            $requisitionId = $r->json('data.id') ?? $r->json('id');
-            $this->expectOk($this->as($this->superB)->postJson("/api/procurement-stores/requisitions/{$requisitionId}/approve"));
-            $po = $this->expectOk($this->as($this->superA)->postJson('/api/procurement-stores/purchase-orders/store-linked', [
-                'requisition_id' => $requisitionId, 'due_date' => now()->addDays(7)->toDateString(), 'delivery_address' => 'Rehearsal store',
-            ]), 201);
-            $orderId = $po->json('data.0.id') ?? $po->json('data.id');
-            if (DB::table('purchase_orders')->where('id', $orderId)->value('status') !== 'approved') {
-                $this->expectOk($this->as($this->superB)->postJson("/api/procurement-stores/purchase-orders/{$orderId}/approve"));
+        // A payment voucher settles a verified liability that is NOT a goods-received
+        // accrual: those are paid through their supplier bill after the three-way match
+        // (Report 63 §6; the voucher-first GRN double payment). So W4 raises its own
+        // supplier invoice on credit through the Cost Collector (funding_mode
+        // unpaid_invoice), has a second person verify it (Dr expense / Cr AP), and pays
+        // exactly that liability. Earlier rehearsals paid an unbilled GRN accrual here,
+        // which Stream E now correctly refuses.
+        $liabilityId = $this->step('W4', 'Capture a supplier invoice on credit (Cost Collector, Super Admin A) and verify it (Super Admin B)', function () {
+            $code = DB::table('expense_codes')->where('is_active', true)->where('is_procurable', true)->where('job_id_rule', 'not_allowed')->orderBy('id')->value('code');
+            $supplier = DB::table('suppliers')->whereNotNull('kra_pin')->where('kra_pin', '!=', '')->orderBy('id')->first(['id', 'supplier_name']);
+            if (! $code || ! $supplier) {
+                throw new RuntimeException('no active overhead expense code or no supplier with a KRA PIN ('.$this->d3CodeEvidence().')');
             }
-            $item = DB::table('purchase_order_items')->where('purchase_order_id', $orderId)->first();
-            $this->expectOk($this->as($this->superA)->postJson('/api/procurement-stores/goods-receipt-notes', [
-                'purchase_order_id' => $orderId, 'store_location' => 'Karen Village Store', 'quality_check' => 'pass',
-                'items' => [['purchase_order_item_id' => $item->id, 'ordered_quantity' => $item->quantity, 'received_quantity' => $item->quantity, 'condition' => 'good', 'accepted' => true]],
+            // The invoice is uploaded first, as the capture form does, under each key the code requires.
+            $evidence = [];
+            foreach (\App\Modules\Finance\CostCollector\Models\ExpenseCode::where('code', $code)->firstOrFail()->requiredEvidenceKeys() as $key) {
+                $upload = $this->expectOk($this->as($this->superA)->post('/api/costs/evidence', [
+                    'key' => $key, 'file' => \Illuminate\Http\UploadedFile::fake()->create("rehearsal-{$key}.pdf", 20, 'application/pdf'),
+                ]), 201);
+                $evidence[] = ['key' => $key, 'path' => $upload->json('data.path')];
+            }
+            $r = $this->expectOk($this->as($this->superA)->postJson('/api/costs', [
+                'evidence' => $evidence,
+                'expense_code' => $code, 'amount' => 100, 'description' => 'Rehearsal supplier invoice on credit',
+                'funding_mode' => 'unpaid_invoice', 'payee_type' => 'SUPPLIER', 'payee_id' => $supplier->id, 'payee_name' => $supplier->supplier_name,
             ]), 201);
+            $costId = $r->json('data.id');
+            $this->expectOk($this->as($this->superB)->postJson("/api/costs/verification/{$costId}/verify"));
 
-            return "PO #{$orderId} received, not billed; drain ".$this->drain();
+            return $costId;
         });
-        $voucherId = $this->step('W4', 'Create a payment voucher against an eligible liability (Accounts)', function () {
+        $voucherId = $liabilityId ? $this->step('W4', 'Create a payment voucher against that verified supplier liability (Accounts)', function () use ($liabilityId) {
             $eligible = $this->as($this->accounts)->getJson('/api/finance/spend-vouchers/eligible-liabilities');
             $this->expectOk($eligible);
-            $rows = collect($eligible->json('data') ?? []);
-            $first = $rows->first();
-            if (! $first) {
-                throw new RuntimeException('no eligible liability: payable cost lines arise from coded purchases/expenses, which need active expense codes ('.$this->d3CodeEvidence().')');
+            if (! collect($eligible->json('data') ?? [])->contains('id', $liabilityId)) {
+                throw new RuntimeException("the verified supplier liability #{$liabilityId} is not offered as eligible");
             }
-            $line = (object) ['id' => $first['cost_line_id'] ?? $first['id']];
             $r = $this->as($this->accounts)->postJson('/api/finance/spend-vouchers', [
                 'type' => 'payment', 'payee_name' => 'Rehearsal Payee', 'total_amount' => 100.0, 'payment_method' => 'bank_transfer',
-                'payment_source_id' => DB::table('payment_sources')->where('is_active', true)->where('can_make_payment', true)->orderBy('id')->value('id'),
-                'allocations' => $line ? [['cost_line_id' => $line->id, 'amount' => 100.0]] : [],
+                'payment_source_id' => DB::table('payment_sources')->where('is_active', true)->where('can_make_payment', true)->where('type', 'bank')->whereNotNull('gl_account_id')->orderBy('id')->value('id'),
+                'allocations' => [['cost_line_id' => $liabilityId, 'amount' => 100.0]],
             ]);
             $this->expectOk($r, 201);
 
             return $r->json('data.id') ?? $r->json('id');
+        }) : null;
+        $this->step('W4', 'A received-but-not-billed GRN accrual is never offered to a voucher', function () {
+            $grnAccruals = DB::table('cost_lines')->where('source_type', \App\Modules\Finance\CostCollector\Models\CostLine::GRN_ACCRUAL_SOURCE)
+                ->where('source_ref', 'accrual')->pluck('id');
+            $offered = collect($this->as($this->accounts)->getJson('/api/finance/spend-vouchers/eligible-liabilities')->json('data') ?? [])->pluck('id');
+            if ($offered->intersect($grnAccruals)->isNotEmpty()) {
+                throw new RuntimeException('a GRN accrual was offered as a voucher liability');
+            }
         });
         if (! $voucherId) {
             return;
