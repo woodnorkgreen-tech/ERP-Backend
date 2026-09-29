@@ -280,3 +280,61 @@ before anything else in this document.
 Invented employees are not only untidy — they carry salaries, so they land in
 payroll totals, headcount and departmental cost. Removing them is a data
 decision for HR and Finance, not a cleanup script.
+
+## 2026-09-29: reference data is checked on every deploy, never seeded by it
+
+**What happened.** The redesigned production database (`woodnork_erp`) had
+run every migration and no reference seed. The requisition purchase-category
+picker offered 2 of 76 categories. `ExpenseCodeSeeder` runs inside migration
+`2026_09_07_000002`, and it deactivates any code whose debit account is not in
+the chart. The chart held only the 7150 account that migration creates, so
+every other code was switched off, with no error and a green deploy.
+
+**Why the deploy still does not seed.** The plan above was to add
+`ReferenceDataSeeder` to the pipeline once it had run by hand. An audit of its
+19 children found that most write with `updateOrCreate`/`updateOrInsert` over
+full rows. Expense codes, payroll rates, finance settings, and team, design and
+workstation types would all be reset on every deploy, undoing edits made in the
+app. It would also interfere with the cutover, which builds its target
+database deliberately.
+
+**What runs instead.** `php artisan finance:readiness`, the last command of both
+deploy jobs. It is read-only and checks six things:
+
+- a postable chart exists;
+- every expense code resolves its debit account;
+- purchase categories exist;
+- a paying account exists;
+- an accounting period covers today;
+- every role in `RolePermissions::matrix()` exists.
+
+A failure exits non-zero, which turns the Actions run red, and prints the fix.
+Run it by hand at any time.
+
+**The fix it prints, and the trap in it.** On a production install the chart
+seeder is off (`seed_reference_chart`), and the deploy caches config, which
+ignores an environment variable. So clear the cache first:
+
+```
+php artisan tinker --execute="echo DB::connection()->getDatabaseName();"   # confirm the database
+mysqldump … > backup.sql
+php artisan config:clear
+FINANCE_SEED_REFERENCE_CHART=true php artisan db:seed --class=ReferenceDataSeeder --force
+php artisan config:cache
+php artisan finance:readiness
+```
+
+The first attempt on 2026-09-29 skipped `config:clear` and the flag. The chart
+step printed "Chart of accounts left alone", and nothing changed.
+
+**`ExpenseCodeSeeder` is now safe to re-run over Finance's edits:**
+
+- **Links:** it never replaces an account link Finance has set with null.
+- **Deactivations:** a code Finance switched off stays off.
+- **Its own deactivations:** a code the seeder switched off (it had no
+  account) comes back once the account exists.
+- **Reporting:** it names the codes it leaves inactive, instead of switching
+  them off silently.
+
+Pinned by `tests/Feature/Finance/FinanceReadinessTest.php`. The other
+reference seeders still overwrite, which is why none of them runs on deploy.
