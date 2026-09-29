@@ -2,6 +2,8 @@
 
 namespace App\Modules\Printing\Resources;
 
+use App\Support\ProjectSetupSchedule;
+use App\Support\WorkTrackingSummary;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -40,9 +42,16 @@ class PrintJobResource extends JsonResource
             'status' => $this->status,
             'priority' => $this->priority,
             'due_date' => $this->due_date?->format('Y-m-d'),
+            'project_setup_date' => ProjectSetupSchedule::dateFor($this->resource),
             'scheduled_at' => $this->scheduled_at,
             'started_at' => $this->started_at,
             'completed_at' => $this->completed_at,
+            'stop_required_at' => $this->stop_required_at,
+            'stop_required_reason' => $this->stop_required_reason,
+            'stop_required_by_name' => $this->stopRequestedBy?->name,
+            'stop_acknowledged_at' => $this->stop_acknowledged_at,
+            'stop_acknowledged_by_name' => $this->stopAcknowledgedBy?->name,
+            'must_stop' => $this->stop_required_at !== null && $this->stop_acknowledged_at === null,
             'operator_id' => $this->operator_id,
             'operator_name' => $this->operator?->name,
             'machine_asset_id' => $this->machine_asset_id,
@@ -50,6 +59,10 @@ class PrintJobResource extends JsonResource
             'remarks' => $this->remarks,
             'locked' => $this->isLocked(),
             'consumptions' => PrintJobConsumptionResource::collection($this->whenLoaded('consumptions')),
+            'work_tracking' => $this->whenLoaded('workSessions', fn () => WorkTrackingSummary::from(
+                $this->workSessions,
+                in_array($this->status, ['completed', 'cancelled'], true)
+            )),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

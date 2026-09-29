@@ -51,6 +51,11 @@ class PrintJob extends Model
         'scheduled_at',
         'started_at',
         'completed_at',
+        'stop_required_at',
+        'stop_required_reason',
+        'stop_required_by',
+        'stop_acknowledged_at',
+        'stop_acknowledged_by',
         'operator_id',
         'machine_asset_id',
         'machine_name_snapshot',
@@ -64,6 +69,8 @@ class PrintJob extends Model
         'scheduled_at' => 'datetime',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
+        'stop_required_at' => 'datetime',
+        'stop_acknowledged_at' => 'datetime',
         'artwork_version' => 'integer',
         'design_height_m' => 'decimal:3',
         'design_length_m' => 'decimal:3',
@@ -107,6 +114,16 @@ class PrintJob extends Model
         return $this->belongsTo(Asset::class, 'machine_asset_id');
     }
 
+    public function stopRequestedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'stop_required_by');
+    }
+
+    public function stopAcknowledgedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'stop_acknowledged_by');
+    }
+
     public function originalJob(): BelongsTo
     {
         return $this->belongsTo(self::class, 'reprint_of_job_id');
@@ -120,6 +137,11 @@ class PrintJob extends Model
     public function events(): HasMany
     {
         return $this->hasMany(PrintJobEvent::class);
+    }
+
+    public function workSessions(): HasMany
+    {
+        return $this->hasMany(PrintWorkSession::class)->latest('started_at');
     }
 
     public function isLocked(): bool

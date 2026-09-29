@@ -8,6 +8,10 @@ use Illuminate\Validation\ValidationException;
 
 class PrintJobService
 {
+    public function __construct(private readonly PrintWorkTrackingService $workTracking)
+    {
+    }
+
     public function update(PrintJob $job, array $data): PrintJob
     {
         if ($job->isLocked()) {
@@ -23,7 +27,7 @@ class PrintJobService
 
         $job->update($data + ['updated_by' => auth()->id()]);
 
-        return $job->fresh(['consumptions.roll', 'operator', 'machine']);
+        return $job->fresh(['consumptions.roll', 'operator', 'machine', 'workSessions.user:id,name', 'workSessions.endedBy:id,name']);
     }
 
     public function transition(PrintJob $job, string $status, ?string $reason = null): PrintJob
@@ -38,6 +42,12 @@ class PrintJobService
             $this->assertReadyToComplete($job);
         }
 
+        if ($status === 'printing' && $job->stop_required_at !== null && $job->stop_acknowledged_at === null) {
+            throw ValidationException::withMessages([
+                'stop_required' => ['A client artwork change requires this print job to stop.'],
+            ]);
+        }
+
         $from = $job->status;
         $job->update([
             'status' => $status,
@@ -45,6 +55,13 @@ class PrintJobService
             'completed_at' => $status === 'completed' ? now() : $job->completed_at,
             'updated_by' => auth()->id(),
         ]);
+
+        if ($status === 'printing' && !$job->workSessions()->whereNull('ended_at')->exists()) {
+            $job->workSessions()->create(['user_id' => auth()->id(), 'started_at' => now()]);
+        }
+        if (in_array($status, ['completed', 'cancelled', 'reprint_required'], true)) {
+            $this->workTracking->closeForWorkflow($job, $status === 'completed' ? 'completed' : 'stopped');
+        }
 
         $job->events()->create([
             'event_type' => 'status_changed',
@@ -54,7 +71,11 @@ class PrintJobService
             'created_by' => auth()->id(),
         ]);
 
-        return $job->fresh(['consumptions.roll', 'operator', 'machine']);
+        return $job->fresh([
+            'consumptions.roll', 'operator', 'machine',
+            'stopRequestedBy:id,name', 'stopAcknowledgedBy:id,name',
+            'workSessions.user:id,name', 'workSessions.endedBy:id,name',
+        ]);
     }
 
     private function assertReadyToComplete(PrintJob $job): void
@@ -110,6 +131,6 @@ class PrintJobService
             'created_by' => auth()->id(),
         ]);
 
-        return $reprint->fresh(['consumptions.roll', 'operator', 'machine']);
+        return $reprint->fresh(['consumptions.roll', 'operator', 'machine', 'workSessions.user:id,name', 'workSessions.endedBy:id,name']);
     }
 }

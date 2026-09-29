@@ -14,6 +14,9 @@ class DesignItemReadinessService
         if ($item->stream !== DesignItem::STREAM_GRAPHIC) {
             $errors['stream'][] = 'Only Graphic Designs can be marked print ready.';
         }
+        if (($item->destination ?: 'printing') !== 'printing') {
+            $errors['destination'][] = 'Choose Printing as the destination before sending this item to Printing.';
+        }
 
         foreach (['length_m', 'width_m', 'quantity'] as $field) {
             if (empty($item->{$field})) {
@@ -33,6 +36,8 @@ class DesignItemReadinessService
             $errors['documents'][] = 'Attach an active Artwork link before marking this item print ready.';
         }
 
+        $this->requireLatestApprovedRevision($item, $errors);
+
         if ($errors) {
             throw ValidationException::withMessages($errors);
         }
@@ -44,6 +49,9 @@ class DesignItemReadinessService
 
         if ($item->stream !== DesignItem::STREAM_STRUCTURAL) {
             $errors['stream'][] = 'Only Structural Designs can be marked production ready.';
+        }
+        if (($item->destination ?: 'production') !== 'production') {
+            $errors['destination'][] = 'Choose Production as the destination before sending this item to Production.';
         }
 
         foreach (['length_m', 'width_m', 'height_m', 'quantity'] as $field) {
@@ -63,8 +71,22 @@ class DesignItemReadinessService
             $errors['bom'][] = 'At least one BOM item is required for production readiness.';
         }
 
+        $this->requireLatestApprovedRevision($item, $errors);
+
         if ($errors) {
             throw ValidationException::withMessages($errors);
+        }
+    }
+
+    private function requireLatestApprovedRevision(DesignItem $item, array &$errors): void
+    {
+        $latest = $item->revisions()->orderByDesc('version_number')->first();
+        if ($latest && $latest->status !== 'approved') {
+            $errors['revision'][] = "Approve artwork version {$latest->version_number} and record the approval evidence first.";
+        }
+
+        if ($item->changeRequests()->where('status', 'open')->exists()) {
+            $errors['change_requests'][] = 'Address all open client changes before marking this work ready.';
         }
     }
 }

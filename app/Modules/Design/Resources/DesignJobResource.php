@@ -2,6 +2,7 @@
 
 namespace App\Modules\Design\Resources;
 
+use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -22,6 +23,12 @@ class DesignJobResource extends JsonResource
             'status' => $this->status,
             'priority' => $this->priority,
             'due_date' => $this->due_date?->format('Y-m-d'),
+            'project_setup_date' => ProjectSetupSchedule::dateFor($this->resource),
+            'designers' => $this->whenLoaded('designers', fn () => $this->designers
+                ->unique('id')->sortBy('name')->values()->map(fn ($designer) => [
+                    'id' => $designer->id,
+                    'name' => $designer->name,
+                ])),
             'enquiry' => $this->whenLoaded('enquiry', fn () => new DesignEnquirySummaryResource($this->enquiry)),
             'project' => $this->whenLoaded('project'),
             'items' => DesignItemResource::collection($this->whenLoaded('items')),

@@ -10,6 +10,8 @@ use App\Modules\Design\Resources\DesignJobResource;
 use App\Modules\Design\Services\DesignNotificationService;
 use App\Modules\Design\Services\DesignProjectSyncService;
 use App\Modules\Design\Support\DesignAccess;
+use App\Modules\Design\Support\DesignSchedule;
+use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -28,9 +30,14 @@ class DesignJobController extends Controller
 
         $validated = $request->validate([
             'due_within_days' => ['sometimes', 'integer', Rule::in(DesignProjectSyncService::ALLOWED_SYNC_WINDOWS)],
+            'overdue_only' => ['sometimes', 'boolean'],
         ]);
 
-        $applyFilters = function ($q) use ($request, $validated) {
+        $setupDate = ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id');
+        $applyFilters = function ($q) use ($request, $validated, $setupDate) {
+            if ($request->boolean('overdue_only')) {
+                DesignSchedule::overdueJobs($q);
+            }
             if ($request->filled('project_enquiry_id')) {
                 $q->where('project_enquiry_id', $request->project_enquiry_id);
             }
@@ -46,8 +53,9 @@ class DesignJobController extends Controller
 
             if (!empty($validated['due_within_days'])) {
                 $cutoff = now()->startOfDay()->addDays((int) $validated['due_within_days']);
-                $q->where(function ($inner) use ($cutoff) {
-                    $inner->whereNull('due_date')->orWhereDate('due_date', '<=', $cutoff);
+                $q->where(function ($inner) use ($cutoff, $setupDate) {
+                    $inner->where($setupDate, '<=', $cutoff->toDateString())
+                        ->orWhereRaw('('.$setupDate->toSql().') IS NULL', $setupDate->getBindings());
                 });
             }
         };
@@ -61,6 +69,7 @@ class DesignJobController extends Controller
         $counts = $countsQuery->selectRaw('status, count(*) as aggregate')->groupBy('status')->pluck('aggregate', 'status');
 
         $query = DesignJob::withCount('items')->with(['enquiry.client', 'enquiry.deliverables', 'enquiry.projectOfficer', 'project']);
+        $query->with(['designers' => fn ($designers) => $designers->select('users.id', 'users.name')]);
         $applyFilters($query);
 
         if ($request->filled('status')) {
@@ -68,9 +77,12 @@ class DesignJobController extends Controller
         }
 
         $jobs = $query
-            ->orderByRaw('CASE WHEN due_date IS NULL THEN 1 ELSE 0 END')
-            ->orderBy('due_date')
+            ->selectSub($setupDate, 'project_setup_date')
+            ->orderByRaw("CASE WHEN status IN ('done', 'handed_off', 'cancelled') THEN 1 ELSE 0 END")
+            ->orderByRaw('project_setup_date IS NULL')
+            ->orderBy('project_setup_date')
             ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->paginate(
                 $request->get('per_page', 25),
                 ['*'],
@@ -121,6 +133,7 @@ class DesignJobController extends Controller
             'enquiry.projectOfficer',
             'project',
             'items.type',
+            'items.assignedUser:id,name',
             'items.printMaterial',
             'items.documents',
             'items.bomItems.material.baseUom',

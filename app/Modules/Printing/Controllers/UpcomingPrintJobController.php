@@ -4,7 +4,9 @@ namespace App\Modules\Printing\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Design\Models\DesignItem;
+use App\Modules\Design\Models\DesignJob;
 use App\Modules\Printing\Resources\UpcomingPrintJobResource;
+use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -28,6 +30,10 @@ class UpcomingPrintJobController extends Controller
         ]);
 
         $items = DesignItem::query()
+            ->select('design_items.*')
+            ->selectSub(DesignJob::query()
+                ->selectSub(ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id'), 'setup_date')
+                ->whereColumn('design_jobs.id', 'design_items.design_job_id')->limit(1), 'project_setup_date')
             ->where('stream', DesignItem::STREAM_GRAPHIC)
             ->whereIn('status', self::STATUSES)
             ->whereHas('job', fn ($query) => $query->where('status', '!=', 'cancelled'))
@@ -45,6 +51,8 @@ class UpcomingPrintJobController extends Controller
                             ->where('title', 'like', $term)
                             ->orWhereHas('client', fn ($client) => $client->where('full_name', 'like', $term)))));
             })
+            ->orderByRaw('project_setup_date IS NULL')
+            ->orderBy('project_setup_date')
             ->latest('id')
             ->paginate($filters['per_page'] ?? 20);
 

@@ -4,6 +4,7 @@ use App\Modules\Design\Controllers\DesignBomItemController;
 use App\Modules\Design\Controllers\DesignDashboardController;
 use App\Modules\Design\Controllers\DesignDocumentController;
 use App\Modules\Design\Controllers\DesignHandoffController;
+use App\Modules\Design\Controllers\DesignHistoryController;
 use App\Modules\Design\Controllers\DesignItemController;
 use App\Modules\Design\Controllers\DesignJobController;
 use App\Modules\Design\Controllers\DesignTypeController;
@@ -26,6 +27,7 @@ Route::put('/types/{type}', [DesignTypeController::class, 'update']);
 Route::delete('/types/{type}', [DesignTypeController::class, 'destroy']);
 
 Route::get('/graphic/items', [DesignItemController::class, 'index'])->defaults('stream', 'graphic');
+Route::get('/graphic/bundles', [DesignItemController::class, 'bundles'])->defaults('stream', 'graphic');
 Route::post('/jobs/{job}/graphic/items', [DesignItemController::class, 'store'])->defaults('stream', 'graphic');
 Route::put('/graphic/items/{item}', [DesignItemController::class, 'update']);
 Route::delete('/graphic/items/{item}', [DesignItemController::class, 'destroy']);
@@ -33,6 +35,7 @@ Route::post('/graphic/items/{item}/mark-print-ready', [DesignItemController::cla
 Route::get('/graphic/print-ready', [DesignItemController::class, 'index'])->defaults('stream', 'graphic')->defaults('status', 'print_ready');
 
 Route::get('/structural/items', [DesignItemController::class, 'index'])->defaults('stream', 'structural');
+Route::get('/structural/bundles', [DesignItemController::class, 'bundles'])->defaults('stream', 'structural');
 Route::post('/jobs/{job}/structural/items', [DesignItemController::class, 'store'])->defaults('stream', 'structural');
 Route::put('/structural/items/{item}', [DesignItemController::class, 'update']);
 Route::delete('/structural/items/{item}', [DesignItemController::class, 'destroy']);
@@ -40,6 +43,12 @@ Route::post('/structural/items/{item}/mark-production-ready', [DesignItemControl
 Route::get('/structural/production-ready', [DesignItemController::class, 'index'])->defaults('stream', 'structural')->defaults('status', 'production_ready');
 
 Route::post('/items/{item}/redesign', [DesignItemController::class, 'redesign']);
+Route::post('/items/{item}/work/begin', [DesignItemController::class, 'beginWork']);
+Route::post('/items/{item}/work/pause', [DesignItemController::class, 'pauseWork']);
+Route::post('/items/{item}/updates', [DesignHistoryController::class, 'storeUpdate']);
+Route::post('/items/{item}/change-requests', [DesignHistoryController::class, 'storeChangeRequest']);
+Route::post('/items/{item}/revisions', [DesignHistoryController::class, 'storeRevision']);
+Route::post('/revisions/{revision}/approve', [DesignHistoryController::class, 'approveRevision']);
 
 Route::get('/structural/items/{item}/bom', [DesignBomItemController::class, 'index']);
 Route::post('/structural/items/{item}/bom', [DesignBomItemController::class, 'store']);

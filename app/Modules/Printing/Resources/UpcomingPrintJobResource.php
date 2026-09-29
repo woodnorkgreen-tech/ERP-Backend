@@ -12,6 +12,9 @@ class UpcomingPrintJobResource extends JsonResource
         return [
             'design_item_id' => $this->id,
             'design_job_id' => $this->design_job_id,
+            'project_enquiry_id' => $this->job?->project_enquiry_id,
+            'project_id' => $this->job?->project_id,
+            'project_setup_date' => $this->project_setup_date,
             'job_number' => $this->job?->job_number,
             'project_name' => $this->job?->enquiry?->title ?? $this->job?->title,
             'client_name' => $this->job?->enquiry?->client?->full_name ?? $this->job?->client?->full_name,

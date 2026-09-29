@@ -3,6 +3,7 @@
 namespace App\Modules\Design\Resources;
 
 use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
+use App\Support\WorkTrackingSummary;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -21,10 +22,15 @@ class DesignItemResource extends JsonResource
             'redesign_reason' => $this->redesign_reason,
             'redesign_requested_at' => $this->redesign_requested_at,
             'stream' => $this->stream,
+            'destination' => $this->destination ?: ($this->stream === 'graphic' ? 'printing' : 'production'),
             'title' => $this->title,
             'description' => $this->description,
             'status' => $this->status,
             'assigned_to' => $this->assigned_to,
+            'designer' => $this->whenLoaded('assignedUser', fn () => [
+                'id' => $this->assignedUser->id,
+                'name' => $this->assignedUser->name,
+            ]),
             'quantity' => $this->quantity !== null ? (float) $this->quantity : null,
             'dimension_unit' => $this->dimension_unit,
             'length_value' => $this->length_value !== null ? (float) $this->length_value : null,
@@ -43,6 +49,13 @@ class DesignItemResource extends JsonResource
             'documents' => DesignDocumentResource::collection($this->whenLoaded('documents')),
             'bom_items' => DesignBomItemResource::collection($this->whenLoaded('bomItems')),
             'handoffs' => DesignHandoffResource::collection($this->whenLoaded('handoffs')),
+            'work_tracking' => $this->whenLoaded('workSessions', fn () => WorkTrackingSummary::from(
+                $this->workSessions,
+                in_array($this->status, ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off'], true)
+            )),
+            'revisions' => DesignRevisionResource::collection($this->whenLoaded('revisions')),
+            'change_requests' => DesignChangeRequestResource::collection($this->whenLoaded('changeRequests')),
+            'updates' => DesignUpdateResource::collection($this->whenLoaded('updates')),
             'submitted_at' => $this->submitted_at,
             'approved_at' => $this->approved_at,
             'print_ready_at' => $this->print_ready_at,
