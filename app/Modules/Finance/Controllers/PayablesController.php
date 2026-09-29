@@ -587,29 +587,10 @@ class PayablesController extends Controller
     }
 
     /** Headline counts over the whole book, independent of filters and paging. */
+    /** One definition, shared with the Finance Overview (Report 65). */
     private function summary(): array
     {
-        $today = now()->toDateString();
-        $awaiting = 'returned_at is not null and (resubmitted_at is null or returned_at > resubmitted_at)';
-        $totals = Bill::query()->whereNotIn('status', ['cancelled'])
-            ->selectRaw("sum(case when verified_at is null and status <> 'paid' and not ($awaiting) then 1 else 0 end) as awaiting_verification")
-            ->selectRaw("sum(case when verified_at is null and ($awaiting) then 1 else 0 end) as returned_for_correction")
-            ->selectRaw("sum(case when verified_at is not null and balance > 0 and status <> 'paid' then 1 else 0 end) as verified_unpaid")
-            ->selectRaw("coalesce(sum(case when verified_at is not null and balance > 0 and status <> 'paid' then balance else 0 end),0) as verified_unpaid_amount")
-            ->selectRaw("sum(case when due_date < ? and balance > 0 and status <> 'paid' then 1 else 0 end) as overdue", [$today])
-            ->selectRaw("coalesce(sum(case when due_date < ? and balance > 0 and status <> 'paid' then balance else 0 end),0) as overdue_amount", [$today])
-            ->selectRaw("coalesce(sum(case when balance > 0 and status <> 'paid' then balance else 0 end),0) as outstanding")
-            ->first();
-
-        return [
-            'awaiting_verification' => (int) ($totals->awaiting_verification ?? 0),
-            'returned_for_correction' => (int) ($totals->returned_for_correction ?? 0),
-            'verified_unpaid' => (int) ($totals->verified_unpaid ?? 0),
-            'verified_unpaid_amount' => $this->money($totals->verified_unpaid_amount ?? 0),
-            'overdue' => (int) ($totals->overdue ?? 0),
-            'overdue_amount' => $this->money($totals->overdue_amount ?? 0),
-            'outstanding' => $this->money($totals->outstanding ?? 0),
-        ];
+        return \App\Modules\Finance\Support\FinancePositions::payables();
     }
 
     private function workflowRelations(): array

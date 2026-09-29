@@ -1031,6 +1031,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('work-queue/{workType}/{sourceId}/assignment', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'reassign']);
         Route::get('work-queue/{workType}/{sourceId}/assignment-history', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'history']);
         Route::get('readiness', [\App\Modules\Finance\Controllers\FinanceReadinessController::class, 'show']);
+        // Finance Overview read projection, one section per request (Report 65).
+        Route::get('overview', [\App\Modules\Finance\Controllers\FinanceOverviewController::class, 'show']);
 
         // W1-7: configurable payment-term templates. Same permission as other
         // receivables-policy configuration (quote-waiver, receivables-terms).
@@ -1090,6 +1092,13 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
             Route::post('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'store']);
             Route::get('eligible-liabilities', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'eligibleLiabilities']);
+            // W4 workspace read projections (Report 63), declared ahead of `/{id}`
+            // so "register" is not taken as a voucher id. Workflow changes stay on
+            // the routes below and on payments/{payment}/reverse.
+            Route::get('register', [\App\Modules\Finance\Controllers\SpendVoucherWorkspaceController::class, 'register']);
+            Route::get('/{id}/detail', [\App\Modules\Finance\Controllers\SpendVoucherWorkspaceController::class, 'detail'])->whereNumber('id');
+            Route::post('/{id}/attachments', [\App\Modules\Finance\Controllers\SpendVoucherWorkspaceController::class, 'storeAttachment'])->whereNumber('id');
+            Route::get('/{id}/attachments/{attachment}/download', [\App\Modules\Finance\Controllers\SpendVoucherWorkspaceController::class, 'downloadAttachment'])->whereNumber('id')->whereNumber('attachment');
             Route::get('/{id}', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'show']);
             Route::post('/{id}/cancel', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'cancel']);
             Route::post('/{id}/approve', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'approve']);

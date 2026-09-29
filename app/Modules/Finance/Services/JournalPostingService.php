@@ -813,6 +813,14 @@ class JournalPostingService
         // but currently unreachable — its only caller, UnifiedPaymentService,
         // was removed 2026-09-17 as dead/broken code; nothing else calls
         // postPayment() yet).
+        // The other direction of the same hole (Report 63): a goods-received
+        // accrual paid here first would still be cleared again by its bill.
+        if ($costLine->isGrnAccrual()) {
+            throw new InvalidArgumentException(
+                "{$context}: cost line {$costLine->ref} is goods received against a purchase order; it is paid through its supplier bill, not settled here."
+            );
+        }
+
         if ($costLine->settled_by_bill_id !== null) {
             throw new InvalidArgumentException(
                 "{$context}: cost line {$costLine->ref} was already settled when bill #{$costLine->settled_by_bill_id} "
