@@ -48,6 +48,7 @@ class FinanceServiceProvider extends ServiceProvider
                 \App\Modules\Finance\Console\FinanceResetPlanCommand::class,
                 \App\Modules\Finance\Console\AccountMappingCommand::class,
                 \App\Modules\Finance\Console\CompleteChartCommand::class,
+                \App\Modules\Finance\Console\FinanceReadinessCommand::class,
                 \App\Modules\Finance\CostCollector\Console\BackfillPettyCashCostsCommand::class,
                 \App\Modules\Finance\CostCollector\Console\AuditCostIdentityCommand::class,
                 \App\Modules\Finance\CostCollector\Console\RepairCostLineDetailCommand::class,
