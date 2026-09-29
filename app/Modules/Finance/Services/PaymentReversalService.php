@@ -26,6 +26,18 @@ class PaymentReversalService
                 throw new InvalidArgumentException("Payment {$payment->payment_no} is already voided or inactive.");
             }
 
+            // A payroll payment's journal is sourced to its payroll run, not to this
+            // Payment, and the run itself says "paid". Voiding the Payment here would
+            // leave the ledger showing net payroll settled and the run paid while the
+            // cash record says nothing left (Report 67). Payroll reversal is an open
+            // policy decision, so it is refused rather than half-done.
+            if ($payment->source_document_type === \App\Modules\HR\Models\PayrollRun::class) {
+                throw new InvalidArgumentException(
+                    "Payment {$payment->payment_no} settled a payroll run. A payroll payment is not reversed here: "
+                    .'its reversal needs a controlled payroll reversal, which WNG has not yet decided.'
+                );
+            }
+
             if (DB::table('finance_statement_matches')->where('payment_id', $payment->id)->exists()) {
                 throw new InvalidArgumentException(
                     "Payment {$payment->payment_no} is reconciled. Unmatch it from the statement before reversing it."
