@@ -9,10 +9,11 @@ class TripRequestResource extends JsonResource
     public function toArray($request): array
     {
         return [
-            'id'           => $this->id,
-            'request_code' => $this->request_code,
-            'context_type' => $this->context_type,
-            'project_id'   => $this->project_id,
+            'id'                     => $this->id,
+            'request_code'           => $this->request_code,
+            'context_type'           => $this->context_type,
+            'transport_arrangement'  => $this->transport_arrangement,
+            'project_id'             => $this->project_id,
 
             'project' => $this->whenLoaded('project', function () {
                 if (!$this->project) return null;
@@ -49,6 +50,27 @@ class TripRequestResource extends JsonResource
             'destination_lat' => $this->destination_lat,
             'destination_lng' => $this->destination_lng,
             'required_date'   => $this->required_date?->toDateString(),
+            // Merged in from the Logistics Log's planning timeline.
+            'loading_time'    => $this->loading_time,
+            'departure_time'  => $this->departure_time,
+            'setdown_time'    => $this->setdown_time,
+
+            // Backward-calculation from the delivery deadline.
+            'required_delivery_at'      => $this->required_delivery_at,
+            'estimated_loading_minutes' => $this->estimated_loading_minutes,
+            'load_size'                 => $this->load_size,
+            'estimated_travel_minutes'  => $this->estimated_travel_minutes,
+            'buffer_minutes'            => $this->buffer_minutes,
+            'loading_start_by'          => $this->loading_start_by,
+            'departure_by'              => $this->departure_by,
+            'loading_started_at'        => $this->loading_started_at,
+            'loading_ended_at'          => $this->loading_ended_at,
+            'timeline_status'           => $this->timeline_status,
+            'loading_responsible' => $this->whenLoaded('loadingResponsible', fn() => $this->loadingResponsible ? [
+                'id'   => $this->loadingResponsible->id,
+                'name' => $this->loadingResponsible->name ?? $this->loadingResponsible->full_name,
+            ] : null),
+
             'notes'           => $this->notes,
             'status'          => $this->status,
 
@@ -77,6 +99,10 @@ class TripRequestResource extends JsonResource
                 'gps_lat'      => $this->assignedVehicle->gps_lat ?? null,
                 'gps_lng'      => $this->assignedVehicle->gps_lng ?? null,
             ] : null),
+            // Free-text pickup note used only for a client-arranged trip
+            // (no assigned_vehicle in that case) — replaces the Log's
+            // hardcoded "Client to pick" dropdown entry.
+            'vehicle_note' => $this->vehicle_note,
 
             'assigned_by' => $this->whenLoaded('assignedBy', fn() => $this->assignedBy ? [
                 'id'   => $this->assignedBy->id,

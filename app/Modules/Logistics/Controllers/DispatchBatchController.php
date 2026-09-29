@@ -63,7 +63,13 @@ class DispatchBatchController extends Controller
         DB::transaction(function () use ($validated, &$batch) {
             $batch = DispatchBatch::create([
                 'dispatch_date'  => $validated['dispatch_date'],
-                'departure_time' => $validated['departure_time'] ?? null,
+                // If nobody typed a departure time for the batch, don't
+                // leave it blank when its own trips already worked one out
+                // via the loading-timeline auto-calculation — carry the
+                // earliest departure_by across instead of making the
+                // dispatcher re-type a time the ERP already knows.
+                'departure_time' => $validated['departure_time']
+                    ?? $this->deriveDepartureTime($validated['trip_request_ids']),
                 'driver_id'      => $validated['driver_id'] ?? null,
                 'vehicle_id'     => $validated['vehicle_id'] ?? null,
                 'created_by_id'  => Auth::user()->employee?->id,
@@ -107,7 +113,12 @@ class DispatchBatchController extends Controller
         ]);
 
         DB::transaction(function () use ($validated, $dispatchBatch) {
-            $dispatchBatch->update(collect($validated)->except('trip_request_ids')->toArray());
+            $updates = collect($validated)->except('trip_request_ids')->toArray();
+            if (!array_key_exists('departure_time', $updates) && isset($validated['trip_request_ids']) && !$dispatchBatch->departure_time) {
+                $derived = $this->deriveDepartureTime($validated['trip_request_ids']);
+                if ($derived) $updates['departure_time'] = $derived;
+            }
+            $dispatchBatch->update($updates);
 
             if (isset($validated['trip_request_ids'])) {
                 $oldIds   = $dispatchBatch->tripRequests->pluck('id')->toArray();
@@ -210,6 +221,21 @@ class DispatchBatchController extends Controller
     $dispatchBatch->load($this->with);
     return response()->json(['data' => $dispatchBatch]);
 }
+
+    /**
+     * The earliest departure_by among the given trips, as "H:i" — or null
+     * if none of them are using the loading-timeline auto-calculation.
+     * Only ever fills a gap; a manually typed departure_time always wins.
+     */
+    private function deriveDepartureTime(array $tripRequestIds): ?string
+    {
+        $earliest = TripRequest::whereIn('id', $tripRequestIds)
+            ->whereNotNull('departure_by')
+            ->orderBy('departure_by')
+            ->value('departure_by');
+
+        return $earliest ? \Illuminate\Support\Carbon::parse($earliest)->format('H:i') : null;
+    }
 
     public function destroy(DispatchBatch $dispatchBatch): JsonResponse
     {
