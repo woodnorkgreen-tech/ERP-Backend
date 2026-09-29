@@ -373,7 +373,7 @@ class FinanceWorkQueueService
 
         $voucher = fn (string $type, string $action) => fn (SpendVoucher $v) => $this->item(
             $type, 'cash', $v->id, $v->voucher_no, $v->payee_name ?: 'Payee', $v->total_amount, $v->currency ?: 'KES',
-            $v->resubmitted_at ?? $v->approved_at ?? $v->created_at, $action, "/finance/spend-vouchers?voucher={$v->voucher_no}", null,
+            $v->resubmitted_at ?? $v->approved_at ?? $v->created_at, $action, "/finance/payment-vouchers/{$v->id}", null,
         );
         $returned = ['returned_for_correction', 'corrected'];
         $add('spend_voucher', 'cash', $user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE),

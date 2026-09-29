@@ -206,6 +206,31 @@ class CostLine extends Model
      * joining it straight to suppliers would put a supplier's name against an
      * employee who happens to share the id.
      */
+    /**
+     * A goods-received accrual: the liability a purchase order's receipt
+     * raised before its supplier invoice arrived.
+     *
+     * It is paid through its supplier bill, after the three-way match
+     * (docs/purchase-to-pay-workflow.md), and never by a payment voucher. A
+     * voucher that paid it first left the bill free to clear the same accrual
+     * again and raise a second payable for the same goods (Report 63).
+     */
+    public const GRN_ACCRUAL_SOURCE = \App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem::class;
+
+    public function isGrnAccrual(): bool
+    {
+        return $this->source_type === self::GRN_ACCRUAL_SOURCE && $this->source_ref === 'accrual';
+    }
+
+    /** Excludes goods-received accruals; see isGrnAccrual(). */
+    public function scopeNotGrnAccrual($query)
+    {
+        return $query->where(fn ($q) => $q->whereNull('source_type')
+            ->orWhere('source_type', '!=', self::GRN_ACCRUAL_SOURCE)
+            ->orWhereNull('source_ref')
+            ->orWhere('source_ref', '!=', 'accrual'));
+    }
+
     public function scopeWithReferenceNames($query)
     {
         $lookup = fn (string $table, string $column, string $localKey) => DB::table($table)

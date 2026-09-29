@@ -1090,6 +1090,13 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'index']);
             Route::post('/', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'store']);
             Route::get('eligible-liabilities', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'eligibleLiabilities']);
+            // W4 workspace read projections (Report 63), declared ahead of `/{id}`
+            // so "register" is not taken as a voucher id. Workflow changes stay on
+            // the routes below and on payments/{payment}/reverse.
+            Route::get('register', [\App\Modules\Finance\Controllers\SpendVoucherWorkspaceController::class, 'register']);
+            Route::get('/{id}/detail', [\App\Modules\Finance\Controllers\SpendVoucherWorkspaceController::class, 'detail'])->whereNumber('id');
+            Route::post('/{id}/attachments', [\App\Modules\Finance\Controllers\SpendVoucherWorkspaceController::class, 'storeAttachment'])->whereNumber('id');
+            Route::get('/{id}/attachments/{attachment}/download', [\App\Modules\Finance\Controllers\SpendVoucherWorkspaceController::class, 'downloadAttachment'])->whereNumber('id')->whereNumber('attachment');
             Route::get('/{id}', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'show']);
             Route::post('/{id}/cancel', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'cancel']);
             Route::post('/{id}/approve', [\App\Modules\Finance\Controllers\SpendVoucherController::class, 'approve']);

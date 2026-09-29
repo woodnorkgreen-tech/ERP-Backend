@@ -254,8 +254,10 @@ class SupplierLedgerRailTest extends TestCase
         \Spatie\Permission\Models\Permission::findOrCreate(Permissions::FINANCE_SPEND_VOUCHERS_CREATE, 'web');
         $this->accounts->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_CREATE);
 
+        // Report 63: a goods-received accrual is never voucher-payable, before
+        // its bill as much as after. Paying it first let the bill clear it again.
         $before = $this->getJson('/api/finance/spend-vouchers/eligible-liabilities')->assertOk();
-        $this->assertTrue(collect($before->json('data'))->contains('id', $costLine->id));
+        $this->assertFalse(collect($before->json('data'))->contains('id', $costLine->id));
 
         $bill = $this->bill();
         $this->postJson("/api/procurement-stores/bills/{$bill->id}/verify")->assertOk();

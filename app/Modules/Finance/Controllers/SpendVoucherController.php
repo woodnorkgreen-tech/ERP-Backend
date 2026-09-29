@@ -127,6 +127,10 @@ class SpendVoucherController extends Controller
             // cost line kept showing up as payable forever after its bill had
             // already paid it: see erp-grn-accrual-double-payment memory.
             ->whereNull('settled_by_bill_id')
+            // A goods-received accrual is paid through its supplier bill after
+            // the three-way match, never here (Report 63): paying it first left
+            // the bill free to clear it again and raise a second payable.
+            ->notGrnAccrual()
             ->whereHas('journalEntry', function ($journal) use ($controlAccounts) {
                 $journal->where('status', 'posted')->whereHas('lines', fn ($line) =>
                     $line->where('entry_type', 'credit')->whereIn('account_id', $controlAccounts)
@@ -346,6 +350,13 @@ class SpendVoucherController extends Controller
                 );
             }
 
+            if ($line->isGrnAccrual()) {
+                throw new \DomainException(
+                    "Cost line {$line->ref} is goods received against a purchase order. It is paid through its supplier bill "
+                    .'after the three-way match, not by a payment voucher.'
+                );
+            }
+
             $eligible = $line->status === CostLine::STATUS_VERIFIED
                 && $line->journal_entry_id !== null
                 && DB::table('journal_entries')->where('id', $line->journal_entry_id)->where('status', 'posted')->exists()
@@ -519,6 +530,11 @@ class SpendVoucherController extends Controller
             $voucher = SpendVoucher::query()->lockForUpdate()->findOrFail($id);
             if (! in_array($voucher->status, ['pending_approval', 'draft'], true)) {
                 throw ValidationException::withMessages(['voucher' => 'Only a voucher awaiting approval can be returned.']);
+            }
+            // Already with the requester: a second return would stack another
+            // "returned" event on a voucher nobody has touched since the first.
+            if (in_array($voucher->review_state, ['returned_for_correction', 'corrected'], true)) {
+                throw ValidationException::withMessages(['voucher' => 'This voucher is already with its requester for correction.']);
             }
             if ((int) $voucher->requester_user_id === (int) $request->user()->id
                 && ! \App\Support\SelfApproval::allowedFor($request->user())) {
