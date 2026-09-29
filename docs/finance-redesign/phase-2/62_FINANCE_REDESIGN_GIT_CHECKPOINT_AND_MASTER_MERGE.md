@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-29
 **Scope:** Git integration only. It covers the Finance redesign through Stream D (Reports 56–61 and 34A). No new Finance functionality. Stream E was not started.
-**Status:** CHECKPOINT BRANCH VERIFIED AND PUSHED. **MASTER MERGE ON HOLD, pending an explicit release decision (§14).**
+**Status:** CHECKPOINT BRANCH VERIFIED AND PUSHED. **MERGED AND PUSHED TO MASTER** on the user's explicit decision (§14), accepting that the deploy workflow runs the 25 migrations on the `woodnork_erp` target.
 
 Both repos are covered, because the redesign spans them: `ERP-Backend` and `ERP-Frontend`.
 
@@ -104,7 +104,9 @@ After re-fetching, `origin/master` was unchanged (`25a304d` / `c5caa1c`). `git m
 - A push to master is therefore a deployment, which this task's safety boundary forbids (§2, §18 of the brief).
 - `origin/master..HEAD` in Backend is **26 commits and 25 new migrations**. That is all of unreleased Phase 2B (Reports 36–55, whose last release gate, Report 45, was "still blocked"), not only Streams A–D.
 
-Per the stop condition, this needs an explicit release decision before anything goes to master.
+Per the stop condition, this needed an explicit release decision, so work stopped and the question went to the user.
+
+**Decision (2026-09-29):** the user chose to *merge and push now, accepting that the deploy workflow will run all 25 migrations on the `woodnork_erp` target*. `master` was fast-forwarded to `origin/master` (unchanged at `25a304d` / `c5caa1c`), and then `git merge --no-ff finance-redesign-through-stream-d` was run. The merge commits' trees are **byte-identical** to the verified branch trees, so §17 stands as the verification of what shipped. It was pushed without force. The merge ran in a temporary `git worktree` so the shared working tree was never switched.
 
 ## 15. Conflicts Encountered
 
@@ -130,19 +132,24 @@ The errors (for example `printingService.jobBundles is not a function`) suggest 
 
 ## 18. Feature Branch Remote SHA
 
-See the final response for this session. The branch is pushed after this report is committed, so the SHA of the commit that adds this file cannot appear inside it.
+Backend `3cda587` (the commit that first added this report), Frontend `0a5c9fb`. This update to the report is committed on the branch after it.
 
 ## 19. Master Merge Commit SHA
 
-Not created (§14).
+| Repo | Merge commit |
+|---|---|
+| Backend | `f6eebf56b022b2f3c66758d4922cf149bbe15fc8` |
+| Frontend | `811e46aa5065c1759eb4e95f909ccc66171671c1` |
 
 ## 20. Final `origin/master` SHA
 
-Unchanged: Backend `25a304d`, Frontend `c5caa1c`.
+Backend `f6eebf5`, Frontend `811e46a`. After a fetch, local `master` == `origin/master` in both repos. This report update is **not** on master yet: pushing it would re-trigger the deploy, so it travels with the next release.
 
 ## 21. Production Untouched
 
-No push to `master` or `staging` was made, so the deploy workflow did not run. No production database, `.env`, queue or service was touched. `public_html/system` / `woodnork_erpsystem` were not accessed. **Production was not deployed or modified.**
+The push to `master` **triggered `.github/workflows/deploy.yml` in both repos**. By the user's decision, that runs `git pull`, `composer install`, `migrate --force` (25 new migrations) and the cache rebuilds on `~/erp-backend-master` / `woodnork_erp`, which is the empty redesigned target, plus the frontend build and deploy. Its outcome was not observed from this session (`gh` is not installed). Check GitHub Actions.
+
+Nothing else was done by hand. No `.env` was edited, no queue was started, and there was no seeding, opening balance or journal posting. The live ERP (`public_html/system` / `woodnork_erpsystem`) is not deployed by this pipeline and was not accessed.
 
 ## 22. Remaining Business-Policy Decisions
 
@@ -153,7 +160,7 @@ These are carried from Reports 59–61 and are unchanged:
 - **W3:** low/critical balance thresholds, the surrender deadline and the advance ceiling (the `1000/500` fallback); custody `held_by = 38` for WNG to confirm (R-2).
 - **W5:** write-off posting policy; WIP/COS confirmation (capitalise sign-off, Report 55).
 
-A **release decision** is new: whether and when Phase 2B plus Streams A–D go to master (§14). It needs a production backup and a pre-flight check first.
+The release decision (§14) is taken. What follows it: confirm the Actions runs succeeded, and fix master's 8 failing Design/Printing specs and the ENG-1 rise from 256 to 267 (§17). Those belong to the Design/Printing owner, not Finance.
 
 ## 23. Next Development Stream
 
