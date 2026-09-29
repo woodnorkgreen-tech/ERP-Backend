@@ -1031,6 +1031,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('work-queue/{workType}/{sourceId}/assignment', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'reassign']);
         Route::get('work-queue/{workType}/{sourceId}/assignment-history', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'history']);
         Route::get('readiness', [\App\Modules\Finance\Controllers\FinanceReadinessController::class, 'show']);
+        // Finance Overview read projection, one section per request (Report 65).
+        Route::get('overview', [\App\Modules\Finance\Controllers\FinanceOverviewController::class, 'show']);
 
         // W1-7: configurable payment-term templates. Same permission as other
         // receivables-policy configuration (quote-waiver, receivables-terms).

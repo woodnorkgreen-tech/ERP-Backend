@@ -236,10 +236,8 @@ class ReceivablesController extends Controller
         $names = $this->names($receipts->flatMap(fn (EnquiryPayment $p) => [$p->recorded_by, $p->verified_by, $p->reversed_by]));
 
         // Headline figures over the whole book, independent of filters and paging.
-        $totals = EnquiryPayment::query()->whereNull('reversed_at')->where('status', '!=', 'reversed')
-            ->selectRaw("sum(case when status = 'pending' then 1 else 0 end) as pending_count")
-            ->selectRaw("coalesce(sum(case when status = 'verified' then amount - $applied else 0 end),0) as unapplied_amount")
-            ->first();
+        // One definition, shared with the Finance Overview (Report 65).
+        $totals = \App\Modules\Finance\Support\FinancePositions::receipts();
 
         return response()->json([
             'data' => $receipts->map(function (EnquiryPayment $p) use ($request, $allocations, $names) {
@@ -278,8 +276,8 @@ class ReceivablesController extends Controller
                 ];
             })->values(),
             'summary' => [
-                'pending_verification' => (int) ($totals->pending_count ?? 0),
-                'unapplied_client_money' => $this->money($totals->unapplied_amount ?? 0),
+                'pending_verification' => $totals['pending_verification'],
+                'unapplied_client_money' => $totals['unapplied_client_money'],
             ],
             'meta' => [
                 'current_page' => $page->currentPage(), 'last_page' => $page->lastPage(), 'per_page' => $page->perPage(),
