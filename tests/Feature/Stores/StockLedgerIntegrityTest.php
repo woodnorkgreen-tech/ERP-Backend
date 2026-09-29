@@ -26,6 +26,7 @@ use Tests\TestCase;
  */
 class StockLedgerIntegrityTest extends TestCase
 {
+    use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private LibraryMaterial $material;
@@ -38,6 +39,7 @@ class StockLedgerIntegrityTest extends TestCase
 
         foreach (['Stores', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);
+            $this->grantMatrixPermissions($role);
         }
         Permission::findOrCreate(Permissions::STORES_ADJUST_QUANTITY);
         Role::findByName('Stores')->givePermissionTo(Permissions::STORES_ADJUST_QUANTITY);

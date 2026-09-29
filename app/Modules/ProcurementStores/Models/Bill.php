@@ -44,6 +44,11 @@ class Bill extends Model
         'duplicate_override_reason',
         'duplicate_override_by',
         'duplicate_override_at',
+        // Report 60: Return for Correction (current state; history is in governance_audit_logs).
+        'returned_by',
+        'returned_at',
+        'return_reason',
+        'resubmitted_at',
     ];
 
     protected $casts = [
@@ -58,6 +63,8 @@ class Bill extends Model
         'wht_amount' => 'decimal:2',
         'tax_point_date' => 'date',
         'duplicate_override_at' => 'datetime',
+        'returned_at' => 'datetime',
+        'resubmitted_at' => 'datetime',
     ];
 
     protected static function boot()
@@ -196,6 +203,22 @@ class Bill extends Model
     public function verifiedBy()
     {
         return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    public function returnedBy()
+    {
+        return $this->belongsTo(User::class, 'returned_by');
+    }
+
+    /**
+     * Returned by the verifier and not yet corrected by its preparer. While this
+     * holds the bill cannot be verified or paid; the preparer corrects it, which
+     * resubmits it for independent verification (Report 60 §16).
+     */
+    public function awaitingCorrection(): bool
+    {
+        return $this->returned_at !== null
+            && ($this->resubmitted_at === null || $this->returned_at->gt($this->resubmitted_at));
     }
 
     /** Direct bills only — a PO-backed bill classifies through its purchase order. */

@@ -193,6 +193,8 @@ class FinanceWorkQueueTest extends TestCase
         $this->assertArrayNotHasKey('invoice_check', $this->types($preparer));
         $this->assertSame(1, $this->types($checker)['invoice_check']);
         $this->assertArrayNotHasKey('invoice_issue', $this->types($issuer));
+        $this->actingAs($checker, 'sanctum')->getJson('/api/finance/work-queue?work_type=invoice_check')->assertOk()
+            ->assertJsonPath('data.items.0.target_url', "/finance/invoices/{$id}");
 
         DB::table('project_invoices')->where('id', $id)->update(['checked_by' => $checker->id, 'checked_at' => now()]);
         $this->assertArrayNotHasKey('invoice_check', $this->types($checker));
@@ -338,6 +340,8 @@ class FinanceWorkQueueTest extends TestCase
             ->assertJsonPath('data.meta.total', 1)
             ->assertJsonPath('data.items.0.work_type', 'client_receipt')
             ->assertJsonPath('data.items.0.required_action', 'Verify receipt')
-            ->assertJsonPath('data.items.0.area', 'sales');
+            ->assertJsonPath('data.items.0.area', 'sales')
+            // Report 58: W1 items open the Finance receipts/invoice screens, not the project modal.
+            ->assertJsonPath('data.items.0.target_url', '/finance/receipts?receipt_id='.DB::table('enquiry_payments')->value('id'));
     }
 }

@@ -221,6 +221,12 @@ class PettyCashRequisition extends Model
         return $this->hasMany(PettyCashSurrenderItem::class, 'requisition_id');
     }
 
+    /** Report 61: evidence (receipts, quotations) on the generic Finance attachments. */
+    public function attachments(): \Illuminate\Database\Eloquent\Relations\MorphMany
+    {
+        return $this->morphMany(\App\Modules\Finance\Models\FinanceAttachment::class, 'source');
+    }
+
     public function surrenderedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'surrendered_by');

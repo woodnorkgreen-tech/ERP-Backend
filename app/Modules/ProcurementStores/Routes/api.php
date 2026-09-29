@@ -140,6 +140,8 @@ Route::post('/search/bills', [BillController::class, 'search']);
 Route::post('/bills/{bill}/record-payment', [BillController::class, 'recordPayment']);
 Route::get('/bills/{bill}/verification', [BillController::class, 'verification']);
 Route::post('/bills/{bill}/verify', [BillController::class, 'verify']);
+// Report 60 §16: the verifier returns a bill; its preparer corrects it via PUT /bills/{bill}.
+Route::post('/bills/{bill}/return-for-correction', [BillController::class, 'returnForCorrection']);
 Route::get('/bills/{bill}/download', [BillController::class, 'downloadPdf']);
 Route::post('/multi-payment', [BillController::class, 'recordMultiBillPayment']);
 

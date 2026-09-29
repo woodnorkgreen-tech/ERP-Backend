@@ -1371,6 +1371,10 @@ class PettyCashRequisitionController extends Controller
             'disbursement'
         ])->findOrFail($id);
 
+        // Report 61: the voucher of any requisition could be downloaded by any
+        // signed-in user who guessed its id. Same rule as viewing it.
+        abort_unless($this->mayView($requisition), 403, 'You may only download vouchers for your own requisitions.');
+
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.finance.requisition-voucher', compact('requisition'));
         
         return $pdf->download("Voucher-{$requisition->requisition_number}.pdf");

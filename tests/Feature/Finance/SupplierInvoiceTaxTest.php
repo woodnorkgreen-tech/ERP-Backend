@@ -57,6 +57,8 @@ class SupplierInvoiceTaxTest extends TestCase
         $this->seed(\App\Modules\Finance\Database\Seeders\FinanceTaxSeeder::class);
 
         Role::findOrCreate('Accounts', 'web');
+        // Report 60: bill verification is a permission, which Accounts holds (RolePermissions).
+        \Spatie\Permission\Models\Role::findByName('Accounts', 'web')->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::FINANCE_PAYABLES_VERIFY, 'web'));
         $this->accounts = User::factory()->create(['is_active' => true]);
         $this->accounts->assignRole('Accounts');
         // One actor plays every role in this fixture — raising the order,

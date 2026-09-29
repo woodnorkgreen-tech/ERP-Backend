@@ -1006,6 +1006,24 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     // Finance Module Routes
     Route::prefix('finance')->group(function () {
+        // W1 read projections for the Sales & receivables workspace (Report 58).
+        // Changes still go through the per-project enquiry routes.
+        Route::get('invoices', [\App\Modules\Finance\Controllers\ReceivablesController::class, 'invoices']);
+        Route::get('invoices/{invoice}', [\App\Modules\Finance\Controllers\ReceivablesController::class, 'invoice'])->whereNumber('invoice');
+        Route::get('receipts', [\App\Modules\Finance\Controllers\ReceivablesController::class, 'receipts']);
+        // Project billing controls (Report 59): the read that replaced EnquiryFinanceModal's.
+        Route::get('project-billing/{enquiry}', [\App\Modules\Finance\Controllers\ProjectBillingController::class, 'show'])->whereNumber('enquiry');
+        // W2 Purchasing & payables read projections (Report 60). Changes still go
+        // through the Procurement bill routes (verify, return, correct, pay).
+        Route::get('payables/bills', [\App\Modules\Finance\Controllers\PayablesController::class, 'bills']);
+        Route::get('payables/bills/{bill}', [\App\Modules\Finance\Controllers\PayablesController::class, 'bill'])->whereNumber('bill');
+        Route::get('payables/payments', [\App\Modules\Finance\Controllers\PayablesController::class, 'payments']);
+        Route::get('payables/position', [\App\Modules\Finance\Controllers\PayablesController::class, 'position']);
+        Route::get('payables/wht', [\App\Modules\Finance\Controllers\PayablesController::class, 'wht']);
+        // W5 Finance-facing inventory (Report 61): read-only; Stores owns every movement.
+        Route::get('inventory/position', [\App\Modules\Finance\Controllers\InventoryFinanceController::class, 'position']);
+        Route::get('inventory/issues', [\App\Modules\Finance\Controllers\InventoryFinanceController::class, 'issues']);
+        Route::get('inventory/adjustments', [\App\Modules\Finance\Controllers\InventoryFinanceController::class, 'adjustments']);
         Route::get('work-queue/count', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'count']);
         Route::get('work-queue', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'index']);
         Route::post('work-queue/{workType}/{sourceId}/claim', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'claim']);
@@ -1264,6 +1282,13 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('requisitions/{id}/surrender/return', [PettyCashRequisitionController::class, 'returnSurrenderForCorrection']);
             Route::post('requisitions/{id}/surrender/reverse', [PettyCashRequisitionController::class, 'reverseSurrender']);
             Route::get('advances/outstanding', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'outstandingAdvances']);
+            // W3 Finance workspace read projections (Report 61); workflow changes stay on the routes above.
+            Route::get('finance/overview', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'overview']);
+            Route::get('finance/requisitions', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'requisitions']);
+            Route::get('finance/requisitions/{id}', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'requisition'])->whereNumber('id');
+            Route::get('requisitions/{id}/attachments', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'attachments'])->whereNumber('id');
+            Route::post('requisitions/{id}/attachments', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'storeAttachment'])->whereNumber('id');
+            Route::get('requisitions/{id}/attachments/{attachment}/download', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'downloadAttachment'])->whereNumber('id')->whereNumber('attachment');
             Route::get('custody/current', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'custody']);
             Route::post('custody/handovers/{id}/confirm', [\App\Modules\Finance\PettyCash\Controllers\PettyCashControlController::class, 'confirmHandover']);
             Route::post('requisitions/{id}/reconcile', [PettyCashRequisitionController::class, 'reconcileSurrender']);

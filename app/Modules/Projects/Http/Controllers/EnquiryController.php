@@ -1211,7 +1211,7 @@ class EnquiryController extends Controller
     {
         $receipts = \App\Modules\Finance\Models\ClientReceipt::query()
             ->with(['paymentSource:id,code,name,type,currency', 'allocations' => fn ($query) => $query
-                ->whereNull('reversed_at')->with('enquiry:id,title,job_number')])
+                ->whereNull('reversed_at')->with(['enquiry:id,title,job_number,client_id', 'enquiry.client:id,full_name,company_name'])])
             ->withSum(['allocations as allocated_amount' => fn ($query) => $query->whereNull('reversed_at')], 'amount')
             ->orderByDesc('payment_date')
             ->get()
@@ -1486,17 +1486,8 @@ class EnquiryController extends Controller
                 $paid = (float) ($invoice->paid_amount ?? 0);
                 $netTotal = (float) ($invoice->net_total_amount ?? $invoice->total_amount);
                 $balance = max(0, $netTotal - $paid);
-                $reviewState = match (true) {
-                    $invoice->status === 'void' => 'void',
-                    $invoice->isCreditNote() => 'credit_note',
-                    $invoice->status === 'paid' => 'paid',
-                    $invoice->status === 'issued' && $balance < $netTotal => 'partially_paid',
-                    $invoice->status === 'issued' => 'issued',
-                    (bool) $invoice->checked_at => 'checked',
-                    (bool) $invoice->returned_at && (! $invoice->resubmitted_at || $invoice->returned_at->gt($invoice->resubmitted_at)) => 'returned_for_correction',
-                    (bool) $invoice->resubmitted_at => 'awaiting_review',
-                    default => 'draft',
-                };
+                // One definition shared with the Finance invoice index (Report 58 §6).
+                $reviewState = \App\Modules\Finance\Support\InvoiceState::reviewState($invoice, $paid, $netTotal);
 
                 return array_merge($invoice->toArray(), [
                     'paid_amount' => $paid,
@@ -1504,7 +1495,7 @@ class EnquiryController extends Controller
                     'balance' => $balance,
                     'is_credit_note' => $invoice->credits_invoice_id !== null,
                     'review_state' => $reviewState,
-                    'days_overdue' => $invoice->status === 'issued' && $balance > 0 && $invoice->due_date->isPast() ? $invoice->due_date->diffInDays(now()) : 0,
+                    'days_overdue' => \App\Modules\Finance\Support\InvoiceState::daysOverdue($invoice, $balance),
                 ]);
             });
         return response()->json(['data'=>$invoices]);
@@ -1699,6 +1690,30 @@ class EnquiryController extends Controller
                 if ((int) $locked->created_by === (int) Auth::id()) {
                     throw new \InvalidArgumentException('You prepared this credit note, so someone else has to approve and issue it.');
                 }
+
+                // A draft does not reduce what the invoice can take, so money
+                // may have been applied to it since this was raised. Issuing
+                // must not leave the invoice owing less than was collected —
+                // the same rule createCreditNote() applied at the time.
+                $invoice = \App\Modules\Finance\Models\ProjectInvoice::query()->lockForUpdate()->findOrFail($locked->credits_invoice_id);
+                if (! in_array($invoice->status, ['issued', 'paid'], true)) {
+                    throw new \InvalidArgumentException('Invoice ' . $invoice->invoice_number . ' is no longer issued, so this credit note cannot be issued against it.');
+                }
+                $netAfter = bcadd(
+                    \App\Modules\Finance\Models\ProjectInvoice::effectiveNetTotal($invoice->id),
+                    number_format((float) $locked->total_amount, 2, '.', ''),
+                    2,
+                );
+                $allocated = number_format((float) (DB::table('project_invoice_allocations')
+                    ->where('project_invoice_id', $invoice->id)->sum('amount') ?: 0), 2, '.', '');
+                if (bccomp($netAfter, $allocated, 2) < 0) {
+                    throw new \InvalidArgumentException(
+                        'Receipts totalling ' . number_format((float) $allocated, 2) . ' are applied to invoice '
+                        . $invoice->invoice_number . ', more than the ' . number_format(max(0, (float) $netAfter), 2)
+                        . ' this credit note would leave owed. Reverse the excess allocation first, or void this credit note.'
+                    );
+                }
+
                 $locked->update(['status' => 'issued', 'issued_by' => Auth::id(), 'issued_at' => now()]);
 
                 app(\App\Modules\Finance\Services\ReceivablesPostingService::class)
@@ -1828,7 +1843,11 @@ class EnquiryController extends Controller
                 // same remaining balance and overbill the agreed price.
                 $lockedEnquiry = ProjectEnquiry::query()->lockForUpdate()->findOrFail($enquiry->id);
                 $basis = (float) $this->financeService->getPaymentProgress($lockedEnquiry)['total_quote'];
-                $existing = (float) \App\Modules\Finance\Models\ProjectInvoice::where('project_enquiry_id',$lockedEnquiry->id)->whereNot('status','void')->sum('total_amount');
+                // Draft invoices reserve headroom (they are about to bill); a
+                // draft credit note does not release any until it is issued.
+                $existing = (float) \App\Modules\Finance\Models\ProjectInvoice::where('project_enquiry_id',$lockedEnquiry->id)->whereNot('status','void')
+                    ->where(fn ($q) => $q->whereNull('credits_invoice_id')->orWhere('status', \App\Modules\Finance\Models\ProjectInvoice::EFFECTIVE_CREDIT_STATUS))
+                    ->sum('total_amount');
 
                 $exceptionAttributes = [];
                 if ($basis <= 0) {
@@ -1908,6 +1927,12 @@ class EnquiryController extends Controller
                 }
                 if ($locked->checked_at) {
                     throw new \DomainException('This invoice has already been checked.');
+                }
+                // A returned invoice is with its preparer until they resubmit
+                // it; checking it first would skip the correction it was
+                // returned for (Report 58 §10).
+                if (\App\Modules\Finance\Support\InvoiceState::awaitingCorrection($locked)) {
+                    throw new \DomainException('This invoice was returned to its preparer for correction. It can be checked once they resubmit it.');
                 }
 
                 $locked->update([
@@ -2255,9 +2280,11 @@ class EnquiryController extends Controller
                 }
                 $paymentUsed=(float)DB::table('project_invoice_allocations')->where('enquiry_payment_id',$lockedPayment->id)->sum('amount');
                 $invoicePaid=(float)DB::table('project_invoice_allocations')->where('project_invoice_id',$lockedInvoice->id)->sum('amount');
-                // Net of any non-void credit note, so a credited invoice
-                // cannot be over-allocated up to its ORIGINAL total.
-                $creditedTotal=(float)$lockedInvoice->total_amount+(float)DB::table('project_invoices')->where('credits_invoice_id',$lockedInvoice->id)->where('status','!=','void')->sum('total_amount');
+                // Net of every ISSUED credit note, so a credited invoice cannot
+                // be over-allocated up to its ORIGINAL total. A draft credit
+                // note has no accounting effect yet and does not shrink the
+                // capacity; issueCreditNote() re-checks allocations instead.
+                $creditedTotal=(float)\App\Modules\Finance\Models\ProjectInvoice::effectiveNetTotal($lockedInvoice->id);
                 if ((float)$data['amount']>(float)$lockedPayment->amount-$paymentUsed || (float)$data['amount']>$creditedTotal-$invoicePaid) throw new \DomainException('Allocation exceeds the available payment or invoice balance.');
                 $allocationId = DB::table('project_invoice_allocations')->insertGetId(['project_invoice_id'=>$lockedInvoice->id,'enquiry_payment_id'=>$lockedPayment->id,'amount'=>$data['amount'],'allocated_by'=>Auth::id(),'created_at'=>now(),'updated_at'=>now()]);
 

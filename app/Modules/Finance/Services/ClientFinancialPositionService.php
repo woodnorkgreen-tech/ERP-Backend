@@ -4,6 +4,7 @@ namespace App\Modules\Finance\Services;
 
 use App\Models\ProjectEnquiry;
 use App\Modules\Finance\CostCollector\Services\CostAccountService;
+use App\Modules\Finance\Models\ProjectInvoice;
 use App\Modules\Projects\Services\FinanceService;
 use Illuminate\Support\Facades\DB;
 
@@ -31,19 +32,22 @@ class ClientFinancialPositionService
         $approvedQuoteValue = (float) $progress['total_quote'];
         $cashReceived = (float) $progress['total_paid'];
 
-        // Net of any non-void credit note — the same "what this invoice is
-        // really worth now" definition ProjectInvoice::scopeWithNetTotal()
-        // already uses, summed across the whole project rather than one
-        // invoice.
-        $amountInvoiced = (float) (DB::table('project_invoices')
+        // Only documents that reached the ledger: issued (or paid) invoices,
+        // net of ISSUED credit notes — the same definition as
+        // ProjectInvoice::scopeWithNetTotal(), summed across the project, so
+        // this agrees with each invoice's balance and with receivables ageing.
+        // Drafts are reported separately as pending, never as billed or earned
+        // (Report 59 §11–13).
+        $effective = fn () => DB::table('project_invoices')
             ->where('project_enquiry_id', $enquiry->id)
-            ->where('status', '!=', 'void')
-            ->sum('total_amount') ?: 0);
+            ->where(fn ($q) => $q->where(fn ($i) => $i->whereNull('credits_invoice_id')->whereIn('status', ['issued', 'paid']))
+                ->orWhere(fn ($c) => $c->whereNotNull('credits_invoice_id')->where('status', ProjectInvoice::EFFECTIVE_CREDIT_STATUS)));
+        $amountInvoiced = (float) ($effective()->sum('total_amount') ?: 0);
+        $projectRevenue = (float) ($effective()->sum('subtotal') ?: 0);
 
-        $projectRevenue = (float) (DB::table('project_invoices')
-            ->where('project_enquiry_id', $enquiry->id)
-            ->where('status', '!=', 'void')
-            ->sum('subtotal') ?: 0);
+        $drafts = fn () => DB::table('project_invoices')->where('project_enquiry_id', $enquiry->id)->where('status', 'draft');
+        $draftInvoiced = (float) ($drafts()->whereNull('credits_invoice_id')->sum('total_amount') ?: 0);
+        $pendingCredit = abs((float) ($drafts()->whereNotNull('credits_invoice_id')->sum('total_amount') ?: 0));
 
         $amountAllocated = (float) (DB::table('project_invoice_allocations')
             ->join('project_invoices', 'project_invoices.id', '=', 'project_invoice_allocations.project_invoice_id')
@@ -51,7 +55,9 @@ class ClientFinancialPositionService
             ->sum('project_invoice_allocations.amount') ?: 0);
 
         $invoiceOutstanding = max(0.0, $amountInvoiced - $amountAllocated);
-        $remainingToInvoice = max(0.0, $approvedQuoteValue - $amountInvoiced);
+        // Mirrors the over-billing cap in createProjectInvoice(): a draft
+        // invoice already uses headroom, a draft credit note frees none.
+        $remainingToInvoice = max(0.0, $approvedQuoteValue - $amountInvoiced - $draftInvoiced);
         $unallocatedClientCredit = max(0.0, $cashReceived - $amountAllocated);
 
         $margin = $this->costAccountService->forEnquiry($enquiry)['margin'] ?? null;
@@ -59,6 +65,8 @@ class ClientFinancialPositionService
         return [
             'approved_quote_value' => $approvedQuoteValue,
             'amount_invoiced' => $amountInvoiced,
+            'draft_invoiced' => $draftInvoiced,
+            'pending_credit_notes' => $pendingCredit,
             'remaining_to_invoice' => $remainingToInvoice,
             'cash_received' => $cashReceived,
             'amount_allocated' => $amountAllocated,

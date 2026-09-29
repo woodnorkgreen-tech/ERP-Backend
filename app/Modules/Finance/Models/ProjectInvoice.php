@@ -66,11 +66,24 @@ class ProjectInvoice extends Model
     }
 
     /**
-     * Adds `net_total_amount` — this invoice's total after every non-void
-     * credit note raised against it. Credit note totals are stored negative
-     * (see the migration that added `credits_invoice_id`), so this is a plain
-     * sum, not a subtraction that could be applied to the wrong sign by a
-     * future caller.
+     * The only credit-note status with a financial effect (Report 59 §11).
+     *
+     * A credit note reaches the ledger when it is issued
+     * (ReceivablesPostingService::postCreditNoteIssued) and leaves it when it
+     * is voided. A draft is a proposal awaiting independent issue: counting it
+     * would make the receivables book (balances, ageing, allocation capacity)
+     * disagree with Accounts Receivable in the ledger. Drafts still reserve
+     * crediting headroom in createCreditNote(), so two drafts cannot together
+     * over-credit an invoice — that is a limit on documents, not a balance.
+     */
+    public const EFFECTIVE_CREDIT_STATUS = 'issued';
+
+    /**
+     * Adds `net_total_amount` — this invoice's total after every issued
+     * credit note raised against it (see EFFECTIVE_CREDIT_STATUS). Credit note
+     * totals are stored negative (see the migration that added
+     * `credits_invoice_id`), so this is a plain sum, not a subtraction that
+     * could be applied to the wrong sign by a future caller.
      *
      * The one definition of "what this invoice is really worth now" that the
      * invoice list, receivables ageing and the allocation cap all share —
@@ -83,8 +96,18 @@ class ProjectInvoice extends Model
                 ->selectRaw('project_invoices.total_amount + COALESCE(SUM(credit_notes.total_amount), 0)')
                 ->from('project_invoices as credit_notes')
                 ->whereColumn('credit_notes.credits_invoice_id', 'project_invoices.id')
-                ->where('credit_notes.status', '!=', 'void'),
+                ->where('credit_notes.status', self::EFFECTIVE_CREDIT_STATUS),
         ]);
+    }
+
+    /** The same net total for one invoice by id, for code working under a row lock. */
+    public static function effectiveNetTotal(int $invoiceId): string
+    {
+        $total = (string) (self::query()->whereKey($invoiceId)->value('total_amount') ?? '0');
+        $credits = (string) (self::query()->where('credits_invoice_id', $invoiceId)
+            ->where('status', self::EFFECTIVE_CREDIT_STATUS)->sum('total_amount') ?: '0');
+
+        return bcadd(number_format((float) $total, 2, '.', ''), number_format((float) $credits, 2, '.', ''), 2);
     }
 
     /**

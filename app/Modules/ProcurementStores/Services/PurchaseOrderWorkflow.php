@@ -295,7 +295,10 @@ class PurchaseOrderWorkflow
             ],
         ];
 
-        $eligible = collect($checks)->every(fn ($check) => $check['passed']);
+        // Report 60 §16: a bill returned to its preparer cannot be verified
+        // until they correct and resubmit it, whatever the checks say.
+        $returned = $bill->awaitingCorrection();
+        $eligible = collect($checks)->every(fn ($check) => $check['passed']) && ! $returned;
         $fingerprint = $this->fingerprint($bill, $workflow);
 
         /*
@@ -313,6 +316,7 @@ class PurchaseOrderWorkflow
         $blockers = $legacy ? [] : collect($checks)->where('passed', false)->pluck('label')->values()->all();
         if (! $verified) {
             $blockers[] = match (true) {
+                $returned => 'Returned to its preparer for correction: '.$bill->return_reason,
                 ! $eligible => 'Resolve the checks above, then verify the invoice.',
                 $bill->verified_at === null => 'Accounts must verify this invoice before it can be paid.',
                 default => 'The order, receipt or invoice changed after verification. Verify it again.',
@@ -362,6 +366,7 @@ class PurchaseOrderWorkflow
             'can_pay' => $verified && $bill->status !== 'cancelled' && ! $settled,
             'blockers' => $blockers,
             'fingerprint' => $fingerprint,
+            'awaiting_correction' => $returned,
         ];
     }
 
@@ -422,7 +427,8 @@ class PurchaseOrderWorkflow
             ],
         ];
 
-        $eligible = collect($checks)->every(fn ($check) => $check['passed']);
+        $returned = $bill->awaitingCorrection();
+        $eligible = collect($checks)->every(fn ($check) => $check['passed']) && ! $returned;
         $fingerprint = $this->directFingerprint($bill);
         $matched = $eligible
             && $bill->verified_at !== null
@@ -431,6 +437,7 @@ class PurchaseOrderWorkflow
         $blockers = collect($checks)->where('passed', false)->pluck('label')->values()->all();
         if (! $matched) {
             $blockers[] = match (true) {
+                $returned => 'Returned to its preparer for correction: '.$bill->return_reason,
                 ! $eligible => 'Resolve the checks above, then verify the invoice.',
                 $bill->verified_at === null => 'Accounts must verify this invoice before it can be paid.',
                 default => 'The invoice changed after verification. Verify it again.',
@@ -482,6 +489,7 @@ class PurchaseOrderWorkflow
             'blockers' => $blockers,
             'fingerprint' => $fingerprint,
             'is_direct' => true,
+            'awaiting_correction' => $returned,
         ];
     }
 

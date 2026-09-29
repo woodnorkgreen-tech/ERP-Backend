@@ -187,6 +187,15 @@ class Permissions
     // PEOPLE, not different permission grants.
     const FINANCE_RECEIVABLES_INVOICE_CHECK = 'finance.receivables.invoice_check';
 
+    // W2 Purchasing & payables (Report 60). Supplier-bill verification used to be
+    // "is the user's role named Super Admin, Admin or Accounts" in two private
+    // methods; it is now a permission like every other Finance control, so who
+    // may verify is configuration, visible on the admin screens. Verifying is the
+    // accounting event (the invoice posts to Accounts Payable), and the verifier
+    // also returns a bill for correction and may delete an unverified draft.
+    const FINANCE_PAYABLES_READ = 'finance.payables.read';
+    const FINANCE_PAYABLES_VERIFY = 'finance.payables.verify';
+
     const FINANCE_INVOICE_CREATE = 'finance.invoice.create';
     const FINANCE_INVOICE_READ = 'finance.invoice.read';
     const FINANCE_INVOICE_UPDATE = 'finance.invoice.update';
@@ -526,6 +535,7 @@ class Permissions
             self::FINANCE_RECEIVABLES_CORRECT, self::FINANCE_RECEIVABLES_REVERSE,
             self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
             self::FINANCE_RECEIVABLES_OVERRIDE, self::FINANCE_RECEIVABLES_INVOICE_CHECK,
+            self::FINANCE_PAYABLES_READ, self::FINANCE_PAYABLES_VERIFY,
 
             // Cross-cutting approvals
             self::APPROVALS_SELF_APPROVE,
@@ -665,6 +675,7 @@ class Permissions
                 self::FINANCE_RECEIVABLES_CORRECT, self::FINANCE_RECEIVABLES_REVERSE,
                 self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
                 self::FINANCE_RECEIVABLES_OVERRIDE, self::FINANCE_RECEIVABLES_INVOICE_CHECK,
+                self::FINANCE_PAYABLES_READ, self::FINANCE_PAYABLES_VERIFY,
                 self::FINANCE_PETTY_CASH_VIEW,
                 self::FINANCE_PETTY_CASH_VIEW_BALANCE,
                 self::FINANCE_PETTY_CASH_VIEW_REPORTS,

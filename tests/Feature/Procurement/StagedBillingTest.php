@@ -43,6 +43,8 @@ class StagedBillingTest extends TestCase
         $this->seed(\App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class);
 
         $accountsRole = Role::findOrCreate('Accounts', 'web');
+        // Report 60: bill verification is a permission, which Accounts holds (RolePermissions).
+        \Spatie\Permission\Models\Role::findByName('Accounts', 'web')->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::FINANCE_PAYABLES_VERIFY, 'web'));
         $this->accounts = User::create([
             'name' => 'Accounts Clerk', 'email' => uniqid('accounts_').'@test.local',
             'password' => bcrypt('secret'), 'is_active' => true,

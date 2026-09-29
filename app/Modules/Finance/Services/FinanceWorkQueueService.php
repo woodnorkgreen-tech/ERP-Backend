@@ -261,7 +261,7 @@ class FinanceWorkQueueService
         $invoiceItem = fn (string $type, string $action) => fn (ProjectInvoice $invoice) => $this->item(
             $type, 'sales', $invoice->id, $invoice->invoice_number, $this->clientName($invoice->enquiry),
             $invoice->total_amount, 'KES', $invoice->resubmitted_at ?? $invoice->created_at, $action,
-            "/finance/project-receivables?enquiry={$invoice->project_enquiry_id}", $invoice->enquiry?->job_number,
+            "/finance/invoices/{$invoice->id}", $invoice->enquiry?->job_number,
         );
 
         $add('invoice_check', 'sales', $user->can(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK),
@@ -283,7 +283,7 @@ class FinanceWorkQueueService
             fn (EnquiryPayment $receipt) => $this->item(
                 'client_receipt', 'sales', $receipt->id, $receipt->transaction_reference ?: "RECEIPT-{$receipt->id}",
                 $this->clientName($receipt->enquiry), $receipt->amount, 'KES', $receipt->payment_date ?? $receipt->created_at,
-                'Verify receipt', "/finance/project-receivables?enquiry={$receipt->project_enquiry_id}", $receipt->enquiry?->job_number,
+                'Verify receipt', "/finance/receipts?receipt_id={$receipt->id}", $receipt->enquiry?->job_number,
             ));
 
         // ── Purchasing & payables (W2) ────────────────────────────────────
@@ -301,14 +301,32 @@ class FinanceWorkQueueService
                 $order->supplier?->supplier_name ?? 'Supplier', $order->total_amount ?? 0, 'KES', $order->created_at,
                 'Approve order', "/procurement/purchase-order/{$order->id}", null,
             ));
-        $add('supplier_invoice', 'purchasing', $this->canVerifySupplierBills($user),
+        // Report 60: supplier bills. A bill returned for correction is with its
+        // preparer, not the verifier, until it is resubmitted.
+        $billAwaitingCorrection = fn (Builder $q) => $q->whereNotNull('returned_at')
+            ->where(fn (Builder $r) => $r->whereNull('resubmitted_at')->orWhereColumn('returned_at', '>', 'resubmitted_at'));
+        $billItem = fn (string $type, string $action) => fn (Bill $bill) => $this->item(
+            $type, 'purchasing', $bill->id, $bill->bill_number, $bill->supplier?->supplier_name ?? 'Supplier',
+            $type === 'supplier_payment' ? $bill->balance : $bill->amount, 'KES',
+            $type === 'supplier_invoice_correction' ? $bill->returned_at : ($bill->bill_date ?? $bill->created_at), $action,
+            "/finance/payables/bills/{$bill->id}", $bill->job_number,
+        );
+        $add('supplier_invoice', 'purchasing', $user->can(Permissions::FINANCE_PAYABLES_VERIFY),
             fn () => $notMine(Bill::query()->with('supplier:id,supplier_name')->whereNull('verified_at')
-                ->whereNotIn('status', ['paid', 'cancelled']), 'user_id')->oldest('bill_date'),
-            fn (Bill $bill) => $this->item(
-                'supplier_invoice', 'purchasing', $bill->id, $bill->bill_number, $bill->supplier?->supplier_name ?? 'Supplier',
-                $bill->amount, 'KES', $bill->bill_date ?? $bill->created_at, 'Verify supplier invoice',
-                "/procurement/billing/{$bill->id}", $bill->job_number,
-            ));
+                ->whereNotIn('status', ['paid', 'cancelled']), 'user_id')->whereNot($billAwaitingCorrection)->oldest('bill_date'),
+            $billItem('supplier_invoice', 'Verify supplier invoice'));
+        $add('supplier_invoice_correction', 'purchasing', true,
+            fn () => $billAwaitingCorrection(Bill::query()->with('supplier:id,supplier_name')->where('user_id', $uid)
+                ->whereNull('verified_at')->whereNotIn('status', ['paid', 'cancelled']))->oldest('returned_at'),
+            $billItem('supplier_invoice_correction', 'Correct supplier invoice'));
+        // Verified, not yet settled, and payable directly by this person (the
+        // same permission and legacy exclusion BillController::directPaymentRefusal
+        // applies; the payment gate re-checks the fingerprint when they pay).
+        $add('supplier_payment', 'purchasing', $user->can(Permissions::FINANCE_PETTY_CASH_CREATE),
+            fn () => Bill::query()->with('supplier:id,supplier_name')->whereNotNull('verified_at')
+                ->where('verification_basis', '!=', 'legacy')->where('balance', '>', 0)
+                ->whereNotIn('status', ['paid', 'cancelled'])->oldest('due_date'),
+            $billItem('supplier_payment', 'Pay supplier invoice'));
 
         // ── Expenses & cash (W3/W4) ───────────────────────────────────────
         $fund = fn (string $type, string $action) => fn (PettyCashRequisition $request) => $this->item(
@@ -320,12 +338,21 @@ class FinanceWorkQueueService
         $add('fund_requisition', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_UPDATE),
             fn () => $notMine(PettyCashRequisition::query()->where('status', 'pending'), 'user_id')->oldest(),
             $fund('fund_requisition', 'Review request'));
+        // Report 61: the disburser and the reviewer of a surrender are never the
+        // requester (disburse and return refuse them), so their own requests are
+        // not offered to them as work.
         $add('fund_disbursement', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_CREATE),
-            fn () => PettyCashRequisition::query()->where('status', 'approved')->oldest('approved_at'),
+            fn () => $notMine(PettyCashRequisition::query()->where('status', 'approved'), 'user_id')->oldest('approved_at'),
             $fund('fund_disbursement', 'Disburse'));
         $add('fund_surrender_review', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_CREATE),
-            fn () => PettyCashRequisition::query()->where('status', 'surrender_pending')->oldest('surrendered_at'),
+            fn () => $notMine(PettyCashRequisition::query()->where('status', 'surrender_pending'), 'user_id')->oldest('surrendered_at'),
             $fund('fund_surrender_review', 'Review surrender'));
+        // STAB-4: cash left but its journal did not post. The retry is a human
+        // decision (the cause — a closed period, an unmapped account — must be
+        // fixed first) and it is idempotent.
+        $add('petty_cash_posting_failed', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_UPDATE),
+            fn () => PettyCashRequisition::query()->whereNotNull('advance_gl_posting_failed_at')->oldest('advance_gl_posting_failed_at'),
+            $fund('petty_cash_posting_failed', 'Retry ledger posting'));
         $add('fund_surrender', 'cash', true,
             fn () => PettyCashRequisition::query()->where('user_id', $uid)
                 ->whereIn('status', ['disbursed', 'received', 'surrender_returned'])->oldest(),
@@ -449,10 +476,13 @@ class FinanceWorkQueueService
         'purchase_requisition' => 'Purchase requisition',
         'purchase_order' => 'Purchase order exception',
         'supplier_invoice' => 'Supplier invoice',
+        'supplier_invoice_correction' => 'Supplier invoice returned to you',
+        'supplier_payment' => 'Supplier invoice to pay',
         'fund_requisition' => 'Cash requisition',
         'fund_disbursement' => 'Cash to disburse',
         'fund_surrender_review' => 'Surrender to review',
         'fund_surrender' => 'Cash to account for',
+        'petty_cash_posting_failed' => 'Petty cash posting failed',
         'direct_disbursement' => 'Direct disbursement',
         'spend_voucher' => 'Payment voucher',
         'spend_voucher_correction' => 'Voucher returned to you',
@@ -464,14 +494,4 @@ class FinanceWorkQueueService
         'payroll_lock' => 'Payroll to lock',
         'payroll_payment' => 'Payroll to pay',
     ];
-
-    /**
-     * Supplier-invoice verification is authorised by role in BillController
-     * (canVerify); mirrored here so the queue matches it. Moving it to a
-     * permission is Stream C (Report 56 §6).
-     */
-    private function canVerifySupplierBills(User $user): bool
-    {
-        return $user->roles()->whereIn('name', ['Super Admin', 'Admin', 'Accounts'])->exists();
-    }
 }

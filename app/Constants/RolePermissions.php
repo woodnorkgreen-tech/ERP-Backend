@@ -122,6 +122,9 @@ final class RolePermissions
                 Permissions::FINANCE_LABOUR_VIEW, Permissions::FINANCE_LABOUR_RECORD,
                 Permissions::FINANCE_LABOUR_PO_VERIFY, Permissions::FINANCE_LABOUR_FINANCE_VERIFY,
                 Permissions::FINANCE_LABOUR_CORRECT,
+                // W2 (Report 60): supplier-bill verification, previously granted by the
+                // role NAME Admin. Same population, now an assignable permission.
+                Permissions::FINANCE_PAYABLES_READ, Permissions::FINANCE_PAYABLES_VERIFY,
             ],
             'Manager' => [
                 Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_ACCESS, Permissions::DEPARTMENT_READ,
@@ -185,6 +188,8 @@ final class RolePermissions
                 Permissions::FINANCE_LABOUR_FINANCE_VERIFY, Permissions::FINANCE_LABOUR_CORRECT,
                 // R-3 (WNG, Report 53): Accounts opens Finance readiness and the reports.
                 Permissions::FINANCE_REPORTS_VIEW,
+                // W2 (Report 60): Accounts verifies supplier bills (previously by role name).
+                Permissions::FINANCE_PAYABLES_READ, Permissions::FINANCE_PAYABLES_VERIFY,
             ],
             'Costing' => [
                 Permissions::DASHBOARD_FINANCE, Permissions::FINANCE_BUDGET_APPROVE,

@@ -260,8 +260,31 @@ class TaxScheduleService
             ->orderBy('cost_lines.incurred_at')
             ->get();
 
+        // Report 60 §24: withholding on a verified supplier invoice. It reaches
+        // the ledger (Cr WHT payable) when the bill posts, but the return read
+        // cost lines only, so procurement WHT never appeared on it. Bills are
+        // grouped as their own payee rows: a receipt accrual for the same
+        // supplier carries the category but no withheld amount, and merging the
+        // two would double the net the aggregation threshold is tested on.
+        $billLines = DB::table('bills')
+            ->join('suppliers', 'suppliers.id', '=', 'bills.supplier_id')
+            ->whereNotNull('bills.verified_at')
+            ->whereIn('bills.verification_basis', ['three_way_match', 'direct'])
+            ->whereNotNull('bills.wht_category_id')
+            ->whereRaw('COALESCE(bills.tax_point_date, bills.bill_date) BETWEEN ? AND ?', [$start->toDateString(), $end->toDateString()])
+            ->whereExists(fn ($q) => $q->selectRaw('1')->from('journal_entries')
+                ->where('journal_entries.source_type', \App\Modules\ProcurementStores\Models\Bill::class)
+                ->whereColumn('journal_entries.source_id', 'bills.id')
+                ->where('journal_entries.status', 'posted'))
+            ->orderBy('bills.bill_date')
+            ->get([
+                DB::raw('null as payee_type_id'), 'bills.supplier_id as payee_id', 'suppliers.supplier_name as payee_name',
+                'bills.supplier_pin', 'bills.net_amount', 'bills.wht_amount', 'bills.wht_category_id', 'bills.bill_number as ref',
+            ]);
+
         $rows = $lines
             ->groupBy(fn (object $line) => $line->payee_type_id . ':' . ($line->payee_id ?: 'n/a') . ':' . $line->payee_name)
+            ->concat($billLines->groupBy(fn (object $bill) => 'bill:' . $bill->payee_id))
             ->map(fn (Collection $group) => $this->whtPayeeRow($group))
             // A payee whose whole month withheld nothing does not belong on a
             // remittance return; it belongs in the exposure list below if the
@@ -295,7 +318,8 @@ class TaxScheduleService
             'remittance_rule' => 'Remit within five working days after deduction. Confirm each payment date and applicable public holidays; do not wait for month-end.',
             'remittance_source' => 'https://www.kra.go.ke/individual//filing-paying/types-of-taxes/individual-withholding-tax',
             'basis' => 'Verified, posted, unreversed cost lines carrying a WHT category, by payee, '
-                . 'dated on when the cost was incurred.',
+                . 'dated on when the cost was incurred; and verified, posted supplier invoices carrying a WHT '
+                . 'category, by supplier, dated by the invoice tax point.',
         ];
     }
 

@@ -29,6 +29,13 @@ class FinanceAttachment extends Model
         return $this->morphTo(__FUNCTION__, 'source_type', 'source_id');
     }
 
+    /**
+     * Report 61: the storage path is an internal detail. Every file is served
+     * through a controlled download route that checks the source; a caller that
+     * serialised the model (cash counts did) must never hand the path out.
+     */
+    protected $hidden = ['file_path'];
+
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');

@@ -28,6 +28,7 @@ use App\Constants\Permissions;
  */
 class CatalogueWorkflowIntegrityTest extends TestCase
 {
+    use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private MaterialCategory $leaf;
@@ -41,6 +42,8 @@ class CatalogueWorkflowIntegrityTest extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         foreach (['Stores', 'Production', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);
+            // Report 61: Stores actions are authorised by permission, as in production.
+            $this->grantMatrixPermissions($role);
         }
         Role::findByName('Stores')->givePermissionTo([
             Permissions::MATERIALS_LIBRARY_VIEW, Permissions::MATERIALS_LIBRARY_MANAGE,

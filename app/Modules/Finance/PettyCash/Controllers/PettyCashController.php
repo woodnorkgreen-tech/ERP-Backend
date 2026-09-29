@@ -32,6 +32,28 @@ class PettyCashController extends Controller
     }
 
     /**
+     * Report 61 (D-1): the petty-cash register and float were readable by any
+     * signed-in user — PettyCashPolicy defined viewAny/viewBalance but nothing
+     * called them. The register (disbursements, transactions, vouchers, search)
+     * needs `finance.petty_cash.view`; anything revealing the float needs
+     * `finance.petty_cash.view_balance`. Requesters keep their own requisitions
+     * through PettyCashRequisitionController::mayView, which is unaffected.
+     */
+    private function refuse(string $ability): ?JsonResponse
+    {
+        if (Auth::user()?->can($ability, Payment::class)) {
+            return null;
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $ability === 'viewBalance'
+                ? 'You do not have permission to view the petty cash balance.'
+                : 'You do not have permission to view the petty cash register.',
+        ], 403);
+    }
+
+    /**
      * Get approved projects list for petty cash forms
      * Proxies to the Projects module logic to ensure consistent data access
      */
@@ -268,6 +290,10 @@ class PettyCashController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'status', 'classification', 'transaction_classification', 'payment_method', 'project_name',
@@ -506,6 +532,10 @@ class PettyCashController extends Controller
      */
     public function show(int $id): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $disbursement = $this->repository->findDisbursement($id);
 
@@ -639,6 +669,10 @@ class PettyCashController extends Controller
      */
     public function transactions(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'payment_method', 'creator_id', 'start_date', 'end_date', 
@@ -674,6 +708,10 @@ class PettyCashController extends Controller
      */
     public function balance(): JsonResponse
     {
+        if ($denied = $this->refuse('viewBalance')) {
+            return $denied;
+        }
+
         try {
             $balance = $this->repository->getCurrentBalance();
 
@@ -695,6 +733,10 @@ class PettyCashController extends Controller
      */
     public function summary(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'start_date', 'end_date', 'classification', 'project_name'
@@ -721,6 +763,10 @@ class PettyCashController extends Controller
      */
     public function voucher(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'start_date', 'end_date', 'classification', 'project_name'
@@ -744,6 +790,10 @@ class PettyCashController extends Controller
 
     public function downloadVoucherPdf(Request $request)
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'start_date', 'end_date', 'classification', 'project_name'
@@ -787,6 +837,10 @@ class PettyCashController extends Controller
      */
     public function recent(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $limit = $request->get('limit', 10);
             $recentTransactions = $this->service->getRecentTransactions($limit);
@@ -809,6 +863,10 @@ class PettyCashController extends Controller
      */
     public function search(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse('viewAny')) {
+            return $denied;
+        }
+
         try {
             $request->validate([
                 'query' => 'required|string|min:2',
@@ -847,6 +905,12 @@ class PettyCashController extends Controller
      */
     public function recalculateBalance(): JsonResponse
     {
+        // Report 61 (D-1): rebuilding the stored balance is a write. It was open to
+        // any signed-in user; it now needs the purpose-built permission.
+        if (! Auth::user()?->can(Permissions::FINANCE_PETTY_CASH_RECALCULATE_BALANCE)) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to recalculate the petty cash balance.'], 403);
+        }
+
         try {
             $result = $this->service->recalculateBalance();
 
