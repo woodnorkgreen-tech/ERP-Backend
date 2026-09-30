@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Printing\Controllers\PrintJobController;
+use App\Modules\Printing\Controllers\PrintHistoryImportController;
 use App\Modules\Printing\Controllers\PrintLookupController;
 use App\Modules\Printing\Controllers\PrintManualConsumptionController;
 use App\Modules\Printing\Controllers\PrintMaterialRequestController;
@@ -11,6 +12,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/dashboard', [PrintingDashboardController::class, 'index']);
 Route::get('/dashboard/project-usage', [PrintingDashboardController::class, 'projectUsage']);
+Route::get('/dashboard/monthly-consumption', [PrintingDashboardController::class, 'monthlyConsumption']);
+
+Route::post('/history-imports/preview', [PrintHistoryImportController::class, 'preview']);
+Route::post('/history-imports/{batchId}/commit', [PrintHistoryImportController::class, 'commit']);
 
 Route::get('/jobs', [PrintJobController::class, 'index']);
 Route::get('/job-bundles', [PrintJobController::class, 'bundles']);

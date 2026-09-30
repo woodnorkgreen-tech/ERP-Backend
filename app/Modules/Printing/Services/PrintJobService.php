@@ -32,6 +32,11 @@ class PrintJobService
 
     public function transition(PrintJob $job, string $status, ?string $reason = null): PrintJob
     {
+        if ($job->origin === 'historical_import') {
+            throw ValidationException::withMessages([
+                'status' => ['Imported historical jobs cannot enter the live printing workflow.'],
+            ]);
+        }
         if ($status === 'reprint_required' && !in_array($job->status, ['completed', 'reprint_required'], true)) {
             throw ValidationException::withMessages([
                 'status' => ['Only completed print jobs can be marked as requiring a reprint.'],
@@ -94,6 +99,11 @@ class PrintJobService
 
     public function reprint(PrintJob $job, string $reason): PrintJob
     {
+        if ($job->origin === 'historical_import') {
+            throw ValidationException::withMessages([
+                'order_type' => ['Create live reprints from a new print job.'],
+            ]);
+        }
         if (!in_array($job->status, ['completed', 'reprint_required'], true)) {
             throw ValidationException::withMessages([
                 'status' => ['Only completed print jobs can be reprinted.'],

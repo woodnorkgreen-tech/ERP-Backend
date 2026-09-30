@@ -14,6 +14,8 @@ class PrintJobConsumptionResource extends JsonResource
             'print_job_id' => $this->print_job_id,
             'print_roll_id' => $this->print_roll_id,
             'material_id' => $this->material_id,
+            'material_name_snapshot' => $this->material_name_snapshot,
+            'material_family' => $this->material_family,
             'artwork_width_m' => $this->float('artwork_width_m'),
             'artwork_height_m' => $this->float('artwork_height_m'),
             'artwork_count' => $this->artwork_count,
