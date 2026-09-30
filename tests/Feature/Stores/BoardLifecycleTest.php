@@ -24,6 +24,7 @@ use Tests\TestCase;
  */
 class BoardLifecycleTest extends TestCase
 {
+    use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private LibraryMaterial $material;
@@ -38,6 +39,7 @@ class BoardLifecycleTest extends TestCase
         // roles the lifecycle addresses must be present regardless of who acts.
         foreach (['Stores', 'Production', 'Manager', 'Super Admin', 'Logistics'] as $role) {
             Role::findOrCreate($role);
+            $this->grantMatrixPermissions($role);
         }
 
         $workstationId = DB::table('workstations')->insertGetId([
@@ -73,6 +75,7 @@ class BoardLifecycleTest extends TestCase
     {
         $user = User::factory()->create();
         Role::findOrCreate($role);
+        $this->grantMatrixPermissions($role);
         $user->assignRole($role);
         Sanctum::actingAs($user->fresh());
 

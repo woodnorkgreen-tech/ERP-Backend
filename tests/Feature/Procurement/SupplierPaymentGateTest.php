@@ -71,6 +71,8 @@ class SupplierPaymentGateTest extends TestCase
          * architecture was unified there is one payments table behind both.
          */
         $accountsRole = Role::findOrCreate('Accounts', 'web');
+        // Report 60: bill verification is a permission, which Accounts holds (RolePermissions).
+        \Spatie\Permission\Models\Role::findByName('Accounts', 'web')->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::FINANCE_PAYABLES_VERIFY, 'web'));
         $accountsRole->givePermissionTo(
             Permission::findOrCreate('finance.petty_cash.create_disbursement', 'web'),
         );
@@ -284,7 +286,7 @@ class SupplierPaymentGateTest extends TestCase
             ->assertStatus(422);
 
         $this->assertContains(
-            'Invoice does not exceed the value accepted into stock',
+            'Invoice does not exceed the remaining accepted (unbilled) value',
             $response->json('blockers')
         );
     }

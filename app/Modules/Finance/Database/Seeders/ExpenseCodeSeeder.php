@@ -143,9 +143,21 @@ class ExpenseCodeSeeder extends Seeder
         $costCentres = DB::table('cost_centres')->where('is_active', true)->pluck('id', 'code');
         $activities = DB::table('activities')->where('is_active', true)->pluck('id', 'code');
 
-        DB::transaction(function () use ($accounts, $costCentres, $activities) {
+        // Keyed by code: what is already there decides what a re-run may change.
+        $existing = ExpenseCode::query()->get(['code', 'is_active', 'default_debit_account_id'])->keyBy('code');
+        // Headers included: a code naming a header waits for a person by design.
+        $inChart = DB::table('chart_of_accounts')->pluck('code')->flip();
+        $unresolved = [];
+
+        DB::transaction(function () use ($accounts, $costCentres, $activities, $existing, $inChart, &$unresolved) {
             foreach ($this->rows() as $row) {
-                $row['default_debit_account_id'] = $this->resolveAccount($row['default_debit_gl'] ?? null, $accounts);
+                $current = $existing->get($row['code']);
+
+                // Never wipe a link Finance has set: a chart without the reference
+                // account (a company keeping its own codes) resolves to null here,
+                // and writing that null used to switch a working code off.
+                $row['default_debit_account_id'] = $this->resolveAccount($row['default_debit_gl'] ?? null, $accounts)
+                    ?? $current?->default_debit_account_id;
                 $row['default_cost_centre_id'] = $this->resolveDimension(
                     CatalogueDimensionMap::costCentreCode($row['default_cost_centre'] ?? null), $costCentres
                 );
@@ -161,11 +173,32 @@ class ExpenseCodeSeeder extends Seeder
                 // Keep the catalogue row for the future dedicated workflow,
                 // while removing it from ordinary cost capture until Finance
                 // gives it an explicit posting destination.
-                $row['is_active'] = $row['default_debit_account_id'] !== null;
+                //
+                // On a re-run, a code the seeder itself switched off (it had no
+                // account) comes back once it has one. A code Finance switched off
+                // while it had an account stays off.
+                $row['is_active'] = match (true) {
+                    $row['default_debit_account_id'] === null => false,
+                    $current === null, $current->default_debit_account_id === null => true,
+                    default => (bool) $current->is_active,
+                };
+
+                $local = ChartAccountMap::localFromGl($row['default_debit_gl'] ?? null);
+                if ($row['default_debit_account_id'] === null && $local !== null && ! $inChart->has($local)) {
+                    $unresolved[] = $row['code'];
+                }
 
                 ExpenseCode::updateOrCreate(['code' => $row['code']], $row);
             }
         });
+
+        // Said out loud: this used to happen silently, and production ran with
+        // 2 of 76 purchase categories until a user noticed.
+        if ($unresolved !== []) {
+            $this->command?->warn(count($unresolved).' expense codes left inactive: their debit account is not in the chart ('
+                .implode(', ', array_slice($unresolved, 0, 10)).(count($unresolved) > 10 ? ', …' : '')
+                .'). Run php artisan finance:readiness for the fix.');
+        }
     }
 
     /**

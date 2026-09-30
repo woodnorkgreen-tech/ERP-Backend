@@ -121,12 +121,15 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::delete('performance-reviews/{review}',  [PerformanceReviewController::class, 'destroy']);
         });
 
-        // Technical Labour management
-        // Promotion creates a real staff record, so it requires the employee-create permission
-        // (the route is otherwise only auth-gated and would bypass employee.create entirely).
-        Route::post('technical-labour/{technicalLabour}/promote', [TechnicalLabourController::class, 'promote'])
-            ->middleware('permission:' . Permissions::EMPLOYEE_CREATE);
-        Route::apiResource('technical-labour', TechnicalLabourController::class);
+        // W7-10: TechnicalLabour active routes decommissioned 2026-09-24.
+        // The HR Technical/Casual Labour workflow is replaced by W7 Project Labour Actuals
+        // (finance/costs/projects/{enquiry}/labour-actuals). WNG confirmed this workflow
+        // was not in operational use. The model, table, and historical FK columns are
+        // preserved for audit trail — only the active API surface is retired.
+        //
+        // Route::post('technical-labour/{technicalLabour}/promote', [TechnicalLabourController::class, 'promote'])
+        //     ->middleware('permission:' . Permissions::EMPLOYEE_CREATE);
+        // Route::apiResource('technical-labour', TechnicalLabourController::class);
 
         // Department management
         Route::get('departments', [DepartmentController::class, 'index'])
@@ -199,6 +202,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('advances', [SalaryAdvanceController::class, 'index']);
         Route::post('advances/{id}/approve', [SalaryAdvanceController::class, 'approve']);
         Route::post('advances/{id}/reject', [SalaryAdvanceController::class, 'reject']);
+        Route::post('advances/{id}/disburse', [SalaryAdvanceController::class, 'disburse']);
+        Route::post('advances/{id}/recoveries', [SalaryAdvanceController::class, 'recordRecovery']);
         Route::get('my-advances', [SalaryAdvanceController::class, 'myRequests']);
         Route::post('my-advances', [SalaryAdvanceController::class, 'store']);
 

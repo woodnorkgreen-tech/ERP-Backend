@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Real-data rehearsal smoke test (Report 52). NOT part of the normal suites.
+  It uses the checkout's own .env (a disposable wng_*rehearsal* database with
+  QUEUE_CONNECTION=database) and COMMITS data there. The test refuses any other
+  database. Never run it from a checkout pointed at a live or shared database.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true">
+    <testsuites>
+        <testsuite name="Rehearsal">
+            <directory>tests/Rehearsal</directory>
+        </testsuite>
+    </testsuites>
+    <php>
+        <env name="MAIL_MAILER" value="log"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+    </php>
+</phpunit>

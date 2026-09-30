@@ -182,12 +182,18 @@ class PettyCashCommitmentTest extends TestCase
             'created_by' => $this->user->id,
         ]);
 
-        $this->assertSame('posted', $this->producer->postFor($disbursement));
+        // STAB-7 (finance-redesign/phase-2/14_STAB_7_PETTY_CASH_TRIPLE_POSTING_ANALYSIS.md):
+        // a requisition-linked disbursement is an advance, not yet the final
+        // expense, so postFor() no longer posts an ACTUAL cost line for it here
+        // — that used to happen on top of PettyCashAdvancePoster's own advance
+        // entry, recognising the same spend before it was even surrendered.
+        $this->assertSame('skipped_requisition_advance', $this->producer->postFor($disbursement));
 
-        // The promise is discharged, not left standing beside the payment —
-        // otherwise the project would carry the same money twice.
+        // The promise IS still discharged the moment cash leaves — that part of
+        // this test's original intent is unaffected — but no ACTUAL cost line
+        // exists yet; the real expense is recognised only at surrender.
         $this->assertSame(CostLine::STATUS_REVERSED, $commitment->fresh()->status);
-        $this->assertSame(1, CostLine::where('nature', CostLine::NATURE_ACTUAL)
+        $this->assertSame(0, CostLine::where('nature', CostLine::NATURE_ACTUAL)
             ->where('status', CostLine::STATUS_VERIFIED)->count());
     }
 
@@ -356,7 +362,9 @@ class PettyCashCommitmentTest extends TestCase
         return (int) (DB::table('payment_sources')->where('code', 'PC-TEST')->value('id')
             ?: DB::table('payment_sources')->insertGetId([
                 'code' => 'PC-TEST', 'name' => 'Test Petty Cash Float', 'type' => 'petty_cash',
-                'currency' => 'KES', 'is_active' => 1, 'created_at' => now(), 'updated_at' => now(),
+                'currency' => 'KES', 'is_active' => 1, 'can_make_payment' => 1,
+                'gl_account_id' => ChartOfAccount::where('code', '1030')->value('id'),
+                'created_at' => now(), 'updated_at' => now(),
             ]));
     }
 

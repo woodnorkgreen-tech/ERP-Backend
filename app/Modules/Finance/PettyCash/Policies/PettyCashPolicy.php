@@ -125,17 +125,11 @@ class PettyCashPolicy
         return $user->can(Permissions::FINANCE_PETTY_CASH_VIEW_REPORTS);
     }
 
-    /**
-     * Wipe every disbursement, top-up and balance.
-     *
-     * Left as Super Admin only, via before(). `finance.petty_cash.admin` is
-     * granted to Accounts, so gating this on the permission — as every other
-     * ability here does — would hand a full-data-wipe to a second role. That is
-     * a change of a different kind from letting Finance void a voucher, and it
-     * is not one to make as a side effect of consolidating authorization.
-     */
-    public function clearAll(User $user): bool
-    {
-        return false;
-    }
+    // clearAll() (wipe every disbursement/top-up/balance) was removed here.
+    // Critical Risk C6 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+    // a full-data-wipe should not be reachable from the production API at
+    // all, regardless of who could pass the gate. The equivalent capability
+    // now exists only as `php artisan petty-cash:clear-all-non-production`,
+    // which refuses to run outside local/testing environments — see
+    // App\Modules\Finance\PettyCash\Console\ClearAllPettyCashDataCommand.
 }

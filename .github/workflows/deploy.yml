@@ -47,20 +47,18 @@ jobs:
             # invalidates every session and every encrypted value. A key is
             # provisioned once, by hand, and then left alone.
 
-            # No db:seed. That command means DatabaseSeeder, which also plants
-            # demo employees, demo clients and @company.com logins.
+            # No db:seed, and no ReferenceDataSeeder either. Most reference
+            # seeders overwrite rows people edit in the app (expense codes,
+            # payroll rates, settings, team and design types), so re-running
+            # them on every deploy would quietly undo those edits. Seeding stays
+            # a deliberate, attended step: docs/seeding-in-production.md.
             #
-            # The reference data — permissions, the expense catalogue, the
-            # accounting calendar, statutory payroll rates — is now separable and
-            # safe to re-run:
-            #
-            #   php artisan db:seed --class=ReferenceDataSeeder --force
-            #
-            # It is not automatic yet on purpose. PayrollSeeder and
-            # AssetCategorySeeder have never run on this database, so the first
-            # run inserts rather than upserts and wants somebody watching it.
-            # Once it has been run by hand and the result checked, add it here.
-            # See docs/seeding-in-production.md.
+            # What runs instead is the check that seeding is needed. It is
+            # read-only, and it is LAST on purpose: this script's exit status
+            # is its last command's, so missing reference data turns the run
+            # red and prints the fix. On 2026-09-29 production served 2 of 76
+            # purchase categories behind a green deploy until a user noticed.
+            php artisan finance:readiness
 
       - name: Deploy to staging
         if: github.ref == 'refs/heads/staging'
@@ -79,3 +77,5 @@ jobs:
             php artisan route:cache
             php artisan view:cache
             php artisan stores:process-finance-postings
+            # Last, so its exit status is the run's. See the production job.
+            php artisan finance:readiness

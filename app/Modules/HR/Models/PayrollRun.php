@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use App\Modules\Finance\Models\JournalEntry;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Models\PaymentSource;
 
 class PayrollRun extends Model
@@ -28,6 +29,7 @@ class PayrollRun extends Model
         'payment_source_id',
         'payment_date',
         'payment_reference',
+        'payment_id',
     ];
 
     protected $casts = [
@@ -77,5 +79,16 @@ class PayrollRun extends Model
     public function paymentSource(): BelongsTo
     {
         return $this->belongsTo(PaymentSource::class, 'payment_source_id');
+    }
+
+    /**
+     * The independent money-movement record for this run's net-pay
+     * disbursement — see Critical Risk C7 in
+     * finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md. Null for
+     * any run paid before this was introduced.
+     */
+    public function payment(): BelongsTo
+    {
+        return $this->belongsTo(Payment::class, 'payment_id');
     }
 }

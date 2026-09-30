@@ -30,10 +30,34 @@ class PettyCashTopUpController extends Controller
     }
 
     /**
+     * Report 61 (D-1): top-ups and the float were readable by any signed-in
+     * user. Each read now needs one of the named permissions: the register
+     * (`finance.petty_cash.view`), the float (`view_balance`), or — for the
+     * balance check a disbursement form makes — the disbursement permission.
+     *
+     * @param  list<string>  $permissions  any one suffices
+     */
+    private function refuse(array $permissions): ?JsonResponse
+    {
+        $user = request()->user();
+        foreach ($permissions as $permission) {
+            if ($user?->can($permission)) {
+                return null;
+            }
+        }
+
+        return response()->json(['success' => false, 'message' => 'You do not have permission to view petty cash float information.'], 403);
+    }
+
+    /**
      * Display a listing of top-ups.
      */
     public function index(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_VIEW])) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only([
                 'payment_method', 'creator_id', 'start_date', 'end_date', 'search'
@@ -158,6 +182,10 @@ class PettyCashTopUpController extends Controller
      */
     public function show(int $id): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_VIEW])) {
+            return $denied;
+        }
+
         try {
             $topUp = $this->repository->findTopUp($id);
 
@@ -186,6 +214,10 @@ class PettyCashTopUpController extends Controller
      */
     public function balance(): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE])) {
+            return $denied;
+        }
+
         try {
             $balance = $this->repository->getCurrentBalance();
 
@@ -207,6 +239,10 @@ class PettyCashTopUpController extends Controller
      */
     public function available(): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_VIEW])) {
+            return $denied;
+        }
+
         try {
             $availableTopUps = $this->repository->getTopUpsWithAvailableBalance();
 
@@ -230,6 +266,10 @@ class PettyCashTopUpController extends Controller
      */
     public function availableBalance(int $id): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE])) {
+            return $denied;
+        }
+
         try {
             $availableBalance = $this->service->getTopUpAvailableBalance($id);
 
@@ -254,6 +294,10 @@ class PettyCashTopUpController extends Controller
      */
     public function validateTopUp(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_CREATE_TOP_UP])) {
+            return $denied;
+        }
+
         try {
             $validationErrors = $this->service->validateTopUpData($request->all());
 
@@ -283,6 +327,10 @@ class PettyCashTopUpController extends Controller
      */
     public function checkBalance(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE, Permissions::FINANCE_PETTY_CASH_CREATE])) {
+            return $denied;
+        }
+
         try {
             $request->validate([
                 'amount' => 'required|numeric|min:0.01',
@@ -319,6 +367,10 @@ class PettyCashTopUpController extends Controller
      */
     public function trends(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE])) {
+            return $denied;
+        }
+
         try {
             $months = max(1, min((int) $request->get('months', 12), 24));
             $startDate = now()->subMonths($months - 1)->startOfMonth();
@@ -387,6 +439,10 @@ class PettyCashTopUpController extends Controller
      */
     public function statistics(Request $request): JsonResponse
     {
+        if ($denied = $this->refuse([Permissions::FINANCE_PETTY_CASH_VIEW])) {
+            return $denied;
+        }
+
         try {
             $filters = $request->only(['start_date', 'end_date', 'classification', 'project_name']);
             $summary = $this->service->getTransactionSummary($filters);

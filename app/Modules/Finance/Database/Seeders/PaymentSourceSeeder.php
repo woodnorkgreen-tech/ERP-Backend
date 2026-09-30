@@ -3,6 +3,7 @@
 namespace App\Modules\Finance\Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use App\Modules\Finance\Support\ChartAccountMap;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -51,6 +52,15 @@ class PaymentSourceSeeder extends Seeder
     public function run(): void
     {
         $accounts = DB::table('chart_of_accounts')->pluck('id', 'code');
+        // The reference code each source names is translated through the account
+        // map, so a company on its own chart (WNG, D3) links to its own accounts.
+        // A chart profile names each source's account explicitly (null = leave it
+        // unlinked): every bank here names the generic 1010, so on a company's own
+        // chart a map alone would link Stanbic, KCB, Family and Card to one bank.
+        $profile = (array) config('finance_accounts.payment_sources', []);
+        $resolve = fn (string $code, string $reference) => array_key_exists($code, $profile)
+            ? ($profile[$code] !== null ? ($accounts[$profile[$code]] ?? null) : null)
+            : ($accounts[ChartAccountMap::local($reference)] ?? null);
         $now = now();
 
         foreach (self::SOURCES as $source) {
@@ -72,7 +82,11 @@ class PaymentSourceSeeder extends Seeder
                     // structural fact about the account, not an admin
                     // preference such as `is_active`.
                     'can_make_payment' => $type !== 'payable',
-                    'gl_account_id' => $accounts[$accountCode] ?? null,
+                    // Never wipe a link Finance has set on the paying-accounts screen:
+                    // a generic reference code (all banks name 1010) cannot say which
+                    // real bank account a source is, so only fill an empty link.
+                    'gl_account_id' => DB::table('payment_sources')->where('code', $code)->value('gl_account_id')
+                        ?? $resolve($code, $accountCode),
                     'currency' => 'KES',
                     'updated_at' => $now,
                     'created_at' => $now,

@@ -73,6 +73,11 @@ class PettyCashRepository
             $query->byClassification($filters['classification']);
         }
 
+        // W3-1: e.g. every walk-in cash purchase, for Finance's separate count/total.
+        if (!empty($filters['transaction_classification'])) {
+            $query->where('transaction_classification', $filters['transaction_classification']);
+        }
+
         if (!empty($filters['payment_method'])) {
             $query->byPaymentMethod($filters['payment_method']);
         }

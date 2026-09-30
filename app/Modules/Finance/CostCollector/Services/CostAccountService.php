@@ -63,6 +63,20 @@ class CostAccountService
         JSON_UNQUOTE(JSON_EXTRACT(cost_lines.details, '$.library_material_id'))
     )";
 
+    /**
+     * The budget category a cost line reports under: its own, else the planned line it
+     * consumes, else unbudgeted. One binding: the unbudgeted label. Shared by the
+     * project statement and the portfolio so the two cannot classify differently.
+     */
+    private const CATEGORY_EXPR = "COALESCE(
+        JSON_UNQUOTE(JSON_EXTRACT(cost_lines.details, '$.budget_category')),
+        JSON_UNQUOTE(JSON_EXTRACT(
+            (SELECT planned.details FROM cost_lines AS planned WHERE planned.id = cost_lines.consumes_line_id),
+            '$.budget_category'
+        )),
+        CASE WHEN cost_lines.consumes_line_id IS NULL THEN ? ELSE 'Other project costs' END
+    )";
+
     private const NATURE_SUMS = '
         SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS planned,
         SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS committed,
@@ -261,9 +275,10 @@ class CostAccountService
         ];
     }
 
+    /** A decimal SQL sum as an exact 2dp string — never through a float. */
     private function money(mixed $value): string
     {
-        return number_format((float) ($value ?? 0), 2, '.', '');
+        return bcadd(is_numeric($value) ? (string) $value : '0', '0', 2);
     }
 
     /** @return array<string, mixed> */
@@ -272,15 +287,7 @@ class CostAccountService
         $rows = CostLine::query()
             ->where('project_enquiry_id', $enquiry->id)
             ->counting()
-            ->selectRaw("
-                COALESCE(
-                    JSON_UNQUOTE(JSON_EXTRACT(details, '$.budget_category')),
-                    JSON_UNQUOTE(JSON_EXTRACT(
-                        (SELECT planned.details FROM cost_lines AS planned WHERE planned.id = cost_lines.consumes_line_id),
-                        '$.budget_category'
-                    )),
-                    CASE WHEN consumes_line_id IS NULL THEN ? ELSE 'Other project costs' END
-                ) AS category,
+            ->selectRaw(self::CATEGORY_EXPR . " AS category,
                 nature,
                 SUM(net_amount) AS total,
                 SUM(CASE WHEN nature <> ? AND consumes_line_id IS NULL THEN net_amount ELSE 0 END) AS unbudgeted,
@@ -295,9 +302,13 @@ class CostAccountService
 
         return [
             'project' => [
-                'enquiry_id' => $enquiry->id,
-                'job_number' => $enquiry->job_number,
-                'title' => $enquiry->title,
+                'enquiry_id'               => $enquiry->id,
+                'job_number'               => $enquiry->job_number,
+                'title'                    => $enquiry->title,
+                // W6-5: financial closure status — Finance control, independent
+                // of the project's operational status.
+                'financial_closure_status' => $enquiry->financial_closure_status ?? 'open',
+                'financially_closed_at'    => $enquiry->financially_closed_at?->toIso8601String(),
             ],
             'totals' => $totals,
             'categories' => $categories,
@@ -311,6 +322,155 @@ class CostAccountService
             'margin' => $margin,
             'alerts' => $this->alerts($totals, $margin),
         ];
+    }
+
+    /**
+     * Portfolio-level margin for multiple projects — one batched query, not N+1.
+     *
+     * W6-2: The existing index() method intentionally omits margin (portfolio is
+     * already expensive). This method is the opt-in margin view, called when Finance
+     * explicitly requests margin data for a set of projects. All needed data is
+     * batch-queried upfront so the frontend sees one round trip, not one per project.
+     *
+     * @param  int[]  $enquiryIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function portfolioMargin(array $enquiryIds): array
+    {
+        if (empty($enquiryIds)) {
+            return [];
+        }
+
+        // Batch 1: billed revenue per enquiry.
+        $billedByEnquiry = DB::table('project_invoices')
+            ->whereIn('project_enquiry_id', $enquiryIds)
+            ->whereNot('status', 'void')
+            ->whereNotNull('journal_entry_id')
+            ->selectRaw('project_enquiry_id, SUM(total_amount) AS billed')
+            ->groupBy('project_enquiry_id')
+            ->pluck('billed', 'project_enquiry_id');
+
+        // Batch 2: WIP released (COS journal lines) per enquiry.
+        $releasedByEnquiry = DB::table('journal_lines as jl')
+            ->join('journal_entries as je', 'je.id', '=', 'jl.journal_entry_id')
+            ->join('chart_of_accounts as coa', 'coa.id', '=', 'jl.account_id')
+            ->whereIn('jl.project_enquiry_id', $enquiryIds)
+            ->whereIn('je.status', ['posted', 'reversed'])
+            ->where('je.source_type', \App\Modules\Finance\Models\ProjectInvoice::class)
+            ->where(function ($q) {
+                $q->where('coa.code', 'like', '5%')
+                    ->orWhere('coa.code', 'like', 'COS-%');
+            })
+            ->selectRaw(
+                'jl.project_enquiry_id, '
+                . "COALESCE(SUM(CASE WHEN jl.entry_type = 'debit' THEN jl.base_amount ELSE -jl.base_amount END), 0) AS released",
+            )
+            ->groupBy('jl.project_enquiry_id')
+            ->pluck('released', 'project_enquiry_id');
+
+        // Batch 3a: verified actual direct cost per enquiry (excluding allocated parent lines).
+        $directByEnquiry = CostLine::query()
+            ->whereIn('project_enquiry_id', $enquiryIds)
+            ->counting()
+            ->where('nature', CostLine::NATURE_ACTUAL)
+            ->whereDoesntHave('allocations')
+            ->selectRaw('project_enquiry_id, SUM(net_amount) AS actual')
+            ->groupBy('project_enquiry_id')
+            ->pluck('actual', 'project_enquiry_id');
+
+        // Batch 3b: verified actual allocated slices per enquiry.
+        $allocatedByEnquiry = \App\Modules\Finance\CostCollector\Models\CostLineAllocation::query()
+            ->whereIn('project_enquiry_id', $enquiryIds)
+            ->whereHas('costLine', fn ($q) => $q->counting()->where('nature', CostLine::NATURE_ACTUAL))
+            ->selectRaw('project_enquiry_id, SUM(allocated_amount) AS allocated')
+            ->groupBy('project_enquiry_id')
+            ->pluck('allocated', 'project_enquiry_id');
+
+        // Batch 4: agreed quote amounts per enquiry (latest approved only).
+        $agreedByEnquiry = DB::table('quote_approvals')
+            ->whereIn('enquiry_id', $enquiryIds)
+            ->where('approval_status', 'approved')
+            ->orderByDesc('updated_at')
+            ->get(['enquiry_id', 'quote_amount'])
+            ->unique('enquiry_id')
+            ->pluck('quote_amount', 'enquiry_id');
+
+        // Batch 5 (W7): verified Actual Labour per enquiry, classified with exactly the
+        // category expression forEnquiry() uses, so a portfolio figure always equals
+        // the sum of the matching project statements.
+        $labourByEnquiry = CostLine::query()
+            ->whereIn('project_enquiry_id', $enquiryIds)
+            ->counting()
+            ->where('nature', CostLine::NATURE_ACTUAL)
+            ->whereRaw(self::CATEGORY_EXPR . ' = ?', [self::CATEGORY_UNBUDGETED, 'labour'])
+            ->selectRaw('project_enquiry_id, SUM(net_amount) AS labour')
+            ->groupBy('project_enquiry_id')
+            ->pluck('labour', 'project_enquiry_id');
+
+        // W7: Pre-load enquiry IDs that have at least one Finance-verified labour actual.
+        // Single query to avoid N+1 per enquiry in the loop below.
+        $enquiriesWithLabourActuals = \App\Modules\Finance\CostCollector\Models\ProjectLabourActual::query()
+            ->whereIn('project_enquiry_id', $enquiryIds)
+            ->where('status', \App\Modules\Finance\CostCollector\Models\ProjectLabourActual::STATUS_FINANCE_VERIFIED)
+            ->distinct()
+            ->pluck('project_enquiry_id')
+            ->flip()     // convert to [id => index] for O(1) lookup
+            ->all();
+
+        $costCompleteness = [
+            'materials'   => 'included',
+            'procurement' => 'included',
+            'expenses'    => 'included',
+            'labour'      => null,          // resolved per-enquiry below using $enquiriesWithLabourActuals
+            'logistics'   => 'not_included', // W8 — pending WNG decision
+            'overhead'    => 'not_included', // overhead allocation — pending WNG decision
+        ];
+
+        $result = [];
+        foreach ($enquiryIds as $enquiryId) {
+            $billed = $this->money($billedByEnquiry[$enquiryId] ?? 0);
+            $released = $this->money($releasedByEnquiry[$enquiryId] ?? 0);
+            $directActual = (string) ($directByEnquiry[$enquiryId] ?? 0);
+            $allocatedActual = (string) ($allocatedByEnquiry[$enquiryId] ?? 0);
+            $actual = $this->money(bcadd($directActual, $allocatedActual, 2));
+
+            $usesRelease = bccomp($released, '0.00', 2) === 1;
+            $costOfSales = $usesRelease ? $released : $actual;
+            $basis = $usesRelease ? 'released' : 'actual';
+            $margin = bcsub($billed, $costOfSales, 2);
+            $marginPercent = bccomp($billed, '0.00', 2) === 1
+                ? round((float) bcmul(bcdiv($margin, $billed, 6), '100', 4), 1)
+                : null;
+
+            $agreed = (float) ($agreedByEnquiry[$enquiryId] ?? 0);
+            $fraction = ($agreed > 0 && bccomp($billed, '0.00', 2) === 1)
+                ? bcdiv($billed, $this->money($agreed), 6)
+                : '0.000000';
+            if (bccomp($fraction, '1.000000', 6) > 0) {
+                $fraction = '1.000000';
+            }
+
+            $enquiryCompleteness = $costCompleteness;
+            $enquiryCompleteness['labour'] = array_key_exists($enquiryId, $enquiriesWithLabourActuals)
+                ? 'included'
+                : 'not_included';
+
+            $result[$enquiryId] = [
+                'billed_revenue'         => $billed,
+                'actual_labour'          => $this->money($labourByEnquiry[$enquiryId] ?? 0),
+                'cost_of_sales'          => $costOfSales,
+                'cost_basis'             => $basis,
+                'margin'                 => $margin,
+                'margin_percent'         => $marginPercent,
+                'billed_fraction'        => $fraction,
+                'cost_completeness'      => $enquiryCompleteness,
+                'margin_type'            => 'direct',
+                'margin_status'          => 'provisional',
+                'fully_loaded_available' => false,
+            ];
+        }
+
+        return $result;
     }
 
     /**
@@ -417,13 +577,19 @@ class CostAccountService
                 ->value('released'),
         );
 
-        $actual = $this->money(
-            CostLine::query()
-                ->where('project_enquiry_id', $enquiry->id)
-                ->counting()
-                ->where('nature', CostLine::NATURE_ACTUAL)
-                ->sum('net_amount'),
-        );
+        $directActual = CostLine::query()
+            ->where('project_enquiry_id', $enquiry->id)
+            ->counting()
+            ->where('nature', CostLine::NATURE_ACTUAL)
+            ->whereDoesntHave('allocations')
+            ->sum('net_amount');
+
+        $allocatedIn = \App\Modules\Finance\CostCollector\Models\CostLineAllocation::query()
+            ->where('project_enquiry_id', $enquiry->id)
+            ->whereHas('costLine', fn ($q) => $q->counting()->where('nature', CostLine::NATURE_ACTUAL))
+            ->sum('allocated_amount');
+
+        $actual = $this->money(bcadd((string) $directActual, (string) $allocatedIn, 2));
 
         $usesRelease = bccomp($released, '0.00', 2) === 1;
         $costOfSales = $usesRelease ? $released : $actual;
@@ -447,16 +613,36 @@ class CostAccountService
             $fraction = '1.000000';
         }
 
+        // W6-1 / W7: cost completeness — which categories are included in this margin.
+        // Labour is now dynamic: 'included' if at least one Finance-verified labour actual exists.
+        $hasLabourActuals = \App\Modules\Finance\CostCollector\Models\ProjectLabourActual::query()
+            ->where('project_enquiry_id', $enquiry->id)
+            ->where('status', \App\Modules\Finance\CostCollector\Models\ProjectLabourActual::STATUS_FINANCE_VERIFIED)
+            ->exists();
+
+        $costCompleteness = [
+            'materials'   => 'included',   // stores issues + direct materials
+            'procurement' => 'included',   // verified procurement cost lines
+            'expenses'    => 'included',   // verified expense/petty-cash cost lines
+            'labour'      => $hasLabourActuals ? 'included' : 'not_included', // W7 confirmed subset
+            'logistics'   => 'not_included', // W8 — pending WNG decision
+            'overhead'    => 'not_included', // overhead allocation — pending WNG decision
+        ];
+
         return [
-            'billed_revenue' => $billed,
-            'cost_of_sales' => $costOfSales,
-            'cost_basis' => $basis,
-            'margin' => $margin,
-            'margin_percent' => $marginPercent,
-            'billed_fraction' => $fraction,
-            'note' => $usesRelease
+            'billed_revenue'         => $billed,
+            'cost_of_sales'          => $costOfSales,
+            'cost_basis'             => $basis,
+            'margin'                 => $margin,
+            'margin_percent'         => $marginPercent,
+            'billed_fraction'        => $fraction,
+            'note'                   => $usesRelease
                 ? 'Cost of sales is Work in Progress released against issued invoices.'
                 : 'No WIP→COS release yet; margin uses verified actual costs until billing releases them.',
+            'cost_completeness'      => $costCompleteness,
+            'margin_type'            => 'direct',
+            'margin_status'          => 'provisional', // always provisional until W7/W8/overhead resolved
+            'fully_loaded_available' => false,         // W6-1A unconfirmed — labour/logistics not in scope
         ];
     }
 
@@ -719,9 +905,7 @@ class CostAccountService
     private function pivotByCategory($rows): array
     {
         return $rows->groupBy('category')->map(function ($group, $category) {
-            $of = fn (string $nature) => (string) number_format(
-                (float) ($group->firstWhere('nature', $nature)->total ?? 0), 2, '.', ''
-            );
+            $of = fn (string $nature) => $this->money($group->firstWhere('nature', $nature)->total ?? 0);
 
             $planned = $of(CostLine::NATURE_PLANNED);
             $spent = bcadd(
@@ -742,9 +926,7 @@ class CostAccountService
                 'spent' => $spent,
                 // Already inside `spent` — surfaced per category so an overrun
                 // can be read as planned-but-expensive or simply unplanned.
-                'unbudgeted' => (string) number_format(
-                    (float) $group->sum('unbudgeted'), 2, '.', ''
-                ),
+                'unbudgeted' => $group->reduce(fn ($carry, $row) => bcadd($carry, $this->money($row->unbudgeted), 2), '0.00'),
                 'remaining' => bcsub($planned, $spent, 2),
                 // Negative planned with spend against it is an overrun; the sign
                 // is left as-is so the client does not have to guess direction.

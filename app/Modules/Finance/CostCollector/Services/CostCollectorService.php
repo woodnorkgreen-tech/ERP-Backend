@@ -13,6 +13,7 @@ use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\ProcurementStores\Models\Supplier;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The single writer of cost lines.
@@ -36,6 +37,28 @@ class CostCollectorService implements CollectsCost
 
     public function collect(CostContext $context): CostLine
     {
+        // W6-5: A financially closed project cannot receive new costs.
+        // The reopen permission (finance.costs.reopen) must be exercised first.
+        if ($context->enquiryId) {
+            $closure = DB::table('project_enquiries')
+                ->where('id', $context->enquiryId)
+                ->value('financial_closure_status');
+            if ($closure === 'closed') {
+                throw ValidationException::withMessages([
+                    'enquiry_id' => ['This project is financially closed. New costs cannot be recorded until the closure is reopened (finance.costs.reopen required).'],
+                ]);
+            }
+        } elseif ($context->jobNumber) {
+            $closure = DB::table('project_enquiries')
+                ->where('job_number', $context->jobNumber)
+                ->value('financial_closure_status');
+            if ($closure === 'closed') {
+                throw ValidationException::withMessages([
+                    'job_number' => ['This project is financially closed. New costs cannot be recorded until the closure is reopened (finance.costs.reopen required).'],
+                ]);
+            }
+        }
+
         $code = $this->expenseCode($context);
 
         // A producer that retries — a GRN sync, a payroll run, a re-run backfill —
@@ -84,7 +107,8 @@ class CostCollectorService implements CollectsCost
             // race on. job_number already carries the project context.
             $line->forceFill(['ref' => 'CL-' . str_pad((string) $line->id, 7, '0', STR_PAD_LEFT)])->save();
 
-            if ($line->status === CostLine::STATUS_VERIFIED
+            if ($context->postsIndependently
+                && $line->status === CostLine::STATUS_VERIFIED
                 && in_array($line->nature, [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL], true)) {
                 $this->journalPosting->postCostLine($line);
             }
@@ -431,7 +455,12 @@ class CostCollectorService implements CollectsCost
 
             $line->forceFill(['ref' => 'CL-' . str_pad((string) $line->id, 7, '0', STR_PAD_LEFT)])->save();
 
-            if (in_array($line->nature, [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL], true)) {
+            // STAB-7: a caller that already owns posting this event elsewhere
+            // (see CostContext::$postsIndependently) still gets a CostLine for
+            // project-cost attribution, but this is not its posting — creating
+            // one here as well would recognise the same spend twice.
+            if ($context->postsIndependently
+                && in_array($line->nature, [CostLine::NATURE_ACCRUED, CostLine::NATURE_ACTUAL], true)) {
                 $this->journalPosting->postCostLine($line);
             }
 

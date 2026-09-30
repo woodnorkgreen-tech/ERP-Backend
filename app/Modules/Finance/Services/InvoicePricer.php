@@ -45,29 +45,49 @@ class InvoicePricer
      * total — so an invoice's tax equals the sum of its lines' tax exactly, and
      * a client checking one line against the total finds them consistent.
      *
-     * @return array{net_amount: string, tax_amount: string, total_amount: string}
+     * W1-8: `discountAmount` is a distinct, auditable figure — never a
+     * pre-reduced `unitPrice`. Tax is charged on the discounted (net) amount,
+     * matching how a discount is conventionally applied before tax; WNG has
+     * not been asked to confirm an alternative, and none is invented here.
+     *
+     * @return array{gross_amount: string, discount_amount: string, net_amount: string, tax_amount: string, total_amount: string}
      */
     public function priceLine(
         string|float $quantity,
         string|float $unitPrice,
         ?VatTreatment $treatment,
+        string|float $discountAmount = '0',
     ): array {
-        $net = $this->money(bcmul(
+        $gross = $this->money(bcmul(
             $this->decimal($quantity, 3),
             $this->decimal($unitPrice, 2),
             6,
         ));
 
-        if (bccomp($net, '0.00', 2) < 0) {
+        if (bccomp($gross, '0.00', 2) < 0) {
             throw new InvalidArgumentException(
                 'An invoice line cannot be negative. Raise a credit note to reduce an invoice.'
             );
         }
 
+        $discount = $this->money($discountAmount);
+
+        if (bccomp($discount, '0.00', 2) < 0) {
+            throw new InvalidArgumentException('A discount cannot be negative.');
+        }
+
+        if (bccomp($discount, $gross, 2) > 0) {
+            throw new InvalidArgumentException('A line\'s discount cannot exceed its gross amount.');
+        }
+
+        $net = bcsub($gross, $discount, 2);
+
         $rate = $treatment ? $this->decimal($treatment->rate_percent, 3) : '0.000';
         $tax = $this->money(bcdiv(bcmul($net, $rate, 6), '100', 6));
 
         return [
+            'gross_amount' => $gross,
+            'discount_amount' => $discount,
             'net_amount' => $net,
             'tax_amount' => $tax,
             'total_amount' => bcadd($net, $tax, 2),

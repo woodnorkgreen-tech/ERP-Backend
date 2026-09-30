@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Constants\Permissions;
 use App\Http\Controllers\Controller;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\ProcurementStores\Models\Stock;
@@ -16,14 +17,19 @@ use Illuminate\Validation\ValidationException;
 
 class StockCountController extends Controller
 {
+    /*
+     * Report 61 role-name audit: the same authority as the role lists these
+     * replaced (Stores, Manager, Super Admin hold stores.manage; Manager and
+     * Super Admin hold stores.review), read from permissions, not names.
+     */
     private function storesUser(): void
     {
-        abort_unless(auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin']), 403, 'Only Stores team members can manage stock counts.');
+        abort_unless(auth()->user()?->can(Permissions::STORES_MANAGE), 403, 'Only Stores team members can manage stock counts.');
     }
 
     private function reviewUser(): void
     {
-        abort_unless(auth()->user()?->hasAnyRole(['Manager', 'Super Admin']), 403, 'A Manager must review stock-count variances.');
+        abort_unless(auth()->user()?->can(Permissions::STORES_REVIEW), 403, 'A Manager must review stock-count variances.');
     }
 
     public function index(): JsonResponse
@@ -279,7 +285,7 @@ class StockCountController extends Controller
             $this->storesUser();
             abort_unless(
                 (int) $stockCount->created_by === (int) auth()->id()
-                    || auth()->user()?->hasAnyRole(['Manager', 'Super Admin']),
+                    || auth()->user()?->can(Permissions::STORES_REVIEW),
                 403,
                 'Only the creator or a Manager can discard this draft.'
             );
@@ -302,7 +308,7 @@ class StockCountController extends Controller
         $this->storesUser();
         abort_unless(
             (int) $stockCount->created_by === (int) auth()->id()
-                || auth()->user()?->hasAnyRole(['Manager', 'Super Admin']),
+                || auth()->user()?->can(Permissions::STORES_REVIEW),
             403,
             'Only the creator or a Manager can delete this inventory session.'
         );

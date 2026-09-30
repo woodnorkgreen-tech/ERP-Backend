@@ -154,8 +154,15 @@ class UnbudgetedSpendAdoptionTest extends TestCase
         $cost = $this->issue($projectId, $material, $materialLineId, quantity: 3, unitCost: '2000.00');
         $this->assertNull($cost->consumes_line_id);
 
+        // A budget lives on the project's own budget task (ProjectBudgetAuthority).
+        $budgetTaskId = DB::table('enquiry_tasks')->insertGetId([
+            'project_enquiry_id' => $enquiryId, 'type' => 'budget',
+            'title' => 'Budget', 'status' => 'completed',
+            'created_by' => $this->user->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
         $budget = TaskBudgetData::create([
-            'enquiry_task_id' => $taskId,
+            'enquiry_task_id' => $budgetTaskId,
             'project_info' => ['projectId' => 'ENQ-' . $enquiryId],
             'materials_data' => [[
                 'name' => 'Stand',
@@ -171,7 +178,7 @@ class UnbudgetedSpendAdoptionTest extends TestCase
                 ]],
             ]],
             'budget_summary' => ['grandTotal' => 9000],
-            'status' => 'approved',
+            'status' => 'draft',
         ]);
 
         $result = app(BudgetProjector::class)->project($budget);

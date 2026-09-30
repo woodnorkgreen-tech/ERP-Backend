@@ -32,6 +32,7 @@ use Tests\TestCase;
  */
 class StockMovementEndpointTest extends TestCase
 {
+    use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private int $workstationId;
@@ -42,6 +43,7 @@ class StockMovementEndpointTest extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         foreach (['Stores', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);
+            $this->grantMatrixPermissions($role);
         }
         $this->workstationId = DB::table('workstations')->insertGetId([
             'name' => 'Movement Store', 'code' => 'WS-MOVE-'.uniqid(),

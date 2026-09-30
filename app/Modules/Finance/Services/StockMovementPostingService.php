@@ -5,6 +5,7 @@ namespace App\Modules\Finance\Services;
 use App\Modules\Finance\Models\ChartOfAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceAccountFunctions;
 use App\Modules\ProcurementStores\Models\StockCount;
 use InvalidArgumentException;
 
@@ -49,9 +50,9 @@ use InvalidArgumentException;
  */
 class StockMovementPostingService
 {
-    private const INVENTORY_CODE = '1200';
-    private const ADJUSTMENT_CODE = '6800';
-    private const OPENING_EQUITY_CODE = '3900';
+    private const INVENTORY_CODE = FinanceAccountFunctions::INVENTORY;
+    private const ADJUSTMENT_CODE = FinanceAccountFunctions::INVENTORY_ADJUSTMENTS;
+    private const OPENING_EQUITY_CODE = FinanceAccountFunctions::OPENING_BALANCE_EQUITY;
 
     public function __construct(private JournalPostingService $posting)
     {

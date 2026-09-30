@@ -5,7 +5,6 @@ namespace App\Modules\Production\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Models\JobCard;
 use App\Modules\HR\Models\Employee;
-use App\Modules\HR\Models\TechnicalLabour;
 use App\Modules\Production\Models\DailyTask;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -204,13 +203,9 @@ class ProductionReportsController extends Controller
         }
 
         try {
-            // Try to find technical labour first, then fallback to employee
-            $technician = TechnicalLabour::find($technician_id);
+            // W7-10: Only Employee Records are active. Technical Labour is historical.
+            $technician = Employee::findOrFail($technician_id);
             
-            if (!$technician) {
-                $technician = Employee::findOrFail($technician_id);
-            }
-
             // Get job cards for this technician in period
             $jobCards = JobCard::where('worker_id', $technician_id)
                 ->whereBetween('date', [$startDate, $endDate])
@@ -230,14 +225,8 @@ class ProductionReportsController extends Controller
             $dayRate = $technician->day_rate ?? 25.00;
             $totalCost = $totalDays * $dayRate;
 
-            // Determine technician name and ID based on model type
-            if ($technician instanceof TechnicalLabour) {
-                $technicianName = $technician->full_name;
-                $employeeId = 'TECH-' . $technician->id;
-            } else {
-                $technicianName = $technician->first_name . ' ' . $technician->last_name;
-                $employeeId = $technician->employee_id ?? 'EMP-' . $technician->id;
-            }
+            $technicianName = $technician->first_name . ' ' . $technician->last_name;
+            $employeeId = $technician->employee_id ?? 'EMP-' . $technician->id;
 
             return response()->json([
                 'success' => true,

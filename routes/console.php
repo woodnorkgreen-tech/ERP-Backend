@@ -14,3 +14,9 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::command('tasks:check-escalations')
     ->dailyAt('07:00')
     ->withoutOverlapping();
+
+// Kevin's request: reminders before loading/departure is due, and
+// escalation to the Logistics team when it's overdue.
+\Illuminate\Support\Facades\Schedule::command('logistics:loading-timeline-alerts')
+    ->everyFiveMinutes()
+    ->withoutOverlapping();

@@ -34,6 +34,7 @@ class ProfitAndLossReportTest extends TestCase
 
     private User $accountant;
     private User $outsider;
+    private User $checker;
 
     protected function setUp(): void
     {
@@ -43,6 +44,7 @@ class ProfitAndLossReportTest extends TestCase
 
         Permission::findOrCreate(Permissions::FINANCE_REPORTS_VIEW, 'web');
         Permission::findOrCreate(Permissions::FINANCE_RECEIVABLES_BILLING_BASIS, 'web');
+        Permission::findOrCreate(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK, 'web');
 
         $this->accountant = User::factory()->create(['is_active' => true]);
         $this->accountant->givePermissionTo([
@@ -51,6 +53,10 @@ class ProfitAndLossReportTest extends TestCase
         ]);
 
         $this->outsider = User::factory()->create(['is_active' => true]);
+
+        // W1-1: the preparer (accountant, above) must not be their own checker.
+        $this->checker = User::factory()->create(['is_active' => true]);
+        $this->checker->givePermissionTo(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK);
     }
 
     private function enquiry(float $agreedPrice): ProjectEnquiry
@@ -123,6 +129,10 @@ class ProfitAndLossReportTest extends TestCase
             ])->assertCreated();
 
         $invoice = ProjectInvoice::findOrFail($created->json('data.id'));
+
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
 
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")

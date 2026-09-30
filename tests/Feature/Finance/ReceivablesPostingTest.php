@@ -39,6 +39,7 @@ class ReceivablesPostingTest extends TestCase
     use RefreshDatabase;
 
     private User $accountant;
+    private User $checker;
 
     protected function setUp(): void
     {
@@ -53,6 +54,7 @@ class ReceivablesPostingTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_REVERSE,
             Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
             Permissions::FINANCE_REPORTS_VIEW,
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
         ] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
@@ -66,6 +68,11 @@ class ReceivablesPostingTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
             Permissions::FINANCE_REPORTS_VIEW,
         ]);
+
+        // W1-1: a draft invoice must be checked by someone other than its
+        // preparer (the accountant, above) before it can be issued.
+        $this->checker = User::factory()->create(['is_active' => true]);
+        $this->checker->givePermissionTo(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK);
     }
 
     /** A project with an approved quote, which is what makes it billable. */
@@ -175,6 +182,10 @@ class ReceivablesPostingTest extends TestCase
         $this->assertNull($invoice->journal_entry_id);
         $this->assertSame(0.0, $this->movement('4100')['credit']);
 
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
             ->assertOk();
@@ -200,6 +211,10 @@ class ReceivablesPostingTest extends TestCase
             ['description' => 'Exempt supply', 'quantity' => 1, 'unit_price' => 200000],
         ]);
 
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
             ->assertOk();
@@ -222,6 +237,10 @@ class ReceivablesPostingTest extends TestCase
             ['description' => 'Stand build', 'quantity' => 1, 'unit_price' => 100000, 'vat_treatment_id' => $vat->id],
         ]);
 
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
             ->assertOk();
@@ -242,6 +261,10 @@ class ReceivablesPostingTest extends TestCase
         ]);
 
         AccountingPeriod::forDate(now())->forceFill(['status' => AccountingPeriod::STATUS_CLOSED])->save();
+
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
 
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
@@ -292,6 +315,25 @@ class ReceivablesPostingTest extends TestCase
         $this->assertSame(0.0, $this->movement('4100')['credit']);
     }
 
+    /** Report 55: a disabled paying account (e.g. WNG's unlinked M-Pesa) answered 500. */
+    public function test_a_receipt_into_a_disabled_paying_account_is_refused_with_a_reason(): void
+    {
+        $enquiry = $this->enquiry();
+        $source = PaymentSource::where('type', 'bank')->firstOrFail();
+        $source->update(['is_active' => false]);
+
+        $this->actingAs($this->accountant, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/payments", [
+                'amount' => 1000, 'received_amount' => 1000, 'payment_date' => '2026-09-05',
+                'payment_method' => 'bank_transfer', 'payment_source_id' => $source->id,
+                'transaction_reference' => 'DISABLED-001',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('payment_source_id');
+
+        $this->assertSame(0, \App\Models\EnquiryPayment::where('project_enquiry_id', $enquiry->id)->count());
+    }
+
     public function test_every_receivables_entry_balances(): void
     {
         $vat = $this->standardRatedTreatment();
@@ -299,6 +341,10 @@ class ReceivablesPostingTest extends TestCase
         $invoice = $this->createInvoice($enquiry, [
             ['description' => 'Stand build', 'quantity' => 1, 'unit_price' => 300000, 'vat_treatment_id' => $vat->id],
         ]);
+
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
 
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
@@ -409,6 +455,10 @@ class ReceivablesPostingTest extends TestCase
             ['description' => 'Stand build', 'quantity' => 1, 'unit_price' => 500000, 'vat_treatment_id' => $vat->id],
         ]);
 
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
             ->assertOk();
@@ -447,6 +497,10 @@ class ReceivablesPostingTest extends TestCase
         $lines = [['description' => 'Stand build', 'quantity' => 1, 'unit_price' => 1000000, 'vat_treatment_id' => $vat->id]];
 
         $invoice = $this->createInvoice($enquiry, $lines);
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
             ->assertOk();
@@ -498,6 +552,10 @@ class ReceivablesPostingTest extends TestCase
         $invoice = $this->createInvoice($enquiry, [
             ['description' => 'Stand build', 'quantity' => 1, 'unit_price' => 100000, 'vat_treatment_id' => $vat->id],
         ]);
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
             ->assertOk();

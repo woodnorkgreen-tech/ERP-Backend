@@ -36,6 +36,7 @@ class WorkInProgressReleaseTest extends TestCase
     use RefreshDatabase;
 
     private User $accountant;
+    private User $checker;
 
     protected function setUp(): void
     {
@@ -48,6 +49,7 @@ class WorkInProgressReleaseTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_BILLING_BASIS,
             Permissions::FINANCE_RECEIVABLES_REVERSE,
             Permissions::FINANCE_REPORTS_VIEW,
+            Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK,
         ] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
@@ -59,6 +61,10 @@ class WorkInProgressReleaseTest extends TestCase
             Permissions::FINANCE_RECEIVABLES_REVERSE,
             Permissions::FINANCE_REPORTS_VIEW,
         ]);
+
+        // W1-1: the preparer (accountant, above) must not be their own checker.
+        $this->checker = User::factory()->create(['is_active' => true]);
+        $this->checker->givePermissionTo(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK);
     }
 
     private function enquiry(float $agreedPrice): ProjectEnquiry
@@ -130,6 +136,10 @@ class WorkInProgressReleaseTest extends TestCase
 
         $invoice = ProjectInvoice::findOrFail($created->json('data.id'));
 
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
+
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")
             ->assertOk();
@@ -163,6 +173,30 @@ class WorkInProgressReleaseTest extends TestCase
         $this->assertSame(0.0, $this->balanceOn('1214', $enquiry->id));
         $this->assertSame(300000.0, $this->balanceOn('5100', $enquiry->id));
         $this->assertSame(40000.0, $this->balanceOn('5400', $enquiry->id));
+    }
+
+    public function test_two_cost_families_mapped_to_one_wip_account_are_refused_not_released_twice(): void
+    {
+        // A chart profile that sent direct labour's WIP onto the materials WIP account
+        // would have both families read — and release — the same balance.
+        config(['finance_accounts.map' => ['1212' => '1211']]);
+        $enquiry = $this->enquiry(1160000);
+        $this->chargeCostToJob($enquiry, '1211', 300000);
+
+        $vat = VatTreatment::query()->effectiveOn('2026-09-08')->where('rate_percent', '>', 0)->firstOrFail();
+        $invoice = ProjectInvoice::findOrFail($this->actingAs($this->accountant, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices", [
+                'invoice_date' => '2026-09-08', 'due_date' => '2026-10-08',
+                'lines' => [['description' => 'Stand build', 'quantity' => 1, 'unit_price' => 1000000, 'vat_treatment_id' => $vat->id]],
+            ])->assertCreated()->json('data.id'));
+        $this->actingAs($this->checker, 'sanctum')->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")->assertOk();
+
+        $issued = $this->actingAs($this->accountant, 'sanctum')->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue");
+
+        $this->assertGreaterThanOrEqual(400, $issued->status(), 'The issue must be refused, not released twice.');
+        $this->assertSame(300000.0, $this->balanceOn('1211', $enquiry->id), 'WIP untouched');
+        $this->assertSame(0.0, $this->balanceOn('5100', $enquiry->id));
+        $this->assertSame(0.0, $this->balanceOn('5200', $enquiry->id));
     }
 
     public function test_each_cost_family_releases_into_its_own_cost_of_sales_account(): void
@@ -272,6 +306,10 @@ class WorkInProgressReleaseTest extends TestCase
             ])->assertCreated();
 
         $invoice = ProjectInvoice::findOrFail($created->json('data.id'));
+
+        $this->actingAs($this->checker, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/check")
+            ->assertOk();
 
         $this->actingAs($this->accountant, 'sanctum')
             ->postJson("/api/projects/enquiries/{$enquiry->id}/invoices/{$invoice->id}/issue")

@@ -21,12 +21,14 @@ class ProjectInvoiceLine extends Model
     protected $fillable = [
         'project_invoice_id', 'description', 'quantity', 'unit_price',
         'vat_treatment_id', 'revenue_account_id',
-        'net_amount', 'tax_amount', 'total_amount', 'sort_order',
+        'gross_amount', 'discount_amount', 'net_amount', 'tax_amount', 'total_amount', 'sort_order',
     ];
 
     protected $casts = [
         'quantity' => 'decimal:3',
         'unit_price' => 'decimal:2',
+        'gross_amount' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
         'net_amount' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',

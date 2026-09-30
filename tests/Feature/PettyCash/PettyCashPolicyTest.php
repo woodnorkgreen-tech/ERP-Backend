@@ -84,23 +84,26 @@ class PettyCashPolicyTest extends TestCase
     }
 
     /**
-     * The deliberate exception. `finance.petty_cash.admin` is granted to
-     * Accounts, so gating a full-data-wipe on it would hand the wipe to a second
-     * role as a side effect of tidying authorization.
+     * Critical Risk C6 (finance-redesign/current-state/10_FINANCE_RISK_REGISTER.md):
+     * clearAll() no longer exists as a policy ability at all — the
+     * full-data-wipe capability was removed from the API entirely per the
+     * confirmed STAB-5 decision, not merely re-gated. No user, Super Admin
+     * included, can reach it through this policy; the only surviving path
+     * is the local/testing-only console command.
      */
-    public function test_clear_all_is_not_widened_by_the_admin_permission(): void
+    public function test_clear_all_is_no_longer_an_ability_anyone_can_be_granted(): void
     {
         $withAdmin = $this->userWith([Permissions::FINANCE_PETTY_CASH_ADMIN]);
 
+        $this->assertFalse(method_exists(\App\Modules\Finance\PettyCash\Policies\PettyCashPolicy::class, 'clearAll'));
         $this->assertFalse($withAdmin->can('clearAll', Payment::class));
-        $this->assertTrue($this->superAdmin()->can('clearAll', Payment::class));
     }
 
-    public function test_super_admin_still_passes_every_ability(): void
+    public function test_super_admin_still_passes_every_remaining_ability(): void
     {
         $admin = $this->superAdmin();
 
-        foreach (['viewAny', 'reviewRequisition', 'void', 'archive', 'viewActivityLogs', 'clearAll'] as $ability) {
+        foreach (['viewAny', 'reviewRequisition', 'void', 'archive', 'viewActivityLogs'] as $ability) {
             $this->assertTrue(
                 $admin->can($ability, Payment::class),
                 "Super Admin should pass {$ability}",
@@ -108,13 +111,22 @@ class PettyCashPolicyTest extends TestCase
         }
     }
 
-    public function test_a_user_with_no_permissions_is_refused_at_the_endpoint(): void
+    /**
+     * The route itself is gone (Critical Risk C6), not just re-guarded —
+     * this pins that "removed from the API" actually means removed, for
+     * every caller regardless of permission.
+     */
+    public function test_the_clear_all_route_no_longer_exists(): void
     {
         $nobody = User::factory()->create(['is_active' => true]);
 
         $this->actingAs($nobody, 'sanctum')
             ->deleteJson('/api/finance/petty-cash/clear-all')
-            ->assertForbidden();
+            ->assertNotFound();
+
+        $this->actingAs($this->superAdmin(), 'sanctum')
+            ->deleteJson('/api/finance/petty-cash/clear-all')
+            ->assertNotFound();
     }
 
     public function test_a_user_without_create_permission_cannot_submit_a_disbursement(): void

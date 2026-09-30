@@ -64,6 +64,13 @@ class ProjectEnquiry extends Model
         'finance_released',
         'finance_released_at',
         'mobilization_threshold_percentage',
+        // W6-5/W6-6: project financial closure
+        'financial_closure_status',
+        'financially_closed_by',
+        'financially_closed_at',
+        'closure_reopened_by',
+        'closure_reopened_at',
+        'closure_reopen_reason',
     ];
 
     protected $casts = [
@@ -92,6 +99,8 @@ class ProjectEnquiry extends Model
         'finance_released' => 'boolean',
         'finance_released_at' => 'datetime',
         'mobilization_threshold_percentage' => 'decimal:2',
+        'financially_closed_at' => 'datetime',
+        'closure_reopened_at' => 'datetime',
     ];
 
     public function client(): BelongsTo

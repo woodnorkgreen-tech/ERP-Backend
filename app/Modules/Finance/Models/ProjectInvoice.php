@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * A client invoice.
@@ -22,11 +23,30 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class ProjectInvoice extends Model
 {
-    protected $fillable = ['invoice_number','project_enquiry_id','credits_invoice_id','invoice_date','due_date','subtotal','tax_amount','total_amount','status','notes','created_by','issued_by','issued_at','voided_by','voided_at','void_reason','journal_entry_id','accounting_period_id'];
-    protected $casts = ['invoice_date'=>'date','due_date'=>'date','subtotal'=>'decimal:2','tax_amount'=>'decimal:2','total_amount'=>'decimal:2','issued_at'=>'datetime','voided_at'=>'datetime'];
+    protected $fillable = ['invoice_number','project_enquiry_id','credits_invoice_id','invoice_date','due_date','subtotal','tax_amount','total_amount','status','notes','created_by','issued_by','issued_at','voided_by','voided_at','void_reason','journal_entry_id','accounting_period_id','checked_by','checked_at','returned_by','returned_at','return_reason','resubmitted_at','no_quote_exception_reason','no_quote_exception_requested_by','no_quote_exception_approved_by','no_quote_exception_approved_at','no_quote_exception_evidence_reference','payment_term_id'];
+    protected $casts = ['invoice_date'=>'date','due_date'=>'date','subtotal'=>'decimal:2','tax_amount'=>'decimal:2','total_amount'=>'decimal:2','issued_at'=>'datetime','voided_at'=>'datetime','checked_at'=>'datetime','returned_at'=>'datetime','resubmitted_at'=>'datetime','no_quote_exception_approved_at'=>'datetime'];
     public function enquiry(): BelongsTo { return $this->belongsTo(ProjectEnquiry::class, 'project_enquiry_id'); }
     public function creator(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
     public function payments(): BelongsToMany { return $this->belongsToMany(\App\Models\EnquiryPayment::class, 'project_invoice_allocations')->withPivot('amount','allocated_by')->withTimestamps(); }
+
+    /** W1-1: who checked/reviewed this draft — never the preparer (`created_by`). */
+    public function checkedBy(): BelongsTo { return $this->belongsTo(User::class, 'checked_by'); }
+
+    /** Return for Correction: who sent it back, if it ever was. */
+    public function returnedBy(): BelongsTo { return $this->belongsTo(User::class, 'returned_by'); }
+
+    /** W1-2: who requested, and who authorized, issuing without an approved commercial basis. */
+    public function noQuoteExceptionRequestedBy(): BelongsTo { return $this->belongsTo(User::class, 'no_quote_exception_requested_by'); }
+    public function noQuoteExceptionApprovedBy(): BelongsTo { return $this->belongsTo(User::class, 'no_quote_exception_approved_by'); }
+
+    /** W1-7: the configured term this invoice's due date was computed from, if any. */
+    public function paymentTerm(): BelongsTo { return $this->belongsTo(PaymentTerm::class, 'payment_term_id'); }
+
+    /** Private evidence retrieved only through authenticated Finance routes. */
+    public function attachments(): MorphMany
+    {
+        return $this->morphMany(FinanceAttachment::class, 'source');
+    }
 
     /** The invoice this row corrects. Null on an ordinary invoice. */
     public function creditedInvoice(): BelongsTo
@@ -46,11 +66,24 @@ class ProjectInvoice extends Model
     }
 
     /**
-     * Adds `net_total_amount` — this invoice's total after every non-void
-     * credit note raised against it. Credit note totals are stored negative
-     * (see the migration that added `credits_invoice_id`), so this is a plain
-     * sum, not a subtraction that could be applied to the wrong sign by a
-     * future caller.
+     * The only credit-note status with a financial effect (Report 59 §11).
+     *
+     * A credit note reaches the ledger when it is issued
+     * (ReceivablesPostingService::postCreditNoteIssued) and leaves it when it
+     * is voided. A draft is a proposal awaiting independent issue: counting it
+     * would make the receivables book (balances, ageing, allocation capacity)
+     * disagree with Accounts Receivable in the ledger. Drafts still reserve
+     * crediting headroom in createCreditNote(), so two drafts cannot together
+     * over-credit an invoice — that is a limit on documents, not a balance.
+     */
+    public const EFFECTIVE_CREDIT_STATUS = 'issued';
+
+    /**
+     * Adds `net_total_amount` — this invoice's total after every issued
+     * credit note raised against it (see EFFECTIVE_CREDIT_STATUS). Credit note
+     * totals are stored negative (see the migration that added
+     * `credits_invoice_id`), so this is a plain sum, not a subtraction that
+     * could be applied to the wrong sign by a future caller.
      *
      * The one definition of "what this invoice is really worth now" that the
      * invoice list, receivables ageing and the allocation cap all share —
@@ -63,8 +96,18 @@ class ProjectInvoice extends Model
                 ->selectRaw('project_invoices.total_amount + COALESCE(SUM(credit_notes.total_amount), 0)')
                 ->from('project_invoices as credit_notes')
                 ->whereColumn('credit_notes.credits_invoice_id', 'project_invoices.id')
-                ->where('credit_notes.status', '!=', 'void'),
+                ->where('credit_notes.status', self::EFFECTIVE_CREDIT_STATUS),
         ]);
+    }
+
+    /** The same net total for one invoice by id, for code working under a row lock. */
+    public static function effectiveNetTotal(int $invoiceId): string
+    {
+        $total = (string) (self::query()->whereKey($invoiceId)->value('total_amount') ?? '0');
+        $credits = (string) (self::query()->where('credits_invoice_id', $invoiceId)
+            ->where('status', self::EFFECTIVE_CREDIT_STATUS)->sum('total_amount') ?: '0');
+
+        return bcadd(number_format((float) $total, 2, '.', ''), number_format((float) $credits, 2, '.', ''), 2);
     }
 
     /**

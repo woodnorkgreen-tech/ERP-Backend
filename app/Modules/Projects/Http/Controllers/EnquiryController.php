@@ -1056,7 +1056,9 @@ class EnquiryController extends Controller
             'received_amount' => 'required|numeric|gte:amount',
             'payment_date' => 'nullable|date',
             'payment_method' => 'required|in:bank_transfer,mpesa,cash,cheque',
-            'payment_source_id' => 'required|integer|exists:payment_sources,id',
+            // Active only: a disabled account (e.g. one awaiting its ledger link)
+            // is a reason to give the user, not a server error.
+            'payment_source_id' => ['required', 'integer', Rule::exists('payment_sources', 'id')->where('is_active', true)],
             'transaction_reference' => [
                 Rule::requiredIf(fn () => $request->input('payment_method') !== 'cash'),
                 'nullable',
@@ -1115,6 +1117,17 @@ class EnquiryController extends Controller
      *
      * Chunked, so memory stays flat as the book grows.
      */
+    /**
+     * W1-3/W1-4: the explicit client/project financial position, replacing
+     * one ambiguous "Client Outstanding" figure. See
+     * ClientFinancialPositionService for what each figure means and which
+     * existing calculation it reuses.
+     */
+    public function financialPosition(ProjectEnquiry $enquiry, \App\Modules\Finance\Services\ClientFinancialPositionService $service): JsonResponse
+    {
+        return response()->json(['data' => $service->forEnquiry($enquiry)]);
+    }
+
     public function receivablesSummary(Request $request): JsonResponse
     {
         abort_unless(
@@ -1198,7 +1211,7 @@ class EnquiryController extends Controller
     {
         $receipts = \App\Modules\Finance\Models\ClientReceipt::query()
             ->with(['paymentSource:id,code,name,type,currency', 'allocations' => fn ($query) => $query
-                ->whereNull('reversed_at')->with('enquiry:id,title,job_number')])
+                ->whereNull('reversed_at')->with(['enquiry:id,title,job_number,client_id', 'enquiry.client:id,full_name,company_name'])])
             ->withSum(['allocations as allocated_amount' => fn ($query) => $query->whereNull('reversed_at')], 'amount')
             ->orderByDesc('payment_date')
             ->get()
@@ -1211,6 +1224,10 @@ class EnquiryController extends Controller
                     'received_amount' => (float) $receipt->received_amount,
                     'allocated_amount' => $allocated,
                     'available_amount' => (float) $receipt->received_amount - $allocated,
+                    // W1-9: age of the unallocated portion, so Finance can see
+                    // how long client money has sat unmatched — no escalation
+                    // threshold is applied here, that remains open.
+                    'age_days' => $receipt->payment_date ? now()->diffInDays($receipt->payment_date) : null,
                     'payment_date' => $receipt->payment_date?->toDateString(),
                     'payment_method' => $receipt->payment_method,
                     'transaction_reference' => $receipt->transaction_reference,
@@ -1455,17 +1472,30 @@ class EnquiryController extends Controller
         // invoice's balance drops here too, not only in the enquiry-wide
         // over-billing cap that already summed credit notes for free.
         $invoices = \App\Modules\Finance\Models\ProjectInvoice::query()->where('project_enquiry_id', $enquiry->id)
+            ->with([
+                'lines.vatTreatment:id,code,name,rate_percent',
+                'creator:id,name',
+                'checkedBy:id,name',
+                'returnedBy:id,name',
+                'noQuoteExceptionRequestedBy:id,name',
+                'noQuoteExceptionApprovedBy:id,name',
+                'paymentTerm:id,name,days,is_custom,is_active,is_default',
+            ])
             ->withVerifiedPaidAmount()->withNetTotal()->orderByDesc('invoice_date')->get()
             ->map(function ($invoice) {
                 $paid = (float) ($invoice->paid_amount ?? 0);
                 $netTotal = (float) ($invoice->net_total_amount ?? $invoice->total_amount);
                 $balance = max(0, $netTotal - $paid);
+                // One definition shared with the Finance invoice index (Report 58 §6).
+                $reviewState = \App\Modules\Finance\Support\InvoiceState::reviewState($invoice, $paid, $netTotal);
+
                 return array_merge($invoice->toArray(), [
                     'paid_amount' => $paid,
                     'net_total_amount' => $netTotal,
                     'balance' => $balance,
                     'is_credit_note' => $invoice->credits_invoice_id !== null,
-                    'days_overdue' => $invoice->status === 'issued' && $balance > 0 && $invoice->due_date->isPast() ? $invoice->due_date->diffInDays(now()) : 0,
+                    'review_state' => $reviewState,
+                    'days_overdue' => \App\Modules\Finance\Support\InvoiceState::daysOverdue($invoice, $balance),
                 ]);
             });
         return response()->json(['data'=>$invoices]);
@@ -1528,6 +1558,7 @@ class EnquiryController extends Controller
             'lines.*.description' => 'required|string|max:500',
             'lines.*.quantity' => 'required|numeric|gt:0',
             'lines.*.unit_price' => 'required|numeric|min:0',
+            'lines.*.discount_amount' => 'nullable|numeric|min:0',
             'lines.*.vat_treatment_id' => 'nullable|integer|exists:vat_treatments,id',
             'lines.*.revenue_account_id' => 'nullable|integer|exists:chart_of_accounts,id',
         ]);
@@ -1544,10 +1575,12 @@ class EnquiryController extends Controller
         try {
             $priced = collect($data['lines'])->values()->map(function (array $line, int $index) use ($pricer, $creditDate) {
                 $treatment = $pricer->treatmentFor($line['vat_treatment_id'] ?? null, $creditDate);
-                $line_ = $pricer->priceLine($line['quantity'], $line['unit_price'], $treatment);
+                $line_ = $pricer->priceLine($line['quantity'], $line['unit_price'], $treatment, $line['discount_amount'] ?? '0');
 
                 return array_merge(
                     [
+                        'gross_amount' => bcmul($line_['gross_amount'], '-1', 2),
+                        'discount_amount' => $line_['discount_amount'],
                         'net_amount' => bcmul($line_['net_amount'], '-1', 2),
                         'tax_amount' => bcmul($line_['tax_amount'], '-1', 2),
                         'total_amount' => bcmul($line_['total_amount'], '-1', 2),
@@ -1651,6 +1684,36 @@ class EnquiryController extends Controller
             $creditNote = DB::transaction(function () use ($creditNote) {
                 $locked = $creditNote->newQuery()->lockForUpdate()->findOrFail($creditNote->id);
                 abort_unless($locked->status === 'draft', 422, 'Only a draft credit note can be issued.');
+                // W1-6: the preparer must not be their own final approver —
+                // credit notes combine review/approval and issue into one
+                // step, so this is the one place that separation is enforced.
+                if ((int) $locked->created_by === (int) Auth::id()) {
+                    throw new \InvalidArgumentException('You prepared this credit note, so someone else has to approve and issue it.');
+                }
+
+                // A draft does not reduce what the invoice can take, so money
+                // may have been applied to it since this was raised. Issuing
+                // must not leave the invoice owing less than was collected —
+                // the same rule createCreditNote() applied at the time.
+                $invoice = \App\Modules\Finance\Models\ProjectInvoice::query()->lockForUpdate()->findOrFail($locked->credits_invoice_id);
+                if (! in_array($invoice->status, ['issued', 'paid'], true)) {
+                    throw new \InvalidArgumentException('Invoice ' . $invoice->invoice_number . ' is no longer issued, so this credit note cannot be issued against it.');
+                }
+                $netAfter = bcadd(
+                    \App\Modules\Finance\Models\ProjectInvoice::effectiveNetTotal($invoice->id),
+                    number_format((float) $locked->total_amount, 2, '.', ''),
+                    2,
+                );
+                $allocated = number_format((float) (DB::table('project_invoice_allocations')
+                    ->where('project_invoice_id', $invoice->id)->sum('amount') ?: 0), 2, '.', '');
+                if (bccomp($netAfter, $allocated, 2) < 0) {
+                    throw new \InvalidArgumentException(
+                        'Receipts totalling ' . number_format((float) $allocated, 2) . ' are applied to invoice '
+                        . $invoice->invoice_number . ', more than the ' . number_format(max(0, (float) $netAfter), 2)
+                        . ' this credit note would leave owed. Reverse the excess allocation first, or void this credit note.'
+                    );
+                }
+
                 $locked->update(['status' => 'issued', 'issued_by' => Auth::id(), 'issued_at' => now()]);
 
                 app(\App\Modules\Finance\Services\ReceivablesPostingService::class)
@@ -1703,13 +1766,22 @@ class EnquiryController extends Controller
         $data = $request->validate([
             'invoice_date' => 'required|date',
             'due_date' => 'required|date|after_or_equal:invoice_date',
+            'payment_term_id' => 'nullable|integer|exists:payment_terms,id',
             'notes' => 'nullable|string|max:1000',
             'lines' => 'required|array|min:1',
             'lines.*.description' => 'required|string|max:500',
             'lines.*.quantity' => 'required|numeric|gt:0',
             'lines.*.unit_price' => 'required|numeric|min:0',
+            'lines.*.discount_amount' => 'nullable|numeric|min:0',
             'lines.*.vat_treatment_id' => 'nullable|integer|exists:vat_treatments,id',
             'lines.*.revenue_account_id' => 'nullable|integer|exists:chart_of_accounts,id',
+            // W1-2: the controlled exception, only consulted if the project
+            // turns out to have no approved commercial basis below. Supplying
+            // these fields does not by itself authorize anything — the
+            // approver must separately hold FINANCE_RECEIVABLES_OVERRIDE.
+            'no_quote_exception_reason' => 'nullable|string|min:5|max:1000|required_with:no_quote_exception_approved_by',
+            'no_quote_exception_approved_by' => 'nullable|integer|exists:users,id',
+            'no_quote_exception_evidence_reference' => 'nullable|string|max:255',
         ]);
 
         $pricer = app(\App\Modules\Finance\Services\InvoicePricer::class);
@@ -1720,7 +1792,7 @@ class EnquiryController extends Controller
                 $treatment = $pricer->treatmentFor($line['vat_treatment_id'] ?? null, $invoiceDate);
 
                 return array_merge(
-                    $pricer->priceLine($line['quantity'], $line['unit_price'], $treatment),
+                    $pricer->priceLine($line['quantity'], $line['unit_price'], $treatment, $line['discount_amount'] ?? '0'),
                     [
                         'description' => $line['description'],
                         'quantity' => $line['quantity'],
@@ -1747,6 +1819,23 @@ class EnquiryController extends Controller
             ], 422);
         }
 
+        // W1-2: an exception may only be authorized by someone who actually
+        // holds the override permission — the approved_by field is not
+        // self-certifying.
+        if (! empty($data['no_quote_exception_approved_by'])) {
+            if ((int) $data['no_quote_exception_approved_by'] === (int) Auth::id()) {
+                return response()->json([
+                    'message' => 'The requester cannot approve their own no-commercial-basis exception.',
+                ], 422);
+            }
+            $approver = \App\Models\User::find($data['no_quote_exception_approved_by']);
+            if (! $approver || ! $approver->can(Permissions::FINANCE_RECEIVABLES_OVERRIDE)) {
+                return response()->json([
+                    'message' => 'The named approver does not hold the authority to approve an invoice-without-quote exception.',
+                ], 422);
+            }
+        }
+
         try {
             $invoice = DB::transaction(function () use ($enquiry,$data,$total,$priced) {
                 // Serialise the aggregate invariant on the parent. Without this
@@ -1754,18 +1843,33 @@ class EnquiryController extends Controller
                 // same remaining balance and overbill the agreed price.
                 $lockedEnquiry = ProjectEnquiry::query()->lockForUpdate()->findOrFail($enquiry->id);
                 $basis = (float) $this->financeService->getPaymentProgress($lockedEnquiry)['total_quote'];
-                $existing = (float) \App\Modules\Finance\Models\ProjectInvoice::where('project_enquiry_id',$lockedEnquiry->id)->whereNot('status','void')->sum('total_amount');
+                // Draft invoices reserve headroom (they are about to bill); a
+                // draft credit note does not release any until it is issued.
+                $existing = (float) \App\Modules\Finance\Models\ProjectInvoice::where('project_enquiry_id',$lockedEnquiry->id)->whereNot('status','void')
+                    ->where(fn ($q) => $q->whereNull('credits_invoice_id')->orWhere('status', \App\Modules\Finance\Models\ProjectInvoice::EFFECTIVE_CREDIT_STATUS))
+                    ->sum('total_amount');
 
+                $exceptionAttributes = [];
                 if ($basis <= 0) {
-                    throw new \DomainException('This project has no agreed price yet, so it cannot be invoiced. Set the agreed price first.');
-                }
-                if ($existing + $total > $basis) {
+                    if (empty($data['no_quote_exception_reason']) || empty($data['no_quote_exception_approved_by'])) {
+                        throw new \DomainException('This project has no agreed price yet, so it cannot be invoiced. Set the agreed price first, or raise an authorized exception with a reason and an approver.');
+                    }
+
+                    $exceptionAttributes = [
+                        'no_quote_exception_reason' => $data['no_quote_exception_reason'],
+                        'no_quote_exception_requested_by' => Auth::id(),
+                        'no_quote_exception_approved_by' => $data['no_quote_exception_approved_by'],
+                        'no_quote_exception_approved_at' => now(),
+                        'no_quote_exception_evidence_reference' => $data['no_quote_exception_evidence_reference'] ?? null,
+                    ];
+                } elseif ($existing + $total > $basis) {
                     throw new \DomainException('That would bill the client more than the agreed price. Invoices so far come to '.number_format($existing,2).' and the agreed price is '.number_format($basis,2).', so this invoice cannot exceed '.number_format($basis-$existing,2).'.');
                 }
 
-                $invoice = \App\Modules\Finance\Models\ProjectInvoice::create([
+                $invoice = \App\Modules\Finance\Models\ProjectInvoice::create(array_merge([
                     'invoice_date' => $data['invoice_date'],
                     'due_date' => $data['due_date'],
+                    'payment_term_id' => $data['payment_term_id'] ?? null,
                     'notes' => $data['notes'] ?? null,
                     // Placeholders. InvoicePricer::retotal() below is what makes
                     // these true, from the lines, so the header can never state
@@ -1774,9 +1878,23 @@ class EnquiryController extends Controller
                     'invoice_number'=>'TMP-'.\Illuminate\Support\Str::uuid(),
                     'project_enquiry_id'=>$lockedEnquiry->id,
                     'created_by'=>Auth::id(),
-                ]);
+                ], $exceptionAttributes));
                 $invoice->update(['invoice_number'=>'INV-'.now()->format('Ym').'-'.str_pad((string)$invoice->id,6,'0',STR_PAD_LEFT)]);
                 $invoice->lines()->createMany($priced);
+
+                if (! empty($exceptionAttributes)) {
+                    \App\Models\GovernanceAuditLog::create([
+                        'project_enquiry_id' => $lockedEnquiry->id,
+                        'user_id' => Auth::id(),
+                        'gate_type' => 'invoice_no_quote_exception',
+                        'action_status' => 'authorized',
+                        'model_type' => \App\Modules\Finance\Models\ProjectInvoice::class,
+                        'model_id' => $invoice->id,
+                        'message' => "Invoice raised for {$lockedEnquiry->id} with no approved commercial basis, authorized by user #{$exceptionAttributes['no_quote_exception_approved_by']}.",
+                        'context' => $exceptionAttributes,
+                        'ip_address' => request()->ip(),
+                    ]);
+                }
 
                 return app(\App\Modules\Finance\Services\InvoicePricer::class)->retotal($invoice);
             });
@@ -1784,6 +1902,189 @@ class EnquiryController extends Controller
             return response()->json(['message'=>$exception->getMessage()],422);
         }
         return response()->json(['message'=>'Draft invoice created.','data'=>$invoice],201);
+    }
+
+    /**
+     * W1-1: an authorized reviewer checks a draft invoice before it can be
+     * issued. The preparer must never be their own checker — the same rule
+     * every other maker/checker pattern in this codebase enforces by identity,
+     * not by permission set, since WNG explicitly allows the checker to also
+     * be the issuer.
+     */
+    public function checkProjectInvoice(Request $request, ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
+    {
+        abort_unless((int) $invoice->project_enquiry_id === (int) $enquiry->id, 404);
+
+        try {
+            $checked = DB::transaction(function () use ($invoice) {
+                $locked = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
+
+                if ($locked->status !== 'draft') {
+                    throw new \DomainException('Only a draft invoice can be checked.');
+                }
+                if ((int) $locked->created_by === (int) Auth::id()) {
+                    throw new \DomainException('You prepared this invoice, so someone else has to check it.');
+                }
+                if ($locked->checked_at) {
+                    throw new \DomainException('This invoice has already been checked.');
+                }
+                // A returned invoice is with its preparer until they resubmit
+                // it; checking it first would skip the correction it was
+                // returned for (Report 58 §10).
+                if (\App\Modules\Finance\Support\InvoiceState::awaitingCorrection($locked)) {
+                    throw new \DomainException('This invoice was returned to its preparer for correction. It can be checked once they resubmit it.');
+                }
+
+                $locked->update([
+                    'checked_by' => Auth::id(),
+                    'checked_at' => now(),
+                    // Return metadata is deliberately retained. checked_at is
+                    // the current state; returned_* remains the audit evidence
+                    // that this document previously needed correction.
+                ]);
+
+                return $locked->fresh();
+            });
+        } catch (\DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['message' => 'Invoice checked. It may now be issued.', 'data' => $checked]);
+    }
+
+    /**
+     * W1-1/W1-6's shared Return for Correction: a reviewer sends a draft back
+     * instead of checking it. Distinct from Reject (there is no reject on a
+     * draft — cancelling one is just deleting the draft) and from Reverse
+     * (which only applies after posting).
+     */
+    public function returnInvoiceForCorrection(Request $request, ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
+    {
+        abort_unless((int) $invoice->project_enquiry_id === (int) $enquiry->id, 404);
+
+        $data = $request->validate(['reason' => 'required|string|min:5|max:1000']);
+
+        try {
+            $returned = DB::transaction(function () use ($invoice, $data) {
+                $locked = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
+
+                if ($locked->status !== 'draft') {
+                    throw new \DomainException('Only a draft can be returned for correction.');
+                }
+                if ((int) $locked->created_by === (int) Auth::id()) {
+                    throw new \DomainException('You prepared this invoice, so someone else has to return it.');
+                }
+
+                $locked->update([
+                    'returned_by' => Auth::id(),
+                    'returned_at' => now(),
+                    'return_reason' => $data['reason'],
+                    'checked_by' => null,
+                    'checked_at' => null,
+                ]);
+
+                return $locked->fresh();
+            });
+        } catch (\DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        \App\Models\GovernanceAuditLog::create([
+            'project_enquiry_id' => $returned->project_enquiry_id,
+            'user_id' => Auth::id(),
+            'gate_type' => 'invoice_returned_for_correction',
+            'action_status' => 'authorized',
+            'model_type' => \App\Modules\Finance\Models\ProjectInvoice::class,
+            'model_id' => $returned->id,
+            'message' => "Invoice {$returned->invoice_number} returned for correction.",
+            'context' => ['reason' => $data['reason']],
+            'ip_address' => request()->ip(),
+        ]);
+
+        return response()->json(['message' => 'Invoice returned for correction.', 'data' => $returned]);
+    }
+
+    /**
+     * The preparer corrects a returned (or any still-draft, unchecked) invoice
+     * and resubmits it. Lines are replaced wholesale — the same
+     * delete-then-recreate shape already used elsewhere in this codebase for
+     * a line-item correction — and the header is repriced from scratch by
+     * InvoicePricer, never hand-edited.
+     */
+    public function updateProjectInvoiceLines(Request $request, ProjectEnquiry $enquiry, \App\Modules\Finance\Models\ProjectInvoice $invoice): JsonResponse
+    {
+        abort_unless((int) $invoice->project_enquiry_id === (int) $enquiry->id, 404);
+
+        $data = $request->validate([
+            'invoice_date' => 'nullable|date',
+            'due_date' => 'nullable|date',
+            'payment_term_id' => 'nullable|integer|exists:payment_terms,id',
+            'notes' => 'nullable|string|max:1000',
+            'lines' => 'required|array|min:1',
+            'lines.*.description' => 'required|string|max:500',
+            'lines.*.quantity' => 'required|numeric|gt:0',
+            'lines.*.unit_price' => 'required|numeric|min:0',
+            'lines.*.discount_amount' => 'nullable|numeric|min:0',
+            'lines.*.vat_treatment_id' => 'nullable|integer|exists:vat_treatments,id',
+            'lines.*.revenue_account_id' => 'nullable|integer|exists:chart_of_accounts,id',
+        ]);
+
+        $pricer = app(\App\Modules\Finance\Services\InvoicePricer::class);
+
+        try {
+            $updated = DB::transaction(function () use ($invoice, $data, $pricer) {
+                $locked = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
+
+                if ($locked->status !== 'draft') {
+                    throw new \DomainException('Only a draft invoice can be corrected.');
+                }
+                if ($locked->checked_at) {
+                    throw new \DomainException('This invoice has already been checked. It must be returned for correction first.');
+                }
+                if ((int) $locked->created_by !== (int) Auth::id()) {
+                    throw new \DomainException('Only the preparer of this invoice can correct it.');
+                }
+
+                $invoiceDate = $data['invoice_date'] ?? $locked->invoice_date->toDateString();
+
+                $priced = collect($data['lines'])->values()->map(function (array $line, int $index) use ($pricer, $invoiceDate) {
+                    $treatment = $pricer->treatmentFor($line['vat_treatment_id'] ?? null, $invoiceDate);
+
+                    return array_merge(
+                        $pricer->priceLine($line['quantity'], $line['unit_price'], $treatment, $line['discount_amount'] ?? '0'),
+                        [
+                            'description' => $line['description'],
+                            'quantity' => $line['quantity'],
+                            'unit_price' => $line['unit_price'],
+                            'vat_treatment_id' => $line['vat_treatment_id'] ?? null,
+                            'revenue_account_id' => $line['revenue_account_id'] ?? null,
+                            'sort_order' => $index,
+                        ],
+                    );
+                })->all();
+
+                $wasReturned = (bool) $locked->returned_at;
+
+                $locked->update(array_filter([
+                    'invoice_date' => $data['invoice_date'] ?? null,
+                    'due_date' => $data['due_date'] ?? null,
+                    'payment_term_id' => $data['payment_term_id'] ?? $locked->payment_term_id,
+                    'notes' => $data['notes'] ?? $locked->notes,
+                    'resubmitted_at' => $wasReturned ? now() : null,
+                ], fn ($value) => $value !== null));
+
+                $locked->lines()->delete();
+                $locked->lines()->createMany($priced);
+
+                return $pricer->retotal($locked);
+            });
+        } catch (\DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['message' => 'Invoice corrected.', 'data' => $updated]);
     }
 
     /**
@@ -1809,6 +2110,10 @@ class EnquiryController extends Controller
             $invoice = DB::transaction(function () use ($invoice) {
                 $lockedInvoice = $invoice->newQuery()->lockForUpdate()->findOrFail($invoice->id);
                 abort_unless($lockedInvoice->status==='draft',422,'Only draft invoices can be issued.');
+                // W1-1: the checker and issuer may be the same authorized
+                // person, but someone must have checked it first — the
+                // preparer≠checker guard already lives on checkProjectInvoice().
+                abort_unless((bool) $lockedInvoice->checked_at, 422, 'This invoice has not been checked yet. It must be reviewed before it can be issued.');
                 $lockedInvoice->update(['status'=>'issued','issued_by'=>Auth::id(),'issued_at'=>now()]);
 
                 app(\App\Modules\Finance\Services\ReceivablesPostingService::class)
@@ -1975,9 +2280,11 @@ class EnquiryController extends Controller
                 }
                 $paymentUsed=(float)DB::table('project_invoice_allocations')->where('enquiry_payment_id',$lockedPayment->id)->sum('amount');
                 $invoicePaid=(float)DB::table('project_invoice_allocations')->where('project_invoice_id',$lockedInvoice->id)->sum('amount');
-                // Net of any non-void credit note, so a credited invoice
-                // cannot be over-allocated up to its ORIGINAL total.
-                $creditedTotal=(float)$lockedInvoice->total_amount+(float)DB::table('project_invoices')->where('credits_invoice_id',$lockedInvoice->id)->where('status','!=','void')->sum('total_amount');
+                // Net of every ISSUED credit note, so a credited invoice cannot
+                // be over-allocated up to its ORIGINAL total. A draft credit
+                // note has no accounting effect yet and does not shrink the
+                // capacity; issueCreditNote() re-checks allocations instead.
+                $creditedTotal=(float)\App\Modules\Finance\Models\ProjectInvoice::effectiveNetTotal($lockedInvoice->id);
                 if ((float)$data['amount']>(float)$lockedPayment->amount-$paymentUsed || (float)$data['amount']>$creditedTotal-$invoicePaid) throw new \DomainException('Allocation exceeds the available payment or invoice balance.');
                 $allocationId = DB::table('project_invoice_allocations')->insertGetId(['project_invoice_id'=>$lockedInvoice->id,'enquiry_payment_id'=>$lockedPayment->id,'amount'=>$data['amount'],'allocated_by'=>Auth::id(),'created_at'=>now(),'updated_at'=>now()]);
 

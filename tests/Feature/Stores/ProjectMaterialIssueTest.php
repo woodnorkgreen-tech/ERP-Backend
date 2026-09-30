@@ -29,6 +29,7 @@ use Tests\TestCase;
  */
 class ProjectMaterialIssueTest extends TestCase
 {
+    use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private int $enquiryId;
@@ -59,6 +60,7 @@ class ProjectMaterialIssueTest extends TestCase
         $this->seed(ExpenseCodeSeeder::class);
 
         Role::findOrCreate('Stores', 'web');
+        $this->grantMatrixPermissions('Stores');
         $this->user = User::factory()->create(['is_active' => true]);
         $this->user->assignRole('Stores');
         // Roles are read off the fresh record, or every request answers 403.

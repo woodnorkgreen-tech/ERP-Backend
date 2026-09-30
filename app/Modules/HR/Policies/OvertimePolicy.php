@@ -124,17 +124,15 @@ class OvertimePolicy
             || $entry->employee->department?->manager_id === $user->employee_id;
     }
 
-    /** Manager/lead of the employee, or the Production lead for a technical-labour entry. */
+    /** Manager/lead of the employee. */
     private function hasHierarchyOver(User $user, OTEntry $entry): bool
     {
         if ($this->isDirectManagerOrLead($user, $entry)) {
             return true;
         }
 
-        if ($entry->technical_labour_id && $user->employee_id) {
-            $production = Department::where('name', 'Production')->first();
-            return $production && $production->manager_id === $user->employee_id;
-        }
+        // W7-10: Technical Labour hierarchy paths decommissioned.
+        // Historical technical_labour_id data is preserved but not operationally processed.
 
         return false;
     }

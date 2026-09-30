@@ -65,6 +65,33 @@ class FinanceSettingsSeeder extends Seeder
             'An order at or below this value skips its second approval WHEN it comes from an already-approved '
             .'requisition and has not grown beyond it. Never a blanket small-purchase exemption: an order with no '
             .'requisition behind it always goes to a person. Requires accountant sign-off to take effect.'],
+
+        // W2-1 (confirmed 2026-09-23, Option C): also read through
+        // FinanceSetting::approvedValue() — layered on top of the
+        // auto-approval limit above, not a replacement for it. Until
+        // Management/Procurement name the amount and sign it off, every
+        // order approves exactly as it does today, regardless of value.
+        ['purchase_order_senior_approval_threshold', null,
+            'Purchase order senior-approval threshold (KES)',
+            'An order above this value needs an additional senior approval before it can be approved, on top of '
+            .'the ordinary approval every order already requires. Requires Management/Procurement to name the '
+            .'amount and an accountant to sign the row off before it takes effect.'],
+
+        ['spend_voucher_senior_approval_threshold', null,
+            'Payment voucher senior-approval threshold (KES)',
+            'W4-2. Above this approved value a voucher requires an additional senior approval. Null keeps the gate inactive.'],
+        ['petty_cash_low_balance_threshold', null,
+            'Petty cash low-balance threshold (KES)',
+            'W5-5. Finance-approved low balance alert threshold; null preserves the legacy safe default.'],
+        ['petty_cash_critical_balance_threshold', null,
+            'Petty cash critical-balance threshold (KES)',
+            'W5-5. Finance-approved critical balance alert threshold; null preserves the legacy safe default.'],
+        ['petty_cash_surrender_due_days', null,
+            'Petty cash surrender deadline (days)',
+            'W5-8. Finance-approved default days after disbursement; null requires an explicit due date and does not invent policy.'],
+        ['petty_cash_surrender_due_soon_days', null,
+            'Petty cash "due soon" window (days)',
+            'W5-8. How many days before its deadline an advance shows as due soon. Null shows no due-soon state.'],
     ];
 
     public function run(): void

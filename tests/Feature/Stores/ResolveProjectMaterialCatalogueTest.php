@@ -21,6 +21,7 @@ use Tests\TestCase;
  */
 class ResolveProjectMaterialCatalogueTest extends TestCase
 {
+    use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private int $enquiryId;
@@ -32,6 +33,7 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
         parent::setUp();
 
         Role::findOrCreate('Stores', 'web');
+        $this->grantMatrixPermissions('Stores');
         $this->user = User::factory()->create(['is_active' => true]);
         $this->user->assignRole('Stores');
         Sanctum::actingAs($this->user->fresh());

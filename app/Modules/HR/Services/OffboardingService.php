@@ -440,6 +440,19 @@ class OffboardingService
         $this->recalculateProgress($caseId);
         $this->log($caseId, 'settlement_approved', 'Final settlement approved');
 
+        // W3-8: flag — not block — an approval whose deductions do not cover
+        // the employee's unrecovered salary advances. Whether to write the
+        // remainder off is WNG's decision, not the system's.
+        $case = OffboardingCase::findOrFail($caseId);
+        $outstanding = \App\Modules\HR\Models\SalaryAdvanceRequest::outstandingFor($case->employee_id)
+            ->sum(fn ($advance) => (float) $advance->outstanding_balance);
+        if ($outstanding > (float) ($settlement->deductions ?? 0)) {
+            $this->log($caseId, 'settlement_advance_shortfall', sprintf(
+                'Final settlement approved with deductions of KES %s against unrecovered salary advances of KES %s.',
+                number_format((float) ($settlement->deductions ?? 0), 2), number_format($outstanding, 2)
+            ));
+        }
+
         $case = OffboardingCase::findOrFail($caseId);
         $this->notifyOffboarding($case, 'offboarding_settlement_approved', 'Final settlement approved',
             "The final settlement for {$case->employee->name} has been approved.");

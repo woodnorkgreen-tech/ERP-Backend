@@ -45,6 +45,10 @@ class CreateDisbursementRequest extends FormRequest
             'classification' => ['nullable', Rule::in([
                 'agencies', 'admin', 'operations', 'event_planners', 'corporates', 'crs', 'other',
             ])],
+            // W3-1: the expense process, not the client segment above and not
+            // the payment method. Only a payment with no prior requisition can
+            // be a walk-in cash purchase.
+            'transaction_classification' => ['nullable', Rule::in(['cash_purchase']), 'prohibits:requisition_id'],
             'job_number' => ['nullable', 'string', 'max:100'],
             'date_disbursed' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
             'payee_type' => ['nullable', 'string', 'max:32'],

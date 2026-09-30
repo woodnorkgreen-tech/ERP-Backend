@@ -19,12 +19,18 @@ class BillPayment extends Model
         'payment_source_id',
         'disbursement_id',
         'reference_number', // CHANGED from 'notes'
-        'user_id'
+        'user_id',
+        // W2-5: duplicate detection override trail.
+        'duplicate_of_payment_id',
+        'duplicate_override_reason',
+        'duplicate_override_by',
+        'duplicate_override_at',
     ];
 
     protected $casts = [
         'payment_date' => 'date',
         'amount_paid' => 'decimal:2',
+        'duplicate_override_at' => 'datetime',
     ];
 
     /**

@@ -8,6 +8,9 @@ use App\Modules\Finance\CostCollector\Services\PettyCashCostProducer;
 use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Models\ChartOfAccount;
+use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\PettyCash\Models\PettyCashTopUp;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +23,8 @@ class PettyCashCostProducerTest extends TestCase
     private PettyCashCostProducer $producer;
     private User $user;
     private int $topUpId;
+    private int $expenseCodeId;
+    private int $paymentSourceId;
 
     protected function setUp(): void
     {
@@ -38,6 +43,26 @@ class PettyCashCostProducerTest extends TestCase
             'payment_method' => 'cash',
             'date_topped_up' => now()->subMonth()->toDateString(),
             'created_by' => $this->user->id,
+        ])->id;
+
+        $this->expenseCodeId = ExpenseCode::create([
+            'code' => 'TEST-OVERHEAD',
+            'accounting_class' => 'expense',
+            'expense_family' => 'Administrative expenses',
+            'expense_type' => 'Test overhead',
+            'simple_meaning' => 'Test-only mapped direct expense',
+            'default_debit_account_id' => ChartOfAccount::where('code', '7100')->value('id'),
+            'job_id_rule' => ExpenseCode::JOB_OPTIONAL,
+            'is_active' => true,
+        ])->id;
+
+        $this->paymentSourceId = PaymentSource::create([
+            'code' => 'TEST-PETTY-CASH',
+            'name' => 'Test Petty Cash',
+            'type' => 'petty_cash',
+            'gl_account_id' => ChartOfAccount::where('code', '1030')->value('id'),
+            'is_active' => true,
+            'can_make_payment' => true,
         ])->id;
     }
 
@@ -65,6 +90,8 @@ class PettyCashCostProducerTest extends TestCase
             'amount' => 4500.00,
             'payee_name' => 'Bolt',
             'account' => 'Cost of Sales:Transport & Delivery',
+            'expense_code_id' => $this->expenseCodeId,
+            'payment_source_id' => $this->paymentSourceId,
             'description' => 'Site transport',
             'classification' => 'operations',
             'payment_method' => 'cash',
