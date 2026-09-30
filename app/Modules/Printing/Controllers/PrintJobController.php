@@ -53,6 +53,8 @@ class PrintJobController extends Controller
                 'stopRequestedBy:id,name', 'stopAcknowledgedBy:id,name',
             ])
             ->when($myWorkApplied, fn ($q) => $q->where('operator_id', auth()->id()))
+            ->when($request->input('source') === 'historical', fn ($q) => $q->where('origin', 'historical_import'))
+            ->when($request->input('source') === 'live', fn ($q) => $q->where('origin', '!=', 'historical_import'))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('tab'), fn ($q) => $this->applyTab($q, (string) $request->get('tab')))
             ->when($request->filled('order_type'), fn ($q) => $q->where('order_type', $request->string('order_type')))
@@ -344,6 +346,9 @@ class PrintJobController extends Controller
 
     public function correction(Request $request, PrintJob $job): JsonResponse
     {
+        if ($job->origin === 'historical_import') {
+            return response()->json(['message' => 'Imported historical jobs are read only.'], 422);
+        }
         $data = $request->validate([
             'reason' => ['required', 'string', 'max:2000'],
             'status' => ['nullable', 'in:' . implode(',', self::PILOT_STATUSES)],
@@ -370,6 +375,9 @@ class PrintJobController extends Controller
 
     public function saveConsumption(Request $request, PrintJob $job): JsonResponse
     {
+        if ($job->origin === 'historical_import') {
+            return response()->json(['message' => 'Imported historical usage is read only.'], 422);
+        }
         $data = $request->validate([
             'print_roll_id' => ['required', 'integer', 'exists:print_rolls,id'],
             'artwork_width_m' => ['nullable', 'numeric', 'min:0'],

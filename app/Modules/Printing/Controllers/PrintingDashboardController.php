@@ -22,4 +22,18 @@ class PrintingDashboardController extends Controller
     {
         return response()->json(['data' => $this->dashboard->projectUsage($request)]);
     }
+
+    public function monthlyConsumption(Request $request): JsonResponse
+    {
+        $filters = $request->validate([
+            'period' => ['nullable', 'in:month,week,all'],
+            'month' => ['nullable', 'date_format:Y-m'],
+            'week' => ['nullable', 'date_format:Y-m-d'],
+            'material' => ['nullable', 'string', 'max:255'],
+            'project' => ['nullable', 'string', 'max:255'],
+            'source' => ['nullable', 'in:all,historical,live'],
+        ]);
+
+        return response()->json(['data' => $this->dashboard->monthlyConsumption($filters)]);
+    }
 }
