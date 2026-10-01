@@ -104,7 +104,7 @@ class InventoryService
             // stock inside a reclassified item would be worse than the
             // inconsistency it prevents.
             $status = $material->item_status ?? ($material->is_active ? 'Active' : 'Inactive');
-            if ($status !== 'Active' && ! in_array($type, ['return', 'defective'], true)) {
+            if ($status !== 'Active' && ! in_array($type, ['return', 'defective', 'reversal'], true)) {
                 $verb = $quantity < 0 ? 'issued' : 'received';
                 throw new \DomainException(
                     "{$material->material_name} cannot be {$verb} while it is {$status}. "
@@ -200,7 +200,11 @@ class InventoryService
                 }
             }
 
-            $controlled = app(ControlledInventoryService::class)->apply($material, $quantity, $type, $meta);
+            $controlled = ($meta['skip_controlled_inventory'] ?? false)
+                ? ['inventory_lot_id' => $meta['inventory_lot_id'] ?? null,
+                    'inventory_serial_item_id' => $meta['inventory_serial_item_id'] ?? null,
+                    'allocations' => []]
+                : app(ControlledInventoryService::class)->apply($material, $quantity, $type, $meta);
 
             // 3. Generate or use provided batch number
             $batchNumber = $meta['batch_number'] ?? $this->generateBatchNumber();
@@ -208,7 +212,7 @@ class InventoryService
             // 4. Log the movement with batch number
             $log = InventoryLog::create([
                 'material_id' => $materialId,
-                'user_id' => Auth::id(),
+                'user_id' => $meta['user_id'] ?? Auth::id(),
                 'type' => $type,
                 'batch_number' => $batchNumber,
                 'lot_number' => $meta['lot_number'] ?? null,
@@ -238,6 +242,7 @@ class InventoryService
                 'project_id' => $meta['project_id'] ?? null,
                 'project_material_id' => $meta['project_material_id'] ?? null,
                 'original_issue_log_id' => $meta['original_issue_log_id'] ?? null,
+                'reversal_of_log_id' => $meta['reversal_of_log_id'] ?? null,
                 'return_kind' => $type === 'return' ? ($meta['return_kind'] ?? 'whole_item') : null,
                 'supplier_id' => $meta['supplier_id'] ?? null,
                 'reference_no' => $meta['reference_no'] ?? null,

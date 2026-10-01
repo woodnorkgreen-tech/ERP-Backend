@@ -261,11 +261,12 @@ class PayrollFinancePostingService
      */
     private function splitGrossByLabourClassification($payslips): array
     {
-        $directEmployeeIds = DB::table('employees')
-            ->join('departments', 'departments.id', '=', 'employees.department_id')
-            ->where('departments.labour_classification', 'direct')
-            ->pluck('employees.id')
-            ->flip();
+        // The classification in force at the payroll month's end (Report 67): a
+        // department reclassified later does not change a month already posted.
+        $monthEnd = Carbon::createFromFormat('Y-m', $payslips->first()?->payroll_month ?? now()->format('Y-m'))->endOfMonth();
+        $classification = app(\App\Modules\Finance\Payroll\LabourClassificationService::class)->mapOn($monthEnd);
+        $directDepartments = collect($classification)->filter(fn ($value) => $value === 'direct')->keys();
+        $directEmployeeIds = DB::table('employees')->whereIn('department_id', $directDepartments)->pluck('id')->flip();
 
         $direct = '0.00';
         $indirect = '0.00';

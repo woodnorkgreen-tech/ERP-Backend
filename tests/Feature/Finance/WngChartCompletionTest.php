@@ -9,6 +9,7 @@ use App\Modules\Finance\Database\Seeders\PaymentSourceSeeder;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Finance\Support\FinanceAccountFunctions;
 use App\Modules\Finance\Support\FinanceChartProfile;
+use App\Modules\Finance\Support\FinanceReadiness;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -374,6 +375,11 @@ class WngChartCompletionTest extends TestCase
         $this->assertTrue($check['ready'], $check['message']);
         $this->assertStringContainsString('off by design', $check['message']);
         $this->assertStringContainsString('2300', $check['message']);
+
+        $cliCheck = collect(app(FinanceReadiness::class)->checks())->firstWhere('check', 'Expense-code accounts');
+        $this->assertTrue($cliCheck['ok'], $cliCheck['detail']);
+        $this->assertStringContainsString('off by design', $cliCheck['detail']);
+        $this->assertStringContainsString('2300', $cliCheck['detail']);
         $this->assertFalse((bool) DB::table('expense_codes')->where('default_debit_gl', 'like', '2300%')->value('is_active'), 'the loan code stays inactive');
     }
 

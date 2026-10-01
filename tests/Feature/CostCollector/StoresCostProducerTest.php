@@ -3,7 +3,10 @@
 namespace Tests\Feature\CostCollector;
 
 use App\Models\User;
+use App\Modules\Finance\CostCollector\Contracts\CostContext;
+use App\Modules\Finance\CostCollector\Exceptions\CostValidationException;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\CostCollector\Services\CostCollectorService;
 use App\Modules\Finance\CostCollector\Services\StoresCostProducer;
 use App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder;
 use App\Modules\Finance\Database\Seeders\ChartOfAccountSeeder;
@@ -13,6 +16,7 @@ use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class StoresCostProducerTest extends TestCase
@@ -20,6 +24,7 @@ class StoresCostProducerTest extends TestCase
     use RefreshDatabase;
 
     private StoresCostProducer $producer;
+
     private User $user;
 
     protected function setUp(): void
@@ -56,12 +61,12 @@ class StoresCostProducerTest extends TestCase
 
         $materialsDataId = DB::table('task_materials_data')->insertGetId([
             'enquiry_task_id' => $taskId,
-            'project_info' => json_encode(['projectId' => 'ENQ-' . $enquiryId]),
+            'project_info' => json_encode(['projectId' => 'ENQ-'.$enquiryId]),
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
         $elementId = DB::table('project_elements')->insertGetId([
-            'persistent_id' => (string) \Illuminate\Support\Str::uuid(),
+            'persistent_id' => (string) Str::uuid(),
             'task_materials_data_id' => $materialsDataId,
             'element_type' => 'stand',
             'name' => 'Stand',
@@ -69,7 +74,7 @@ class StoresCostProducerTest extends TestCase
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        $persistentId = (string) \Illuminate\Support\Str::uuid();
+        $persistentId = (string) Str::uuid();
 
         $materialLineId = DB::table('element_materials')->insertGetId([
             'persistent_id' => $persistentId,
@@ -82,7 +87,7 @@ class StoresCostProducerTest extends TestCase
         ]);
 
         CostLine::create([
-            'ref' => 'CL-PLAN-' . uniqid(),
+            'ref' => 'CL-PLAN-'.uniqid(),
             'nature' => CostLine::NATURE_PLANNED,
             'status' => CostLine::STATUS_VERIFIED,
             'amount' => $plannedTotal,
@@ -110,14 +115,14 @@ class StoresCostProducerTest extends TestCase
     private function createMaterial(string $name, float $unitCost): LibraryMaterial
     {
         $workstationId = DB::table('workstations')->insertGetId([
-            'name' => 'Main Workshop', 'code' => 'WS-MAIN-' . uniqid(),
+            'name' => 'Main Workshop', 'code' => 'WS-MAIN-'.uniqid(),
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
         return LibraryMaterial::create([
             'workstation_id' => $workstationId,
             'material_name' => $name,
-            'material_code' => 'MAT-' . uniqid(),
+            'material_code' => 'MAT-'.uniqid(),
             'category' => 'Materials',
             'unit_of_measure' => 'sheet',
             'unit_cost' => $unitCost,
@@ -138,7 +143,7 @@ class StoresCostProducerTest extends TestCase
         }
 
         $clientId = DB::table('clients')->insertGetId([
-            'full_name' => 'Decoy Client', 'email' => uniqid() . '@t.local', 'phone' => '0700000000',
+            'full_name' => 'Decoy Client', 'email' => uniqid().'@t.local', 'phone' => '0700000000',
             'address' => 'Nairobi', 'city' => 'Nairobi', 'county' => 'Nairobi',
             'customer_type' => 'company', 'lead_source' => 'test', 'preferred_contact' => 'email',
             'registration_date' => now()->toDateString(), 'created_at' => now(), 'updated_at' => now(),
@@ -147,7 +152,7 @@ class StoresCostProducerTest extends TestCase
         DB::table('project_enquiries')->insert([
             'id' => $id, 'date_received' => now()->toDateString(), 'client_id' => $clientId,
             'title' => 'Decoy Job', 'contact_person' => 'Contact',
-            'enquiry_number' => 'ENQ-' . uniqid(), 'job_number' => $jobNumber,
+            'enquiry_number' => 'ENQ-'.uniqid(), 'job_number' => $jobNumber,
             'created_by' => $this->user->id, 'created_at' => now(), 'updated_at' => now(),
         ]);
 
@@ -157,7 +162,7 @@ class StoresCostProducerTest extends TestCase
     private function createEnquiry(string $jobNumber): int
     {
         $clientId = DB::table('clients')->insertGetId([
-            'full_name' => 'Client', 'email' => uniqid() . '@t.local', 'phone' => '0700000000',
+            'full_name' => 'Client', 'email' => uniqid().'@t.local', 'phone' => '0700000000',
             'address' => 'Nairobi', 'city' => 'Nairobi', 'county' => 'Nairobi',
             'customer_type' => 'company', 'lead_source' => 'test', 'preferred_contact' => 'email',
             'registration_date' => now()->toDateString(), 'created_at' => now(), 'updated_at' => now(),
@@ -166,7 +171,7 @@ class StoresCostProducerTest extends TestCase
         return DB::table('project_enquiries')->insertGetId([
             'date_received' => now()->toDateString(), 'client_id' => $clientId,
             'title' => 'Woodwork Job', 'contact_person' => 'Contact',
-            'enquiry_number' => 'ENQ-' . uniqid(), 'job_number' => $jobNumber,
+            'enquiry_number' => 'ENQ-'.uniqid(), 'job_number' => $jobNumber,
             'created_by' => $this->user->id, 'created_at' => now(), 'updated_at' => now(),
         ]);
     }
@@ -176,14 +181,14 @@ class StoresCostProducerTest extends TestCase
         $enquiryId = $this->createEnquiry('WNG-08-2026-001');
 
         $workstationId = DB::table('workstations')->insertGetId([
-            'name' => 'Main Workshop', 'code' => 'WS-MAIN-' . uniqid(),
+            'name' => 'Main Workshop', 'code' => 'WS-MAIN-'.uniqid(),
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
         $material = LibraryMaterial::create([
             'workstation_id' => $workstationId,
             'material_name' => 'MDF Board 18mm',
-            'material_code' => 'MAT-MDF-18-' . uniqid(),
+            'material_code' => 'MAT-MDF-18-'.uniqid(),
             'category' => 'Materials',
             'unit_of_measure' => 'sheet',
             'unit_cost' => 3500.00,
@@ -233,8 +238,8 @@ class StoresCostProducerTest extends TestCase
         // The two sequences must not already coincide, or the "other" enquiry
         // would be this project's own and there would be no collision to test.
         while ($realProjectId === $realEnquiryId) {
-            $realEnquiryId = $this->createEnquiry('WNG-OFFSET-' . uniqid());
-            $realProjectId = $this->createProject($realEnquiryId, 'PRJ-' . uniqid());
+            $realEnquiryId = $this->createEnquiry('WNG-OFFSET-'.uniqid());
+            $realProjectId = $this->createProject($realEnquiryId, 'PRJ-'.uniqid());
         }
 
         // Force the collision: an unrelated enquiry whose id equals the issuing
@@ -283,10 +288,10 @@ class StoresCostProducerTest extends TestCase
         $enquiryId = $this->createEnquiry('WNG-08-2026-002');
         $projectId = $this->createProject($enquiryId, 'WNG-08-2026-003');
 
-        $this->expectException(\App\Modules\Finance\CostCollector\Exceptions\CostValidationException::class);
+        $this->expectException(CostValidationException::class);
 
-        app(\App\Modules\Finance\CostCollector\Services\CostCollectorService::class)->postFromSource(
-            new \App\Modules\Finance\CostCollector\Contracts\CostContext(
+        app(CostCollectorService::class)->postFromSource(
+            new CostContext(
                 expenseCode: 'DM-WD-001',
                 amount: '100.00',
                 nature: CostLine::NATURE_ACTUAL,
@@ -337,14 +342,14 @@ class StoresCostProducerTest extends TestCase
     public function test_stock_checkout_without_project_is_skipped(): void
     {
         $workstationId = DB::table('workstations')->insertGetId([
-            'name' => 'Main Workshop', 'code' => 'WS-MAIN-' . uniqid(),
+            'name' => 'Main Workshop', 'code' => 'WS-MAIN-'.uniqid(),
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
         $material = LibraryMaterial::create([
             'workstation_id' => $workstationId,
             'material_name' => 'General Cleaning Cloth',
-            'material_code' => 'MAT-CLN-01-' . uniqid(),
+            'material_code' => 'MAT-CLN-01-'.uniqid(),
             'category' => 'Consumables',
             'unit_of_measure' => 'pack',
             'unit_cost' => 500.00,
@@ -375,13 +380,13 @@ class StoresCostProducerTest extends TestCase
     {
         $enquiryId = $this->createEnquiry('WNG-08-2026-RET');
         $workstationId = DB::table('workstations')->insertGetId([
-            'name' => 'Returns Workshop', 'code' => 'WS-RET-' . uniqid(),
+            'name' => 'Returns Workshop', 'code' => 'WS-RET-'.uniqid(),
             'created_at' => now(), 'updated_at' => now(),
         ]);
         $material = LibraryMaterial::create([
             'workstation_id' => $workstationId,
             'material_name' => 'Returnable Fixture',
-            'material_code' => 'MAT-RET-' . uniqid(),
+            'material_code' => 'MAT-RET-'.uniqid(),
             'category' => 'Materials',
             'unit_of_measure' => 'unit',
             'unit_cost' => 1000,
@@ -415,12 +420,12 @@ class StoresCostProducerTest extends TestCase
     {
         $enquiryId = $this->createEnquiry('WNG-08-2026-QR');
         $workstationId = DB::table('workstations')->insertGetId([
-            'name' => 'Review Workshop', 'code' => 'WS-QR-' . uniqid(),
+            'name' => 'Review Workshop', 'code' => 'WS-QR-'.uniqid(),
             'created_at' => now(), 'updated_at' => now(),
         ]);
         $material = LibraryMaterial::create([
             'workstation_id' => $workstationId, 'material_name' => 'Review Board',
-            'material_code' => 'MAT-QR-' . uniqid(), 'category' => 'Boards',
+            'material_code' => 'MAT-QR-'.uniqid(), 'category' => 'Boards',
             'unit_of_measure' => 'sheet', 'unit_cost' => 8000, 'item_status' => 'Active',
         ]);
         $issue = InventoryLog::create([
@@ -590,5 +595,56 @@ class StoresCostProducerTest extends TestCase
         ]);
 
         $this->assertNull($this->producer->postStockIssue($log));
+    }
+
+    public function test_stock_issue_reversal_posts_one_matching_negative_actual(): void
+    {
+        $enquiryId = $this->createEnquiry('WNG-REV-2026-001');
+        $projectId = $this->createProject($enquiryId, 'WNG-REV-2026-001');
+        $material = $this->createMaterial('Reversal-priced board', 500.00);
+
+        $issue = InventoryLog::create([
+            'material_id' => $material->id,
+            'user_id' => $this->user->id,
+            'type' => 'check_out',
+            'batch_number' => 'ISS-REV-'.uniqid(),
+            'quantity' => -2,
+            'receipt_unit_cost' => 500,
+            'balance_after' => 8,
+            'project_id' => $projectId,
+            'reference_no' => 'WNG-REV-2026-001',
+            'recipient_name' => 'Site Worker',
+            'logged_at' => now(),
+        ]);
+        $originalCost = $this->producer->postStockIssue($issue);
+        $this->assertNotNull($originalCost);
+        $this->assertSame('1000.00', $originalCost->net_amount);
+
+        $reversal = InventoryLog::create([
+            'material_id' => $material->id,
+            'user_id' => $this->user->id,
+            'type' => 'reversal',
+            'batch_number' => 'REV-'.$issue->id,
+            'quantity' => 2,
+            'balance_after' => 10,
+            'project_id' => $projectId,
+            'original_issue_log_id' => $issue->id,
+            'reversal_of_log_id' => $issue->id,
+            'reference_no' => 'REV-WNG-REV-2026-001',
+            'logged_at' => now(),
+        ]);
+
+        $reversalCost = $this->producer->postStockIssueReversal($reversal);
+        $again = $this->producer->postStockIssueReversal($reversal);
+
+        $this->assertNotNull($reversalCost);
+        $this->assertSame($reversalCost->id, $again?->id);
+        $this->assertSame('-1000.00', $reversalCost->net_amount);
+        $this->assertNotNull($originalCost->journal_entry_id);
+        $this->assertNotNull($reversalCost->journal_entry_id);
+        $this->assertSame($originalCost->id, $reversalCost->reversal_of_id);
+        $this->assertSame('stock-issue-reversal', $reversalCost->source_ref);
+        $this->assertSame(1, CostLine::where('source_type', InventoryLog::class)
+            ->where('source_id', $reversal->id)->where('source_ref', 'stock-issue-reversal')->count());
     }
 }

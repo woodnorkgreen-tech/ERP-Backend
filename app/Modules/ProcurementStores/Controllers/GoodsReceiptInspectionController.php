@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Constants\Permissions;
 use App\Events\GoodsReceiptRecorded;
 use App\Http\Controllers\Controller;
 use App\Modules\ProcurementStores\Models\GoodsReceiptInspection;
@@ -17,7 +18,12 @@ class GoodsReceiptInspectionController extends Controller
 {
     private function authorizeStores(): void
     {
-        abort_unless(auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin']), 403, 'Only Stores team members can manage receipt inspections.');
+        abort_unless(
+            auth()->user()?->can(Permissions::STORES_RECEIPT_INSPECT)
+            || auth()->user()?->can(Permissions::STORES_MANAGE),
+            403,
+            'Only Stores team members can manage receipt inspections.'
+        );
     }
 
     public function index(Request $request): JsonResponse

@@ -62,15 +62,16 @@ class ChartAccountMapTest extends TestCase
         $this->withMap([]);
 
         $this->assertNull(ChartAccountMap::localFromGl('Receiving cash/bank account'));
+        $this->assertNull(ChartAccountMap::localFromGl('Relevant 1400 PPE account'));
         $this->assertNull(ChartAccountMap::localFromGl('Equity / Dividends Payable'));
         $this->assertNull(ChartAccountMap::localFromGl(null));
     }
 
-    public function test_a_four_digit_code_inside_prose_is_still_found(): void
+    public function test_an_indirect_account_can_be_resolved_only_by_an_explicit_mapping(): void
     {
-        // The catalogue writes "Relevant 1400 PPE account" and "1030 Petty Cash
-        // Float or bank" alike, so the reference is read out of the text rather
-        // than expected to start it.
+        // An indirect account names a class for Finance to choose within. It is
+        // resolved only when this installation explicitly maps that class to a
+        // concrete postable account.
         $this->withMap(['1400' => 'PE-001']);
 
         $this->assertSame('PE-001', ChartAccountMap::localFromGl('Relevant 1400 PPE account'));

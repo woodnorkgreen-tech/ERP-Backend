@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Constants\Permissions;
 use App\Events\GoodsReceiptRecorded;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNote;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
@@ -29,7 +30,7 @@ class GoodsReceiptNoteController extends Controller
      */
     public function receivingQueue()
     {
-        if (! auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (! auth()->user()?->can(Permissions::STORES_VIEW) && ! auth()->user()?->can(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can view the receiving queue.'], 403);
         }
 
@@ -494,7 +495,7 @@ class GoodsReceiptNoteController extends Controller
     public function destroy($id)
     {
         abort_unless(
-            auth()->user()?->hasRole('Super Admin'),
+            auth()->user()?->can(Permissions::ADMIN_ACCESS),
             403,
             'Only a Super Admin can delete a goods receipt note.'
         );

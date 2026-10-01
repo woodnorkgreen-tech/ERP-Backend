@@ -53,6 +53,7 @@ class LabourClassificationController extends Controller
         // The headcount is what makes the decision concrete: "Production, 11
         // people" is a judgement someone can actually make, where a bare list of
         // department names is not.
+        $inForce = app(\App\Modules\Finance\Payroll\LabourClassificationService::class)->mapOn(now());
         $departments = Department::query()
             ->leftJoin('employees', function ($join) {
                 $join->on('employees.department_id', '=', 'departments.id')
@@ -69,8 +70,9 @@ class LabourClassificationController extends Controller
             ->map(fn ($department) => [
                 'id' => $department->id,
                 'name' => $department->name,
-                'labour_classification' => $department->labour_classification ?? Department::LABOUR_INDIRECT,
-                'is_explicit' => $department->labour_classification !== null,
+                // In force today (Report 67); unclassified posts as overhead, and says so.
+                'labour_classification' => $inForce[$department->id] ?? Department::LABOUR_INDIRECT,
+                'is_explicit' => isset($inForce[$department->id]),
                 'active_employees' => (int) $department->active_employees,
             ]);
 
@@ -87,15 +89,18 @@ class LabourClassificationController extends Controller
 
     public function update(Request $request, Department $department): JsonResponse
     {
-        abort_unless($request->user()?->can(Permissions::FINANCE_EXPENSE_CODES_MANAGE), 403);
+        abort_unless($request->user()?->can(Permissions::FINANCE_EXPENSE_CODES_MANAGE)
+            || $request->user()?->can(Permissions::FINANCE_PAYROLL_LABOUR_CLASSIFICATION_MANAGE), 403);
 
         $validated = $request->validate([
             'labour_classification' => ['required', 'in:direct,indirect'],
         ]);
 
-        $department->forceFill([
-            'labour_classification' => $validated['labour_classification'],
-        ])->save();
+        // Effective from today and recorded with who changed it (Report 67). The
+        // effective-dated register at api/finance/payroll/labour-classification
+        // takes a date and a reason.
+        app(\App\Modules\Finance\Payroll\LabourClassificationService::class)
+            ->classify($department, $validated['labour_classification'], now()->toDateString(), $request->user()->id, null);
 
         return response()->json([
             'status' => 'success',

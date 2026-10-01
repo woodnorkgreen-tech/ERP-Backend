@@ -33,6 +33,7 @@ class InventoryLog extends Model
         'project_id',
         'project_material_id',
         'original_issue_log_id',
+        'reversal_of_log_id',
         'return_kind',
         'supplier_id',
         'reference_no',
@@ -87,6 +88,16 @@ class InventoryLog extends Model
     public function originalIssue(): BelongsTo
     {
         return $this->belongsTo(self::class, 'original_issue_log_id');
+    }
+
+    public function reversedMovement(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reversal_of_log_id');
+    }
+
+    public function reversal()
+    {
+        return $this->hasOne(self::class, 'reversal_of_log_id');
     }
 
     public function projectMaterial(): BelongsTo

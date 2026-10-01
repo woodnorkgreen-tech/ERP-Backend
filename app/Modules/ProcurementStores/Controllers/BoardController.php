@@ -2,6 +2,7 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Constants\Permissions;
 use App\Http\Controllers\Controller;
 use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\BoardMovement;
@@ -27,6 +28,18 @@ class BoardController extends Controller
         private readonly BoardValuationService    $valuation,
     ) {}
 
+    private function allows(string ...$permissions): bool
+    {
+        $user = auth()->user();
+        foreach ($permissions as $permission) {
+            if ($user?->can($permission)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // ─── Ingestion ────────────────────────────────────────────────────────────
 
     /**
@@ -35,7 +48,7 @@ class BoardController extends Controller
      */
     public function ingest(StoreBoardRequest $request): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can receive boards.'], 403);
         }
 
@@ -256,7 +269,7 @@ class BoardController extends Controller
      */
     public function startProcessing(int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE, Permissions::PROJECT_READ)) {
             return response()->json(['message' => 'You are not permitted to process boards.'], 403);
         }
 
@@ -298,7 +311,7 @@ class BoardController extends Controller
      */
     public function dispatchToStation(Request $request, string $jobRef): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE, Permissions::PROJECT_READ)) {
             return response()->json(['message' => 'Only Production, Stores or Managers can send boards to Production.'], 403);
         }
 
@@ -330,7 +343,7 @@ class BoardController extends Controller
     /** Append an operational observation without changing lifecycle state. */
     public function addNote(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE, Permissions::PROJECT_READ)) {
             return response()->json(['message' => 'You are not permitted to add board notes.'], 403);
         }
         $validated = $request->validate(['notes' => 'required|string|min:3|max:1000']);
@@ -421,7 +434,7 @@ class BoardController extends Controller
      */
     public function startWip(Request $request, string $jobRef): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Production, Stores or Managers can start board work.'], 403);
         }
 
@@ -469,7 +482,7 @@ class BoardController extends Controller
      */
     public function consume(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'You are not permitted to record board use.'], 403);
         }
 
@@ -934,7 +947,7 @@ class BoardController extends Controller
      */
     public function recordValuation(Request $request): JsonResponse
     {
-        if (! auth()->user()?->hasAnyRole(['Stores', 'Finance', 'Finance Manager', 'Accounts', 'Accountant', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_MANAGE, Permissions::STORES_REVIEW)) {
             return response()->json(['message' => 'You are not permitted to record board valuations.'], 403);
         }
 
@@ -1017,7 +1030,7 @@ class BoardController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasRole('Super Admin')) {
+        if (! $this->allows(Permissions::STORES_REVIEW)) {
             return response()->json(['message' => 'Only Super Admins can edit board records.'], 403);
         }
 
@@ -1088,7 +1101,7 @@ class BoardController extends Controller
      */
     public function destroy(int $id): JsonResponse
     {
-        if (!auth()->user()?->hasRole('Super Admin')) {
+        if (! $this->allows(Permissions::ADMIN_ACCESS)) {
             return response()->json(['message' => 'Only Super Admins can delete board records.'], 403);
         }
 
@@ -1130,7 +1143,7 @@ class BoardController extends Controller
      */
     public function confirmLabels(Request $request, string $batchNumber): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_REVIEW)) {
             return response()->json(['message' => 'Only Stores team members can confirm labels.'], 403);
         }
 
@@ -1199,7 +1212,7 @@ class BoardController extends Controller
      */
     public function confirmBoardLabel(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can confirm labels.'], 403);
         }
 
@@ -1248,7 +1261,7 @@ class BoardController extends Controller
 
     public function initiateReturn(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'You are not permitted to initiate board returns.'], 403);
         }
 
@@ -1285,7 +1298,7 @@ class BoardController extends Controller
 
     public function receiveReturn(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores can receive a returned board.'], 403);
         }
 
@@ -1352,7 +1365,7 @@ class BoardController extends Controller
 
     public function bulkReturn(Request $request, string $jobRef): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores can receive board returns.'], 403);
         }
 
@@ -1527,7 +1540,7 @@ class BoardController extends Controller
 
     public function initiateReturnBatch(Request $request, string $jobRef): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'You are not permitted to initiate board returns.'], 403);
         }
         $validated = $request->validate([
@@ -1571,7 +1584,7 @@ class BoardController extends Controller
 
     public function markReturnBatchMissing(Request $request, BoardReturnBatch $batch): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores can record missing return items.'], 403);
         }
         $validated = $request->validate([
@@ -1620,7 +1633,7 @@ class BoardController extends Controller
 
     public function reviewQuarantineReturn(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_MANAGE, Permissions::STORES_REVIEW)) {
             return response()->json(['message' => 'A Stores manager must decide quarantined board returns.'], 403);
         }
         $validated = $request->validate([
@@ -1688,7 +1701,7 @@ class BoardController extends Controller
      */
     public function transition(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! $this->allows(Permissions::STORES_BOARD_MANAGE, Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'You are not permitted to change board status.'], 403);
         }
 

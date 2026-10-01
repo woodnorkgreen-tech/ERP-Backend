@@ -196,6 +196,15 @@ class Permissions
     const FINANCE_PAYABLES_READ = 'finance.payables.read';
     const FINANCE_PAYABLES_VERIFY = 'finance.payables.verify';
 
+    // Stream F (Report 67): Finance's side of payroll. HR prepares, processes and
+    // locks payroll (HR_MANAGE_PAYROLL); these never expose a payslip or salary.
+    // Aggregate payroll finance: runs, liabilities, payments, readiness counts.
+    const FINANCE_PAYROLL_READ = 'finance.payroll.read';
+    // Release payment of a locked payroll run (the payer, never the locker).
+    const FINANCE_PAYROLL_PAY = 'finance.payroll.pay';
+    // Classify departments as direct or overhead labour, effective-dated.
+    const FINANCE_PAYROLL_LABOUR_CLASSIFICATION_MANAGE = 'finance.payroll.labour_classification.manage';
+
     const FINANCE_INVOICE_CREATE = 'finance.invoice.create';
     const FINANCE_INVOICE_READ = 'finance.invoice.read';
     const FINANCE_INVOICE_UPDATE = 'finance.invoice.update';
@@ -366,6 +375,9 @@ class Permissions
     // want to hand that out to one trusted person without also granting
     // everything else STORES_MANAGE covers.
     const STORES_ADJUST_QUANTITY = 'stores.adjust_quantity';
+    const STORES_BOARD_MANAGE = 'stores.board.manage';
+    const STORES_RECEIPT_INSPECT = 'stores.receipt.inspect';
+    const STORES_MOVEMENT_REVERSE = 'stores.movement.reverse';
 
     // ===========================================
     // LOGISTICS MANAGEMENT PERMISSIONS
@@ -536,6 +548,7 @@ class Permissions
             self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
             self::FINANCE_RECEIVABLES_OVERRIDE, self::FINANCE_RECEIVABLES_INVOICE_CHECK,
             self::FINANCE_PAYABLES_READ, self::FINANCE_PAYABLES_VERIFY,
+            self::FINANCE_PAYROLL_READ, self::FINANCE_PAYROLL_PAY, self::FINANCE_PAYROLL_LABOUR_CLASSIFICATION_MANAGE,
 
             // Cross-cutting approvals
             self::APPROVALS_SELF_APPROVE,
@@ -587,6 +600,7 @@ class Permissions
             self::PROCUREMENT_BILLS_OVERRIDE_DUPLICATE,
             self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
             self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW, self::STORES_ADJUST_QUANTITY,
+            self::STORES_BOARD_MANAGE, self::STORES_RECEIPT_INSPECT, self::STORES_MOVEMENT_REVERSE,
 
             // System Admin Permissions
             self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
@@ -676,6 +690,7 @@ class Permissions
                 self::FINANCE_RECEIVABLES_BILLING_BASIS, self::FINANCE_RECEIVABLES_RELEASE,
                 self::FINANCE_RECEIVABLES_OVERRIDE, self::FINANCE_RECEIVABLES_INVOICE_CHECK,
                 self::FINANCE_PAYABLES_READ, self::FINANCE_PAYABLES_VERIFY,
+                self::FINANCE_PAYROLL_READ, self::FINANCE_PAYROLL_PAY, self::FINANCE_PAYROLL_LABOUR_CLASSIFICATION_MANAGE,
                 self::FINANCE_PETTY_CASH_VIEW,
                 self::FINANCE_PETTY_CASH_VIEW_BALANCE,
                 self::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -724,6 +739,7 @@ class Permissions
             'materials_stores' => [
                 self::MATERIALS_LIBRARY_VIEW, self::MATERIALS_LIBRARY_MANAGE, self::MATERIALS_LIBRARY_IMPORT,
                 self::STORES_VIEW, self::STORES_MANAGE, self::STORES_REVIEW, self::STORES_ADJUST_QUANTITY,
+                self::STORES_BOARD_MANAGE, self::STORES_RECEIPT_INSPECT, self::STORES_MOVEMENT_REVERSE,
             ],
             'admin' => [
                 self::ADMIN_ACCESS, self::ADMIN_LOGS_VIEW, self::ADMIN_SETTINGS, self::ADMIN_BACKUP, self::ADMIN_MAINTENANCE,
@@ -833,6 +849,9 @@ class Permissions
             self::FINANCE_EXPENDITURE_EXCEPTION_APPROVE => 'Authorize Spending Beyond an Approved Project Budget',
 
             self::STORES_ADJUST_QUANTITY => 'Correct Counted Stock Quantities',
+            self::STORES_BOARD_MANAGE => 'Manage Board Life Cycle and Requests',
+            self::STORES_RECEIPT_INSPECT => 'Inspect Received Stores Goods',
+            self::STORES_MOVEMENT_REVERSE => 'Reverse Stores Stock Movements',
 
             self::ADMIN_ACCESS => 'Access System Control Panel',
             self::ADMIN_SETTINGS => 'Modify Global System Config',

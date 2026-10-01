@@ -438,7 +438,7 @@ class FinanceWorkQueueService
         $add('payroll_lock', 'payroll', $manage,
             fn () => $notMine(PayrollRun::query()->where('status', 'processing'), 'created_by')->oldest(),
             $run('payroll_lock', 'Lock payroll', '/hr/payroll'));
-        $add('payroll_payment', 'payroll', $manage,
+        $add('payroll_payment', 'payroll', $manage || $user->can(Permissions::FINANCE_PAYROLL_PAY),
             fn () => $notMine(PayrollRun::query()->where('status', 'locked'), 'locked_by')->oldest(),
             $run('payroll_payment', 'Mark payroll paid', '/finance/payroll-disbursement'));
 

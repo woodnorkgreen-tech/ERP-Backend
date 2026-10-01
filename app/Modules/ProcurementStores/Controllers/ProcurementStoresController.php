@@ -4,16 +4,28 @@ namespace App\Modules\ProcurementStores\Controllers;
 
 use App\Constants\Permissions;
 use App\Http\Controllers\Controller;
+use App\Models\ElementMaterial;
+use App\Models\Project;
+use App\Modules\Finance\CostCollector\Services\StoresCostProducer;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Support\MaterialControl;
 use App\Modules\ProcurementStores\Models\Board;
+use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
 use App\Modules\ProcurementStores\Models\InventoryLog;
 use App\Modules\ProcurementStores\Models\InventoryLot;
 use App\Modules\ProcurementStores\Models\InventorySerialItem;
+use App\Modules\ProcurementStores\Models\PurchaseOrderItem;
 use App\Modules\ProcurementStores\Models\Stock;
+use App\Modules\ProcurementStores\Models\StockCount;
 use App\Modules\ProcurementStores\Models\StoresFinancePosting;
-use App\Modules\ProcurementStores\Services\StockMovementPoster;
 use App\Modules\ProcurementStores\Services\InventoryService;
+use App\Modules\ProcurementStores\Services\InventoryValuationService;
+use App\Modules\ProcurementStores\Services\ProjectMaterialDemand;
+use App\Modules\ProcurementStores\Services\StockMovementPoster;
+use App\Modules\ProcurementStores\Services\StockMovementReversalService;
+use App\Modules\ProcurementStores\Services\StoresFinanceOutbox;
+use App\Modules\ProcurementStores\Services\StoresValuationReadinessService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -49,15 +61,15 @@ class ProcurementStoresController extends Controller
         }
 
         $planRate = fn ($log) => $log?->project_material_id
-            ? app(\App\Modules\Finance\CostCollector\Services\StoresCostProducer::class)
+            ? app(StoresCostProducer::class)
                 ->plannedUnitRate((int) $log->project_material_id)
             : null;
 
         $postings = StoresFinancePosting::with([
-                'inventoryLog.material:id,material_name,material_code',
-                'inventoryLog.project:id,project_id', 'costLine:id,ref',
-                'inventoryLog.projectMaterial:id,unit_cost,description',
-            ])
+            'inventoryLog.material:id,material_name,material_code',
+            'inventoryLog.project:id,project_id', 'costLine:id,ref',
+            'inventoryLog.projectMaterial:id,unit_cost,description',
+        ])
             ->whereIn('status', ['pending', 'processing', 'failed'])
             ->latest()
             ->get()
@@ -67,6 +79,7 @@ class ProcurementStoresController extends Controller
                         && $posting->processing_started_at?->lt(now()->subMinutes(10)))
                     || ($posting->status === 'pending'
                         && $posting->updated_at?->lt(now()->subMinutes(15)));
+
                 return [
                     'id' => $posting->id, 'posting_type' => $posting->posting_type,
                     'status' => $posting->status, 'attempts' => $posting->attempts,
@@ -122,7 +135,7 @@ class ProcurementStoresController extends Controller
             'status' => 'pending', 'last_error' => null, 'next_retry_at' => null,
             'last_retried_by' => auth()->id(),
         ]);
-        app(\App\Modules\ProcurementStores\Services\StoresFinanceOutbox::class)
+        app(StoresFinanceOutbox::class)
             ->processSynchronously($inventoryLog);
 
         return response()->json(['message' => 'Finance posting processed. Stock was not moved again.']);
@@ -152,7 +165,7 @@ class ProcurementStoresController extends Controller
                 'resolved_unit_cost' => $validated['unit_cost'], 'resolution_notes' => $validated['reason'],
                 'resolved_by' => auth()->id(), 'resolved_at' => now(), 'last_retried_by' => auth()->id(),
             ]);
-            app(\App\Modules\ProcurementStores\Services\StoresFinanceOutbox::class)
+            app(StoresFinanceOutbox::class)
                 ->processSynchronously($posting);
         });
 
@@ -311,94 +324,95 @@ class ProcurementStoresController extends Controller
         //   available = ready-to-issue (Available) minus soft reservations
         $allMaterials = $summaryMaterials->concat($paginator->getCollection())->unique('id');
         $boardMaterialIds = $allMaterials
-            ->filter(fn($m) => $m->isBoardTrackable())
+            ->filter(fn ($m) => $m->isBoardTrackable())
             ->pluck('id');
 
         // Report 61: one valuation, shared with the Finance inventory position.
-        $valuation = app(\App\Modules\ProcurementStores\Services\InventoryValuationService::class);
+        $valuation = app(InventoryValuationService::class);
         $boardCounts = $valuation->boardCounts($boardMaterialIds);
 
         $formatMaterial = function ($material) use ($boardCounts, $valuation) {
             // The governed master controls behaviour. stocks.tracking_mode is a
             // compatibility projection and must never override master data.
             $isBoard = $material->isBoardTrackable();
-            $bc      = $isBoard ? $boardCounts->get($material->id) : null;
+            $bc = $isBoard ? $boardCounts->get($material->id) : null;
 
-            $reserved   = (float) ($material->stock?->quantity_reserved ?? 0);
-            $onHand     = $bc
+            $reserved = (float) ($material->stock?->quantity_reserved ?? 0);
+            $onHand = $bc
                 ? (float) $bc->in_stores_cnt
                 : (float) ($material->stock?->quantity_on_hand ?? 0);
-            $available  = $bc
+            $available = $bc
                 ? max(0.0, (float) $bc->available_cnt - $reserved)
                 : (float) ($material->stock ? ($material->stock->quantity_on_hand - $reserved) : 0);
 
             return [
-                'id'                => $material->id,
-                'workstation_id'    => $material->workstation_id,
-                'material_name'     => $material->material_name,
-                'material_code'     => $material->material_code,
+                'id' => $material->id,
+                'workstation_id' => $material->workstation_id,
+                'material_name' => $material->material_name,
+                'material_code' => $material->material_code,
                 'material_category_id' => $material->material_category_id,
-                'category'          => $material->materialCategory?->parent?->name
+                'category' => $material->materialCategory?->parent?->name
                     ?? $material->materialCategory?->name ?? $material->category,
-                'subcategory'       => $material->materialCategory?->parent
+                'subcategory' => $material->materialCategory?->parent
                     ? $material->materialCategory->name : $material->subcategory,
-                'unit_of_measure'   => $material->baseUom?->code ?? $material->unit_of_measure,
-                'unit_cost'         => $material->unit_cost,
+                'unit_of_measure' => $material->baseUom?->code ?? $material->unit_of_measure,
+                'unit_cost' => $material->unit_cost,
                 // The receiving API accepts this fallback when a board has no
                 // receipt-derived average yet. Omitting it made both Stores
                 // clients falsely block a valid receipt as "no default price".
                 'default_unit_cost' => $material->default_unit_cost !== null
                     ? (float) $material->default_unit_cost : null,
-                'workstation'       => $material->workstation,
-                'workstation_name'  => $material->workstation?->name ?? 'N/A',
-                'attributes'        => $material->attributes ?? [],
-                'is_active'         => $material->is_active,
-                'notes'             => $material->notes,
-                'material_type'     => $material->material_type ?? 'consumable',
-                'item_status'       => $material->item_status ?? ($material->is_active ? 'Active' : 'Inactive'),
+                'workstation' => $material->workstation,
+                'workstation_name' => $material->workstation?->name ?? 'N/A',
+                'attributes' => $material->attributes ?? [],
+                'is_active' => $material->is_active,
+                'notes' => $material->notes,
+                'material_type' => $material->material_type ?? 'consumable',
+                'item_status' => $material->item_status ?? ($material->is_active ? 'Active' : 'Inactive'),
                 'issue_disposition' => $material->issue_disposition ?? ($material->material_type === 'reusable' ? 'returnable' : 'consumed'),
-                'tracking_mode'     => $material->tracking_mode ?? ($material->isBoardTrackable() ? 'dimension_piece' : 'bulk_quantity'),
-                'is_hazardous'      => (bool) $material->is_hazardous,
-                'is_serialized'     => (bool) $material->is_serialized,
+                'tracking_mode' => $material->tracking_mode ?? ($material->isBoardTrackable() ? 'dimension_piece' : 'bulk_quantity'),
+                'is_hazardous' => (bool) $material->is_hazardous,
+                'is_serialized' => (bool) $material->is_serialized,
                 'is_batch_controlled' => (bool) $material->is_batch_controlled,
                 'is_expiry_controlled' => (bool) $material->is_expiry_controlled,
                 'is_project_chargeable' => (bool) $material->is_project_chargeable,
-                'base_uom'          => $material->baseUom?->code ?? $material->unit_of_measure,
-                'base_uom_id'       => $material->base_uom_id,
-                'purchase_uom'      => $material->purchaseUom ? ['id' => $material->purchaseUom->id, 'code' => $material->purchaseUom->code, 'name' => $material->purchaseUom->name] : null,
-                'issue_uom'         => $material->issueUom ? ['id' => $material->issueUom->id, 'code' => $material->issueUom->code, 'name' => $material->issueUom->name] : null,
-                'uom_conversions'   => $material->uomConversions->map(fn ($row) => ['from_uom_id' => $row->from_uom_id, 'to_uom_id' => $row->to_uom_id, 'factor' => (float) $row->factor])->values(),
-                'board_trackable'   => $material->isBoardTrackable(),
+                'base_uom' => $material->baseUom?->code ?? $material->unit_of_measure,
+                'base_uom_id' => $material->base_uom_id,
+                'purchase_uom' => $material->purchaseUom ? ['id' => $material->purchaseUom->id, 'code' => $material->purchaseUom->code, 'name' => $material->purchaseUom->name] : null,
+                'issue_uom' => $material->issueUom ? ['id' => $material->issueUom->id, 'code' => $material->issueUom->code, 'name' => $material->issueUom->name] : null,
+                'uom_conversions' => $material->uomConversions->map(fn ($row) => ['from_uom_id' => $row->from_uom_id, 'to_uom_id' => $row->to_uom_id, 'factor' => (float) $row->factor])->values(),
+                'board_trackable' => $material->isBoardTrackable(),
                 // Same source as the Materials Library table, so one item is
                 // never described two ways across the two screens.
-                'stock_handling'    => $material->stock_handling,
-                'handling_label'    => $material->handling_label,
+                'stock_handling' => $material->stock_handling,
+                'handling_label' => $material->handling_label,
                 // Stores must be able to see that a draft is not yet usable,
                 // rather than discovering it when a check-in is refused.
-                'is_draft'          => ($material->item_status ?? 'Active') !== 'Active',
-                'quantity_on_hand'  => $onHand,
+                'is_draft' => ($material->item_status ?? 'Active') !== 'Active',
+                'quantity_on_hand' => $onHand,
                 'quantity_reserved' => $reserved,
-                'available'         => $available,
-                'min_stock_level'   => (float) ($material->stock?->min_stock_level ?? 0),
-                'location'          => $material->stock?->location_bin ?? 'Not Set',
-                'warehouse_code'    => $material->stock?->warehouse_code ?? 'MAIN',
-                'is_stocked'        => $material->stock !== null,
+                'available' => $available,
+                'min_stock_level' => (float) ($material->stock?->min_stock_level ?? 0),
+                'location' => $material->stock?->location_bin ?? 'Not Set',
+                'warehouse_code' => $material->stock?->warehouse_code ?? 'MAIN',
+                'is_stocked' => $material->stock !== null,
                 'recent_project_issue_count' => (int) ($material->recent_project_issue_count ?? 0),
                 'project_specification_count' => (int) ($material->project_specification_count ?? 0),
                 'project_usage_score' => ((int) ($material->recent_project_issue_count ?? 0) * 3)
                     + (int) ($material->project_specification_count ?? 0),
                 'is_frequently_used' => (int) ($material->recent_project_issue_count ?? 0) >= 3
                     || (int) ($material->project_specification_count ?? 0) >= 5,
-                'can_set_stock_quantity' => !$isBoard
-                    && !$material->is_serialized
-                    && !$material->is_batch_controlled,
-                '_stock_value'      => $valuation->valueOf($material, (float) $onHand, $bc),
+                'can_set_stock_quantity' => ! $isBoard
+                    && ! $material->is_serialized
+                    && ! $material->is_batch_controlled,
+                '_stock_value' => $valuation->valueOf($material, (float) $onHand, $bc),
             ];
         };
 
         $paginator->getCollection()->transform(function ($material) use ($formatMaterial) {
             $row = $formatMaterial($material);
             unset($row['_stock_value']);
+
             return $row;
         });
 
@@ -420,17 +434,17 @@ class ProcurementStoresController extends Controller
 
         foreach ($summaryMaterials as $material) {
             $isBoard = $material->isBoardTrackable();
-            $bc      = $isBoard ? $boardCounts->get($material->id) : null;
-            $stock   = $material->stock;
+            $bc = $isBoard ? $boardCounts->get($material->id) : null;
+            $stock = $material->stock;
 
-            $reserved  = (float) ($stock?->quantity_reserved ?? 0);
-            $onHand    = $bc
+            $reserved = (float) ($stock?->quantity_reserved ?? 0);
+            $onHand = $bc
                 ? (float) $bc->in_stores_cnt
                 : (float) ($stock?->quantity_on_hand ?? 0);
             $available = $bc
                 ? max(0.0, (float) $bc->available_cnt - $reserved)
                 : (float) ($stock ? ($stock->quantity_on_hand - $reserved) : 0);
-            $minLevel    = (float) ($stock?->min_stock_level ?? 0);
+            $minLevel = (float) ($stock?->min_stock_level ?? 0);
             $disposition = $material->issue_disposition
                 ?? ($material->material_type === 'reusable' ? 'returnable' : 'consumed');
 
@@ -455,7 +469,7 @@ class ProcurementStoresController extends Controller
         $summary['total_value'] = round($summary['total_value'], 2);
 
         $response = [
-            'data'   => $paginator,
+            'data' => $paginator,
             'status' => 'success',
         ];
 
@@ -508,7 +522,7 @@ class ProcurementStoresController extends Controller
      */
     public function checkIn(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can check stock in.'], 403);
         }
 
@@ -536,22 +550,22 @@ class ProcurementStoresController extends Controller
         $material = LibraryMaterial::find($request->material_id);
 
         return response()->json([
-            'message'      => 'Stock updated successfully',
-            'data'         => $log,
+            'message' => 'Stock updated successfully',
+            'data' => $log,
             'batch_number' => $log->batch_number,
-            'status'       => 'success',
+            'status' => 'success',
             'labels_required' => count($boards) > 0,
             'label_status' => count($boards) > 0 ? 'pending_print' : 'not_applicable',
             'label_count' => count($boards),
-            'boards'       => array_map(fn($b) => [
-                'id'            => $b->id,
+            'boards' => array_map(fn ($b) => [
+                'id' => $b->id,
                 'tracking_code' => $b->tracking_code,
-                'scan_url'      => config('app.frontend_url', config('app.url')) . '/stores/boards/' . $b->tracking_code,
-                'length'        => $b->length,
-                'width'         => $b->width,
-                'thickness'     => $b->thickness,
-                'batch_number'  => $b->batch_number,
-                'material'      => ['name' => $material?->material_name, 'code' => $material?->material_code],
+                'scan_url' => config('app.frontend_url', config('app.url')).'/stores/boards/'.$b->tracking_code,
+                'length' => $b->length,
+                'width' => $b->width,
+                'thickness' => $b->thickness,
+                'batch_number' => $b->batch_number,
+                'material' => ['name' => $material?->material_name, 'code' => $material?->material_code],
             ], $boards),
         ]);
     }
@@ -564,7 +578,7 @@ class ProcurementStoresController extends Controller
      */
     public function checkOut(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
         }
 
@@ -587,7 +601,7 @@ class ProcurementStoresController extends Controller
             'message' => 'Stock issued successfully',
             'data' => $log,
             'batch_number' => $log->batch_number,
-            'status' => 'success'
+            'status' => 'success',
         ]);
     }
 
@@ -597,15 +611,15 @@ class ProcurementStoresController extends Controller
      */
     public function updateStockSettings(Request $request): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can update stock settings.'], 403);
         }
 
         $validated = $request->validate([
-            'material_id'     => 'required|exists:library_materials,id',
+            'material_id' => 'required|exists:library_materials,id',
             'min_stock_level' => 'nullable|numeric|min:0',
-            'location_bin'    => 'nullable|string|max:50',
-            'warehouse_code'  => 'nullable|string|max:20',
+            'location_bin' => 'nullable|string|max:50',
+            'warehouse_code' => 'nullable|string|max:20',
             'stock_quantity' => 'nullable|numeric|min:0',
             // Required only when the count actually moves the balance — the form
             // always posts the current figure back, and re-sending it unchanged
@@ -621,9 +635,15 @@ class ProcurementStoresController extends Controller
             );
             $stock = Stock::whereKey($stock->id)->lockForUpdate()->firstOrFail();
 
-            if ($request->has('min_stock_level')) $stock->min_stock_level = $request->min_stock_level;
-            if ($request->has('location_bin')) $stock->location_bin = $request->location_bin;
-            if ($request->has('warehouse_code')) $stock->warehouse_code = $request->warehouse_code;
+            if ($request->has('min_stock_level')) {
+                $stock->min_stock_level = $request->min_stock_level;
+            }
+            if ($request->has('location_bin')) {
+                $stock->location_bin = $request->location_bin;
+            }
+            if ($request->has('warehouse_code')) {
+                $stock->warehouse_code = $request->warehouse_code;
+            }
             $stock->save();
 
             if ($request->filled('stock_quantity')) {
@@ -680,7 +700,7 @@ class ProcurementStoresController extends Controller
         return response()->json([
             'message' => 'Stock settings updated successfully',
             'data' => $stock,
-            'status' => 'success'
+            'status' => 'success',
         ]);
     }
 
@@ -698,7 +718,7 @@ class ProcurementStoresController extends Controller
      */
     public function bulkStockSettings(Request $request): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can update stock settings.'], 403);
         }
 
@@ -753,7 +773,7 @@ class ProcurementStoresController extends Controller
      */
     public function returns(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can record returns.'], 403);
         }
 
@@ -773,7 +793,7 @@ class ProcurementStoresController extends Controller
         return response()->json([
             'message' => 'Material returned successfully',
             'data' => $log,
-            'status' => 'success'
+            'status' => 'success',
         ]);
     }
 
@@ -782,7 +802,7 @@ class ProcurementStoresController extends Controller
      */
     public function markDefective(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can mark stock defective.'], 403);
         }
 
@@ -801,7 +821,7 @@ class ProcurementStoresController extends Controller
         return response()->json([
             'message' => 'Stock marked as defective and removed from inventory',
             'data' => $log,
-            'status' => 'success'
+            'status' => 'success',
         ]);
     }
 
@@ -810,7 +830,7 @@ class ProcurementStoresController extends Controller
      */
     public function batchCheckIn(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can check stock in.'], 403);
         }
 
@@ -831,7 +851,7 @@ class ProcurementStoresController extends Controller
             'items.*.serial_numbers' => 'nullable|array',
             'items.*.serial_numbers.*' => 'string|max:150',
             'warehouse_code' => 'sometimes|string',
-            'logged_at' => 'nullable|date'
+            'logged_at' => 'nullable|date',
         ]);
 
         return $this->postBatch($poster, 'receive', $request, [
@@ -845,7 +865,7 @@ class ProcurementStoresController extends Controller
      */
     public function batchCheckOut(Request $request, StockMovementPoster $poster): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
+        if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
         }
 
@@ -865,7 +885,7 @@ class ProcurementStoresController extends Controller
             'requestor_name' => 'required|string|max:255',
             'reference_no' => 'nullable|string|max:255',
             'project_id' => 'nullable|exists:projects,id',
-            'logged_at' => 'nullable|date'
+            'logged_at' => 'nullable|date',
         ]);
 
         return $this->postBatch($poster, 'issue', $request, [
@@ -922,12 +942,12 @@ class ProcurementStoresController extends Controller
         }
 
         return response()->json(array_filter([
-            'message'         => $message,
-            'batch_number'    => $batchNumber,
+            'message' => $message,
+            'batch_number' => $batchNumber,
             'items_processed' => count($logs),
-            'data'            => $logs,
-            'boards_created'  => $type === 'receive' ? count($boards) : null,
-            'status'          => 'success',
+            'data' => $logs,
+            'boards_created' => $type === 'receive' ? count($boards) : null,
+            'status' => 'success',
         ], fn ($value) => $value !== null));
     }
 
@@ -958,6 +978,7 @@ class ProcurementStoresController extends Controller
             'material.materialCategory.parent', 'enteredUom', 'user:id,name', 'project.enquiry.deliverables',
             'projectMaterial:id,project_element_id', 'projectMaterial.element:id,name',
             'financePosting.costLine:id,ref,status,nature,net_amount,base_net_amount,quantity,unit_rate,verified_at',
+            'reversal:id,reversal_of_log_id',
         ]);
 
         if ($request->filled('type')) {
@@ -1006,7 +1027,7 @@ class ProcurementStoresController extends Controller
             ? collect()
             : Board::query()
                 ->whereIn('batch_number', $boardBatches)
-                ->whereNotIn('status', ['Consumed', 'Scrapped'])
+                ->where('status', '!=', 'Available')
                 ->selectRaw('batch_number, COUNT(*) as active_count')
                 ->groupBy('batch_number')
                 ->pluck('active_count', 'batch_number');
@@ -1019,12 +1040,23 @@ class ProcurementStoresController extends Controller
                 }
 
                 $log->setAttribute('active_board_count', $activeBoards);
-                $log->setAttribute('can_delete', $activeBoards === 0);
+                $canReverse = in_array($log->type, ['check_in', 'check_out', 'issue', 'consumption', 'adjustment'], true)
+                    && $log->reversal === null
+                    && $activeBoards === 0;
+                $log->setAttribute('can_delete', false);
+                $log->setAttribute('can_reverse', $canReverse);
                 $log->setAttribute(
-                    'delete_blocked_reason',
-                    $activeBoards > 0
-                        ? "{$activeBoards} active board(s) still use batch [{$log->batch_number}]. Scrap or consume them before deleting this receipt."
-                        : null
+                    'delete_blocked_reason', null
+                );
+                $log->setAttribute(
+                    'reverse_blocked_reason',
+                    $log->type === 'reversal'
+                        ? 'A reversal movement cannot itself be reversed.'
+                        : ($log->reversal !== null
+                            ? 'This movement has already been reversed.'
+                            : ($activeBoards > 0
+                                ? "{$activeBoards} board(s) from batch [{$log->batch_number}] are no longer Available in Stores."
+                                : null))
                 );
 
                 return $log;
@@ -1032,7 +1064,7 @@ class ProcurementStoresController extends Controller
         );
 
         return response()->json([
-            'data'   => $logs,
+            'data' => $logs,
             'status' => 'success',
         ]);
     }
@@ -1069,8 +1101,8 @@ class ProcurementStoresController extends Controller
                 ]);
             }
 
-            $project = \App\Models\Project::findOrFail($movement->project_id);
-            $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')
+            $project = Project::findOrFail($movement->project_id);
+            $planned = ElementMaterial::with('element.taskMaterialsData.task')
                 ->lockForUpdate()->findOrFail($validated['project_material_id']);
             $materialsData = $planned->element?->taskMaterialsData;
             if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id) {
@@ -1094,7 +1126,7 @@ class ProcurementStoresController extends Controller
             $movement->update(['project_material_id' => $planned->id, 'notes' => $auditNote]);
             $movement->returns()->update(['project_material_id' => $planned->id]);
 
-            $outbox = app(\App\Modules\ProcurementStores\Services\StoresFinanceOutbox::class);
+            $outbox = app(StoresFinanceOutbox::class);
             $outbox->queue($movement->fresh(), 'issue_cost');
             $movement->returns()->get()->each(fn ($return) => $outbox->queue($return, 'return_credit'));
         });
@@ -1115,7 +1147,7 @@ class ProcurementStoresController extends Controller
      * overwrites a prior decision — swapping an established link is a bigger
      * question than this endpoint answers.
      */
-    public function resolveProjectMaterialCatalogue(Request $request, \App\Models\ElementMaterial $elementMaterial, StockMovementPoster $poster): JsonResponse
+    public function resolveProjectMaterialCatalogue(Request $request, ElementMaterial $elementMaterial, StockMovementPoster $poster): JsonResponse
     {
         if (! $this->allows(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can resolve a material to the catalogue.'], 403);
@@ -1163,7 +1195,7 @@ class ProcurementStoresController extends Controller
         $movementLog = null;
 
         DB::transaction(function () use ($request, $validated, $elementMaterial, $poster, &$movementLog) {
-            $locked = \App\Models\ElementMaterial::lockForUpdate()->findOrFail($elementMaterial->id);
+            $locked = ElementMaterial::lockForUpdate()->findOrFail($elementMaterial->id);
             if ($locked->library_material_id) {
                 throw ValidationException::withMessages(['material_id' => 'This line is already linked to a Material Library item.']);
             }
@@ -1296,15 +1328,15 @@ class ProcurementStoresController extends Controller
         // Apply Search (Matches frontend filteredLogs logic)
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('batch_number', 'like', "%{$search}%")
-                  ->orWhereHas('material', function($mq) use ($search) {
-                      $mq->where('material_name', 'like', "%{$search}%")
-                         ->orWhere('material_code', 'like', "%{$search}%");
-                  })
-                  ->orWhereHas('project', function($pq) use ($search) {
-                      $pq->where('project_id', 'like', "%{$search}%");
-                  });
+                    ->orWhereHas('material', function ($mq) use ($search) {
+                        $mq->where('material_name', 'like', "%{$search}%")
+                            ->orWhere('material_code', 'like', "%{$search}%");
+                    })
+                    ->orWhereHas('project', function ($pq) use ($search) {
+                        $pq->where('project_id', 'like', "%{$search}%");
+                    });
             });
         }
 
@@ -1320,73 +1352,138 @@ class ProcurementStoresController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.inventory-logs', [
+        $pdf = Pdf::loadView('reports.inventory-logs', [
             'logs' => $logs,
-            'filters' => $request->all()
+            'filters' => $request->all(),
         ]);
 
-        $fileName = 'inventory-movement-report-' . now()->format('Y-m-d') . '.pdf';
+        $fileName = 'inventory-movement-report-'.now()->format('Y-m-d').'.pdf';
+
         return $pdf->download($fileName);
     }
 
     /**
-     * Delete an inventory log and revert the stock adjustment.
-     *
-     * Reusable / board material check-in logs cannot be deleted while board records
-     * created from that batch still exist — deleting the log would leave orphaned
-     * boards with no matching stock entry.
+     * Legacy DELETE compatibility endpoint. Ledger rows are immutable; callers must post a reasoned reversal.
      */
     public function destroyLog($id): JsonResponse
     {
-        if (!$this->allows(Permissions::STORES_MANAGE)) {
-            return response()->json(['message' => 'Only Stores team members can delete inventory logs.'], 403);
-        }
-
-        return DB::transaction(function () use ($id) {
-            $log = InventoryLog::findOrFail($id);
-
-            // Guard: refuse if boards were created from this batch
-            $isBoardCheckIn = $log->usage_type === 'reusable' && $log->type === 'check_in' && $log->batch_number;
-            if ($isBoardCheckIn) {
-                $boardCount = Board::where('batch_number', $log->batch_number)
-                    ->whereNotIn('status', ['Consumed', 'Scrapped'])
-                    ->count();
-
-                if ($boardCount > 0) {
-                    return response()->json([
-                        'message' => "Cannot delete this log — {$boardCount} active board(s) were created from batch [{$log->batch_number}]. "
-                            . 'Scrap or consume all boards in the batch before deleting the log.',
-                        'status' => 'error',
-                    ], 422);
-                }
-            }
-
-            // Reverse the stock movement — but NOT for a board check-in log.
-            // By the time deletion is allowed for a board batch, every board has been
-            // Consumed/Scrapped and each already decremented quantity_on_hand through the
-            // board lifecycle (fulfil/allocate/scrap). Subtracting the original check-in
-            // quantity again would double-count and drive on-hand negative.
-            if (!$isBoardCheckIn) {
-                $stock = Stock::where('material_id', $log->material_id)->first();
-                if ($stock) {
-                    $stock->quantity_on_hand -= $log->quantity;
-                    $stock->save();
-                }
-            }
-
-            $log->delete();
-
-            return response()->json([
-                'message' => 'Inventory log deleted and stock reverted successfully',
-                'status'  => 'success',
-            ]);
-        });
+        return response()->json([
+            'message' => 'Inventory ledger entries are immutable. Use POST /inventory-logs/{id}/reverse with a reason.',
+        ], 405);
     }
 
     /**
-     * Aggregate approved, unissued project material demand against stock and
-     * open purchase orders. This is planning information only: it never reserves
-     * stock or silently chooses which project receives a constrained item.
+     * Reverse a movement by appending an offsetting, actor-attributed ledger entry.
+     */
+    public function reverseLog(Request $request, $id): JsonResponse
+    {
+        if (! $this->allows(Permissions::STORES_MOVEMENT_REVERSE, Permissions::STORES_MANAGE)) {
+            return response()->json(['message' => 'You are not permitted to reverse stock movements.'], 403);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'required|string|min:10|max:1000',
+        ]);
+        $log = InventoryLog::findOrFail($id);
+        $reversal = app(StockMovementReversalService::class)
+            ->reverse($log, $validated['reason'], (int) auth()->id());
+
+        return response()->json([
+            'message' => "Movement #{$log->id} reversed. The original ledger entry was preserved.",
+            'data' => $reversal,
+            'status' => 'success',
+        ], 201);
+    }
+
+    public function valuationReadiness(): JsonResponse
+    {
+        if (! $this->allows(Permissions::STORES_VIEW, Permissions::STORES_MANAGE, Permissions::STORES_REVIEW)) {
+            return response()->json(['message' => 'You are not permitted to view Stores valuation readiness.'], 403);
+        }
+
+        return response()->json(
+            app(StoresValuationReadinessService::class)->project()
+        );
+    }
+
+    public function ledgerReconciliation(): JsonResponse
+    {
+        if (! $this->allows(Permissions::STORES_VIEW, Permissions::STORES_MANAGE, Permissions::STORES_REVIEW)) {
+            return response()->json(['message' => 'You are not permitted to reconcile the Stores ledger.'], 403);
+        }
+
+        $ledger = InventoryLog::query()
+            ->selectRaw('material_id, COALESCE(SUM(quantity), 0) AS ledger_quantity')
+            ->groupBy('material_id')
+            ->pluck('ledger_quantity', 'material_id');
+        $stocks = Stock::with('material:id,material_code,material_name')
+            ->get()
+            ->keyBy('material_id');
+        $materialIds = $stocks->keys()->merge($ledger->keys())->unique()->sort()->values();
+
+        $data = $materialIds->map(function ($materialId) use ($stocks, $ledger) {
+            $stock = $stocks->get($materialId);
+            $stored = (float) ($stock?->quantity_on_hand ?? 0);
+            $calculated = (float) ($ledger[$materialId] ?? 0);
+            $difference = round($stored - $calculated, 6);
+
+            return [
+                'material_id' => (int) $materialId,
+                'material_code' => $stock?->material?->material_code,
+                'material_name' => $stock?->material?->material_name,
+                'stored_quantity' => $stored,
+                'ledger_quantity' => $calculated,
+                'difference' => $difference,
+                'status' => abs($difference) <= 0.00001 ? 'RECONCILED' : 'DISCREPANCY',
+            ];
+        });
+
+        return response()->json([
+            'summary' => [
+                'materials' => $data->count(),
+                'reconciled' => $data->where('status', 'RECONCILED')->count(),
+                'discrepancies' => $data->where('status', 'DISCREPANCY')->count(),
+                'generated_at' => now()->toIso8601String(),
+            ],
+            'data' => $data->values(),
+        ]);
+    }
+
+    public function actionQueue(): JsonResponse
+    {
+        if (! $this->allows(Permissions::STORES_VIEW, Permissions::STORES_MANAGE, Permissions::STORES_REVIEW)) {
+            return response()->json(['message' => 'You are not permitted to view the Stores action queue.'], 403);
+        }
+
+        $grnStatuses = ['awaiting_stores_details', 'awaiting_material_setup', 'awaiting_unit_setup', 'not_stocked'];
+        $grnConfirmations = GoodsReceiptNoteItem::whereIn('stock_status', $grnStatuses)->count();
+        $inspections = GoodsReceiptNoteItem::where('stock_status', 'awaiting_inspection')->count();
+        $stockCounts = StockCount::where('status', 'submitted')->count();
+        $financeExceptions = StoresFinancePosting::query()
+            ->where(function ($query) {
+                $query->where('status', 'failed')
+                    ->orWhere(fn ($processing) => $processing->where('status', 'processing')
+                        ->where('processing_started_at', '<', now()->subMinutes(10)))
+                    ->orWhere(fn ($pending) => $pending->where('status', 'pending')
+                        ->where('updated_at', '<', now()->subMinutes(15)));
+            })->count();
+
+        $data = [
+            ['key' => 'grn_confirmations', 'label' => 'GRNs awaiting Stores confirmation', 'count' => $grnConfirmations],
+            ['key' => 'receipt_inspections', 'label' => 'Receipt inspections pending', 'count' => $inspections],
+            ['key' => 'stock_count_reviews', 'label' => 'Stock counts submitted for review', 'count' => $stockCounts],
+            ['key' => 'finance_sync_exceptions', 'label' => 'Finance sync exceptions', 'count' => $financeExceptions],
+        ];
+
+        return response()->json([
+            'summary' => ['total' => collect($data)->sum('count'), 'generated_at' => now()->toIso8601String()],
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Aggregate approved, unissued project demand against stock and open purchase orders.
+     * This projection never reserves or allocates stock.
      */
     public function materialDemandForecast(): JsonResponse
     {
@@ -1401,7 +1498,7 @@ class ProcurementStoresController extends Controller
          * spoken for while a buyer choosing that same material saw nothing of
          * it. One definition, so the two screens cannot disagree.
          */
-        $pendingLines = app(\App\Modules\ProcurementStores\Services\ProjectMaterialDemand::class)->pendingLines();
+        $pendingLines = app(ProjectMaterialDemand::class)->pendingLines();
 
         if ($pendingLines->isEmpty()) {
             return response()->json(['data' => [], 'summary' => [
@@ -1410,7 +1507,7 @@ class ProcurementStoresController extends Controller
         }
 
         $materialIds = $pendingLines->pluck('library_material_id')->unique()->values();
-        $materials = \App\Modules\MaterialsLibrary\Models\LibraryMaterial::with('stock')
+        $materials = LibraryMaterial::with('stock')
             ->whereIn('id', $materialIds)->get()->keyBy('id');
 
         $boardMaterialIds = $materials->filter(fn ($material) => $material->isBoardTrackable())
@@ -1419,7 +1516,7 @@ class ProcurementStoresController extends Controller
             ->where('status', 'Available')->selectRaw('library_material_id, COUNT(*) AS quantity')
             ->groupBy('library_material_id')->pluck('quantity', 'library_material_id');
 
-        $incoming = \App\Modules\ProcurementStores\Models\PurchaseOrderItem::query()
+        $incoming = PurchaseOrderItem::query()
             ->whereNotNull('material_id')
             ->whereHas('purchaseOrder', fn ($query) => $query->whereNotIn('status', ['cancelled', 'rejected', 'completed']))
             ->withSum('goodsReceiptNoteItems as received_total', 'received_quantity')
@@ -1532,7 +1629,9 @@ class ProcurementStoresController extends Controller
         $materialSummary = function ($groupedLogs) use ($boardsByIssue) {
             return $groupedLogs->groupBy('material_id')->map(function ($ml) use ($boardsByIssue) {
                 $material = $ml->first()->material;
-                if (!$material) return null;
+                if (! $material) {
+                    return null;
+                }
                 $issues = $ml->where('type', 'check_out')->map(function (InventoryLog $issue) use ($ml, $boardsByIssue) {
                     $issueQuantity = abs((float) $issue->quantity);
                     $linkedReturns = (float) $ml->where('type', 'return')
@@ -1562,56 +1661,61 @@ class ProcurementStoresController extends Controller
                 $resolved = (float) $issues->sum('resolved');
                 $balance = (float) $issues->sum('remaining');
                 $openIssues = $issues->filter(fn (array $issue) => $issue['remaining'] > 0)->values();
+
                 return $balance > 0 ? [
-                    'material_id'   => $material->id,
+                    'material_id' => $material->id,
                     'material_name' => $material->material_name,
                     'material_code' => $material->material_code,
-                    'unit'          => $material->unit_of_measure,
-                    'issued'        => $issued,
-                    'returned'      => $returned,
-                    'resolved'      => $resolved,
-                    'balance'       => $balance,
-                    'issues'        => $openIssues,
+                    'unit' => $material->unit_of_measure,
+                    'issued' => $issued,
+                    'returned' => $returned,
+                    'resolved' => $resolved,
+                    'balance' => $balance,
+                    'issues' => $openIssues,
                 ] : null;
             })->filter()->values();
         };
 
         // 1. Project-linked reusables
-        $byProject = $logs->filter(fn($l) => $l->project_id)
+        $byProject = $logs->filter(fn ($l) => $l->project_id)
             ->groupBy('project_id')
             ->map(function ($projectLogs, $projectId) use ($materialSummary) {
                 $project = $projectLogs->first()->project;
-                if (!$project) return null;
+                if (! $project) {
+                    return null;
+                }
                 $items = $materialSummary($projectLogs);
+
                 return $items->count() > 0 ? [
-                    'ref_type'     => 'project',
-                    'project_id'   => $projectId,
+                    'ref_type' => 'project',
+                    'project_id' => $projectId,
                     'project_code' => $project->project_id ?? 'N/A',
-                    'project_title'=> $project->enquiry?->title ?? 'N/A',
+                    'project_title' => $project->enquiry?->title ?? 'N/A',
                     'oldest_issued_at' => $projectLogs->where('type', 'check_out')->min(fn ($log) => $log->logged_at ?? $log->created_at)?->toIso8601String(),
                     'days_outstanding' => (int) optional($projectLogs->where('type', 'check_out')->min(fn ($log) => $log->logged_at ?? $log->created_at))->diffInDays(now()),
                     'custodians' => $projectLogs->where('type', 'check_out')->pluck('recipient_name')->filter()->unique()->values(),
-                    'items'        => $items,
+                    'items' => $items,
                 ] : null;
             })->filter()->values();
 
         // 2. Board materials issued by job_ref (stored in reference_no by BoardRequestController)
-        $byJob = $logs->filter(fn($l) => !$l->project_id && $l->reference_no)
+        $byJob = $logs->filter(fn ($l) => ! $l->project_id && $l->reference_no)
             ->groupBy('reference_no')
             ->map(function ($jobLogs, $jobRef) use ($materialSummary) {
                 $items = $materialSummary($jobLogs);
+
                 return $items->count() > 0 ? [
                     'ref_type' => 'job',
-                    'job_ref'  => $jobRef,
+                    'job_ref' => $jobRef,
                     'oldest_issued_at' => $jobLogs->where('type', 'check_out')->min(fn ($log) => $log->logged_at ?? $log->created_at)?->toIso8601String(),
                     'days_outstanding' => (int) optional($jobLogs->where('type', 'check_out')->min(fn ($log) => $log->logged_at ?? $log->created_at))->diffInDays(now()),
                     'custodians' => $jobLogs->where('type', 'check_out')->pluck('recipient_name')->filter()->unique()->values(),
-                    'items'    => $items,
+                    'items' => $items,
                 ] : null;
             })->filter()->values();
 
         return response()->json([
-            'data'   => $byProject->merge($byJob)->values(),
+            'data' => $byProject->merge($byJob)->values(),
             'status' => 'success',
         ]);
     }

@@ -1034,6 +1034,19 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Finance Overview read projection, one section per request (Report 65).
         Route::get('overview', [\App\Modules\Finance\Controllers\FinanceOverviewController::class, 'show']);
 
+        // Stream F (Report 67): Finance aggregate payroll controls. HR employee,
+        // salary, payslip and calculation endpoints remain separate.
+        Route::prefix('payroll')->group(function () {
+            Route::get('/', [\App\Modules\Finance\Controllers\PayrollFinanceController::class, 'index']);
+            Route::get('liabilities', [\App\Modules\Finance\Controllers\PayrollFinanceController::class, 'liabilities']);
+            Route::get('payments', [\App\Modules\Finance\Controllers\PayrollFinanceController::class, 'paymentRegister']);
+            Route::get('readiness', [\App\Modules\Finance\Controllers\PayrollFinanceController::class, 'readiness']);
+            Route::get('labour-classification', [\App\Modules\Finance\Controllers\PayrollFinanceController::class, 'labourClassification']);
+            Route::post('labour-classification/{department}', [\App\Modules\Finance\Controllers\PayrollFinanceController::class, 'classify'])->whereNumber('department');
+            Route::get('{run}', [\App\Modules\Finance\Controllers\PayrollFinanceController::class, 'show'])->whereNumber('run');
+            Route::post('{run}/pay', [\App\Modules\Finance\Controllers\PayrollFinanceController::class, 'pay'])->whereNumber('run');
+        });
+
         // W1-7: configurable payment-term templates. Same permission as other
         // receivables-policy configuration (quote-waiver, receivables-terms).
         Route::get('payment-terms', [\App\Modules\Finance\Controllers\PaymentTermController::class, 'index'])

@@ -15,7 +15,7 @@ class StoresCostProducer
 {
     public function __construct(
         private CostCollectorService $collector,
-        private MaterialExpenseCodeResolver $materialExpenseCodes = new MaterialExpenseCodeResolver(),
+        private MaterialExpenseCodeResolver $materialExpenseCodes = new MaterialExpenseCodeResolver,
     ) {}
 
     public function postStockIssue(InventoryLog $log): ?CostLine
@@ -104,7 +104,7 @@ class StoresCostProducer
             sourceApproved: true,
             payeeName: $log->recipient_name ?? 'Storekeeper Issue',
             consumesLineId: $planned?->id,
-            description: 'Stores Issue: ' . ($material?->material_name ?? "Item #{$log->material_id}") . " (x{$quantity})",
+            description: 'Stores Issue: '.($material?->material_name ?? "Item #{$log->material_id}")." (x{$quantity})",
             details: array_filter([
                 'budget_category' => $planned?->details['budget_category'] ?? 'materials',
                 // Inherited from the plan where there is one, resolved from the
@@ -295,13 +295,15 @@ class StoresCostProducer
         // value per returned unit, capped at the original proportional credit.
         if ($return->receipt_unit_cost !== null) {
             $accepted = bcmul((string) $returnedQuantity, (string) $return->receipt_unit_cost, 2);
-            if (bccomp($accepted, $credit, 2) === -1) $credit = $accepted;
+            if (bccomp($accepted, $credit, 2) === -1) {
+                $credit = $accepted;
+            }
         }
         if (bccomp($credit, '0.00', 2) !== 1) {
             return null;
         }
 
-        $negative = '-' . $credit;
+        $negative = '-'.$credit;
         $line = $this->collector->postFromSource(new CostContext(
             expenseCode: (string) $originalCost->expenseCode?->code,
             amount: $credit,
@@ -314,7 +316,7 @@ class StoresCostProducer
             sourceApproved: true,
             payeeName: 'Stores Return',
             consumesLineId: $originalCost->consumes_line_id,
-            description: 'Stores Return: ' . ($return->material?->material_name ?? "Item #{$return->material_id}") . " (x{$returnedQuantity})",
+            description: 'Stores Return: '.($return->material?->material_name ?? "Item #{$return->material_id}")." (x{$returnedQuantity})",
             details: [
                 'budget_category' => $originalCost->details['budget_category'] ?? 'materials',
                 'element' => $originalCost->details['element'] ?? null,
@@ -336,6 +338,82 @@ class StoresCostProducer
                 // material had cost less than it was issued at.
                 'return_kind' => $return->return_kind
                     ?: (str_starts_with((string) $return->notes, 'Offcut ') ? 'recovered_offcut' : 'whole_item'),
+            ],
+        ), [
+            'amount' => $negative,
+            'net_amount' => $negative,
+            'base_net_amount' => bcmul($negative, (string) ($originalCost->fx_rate ?? 1), 2),
+            'reversal_of_id' => $originalCost->id,
+        ]);
+
+        return $line;
+    }
+
+    /**
+     * Post a signed reversal for a stock issue movement.
+     * Restores project actuals and planned-line headroom.
+     */
+    public function postStockIssueReversal(InventoryLog $reversal): ?CostLine
+    {
+        if ($reversal->type !== 'reversal' || ! $reversal->original_issue_log_id) {
+            return null;
+        }
+
+        $reversal->loadMissing('material', 'originalIssue');
+        $issue = $reversal->originalIssue;
+        if (! $issue || (int) $issue->material_id !== (int) $reversal->material_id) {
+            throw new \DomainException('The stock reversal is not linked to a matching original issue.');
+        }
+
+        $originalCost = CostLine::where('source_type', InventoryLog::class)
+            ->where('source_id', $issue->id)
+            ->where('source_ref', 'stock-issue')
+            ->where('status', CostLine::STATUS_VERIFIED)
+            ->first();
+        if (! $originalCost) {
+            return null;
+        }
+
+        $issuedQuantity = abs((float) $issue->quantity);
+        $reversedQuantity = abs((float) $reversal->quantity);
+        if ($issuedQuantity <= 0 || $reversedQuantity <= 0) {
+            return null;
+        }
+
+        $credit = bcmul(
+            (string) $originalCost->net_amount,
+            bcdiv((string) $reversedQuantity, (string) $issuedQuantity, 8),
+            2,
+        );
+        if (bccomp($credit, '0.00', 2) !== 1) {
+            return null;
+        }
+
+        $negative = '-'.$credit;
+        $line = $this->collector->postFromSource(new CostContext(
+            expenseCode: (string) $originalCost->expenseCode?->code,
+            amount: $credit,
+            nature: CostLine::NATURE_ACTUAL,
+            enquiryId: $originalCost->project_enquiry_id,
+            jobNumber: $originalCost->job_number,
+            sourceType: InventoryLog::class,
+            sourceId: $reversal->id,
+            sourceRef: 'stock-issue-reversal',
+            sourceApproved: true,
+            payeeName: 'Stores Issue Reversal',
+            consumesLineId: $originalCost->consumes_line_id,
+            description: 'Stores Issue Reversal: '.($reversal->material?->material_name ?? "Item #{$reversal->material_id}")." (x{$reversedQuantity})",
+            details: [
+                'budget_category' => $originalCost->details['budget_category'] ?? 'materials',
+                'element' => $originalCost->details['element'] ?? null,
+                'material' => $originalCost->details['material'] ?? null,
+                'inventory_log_id' => $reversal->id,
+                'original_issue_log_id' => $issue->id,
+                'original_cost_line_id' => $originalCost->id,
+                'library_material_id' => $reversal->material_id,
+                'project_material_id' => $reversal->project_material_id,
+                'quantity' => (string) $reversedQuantity,
+                'movement' => 'issue_reversal',
             ],
         ), [
             'amount' => $negative,
@@ -432,5 +510,4 @@ class StoresCostProducer
             ->orderBy('id')
             ->first();
     }
-
 }

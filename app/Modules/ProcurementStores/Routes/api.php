@@ -20,6 +20,9 @@ use App\Modules\ProcurementStores\Controllers\ProcurementAttachmentController;
 use App\Modules\ProcurementStores\Controllers\PurchaseOrderAmendmentController;
 
 Route::get('/readiness', [OperationsReadinessController::class, 'show']);
+Route::get('/valuation-readiness', [ProcurementStoresController::class, 'valuationReadiness']);
+Route::get('/ledger-reconciliation', [ProcurementStoresController::class, 'ledgerReconciliation']);
+Route::get('/action-queue', [ProcurementStoresController::class, 'actionQueue']);
 
 // apiResource, not resource: `create` and `edit` return HTML form scaffolding,
 // which no controller here implements and no client asks for. Registering them
@@ -66,6 +69,7 @@ Route::get('/finance-sync-exceptions', [ProcurementStoresController::class, 'fin
 Route::post('/finance-sync-exceptions/{inventoryLog}/retry', [ProcurementStoresController::class, 'retryFinanceSync']);
 Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [ProcurementStoresController::class, 'resolveFinanceValuation']);
 Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'destroyLog']);
+Route::post('/inventory-logs/{id}/reverse', [ProcurementStoresController::class, 'reverseLog']);
 Route::post('/inventory-logs/{inventoryLog}/link-project-material', [ProcurementStoresController::class, 'linkProjectMaterial']);
 Route::post('/project-materials/{elementMaterial}/resolve-catalogue', [ProcurementStoresController::class, 'resolveProjectMaterialCatalogue']);
 Route::get('/stock-counts', [StockCountController::class, 'index']);

@@ -53,7 +53,11 @@ class ChartAccountMap
             return null;
         }
 
-        return self::local($matches[1]);
+        $reference = $matches[1];
+        $startsWithCode = (bool) preg_match('/^\s*'.preg_quote($reference, '/').'\b/', $gl);
+        $explicitlyMapped = filled(self::all()[$reference] ?? null);
+
+        return $startsWithCode || $explicitlyMapped ? self::local($reference) : null;
     }
 
     /** Every reference code this installation redirects. Empty when the charts agree. */

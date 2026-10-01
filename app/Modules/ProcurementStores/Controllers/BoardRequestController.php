@@ -2,7 +2,11 @@
 
 namespace App\Modules\ProcurementStores\Controllers;
 
+use App\Constants\Permissions;
+use App\Events\Stores\StockIssued;
 use App\Http\Controllers\Controller;
+use App\Models\ElementMaterial;
+use App\Models\Project;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\ProcurementStores\Models\Board;
 use App\Modules\ProcurementStores\Models\BoardRequest;
@@ -50,23 +54,23 @@ class BoardRequestController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! auth()->user()?->can(Permissions::STORES_BOARD_MANAGE) && ! auth()->user()?->can(Permissions::PROJECT_READ)) {
             return response()->json(['message' => 'You are not permitted to raise board requests.'], 403);
         }
 
         $request->validate([
-            'job_ref'  => 'required|string|max:100',
+            'job_ref' => 'required|string|max:100',
             'job_name' => 'nullable|string|max:255',
             'material_id' => 'required|integer|exists:library_materials,id',
             'project_id' => 'nullable|integer|exists:projects,id',
             'project_material_id' => 'nullable|integer|exists:element_materials,id',
             'recipient_name' => 'nullable|string|max:255',
-            'qty'         => 'required|integer|min:1|max:200',
-            'notes'       => 'nullable|string|max:500',
+            'qty' => 'required|integer|min:1|max:200',
+            'notes' => 'nullable|string|max:500',
         ]);
 
         $material = LibraryMaterial::with('materialCategory.parent')->findOrFail($request->material_id);
-        if (!$material->isBoardTrackable()) {
+        if (! $material->isBoardTrackable()) {
             return response()->json([
                 'message' => "'{$material->material_name}' is not a board/sheet item. Issue it through the normal Stores workflow.",
             ], 422);
@@ -84,8 +88,8 @@ class BoardRequestController extends Controller
         }
 
         if ($request->filled('project_material_id')) {
-            $project = \App\Models\Project::findOrFail($request->project_id);
-            $planned = \App\Models\ElementMaterial::with('element.taskMaterialsData.task')
+            $project = Project::findOrFail($request->project_id);
+            $planned = ElementMaterial::with('element.taskMaterialsData.task')
                 ->findOrFail($request->project_material_id);
             $materialsData = $planned->element?->taskMaterialsData;
             // Validate project and catalogue identity before applying the same
@@ -134,34 +138,34 @@ class BoardRequestController extends Controller
                 $reason = "All {$total} board(s) are currently out on jobs.";
             } elseif ($onJob > 0) {
                 $consumed = ($breakdown['Consumed'] ?? 0) + ($breakdown['Scrapped'] ?? 0);
-                $reason   = "{$onJob} board(s) are out on jobs" . ($consumed > 0 ? ", {$consumed} consumed/scrapped." : '.');
+                $reason = "{$onJob} board(s) are out on jobs".($consumed > 0 ? ", {$consumed} consumed/scrapped." : '.');
             } else {
                 $consumed = ($breakdown['Consumed'] ?? 0) + ($breakdown['Scrapped'] ?? 0);
-                $reason   = $consumed > 0
+                $reason = $consumed > 0
                     ? "All {$consumed} board(s) have been consumed or scrapped."
                     : 'No boards are currently available.';
             }
 
             return response()->json([
-                'message'   => "Only {$available} {$material->material_name} board(s) available. Requested: {$request->qty}.",
+                'message' => "Only {$available} {$material->material_name} board(s) available. Requested: {$request->qty}.",
                 'available' => $available,
-                'reason'    => $reason,
+                'reason' => $reason,
                 'breakdown' => $breakdown,
             ], 422);
         }
 
         $boardRequest = DB::transaction(function () use ($request, $material) {
             $br = BoardRequest::create([
-                'job_ref'      => $request->job_ref,
-                'project_id'   => $request->project_id,
-                'job_name'     => $request->job_name,
-                'material_id'  => $material->id,
+                'job_ref' => $request->job_ref,
+                'project_id' => $request->project_id,
+                'job_name' => $request->job_name,
+                'material_id' => $material->id,
                 'project_material_id' => $request->project_material_id,
-                'qty_requested'=> $request->qty,
+                'qty_requested' => $request->qty,
                 'recipient_name' => $request->recipient_name,
-                'status'       => 'pending',
+                'status' => 'pending',
                 'requested_by' => auth()->id(),
-                'notes'        => $request->notes,
+                'notes' => $request->notes,
             ]);
 
             // Soft-reserve in stocks
@@ -171,14 +175,14 @@ class BoardRequestController extends Controller
             // Log the reservation
             $stock = Stock::where('material_id', $material->id)->first();
             InventoryLog::create([
-                'material_id'  => $material->id,
-                'user_id'      => auth()->id(),
-                'type'         => 'allocated',
-                'usage_type'   => 'reusable',
-                'quantity'     => $request->qty,
-                'balance_after'=> $stock?->quantity_on_hand ?? 0,
-                'notes'        => "Board request raised — {$request->qty} boards for job {$request->job_ref}",
-                'logged_at'    => now(),
+                'material_id' => $material->id,
+                'user_id' => auth()->id(),
+                'type' => 'allocated',
+                'usage_type' => 'reusable',
+                'quantity' => $request->qty,
+                'balance_after' => $stock?->quantity_on_hand ?? 0,
+                'notes' => "Board request raised — {$request->qty} boards for job {$request->job_ref}",
+                'logged_at' => now(),
             ]);
 
             return $br;
@@ -200,7 +204,7 @@ class BoardRequestController extends Controller
      */
     public function fulfil(Request $request, int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Stores', 'Super Admin'])) {
+        if (! auth()->user()?->can(Permissions::STORES_BOARD_MANAGE) && ! auth()->user()?->can(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'Only Stores team members can fulfil board requests.'], 403);
         }
 
@@ -231,7 +235,7 @@ class BoardRequestController extends Controller
                 // count is capped by what this request still has reserved —
                 // over-issuing here would bypass the approved-requirement check
                 // that store() applied when the request was raised.
-                if (!empty($request->board_ids)) {
+                if (! empty($request->board_ids)) {
                     $ids = array_values(array_unique($request->board_ids));
                     if (count($ids) > $needed) {
                         throw new \InvalidArgumentException(
@@ -267,9 +271,9 @@ class BoardRequestController extends Controller
                 $unvalued = $boards->filter(fn (Board $board) => (float) $board->current_value <= 0);
                 if ($unvalued->isNotEmpty()) {
                     throw new \InvalidArgumentException(
-                        $unvalued->count() . ' selected board(s) have no recorded value: '
-                        . $unvalued->pluck('tracking_code')->join(', ')
-                        . '. Record their receipt valuation before issue — issuing them would post a zero cost to this project.'
+                        $unvalued->count().' selected board(s) have no recorded value: '
+                        .$unvalued->pluck('tracking_code')->join(', ')
+                        .'. Record their receipt valuation before issue — issuing them would post a zero cost to this project.'
                     );
                 }
 
@@ -285,7 +289,7 @@ class BoardRequestController extends Controller
 
                 $newTotal = $boardRequest->qty_fulfilled;
                 $boardRequest->update([
-                    'status'       => $newTotal >= $boardRequest->qty_requested ? 'fulfilled' : 'partial',
+                    'status' => $newTotal >= $boardRequest->qty_requested ? 'fulfilled' : 'partial',
                     'fulfilled_by' => auth()->id(),
                     'fulfilled_at' => now(),
                 ]);
@@ -295,25 +299,31 @@ class BoardRequestController extends Controller
                 // cannot read the same balance and race it negative.
                 $stock = Stock::where('material_id', $boardRequest->material_id)->lockForUpdate()->first();
                 if ($stock) {
-                    $stock->decrement('quantity_reserved', $fulfilled);
+                    $reservedToRelease = min((float) $stock->quantity_reserved, (float) $fulfilled);
+                    if ($reservedToRelease > 0) {
+                        $stock->decrement('quantity_reserved', $reservedToRelease);
+                    }
+                    if ((float) $stock->quantity_on_hand < $fulfilled) {
+                        throw new \InvalidArgumentException("Insufficient physical stock on hand ({$stock->quantity_on_hand}) to fulfil {$fulfilled} board(s).");
+                    }
                     $stock->decrement('quantity_on_hand', $fulfilled);
                 }
 
                 $issueLog = InventoryLog::create([
-                    'material_id'  => $boardRequest->material_id,
-                    'user_id'      => auth()->id(),
-                    'type'         => 'check_out',
-                    'usage_type'   => 'reusable',
-                    'quantity'     => -$fulfilled,
+                    'material_id' => $boardRequest->material_id,
+                    'user_id' => auth()->id(),
+                    'type' => 'check_out',
+                    'usage_type' => 'reusable',
+                    'quantity' => -$fulfilled,
                     'receipt_unit_cost' => $boards->avg(fn (Board $board) => (float) $board->current_value),
-                    'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
+                    'balance_after' => $stock?->fresh()->quantity_on_hand ?? 0,
                     'project_id' => $boardRequest->project_id,
                     'project_material_id' => $boardRequest->project_material_id,
                     'reference_no' => $boardRequest->job_ref,   // enables outstandingReusables grouping by job
                     'recipient_name' => $boardRequest->recipient_name,
-                    'notes'        => "{$fulfilled} board(s) issued to job {$boardRequest->job_ref}. "
-                        . 'Codes: ' . $boards->pluck('tracking_code')->join(', '),
-                    'logged_at'    => now(),
+                    'notes' => "{$fulfilled} board(s) issued to job {$boardRequest->job_ref}. "
+                        .'Codes: '.$boards->pluck('tracking_code')->join(', '),
+                    'logged_at' => now(),
                 ]);
 
                 Board::whereIn('id', $boards->pluck('id'))->update([
@@ -332,15 +342,15 @@ class BoardRequestController extends Controller
         // Board issues are cost-bearing Stores issues too. The generic inventory
         // service dispatches this automatically; this specialized lifecycle owns
         // its stock movement, so it must announce the same accounting event.
-        \App\Events\Stores\StockIssued::dispatch($issueLog);
+        StockIssued::dispatch($issueLog);
 
         // Advance the workflow: create Logistics dispatch task + notify
         $this->workflow->onRequestFulfilled($boardRequest, $boards);
 
         return response()->json([
-            'message'      => "{$boards->count()} board(s) issued to job [{$boardRequest->job_ref}].",
-            'boards_issued'=> $boards->pluck('tracking_code'),
-            'request'      => $boardRequest->fresh(['material', 'requester']),
+            'message' => "{$boards->count()} board(s) issued to job [{$boardRequest->job_ref}].",
+            'boards_issued' => $boards->pluck('tracking_code'),
+            'request' => $boardRequest->fresh(['material', 'requester']),
         ]);
     }
 
@@ -350,7 +360,7 @@ class BoardRequestController extends Controller
      */
     public function cancel(int $id): JsonResponse
     {
-        if (!auth()->user()?->hasAnyRole(['Production', 'Stores', 'Manager', 'Super Admin'])) {
+        if (! auth()->user()?->can(Permissions::STORES_BOARD_MANAGE) && ! auth()->user()?->can(Permissions::STORES_MANAGE)) {
             return response()->json(['message' => 'You are not permitted to cancel board requests.'], 403);
         }
 

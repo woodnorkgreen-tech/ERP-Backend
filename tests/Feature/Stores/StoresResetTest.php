@@ -18,7 +18,9 @@ class StoresResetTest extends TestCase
     use RefreshDatabase;
 
     private User $superAdmin;
+
     private User $manager;
+
     private int $workstationId;
 
     protected function setUp(): void
@@ -63,6 +65,18 @@ class StoresResetTest extends TestCase
             'usage_type' => 'consumable', 'logged_at' => now(),
             'created_at' => now(), 'updated_at' => now(),
         ]);
+    }
+
+    public function test_reset_is_blocked_in_production_even_for_super_admin(): void
+    {
+        Sanctum::actingAs($this->superAdmin->fresh());
+        $this->app->detectEnvironment(fn () => 'production');
+
+        $this->getJson('/api/procurement-stores/stores-reset/preview')->assertForbidden();
+        $this->postJson('/api/procurement-stores/stores-reset', [
+            'confirmation' => 'RESET STORES',
+            'reason' => 'This must remain blocked in the production environment.',
+        ])->assertForbidden();
     }
 
     public function test_only_a_super_admin_can_reach_the_reset(): void

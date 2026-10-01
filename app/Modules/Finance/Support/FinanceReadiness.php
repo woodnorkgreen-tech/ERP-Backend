@@ -65,11 +65,18 @@ class FinanceReadiness
     private function expenseCodeAccounts(): array
     {
         $postable = DB::table('chart_of_accounts')->pluck('is_postable', 'code');
+        $intentional = FinanceChartProfile::intentionallyUnconfigured(config('finance_accounts.profile'));
+        $intentionallyOff = 0;
         $missing = [];
         $unlinked = [];
 
         foreach (ExpenseCode::query()->get(['code', 'default_debit_gl', 'default_debit_account_id']) as $code) {
             $local = ChartAccountMap::localFromGl($code->default_debit_gl);
+            if ($code->default_debit_account_id === null && array_key_exists((string) $local, $intentional)) {
+                $intentionallyOff++;
+
+                continue;
+            }
             if ($local === null || ($postable->has($local) && ! $postable[$local])) {
                 continue;
             }
@@ -81,7 +88,8 @@ class FinanceReadiness
         }
 
         if ($missing === [] && $unlinked === []) {
-            return $this->result('Expense-code accounts', true, 'every code resolves its debit account', null);
+            return $this->result('Expense-code accounts', true, 'every required code resolves its debit account'
+                .($intentionallyOff > 0 ? "; {$intentionallyOff} code(s) are off by design (".implode(', ', array_keys($intentional)).')' : ''), null);
         }
 
         $parts = [];
@@ -96,7 +104,17 @@ class FinanceReadiness
         }
 
         return $this->result('Expense-code accounts', false, implode('; ', $parts),
-            $missing !== [] ? self::SEED : 'php artisan db:seed --class="App\Modules\Finance\Database\Seeders\ExpenseCodeSeeder" --force');
+            $missing !== [] ? $this->missingAccountFix() : 'php artisan db:seed --class="App\Modules\Finance\Database\Seeders\ExpenseCodeSeeder" --force');
+    }
+
+    private function missingAccountFix(): string
+    {
+        $profile = config('finance_accounts.profile');
+        if (filled($profile)) {
+            return "Run php artisan finance:complete-chart --profile={$profile} as an attended cutover (dry run first), then re-run the expense code seeder.";
+        }
+
+        return self::SEED;
     }
 
     private function purchaseCategories(): array

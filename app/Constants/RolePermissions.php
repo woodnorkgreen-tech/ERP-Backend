@@ -125,6 +125,10 @@ final class RolePermissions
                 // W2 (Report 60): supplier-bill verification, previously granted by the
                 // role NAME Admin. Same population, now an assignable permission.
                 Permissions::FINANCE_PAYABLES_READ, Permissions::FINANCE_PAYABLES_VERIFY,
+                // Stream F (Report 67): Admin sees payroll finance; paying stays with Accounts.
+                Permissions::FINANCE_PAYROLL_READ,
+                // Report 69: Stores control permissions
+                Permissions::STORES_BOARD_MANAGE, Permissions::STORES_RECEIPT_INSPECT, Permissions::STORES_MOVEMENT_REVERSE,
             ],
             'Manager' => [
                 Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_ACCESS, Permissions::DEPARTMENT_READ,
@@ -140,6 +144,7 @@ final class RolePermissions
                 Permissions::PROCUREMENT_REQUISITIONS_APPROVE, Permissions::PROJECT_ASSIGN_USERS,
                 Permissions::PROJECT_READ, Permissions::PROJECT_UPDATE, Permissions::STORES_MANAGE,
                 Permissions::STORES_REVIEW, Permissions::STORES_VIEW, Permissions::STORES_ADJUST_QUANTITY,
+                Permissions::STORES_BOARD_MANAGE, Permissions::STORES_RECEIPT_INSPECT, Permissions::STORES_MOVEMENT_REVERSE,
                 Permissions::TASK_ASSIGN,
                 Permissions::TASK_READ, Permissions::TASK_UPDATE, Permissions::USER_READ,
                 Permissions::USER_UPDATE,
@@ -190,6 +195,9 @@ final class RolePermissions
                 Permissions::FINANCE_REPORTS_VIEW,
                 // W2 (Report 60): Accounts verifies supplier bills (previously by role name).
                 Permissions::FINANCE_PAYABLES_READ, Permissions::FINANCE_PAYABLES_VERIFY,
+                // Stream F (Report 67): Accounts reads, pays and classifies payroll labour.
+                Permissions::FINANCE_PAYROLL_READ, Permissions::FINANCE_PAYROLL_PAY,
+                Permissions::FINANCE_PAYROLL_LABOUR_CLASSIFICATION_MANAGE,
             ],
             'Costing' => [
                 Permissions::DASHBOARD_FINANCE, Permissions::FINANCE_BUDGET_APPROVE,
@@ -277,7 +285,7 @@ final class RolePermissions
                 Permissions::FINANCE_COSTS_READ, Permissions::FINANCE_QUOTE_APPROVE,
                 Permissions::FINANCE_QUOTE_CREATE, Permissions::FINANCE_QUOTE_READ,
                 Permissions::FINANCE_QUOTE_UPDATE, Permissions::MATERIALS_LIBRARY_VIEW,
-                Permissions::PROJECT_READ, Permissions::STORES_VIEW, Permissions::TASK_READ,
+                Permissions::PROJECT_READ, Permissions::STORES_VIEW, Permissions::STORES_BOARD_MANAGE, Permissions::TASK_READ,
                 Permissions::TASK_UPDATE, Permissions::USER_READ,
             ],
             'Procurement' => [
@@ -297,6 +305,7 @@ final class RolePermissions
                 Permissions::MATERIALS_LIBRARY_MANAGE, Permissions::MATERIALS_LIBRARY_VIEW,
                 Permissions::PROJECT_READ, Permissions::STORES_MANAGE, Permissions::STORES_VIEW,
                 Permissions::STORES_ADJUST_QUANTITY,
+                Permissions::STORES_BOARD_MANAGE, Permissions::STORES_RECEIPT_INSPECT, Permissions::STORES_MOVEMENT_REVERSE,
                 Permissions::TASK_READ, Permissions::TASK_UPDATE, Permissions::USER_READ,
             ],
             'Logistics' => [

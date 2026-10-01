@@ -252,55 +252,14 @@ class PayrollRunController extends Controller
             ], 403);
         }
 
-        DB::transaction(function () use ($payrollRun, $paymentSource, $validated) {
-            $lockedRun = PayrollRun::whereKey($payrollRun->id)->lockForUpdate()->firstOrFail();
-            if ($lockedRun->status !== 'locked') {
-                throw new \DomainException('Only locked runs can be marked as paid.');
-            }
-
-            $this->financePosting->postPayment(
-                $lockedRun,
-                $paymentSource,
-                $validated['payment_date'],
-                $validated['payment_reference'],
+        // One write path for paying payroll, shared with Finance's pay endpoint
+        // (Report 67): the same locking, posting, audit and payslip notices.
+        try {
+            $payrollRun = app(\App\Modules\Finance\Payroll\PayrollPaymentService::class)->pay(
+                $payrollRun, $paymentSource, $validated['payment_date'], $validated['payment_reference'], (int) auth()->id(),
             );
-            $lockedRun->update(['status' => 'paid', 'paid_by' => auth()->id()]);
-            $lockedRun->payslips()->update(['status' => 'paid', 'payment_date' => $validated['payment_date']]);
-        });
-        $payrollRun->refresh();
-
-        HRAuditLog::create([
-            'user_id' => auth()->id(),
-            'action' => 'payroll_run_paid',
-            'model_type' => 'PayrollRun',
-            'model_id' => $payrollRun->id,
-            'message' => "Payroll run for {$payrollRun->payroll_month} marked as PAID.",
-            'context' => [
-                'payroll_month' => $payrollRun->payroll_month,
-                'payment_date' => $payrollRun->payment_date?->toDateString(),
-                'payment_reference' => $payrollRun->payment_reference,
-                'payment_journal_entry_id' => $payrollRun->payment_journal_entry_id,
-                'self_approval_override' => $isSelfApproval,
-            ],
-            'ip_address' => request()->ip()
-        ]);
-
-        // Notify each paid employee individually that their payslip is ready.
-        $payslips = $payrollRun->payslips()->with('employee.user')->get();
-        foreach ($payslips as $payslip) {
-            $recipientUser = $payslip->employee?->user;
-            if (!$recipientUser) {
-                continue;
-            }
-
-            NotificationService::send(
-                type: 'payroll_payslip_ready',
-                title: 'Payslip Ready',
-                message: "Your payslip for {$payrollRun->payroll_month} is ready. Net pay: KES " . number_format($payslip->net_pay, 2),
-                module: 'hr',
-                data: ['payroll_run_id' => $payrollRun->id, 'payslip_id' => $payslip->id, 'url' => "/self-service/payslips/{$payslip->id}"],
-                users: [$recipientUser],
-            );
+        } catch (\DomainException|\InvalidArgumentException $exception) {
+            return response()->json(['success' => false, 'message' => $exception->getMessage()], 422);
         }
 
         return response()->json(['success' => true, 'data' => $payrollRun->fresh()]);

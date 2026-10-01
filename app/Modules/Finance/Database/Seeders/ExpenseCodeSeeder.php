@@ -6,6 +6,7 @@ use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use Illuminate\Database\Seeder;
 use App\Modules\Finance\Support\CatalogueDimensionMap;
 use App\Modules\Finance\Support\ChartAccountMap;
+use App\Modules\Finance\Support\FinanceChartProfile;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -147,9 +148,10 @@ class ExpenseCodeSeeder extends Seeder
         $existing = ExpenseCode::query()->get(['code', 'is_active', 'default_debit_account_id'])->keyBy('code');
         // Headers included: a code naming a header waits for a person by design.
         $inChart = DB::table('chart_of_accounts')->pluck('code')->flip();
+        $intentional = FinanceChartProfile::intentionallyUnconfigured(config('finance_accounts.profile'));
         $unresolved = [];
 
-        DB::transaction(function () use ($accounts, $costCentres, $activities, $existing, $inChart, &$unresolved) {
+        DB::transaction(function () use ($accounts, $costCentres, $activities, $existing, $inChart, $intentional, &$unresolved) {
             foreach ($this->rows() as $row) {
                 $current = $existing->get($row['code']);
 
@@ -184,7 +186,7 @@ class ExpenseCodeSeeder extends Seeder
                 };
 
                 $local = ChartAccountMap::localFromGl($row['default_debit_gl'] ?? null);
-                if ($row['default_debit_account_id'] === null && $local !== null && ! $inChart->has($local)) {
+                if ($row['default_debit_account_id'] === null && $local !== null && ! $inChart->has($local) && ! array_key_exists($local, $intentional)) {
                     $unresolved[] = $row['code'];
                 }
 

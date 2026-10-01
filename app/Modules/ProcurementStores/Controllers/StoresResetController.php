@@ -13,6 +13,12 @@ class StoresResetController extends Controller
 
     private function superAdmin(): void
     {
+        abort_if(
+            app()->isProduction(),
+            403,
+            'Stores inventory reset is strictly prohibited in production environments.'
+        );
+
         abort_unless(
             auth()->user()?->hasRole('Super Admin'),
             403,

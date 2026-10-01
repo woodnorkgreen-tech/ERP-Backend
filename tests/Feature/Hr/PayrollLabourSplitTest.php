@@ -195,8 +195,10 @@ class PayrollLabourSplitTest extends TestCase
                 'labour_classification' => 'direct',
             ])->assertOk();
 
-        // The whole point of the setting: the next payroll posts differently.
-        $run = $this->runFor($employee, 100000, 70000);
+        // The whole point of the setting: the next payroll posts differently. It is
+        // effective-dated (Report 67), so the next payroll is this month's: a change
+        // made today does not reach back into a month that ended before it.
+        $run = $this->runFor($employee, 100000, 70000, null, now()->format('Y-m'));
         app(PayrollFinancePostingService::class)->postAccrual($run);
 
         $this->assertSame(100000.0, $this->debitOn('5200'));
@@ -247,19 +249,19 @@ class PayrollLabourSplitTest extends TestCase
         ]);
     }
 
-    private function runFor(Employee $employee, int $gross, int $net, ?array $breakdown = null): PayrollRun
+    private function runFor(Employee $employee, int $gross, int $net, ?array $breakdown = null, string $month = '2026-08'): PayrollRun
     {
-        $run = PayrollRun::create(['payroll_month' => '2026-08', 'status' => 'locked']);
-        $this->payslipFor($run, $employee, $gross, $net, $breakdown);
+        $run = PayrollRun::create(['payroll_month' => $month, 'status' => 'locked']);
+        $this->payslipFor($run, $employee, $gross, $net, $breakdown, $month);
 
         return $run;
     }
 
-    private function payslipFor(PayrollRun $run, Employee $employee, int $gross, int $net, ?array $breakdown = null): void
+    private function payslipFor(PayrollRun $run, Employee $employee, int $gross, int $net, ?array $breakdown = null, string $month = '2026-08'): void
     {
         Payslip::create([
             'payroll_run_id' => $run->id, 'employee_id' => $employee->id,
-            'payroll_month' => '2026-08', 'basic_salary' => $gross,
+            'payroll_month' => $month, 'basic_salary' => $gross,
             'gross_pay' => $gross, 'net_pay' => $net,
             'tax_breakdown' => $breakdown ?? ['paye' => 15000],
             'ledger_breakdown' => [], 'status' => 'locked',
@@ -299,6 +301,11 @@ class PayrollLabourSplitTest extends TestCase
         AccountingPeriod::create([
             'year' => 2026, 'month' => 8, 'starts_on' => '2026-08-01',
             'ends_on' => '2026-08-31', 'status' => AccountingPeriod::STATUS_OPEN,
+        ]);
+        // The current month too, for the effective-dated classification tests (Report 67).
+        AccountingPeriod::firstOrCreate(['year' => (int) now()->year, 'month' => (int) now()->month], [
+            'starts_on' => now()->startOfMonth()->toDateString(), 'ends_on' => now()->endOfMonth()->toDateString(),
+            'status' => AccountingPeriod::STATUS_OPEN,
         ]);
     }
 }
