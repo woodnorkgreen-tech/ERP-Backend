@@ -62,6 +62,15 @@ class ClientDirectoryTest extends TestCase
         $this->assertSame('Grace Wanjiku', $client->contact_person);
     }
 
+    public function test_organization_is_no_longer_an_accepted_client_type(): void
+    {
+        $this->postJson('/api/clientservice/clients', $this->payload([
+            'customer_type' => 'organization',
+            'company_name' => 'Bright Events Ltd',
+            'full_name' => '',
+        ]))->assertUnprocessable()->assertJsonValidationErrors('customer_type');
+    }
+
     public function test_an_individual_never_carries_a_company_name(): void
     {
         $this->postJson('/api/clientservice/clients', $this->payload([

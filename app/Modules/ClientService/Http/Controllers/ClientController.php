@@ -37,7 +37,7 @@ use Illuminate\Http\JsonResponse;
 class ClientController extends Controller
 {
     /**
-     * A company or organisation is known by its trading name, and the form that
+    * A company is known by its trading name, and the form that
      * creates one never asks for a personal name. Copying it into full_name
      * here keeps that single rule in one place — the browser used to apply it
      * too — and keeps the non-null column populated. The individual's own name
@@ -75,7 +75,7 @@ class ClientController extends Controller
      *             @OA\Property(property="city", type="string", example="Nairobi"),
      *             @OA\Property(property="county", type="string", example="Nairobi County"),
      *             @OA\Property(property="postal_address", type="string", nullable=true, example="P.O. Box 12345"),
-     *             @OA\Property(property="customer_type", type="string", enum={"individual","company","organization"}, example="company"),
+    *             @OA\Property(property="customer_type", type="string", enum={"individual","company"}, example="company"),
      *             @OA\Property(property="lead_source", type="string", example="Website"),
      *             @OA\Property(property="preferred_contact", type="string", enum={"email","phone","sms"}, example="email"),
      *             @OA\Property(property="industry", type="string", nullable=true, example="Technology"),
@@ -138,7 +138,7 @@ class ClientController extends Controller
      *             @OA\Property(property="city", type="string", example="Nairobi"),
      *             @OA\Property(property="county", type="string", example="Nairobi County"),
      *             @OA\Property(property="postal_address", type="string", example="P.O. Box 67890"),
-     *             @OA\Property(property="customer_type", type="string", enum={"individual","company","organization"}),
+    *             @OA\Property(property="customer_type", type="string", enum={"individual","company"}),
      *             @OA\Property(property="lead_source", type="string", example="Referral"),
      *             @OA\Property(property="preferred_contact", type="string", enum={"email","phone","sms"}),
      *             @OA\Property(property="industry", type="string", example="Technology"),

@@ -70,7 +70,7 @@ class ClientRequest extends FormRequest
     {
         return [
             'full_name.required_if' => 'Enter the client\'s name.',
-            'company_name.required_unless' => 'Enter the company or organisation name.',
+            'company_name.required_unless' => 'Enter the company name.',
         ];
     }
 }

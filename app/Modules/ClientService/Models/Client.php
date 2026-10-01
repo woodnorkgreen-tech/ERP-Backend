@@ -11,7 +11,7 @@ class Client extends Model
 {
     use HasFactory;
 
-    public const CUSTOMER_TYPES = ['individual', 'company', 'organization'];
+    public const CUSTOMER_TYPES = ['individual', 'company'];
     public const CONTACT_CHANNELS = ['email', 'phone', 'sms'];
     public const STATUSES = ['active', 'inactive'];
 
