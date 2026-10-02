@@ -56,6 +56,16 @@ class GoodsReceiptNoteItem extends Model
         return $this->belongsTo(PurchaseOrderItem::class);
     }
 
+    /** Buying-unit value carried from the receipt or approved purchasing line. */
+    public function resolvedReceiptUnitCost(): float
+    {
+        return (float) ($this->receipt_unit_cost
+            ?? $this->purchaseOrderItem?->unit_price
+            ?? $this->purchaseOrderItem?->requisitionItem?->unit_price
+            ?? $this->purchaseOrderItem?->material?->unit_cost
+            ?? 0);
+    }
+
     public function inspection()
     {
         return $this->hasOne(GoodsReceiptInspection::class);

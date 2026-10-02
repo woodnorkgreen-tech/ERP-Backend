@@ -116,6 +116,30 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
         return $this->postJson("/api/procurement-stores/project-materials/{$elementMaterialId}/resolve-catalogue", $payload);
     }
 
+    public function test_office_draft_keeps_project_link_and_shortfall_snapshot(): void
+    {
+        $project = \App\Models\Project::create([
+            'enquiry_id' => $this->enquiryId, 'project_id' => 'WNG-RES-PROJECT',
+        ]);
+        $department = \App\Modules\HR\Models\Department::create(['name' => 'Workshop']);
+        $snapshot = ['elementName' => 'BOOTH1', 'description' => 'Contact adhesive', 'shortfall' => 10];
+        $response = $this->postJson('/api/procurement-stores/requisitions', [
+            'date' => now()->toDateString(), 'requested_by_type' => 'office',
+            'department_id' => $department->id, 'project_id' => $project->id,
+            'urgency' => 'normal', 'save_as_draft' => true,
+            'trigger_reason' => 'Project material shortfall',
+            'items' => [['custom_description' => 'Contact adhesive', 'quantity' => 10,
+                'unit_price' => 100, 'procurement_item_snapshot' => $snapshot]],
+        ])->assertSuccessful();
+        $id = $response->json('data.id');
+        $requisition = \App\Modules\ProcurementStores\Models\Requisition::findOrFail($id);
+        $this->assertSame($project->id, (int) $requisition->project_id);
+        $this->assertSame('Project material shortfall', $requisition->trigger_reason);
+        $this->assertSame($snapshot, $requisition->items->first()->procurement_item_snapshot);
+        $this->getJson('/api/procurement-stores/requisitions?project_id='.$project->id)
+            ->assertOk()->assertJsonPath('data.0.id', $id);
+    }
+
     public function test_matches_an_existing_material_with_enough_stock_already(): void
     {
         $line = $this->unlinkedLine();

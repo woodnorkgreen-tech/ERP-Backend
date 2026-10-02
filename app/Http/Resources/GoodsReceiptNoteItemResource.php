@@ -30,7 +30,7 @@ class GoodsReceiptNoteItemResource extends JsonResource
             'received_quantity' => $this->received_quantity,
             'entered_uom_id' => $this->entered_uom_id,
             'stock_quantity' => $this->stock_quantity !== null ? (float) $this->stock_quantity : null,
-            'receipt_unit_cost' => $this->receipt_unit_cost !== null ? (float) $this->receipt_unit_cost : null,
+            'receipt_unit_cost' => $this->resource->resolvedReceiptUnitCost(),
             'stock_status' => $this->stock_status,
             'inventory_log_id' => $this->inventory_log_id,
             'condition' => $this->condition,
