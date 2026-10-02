@@ -45,6 +45,8 @@ Route::get('/consumable-units/materials/{material}', [\App\Modules\ProcurementSt
 Route::post('/consumable-units/materials/{material}/convert', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'convert']);
 Route::get('/consumable-units/{unit}', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'show']);
 Route::post('/consumable-units/{unit}/counts', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'count']);
+Route::post('/consumable-units/{unit}/counts/{count}/review', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'review']);
+Route::post('/consumable-units/{unit}/valuation-repair', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'repair']);
 Route::post('/consumable-units/{unit}/hold', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'hold']);
 
 /*

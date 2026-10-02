@@ -421,12 +421,20 @@ class LibraryMaterial extends Model
         );
     }
 
+    /** Only the physically verified conversion service may cross a stocked bulk boundary. */
+    public bool $verifiedConsumableConversion = false;
+
     protected static function booted(): void
     {
         static::updating(function (self $material) {
-            if ($material->getOriginal('tracking_mode') === 'consumable_unit' && $material->isDirty('tracking_mode') && $material->tracking_mode !== 'consumable_unit'
-                && \App\Modules\ProcurementStores\Models\ConsumableUnit::where('material_id', $material->id)->exists()) {
-                throw \Illuminate\Validation\ValidationException::withMessages(['tracking_mode' => 'Controlled-unit history requires consumable_unit tracking.']);
+            if (!$material->isDirty(['tracking_mode', 'is_serialized', 'is_batch_controlled'])) return;
+            if ($material->verifiedConsumableConversion && $material->tracking_mode === 'consumable_unit' && $material->getOriginal('tracking_mode') === 'bulk_quantity') return;
+            $history = \App\Modules\ProcurementStores\Models\ConsumableUnit::where('material_id', $material->id)->exists()
+                || \App\Modules\ProcurementStores\Models\InventoryLog::where('material_id', $material->id)->exists()
+                || \App\Modules\ProcurementStores\Models\Board::where('library_material_id', $material->id)->exists();
+            $stock = \App\Modules\ProcurementStores\Models\Stock::where('material_id', $material->id)->first();
+            if ($history || ($stock && (bccomp((string) $stock->getRawOriginal('quantity_on_hand'), '0', 6) !== 0 || bccomp((string) $stock->quantity_reserved, '0', 6) !== 0))) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['tracking_mode' => 'Stock, tracked items or movement history prevents changing the tracking method. Use the verified physical conversion workflow where applicable.']);
             }
         });
     }

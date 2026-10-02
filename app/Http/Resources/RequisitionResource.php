@@ -21,7 +21,7 @@ class RequisitionResource extends JsonResource
                 return [
                     'id' => $this->project->id,
                     'project_id' => $this->project->project_id ?? null,
-                    'name' => $this->project->enquiry->title ?? $this->project->project_id ?? 'N/A',
+                    'name' => $this->project->enquiry?->title ?? $this->project->title ?? $this->project->name ?? $this->project->project_id ?? 'N/A',
                 ];
             }),
             // Enquiry-based project details (when requested_by_type = 'project' and no Project record exists)

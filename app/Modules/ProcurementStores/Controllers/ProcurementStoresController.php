@@ -1173,11 +1173,10 @@ class ProcurementStoresController extends Controller
             'new_material.uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
             'new_material.uom_conversions.*.factor' => 'required|numeric|gt:0',
             'new_material.default_unit_cost' => 'nullable|numeric|min:0',
-            // A brand-new item has no stock behind it yet, so registering one
-            // without receiving anything would just add a second, differently
-            // unlinked gap. Picking an existing item may already have enough
-            // on the shelf, so its receipt stays optional.
-            'receive' => ['nullable', 'array', Rule::requiredIf(fn () => $request->filled('new_material'))],
+            // Stock receipt is optional for both existing materials and new catalogue registrations.
+            // When stock is not yet on hand, resolving links the project line so that a Purchase Requisition
+            // can be generated directly from the desk for purchasing.
+            'receive' => ['nullable', 'array'],
             'receive.quantity' => 'required_with:receive|numeric|min:0.01',
             'receive.entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'receive.receipt_unit_cost' => 'nullable|numeric|min:0',
@@ -1187,6 +1186,9 @@ class ProcurementStoresController extends Controller
             'receive.width' => 'nullable|numeric|min:0',
             'receive.thickness' => 'nullable|numeric|min:0',
             'receive.location' => 'nullable|string|max:50',
+            'receive.controlled_units' => 'nullable|array|min:1|max:100',
+            'receive.controlled_units.*.quantity' => 'required_with:receive.controlled_units|numeric|gt:0',
+            'receive.controlled_units.*.notes' => 'nullable|string|max:2000',
         ]);
 
         if ($elementMaterial->library_material_id) {
@@ -1212,6 +1214,12 @@ class ProcurementStoresController extends Controller
                 $posted = $poster->post('receive', $line);
                 $movementLog = $posted['log'];
                 $materialId = $movementLog->material_id;
+            } elseif ($request->filled('new_material')) {
+                $material = app(\App\Modules\MaterialsLibrary\Services\MaterialRegistrationService::class)->create(
+                    $validated['new_material'],
+                    (int) auth()->id()
+                );
+                $materialId = $material->id;
             } else {
                 $material = LibraryMaterial::findOrFail($validated['material_id']);
                 if (($material->item_status ?? 'Active') !== 'Active') {
@@ -1241,6 +1249,9 @@ class ProcurementStoresController extends Controller
                 'project_material' => $elementMaterial,
                 'material' => $elementMaterial->libraryMaterial,
                 'movement' => $movementLog,
+                'controlled_units' => $movementLog && $elementMaterial->libraryMaterial?->isConsumableUnit()
+                    ? \App\Modules\ProcurementStores\Models\ConsumableUnit::with('material')->where('source_log_id', $movementLog->id)->get()
+                    : [],
             ],
         ]);
     }

@@ -5,7 +5,7 @@ namespace App\Modules\ProcurementStores\Services;
 use App\Events\Stores\StockIssued;
 use App\Events\Stores\StockReturned;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
-use App\Modules\ProcurementStores\Models\{ConsumableUnit, ConsumableUnitCount, ConsumableUnitMovement, GoodsReceiptNoteItem, InventoryLog, Stock};
+use App\Modules\ProcurementStores\Models\{ConsumableUnit, ConsumableUnitCount, ConsumableUnitCountReview, ConsumableUnitValuationRepair, ConsumableUnitMovement, GoodsReceiptNoteItem, InventoryLog, Stock};
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -14,7 +14,7 @@ class ConsumableUnitService
 {
     public function summary(LibraryMaterial $material): array
     {
-        $units = ConsumableUnit::where('material_id', $material->id)->orderByRaw("status = 'OPEN' DESC, status = 'UNOPENED' DESC")->orderBy('received_at')->orderBy('id')->get();
+        $units = ConsumableUnit::with(['material','counts.review'])->where('material_id', $material->id)->orderByRaw("status = 'OPEN' DESC, status = 'UNOPENED' DESC")->orderBy('received_at')->orderBy('id')->get();
         $total = StoresDecimal::sum($units->pluck('remaining_quantity'));
         $stock = Stock::where('material_id', $material->id)->first();
         $recorded = (string) ($stock?->getRawOriginal('quantity_on_hand') ?? '0');
@@ -45,7 +45,7 @@ class ConsumableUnitService
         return DB::transaction(function () use ($material, $signedQuantity, $type, $meta) {
             $material = LibraryMaterial::lockForUpdate()->findOrFail($material->id);
             if (!$material->isConsumableUnit()) $this->reject('material_id', 'This material is not configured for consumable units.');
-            if (!in_array($type, ['check_in', 'check_out', 'return', 'defective', 'reversal'], true)) {
+            if (!in_array($type, ['check_in', 'check_out', 'return', 'defective', 'reversal', 'adjustment'], true)) {
                 $this->reject('type', 'Controlled-unit adjustments require reviewed unit-level evidence. Record a physical count for review.');
             }
             if (($material->item_status ?? 'Active') !== 'Active' && !in_array($type, ['return', 'reversal', 'defective'], true)) $this->reject('material_id', 'Only active materials can be received or issued.');
@@ -59,6 +59,7 @@ class ConsumableUnitService
             $stock = Stock::where('material_id', $material->id)->lockForUpdate()->firstOrFail();
             $summary = $this->summary($material);
             if ($summary['reconciliation_status'] !== 'RECONCILED') $this->reject('material_id', 'Controlled units differ from the inventory balance. Physically identify existing stock or review the variance before moving stock.');
+            if ($type === 'adjustment') return $this->postCountAdjustment($material, $stock, (string) $signedQuantity, $meta);
             if ($type === 'check_in') return $this->receive($material, $stock, $quantity, $meta);
 
             if ($type === 'reversal' && empty($meta['original_issue_log_id'])) return $this->reverseReceipt($material, $stock, $quantity, $meta);
@@ -234,6 +235,7 @@ class ConsumableUnitService
             // Existing receipt-supported MWA becomes the specific-identification opening cost; no new economic receipt.
             $readiness = app(StoresValuationReadinessService::class)->project()['data']->firstWhere('material_id', $material->id);
             $cost = ($readiness['classification'] ?? '') === StoresValuationReadinessService::VALUED ? StoresDecimal::cost($material->unit_cost) : null;
+            $material->verifiedConsumableConversion = true;
             $material->update(['tracking_mode' => 'consumable_unit', 'issue_disposition' => 'consumed']);
             foreach ($specs as $i => $spec) {
                 $q = $quantities[$i];
@@ -249,10 +251,11 @@ class ConsumableUnitService
     public function count(ConsumableUnit $unit, string $physical, string $notes, int $actor): ConsumableUnitCount
     {
         return DB::transaction(function () use ($unit, $physical, $notes, $actor) {
+            LibraryMaterial::whereKey($unit->material_id)->lockForUpdate()->firstOrFail();
             $unit = ConsumableUnit::whereKey($unit->id)->lockForUpdate()->firstOrFail();
             $q = $physical === '0' || preg_match('/^0\.0+$/', $physical) ? '0.000000' : StoresDecimal::quantity($physical);
             $variance = bcsub($q, $unit->remaining_quantity, 6);
-            return $unit->counts()->create(['actor_id' => $actor, 'system_quantity' => $unit->remaining_quantity, 'physical_quantity' => $q, 'variance' => $variance, 'status' => bccomp($variance, '0', 6) === 0 ? 'RECONCILED' : 'REQUIRES_REVIEW', 'notes' => $notes, 'created_at' => now()]);
+            return $unit->counts()->create(['last_movement_id'=>$unit->movements()->max('id'), 'actor_id' => $actor, 'system_quantity' => $unit->remaining_quantity, 'physical_quantity' => $q, 'variance' => $variance, 'status' => bccomp($variance, '0', 6) === 0 ? 'RECONCILED' : 'REQUIRES_REVIEW', 'notes' => $notes, 'created_at' => now()]);
         });
     }
 
@@ -268,12 +271,116 @@ class ConsumableUnitService
         });
     }
 
+    /** Review is atomic with its movement; the original count never changes. */
+    public function reviewCount(ConsumableUnit $unit, int $countId, string $decision, string $reason, int $actor): ConsumableUnitCountReview
+    {
+        return DB::transaction(function () use ($unit, $countId, $decision, $reason, $actor) {
+            LibraryMaterial::whereKey($unit->material_id)->lockForUpdate()->firstOrFail();
+            $unit = ConsumableUnit::whereKey($unit->id)->lockForUpdate()->firstOrFail();
+            $count = $unit->counts()->whereKey($countId)->lockForUpdate()->firstOrFail();
+            if ($count->status !== 'REQUIRES_REVIEW' || $count->review()->exists()) $this->reject('count', 'Only an unresolved count variance may be reviewed once.');
+            if (!in_array($decision, ['APPROVED','REJECTED'], true)) $this->reject('decision', 'Choose approval or rejection.');
+            if (strlen(trim($reason)) < 5) $this->reject('reason', 'Document the review decision.');
+            if ($decision === 'APPROVED' && (int) $count->actor_id === $actor) $this->reject('reviewer', 'The person who recorded the count cannot approve its adjustment.');
+            $log = $decision === 'APPROVED' ? app(InventoryService::class)->adjustStock($unit->material_id, $count->variance, 'adjustment', [
+                'review_count_id'=>$count->id, 'consumable_unit_id'=>$unit->id, 'user_id'=>$actor,
+                'notes'=>$reason, 'reference_no'=>'CU-COUNT-'.$count->id,
+            ]) : null;
+            $accounting = $log ? app(\App\Modules\Finance\Services\StockMovementPostingService::class)->postControlledCount($log, $actor) : ['status'=>'NOT_APPLICABLE','journal_entry_id'=>null];
+            return ConsumableUnitCountReview::create([
+                'count_id'=>$count->id, 'consumable_unit_id'=>$unit->id, 'material_id'=>$unit->material_id,
+                'system_quantity'=>$count->system_quantity, 'physical_quantity'=>$count->physical_quantity, 'variance'=>$count->variance,
+                'resulting_quantity'=>$unit->fresh()->remaining_quantity, 'reviewer_id'=>$actor, 'reviewed_at'=>now(),
+                'decision'=>$decision, 'reason'=>$reason, 'adjustment_log_id'=>$log?->id,
+                'accounting_status'=>$accounting['status'], 'journal_entry_id'=>$accounting['journal_entry_id'],
+            ]);
+        });
+    }
+
+    private function postCountAdjustment(LibraryMaterial $material, Stock $stock, string $delta, array $meta): InventoryLog
+    {
+        $unit = ConsumableUnit::where('material_id',$material->id)->whereKey($meta['consumable_unit_id'] ?? 0)->lockForUpdate()->first();
+        $count = $unit?->counts()->whereKey($meta['review_count_id'] ?? 0)->lockForUpdate()->first();
+        if (!$count || $count->status !== 'REQUIRES_REVIEW' || $count->review()->exists() || (int) $count->actor_id === (int) ($meta['user_id'] ?? auth()->id())) $this->reject('count','Adjustment requires unresolved count evidence and a different approving reviewer.');
+        if (bccomp($delta,$count->variance,6) !== 0 || bccomp($unit->remaining_quantity,$count->system_quantity,6) !== 0
+            || $unit->movements()->where('id','>',$count->last_movement_id ?? 0)->exists()
+            || $unit->counts()->where('id','>',$count->id)->exists()) $this->reject('count','Stock or count evidence changed after counting. Record a fresh count; later movements cannot be overwritten.');
+        $before = $unit->remaining_quantity;
+        $next = bcadd($before,$delta,6);
+        if (bccomp($next,'0',6) < 0 || bccomp($next,$unit->original_quantity,6) > 0) $this->reject('physical_quantity','Observed quantity must be between zero and the original physical unit quantity.');
+        $stockNext = bcadd((string) $stock->getRawOriginal('quantity_on_hand'),$delta,6);
+        if (bccomp($stockNext,(string) $stock->quantity_reserved,6) < 0) $this->reject('count','Adjustment would consume reserved stock. Review reservations first.');
+        $newValue = $unit->unit_cost === null ? null : StoresDecimal::money(bcmul($next,$unit->unit_cost,12));
+        $valueDelta = $newValue === null ? null : bcsub($newValue,(string) $unit->remaining_value,2);
+        $unit->remaining_quantity=$next; $unit->remaining_value=$newValue;
+        $unit->status=bccomp($next,'0',6) === 0 ? 'DEPLETED' : ($unit->status === 'HOLD_REVIEW' ? 'HOLD_REVIEW' : 'OPEN');
+        $unit->depleted_at=bccomp($next,'0',6) === 0 ? now() : null; $unit->opened_at ??= now(); $unit->save();
+        $stock->quantity_on_hand=$stockNext; $stock->save();
+        // No project attribution and no StockIssued/StockReturned event.
+        unset($meta['project_id'], $meta['project_material_id']);
+        $log=$this->log($material,$stock,'adjustment',$delta,$unit->unit_cost,$valueDelta,$meta);
+        $this->history($unit,'count_adjustment',$delta,$before,$next,$valueDelta,$meta,$log);
+        return $log;
+    }
+
+    public function repairEligibility(ConsumableUnit $unit): array
+    {
+        $source = InventoryLog::whereKey($unit->source_log_id)->where('material_id',$unit->material_id)->where('type','check_in')->first();
+        $economic = $unit->movements()->whereNotIn('type',['check_in','opening_conversion','hold','release_hold','valuation_repair'])->exists();
+        $reason = $unit->unit_cost !== null ? 'Authoritative unit valuation already exists.'
+            : (!$source ? 'Original receipt source is required.' : ($economic || bccomp($unit->remaining_quantity,$unit->original_quantity,6) !== 0 ? 'ACCOUNTING CORRECTION REQUIRED' : null));
+        $derived = $source?->receipt_unit_cost;
+        if ($source && $derived === null && $unit->source_receipt_id) {
+            $grn = GoodsReceiptNoteItem::with('purchaseOrderItem')->where('goods_receipt_note_id',$unit->source_receipt_id)->where('material_id',$unit->material_id)->first();
+            $derived = $grn?->receipt_unit_cost ?? $grn?->unit_price ?? $grn?->purchaseOrderItem?->unit_price;
+            $buyingId=$grn?->purchaseOrderItem?->uom_id ?: $unit->material->purchase_uom_id ?: $unit->material->base_uom_id;
+            if ($derived !== null && (int) $buyingId !== (int) $unit->material->base_uom_id) {
+                $factor=(string) ($unit->material->uomConversions->firstWhere('from_uom_id',$buyingId)?->factor ?? '0');
+                $derived=bccomp($factor,'0',6)>0 ? bcdiv((string) $derived,$factor,8) : null;
+            }
+        }
+        return ['eligible'=>$reason === null, 'blocked_reason'=>$reason, 'source_log_id'=>$source?->id,
+            'derived_unit_cost'=>$derived === null ? null : StoresDecimal::cost((string) $derived),
+            'valuation_status'=>$unit->unit_cost === null ? 'UNVALUED' : 'VALUED',
+            'source'=>$unit->valuationRepairs()->first()?->source ?? ($unit->unit_cost === null ? 'UNRESOLVED_RECEIPT' : 'RECEIPT'),
+        ];
+    }
+
+    public function repairValuation(ConsumableUnit $unit, array $data, int $actor): ConsumableUnitValuationRepair
+    {
+        return DB::transaction(function () use ($unit,$data,$actor) {
+            LibraryMaterial::whereKey($unit->material_id)->lockForUpdate()->firstOrFail();
+            $unit=ConsumableUnit::whereKey($unit->id)->lockForUpdate()->firstOrFail();
+            InventoryLog::whereKey($unit->source_log_id)->lockForUpdate()->first();
+            $eligibility=$this->repairEligibility($unit);
+            if (!$eligibility['eligible']) $this->reject('valuation',$eligibility['blocked_reason']);
+            $cost=$eligibility['derived_unit_cost'];
+            if ($cost === null) {
+                if (($data['source'] ?? '') !== 'APPROVED_RECEIPT_VALUATION') $this->reject('source','Supply approved receipt valuation evidence when source cost cannot be derived.');
+                $cost=StoresDecimal::cost($data['unit_cost'] ?? null);
+                if ($cost === null) $this->reject('unit_cost','An authoritative receipt valuation is required.');
+            } elseif (isset($data['unit_cost']) && bccomp(StoresDecimal::cost($data['unit_cost']),$cost,8) !== 0) $this->reject('unit_cost','Entered cost must match the authoritative receipt source.');
+            foreach (['evidence_reference','evidence','reason'] as $field) if (strlen(trim($data[$field] ?? '')) < 5) $this->reject($field,'Supply the receipt valuation reference, supporting evidence and reason.');
+            $value=StoresDecimal::money(bcmul($unit->remaining_quantity,$cost,12));
+            $repair=ConsumableUnitValuationRepair::create([
+                'consumable_unit_id'=>$unit->id, 'previous_unit_cost'=>$unit->unit_cost, 'previous_value'=>$unit->remaining_value,
+                'new_unit_cost'=>$cost, 'new_value'=>$value, 'source'=>$eligibility['derived_unit_cost'] !== null ? 'RECEIPT_SOURCE' : 'APPROVED_RECEIPT_VALUATION',
+                'source_log_id'=>$unit->source_log_id, 'evidence_reference'=>$data['evidence_reference'],
+                'evidence'=>$data['evidence'], 'reason'=>$data['reason'], 'actor_id'=>$actor, 'created_at'=>now(),
+            ]);
+            $unit->unit_cost=$cost; $unit->original_value=$value; $unit->remaining_value=$value; $unit->save();
+            $this->history($unit,'valuation_repair','0',$unit->remaining_quantity,$unit->remaining_quantity,$value,
+                ['user_id'=>$actor,'reference_no'=>$data['evidence_reference'],'notes'=>$data['reason']]);
+            return $repair;
+        });
+    }
+
     public function indicators(): array
     {
         $summaries = LibraryMaterial::where('tracking_mode', 'consumable_unit')->get()->map(fn ($m) => $this->summary($m));
         return ['open_units' => ConsumableUnit::where('status', 'OPEN')->count(), 'held_units' => ConsumableUnit::where('status', 'HOLD_REVIEW')->count(),
             'reconciliation_differences' => $summaries->where('reconciliation_status', 'DIFFERENCE')->count(),
-            'count_variances' => ConsumableUnitCount::where('status', 'REQUIRES_REVIEW')->count(),
+            'count_variances' => ConsumableUnitCount::where('status', 'REQUIRES_REVIEW')->whereDoesntHave('review')->count(),
             'low_stock_materials' => $summaries->filter(fn ($s) => bccomp((string) ($s['material']->stock?->min_stock_level ?? '0'), '0', 6) > 0 && bccomp($s['available_quantity'], (string) $s['material']->stock->min_stock_level, 6) < 0)->count()];
     }
 

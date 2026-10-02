@@ -224,6 +224,7 @@ class StockMovementPoster
             'attributes' => $newMaterial['attributes'] ?? [],
             'issue_disposition' => $newMaterial['issue_disposition'] ?? null,
             'tracking_mode' => $newMaterial['tracking_mode'] ?? null,
+            'is_serialized' => ($newMaterial['tracking_mode'] ?? '') === 'serialized_item',
             'base_uom_id' => $newMaterial['base_uom_id'] ?? null,
             'purchase_uom_id' => $newMaterial['purchase_uom_id'] ?? null,
             'issue_uom_id' => $newMaterial['issue_uom_id'] ?? null,

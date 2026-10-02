@@ -165,6 +165,10 @@ class RequisitionController extends Controller
             $query->where('requested_by_type', $request->requested_by_type);
         }
 
+        if ($request->filled('project_id')) {
+            $query->where('project_id', $request->project_id);
+        }
+
         // Filter by user if they don't have permission to see all
         if (!$this->canSeeAll()) {
             $query->where('user_id', auth()->id());
@@ -346,10 +350,8 @@ class RequisitionController extends Controller
                 $input['employee_id']   = null;
                 $input['department_id'] = null;
             } elseif ($input['requested_by_type'] === 'employee') {
-                $input['project_id']    = null;
                 $input['department_id'] = null;
             } elseif ($input['requested_by_type'] === 'office') {
-                $input['project_id']  = null;
                 $input['employee_id'] = null;
             }
 
@@ -369,8 +371,8 @@ class RequisitionController extends Controller
                 $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null);
                 $item['total'] = $item['quantity'] * $item['unit_price'];
                 $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
-                    $input['requested_by_type'] === 'project'
-                        ? $this->enquiryIdForProject($input['project_id'] ?? null)
+                    filled($input['project_id'] ?? null)
+                        ? $this->enquiryIdForProject($input['project_id'])
                         : null
                 );
 
@@ -483,10 +485,8 @@ class RequisitionController extends Controller
                     $input['employee_id']   = null;
                     $input['department_id'] = null;
                 } elseif ($input['requested_by_type'] === 'employee') {
-                    $input['project_id']    = null;
                     $input['department_id'] = null;
                 } elseif ($input['requested_by_type'] === 'office') {
-                    $input['project_id']  = null;
                     $input['employee_id'] = null;
                 }
             }
@@ -502,9 +502,10 @@ class RequisitionController extends Controller
                     $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null);
                     $item['total'] = $item['quantity'] * $item['unit_price'];
                     $totalAmount  += $item['total'];
+                    $resolvedProjectId = $input['project_id'] ?? $requisition->project_id;
                     $item['project_enquiry_id'] = $item['project_enquiry_id'] ?? (
-                        ($input['requested_by_type'] ?? $requisition->requested_by_type) === 'project'
-                            ? $this->enquiryIdForProject($input['project_id'] ?? $requisition->project_id)
+                        filled($resolvedProjectId)
+                            ? $this->enquiryIdForProject($resolvedProjectId)
                             : null
                     );
                     // purpose is required in the DB — if it wasn't provided
