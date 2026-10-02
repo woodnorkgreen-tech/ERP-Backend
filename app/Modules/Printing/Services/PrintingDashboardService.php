@@ -167,17 +167,24 @@ class PrintingDashboardService
             COUNT(DISTINCT CASE WHEN source.date_source = 'previous' THEN j.id END) as inferred_date_jobs")
             ->first();
 
-        $materials = (clone $selected)->selectRaw("{$material} as material, COUNT(DISTINCT j.id) as jobs,
-            COUNT(DISTINCT {$project}) as projects, COALESCE(SUM(c.actual_running_m), 0) as running_m,
-            COALESCE(SUM(c.calculated_sqm), 0) as area_sqm,
-            SUM(CASE WHEN c.actual_running_m IS NULL THEN 1 ELSE 0 END) as missing_running_rows")
-            ->groupByRaw($material)->orderByDesc('running_m')->get();
+        // Group the calculated labels as columns. Grouping by the repeated CASE
+        // expression fails under the production database's ONLY_FULL_GROUP_BY mode.
+        $usageRows = (clone $selected)->selectRaw("j.id as job_id, {$project} as project,
+            {$material} as material, c.actual_running_m, c.calculated_sqm");
 
-        $projects = (clone $selected)->selectRaw("{$project} as project, {$material} as material,
-            COUNT(DISTINCT j.id) as jobs, COALESCE(SUM(c.actual_running_m), 0) as running_m,
-            COALESCE(SUM(c.calculated_sqm), 0) as area_sqm,
-            SUM(CASE WHEN c.actual_running_m IS NULL THEN 1 ELSE 0 END) as missing_running_rows")
-            ->groupByRaw("{$project}, {$material}")->orderByDesc('running_m')->get();
+        $materials = DB::query()->fromSub($usageRows, 'usage_rows')
+            ->selectRaw('material, COUNT(DISTINCT job_id) as jobs,
+                COUNT(DISTINCT project) as projects, COALESCE(SUM(actual_running_m), 0) as running_m,
+                COALESCE(SUM(calculated_sqm), 0) as area_sqm,
+                SUM(CASE WHEN actual_running_m IS NULL THEN 1 ELSE 0 END) as missing_running_rows')
+            ->groupBy('material')->orderByDesc('running_m')->get();
+
+        $projects = DB::query()->fromSub($usageRows, 'usage_rows')
+            ->selectRaw('project, material, COUNT(DISTINCT job_id) as jobs,
+                COALESCE(SUM(actual_running_m), 0) as running_m,
+                COALESCE(SUM(calculated_sqm), 0) as area_sqm,
+                SUM(CASE WHEN actual_running_m IS NULL THEN 1 ELSE 0 END) as missing_running_rows')
+            ->groupBy('project', 'material')->orderByDesc('running_m')->get();
 
         $machines = (clone $selected)->selectRaw("COALESCE(NULLIF(j.machine_name_snapshot, ''), 'Unassigned machine') as machine,
             COUNT(DISTINCT j.id) as jobs, COALESCE(SUM(c.actual_running_m), 0) as running_m")
