@@ -33,6 +33,11 @@ class PrintMaterialUsageService
             $data['artwork_height_m'] = $data['artwork_height_m'] ?? $job->running_length_m;
             $data['quantity'] = $data['quantity'] ?? $job->artwork_quantity ?? 1;
             $data['tile_count'] = $data['tile_count'] ?? 1;
+            if (!$consumption) {
+                foreach (['bleed_left_m', 'bleed_right_m', 'bleed_top_m', 'bleed_bottom_m'] as $side) {
+                    $data[$side] = $data[$side] ?? $job->bleed_per_side_m ?? 0;
+                }
+            }
             $calculated = $this->calculator->calculate($data);
             $actual = (float) ($data['actual_running_m'] ?? $calculated['calculated_running_m'] ?? 0);
             $extraUse = $actual - (float) ($calculated['calculated_running_m'] ?? 0);

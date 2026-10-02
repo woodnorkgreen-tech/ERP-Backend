@@ -6,6 +6,7 @@ use App\Modules\Design\Controllers\DesignDocumentController;
 use App\Modules\Design\Controllers\DesignHandoffController;
 use App\Modules\Design\Controllers\DesignHistoryController;
 use App\Modules\Design\Controllers\DesignItemController;
+use App\Modules\Design\Controllers\DesignPrintOptionController;
 use App\Modules\Design\Controllers\DesignJobController;
 use App\Modules\Design\Controllers\DesignTypeController;
 use Illuminate\Support\Facades\Route;
@@ -20,6 +21,8 @@ Route::get('/jobs/{job}', [DesignJobController::class, 'show']);
 Route::put('/jobs/{job}', [DesignJobController::class, 'update']);
 
 Route::get('/designers', [DesignItemController::class, 'designers']);
+Route::get('/print-options', [DesignPrintOptionController::class, 'index']);
+Route::post('/print-options', [DesignPrintOptionController::class, 'store']);
 
 Route::get('/types', [DesignTypeController::class, 'index']);
 Route::post('/types', [DesignTypeController::class, 'store']);

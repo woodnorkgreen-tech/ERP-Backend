@@ -27,6 +27,8 @@ class StoreDesignItemRequest extends FormRequest
             'width_value' => 'nullable|numeric|min:0',
             'height_value' => 'nullable|numeric|min:0',
             'print_material_id' => 'nullable|integer|exists:library_materials,id',
+            'application_surface' => 'nullable|string|max:191',
+            'bleed_per_side_m' => 'nullable|numeric|min:0|max:10',
             'print_notes' => 'nullable|string',
             'concept_notes' => 'nullable|string',
             'technical_notes' => 'nullable|string',

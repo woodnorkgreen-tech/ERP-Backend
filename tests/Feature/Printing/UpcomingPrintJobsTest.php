@@ -106,7 +106,7 @@ class UpcomingPrintJobsTest extends TestCase
             'registration_date' => now()->toDateString(),
         ]);
         $job = DesignJob::create(['title' => 'Manual design job', 'client_id' => $client->id, 'due_date' => '2026-10-01']);
-        $item = $this->item(['assigned_to' => $designer->id, 'width_m' => 1.25, 'quantity' => 3], $job);
+        $item = $this->item(['assigned_to' => $designer->id, 'width_m' => 1.25, 'bleed_per_side_m' => 0.1, 'quantity' => 3], $job);
 
         $this->getJson('/api/printing/upcoming-jobs?search=Upcoming%20Client')->assertOk()
             ->assertJsonPath('data.0.design_item_id', $item->id)
@@ -114,6 +114,7 @@ class UpcomingPrintJobsTest extends TestCase
             ->assertJsonPath('data.0.designer_name', $designer->name)
             ->assertJsonPath('data.0.width_m', 1.25)
             ->assertJsonPath('data.0.length_m', null)
+            ->assertJsonPath('data.0.bleed_per_side_m', 0.1)
             ->assertJsonPath('data.0.material_name', null)
             ->assertJsonPath('data.0.quantity', 3)
             ->assertJsonPath('data.0.due_date', '2026-10-01');
