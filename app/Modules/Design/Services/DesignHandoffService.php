@@ -182,6 +182,8 @@ class DesignHandoffService
             'print_width_m' => $item->width_m !== null ? (float) $item->width_m : null,
             'running_length_m' => $item->length_m !== null ? (float) $item->length_m : null,
             'print_material_id' => $item->print_material_id,
+            'application_surface' => $item->application_surface,
+            'bleed_per_side_m' => $item->bleed_per_side_m !== null ? (float) $item->bleed_per_side_m : null,
             'print_material_name' => $item->printMaterial?->material_name
                 ?? $item->printMaterial?->name,
             'print_notes' => $item->print_notes,

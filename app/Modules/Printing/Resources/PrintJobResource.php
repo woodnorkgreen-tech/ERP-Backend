@@ -36,6 +36,8 @@ class PrintJobResource extends JsonResource
             'print_width_m' => $this->float('print_width_m'),
             'running_length_m' => $this->float('running_length_m'),
             'artwork_quantity' => $this->float('artwork_quantity'),
+            'application_surface' => $this->application_surface,
+            'bleed_per_side_m' => $this->float('bleed_per_side_m'),
             'order_type' => $this->order_type,
             'reprint_of_job_id' => $this->reprint_of_job_id,
             'reprint_reason' => $this->reprint_reason,

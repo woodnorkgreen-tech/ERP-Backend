@@ -24,6 +24,7 @@ class UpcomingPrintJobResource extends JsonResource
             'material_name' => $this->printMaterial?->material_name,
             'width_m' => $this->width_m !== null ? (float) $this->width_m : null,
             'length_m' => $this->length_m !== null ? (float) $this->length_m : null,
+            'bleed_per_side_m' => $this->bleed_per_side_m !== null ? (float) $this->bleed_per_side_m : null,
             'quantity' => $this->quantity !== null ? (float) $this->quantity : null,
             'due_date' => $this->job?->due_date?->format('Y-m-d'),
             'is_redesign' => $this->redesign_of_item_id !== null || $this->redesign_of_print_job_id !== null,

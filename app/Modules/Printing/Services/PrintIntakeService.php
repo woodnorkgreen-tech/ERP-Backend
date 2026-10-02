@@ -92,6 +92,12 @@ class PrintIntakeService
                     'updated_by' => auth()->id(),
                 ], fn ($value) => $value !== null));
 
+                // A revised design may explicitly clear either handoff field.
+                $existing->update([
+                    'application_surface' => $payload['application_surface'] ?? null,
+                    'bleed_per_side_m' => $payload['bleed_per_side_m'] ?? null,
+                ]);
+
                 $this->handoffs->accept($handoff, $existing->id);
 
                 return $existing->fresh(['consumptions.roll', 'operator', 'machine']);
@@ -118,6 +124,8 @@ class PrintIntakeService
                 'print_width_m' => $payload['print_width_m'] ?? $payload['width_m'] ?? null,
                 'running_length_m' => $payload['running_length_m'] ?? $payload['length_m'] ?? null,
                 'artwork_quantity' => $payload['quantity'] ?? null,
+                'application_surface' => $payload['application_surface'] ?? null,
+                'bleed_per_side_m' => $payload['bleed_per_side_m'] ?? null,
                 'order_type' => $isRedesignReprint ? 'reprint' : 'original',
                 'reprint_of_job_id' => $reprintOfJobId,
                 'reprint_reason' => $payload['redesign_reason'] ?? null,

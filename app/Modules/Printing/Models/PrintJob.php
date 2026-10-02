@@ -42,6 +42,8 @@ class PrintJob extends Model
         'print_width_m',
         'running_length_m',
         'artwork_quantity',
+        'application_surface',
+        'bleed_per_side_m',
         'order_type',
         'reprint_of_job_id',
         'reprint_reason',
@@ -77,6 +79,7 @@ class PrintJob extends Model
         'print_width_m' => 'decimal:3',
         'running_length_m' => 'decimal:3',
         'artwork_quantity' => 'decimal:3',
+        'bleed_per_side_m' => 'decimal:3',
     ];
 
     public function handoff(): BelongsTo

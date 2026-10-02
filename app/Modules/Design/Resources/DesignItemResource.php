@@ -40,6 +40,8 @@ class DesignItemResource extends JsonResource
             'width_m' => $this->width_m !== null ? (float) $this->width_m : null,
             'height_m' => $this->height_m !== null ? (float) $this->height_m : null,
             'print_material_id' => $this->print_material_id,
+            'application_surface' => $this->application_surface,
+            'bleed_per_side_m' => $this->bleed_per_side_m !== null ? (float) $this->bleed_per_side_m : null,
             'print_material' => $this->whenLoaded('printMaterial', fn () => new LibraryMaterialResource($this->printMaterial)),
             'print_notes' => $this->print_notes,
             'concept_notes' => $this->concept_notes,
