@@ -1,0 +1,19 @@
+BACKEND: master 8427fcb216e30d77e737a24ff3534088bb5daf08
+ M app/Modules/Finance/Controllers/FinanceReportController.php
+ M routes/api.php
+ M tests/Feature/Finance/ProfitAndLossReportTest.php
+?? app/Modules/Finance/Services/BalanceSheetService.php
+?? app/Modules/Finance/Services/FinancialReconciliationService.php
+?? docs/finance-redesign/phase-2/72B_FINANCIAL_REPORTING_BALANCE_SHEET_RECONCILIATION.md
+?? scripts/check-finance-reports-contract.py
+?? tests/Feature/Finance/BalanceSheetReportTest.php
+?? tests/Feature/Finance/FinancialReconciliationTest.php
+
+FRONTEND: master 10007e5d5de6704c9b84edf381eef14623a657e8
+ M src/modules/finance/navigation.ts
+ M src/modules/finance/reports/services/reportsService.ts
+ M src/modules/finance/reports/types/reports.ts
+ M src/modules/finance/reports/views/FinancialReportsView.vue
+?? src/modules/finance/reports/reports.spec.ts
+?? src/modules/finance/reports/views/BalanceSheetStatement.vue
+?? src/modules/finance/reports/views/FinancialReconciliationCentre.vue

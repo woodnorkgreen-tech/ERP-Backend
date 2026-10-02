@@ -128,7 +128,7 @@ class StockMovementPoster
 
             $log = $this->inventory->adjustStock(
                 (int) $line['material_id'],
-                (float) $line['quantity'],
+                (string) $line['quantity'],
                 'check_in',
                 $meta,
             );
@@ -159,7 +159,7 @@ class StockMovementPoster
                 // see GoodsReceiptNoteController::store().
                 $grnItem->update([
                     'entered_uom_id'    => $line['entered_uom_id'] ?? $material->base_uom_id,
-                    'stock_quantity'    => abs((float) $log->quantity),
+                    'stock_quantity'    => $material->isConsumableUnit() ? ltrim($log->quantity, '-') : abs((float) $log->quantity),
                     'receipt_unit_cost' => $line['receipt_unit_cost'] ?? null,
                     'stock_status'      => 'posted',
                     'inventory_log_id'  => $log->id,
@@ -272,7 +272,7 @@ class StockMovementPoster
         $expectedUomId = (int) ($grnItem->purchaseOrderItem?->uom_id
             ?: $material->purchase_uom_id
             ?: $material->base_uom_id);
-        if ((int) ($line['entered_uom_id'] ?? $material->base_uom_id) !== $expectedUomId) {
+        if (!$material->isConsumableUnit() && (int) ($line['entered_uom_id'] ?? $material->base_uom_id) !== $expectedUomId) {
             $this->reject('entered_uom_id', 'Complete this GRN line in the buying unit recorded on the purchase order.');
         }
 
@@ -287,6 +287,13 @@ class StockMovementPoster
     /** Rejected and quarantined quantities must never reach available stock. */
     private function assertGrnQuantityMatches(GoodsReceiptNoteItem $grnItem, InventoryLog $log): void
     {
+        if ($log->material->isConsumableUnit()) {
+            $approved = (string) ($grnItem->inspection?->accepted_quantity ?? $grnItem->received_quantity);
+            $buyingId = $grnItem->purchaseOrderItem?->uom_id ?: $log->material->purchase_uom_id ?: $log->material->base_uom_id;
+            $factor = (int) $buyingId === (int) $log->material->base_uom_id ? '1' : (string) ($log->material->uomConversions->firstWhere('from_uom_id', $buyingId)?->factor ?? '0');
+            if (bccomp($log->quantity, bcmul($approved, $factor, 6), 6) !== 0) $this->reject('quantity', 'Actual roll quantities must equal the GRN accepted quantity in the stock UOM.');
+            return;
+        }
         $factor = (float) ($log->uom_conversion_factor ?: 1);
         $approved = $grnItem->inspection
             ? (float) $grnItem->inspection->accepted_quantity
@@ -311,7 +318,7 @@ class StockMovementPoster
             $this->assertProjectLineCanTake(
                 $line,
                 $material,
-                $this->inBaseUnit($material, (float) $line['quantity'], $line['entered_uom_id'] ?? null),
+                $material->isConsumableUnit() ? StoresDecimal::quantity($line['quantity']) : $this->inBaseUnit($material, (float) $line['quantity'], $line['entered_uom_id'] ?? null),
             );
         }
 
@@ -319,7 +326,7 @@ class StockMovementPoster
         // with an unlocked read only produced a second, racier answer.
         $log = $this->inventory->adjustStock(
             (int) $line['material_id'],
-            -(float) $line['quantity'],
+            '-'.ltrim((string) $line['quantity'], '-'),
             'check_out',
             $line,
         );
@@ -344,7 +351,7 @@ class StockMovementPoster
      *    across repeated approved lines for the same material, so an old
      *    unlinked issue is charged once rather than against every line.
      */
-    private function assertProjectLineCanTake(array $line, LibraryMaterial $material, float $quantityInBase): void
+    private function assertProjectLineCanTake(array $line, LibraryMaterial $material, float|string $quantityInBase): void
     {
         if (! filled($line['project_id'] ?? null)) {
             $this->reject('project_id', 'A project is required for approved material issues.');
@@ -366,6 +373,14 @@ class StockMovementPoster
         }
 
         $this->assertMaterialsApproved($materialsData);
+
+        if ($material->isConsumableUnit()) {
+            $issued = (string) InventoryLog::where('project_material_id', $planned->id)->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'));
+            $returns = (string) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
+            $remaining = bcsub((string) $planned->getRawOriginal('quantity'), bcsub($issued, $returns, 6), 6);
+            if (bccomp((string) $quantityInBase, $remaining, 6) > 0) $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement.");
+            return;
+        }
 
         $netIssued = (float) InventoryLog::where('project_material_id', $planned->id)
                 ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
@@ -426,6 +441,7 @@ class StockMovementPoster
         $returnQuantityBase = $this->inBaseUnit($material, (float) $line['quantity'], $line['entered_uom_id'] ?? null);
 
         $log = DB::transaction(function () use ($line, $returnQuantityBase) {
+            LibraryMaterial::whereKey($line['material_id'])->lockForUpdate()->firstOrFail();
             $issue = InventoryLog::query()->lockForUpdate()->find((int) $line['original_issue_log_id']);
             if (! $issue) {
                 $this->reject('original_issue_log_id', 'This issue is no longer available. Refresh the project custody list and select the current issue.');
@@ -436,13 +452,13 @@ class StockMovementPoster
             if ((int) $issue->material_id !== (int) $line['material_id']) {
                 $this->reject('material_id', 'The returned material must match the original issue.');
             }
-            if ($issue->usage_type !== 'reusable') {
+            if ($issue->usage_type !== 'reusable' && !$issue->consumable_unit_id) {
                 $this->reject('original_issue_log_id', 'Consumable issues are final and cannot be returned to stock.');
             }
 
             $alreadyReturned = (float) InventoryLog::where('original_issue_log_id', $issue->id)
                 ->where('type', 'return')->sum('quantity');
-            if ($alreadyReturned + $returnQuantityBase > abs((float) $issue->quantity) + 0.00001) {
+            if (!$issue->consumable_unit_id && $alreadyReturned + $returnQuantityBase > abs((float) $issue->quantity) + 0.00001) {
                 $this->reject('quantity', 'Return quantity exceeds the unreturned quantity from the original issue.');
             }
 
@@ -455,7 +471,7 @@ class StockMovementPoster
 
             return $this->inventory->adjustStock(
                 (int) $line['material_id'],
-                (float) $line['quantity'],
+                (string) $line['quantity'],
                 'return',
                 $meta,
             );
@@ -476,7 +492,7 @@ class StockMovementPoster
         // Sufficiency is checked inside adjustStock's row lock — see postIssue().
         $log = $this->inventory->adjustStock(
             (int) $line['material_id'],
-            -(float) $line['quantity'],
+            '-'.ltrim((string) $line['quantity'], '-'),
             'defective',
             $line,
         );

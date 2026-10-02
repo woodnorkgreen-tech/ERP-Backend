@@ -124,31 +124,38 @@ class FinanceOverviewController extends Controller
      */
     private function cash(User $user): array
     {
-        $sources = PaymentSource::query()->with('glAccount:id,code,name')->where('is_active', true)->where('type', '!=', 'payable')->get();
-        $linked = $sources->whereNotNull('gl_account_id');
-        $balances = DB::table('journal_lines')->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
-            ->whereIn('journal_entries.status', ['posted', 'reversed'])->whereIn('journal_lines.account_id', $linked->pluck('gl_account_id')->unique())
-            ->groupBy('journal_lines.account_id')
-            ->selectRaw("journal_lines.account_id, sum(case when journal_lines.entry_type = 'debit' then journal_lines.base_amount else -journal_lines.base_amount end) as balance")
-            ->pluck('balance', 'account_id');
-
-        // One row per ledger account: several sources may share one (all banks map to 1010 on the reference chart).
-        $accounts = $linked->groupBy('gl_account_id')->map(fn ($group, $accountId) => [
-            'account' => $group->first()->glAccount ? $group->first()->glAccount->code.' '.$group->first()->glAccount->name : null,
-            'type' => $group->first()->type,
-            'sources' => $group->map(fn ($s) => $s->name)->values(),
-            'balance' => $this->money($balances[$accountId] ?? 0),
-        ])->values();
-        $byType = $accounts->groupBy('type')->map(fn ($rows) => $this->money($rows->sum(fn ($r) => (float) $r['balance'])));
+        $position = app(\App\Modules\Finance\Services\BankCashReportingService::class)->position(now()->toDateString());
+        $channels = collect($position['configuration'])->keyBy('source_code');
+        $sourceCodes = PaymentSource::query()->where('is_active', true)->pluck('code')->all();
+        $accounts = collect($position['accounts'])->map(function ($account) use ($channels) {
+            $sources = collect($account['sources'])->reject(fn ($code) => in_array($code, ['BANK_DEFAULT', 'PETTY_CASH_FLOAT'], true))
+                ->map(fn ($code) => $channels[$code]['source_name'])->values();
+            // The overview keeps its compact display; reporting exposes all configured
+            // zero-balance function accounts. Both consume exactly the same GL projection.
+            if ($sources->isEmpty() && bccomp($account['closing_balance'], '0', 2) === 0) {
+                return null;
+            }
+            return [
+                'account' => $account['account_code'].' '.$account['account_name'],
+                'type' => $account['source_types'][0],
+                'sources' => $sources->isEmpty() ? [$account['account_name']] : $sources->all(),
+                'balance' => $account['closing_balance'],
+            ];
+        })->filter()->values();
+        $byType = $accounts->groupBy('type')->map(fn ($rows) => $rows->reduce(fn ($sum, $row) => bcadd($sum, $row['balance'], 2), '0.00'));
         $float = $user->can(Permissions::FINANCE_PETTY_CASH_VIEW_BALANCE) ? PettyCashBalance::query()->find(1)?->current_balance : null;
 
         return [
             'basis' => 'ledger',
-            'total' => $this->money($accounts->sum(fn ($r) => (float) $r['balance'])),
+            'total' => $position['total_cash_and_bank'],
             'by_type' => $byType,
             'accounts' => $accounts,
-            'unlinked_sources' => $sources->whereNull('gl_account_id')->map(fn ($s) => ['code' => $s->code, 'name' => $s->name, 'type' => $s->type])->values(),
+            'unlinked_sources' => collect($position['configuration'])->whereIn('status', ['NOT_CONFIGURED', 'INVALID_ACCOUNT'])
+                ->filter(fn ($source) => in_array($source['source_code'], $sourceCodes, true))
+                ->map(fn ($source) => ['code' => $source['source_code'], 'name' => $source['source_name'], 'type' => $source['source_type']])->values(),
             'petty_cash_float' => $float === null ? null : $this->money($float),
+            'readiness' => $position['readiness'],
+            'opening_balance_status' => $position['opening_balance_status'],
         ];
     }
 

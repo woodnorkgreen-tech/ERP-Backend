@@ -336,14 +336,15 @@ class ProcurementStoresController extends Controller
             // compatibility projection and must never override master data.
             $isBoard = $material->isBoardTrackable();
             $bc = $isBoard ? $boardCounts->get($material->id) : null;
+            $unitSummary = $material->isConsumableUnit() ? app(\App\Modules\ProcurementStores\Services\ConsumableUnitService::class)->summary($material) : null;
 
             $reserved = (float) ($material->stock?->quantity_reserved ?? 0);
             $onHand = $bc
                 ? (float) $bc->in_stores_cnt
-                : (float) ($material->stock?->quantity_on_hand ?? 0);
+                : ($unitSummary ? (float) $unitSummary['total_remaining'] : (float) ($material->stock?->quantity_on_hand ?? 0));
             $available = $bc
                 ? max(0.0, (float) $bc->available_cnt - $reserved)
-                : (float) ($material->stock ? ($material->stock->quantity_on_hand - $reserved) : 0);
+                : ($unitSummary ? (float) $unitSummary['available_quantity'] : (float) ($material->stock ? ($material->stock->quantity_on_hand - $reserved) : 0));
 
             return [
                 'id' => $material->id,
@@ -389,6 +390,8 @@ class ProcurementStoresController extends Controller
                 // Stores must be able to see that a draft is not yet usable,
                 // rather than discovering it when a check-in is refused.
                 'is_draft' => ($material->item_status ?? 'Active') !== 'Active',
+                'consumable_unit_summary' => $unitSummary,
+                'tracking_method' => $material->tracking_method,
                 'quantity_on_hand' => $onHand,
                 'quantity_reserved' => $reserved,
                 'available' => $available,
@@ -435,15 +438,16 @@ class ProcurementStoresController extends Controller
         foreach ($summaryMaterials as $material) {
             $isBoard = $material->isBoardTrackable();
             $bc = $isBoard ? $boardCounts->get($material->id) : null;
+            $unitSummary = $material->isConsumableUnit() ? app(\App\Modules\ProcurementStores\Services\ConsumableUnitService::class)->summary($material) : null;
             $stock = $material->stock;
 
             $reserved = (float) ($stock?->quantity_reserved ?? 0);
             $onHand = $bc
                 ? (float) $bc->in_stores_cnt
-                : (float) ($stock?->quantity_on_hand ?? 0);
+                : ($unitSummary ? (float) $unitSummary['total_remaining'] : (float) ($stock?->quantity_on_hand ?? 0));
             $available = $bc
                 ? max(0.0, (float) $bc->available_cnt - $reserved)
-                : (float) ($stock ? ($stock->quantity_on_hand - $reserved) : 0);
+                : ($unitSummary ? (float) $unitSummary['available_quantity'] : (float) ($stock ? ($stock->quantity_on_hand - $reserved) : 0));
             $minLevel = (float) ($stock?->min_stock_level ?? 0);
             $disposition = $material->issue_disposition
                 ?? ($material->material_type === 'reusable' ? 'returnable' : 'consumed');

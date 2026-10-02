@@ -4,6 +4,9 @@ namespace App\Modules\Finance\Controllers;
 
 use App\Constants\Permissions;
 use App\Http\Controllers\Controller;
+use App\Modules\Finance\Services\BalanceSheetService;
+use App\Modules\Finance\Services\BankCashReportingService;
+use App\Modules\Finance\Services\FinancialReconciliationService;
 use App\Modules\Finance\Services\ProfitAndLossService;
 use App\Modules\Finance\Services\ReceivablesAgeingService;
 use Illuminate\Http\JsonResponse;
@@ -27,7 +30,124 @@ class FinanceReportController extends Controller
     public function __construct(
         private ProfitAndLossService $profitAndLoss,
         private ReceivablesAgeingService $receivablesAgeingService,
+        private BalanceSheetService $balanceSheet,
+        private FinancialReconciliationService $reconciliations,
+        private BankCashReportingService $bankCashReporting,
     ) {}
+
+    public function bankCashPosition(Request $request): JsonResponse|StreamedResponse
+    {
+        $this->authorise($request);
+        $filters = $request->validate([
+            'as_at' => ['nullable', 'date_format:Y-m-d'],
+            'format' => ['nullable', 'in:json,csv'],
+        ]);
+        $data = $this->bankCashReporting->position($filters['as_at'] ?? now()->toDateString());
+        if (($filters['format'] ?? 'json') === 'csv') {
+            $rows = array_map(fn ($account) => [
+                $account['account_code'], $account['account_name'], $data['as_at'], $data['currency'],
+                $account['opening_or_brought_forward_position'] ?? 'NOT AVAILABLE',
+                $account['debits_to_date'], $account['credits_to_date'], $account['closing_balance'], $account['readiness'],
+            ], $data['accounts']);
+            $rows[] = ['TOTAL', 'Cash & Bank (petty cash included once)', $data['as_at'], $data['currency'], 'NOT AVAILABLE', '', '', $data['total_cash_and_bank'], $data['readiness']];
+            $rows[] = ['READINESS', $data['reason'], '', '', $data['opening_balance_status']];
+            foreach ($data['configuration'] as $channel) {
+                $rows[] = ['CHANNEL', $channel['source_name'], '', '', '', '', '', '', $channel['status']];
+            }
+            return $this->csv('bank-cash-position-'.$data['as_at'].'.csv',
+                ['Account code', 'Account name', 'As at', 'Currency', 'Approved opening position', 'Debits to date', 'Credits to date', 'Closing ledger balance', 'Readiness'], $rows);
+        }
+        return response()->json(['status' => 'success', 'data' => $data]);
+    }
+
+    public function cashMovement(Request $request): JsonResponse|StreamedResponse
+    {
+        $this->authorise($request);
+        $filters = $request->validate([
+            'from' => ['required', 'date_format:Y-m-d'],
+            'to' => ['required', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'format' => ['nullable', 'in:json,csv'],
+        ]);
+        $data = $this->bankCashReporting->movement($filters['from'], $filters['to']);
+        if (($filters['format'] ?? 'json') === 'csv') {
+            $rows = array_map(fn ($account) => [
+                $account['account_code'], $account['account_name'], $data['currency'],
+                $account['opening_balance'] ?? 'NOT AVAILABLE', $account['ledger_brought_forward_balance'],
+                $account['period_debits'], $account['period_credits'], $account['net_movement'], $account['closing_balance'], $account['readiness'],
+            ], $data['accounts']);
+            $rows[] = ['TOTAL', 'Company cash (internal transfers eliminated)', $data['currency'], 'NOT AVAILABLE', $data['ledger_opening_cash_position'], $data['cash_inflows'], $data['cash_outflows'], $data['net_cash_movement'], $data['closing_cash_position'], $data['readiness']];
+            $rows[] = ['TRANSFERS', $data['transfer_method'], '', '', '', $data['internal_transfers_eliminated'], $data['internal_transfers_eliminated']];
+            $rows[] = ['READINESS', $data['reason'], '', $data['opening_balance_status']];
+            return $this->csv('cash-movement-'.$filters['from'].'-to-'.$filters['to'].'.csv',
+                ['Account code', 'Account name', 'Currency', 'Approved opening', 'Recorded ledger brought forward', 'Debits / inflows', 'Credits / outflows', 'Net movement', 'Closing ledger position', 'Readiness'], $rows);
+        }
+        return response()->json(['status' => 'success', 'data' => $data]);
+    }
+
+    public function cashFlowReadiness(Request $request): JsonResponse
+    {
+        $this->authorise($request);
+        return response()->json(['status' => 'success', 'data' => ['cash_flow_statement' => $this->bankCashReporting->cashFlowReadiness()]]);
+    }
+
+    /**
+     * Ledger-backed balance-sheet snapshot as of a date, grouped by asset,
+     * liability, and equity.
+     *
+     * This is still not a statutory statement: the ledger explicitly excludes
+     * equity opening balances, depreciation, and year-end adjustments, so the
+     * API returns a real snapshot of what is posted today with its coverage
+     * metadata attached rather than pretending to be a final filed balance sheet.
+     */
+    public function balanceSheet(Request $request): JsonResponse|StreamedResponse
+    {
+        $this->authorise($request);
+
+        $filters = $request->validate([
+            'as_at' => ['nullable', 'date'],
+            'as_of' => ['nullable', 'date'],
+            'format' => ['nullable', 'in:json,csv'],
+        ]);
+
+        $data = $this->balanceSheet->summary($filters['as_at'] ?? $filters['as_of'] ?? now()->toDateString());
+
+        if (($filters['format'] ?? 'json') === 'csv') {
+            $rows = [];
+            foreach ($data['sections'] as $section => $accounts) {
+                foreach ($accounts as $account) {
+                    $rows[] = [
+                        ucfirst($section),
+                        $account['code'],
+                        $account['name'],
+                        $account['amount'],
+                    ];
+                }
+            }
+
+            return $this->csv(
+                "balance-sheet-{$data['as_of']}.csv",
+                ['Section', 'Account code', 'Account name', 'Amount'],
+                $rows,
+            );
+        }
+
+        return response()->json(['status' => 'success', 'data' => $data]);
+    }
+
+    public function reconciliations(Request $request): JsonResponse
+    {
+        $this->authorise($request);
+
+        $filters = $request->validate([
+            'as_at' => ['nullable', 'date'],
+            'control' => ['nullable', 'in:AR,AP,INVENTORY,PAYROLL,PETTY_CASH,WIP,BANK_CASH'],
+        ]);
+
+        return response()->json(['status' => 'success', 'data' => $this->reconciliations->summary(
+            $filters['as_at'] ?? now()->toDateString(),
+            $filters['control'] ?? null,
+        )]);
+    }
 
     /**
      * Revenue, Cost of Sales, gross profit, overheads and net profit for a

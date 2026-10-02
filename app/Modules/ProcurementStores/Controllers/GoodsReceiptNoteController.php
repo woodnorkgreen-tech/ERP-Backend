@@ -408,7 +408,7 @@ class GoodsReceiptNoteController extends Controller
                         $stockStatus = 'awaiting_inspection';
                     } elseif (($material->item_status ?? 'Active') !== 'Active' || ! $material->base_uom_id) {
                         $stockStatus = 'awaiting_material_setup';
-                    } elseif ($material->isBoardTrackable() || $material->is_serialized || $material->is_batch_controlled || $material->is_expiry_controlled) {
+                    } elseif ($material->isConsumableUnit() || $material->isBoardTrackable() || $material->is_serialized || $material->is_batch_controlled || $material->is_expiry_controlled) {
                         $stockStatus = 'awaiting_stores_details';
                     } else {
                         $enteredUomId = (int) ($material->purchase_uom_id ?: $material->base_uom_id);

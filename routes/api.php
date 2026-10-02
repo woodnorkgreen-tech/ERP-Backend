@@ -1146,6 +1146,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         // Portfolio-wide reports: read the same ledger as `journals` above,
         // grouped differently (by period earned/spent, by what is owed).
         Route::prefix('reports')->group(function () {
+            Route::get('balance-sheet', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'balanceSheet']);
+            Route::get('reconciliations', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'reconciliations']);
+            Route::get('bank-cash-position', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'bankCashPosition']);
+            Route::get('cash-movement', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'cashMovement']);
+            Route::get('cash-flow-readiness', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'cashFlowReadiness']);
             Route::get('profit-and-loss', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'profitAndLoss']);
             Route::get('receivables-ageing', [\App\Modules\Finance\Controllers\FinanceReportController::class, 'receivablesAgeing']);
         });

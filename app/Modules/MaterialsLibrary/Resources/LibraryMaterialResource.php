@@ -48,6 +48,7 @@ class LibraryMaterialResource extends JsonResource
             'minimum_reusable_length_mm' => $this->minimum_reusable_length_mm !== null ? (float) $this->minimum_reusable_length_mm : null,
             'minimum_reusable_width_mm'  => $this->minimum_reusable_width_mm !== null ? (float) $this->minimum_reusable_width_mm : null,
             'minimum_reusable_area_m2'   => $this->minimum_reusable_area_m2 !== null ? (float) $this->minimum_reusable_area_m2 : null,
+            'tracking_method' => $this->resource->tracking_method,
             'board_trackable'      => $this->resource->isBoardTrackable(),
             // Read the model's one definition rather than recomputing it here.
             'stock_handling'       => $this->resource->stock_handling,

@@ -23,6 +23,7 @@ class InventoryValuationService
     /** A material's stock value, given its on-hand quantity and (for boards) its board counts. */
     public function valueOf(LibraryMaterial $material, float $onHand, ?object $boardCount): float
     {
+        if ($material->isConsumableUnit()) return (float) (app(ConsumableUnitService::class)->summary($material)['authoritative_value'] ?? 0);
         return $material->isBoardTrackable()
             ? (float) ($boardCount?->in_stores_value ?? 0)
             : $onHand * (float) $material->unit_cost;

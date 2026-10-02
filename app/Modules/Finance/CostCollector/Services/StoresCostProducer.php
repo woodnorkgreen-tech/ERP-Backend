@@ -40,7 +40,7 @@ class StoresCostProducer
         // produced a cost line at all.
         $log->loadMissing('material.materialCategory.parent');
         $material = $log->material;
-        $quantity = abs((float) $log->quantity);
+        $quantity = $log->consumable_unit_id ? ltrim((string) $log->quantity, '-') : abs((float) $log->quantity);
         if ($quantity <= 0) {
             return null;
         }
@@ -61,12 +61,12 @@ class StoresCostProducer
         // delivery of it was invoiced at.
         $unitCost = (string) ($log->receipt_unit_cost ?? $material?->unit_cost ?? '0.00');
 
-        if (bccomp($unitCost, '0.00', 2) !== 1 && (float) ($material?->default_unit_cost ?? 0) > 0) {
+        if (!$log->consumable_unit_id && bccomp($unitCost, '0.00', 2) !== 1 && (float) ($material?->default_unit_cost ?? 0) > 0) {
             $unitCost = (string) $material->default_unit_cost;
         }
         $valuedAtPlan = false;
 
-        if (bccomp($unitCost, '0.00', 2) !== 1) {
+        if (!$log->consumable_unit_id && bccomp($unitCost, '0.00', 2) !== 1) {
             $planRate = $this->plannedUnitRate(
                 $log->project_material_id ? (int) $log->project_material_id : null,
             );
@@ -77,7 +77,8 @@ class StoresCostProducer
             }
         }
 
-        $amount = bcmul((string) $quantity, $unitCost, 2);
+        if ($log->consumable_unit_id && $log->movement_value === null) throw new \DomainException('Controlled-unit issue has no authoritative receipt valuation.');
+        $amount = $log->consumable_unit_id ? (string) $log->movement_value : bcmul((string) $quantity, $unitCost, 2);
         if (bccomp($amount, '0.00', 2) !== 1) {
             return null;
         }
@@ -115,6 +116,7 @@ class StoresCostProducer
                     ?? $this->elementNameFor($log->project_material_id ? (int) $log->project_material_id : null),
                 'material' => $material?->material_name,
                 'inventory_log_id' => $log->id,
+                'consumable_unit_id' => $log->consumable_unit_id,
                 'library_material_id' => $log->material_id,
                 'project_material_id' => $log->project_material_id,
                 // The reference Stores actually wrote on the movement. It is the
@@ -279,8 +281,8 @@ class StoresCostProducer
             throw new \DomainException('The original Stores issue has no verified project cost to credit.');
         }
 
-        $issuedQuantity = abs((float) $issue->quantity);
-        $returnedQuantity = abs((float) $return->quantity);
+        $issuedQuantity = $issue->consumable_unit_id ? ltrim($issue->quantity, '-') : abs((float) $issue->quantity);
+        $returnedQuantity = $return->consumable_unit_id ? ltrim($return->quantity, '-') : abs((float) $return->quantity);
         if ($issuedQuantity <= 0 || $returnedQuantity <= 0) {
             return null;
         }
@@ -290,10 +292,11 @@ class StoresCostProducer
             bcdiv((string) $returnedQuantity, (string) $issuedQuantity, 8),
             2,
         );
+        if ($return->consumable_unit_id && $return->movement_value !== null) $credit = (string) $return->movement_value;
         // A reviewed quarantine return may recover less value than an intact
         // unit. receipt_unit_cost on a return is the reviewer-approved recovery
         // value per returned unit, capped at the original proportional credit.
-        if ($return->receipt_unit_cost !== null) {
+        if (!$return->consumable_unit_id && $return->receipt_unit_cost !== null) {
             $accepted = bcmul((string) $returnedQuantity, (string) $return->receipt_unit_cost, 2);
             if (bccomp($accepted, $credit, 2) === -1) {
                 $credit = $accepted;
@@ -374,8 +377,8 @@ class StoresCostProducer
             return null;
         }
 
-        $issuedQuantity = abs((float) $issue->quantity);
-        $reversedQuantity = abs((float) $reversal->quantity);
+        $issuedQuantity = $issue->consumable_unit_id ? ltrim($issue->quantity, '-') : abs((float) $issue->quantity);
+        $reversedQuantity = $reversal->consumable_unit_id ? ltrim($reversal->quantity, '-') : abs((float) $reversal->quantity);
         if ($issuedQuantity <= 0 || $reversedQuantity <= 0) {
             return null;
         }

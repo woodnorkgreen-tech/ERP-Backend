@@ -52,8 +52,13 @@ class StockMovementRequest extends FormRequest
             'lines.*.material_id' => $type === 'receive'
                 ? 'nullable|required_without:lines.*.new_material|exists:library_materials,id'
                 : 'required|exists:library_materials,id',
-            'lines.*.quantity' => 'required|numeric|min:0.01',
+            'lines.*.quantity' => 'required|numeric|gt:0',
             'lines.*.entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
+            'lines.*.consumable_unit_id' => 'nullable|integer|exists:consumable_units,id',
+            'lines.*.controlled_units' => 'nullable|array|min:1|max:100',
+            'lines.*.controlled_units.*.quantity' => 'required|numeric|gt:0',
+            'lines.*.controlled_units.*.notes' => 'nullable|string|max:2000',
+            'lines.*.return_kind' => ['nullable', Rule::in(['whole_item', 'recovered_offcut'])],
             'lines.*.notes' => 'nullable|string',
             'lines.*.project_material_id' => 'nullable|exists:element_materials,id',
         ];

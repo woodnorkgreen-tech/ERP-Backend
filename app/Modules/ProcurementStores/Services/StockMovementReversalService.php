@@ -20,6 +20,7 @@ class StockMovementReversalService
     public function reverse(InventoryLog $log, string $reason, int $actorId): InventoryLog
     {
         return DB::transaction(function () use ($log, $reason, $actorId) {
+            \App\Modules\MaterialsLibrary\Models\LibraryMaterial::whereKey($log->material_id)->lockForUpdate()->firstOrFail();
             $original = InventoryLog::with(['material.materialCategory.parent', 'allocations'])
                 ->whereKey($log->id)->lockForUpdate()->firstOrFail();
 
@@ -43,6 +44,8 @@ class StockMovementReversalService
             $quantity = $isReceipt
                 ? -abs((float) $original->quantity)
                 : ($isIssue ? abs((float) $original->quantity) : -(float) $original->quantity);
+
+            if ($original->material->isConsumableUnit()) $quantity = $isReceipt ? '-'.ltrim($original->quantity, '-') : ltrim($original->quantity, '-');
 
             if ($isIssue) {
                 $returned = (float) InventoryLog::where('original_issue_log_id', $original->id)

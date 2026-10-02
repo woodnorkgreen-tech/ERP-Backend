@@ -248,4 +248,64 @@ class ProfitAndLossReportTest extends TestCase
 
         $this->assertSame('0.00', $data['totals']['opex']);
     }
+
+    public function test_balance_sheet_snapshot_groups_by_asset_liability_and_equity(): void
+    {
+        $asset = ChartOfAccount::query()->where('category', 'asset')->firstOrFail();
+        $liability = ChartOfAccount::query()->where('category', 'liability')->firstOrFail();
+        $equity = ChartOfAccount::query()->where('category', 'equity')->firstOrFail();
+
+        $entry = JournalEntry::create([
+            'entry_no' => 'JE-BS-' . uniqid(),
+            'posting_date' => '2026-09-15',
+            'accounting_period_id' => \App\Modules\Finance\CostCollector\Models\AccountingPeriod::forDate(\Carbon\Carbon::parse('2026-09-15'))->id,
+            'source_type' => 'Test',
+            'source_id' => 0,
+            'description' => 'Balance sheet test posting',
+            'total_debit' => '15000.00',
+            'total_credit' => '15000.00',
+            'status' => 'posted',
+            'posted_at' => now(),
+        ]);
+
+        JournalLine::create([
+            'journal_entry_id' => $entry->id,
+            'account_id' => $asset->id,
+            'entry_type' => 'debit',
+            'amount' => '15000.00',
+            'base_amount' => '15000.00',
+            'currency' => 'KES',
+            'fx_rate' => 1,
+        ]);
+        JournalLine::create([
+            'journal_entry_id' => $entry->id,
+            'account_id' => $liability->id,
+            'entry_type' => 'credit',
+            'amount' => '10000.00',
+            'base_amount' => '10000.00',
+            'currency' => 'KES',
+            'fx_rate' => 1,
+        ]);
+        JournalLine::create([
+            'journal_entry_id' => $entry->id,
+            'account_id' => $equity->id,
+            'entry_type' => 'credit',
+            'amount' => '5000.00',
+            'base_amount' => '5000.00',
+            'currency' => 'KES',
+            'fx_rate' => 1,
+        ]);
+
+        $data = $this->actingAs($this->accountant, 'sanctum')
+            ->getJson('/api/finance/reports/balance-sheet?as_of=2026-09-30')
+            ->assertOk()
+            ->json('data');
+
+        $this->assertSame('15000.00', $data['totals']['assets']);
+        $this->assertSame('10000.00', $data['totals']['liabilities']);
+        $this->assertSame('5000.00', $data['totals']['equity']);
+        $this->assertFalse($data['coverage']['is_statutory_trial_balance']);
+        $this->assertArrayHasKey('asset', $data['sections']);
+        $this->assertSame('asset', $data['sections']['asset'][0]['category']);
+    }
 }

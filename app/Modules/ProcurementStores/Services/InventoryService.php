@@ -46,12 +46,15 @@ class InventoryService
      * @param array $meta Additional metadata including optional batch_number
      * @return InventoryLog
      */
-    public function adjustStock(int $materialId, float $quantity, string $type, array $meta = [])
+    public function adjustStock(int $materialId, float|string $quantity, string $type, array $meta = [])
     {
         return DB::transaction(function () use ($materialId, $quantity, $type, $meta) {
             // Serialize valuation as well as quantity: a waiting receipt must
             // read the preceding receipt's average, not a stale catalogue price.
             $material = LibraryMaterial::with('uomConversions')->lockForUpdate()->findOrFail($materialId);
+            if ($material->isConsumableUnit()) {
+                return app(ConsumableUnitService::class)->post($material, $quantity, $type, $meta);
+            }
             $enteredQuantity = $quantity;
             $conversionFactor = 1.0;
             $enteredUomId = isset($meta['entered_uom_id']) ? (int) $meta['entered_uom_id'] : null;

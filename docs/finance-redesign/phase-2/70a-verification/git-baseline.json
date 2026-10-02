@@ -1,0 +1,12 @@
+{
+  "ERP-Backend": {
+    "head": "8427fcb216e30d77e737a24ff3534088bb5daf08",
+    "branch": "master",
+    "status": "M app/Modules/Finance/Controllers/FinanceOverviewController.php\n M app/Modules/Finance/Controllers/FinanceReportController.php\n M routes/api.php\n M tests/Feature/Finance/ProfitAndLossReportTest.php\n?? app/Modules/Finance/Services/BalanceSheetService.php\n?? app/Modules/Finance/Services/BankCashReportingService.php\n?? app/Modules/Finance/Services/FinancialReconciliationService.php\n?? docs/finance-redesign/phase-2/72B_FINANCIAL_REPORTING_BALANCE_SHEET_RECONCILIATION.md\n?? docs/finance-redesign/phase-2/72C_FINANCIAL_REPORTING_CASH_BANK_STREAM_CLOSURE.md\n?? docs/finance-redesign/phase-2/72c-verification/\n?? scripts/check-finance-reports-contract.py\n?? tests/Feature/Finance/BalanceSheetReportTest.php\n?? tests/Feature/Finance/BankCashReportTest.php\n?? tests/Feature/Finance/CashFlowReadinessTest.php\n?? tests/Feature/Finance/CashMovementReportTest.php\n?? tests/Feature/Finance/FinancialReconciliationTest.php\n?? tests/Support/"
+  },
+  "ERP-Frontend": {
+    "head": "10007e5d5de6704c9b84edf381eef14623a657e8",
+    "branch": "master",
+    "status": "M src/modules/finance/navigation.ts\n M src/modules/finance/reports/services/reportsService.ts\n M src/modules/finance/reports/types/reports.ts\n M src/modules/finance/reports/views/FinancialReportsView.vue\n M src/modules/finance/shared/components/FinancePageFrame.vue\n?? src/modules/finance/reports/cashReports.spec.ts\n?? src/modules/finance/reports/reports.spec.ts\n?? src/modules/finance/reports/views/BalanceSheetStatement.vue\n?? src/modules/finance/reports/views/BankCashPositionReport.vue\n?? src/modules/finance/reports/views/CashAccountDrillDown.vue\n?? src/modules/finance/reports/views/CashFlowReadinessPanel.vue\n?? src/modules/finance/reports/views/CashJournalDetail.vue\n?? src/modules/finance/reports/views/CashMovementReport.vue\n?? src/modules/finance/reports/views/CashReportingReadiness.vue\n?? src/modules/finance/reports/views/FinancialReconciliationCentre.vue\n?? tests/fixtures/"
+  }
+}

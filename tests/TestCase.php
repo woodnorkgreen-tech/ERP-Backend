@@ -13,6 +13,11 @@ abstract class TestCase extends BaseTestCase
         $app = require __DIR__ . '/../bootstrap/app.php';
         $app->make(Kernel::class)->bootstrap();
 
+        $database = (string) $app['config']->get('database.connections.'.$app['config']->get('database.default').'.database');
+        if (! str_ends_with($database, '_test')) {
+            throw new \RuntimeException("Refusing to bootstrap tests against non-test database [{$database}].");
+        }
+
         return $app;
     }
     use CreatesApplication;

@@ -647,4 +647,28 @@ class StoresCostProducerTest extends TestCase
         $this->assertSame(1, CostLine::where('source_type', InventoryLog::class)
             ->where('source_id', $reversal->id)->where('source_ref', 'stock-issue-reversal')->count());
     }
+    public function test_controlled_roll_issue_and_return_use_one_economic_actual_cost(): void
+    {
+        \Illuminate\Support\Facades\Event::fake([\App\Events\Stores\StockIssued::class, \App\Events\Stores\StockReturned::class]);
+        $enquiry = $this->createEnquiry('WNG-CU-COST');
+        $project = $this->createProject($enquiry, 'WNG-CU-COST');
+        $ws = DB::table('workstations')->insertGetId(['name' => 'Rolls', 'code' => 'CU-COST', 'created_at' => now(), 'updated_at' => now()]);
+        $material = LibraryMaterial::create(['workstation_id' => $ws, 'material_name' => 'Fabric', 'material_code' => 'CU-COST', 'unit_of_measure' => 'm', 'tracking_mode' => 'consumable_unit', 'issue_disposition' => 'consumed', 'item_status' => 'Active', 'unit_cost' => '999']);
+        $inventory = app(\App\Modules\ProcurementStores\Services\InventoryService::class);
+        $inventory->adjustStock($material->id, '50', 'check_in', ['controlled_units' => [['quantity' => '50']], 'receipt_unit_cost' => '200', 'user_id' => $this->user->id]);
+        $unit = \App\Modules\ProcurementStores\Models\ConsumableUnit::where('material_id', $material->id)->firstOrFail();
+        $issue = $inventory->adjustStock($material->id, '-12', 'check_out', ['consumable_unit_id' => $unit->id, 'project_id' => $project, 'reference_no' => 'WNG-CU-COST', 'user_id' => $this->user->id]);
+        $actual = $this->producer->postStockIssue($issue);
+        $this->assertSame('2400.00', $actual->net_amount);
+        $this->assertSame(CostLine::NATURE_ACTUAL, $actual->nature);
+        $this->assertSame($enquiry, $actual->project_enquiry_id);
+        $this->assertSame($actual->id, $this->producer->postStockIssue($issue)->id);
+        $return = $inventory->adjustStock($material->id, '3', 'return', ['original_issue_log_id' => $issue->id, 'user_id' => $this->user->id]);
+        $credit = $this->producer->postStockReturn($return);
+        $this->assertSame('-600.00', $credit->net_amount);
+        $this->assertSame($credit->id, $this->producer->postStockReturn($return)->id);
+        \Illuminate\Support\Facades\Event::assertDispatched(\App\Events\Stores\StockIssued::class);
+        \Illuminate\Support\Facades\Event::assertDispatched(\App\Events\Stores\StockReturned::class);
+    }
+
 }

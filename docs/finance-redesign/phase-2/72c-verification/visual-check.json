@@ -1,0 +1,359 @@
+{
+  "errors": [],
+  "metrics": [
+    {
+      "tab": "bank-cash",
+      "width": 1440,
+      "state": "ready",
+      "documentWidth": 1440,
+      "viewport": 1440,
+      "tableScrollers": [
+        {
+          "width": 841,
+          "scroll": 1073
+        },
+        {
+          "width": 1116,
+          "scroll": 1116
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "ness: HISTORICAL_DATA_INCOMPLETE · Opening balance status: NOT_CONFIGURED\n\nOperating bank: CONFIGURED\nCompany M-Pesa: NOT CONFIGURED\nCompany Card: NOT CONFIGURED\n\nTOTAL CASH & BANK · KES\n\n(KES 1,234,567,890.12)\n\nAs at 2026-09-30\n\nConfigured cash/bank accounts including petty cash once.\n\nACCOUNT\tAPPROVED OPENING\tDEBITS TO DATE\tCREDITS TO DATE\tCLOSING LEDGER BALANCE\tREADINESS\n1010 Operating bank\n\nbank\n\n\tNOT AVAILABLE\tKES 100.00\tKES 1,234,567,990.12\t(KES 1,234,567,890.12)\tHISTORICAL_DATA_INCOMPLETE"
+    },
+    {
+      "tab": "bank-cash",
+      "width": 390,
+      "state": "ready",
+      "documentWidth": 390,
+      "viewport": 390,
+      "tableScrollers": [
+        {
+          "width": 358,
+          "scroll": 1073
+        },
+        {
+          "width": 356,
+          "scroll": 808
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "ness: HISTORICAL_DATA_INCOMPLETE · Opening balance status: NOT_CONFIGURED\n\nOperating bank: CONFIGURED\nCompany M-Pesa: NOT CONFIGURED\nCompany Card: NOT CONFIGURED\n\nTOTAL CASH & BANK · KES\n\n(KES 1,234,567,890.12)\n\nAs at 2026-09-30\n\nConfigured cash/bank accounts including petty cash once.\n\nACCOUNT\tAPPROVED OPENING\tDEBITS TO DATE\tCREDITS TO DATE\tCLOSING LEDGER BALANCE\tREADINESS\n1010 Operating bank\n\nbank\n\n\tNOT AVAILABLE\tKES 100.00\tKES 1,234,567,990.12\t(KES 1,234,567,890.12)\tHISTORICAL_DATA_INCOMPLETE"
+    },
+    {
+      "tab": "cash-movement",
+      "width": 1440,
+      "state": "ready",
+      "documentWidth": 1440,
+      "viewport": 1440,
+      "tableScrollers": [
+        {
+          "width": 841,
+          "scroll": 1073
+        },
+        {
+          "width": 1116,
+          "scroll": 1116
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "rd: KES 50.00. This is recorded activity, not an approved historical opening position.\n\nInternal transfers eliminated from company inflows and outflows: KES 200.00 (1 journals).\n\nPure configured-account transfers are eliminated; mixed journals retain gross activity. Account rows retain all transfer movements.\n\nACCOUNT\tAPPROVED OPENING\tLEDGER BROUGHT FORWARD\tDEBITS\tCREDITS\tNET MOVEMENT\tCLOSING LEDGER BALANCE\n1010 Operating bank\tNOT AVAILABLE\tKES 50.00\tKES 300.00\tKES 375.00\t(KES 75.00)\t(KES 25.00)"
+    },
+    {
+      "tab": "cash-movement",
+      "width": 390,
+      "state": "ready",
+      "documentWidth": 390,
+      "viewport": 390,
+      "tableScrollers": [
+        {
+          "width": 358,
+          "scroll": 1073
+        },
+        {
+          "width": 356,
+          "scroll": 688
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "rd: KES 50.00. This is recorded activity, not an approved historical opening position.\n\nInternal transfers eliminated from company inflows and outflows: KES 200.00 (1 journals).\n\nPure configured-account transfers are eliminated; mixed journals retain gross activity. Account rows retain all transfer movements.\n\nACCOUNT\tAPPROVED OPENING\tLEDGER BROUGHT FORWARD\tDEBITS\tCREDITS\tNET MOVEMENT\tCLOSING LEDGER BALANCE\n1010 Operating bank\tNOT AVAILABLE\tKES 50.00\tKES 300.00\tKES 375.00\t(KES 75.00)\t(KES 25.00)"
+    },
+    {
+      "tab": "cash-flow",
+      "width": 1440,
+      "state": "ready",
+      "documentWidth": 1440,
+      "viewport": 1440,
+      "tableScrollers": [
+        {
+          "width": 1118,
+          "scroll": 1118
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "asing & payables\nExpenses & cash\nInventory\nProject finance\nPayroll finance\nReports & controls\nFinance setup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nBank matching\nClose month\nBalance sheet\nReconciliation centre\nBank & Cash\nCash Movement\nCash Flow readiness\nProfit and loss\nTrial balance\nReceivables ageing\nPayables ageing\nRun\nCASH FLOW STATEMENT\n\nNOT YET AUTHORITATIVE\n\nNOT_SUPPORTED\n\nNo approved operating/investing/financing classification method exists.\n\nView Cash Movement"
+    },
+    {
+      "tab": "cash-flow",
+      "width": 390,
+      "state": "ready",
+      "documentWidth": 390,
+      "viewport": 390,
+      "tableScrollers": [
+        {
+          "width": 358,
+          "scroll": 1073
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "asing & payables\nExpenses & cash\nInventory\nProject finance\nPayroll finance\nReports & controls\nFinance setup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nBank matching\nClose month\nBalance sheet\nReconciliation centre\nBank & Cash\nCash Movement\nCash Flow readiness\nProfit and loss\nTrial balance\nReceivables ageing\nPayables ageing\nRun\nCASH FLOW STATEMENT\n\nNOT YET AUTHORITATIVE\n\nNOT_SUPPORTED\n\nNo approved operating/investing/financing classification method exists.\n\nView Cash Movement"
+    },
+    {
+      "tab": "reconciliation",
+      "width": 1440,
+      "state": "ready",
+      "documentWidth": 1440,
+      "viewport": 1440,
+      "tableScrollers": [
+        {
+          "width": 1118,
+          "scroll": 1118
+        },
+        {
+          "width": 809,
+          "scroll": 854
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "lance\n-1234567890.12\nDifference\nNot calculated\nReadiness\nNOT_READY\nAs at\n2026-09-30\nREASON\n\nThe canonical GL position has no independent authoritative cash subledger. No external bank statement reconciliation is asserted.\n\nEVIDENCE AND SOURCES\ngl source\nBankCashReportingService canonical configured cash/bank accounts\nposition readiness\nHISTORICAL_DATA_INCOMPLETE\nopening balance status\nNOT_CONFIGURED\nexternal statement data available\nfalse\nDRILL-DOWN\n/finance/reports?tab=bank-cash\n/finance/ledger"
+    },
+    {
+      "tab": "reconciliation",
+      "width": 390,
+      "state": "ready",
+      "documentWidth": 390,
+      "viewport": 390,
+      "tableScrollers": [
+        {
+          "width": 358,
+          "scroll": 1073
+        },
+        {
+          "width": 356,
+          "scroll": 854
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "lance\n-1234567890.12\nDifference\nNot calculated\nReadiness\nNOT_READY\nAs at\n2026-09-30\nREASON\n\nThe canonical GL position has no independent authoritative cash subledger. No external bank statement reconciliation is asserted.\n\nEVIDENCE AND SOURCES\ngl source\nBankCashReportingService canonical configured cash/bank accounts\nposition readiness\nHISTORICAL_DATA_INCOMPLETE\nopening balance status\nNOT_CONFIGURED\nexternal statement data available\nfalse\nDRILL-DOWN\n/finance/reports?tab=bank-cash\n/finance/ledger"
+    },
+    {
+      "tab": "bank-cash",
+      "width": 390,
+      "state": "empty",
+      "documentWidth": 390,
+      "viewport": 390,
+      "tableScrollers": [
+        {
+          "width": 358,
+          "scroll": 1073
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "ivables ageing\nPayables ageing\nDownload comma-separated values file\nAs at \nRun\n\nHISTORICAL DATA INCOMPLETE\n\nApproved historical cash openings are unavailable.\n\nReadiness: HISTORICAL_DATA_INCOMPLETE · Opening balance status: NOT_CONFIGURED\n\nOperating bank: CONFIGURED\nCompany M-Pesa: NOT CONFIGURED\nCompany Card: NOT CONFIGURED\n\nTOTAL CASH & BANK · KES\n\n(KES 1,234,567,890.12)\n\nAs at 2026-09-30\n\nConfigured cash/bank accounts including petty cash once.\n\nNo configured cash/bank accounts are available."
+    },
+    {
+      "tab": "bank-cash",
+      "width": 390,
+      "state": "error",
+      "documentWidth": 390,
+      "viewport": 390,
+      "tableScrollers": [
+        {
+          "width": 358,
+          "scroll": 1073
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": " & receivables\nPurchasing & payables\nExpenses & cash\nInventory\nProject finance\nPayroll finance\nReports & controls\nFinance setup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nBank matching\nClose month\nFixture: Cash reports are temporarily unavailable.\nBalance sheet\nReconciliation centre\nBank & Cash\nCash Movement\nCash Flow readiness\nProfit and loss\nTrial balance\nReceivables ageing\nPayables ageing\nDownload comma-separated values file\nAs at \nRun\nRun the report to view Bank & Cash."
+    },
+    {
+      "tab": "cash-movement",
+      "width": 390,
+      "state": "loading",
+      "documentWidth": 390,
+      "viewport": 390,
+      "tableScrollers": [
+        {
+          "width": 358,
+          "scroll": 1073
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        },
+        {
+          "width": 0,
+          "scroll": 0
+        }
+      ],
+      "text": "nts, ageing and reconciliation controls.\n\nOverview\nSales & receivables\nPurchasing & payables\nExpenses & cash\nInventory\nProject finance\nPayroll finance\nReports & controls\nFinance setup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nBank matching\nClose month\nBalance sheet\nReconciliation centre\nBank & Cash\nCash Movement\nCash Flow readiness\nProfit and loss\nTrial balance\nReceivables ageing\nPayables ageing\nDownload comma-separated values file\nFrom \nTo \nWorking…\nLoading Cash Movement…"
+    }
+  ]
+}

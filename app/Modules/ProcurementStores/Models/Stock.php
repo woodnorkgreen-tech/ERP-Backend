@@ -26,7 +26,7 @@ class Stock extends Model
     ];
 
     protected $casts = [
-        'quantity_on_hand' => 'decimal:2',
+        'quantity_on_hand' => 'decimal:6',
         'quantity_reserved' => 'decimal:2',
         'min_stock_level' => 'decimal:2'
     ];

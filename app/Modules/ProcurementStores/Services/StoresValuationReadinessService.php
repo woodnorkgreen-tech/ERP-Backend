@@ -34,6 +34,13 @@ class StoresValuationReadinessService
 
         $items = $stocks->map(function (Stock $stock) use ($receiptEvidence) {
             $material = $stock->material;
+            if ($material?->isConsumableUnit()) {
+                $unitSummary = app(ConsumableUnitService::class)->summary($material);
+                return ['material_id' => $stock->material_id, 'material_code' => $material->material_code, 'material_name' => $material->material_name,
+                    'quantity_on_hand' => $unitSummary['total_remaining'], 'classification' => $unitSummary['valuation_classification'],
+                    'unit_cost' => null, 'authoritative_value' => $unitSummary['authoritative_value'],
+                    'audit' => ['reason' => 'Specific identification from controlled-unit receipt valuation.', 'reconciliation_status' => $unitSummary['reconciliation_status'], 'readiness' => $unitSummary['readiness']]];
+            }
             $onHand = (float) $stock->quantity_on_hand;
             $unitCost = (float) ($material?->unit_cost ?? 0);
             $evidence = $receiptEvidence->get($stock->material_id);

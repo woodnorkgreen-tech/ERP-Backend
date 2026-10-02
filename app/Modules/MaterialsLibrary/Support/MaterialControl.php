@@ -6,12 +6,12 @@ final class MaterialControl
 {
     public const STATUSES = ['Active', 'Inactive', 'Discontinued', 'Blocked', 'Under Review'];
     public const DISPOSITIONS = ['consumed', 'returnable', 'recoverable_remainder'];
-    public const TRACKING_MODES = ['bulk_quantity', 'lot_batch', 'serialized_item', 'dimension_piece'];
+    public const TRACKING_MODES = ['bulk_quantity', 'lot_batch', 'serialized_item', 'dimension_piece', 'consumable_unit'];
 
     public static function compatible(string $disposition, string $trackingMode): bool
     {
         return match ($disposition) {
-            'consumed' => in_array($trackingMode, ['bulk_quantity', 'lot_batch', 'serialized_item'], true),
+            'consumed' => in_array($trackingMode, ['bulk_quantity', 'lot_batch', 'serialized_item', 'consumable_unit'], true),
             'returnable' => in_array($trackingMode, ['bulk_quantity', 'serialized_item'], true),
             'recoverable_remainder' => $trackingMode === 'dimension_piece',
             default => false,

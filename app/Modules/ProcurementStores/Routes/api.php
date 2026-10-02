@@ -40,6 +40,12 @@ Route::get('/inventory/{material}/control-options', [ProcurementStoresController
  * is one transaction, so a delivery is recorded as the single event it was.
  */
 Route::post('/movements', [StockMovementController::class, 'store']);
+Route::get('/consumable-units', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'index']);
+Route::get('/consumable-units/materials/{material}', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'material']);
+Route::post('/consumable-units/materials/{material}/convert', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'convert']);
+Route::get('/consumable-units/{unit}', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'show']);
+Route::post('/consumable-units/{unit}/counts', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'count']);
+Route::post('/consumable-units/{unit}/hold', [\App\Modules\ProcurementStores\Controllers\ConsumableUnitController::class, 'hold']);
 
 /*
  * The five older movement routes. They are adapters over StockMovementPoster —

@@ -16,6 +16,7 @@ class InventoryLog extends Model
         return 'financial';
     }
     protected $fillable = [
+        'consumable_unit_id', 'movement_value',
         'material_id',
         'user_id',
         'type',
@@ -49,16 +50,28 @@ class InventoryLog extends Model
     ];
 
     protected $casts = [
-        'quantity' => 'decimal:2',
+        'quantity' => 'decimal:6',
         'entered_quantity' => 'decimal:6',
         'uom_conversion_factor' => 'decimal:6',
         'receipt_unit_cost' => 'decimal:4',
-        'balance_after' => 'decimal:2',
+        'balance_after' => 'decimal:6',
         'logged_at' => 'datetime',
         'expiry_date' => 'date',
         'finance_synced_at' => 'datetime',
         'unit_price' => 'decimal:2',
     ];
+
+    protected static function booted(): void
+    {
+        static::updating(function (self $log) {
+            if ($log->consumable_unit_id && $log->isDirty(['quantity', 'material_id', 'consumable_unit_id', 'type', 'movement_value', 'receipt_unit_cost', 'project_id', 'original_issue_log_id'])) {
+                throw new \DomainException('Controlled-unit movement facts are immutable. Post a correction.');
+            }
+        });
+        static::deleting(function (self $log) {
+            if ($log->consumable_unit_id || $log->getOriginal('material_id') && \App\Modules\ProcurementStores\Models\ConsumableUnitMovement::where('inventory_log_id', $log->id)->exists()) throw new \DomainException('Controlled-unit movement history cannot be deleted.');
+        });
+    }
 
     public function material(): BelongsTo
     {

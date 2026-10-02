@@ -71,7 +71,7 @@ class GoodsReceiptInspectionController extends Controller
             if ($accepted > 0 && $material) {
                 if (($material->item_status ?? 'Active') !== 'Active' || ! $material->base_uom_id) {
                     $locked->update(['stock_status' => 'awaiting_material_setup']);
-                } elseif ($material->isBoardTrackable() || $material->is_serialized || $material->is_batch_controlled || $material->is_expiry_controlled) {
+                } elseif ($material->isConsumableUnit() || $material->isBoardTrackable() || $material->is_serialized || $material->is_batch_controlled || $material->is_expiry_controlled) {
                     $locked->update(['stock_status' => 'awaiting_stores_details']);
                 } else {
                     $uomId = (int) ($locked->purchaseOrderItem?->uom_id ?: $material->purchase_uom_id ?: $material->base_uom_id);

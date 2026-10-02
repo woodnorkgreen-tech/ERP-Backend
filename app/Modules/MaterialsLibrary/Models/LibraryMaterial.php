@@ -97,7 +97,7 @@ class LibraryMaterial extends Model
      * of materials is serialized — the category fallback path would otherwise
      * lazy-load once per row.
      */
-    protected $appends = ['board_trackable', 'stock_handling', 'handling_label'];
+    protected $appends = ['board_trackable', 'stock_handling', 'handling_label', 'tracking_method'];
 
     public function getBoardTrackableAttribute(): bool
     {
@@ -114,8 +114,16 @@ class LibraryMaterial extends Model
      * same item could therefore be a "reusable item" in Stores and a plain
      * quantity in the library. One definition, appended, ends that.
      */
+    public function isConsumableUnit(): bool { return $this->tracking_mode === 'consumable_unit'; }
+
+    public function getTrackingMethodAttribute(): string
+    {
+        return $this->isConsumableUnit() ? 'CONSUMABLE_UNIT' : (($this->isBoardTrackable() || $this->is_serialized) ? 'SPECIFIC_ITEM' : 'BULK');
+    }
+
     public function getStockHandlingAttribute(): string
     {
+        if ($this->isConsumableUnit()) return 'consumable_unit';
         if ($this->isBoardTrackable()) {
             return 'individual_board';
         }
@@ -136,6 +144,7 @@ class LibraryMaterial extends Model
     {
         return match ($this->stock_handling) {
             'individual_board' => 'Board — tracked individually',
+            'consumable_unit' => 'Physical unit — progressively consumed',
             'reusable_item' => 'Returnable',
             'recoverable_item' => 'Offcut is kept',
             default => 'Consumed',
@@ -410,6 +419,16 @@ class LibraryMaterial extends Model
             config('boards.tracking_categories', ['Boards', 'Sheet Materials', 'Veneer']),
             true
         );
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function (self $material) {
+            if ($material->getOriginal('tracking_mode') === 'consumable_unit' && $material->isDirty('tracking_mode') && $material->tracking_mode !== 'consumable_unit'
+                && \App\Modules\ProcurementStores\Models\ConsumableUnit::where('material_id', $material->id)->exists()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['tracking_mode' => 'Controlled-unit history requires consumable_unit tracking.']);
+            }
+        });
     }
 
     public function expectedUsageType(): string
