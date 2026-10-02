@@ -8,6 +8,9 @@ use Illuminate\Database\Eloquent\Model;
 class ConsumableUnit extends Model
 {
     protected $guarded = ['id'];
+    protected $appends = ['operational_reference'];
+    public function getOperationalReferenceAttribute(): string { return ($this->material?->material_code ?? 'Material '.$this->material_id).' / '.$this->unit_code; }
+    public function valuationRepairs() { return $this->hasMany(ConsumableUnitValuationRepair::class)->orderByDesc('id'); }
     protected $casts = [
         'original_quantity' => 'decimal:6', 'remaining_quantity' => 'decimal:6',
         'unit_cost' => 'decimal:8', 'original_value' => 'decimal:2', 'remaining_value' => 'decimal:2',
@@ -15,6 +18,9 @@ class ConsumableUnit extends Model
     ];
     protected static function booted(): void
     {
+        static::updating(function (self $unit) {
+            if (($unit->isDirty('unit_code') && !str_starts_with((string) $unit->getOriginal('unit_code'), 'CU-PENDING-')) || $unit->isDirty(['material_id', 'parent_unit_id', 'original_quantity', 'source_log_id', 'source_receipt_id'])) throw new \DomainException('Controlled-unit identity and source are immutable.');
+        });
         static::deleting(fn () => throw new \DomainException('Controlled-unit identity and lineage cannot be deleted.'));
     }
     public function material() { return $this->belongsTo(LibraryMaterial::class); }

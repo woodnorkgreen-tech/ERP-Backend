@@ -108,6 +108,12 @@ class StockMovementPoster
             }
 
             $line = $this->normaliseControlledMovement($line, $material, 'check_in');
+            $meta = $line;
+            $grnItem = $this->lockGrnLine($line, $material, $meta);
+            if ($grnItem && (float) ($line['receipt_unit_cost'] ?? 0) <= 0) {
+                $line['receipt_unit_cost'] = $grnItem->resolvedReceiptUnitCost();
+                $meta['receipt_unit_cost'] = $line['receipt_unit_cost'];
+            }
 
             $quantity = (float) $line['quantity'];
             if ($material->isBoardTrackable() && $quantity !== (float) (int) $quantity) {
@@ -122,9 +128,6 @@ class StockMovementPoster
                 && (float) ($material->default_unit_cost ?? 0) <= 0) {
                 $this->reject('receipt_unit_cost', "'{$material->material_name}' has no price yet. Enter the receipt price per board, or set a default price on the material in the Material Catalogue — boards received without a value cannot be issued to a project.");
             }
-
-            $meta = $line;
-            $grnItem = $this->lockGrnLine($line, $material, $meta);
 
             $log = $this->inventory->adjustStock(
                 (int) $line['material_id'],
@@ -224,6 +227,7 @@ class StockMovementPoster
             'attributes' => $newMaterial['attributes'] ?? [],
             'issue_disposition' => $newMaterial['issue_disposition'] ?? null,
             'tracking_mode' => $newMaterial['tracking_mode'] ?? null,
+            'is_serialized' => ($newMaterial['tracking_mode'] ?? '') === 'serialized_item',
             'base_uom_id' => $newMaterial['base_uom_id'] ?? null,
             'purchase_uom_id' => $newMaterial['purchase_uom_id'] ?? null,
             'issue_uom_id' => $newMaterial['issue_uom_id'] ?? null,
@@ -255,7 +259,7 @@ class StockMovementPoster
             return null;
         }
 
-        $grnItem = GoodsReceiptNoteItem::with(['goodsReceiptNote', 'purchaseOrderItem', 'inspection'])
+        $grnItem = GoodsReceiptNoteItem::with(['goodsReceiptNote', 'purchaseOrderItem.requisitionItem', 'purchaseOrderItem.material', 'inspection'])
             ->lockForUpdate()
             ->findOrFail((int) $line['grn_item_id']);
 

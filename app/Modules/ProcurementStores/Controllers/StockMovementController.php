@@ -87,6 +87,7 @@ class StockMovementController extends Controller
             'batch_number' => $batchNumber,
             'lines_posted' => count($logs),
             'data' => $logs,
+            'controlled_units' => \App\Modules\ProcurementStores\Models\ConsumableUnit::with('material')->whereIn('source_log_id', array_map(fn ($log) => $log->id, $logs))->orWhereIn('id', array_values(array_filter(array_map(fn ($log) => $log->type === 'return' ? $log->consumable_unit_id : null, $logs))))->get(),
             'boards_created' => count($boards),
             // Boards are not shelved until their labels are printed and stuck
             // on, so the screen has to know to ask before it clears the form.

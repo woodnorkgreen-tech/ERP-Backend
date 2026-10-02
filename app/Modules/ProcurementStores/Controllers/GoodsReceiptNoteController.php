@@ -59,9 +59,10 @@ class GoodsReceiptNoteController extends Controller
                 'goodsReceiptNote:id,grn_number,date,purchase_order_id,store_location',
                 'goodsReceiptNote.purchaseOrder:id,po_number,supplier_id',
                 'goodsReceiptNote.purchaseOrder.supplier:id,supplier_name',
-                'purchaseOrderItem:id,material_id,uom_id,unit_price',
+                'purchaseOrderItem:id,material_id,uom_id,unit_price,requisition_item_id',
+                'purchaseOrderItem.requisitionItem:id,unit_price',
                 'purchaseOrderItem.uom:id,code,name',
-                'purchaseOrderItem.material:id,material_code,material_name,item_status,base_uom_id,purchase_uom_id',
+                'purchaseOrderItem.material:id,material_code,material_name,item_status,base_uom_id,purchase_uom_id,unit_cost',
                 'purchaseOrderItem.material.baseUom:id,code,name',
                 'purchaseOrderItem.material.purchaseUom:id,code,name',
             ])
@@ -78,7 +79,7 @@ class GoodsReceiptNoteController extends Controller
                     'stock_status' => $item->stock_status,
                     'received_quantity' => (float) $item->received_quantity,
                     'stock_quantity' => $item->stock_quantity !== null ? (float) $item->stock_quantity : null,
-                    'receipt_unit_cost' => $item->receipt_unit_cost !== null ? (float) $item->receipt_unit_cost : null,
+                    'receipt_unit_cost' => $item->resolvedReceiptUnitCost(),
                     'condition' => $item->condition,
                     'inventory_log_id' => $item->inventory_log_id,
                     'updated_at' => $item->updated_at?->toIso8601String(),
@@ -617,6 +618,7 @@ class GoodsReceiptNoteController extends Controller
     {
         $grns = GoodsReceiptNote::with([
                 'items.purchaseOrderItem.material',
+                'items.purchaseOrderItem.requisitionItem',
                 'purchaseOrder.supplier',
                 'receivedByUser',
             ])
@@ -645,7 +647,7 @@ class GoodsReceiptNoteController extends Controller
             'new_material.unit_of_measure' => 'required_with:new_material|string|max:50',
             'new_material.material_type' => 'required_with:new_material|string|max:50',
             'new_material.category' => 'nullable|string|max:100',
-            'unit_price' => 'required|numeric|min:0',
+            'unit_price' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -674,7 +676,7 @@ class GoodsReceiptNoteController extends Controller
             // Stores staff both acting on it) must not both pass the
             // store_status guard before either has written it, which is
             // exactly how a delivery gets credited to stock twice.
-            $grnItem = GoodsReceiptNoteItem::with(['goodsReceiptNote', 'inspection'])
+            $grnItem = GoodsReceiptNoteItem::with(['goodsReceiptNote', 'inspection', 'purchaseOrderItem.requisitionItem', 'purchaseOrderItem.material'])
                 ->lockForUpdate()->find($grnItemId);
 
             if ($grnItem->store_status === 'confirmed') {
@@ -700,6 +702,7 @@ class GoodsReceiptNoteController extends Controller
                 $materialId = $material->id;
             }
 
+            $unitPrice = $request->input('unit_price') ?? $grnItem->resolvedReceiptUnitCost();
             $grn = $grnItem->goodsReceiptNote;
 
             // The quantity Stores may credit is what inspection approved, not
@@ -718,11 +721,12 @@ class GoodsReceiptNoteController extends Controller
             $log = $this->creditStockForAcceptedItem($grn, [
                 'material_id'       => $materialId,
                 'received_quantity' => $quantityToCredit,
-            ], (float) $request->input('unit_price'));
+            ], (float) $unitPrice);
 
             $grnItem->update([
                 'material_id'      => $materialId,
-                'unit_price'       => $request->input('unit_price'),
+                'unit_price'       => $unitPrice,
+                'receipt_unit_cost' => $unitPrice,
                 'entered_uom_id'   => $log->entered_uom_id,
                 'stock_quantity'   => abs((float) $log->quantity),
                 'stock_status'     => 'posted',

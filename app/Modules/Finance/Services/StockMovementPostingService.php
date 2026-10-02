@@ -131,6 +131,29 @@ class StockMovementPostingService
         );
     }
 
+    /** Uses the same installation account mapping and journal engine as material counts. */
+    public function postControlledCount(\App\Modules\ProcurementStores\Models\InventoryLog $log, int $actor): array
+    {
+        if ($log->movement_value === null) return ['status'=>'UNVALUED','journal_entry_id'=>null];
+        if (bccomp($log->movement_value,'0',2) === 0) return ['status'=>'NO_VALUE_CHANGE','journal_entry_id'=>null];
+        try {
+            $inventory=$this->account(self::INVENTORY_CODE,'Raw-material Inventory');
+            $adjustment=$this->account(self::ADJUSTMENT_CODE,'Inventory Adjustments & Shrinkage');
+        } catch (InvalidArgumentException $e) {
+            return ['status'=>'POLICY_REQUIRED_ACCOUNT_MAPPING','journal_entry_id'=>null];
+        }
+        $up=bccomp($log->movement_value,'0',2)>0;
+        $amount=ltrim($log->movement_value,'-');
+        $entry=$this->posting->postBalancedEntry(
+            entryNo:'JE-CU-ADJ-'.str_pad((string) $log->id,7,'0',STR_PAD_LEFT), postingDate:now()->toDateString(),
+            sourceType: get_class($log), sourceId:$log->id, sourceRef:$log->reference_no,
+            description:'Controlled unit count adjustment '.$log->reference_no,
+            legs:[['account_id'=>$inventory,'entry_type'=>$up ? 'debit' : 'credit','amount'=>$amount,'description'=>'Controlled count variance'],
+                ['account_id'=>$adjustment,'entry_type'=>$up ? 'credit' : 'debit','amount'=>$amount,'description'=>'Inventory adjustment']], createdBy:$actor,
+        );
+        return ['status'=>'POSTED','journal_entry_id'=>$entry->id];
+    }
+
     /**
      * What the count is worth, netted across its items.
      *

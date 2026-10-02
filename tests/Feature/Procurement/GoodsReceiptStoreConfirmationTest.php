@@ -109,6 +109,52 @@ class GoodsReceiptStoreConfirmationTest extends TestCase
         $this->assertSame(4800.0, (float) $material->fresh()->unit_cost, 'Weighted-average cost must move on a store-confirmed receipt too.');
     }
 
+    public function test_missing_or_null_price_inherits_the_purchase_order_value(): void
+    {
+        foreach ([[], ['unit_price' => null]] as $priceInput) {
+            $material = LibraryMaterial::create([
+                'material_code' => 'MAT-'.uniqid(), 'material_name' => 'Purchased material',
+                'item_status' => 'Active', 'material_type' => 'consumable', 'unit_of_measure' => 'pcs',
+            ]);
+            $line = $this->pendingLine($material->id);
+            $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$line->id}/confirm", [
+                'material_id' => $material->id, ...$priceInput,
+            ])->assertOk();
+            $this->assertSame(5000.0, (float) $line->fresh()->receipt_unit_cost);
+            $this->assertSame(5000.0, (float) $line->fresh()->unit_price);
+            $this->assertSame(5000.0, (float) $material->fresh()->unit_cost);
+        }
+    }
+
+    public function test_stock_movement_inherits_grn_purchase_price(): void
+    {
+        $material = LibraryMaterial::create([
+            'material_code' => 'MAT-'.uniqid(), 'material_name' => 'Purchased bulk stock',
+            'item_status' => 'Active', 'material_type' => 'consumable', 'unit_of_measure' => 'pcs',
+        ]);
+        $line = $this->pendingLine($material->id);
+        $this->postJson('/api/procurement-stores/movements', [
+            'type' => 'receive', 'lines' => [[
+                'material_id' => $material->id, 'quantity' => 5, 'grn_item_id' => $line->id,
+            ]],
+        ])->assertSuccessful();
+        $this->assertSame(5000.0, (float) $material->fresh()->unit_cost);
+        $this->assertSame(5000.0, (float) $line->fresh()->receipt_unit_cost);
+    }
+
+    public function test_explicit_zero_price_is_preserved_when_confirming(): void
+    {
+        $material = LibraryMaterial::create([
+            'material_code' => 'MAT-'.uniqid(), 'material_name' => 'Free sample',
+            'item_status' => 'Active', 'material_type' => 'consumable', 'unit_of_measure' => 'pcs',
+        ]);
+        $line = $this->pendingLine($material->id);
+        $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$line->id}/confirm", [
+            'material_id' => $material->id, 'unit_price' => 0,
+        ])->assertOk();
+        $this->assertSame(0.0, (float) $line->fresh()->receipt_unit_cost);
+    }
+
     public function test_confirming_applies_the_buying_unit_conversion(): void
     {
         $boxId = DB::table('units_of_measure')->where('code', 'box')->value('id');

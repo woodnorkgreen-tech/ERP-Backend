@@ -632,6 +632,7 @@ class MaterialController extends Controller
         $data = MaterialFieldSync::syncCategoryStrings($data);
 
         DB::transaction(function () use ($material, $data, $hasConversions, $conversions) {
+            $material = LibraryMaterial::lockForUpdate()->findOrFail($material->id);
             $material->update($data);
             if ($hasConversions) {
                 MaterialFieldSync::syncUomConversions($material, $conversions);

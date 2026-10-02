@@ -79,6 +79,7 @@ class MaterialRegistrationService
             }
         }
 
+        if (($data['tracking_mode'] ?? '') === 'serialized_item') $data['is_serialized'] = true;
         $data = MaterialFieldSync::syncControlCompatibility($data);
         $data = MaterialFieldSync::syncUomCompatibility($data);
 
