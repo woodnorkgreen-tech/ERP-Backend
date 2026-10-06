@@ -61,6 +61,24 @@ class Delivery extends Model
             ->update(['status' => 'in_transit', 'started_at' => now()]);
     }
 
+    /**
+     * Trips on this delivery whose loading hasn't been marked finished.
+     * Only company-arranged trips that use the loading timeline count —
+     * older trips without a loading plan can't be held up by it.
+     */
+    public function tripsStillLoading()
+    {
+        $ids = $this->stops()->whereNotNull('trip_request_id')->pluck('trip_request_id');
+        if ($ids->isEmpty()) {
+            return collect();
+        }
+        return TripRequest::whereIn('id', $ids)
+            ->where('transport_arrangement', '!=', 'client')
+            ->whereNotNull('loading_start_by')
+            ->whereNull('loading_ended_at')
+            ->get(['id', 'request_code']);
+    }
+
     public static function markTripRequestDelivered(?int $tripRequestId): void
     {
         if (!$tripRequestId) {

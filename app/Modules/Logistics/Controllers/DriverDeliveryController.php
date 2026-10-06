@@ -65,6 +65,16 @@ class DriverDeliveryController extends Controller
             return response()->json(['message' => 'Delivery already started.'], 422);
         }
 
+        // A driver leaves only once loading is marked finished.
+        $stillLoading = $delivery->tripsStillLoading();
+        if ($stillLoading->isNotEmpty()) {
+            return response()->json([
+                'message' => 'Loading is not finished yet for ' . $stillLoading->pluck('request_code')->implode(', ')
+                    . '. You can start once loading is marked as finished.',
+                'code' => 'loading_not_finished',
+            ], 422);
+        }
+
         $delivery->update(['status' => 'in_transit', 'started_at' => now()]);
         $delivery->stops()->where('stop_order', 1)->update(['status' => 'en_route']);
         $delivery->markTripRequestsStarted();

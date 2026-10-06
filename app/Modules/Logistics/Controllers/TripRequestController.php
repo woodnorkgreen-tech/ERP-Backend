@@ -59,6 +59,8 @@ class TripRequestController extends Controller
                 $q2->whereNotNull('project_id')
                     ->orWhere('requested_by_id', $user->employee?->id);
             }))
+            // "My Requests": only the trips this person asked for.
+            ->when($request->boolean('mine'), fn($q) => $q->where('requested_by_id', $user->employee?->id ?? 0))
             ->when($request->status,     fn($q) => $q->where('status', $request->status))
             ->when($request->priority,   fn($q) => $q->where('priority', $request->priority))
             ->when($request->project_id, fn($q) => $q->where('project_id', $request->project_id))
