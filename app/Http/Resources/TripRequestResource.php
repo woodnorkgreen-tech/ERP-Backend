@@ -128,8 +128,57 @@ class TripRequestResource extends JsonResource
                 'resolution' => $this->failure_resolution ?: 'pending',
             ] : null,
 
+            // How loading went against the plan (fast / on time / over).
+            'loading_summary' => $this->loadingSummary(),
+
             'steps' => $this->buildSteps(),
         ];
+    }
+
+    /**
+     * Compares the time loading actually took with the planned minutes, and
+     * the finish time with the "must depart by" time. Null until loading has
+     * both a start and a finish.
+     */
+    private function loadingSummary(): ?array
+    {
+        if (!$this->loading_started_at || !$this->loading_ended_at) {
+            return null;
+        }
+
+        $actual   = (int) round(($this->loading_ended_at->timestamp - $this->loading_started_at->timestamp) / 60);
+        $planned  = $this->estimated_loading_minutes !== null ? (int) $this->estimated_loading_minutes : null;
+        $diff     = $planned !== null ? $actual - $planned : null;
+
+        $lateBy = null;
+        if ($this->departure_by) {
+            $lateBy = (int) round(($this->loading_ended_at->timestamp - $this->departure_by->timestamp) / 60);
+        }
+
+        return [
+            'actual_minutes'  => $actual,
+            'planned_minutes' => $planned,
+            'difference_minutes' => $diff,
+            'status' => $diff === null ? null : ($diff < 0 ? 'fast' : ($diff > 0 ? 'over' : 'on_time')),
+            // Positive = finished loading after the depart-by time.
+            'minutes_after_departure_by' => $lateBy,
+            'text' => $this->loadingSummaryText($actual, $planned, $diff),
+        ];
+    }
+
+    private function loadingSummaryText(int $actual, ?int $planned, ?int $diff): string
+    {
+        $text = "Loaded in {$actual} min";
+        if ($planned === null) {
+            return $text;
+        }
+        if ($diff === 0) {
+            return "{$text}, exactly as planned ({$planned} min)";
+        }
+        $abs = abs($diff);
+        return $diff < 0
+            ? "{$text} — {$abs} min faster than the {$planned} min planned"
+            : "{$text} — {$abs} min over the {$planned} min planned";
     }
 
     /**
@@ -195,7 +244,7 @@ class TripRequestResource extends JsonResource
             ];
             $steps[] = [
                 'key' => 'loading_ended', 'label' => 'Loading finished',
-                'detail' => null, 'at' => $this->loading_ended_at, 'done' => (bool) $this->loading_ended_at,
+                'detail' => ($s = $this->loadingSummary()) ? $s['text'] : null, 'at' => $this->loading_ended_at, 'done' => (bool) $this->loading_ended_at,
             ];
         }
 
