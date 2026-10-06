@@ -2,8 +2,6 @@
 
 namespace App\Modules\Logistics\Providers;
 
-use App\Modules\Logistics\Models\TripRequest;
-use App\Modules\Logistics\Observers\TripRequestObserver;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 
@@ -26,7 +24,9 @@ class LogisticsServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        TripRequest::observe(TripRequestObserver::class);
+        // Trip request progress is shown to the requester as steps on the
+        // request itself (see the `steps` field in TripRequestResource), not
+        // as notifications — so there's no observer here any more.
 
         // Load migrations
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');

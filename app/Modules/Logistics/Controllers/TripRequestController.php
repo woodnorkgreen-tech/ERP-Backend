@@ -7,6 +7,8 @@ use App\Modules\Logistics\Models\TripRequest;
 use App\Modules\Logistics\Models\Driver;
 use App\Modules\Logistics\Models\Vehicle;
 use App\Modules\Logistics\Models\Delivery;
+use App\Modules\Logistics\Models\DeliveryStop;
+use App\Modules\Logistics\Models\DispatchBatch;
 use App\Http\Resources\TripRequestResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,6 +32,22 @@ class TripRequestController extends Controller
         $user        = Auth::user();
         $isLogistics = $this->isLogisticsTeam($user);
         $isClientService = $user?->hasAnyRole(['Client Service']) ?? false;
+
+        // A driver sees only the trips assigned to them — where they're
+        // going and when they leave — never the wider request list.
+        if ($this->isDriverOnly($user)) {
+            $driverId = $this->driverIdFor($user);
+            return TripRequestResource::collection(
+                TripRequest::with($this->with)
+                    ->where(fn ($q) => $q
+                        ->where('assigned_driver_id', $driverId ?: 0)
+                        ->orWhereIn('batch_id', DispatchBatch::where('driver_id', $driverId ?: 0)
+                            ->where('status', 'confirmed')->pluck('id')))
+                    ->whereNotIn('status', ['cancelled', 'rejected'])
+                    ->latest()
+                    ->paginate(25)
+            );
+        }
 
         $query = TripRequest::with($this->with)
             // Project-linked trips are the merged Logistics Log — everyone
@@ -94,8 +112,14 @@ class TripRequestController extends Controller
         return new TripRequestResource($trip);
     }
 
-    public function show(TripRequest $tripRequest): TripRequestResource
+    public function show(TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
+        $user = Auth::user();
+        if ($this->isDriverOnly($user)
+            && !$this->isMyTrip($tripRequest, $user)) {
+            return response()->json(['message' => 'This trip is not assigned to you.'], 403);
+        }
+
         $tripRequest->load($this->with);
         return new TripRequestResource($tripRequest);
     }
@@ -247,8 +271,188 @@ class TripRequestController extends Controller
             'assignment_notes'    => $validated['assignment_notes'] ?? null,
         ]);
 
+        // A tracked delivery for this trip, so the driver can Start it and
+        // be followed live — same as a batched trip.
+        $this->ensureDelivery($tripRequest);
+
         $tripRequest->load($this->with);
         return new TripRequestResource($tripRequest);
+    }
+
+    /**
+     * The assigned driver taps Start: the journey begins, live tracking can
+     * run, and the requester's steps show "On the way".
+     */
+    public function driverStart(TripRequest $tripRequest): TripRequestResource|JsonResponse
+    {
+        $user = Auth::user();
+        if (!$this->isMyTrip($tripRequest, $user) && !$this->isLogisticsTeam($user)) {
+            return response()->json(['message' => 'This trip is not assigned to you.'], 403);
+        }
+        if ($tripRequest->status !== 'assigned') {
+            return response()->json(['message' => 'Only assigned trips can be started.'], 422);
+        }
+
+        $delivery = $this->ensureDelivery($tripRequest);
+        if (!$delivery) {
+            return response()->json(['message' => 'No driver or vehicle is assigned to this trip yet.'], 422);
+        }
+
+        if ($delivery->status === 'pending') {
+            $result = app(DriverDeliveryController::class)->start($delivery);
+            if ($result->getStatusCode() >= 400) {
+                return $result;
+            }
+        }
+
+        $tripRequest->refresh()->load($this->with);
+        return (new TripRequestResource($tripRequest))->additional(['delivery_id' => $delivery->id]);
+    }
+
+    /** The driver marks this trip delivered. */
+    public function driverComplete(TripRequest $tripRequest): TripRequestResource|JsonResponse
+    {
+        $user = Auth::user();
+        if (!$this->isMyTrip($tripRequest, $user) && !$this->isLogisticsTeam($user)) {
+            return response()->json(['message' => 'This trip is not assigned to you.'], 403);
+        }
+        if ($tripRequest->status !== 'in_transit') {
+            return response()->json(['message' => 'Only trips that are on the way can be marked delivered.'], 422);
+        }
+
+        $stop = DeliveryStop::where('trip_request_id', $tripRequest->id)->latest('id')->first();
+        if (!$stop || !$stop->delivery) {
+            return response()->json(['message' => 'No tracked delivery found for this trip.'], 422);
+        }
+
+        $result = app(DriverDeliveryController::class)->delivered($stop->delivery, $stop);
+        if ($result->getStatusCode() >= 400) {
+            return $result;
+        }
+
+        $tripRequest->refresh()->load($this->with);
+        return new TripRequestResource($tripRequest);
+    }
+
+    /** The driver reports they couldn't deliver — the lead is asked what next. */
+    public function driverFail(Request $request, TripRequest $tripRequest): TripRequestResource|JsonResponse
+    {
+        $user = Auth::user();
+        if (!$this->isMyTrip($tripRequest, $user) && !$this->isLogisticsTeam($user)) {
+            return response()->json(['message' => 'This trip is not assigned to you.'], 403);
+        }
+        if ($tripRequest->status !== 'in_transit') {
+            return response()->json(['message' => 'Only trips that are on the way can be reported as not delivered.'], 422);
+        }
+        if ($tripRequest->delivery_failed_at && !$tripRequest->failure_resolution) {
+            return response()->json(['message' => 'This trip is already reported as not delivered.'], 422);
+        }
+
+        $stop = DeliveryStop::where('trip_request_id', $tripRequest->id)->latest('id')->first();
+        if (!$stop || !$stop->delivery) {
+            return response()->json(['message' => 'No tracked delivery found for this trip.'], 422);
+        }
+
+        $result = app(DriverDeliveryController::class)->failed($request, $stop->delivery, $stop);
+        if ($result->getStatusCode() >= 400) {
+            return $result;
+        }
+
+        $tripRequest->refresh()->load($this->with);
+        return new TripRequestResource($tripRequest);
+    }
+
+    /**
+     * The Logistics lead decides what happens to a trip the driver couldn't
+     * deliver: send it back to dispatch (to be assigned again) or cancel it.
+     */
+    public function resolveFailed(Request $request, TripRequest $tripRequest): TripRequestResource|JsonResponse
+    {
+        if (!$this->isLogisticsTeam(Auth::user())) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+        if (!$tripRequest->delivery_failed_at || $tripRequest->failure_resolution) {
+            return response()->json(['message' => 'This trip is not waiting for a decision.'], 422);
+        }
+
+        $validated = $request->validate(['action' => 'required|in:redispatch,cancel']);
+        $by = Auth::user()->employee?->id;
+
+        if ($validated['action'] === 'redispatch') {
+            $tripRequest->update([
+                'status'              => 'approved',
+                'assigned_driver_id'  => null,
+                'assigned_vehicle_id' => null,
+                'assigned_by_id'      => null,
+                'assigned_at'         => null,
+                'assignment_notes'    => null,
+                'batch_id'            => null,
+                'stop_order'          => null,
+                'started_at'          => null,
+                'failure_resolution'  => 'redispatched',
+                'failure_resolved_at' => now(),
+                'failure_resolved_by_id' => $by,
+            ]);
+        } else {
+            $tripRequest->update([
+                'status'              => 'cancelled',
+                'failure_resolution'  => 'cancelled',
+                'failure_resolved_at' => now(),
+                'failure_resolved_by_id' => $by,
+            ]);
+        }
+
+        $tripRequest->load($this->with);
+        return new TripRequestResource($tripRequest);
+    }
+
+    /** The trip's delivery (created on demand for a directly assigned trip). */
+    private function ensureDelivery(TripRequest $trip): ?Delivery
+    {
+        $stop = DeliveryStop::where('trip_request_id', $trip->id)->latest('id')->first();
+        if ($stop?->delivery) {
+            return $stop->delivery;
+        }
+        if (!$trip->assigned_driver_id || !$trip->assigned_vehicle_id) {
+            return null;
+        }
+
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($trip) {
+            $delivery = Delivery::create([
+                'driver_id'       => $trip->assigned_driver_id,
+                'vehicle_id'      => $trip->assigned_vehicle_id,
+                'total_stops'     => 1,
+                'completed_stops' => 0,
+                'status'          => 'pending',
+                'delivery_date'   => $trip->required_date,
+                'departure_time'  => $trip->departure_by
+                    ? \Illuminate\Support\Carbon::parse($trip->departure_by)->format('H:i')
+                    : ($trip->departure_time ?: null),
+            ]);
+            DeliveryStop::create([
+                'delivery_id'     => $delivery->id,
+                'trip_request_id' => $trip->id,
+                'stop_order'      => 1,
+                'location'        => $trip->destination,
+                'lat'             => $trip->destination_lat,
+                'lng'             => $trip->destination_lng,
+                'status'          => 'pending',
+            ]);
+            return $delivery;
+        });
+    }
+
+    private function isMyTrip(TripRequest $trip, $user): bool
+    {
+        $driverId = $this->driverIdFor($user);
+        if (!$driverId) {
+            return false;
+        }
+        if ((int) $trip->assigned_driver_id === (int) $driverId) {
+            return true;
+        }
+        return $trip->batch_id
+            && DispatchBatch::where('id', $trip->batch_id)->where('driver_id', $driverId)->exists();
     }
 
     public function start(TripRequest $tripRequest): TripRequestResource|JsonResponse
@@ -291,6 +495,14 @@ class TripRequestController extends Controller
 
         if ($tripRequest->assigned_vehicle_id) {
             Vehicle::where('id', $tripRequest->assigned_vehicle_id)->update(['status' => 'active']);
+        }
+
+        // A directly-assigned trip has its own pending delivery — close it so
+        // the driver and vehicle aren't left looking busy.
+        $stop = DeliveryStop::where('trip_request_id', $tripRequest->id)->latest('id')->first();
+        if ($stop?->delivery && $stop->delivery->status === 'pending' && !$stop->delivery->batch_id) {
+            $stop->delivery->update(['status' => 'cancelled', 'completed_at' => now()]);
+            $stop->update(['status' => 'failed']);
         }
 
         $tripRequest->update(['status' => 'cancelled']);
@@ -364,6 +576,23 @@ class TripRequestController extends Controller
         return response()->json(['message' => 'Trip request deleted.']);
     }
 
+    /** True for someone whose only logistics role is Driver. */
+    private function isDriverOnly($user): bool
+    {
+        return $user
+            && !$this->isLogisticsTeam($user)
+            && method_exists($user, 'hasRole')
+            && $user->hasRole('Driver');
+    }
+
+    private function driverIdFor($user): ?int
+    {
+        $employeeId = $user->employee?->id
+            ?? \App\Modules\HR\Models\Employee::where('email', $user->email)->value('id');
+
+        return $employeeId ? Driver::where('employee_id', $employeeId)->value('id') : null;
+    }
+
     private function isLogisticsTeam($user): bool
     {
         $roles = $user?->roles ?? [];
@@ -373,6 +602,7 @@ class TripRequestController extends Controller
 
         return array_intersect([
             'Logistics',
+            'Logistics Lead',
             'Logistics Officer',
             'Logistics Manager',
             'Super Admin',

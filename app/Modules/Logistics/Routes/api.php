@@ -48,6 +48,12 @@ Route::prefix('logistics')->group(function () {
     Route::patch('/trip-requests/{tripRequest}/assign',   [TripRequestController::class, 'assign']);
     Route::patch('/trip-requests/{tripRequest}/start',    [TripRequestController::class, 'start']);
     Route::patch('/trip-requests/{tripRequest}/complete', [TripRequestController::class, 'complete']);
+    // The assigned driver starts / finishes their own trip (tracking + steps)
+    Route::patch('/trip-requests/{tripRequest}/driver-start',    [TripRequestController::class, 'driverStart']);
+    Route::patch('/trip-requests/{tripRequest}/driver-complete', [TripRequestController::class, 'driverComplete']);
+    Route::patch('/trip-requests/{tripRequest}/driver-fail',     [TripRequestController::class, 'driverFail']);
+    // The lead's decision on a trip the driver couldn't deliver
+    Route::patch('/trip-requests/{tripRequest}/resolve-failed',  [TripRequestController::class, 'resolveFailed']);
     Route::patch('/trip-requests/{tripRequest}/cancel',   [TripRequestController::class, 'cancel']);
     Route::patch('/trip-requests/{tripRequest}/loading-started', [TripRequestController::class, 'markLoadingStarted']);
     Route::patch('/trip-requests/{tripRequest}/loading-ended',   [TripRequestController::class, 'markLoadingEnded']);

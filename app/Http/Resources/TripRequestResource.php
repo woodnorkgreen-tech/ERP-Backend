@@ -117,6 +117,130 @@ class TripRequestResource extends JsonResource
             'completed_at'=> $this->completed_at,
             'created_at'  => $this->created_at,
             'updated_at'  => $this->updated_at,
+
+            // Progress shown to the requester as steps (replaces the old
+            // notifications): submitted → approved → driver/vehicle
+            // allocated → loading → on the way → delivered.
+            // A delivery the driver couldn't complete, and what the lead chose.
+            'delivery_failure' => $this->delivery_failed_at ? [
+                'reason'     => $this->delivery_failure_reason,
+                'at'         => $this->delivery_failed_at,
+                'resolution' => $this->failure_resolution ?: 'pending',
+            ] : null,
+
+            'steps' => $this->buildSteps(),
         ];
+    }
+
+    /**
+     * Derived purely from timestamps/people already on the trip request, so
+     * there's nothing extra to store or keep in sync. `done` steps carry the
+     * time they happened; the first not-done step is flagged `current`.
+     */
+    private function buildSteps(): array
+    {
+        $personName = fn ($p) => $p ? ($p->name ?? $p->full_name ?? null) : null;
+        $by = fn (?string $n) => $n ? "by {$n}" : null;
+
+        $requester = $this->relationLoaded('requestedBy') ? $personName($this->requestedBy) : null;
+        $approver  = $this->relationLoaded('approvedBy') ? $personName($this->approvedBy) : null;
+
+        $steps = [[
+            'key' => 'requested', 'label' => 'Request submitted',
+            'detail' => $by($requester), 'at' => $this->created_at, 'done' => true,
+        ]];
+
+        if ($this->status === 'rejected') {
+            $steps[] = [
+                'key' => 'rejected', 'label' => 'Request rejected',
+                'detail' => trim(implode(' — ', array_filter([$by($approver), $this->rejection_reason]))) ?: null,
+                'at' => $this->approved_at, 'done' => true, 'failed' => true,
+            ];
+            return $this->markCurrent($steps);
+        }
+
+        $steps[] = [
+            'key' => 'approved', 'label' => 'Approved by Logistics',
+            'detail' => $by($approver), 'at' => $this->approved_at, 'done' => (bool) $this->approved_at,
+        ];
+
+        // Allocation: a company trip gets a driver + vehicle; a client
+        // pickup just has a note on who is collecting.
+        if ($this->transport_arrangement === 'client') {
+            $allocDetail = $this->vehicle_note ? "Client collecting — {$this->vehicle_note}" : 'Client will collect';
+            $allocLabel  = 'Client pickup arranged';
+        } else {
+            $driver  = $this->relationLoaded('assignedDriver') && $this->assignedDriver
+                ? $personName($this->assignedDriver->employee) : null;
+            $vehicle = $this->relationLoaded('assignedVehicle') && $this->assignedVehicle
+                ? ($this->assignedVehicle->plate_number ?? $this->assignedVehicle->vehicle_id) : null;
+            $allocLabel  = 'Driver and vehicle allocated';
+            $allocDetail = $this->assigned_at
+                ? trim(implode(' · ', array_filter([
+                    $driver ? "Driver: {$driver}" : null,
+                    $vehicle ? "Vehicle: {$vehicle}" : null,
+                ]))) ?: null
+                : null;
+        }
+        $steps[] = [
+            'key' => 'assigned', 'label' => $allocLabel,
+            'detail' => $allocDetail, 'at' => $this->assigned_at, 'done' => (bool) $this->assigned_at,
+        ];
+
+        // Loading steps only exist for trips using the deadline calculation.
+        if ($this->loading_start_by) {
+            $steps[] = [
+                'key' => 'loading_started', 'label' => 'Loading started',
+                'detail' => null, 'at' => $this->loading_started_at, 'done' => (bool) $this->loading_started_at,
+            ];
+            $steps[] = [
+                'key' => 'loading_ended', 'label' => 'Loading finished',
+                'detail' => null, 'at' => $this->loading_ended_at, 'done' => (bool) $this->loading_ended_at,
+            ];
+        }
+
+        $steps[] = [
+            'key' => 'in_transit', 'label' => 'On the way',
+            'detail' => null, 'at' => $this->started_at, 'done' => (bool) $this->started_at,
+        ];
+        $steps[] = [
+            'key' => 'completed', 'label' => 'Delivered',
+            'detail' => null, 'at' => $this->completed_at, 'done' => (bool) $this->completed_at,
+        ];
+
+        // Driver couldn't deliver and the lead hasn't decided yet.
+        if ($this->delivery_failed_at && !$this->failure_resolution && $this->status === 'in_transit') {
+            $steps = array_values(array_filter($steps, fn ($s) => $s['key'] !== 'completed'));
+            $steps[] = [
+                'key' => 'delivery_failed', 'label' => 'Delivery not completed — Logistics is deciding next steps',
+                'detail' => $this->delivery_failure_reason, 'at' => $this->delivery_failed_at,
+                'done' => true, 'failed' => true,
+            ];
+        }
+
+        if ($this->status === 'cancelled') {
+            $steps = array_values(array_filter($steps, fn ($s) => $s['done']));
+            $steps[] = [
+                'key' => 'cancelled', 'label' => 'Request cancelled',
+                'detail' => null, 'at' => $this->updated_at, 'done' => true, 'failed' => true,
+            ];
+        }
+
+        return $this->markCurrent($steps);
+    }
+
+    private function markCurrent(array $steps): array
+    {
+        $currentSet = false;
+        foreach ($steps as &$s) {
+            $s['failed']  = $s['failed'] ?? false;
+            $s['current'] = false;
+            if (!$s['done'] && !$currentSet) {
+                $s['current'] = true;
+                $currentSet = true;
+            }
+        }
+        unset($s);
+        return $steps;
     }
 }

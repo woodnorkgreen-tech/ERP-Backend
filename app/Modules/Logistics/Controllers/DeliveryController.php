@@ -56,6 +56,7 @@ class DeliveryController extends Controller
 
         // Mark first stop as en_route
         $delivery->stops()->where('stop_order', 1)->update(['status' => 'en_route']);
+        $delivery->markTripRequestsStarted();
 
         $delivery->load($this->with);
         return response()->json(['data' => $delivery]);

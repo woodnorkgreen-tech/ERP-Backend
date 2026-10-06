@@ -175,6 +175,7 @@ class VehicleController extends Controller
         return $user?->can('logistics.fleet.manage')
             || array_intersect([
                 'Logistics',
+                'Logistics Lead',
                 'Logistics Officer',
                 'Logistics Manager',
                 'Super Admin',

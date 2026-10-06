@@ -67,6 +67,7 @@ class DriverDeliveryController extends Controller
 
         $delivery->update(['status' => 'in_transit', 'started_at' => now()]);
         $delivery->stops()->where('stop_order', 1)->update(['status' => 'en_route']);
+        $delivery->markTripRequestsStarted();
         $delivery->load($this->with);
 
         return response()->json(['message' => 'Delivery started.', 'data' => $this->formatDelivery($delivery)]);
@@ -110,6 +111,7 @@ class DriverDeliveryController extends Controller
                 'arrival_delta_minutes'   => $delta,
             ]);
 
+            Delivery::markTripRequestDelivered($stop->trip_request_id);
             $this->recalculateDelivery($delivery);
             $delivery->stops()
                 ->where('stop_order', $stop->stop_order + 1)
@@ -133,6 +135,7 @@ class DriverDeliveryController extends Controller
                 'delivered_at'   => now(),
                 'failure_reason' => $validated['failure_reason'],
             ]);
+            Delivery::markTripRequestFailed($stop->trip_request_id, $validated['failure_reason']);
             $this->recalculateDelivery($delivery);
             $delivery->stops()
                 ->where('stop_order', $stop->stop_order + 1)

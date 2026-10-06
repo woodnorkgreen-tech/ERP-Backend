@@ -210,6 +210,15 @@ class DispatchBatchController extends Controller
             ]);
         }
 
+        // The trips themselves carry who is driving what, so the requester's
+        // progress steps and the driver's "My Trips" list can find them.
+        TripRequest::whereIn('id', $trips->pluck('id'))->update([
+            'assigned_driver_id'  => $dispatchBatch->driver_id,
+            'assigned_vehicle_id' => $dispatchBatch->vehicle_id,
+            'assigned_by_id'      => Auth::user()->employee?->id,
+            'assigned_at'         => now(),
+        ]);
+
         $dispatchBatch->update([
             'status'       => 'confirmed',
             'confirmed_at' => now(),

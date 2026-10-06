@@ -9,6 +9,9 @@ use App\Modules\HR\Models\Employee;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Log;
+use Spatie\Permission\Models\Role;
+use Throwable;
 
 class DriverController extends Controller
 {
@@ -59,6 +62,7 @@ class DriverController extends Controller
 
         $driver = Driver::create($validated);
         $driver->load('employee');
+        $this->syncDriverRole($driver, true);
 
         return new DriverResource($driver);
     }
@@ -94,29 +98,69 @@ class DriverController extends Controller
      */
     public function destroy(Driver $driver): JsonResponse
     {
+        $this->syncDriverRole($driver, false);
         $driver->delete();
         return response()->json(['message' => 'Driver removed successfully.']);
     }
 
     /**
-     * Employees available to be assigned as drivers.
-     * Returns plain array (not wrapped in 'data') for frontend consumption.
+     * HR employees who can be registered as drivers.
+     *
+     * Pulled from the HR employee list: active employees whose position
+     * is a driver role (Driver, Co-Driver…) and who aren't registered yet.
+     * Pass ?all=1 to list every active employee instead (e.g. someone whose
+     * HR position isn't titled "Driver").
+     * Returns a plain array (not wrapped in 'data') for the frontend.
      */
-    public function availableEmployees(): JsonResponse
+    public function availableEmployees(Request $request): JsonResponse
     {
-        $assignedEmployeeIds = Driver::pluck('employee_id');
+        $registered = Driver::pluck('employee_id');
 
         $employees = Employee::active()
-            ->whereNotIn('id', $assignedEmployeeIds)
-            ->select('id', 'first_name', 'last_name', 'phone')
-            ->get()
-            ->map(fn($e) => [
-                'id'    => $e->id,
-                'name'  => $e->name,
-                'phone' => $e->phone,
+            ->whereNotIn('id', $registered)
+            ->when(!$request->boolean('all'), fn ($q) => $q->where('position', 'like', '%driver%'))
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'last_name', 'phone', 'position'])
+            ->map(fn ($e) => [
+                'id'       => $e->id,
+                'name'     => $e->name,
+                'phone'    => $e->phone,
+                'position' => $e->position,
             ]);
 
-        // ✅ RETURN PLAIN ARRAY (not wrapped in 'data')
         return response()->json($employees);
+    }
+
+    /**
+     * Keep the "Driver" role in step with the driver list: registering an
+     * employee as a driver gives their login the Driver role (so they only
+     * see their own assignments); removing the driver takes it away again.
+     * Never blocks the save — a missing login is simply skipped.
+     */
+    private function syncDriverRole(Driver $driver, bool $give): void
+    {
+        try {
+            $user = $driver->user
+                ?? ($driver->employee?->email
+                    ? \App\Models\User::where('email', $driver->employee->email)->first()
+                    : null);
+            if (!$user) {
+                return;
+            }
+
+            if ($give) {
+                Role::firstOrCreate([
+                    'name'       => 'Driver',
+                    'guard_name' => config('auth.defaults.guard', 'web'),
+                ]);
+                if (!$user->hasRole('Driver')) {
+                    $user->assignRole('Driver');
+                }
+            } elseif ($user->hasRole('Driver')) {
+                $user->removeRole('Driver');
+            }
+        } catch (Throwable $e) {
+            Log::warning('Driver role sync failed', ['driver_id' => $driver->id, 'error' => $e->getMessage()]);
+        }
     }
 }

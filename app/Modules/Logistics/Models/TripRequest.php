@@ -75,6 +75,11 @@ class TripRequest extends Model
         'completed_at',
         'batch_id',
         'stop_order',
+        'delivery_failed_at',
+        'delivery_failure_reason',
+        'failure_resolution',
+        'failure_resolved_at',
+        'failure_resolved_by_id',
     ];
 
     protected $casts = [
@@ -83,6 +88,8 @@ class TripRequest extends Model
         'assigned_at'    => 'datetime',
         'started_at'     => 'datetime',
         'completed_at'   => 'datetime',
+        'delivery_failed_at'   => 'datetime',
+        'failure_resolved_at'  => 'datetime',
         'setdown_time'   => 'datetime',
         'required_delivery_at' => 'datetime',
         'loading_start_by'     => 'datetime',
