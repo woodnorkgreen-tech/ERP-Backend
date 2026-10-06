@@ -564,8 +564,9 @@ class TripRequestController extends Controller
         if (!$employeeId) {
             return false;
         }
-        $responsible = $tripRequest->loading_responsible_id ?: $tripRequest->requested_by_id;
-        return $employeeId === $responsible;
+        // The person named responsible for loading, and always the requester.
+        return $employeeId === $tripRequest->loading_responsible_id
+            || $employeeId === $tripRequest->requested_by_id;
     }
 
     public function destroy(TripRequest $tripRequest): JsonResponse
