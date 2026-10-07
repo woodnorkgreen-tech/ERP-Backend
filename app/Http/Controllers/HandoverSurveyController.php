@@ -251,6 +251,12 @@ class HandoverSurveyController extends Controller
                     continue;
                 }
 
+                if (($question['type'] ?? 'text') === 'choice') {
+                    $options = implode(',', $question['options'] ?? []);
+                    $rules[$fieldPath] = "nullable|string|in:{$options}";
+                    continue;
+                }
+
                 $rules[$fieldPath] = match ($question['type'] ?? 'text') {
                     'rating'          => 'nullable|numeric|min:1|max:5',
                     'yes_no',

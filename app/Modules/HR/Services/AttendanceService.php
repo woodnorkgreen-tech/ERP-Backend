@@ -10,6 +10,7 @@ use App\Modules\HR\Models\AttendanceRecord;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\HRAuditLog;
 use App\Modules\HR\Models\LeaveRequest;
+use App\Modules\HR\Support\AttendancePersonId;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
@@ -103,10 +104,49 @@ class AttendanceService
             $query->where('event_datetime', '<=', Carbon::parse($request->date_to)->endOfDay());
         }
 
-        return $query
+        $logs = $query
             ->orderBy('event_datetime', $request->sort_dir === 'asc' ? 'asc' : 'desc')
             ->orderBy('id', 'desc')
             ->paginate($request->per_page ?? 25);
+
+        $personIds = $logs->getCollection()
+            ->pluck('person_id')
+            ->map(fn ($personId) => AttendancePersonId::normalize($personId))
+            ->filter(fn ($personId) => $personId !== '' && $personId !== '0')
+            ->unique()
+            ->values();
+
+        if ($personIds->isNotEmpty()) {
+            $employees = Employee::query()
+                ->where(function ($employeeQuery) use ($personIds) {
+                    $employeeQuery
+                        ->whereIn('hikvision_id', $personIds->all())
+                        ->orWhereIn('id_number', $personIds->all());
+                })
+                ->get(['id', 'hikvision_id', 'id_number', 'first_name', 'last_name'])
+                ->all();
+
+            $employeeNames = [];
+            foreach ($employees as $employee) {
+                foreach ([$employee->hikvision_id, $employee->id_number] as $employeePersonId) {
+                    $normalizedId = AttendancePersonId::normalize($employeePersonId);
+                    if ($normalizedId !== '' && $normalizedId !== '0') {
+                        $employeeNames[$normalizedId] = $employee->name;
+                    }
+                }
+            }
+
+            $logs->getCollection()->transform(function (AttendanceDeviceRawEvent $log) use ($employeeNames) {
+                $personId = AttendancePersonId::normalize($log->person_id);
+                if (trim((string) $log->person_name) === '' && isset($employeeNames[$personId])) {
+                    $log->person_name = $employeeNames[$personId];
+                }
+
+                return $log;
+            });
+        }
+
+        return $logs;
     }
 
     public function getRecord(int $id): AttendanceRecord
@@ -507,3 +547,6 @@ class AttendanceService
                 ->exists();
     }
 }
+
+
+
