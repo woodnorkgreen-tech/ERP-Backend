@@ -9,6 +9,7 @@
  * Question Types:
  * - 'rating': 1-5 scale with explanation
  * - 'yes_no': Yes/No toggle
+ * - 'choice': Single selection from configured options
  * - 'text': Text input
  * - 'textarea': Multi-line text
  * 
@@ -21,195 +22,75 @@
  */
 
 return [
-    'title' => 'Woodnork Green Customer Feedback Form',
-    'description' => 'Thank you for choosing Woodnork Green! Your feedback helps us improve our products and services to better serve you. Please take a few minutes to share your experience with us.',
+    'title' => 'Your feedback matters to us.',
+    'description' => 'Thank you for choosing Woodnork Green. Please take a moment to tell us about your experience. Your feedback helps us understand what worked, what we can improve, and how we can serve you better. It only takes a minute.',
+    'completion_title' => 'Thank you for your feedback.',
+    'completion_message' => 'We appreciate your time and the opportunity to improve your experience with Woodnork Green.',
     'rating_scale_info' => [
-        1 => 'Very Poor (Needs significant improvement)',
-        2 => 'Poor (Below expectations)',
-        3 => 'Average (Meets expectations)',
-        4 => 'Good (Above expectations)',
-        5 => 'Excellent (Exceeded expectations)',
+        1 => 'Very Poor',
+        2 => 'Poor',
+        3 => 'Average',
+        4 => 'Good',
+        5 => 'Excellent',
     ],
     
     'sections' => [
-        // Section 1: Overall Satisfaction
+        // Project experience questions
         [
-            'id' => 'overall_satisfaction',
-            'title' => 'Overall Satisfaction',
-            'questions' => [
-                [
-                    'id' => 'overall_rating',
-                    'type' => 'rating',
-                    'label' => 'On a scale of 1 to 5, how satisfied are you with our products and services?',
-                    'required' => true,
-                ],
-                [
-                    'id' => 'respondent_info',
-                    'type' => 'textarea',
-                    'label' => 'Respondent Information',
-                    'placeholder' => 'Please provide your name, company, or any information you would like to share',
-                    'required' => false,
-                ],
-            ],
-        ],
-
-        // Section 2: Service Quality
-        [
-            'id' => 'service_quality',
-            'title' => 'Service Quality',
-            'description' => 'How would you rate the quality of our branding and event materials?',
-            'questions' => [
-                [
-                    'id' => 'finishing',
-                    'type' => 'rating',
-                    'label' => 'Finishing',
-                    'required' => true,
-                    'has_remarks' => true,
-                ],
-                [
-                    'id' => 'attention_to_detail',
-                    'type' => 'rating',
-                    'label' => 'Attention to Detail & Print Quality',
-                    'required' => true,
-                    'has_remarks' => true,
-                ],
-            ],
-        ],
-
-        // Section 3: Timeliness
-        [
-            'id' => 'timeliness',
-            'title' => 'Timeliness',
-            'questions' => [
-                [
-                    'id' => 'delivered_on_time',
-                    'type' => 'yes_no',
-                    'label' => 'Did we deliver your project within the agreed timeframe?',
-                    'required' => true,
-                ],
-                [
-                    'id' => 'delivery_condition',
-                    'type' => 'rating',
-                    'label' => 'Condition upon delivery',
-                    'required' => true,
-                    'has_remarks' => true,
-                ],
-            ],
-        ],
-
-        // Section 4: Communication
-        [
-            'id' => 'communication',
-            'title' => 'Communication',
+            'id' => 'project_experience',
+            'title' => 'Your Project Experience',
             'questions' => [
                 [
                     'id' => 'communication_effectiveness',
                     'type' => 'rating',
                     'label' => 'How effective was our communication throughout the project?',
                     'required' => true,
-                    'has_remarks' => true,
+                ],
+                [
+                    'id' => 'team_interaction',
+                    'type' => 'rating',
+                    'label' => 'How would you rate your interaction with our team?',
+                    'required' => true,
+                ],
+                [
+                    'id' => 'final_delivery_quality',
+                    'type' => 'rating',
+                    'label' => 'How would you rate the quality of our final delivery?',
+                    'required' => true,
+                ],
+                [
+                    'id' => 'delivered_as_expected',
+                    'type' => 'choice',
+                    'label' => 'Did we deliver what you expected, on time?',
+                    'options' => ['Yes', 'Partly', 'No'],
+                    'required' => true,
+                ],
+                [
+                    'id' => 'work_again_recommend',
+                    'type' => 'rating',
+                    'label' => 'How likely are you to work with Woodnork Green again or recommend us to others?',
+                    'required' => true,
+                    'rating_labels' => [
+                        1 => 'Very Unlikely',
+                        2 => 'Unlikely',
+                        3 => 'Not Sure',
+                        4 => 'Likely',
+                        5 => 'Very Likely',
+                    ],
                 ],
             ],
         ],
 
-        // Section 5: Staff Interaction
+        // Optional open feedback
         [
-            'id' => 'staff_interaction',
-            'title' => 'Staff Interaction',
-            'description' => 'How would you describe your interactions with our team members?',
+            'id' => 'remarks',
+            'title' => 'Remarks',
             'questions' => [
                 [
-                    'id' => 'installation_precision',
-                    'type' => 'rating',
-                    'label' => 'Details & Precision of Installation',
-                    'required' => true,
-                    'has_remarks' => true,
-                ],
-                [
-                    'id' => 'work_efficiency',
-                    'type' => 'rating',
-                    'label' => 'Work process efficiency during set up',
-                    'required' => true,
-                    'has_remarks' => true,
-                ],
-                [
-                    'id' => 'team_professionalism',
-                    'type' => 'rating',
-                    'label' => 'Team Professionalism',
-                    'required' => true,
-                    'has_remarks' => true,
-                ],
-                [
-                    'id' => 'execution_confidence',
-                    'type' => 'rating',
-                    'label' => 'Confidence in Execution',
-                    'required' => true,
-                    'has_remarks' => true,
-                ],
-            ],
-        ],
-
-        // Section 6: Problem Resolution
-        [
-            'id' => 'problem_resolution',
-            'title' => 'Problem Resolution',
-            'questions' => [
-                [
-                    'id' => 'issue_resolution',
-                    'type' => 'rating',
-                    'label' => 'If you encountered any issues, how effectively were they resolved?',
-                    'required' => true,
-                    'has_remarks' => true,
-                ],
-            ],
-        ],
-
-        // Section 7: Sustainability
-        [
-            'id' => 'sustainability',
-            'title' => 'Sustainability Practices',
-            'questions' => [
-                [
-                    'id' => 'sustainability_importance',
-                    'type' => 'rating',
-                    'label' => 'How important is our commitment to sustainability in your decision to work with us?',
-                    'required' => true,
-                ],
-            ],
-        ],
-
-        // Section 8: Recommendation
-        [
-            'id' => 'recommendation',
-            'title' => 'Recommendation Likelihood',
-            'questions' => [
-                [
-                    'id' => 'recommendation_likelihood',
-                    'type' => 'rating',
-                    'label' => 'How likely are you to recommend Woodnork Green to a colleague or friend?',
-                    'required' => true,
-                ],
-            ],
-        ],
-
-        // Section 9: Final Thoughts
-        [
-            'id' => 'final_thoughts',
-            'title' => 'Your Final Thoughts',
-            'description' => 'No right or wrong answers — just your honest perspective.',
-            'questions' => [
-                [
-                    'id' => 'project_overview',
+                    'id' => 'remarks',
                     'type' => 'textarea',
-                    'label' => 'How was your overall experience with this project?',
-                    'placeholder' => 'Tell us anything that comes to mind — what the experience was like, how the team performed, how the final result felt…',
-                    'required' => false,
-                ],
-                [
-                    'id' => 'improvement_suggestions',
-                    'type' => 'textarea',
-                    'label' => 'Any suggestions for how we can do better next time?',
-                    'placeholder' => 'Any ideas — big or small — on how we can improve our products, process, or service…',
+                    'label' => 'Remarks (Optional)',
+                    'placeholder' => 'Please share any comments about the ratings or responses you selected above.',
                     'required' => false,
                 ],
             ],
