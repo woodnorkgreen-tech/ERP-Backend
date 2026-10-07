@@ -1101,6 +1101,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('payments/{payment}/reverse', [\App\Modules\Finance\Controllers\PaymentController::class, 'reverse'])
             ->middleware('permission:' . Permissions::FINANCE_PAYMENTS_REVERSE);
 
+        // Report 76A: cost postings (commitments, accruals, payment costs and
+        // their reversals, budget lines) that did not reach the books, and the
+        // retry. Permissions are checked in the controller.
+        Route::get('postings', [\App\Modules\Finance\Controllers\FinanceEventPostingController::class, 'index']);
+        Route::post('postings/{posting}/retry', [\App\Modules\Finance\Controllers\FinanceEventPostingController::class, 'retry']);
+
         // Statement-based bank, mobile-money, card, and petty-cash reconciliation.
         Route::prefix('reconciliation')->group(function () {
             Route::get('offset-accounts', [\App\Modules\Finance\Controllers\CashMovementController::class, 'accounts']);

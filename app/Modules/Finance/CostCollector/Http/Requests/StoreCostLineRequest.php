@@ -48,7 +48,17 @@ class StoreCostLineRequest extends FormRequest
                 'nullable',
                 'required_if:funding_mode,company_paid',
                 'integer',
-                Rule::exists('payment_sources', 'id')->where('is_active', true),
+                // A paying account, not merely an active one: it must be able
+                // to make payments and have a ledger account behind it — the
+                // same test PaymentSettlementService applies when the verified
+                // cost is settled. Supplier Credit (type `payable`) is a
+                // liability; "company paid" from it would credit Accounts
+                // Payable and call that a payment (Report 76 P0-9).
+                Rule::exists('payment_sources', 'id')
+                    ->where('is_active', true)
+                    ->where('can_make_payment', true)
+                    ->whereNot('type', 'payable')
+                    ->whereNotNull('gl_account_id'),
             ],
             'payee_type' => 'nullable|string|max:32',
             'payee_id' => 'nullable|integer',
@@ -65,6 +75,7 @@ class StoreCostLineRequest extends FormRequest
     {
         return [
             'tax_amount.lte' => 'Tax cannot be more than the amount on the receipt.',
+            'payment_source_id.exists' => 'Choose the bank, float, mobile money or card account the money actually left. Supplier Credit and accounts with no ledger account cannot pay.',
             'incurred_at.before_or_equal' => 'A cost cannot be dated in the future.',
         ];
     }

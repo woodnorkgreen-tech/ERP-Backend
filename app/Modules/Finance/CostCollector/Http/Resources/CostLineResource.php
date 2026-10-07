@@ -238,7 +238,7 @@ class CostLineResource extends JsonResource
             ];
         }
 
-        if (in_array($this->source_ref, ['stock-issue', 'stock-return'], true)
+        if (in_array($this->source_ref, \App\Modules\Finance\Services\JournalPostingService::STOCK_MOVEMENT_REFS, true)
             || str_contains((string) $this->source_type, 'Stores')) {
             return [
                 'status' => 'not_payable',

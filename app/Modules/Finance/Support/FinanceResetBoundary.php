@@ -23,6 +23,9 @@ final class FinanceResetBoundary
 {
     /** Delete in this order. Tables absent from a schema are skipped (Phase 2B tables before migration). */
     public const RESET_ORDER = [
+        // Report 76A: the posting log describes cost lines and journals that a
+        // reset removes; left behind it would report postings that no longer exist.
+        'finance_event_postings',
         // W7 / W6 analytical records
         'project_labour_actual_returns',
         'project_labour_actuals',

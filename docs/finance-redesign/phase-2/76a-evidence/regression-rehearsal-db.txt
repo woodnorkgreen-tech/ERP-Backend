@@ -1,0 +1,10 @@
+J1 unbalanced journals	0
+J2 duplicate journal entry numbers	0
+J3 cost lines with more than one original journal	0
+J4 duplicate cost lines on one source key	0
+J5 stock-issue reversal cost lines	0
+J6 stock movement journals touching Accounts Payable	0
+J7 verified company-paid cost lines	0	0.00
+J8 ...of which have no Payment behind them	0	0.00
+J9 voided payments whose own cost line still counts	0	0.00
+J10 issued invoices: net / VAT / gross	23272.00	0.00	23272.00

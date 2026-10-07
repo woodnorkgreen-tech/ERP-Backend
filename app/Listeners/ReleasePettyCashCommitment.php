@@ -5,9 +5,8 @@ namespace App\Listeners;
 use App\Events\PettyCashRequisitionReturnedToPending;
 use App\Modules\Finance\CostCollector\Services\PettyCashCostProducer;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use App\Modules\Finance\Services\FinanceEventPoster;
 use Illuminate\Support\Facades\Log;
-use Throwable;
 
 /**
  * Retires the commitment behind a withdrawn approval.
@@ -26,26 +25,32 @@ use Throwable;
  * Releasing here settles both: the promise dies with the approval, and a fresh
  * approval records a fresh commitment for what was actually approved.
  *
- * QUEUED, like {@see RecordPettyCashCommitment}, so a cost-ledger write can
- * never stop somebody editing a requisition.
+ * Not queued (Report 76A): run in the editing request, after it commits,
+ * through FinanceEventPoster. A cost-ledger problem still cannot stop somebody
+ * editing a requisition — it is recorded as a failed posting to retry.
  */
-class ReleasePettyCashCommitment implements ShouldQueue
+class ReleasePettyCashCommitment
 {
-    public int $tries = 3;
-    public int $backoff = 30;
-
-    public function __construct(private PettyCashCostProducer $producer) {}
+    public function __construct(
+        private PettyCashCostProducer $producer,
+        private FinanceEventPoster $postings,
+    ) {}
 
     public function handle(PettyCashRequisitionReturnedToPending $event): void
     {
-        $requisition = PettyCashRequisition::find($event->requisitionId);
+        $this->postings->record(FinanceEventPoster::REQUISITION_COMMITMENT_RELEASE, $event->requisitionId);
+    }
+
+    public function post(array $payload, int $requisitionId): string
+    {
+        $requisition = PettyCashRequisition::find($requisitionId);
 
         if (! $requisition) {
             Log::info('Fund requisition gone before its commitment could be released', [
-                'requisition_id' => $event->requisitionId,
+                'requisition_id' => $requisitionId,
             ]);
 
-            return;
+            return 'skipped_requisition_missing';
         }
 
         $outcome = $this->producer->releaseFor(
@@ -58,13 +63,7 @@ class ReleasePettyCashCommitment implements ShouldQueue
             'requisition_number' => $requisition->requisition_number,
             'outcome' => $outcome,
         ]);
-    }
 
-    public function failed(PettyCashRequisitionReturnedToPending $event, Throwable $exception): void
-    {
-        Log::error('Could not release the commitment for an edited fund requisition', [
-            'requisition_id' => $event->requisitionId,
-            'error' => $exception->getMessage(),
-        ]);
+        return $outcome;
     }
 }

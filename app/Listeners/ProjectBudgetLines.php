@@ -5,9 +5,8 @@ namespace App\Listeners;
 use App\Events\BudgetLinesChanged;
 use App\Models\TaskBudgetData;
 use App\Modules\Finance\CostCollector\Services\BudgetProjector;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use App\Modules\Finance\Services\FinanceEventPoster;
 use Illuminate\Support\Facades\Log;
-use Throwable;
 
 /**
  * Keeps a project's planned cost lines equal to its budget.
@@ -17,51 +16,54 @@ use Throwable;
  * what the budget no longer contains, so a replayed job is harmless and a
  * double-dispatch cannot double-count a budget.
  *
- * QUEUED deliberately. This hooks a cost-ledger write onto another module's
- * write path, and no cost-reporting concern is worth blocking the workflow it
- * observes — a failure here must not stop somebody saving their budget. The
- * lines land a moment later instead.
+ * Not queued (Report 76A). The planned lines are what every commitment and
+ * actual is matched against, so a projection waiting on an absent worker left
+ * the cost account with spend and no budget. It now runs in the saving
+ * request's own process through FinanceEventPoster — after the response has
+ * been sent, because the budget screen saves continuously and nobody should
+ * wait on it — and a failure is a visible posting to retry rather than a
+ * blocked save.
  */
-class ProjectBudgetLines implements ShouldQueue
+class ProjectBudgetLines
 {
-    public int $tries = 3;
-    public int $backoff = 30;
-
-    public function __construct(private BudgetProjector $projector) {}
+    public function __construct(
+        private BudgetProjector $projector,
+        private FinanceEventPoster $postings,
+    ) {}
 
     public function handle(BudgetLinesChanged $event): void
     {
+        $this->postings->record(
+            FinanceEventPoster::BUDGET_PROJECTION,
+            $event->budgetTaskId,
+            ['actor_id' => $event->actorId],
+            afterResponse: true,
+        );
+    }
+
+    public function post(array $payload, int $budgetTaskId): string
+    {
         $budget = TaskBudgetData::with('task')
-            ->where('enquiry_task_id', $event->budgetTaskId)
+            ->where('enquiry_task_id', $budgetTaskId)
             ->first();
 
         // Normal on a task that has never been priced — there is nothing to
         // project yet, and the first save will raise this again.
         if (! $budget) {
             Log::info('Budget change announced with no budget data to project', [
-                'budget_task_id' => $event->budgetTaskId,
+                'budget_task_id' => $budgetTaskId,
             ]);
 
-            return;
+            return 'no budget data to project yet';
         }
 
-        Log::info('Projected budget lines', [
-            'budget_task_id' => $event->budgetTaskId,
-            // The actor rides on the event because this runs on a queue worker,
-            // where `auth()` is empty — see BudgetLinesChanged.
-            ...$this->projector->project($budget, $event->actorId),
-        ]);
+        // The actor rides in the payload: a retry or a sweep runs as somebody
+        // else, or as nobody — see BudgetLinesChanged.
+        $result = $this->projector->project($budget, $payload['actor_id'] ?? null);
+
+        Log::info('Projected budget lines', ['budget_task_id' => $budgetTaskId, ...$result]);
+
+        return sprintf('projected %d, retired %d, adopted %d', $result['projected'], $result['retired'], $result['adopted']);
     }
 
-    /**
-     * A budget that could not be projected must be visible, not silent — the
-     * cost account would otherwise under-report with nothing to explain it.
-     */
-    public function failed(BudgetLinesChanged $event, Throwable $e): void
-    {
-        Log::error('Failed to project budget lines', [
-            'budget_task_id' => $event->budgetTaskId,
-            'error' => $e->getMessage(),
-        ]);
-    }
 }

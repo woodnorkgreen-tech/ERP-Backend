@@ -58,7 +58,7 @@ class InventoryFinanceController extends Controller
         $unposted = $this->unpostedAdjustments();
         $openingApproved = StockCount::query()->where('mode', StockCount::MODE_OPENING)->where('status', 'approved')->exists();
         $sync = StoresFinancePosting::query()->whereIn('status', ['failed', 'pending'])->selectRaw('status, count(*) as n')->groupBy('status')->pluck('n', 'status');
-        $issues = CostLine::query()->whereIn('source_ref', ['stock-issue', 'stock-return'])->where('status', CostLine::STATUS_VERIFIED)
+        $issues = CostLine::query()->whereIn('source_ref', \App\Modules\Finance\Services\JournalPostingService::STOCK_MOVEMENT_REFS)->where('status', CostLine::STATUS_VERIFIED)
             ->selectRaw('count(*) as n, coalesce(sum(amount),0) as total')->first();
 
         return response()->json(['data' => [
@@ -120,7 +120,7 @@ class InventoryFinanceController extends Controller
         ]);
 
         $page = CostLine::query()->with(['expenseCode:id,code,simple_meaning,default_debit_account_id', 'expenseCode.debitAccount:id,code,name'])
-            ->whereIn('source_ref', ['stock-issue', 'stock-return'])
+            ->whereIn('source_ref', \App\Modules\Finance\Services\JournalPostingService::STOCK_MOVEMENT_REFS)
             ->when($filters['enquiry_id'] ?? null, fn (Builder $q, $id) => $q->where('project_enquiry_id', $id))
             ->when($filters['date_from'] ?? null, fn (Builder $q, $d) => $q->whereDate('incurred_at', '>=', $d))
             ->when($filters['date_to'] ?? null, fn (Builder $q, $d) => $q->whereDate('incurred_at', '<=', $d))

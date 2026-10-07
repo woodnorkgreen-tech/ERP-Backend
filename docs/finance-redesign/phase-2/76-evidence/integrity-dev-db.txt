@@ -1,0 +1,57 @@
+01 payments total / active / voided	1554	1554	0
+02 active payments with no source link (no requisition, voucher, bill payment, source doc)	1554	2234861.94
+03 active payments with no journal sourced to them and no cost line	1554	2234861.94
+04 payments flagged cost/GL posting failed	0
+05 payments flagged advance GL posting failed	0
+06 active payments without a paying account	1554
+07 journals total / posted / reversed	6	6	0
+08 journals without a source	0
+09 unbalanced journals (lines)	0
+10 journals with no lines	0
+11 cost lines (non-planned) without a source	0	NULL
+13 reversed cost lines whose journal is still posted	1
+14 verified accruals by settled flag	1	0	250.00
+15 verified cost lines with no project and no cost centre	0
+16 GRNs without a purchase order	0
+17 accepted GRN lines with no library material (non-stock/service lines)	0
+18 PO lines with no library material	0	NULL
+19 accepted GRN lines by stock_status	posted	2
+20 accepted GRN lines with no accrual cost line	0
+21 approved POs with no commitment cost line ever	0
+22 GRN line stock qty vs received qty mismatch (posted lines)	0
+23 GRN line receipt cost differs from PO unit price	0
+24 bills total / without PO (direct) / without verification	0	NULL	NULL
+25 bills paid status with balance > 0, or balance<>amount-paid	NULL	NULL
+26 stock receipts (check_in) by GRN linkage	2	13	2500.00
+27 stock movements by type	check_in	15	133.000
+27 stock movements by type	check_out	56	-114.000
+27 stock movements by type	return	1	2.000
+27 stock movements by type	adjustment	4	-20.000
+28 issues with no project and no reference	9
+29 issues with project but no project_id (reference only)	0
+30 issues frozen at zero unit cost	53	109.000
+31 project issues with no verified cost line	44
+32 project issues with no outbox row at all	43
+33 stores finance outbox by status	issue_cost	failed	1
+33 stores finance outbox by status	issue_cost	posted	3
+34 damage/defective movements (no finance posting path)	0	NULL
+35 negative stock	0
+36 stock on hand with zero valuation (no unit cost, no default)	17	112.000
+37 stock on hand valued only by default price (no receipt cost)	0
+38 valuation without quantity (unit cost set, zero on hand)	0
+39 stock balance vs last movement balance_after mismatch	5
+40 Stores valuation (qty x unit cost)	305310.00
+41 GL balance of inventory-type accounts	1200	Raw-material Inventory	-400.00
+41 GL balance of inventory-type accounts	2150	Accrued Expenses	-1000.00
+42 requisitions status	pending	11
+42 requisitions status	approved	3
+42 requisitions status	disbursed	2
+42 requisitions status	received	8
+43 closed requisitions	0
+44 projects financially closed	0
+45 cost lines posted to financially closed projects after closure	0
+46 client receipts: verified without journal / pending	83	0	85
+47 issued invoices without journal	0
+48 projects where verified actual > 0 and planned = 0	2
+49 projects with negative net actual	0
+50 queued jobs waiting / failed	0	0

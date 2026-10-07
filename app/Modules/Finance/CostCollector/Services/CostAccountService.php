@@ -77,6 +77,23 @@ class CostAccountService
         CASE WHEN cost_lines.consumes_line_id IS NULL THEN ? ELSE 'Other project costs' END
     )";
 
+    /**
+     * Billed revenue for margin, in one place so the project statement and the
+     * portfolio cannot measure it differently.
+     *
+     * `net` is what margin uses: the invoice total less output VAT. Credit
+     * notes are stored negative on both columns, so they reduce all three
+     * figures on the same basis. Report 76 P0-8: margin used to subtract
+     * VAT-exclusive cost from the VAT-inclusive `total_amount`.
+     */
+    private const REVENUE_SUMS = '
+        COALESCE(SUM(total_amount - COALESCE(tax_amount, 0)), 0) AS net,
+        COALESCE(SUM(total_amount), 0) AS gross,
+        COALESCE(SUM(COALESCE(tax_amount, 0)), 0) AS vat
+    ';
+
+    public const REVENUE_BASIS = 'net_of_output_vat';
+
     private const NATURE_SUMS = '
         SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS planned,
         SUM(CASE WHEN nature = ? THEN net_amount ELSE 0 END) AS committed,
@@ -346,9 +363,10 @@ class CostAccountService
             ->whereIn('project_enquiry_id', $enquiryIds)
             ->whereNot('status', 'void')
             ->whereNotNull('journal_entry_id')
-            ->selectRaw('project_enquiry_id, SUM(total_amount) AS billed')
+            ->selectRaw('project_enquiry_id, ' . self::REVENUE_SUMS)
             ->groupBy('project_enquiry_id')
-            ->pluck('billed', 'project_enquiry_id');
+            ->get()
+            ->keyBy('project_enquiry_id');
 
         // Batch 2: WIP released (COS journal lines) per enquiry.
         $releasedByEnquiry = DB::table('journal_lines as jl')
@@ -428,7 +446,9 @@ class CostAccountService
 
         $result = [];
         foreach ($enquiryIds as $enquiryId) {
-            $billed = $this->money($billedByEnquiry[$enquiryId] ?? 0);
+            // Same basis as marginAgainstJournals(): revenue net of output VAT.
+            $billed = $this->money($billedByEnquiry[$enquiryId]->net ?? 0);
+            $billedGross = $this->money($billedByEnquiry[$enquiryId]->gross ?? 0);
             $released = $this->money($releasedByEnquiry[$enquiryId] ?? 0);
             $directActual = (string) ($directByEnquiry[$enquiryId] ?? 0);
             $allocatedActual = (string) ($allocatedByEnquiry[$enquiryId] ?? 0);
@@ -443,8 +463,9 @@ class CostAccountService
                 : null;
 
             $agreed = (float) ($agreedByEnquiry[$enquiryId] ?? 0);
-            $fraction = ($agreed > 0 && bccomp($billed, '0.00', 2) === 1)
-                ? bcdiv($billed, $this->money($agreed), 6)
+            // Invoice total over agreed quote, as the WIP release uses it.
+            $fraction = ($agreed > 0 && bccomp($billedGross, '0.00', 2) === 1)
+                ? bcdiv($billedGross, $this->money($agreed), 6)
                 : '0.000000';
             if (bccomp($fraction, '1.000000', 6) > 0) {
                 $fraction = '1.000000';
@@ -457,6 +478,9 @@ class CostAccountService
 
             $result[$enquiryId] = [
                 'billed_revenue'         => $billed,
+                'revenue_basis'          => self::REVENUE_BASIS,
+                'billed_gross'           => $billedGross,
+                'output_vat'             => $this->money($billedByEnquiry[$enquiryId]->vat ?? 0),
                 'actual_labour'          => $this->money($labourByEnquiry[$enquiryId] ?? 0),
                 'cost_of_sales'          => $costOfSales,
                 'cost_basis'             => $basis,
@@ -552,13 +576,20 @@ class CostAccountService
      */
     private function marginAgainstJournals(ProjectEnquiry $enquiry): array
     {
-        $billed = $this->money(
-            DB::table('project_invoices')
-                ->where('project_enquiry_id', $enquiry->id)
-                ->whereNot('status', 'void')
-                ->whereNotNull('journal_entry_id')
-                ->sum('total_amount'),
-        );
+        $invoiced = DB::table('project_invoices')
+            ->where('project_enquiry_id', $enquiry->id)
+            ->whereNot('status', 'void')
+            ->whereNotNull('journal_entry_id')
+            ->selectRaw(self::REVENUE_SUMS)
+            ->first();
+
+        // Margin is measured on revenue net of output VAT: the tax is collected
+        // for the Authority, not earned, and every cost it is compared with is
+        // already net of recoverable input VAT. `billed_gross` is what the client
+        // was asked to pay and is kept for display and for the billed share.
+        $billed = $this->money($invoiced->net ?? 0);
+        $billedGross = $this->money($invoiced->gross ?? 0);
+        $outputVat = $this->money($invoiced->vat ?? 0);
 
         $released = $this->money(
             DB::table('journal_lines as jl')
@@ -605,8 +636,12 @@ class CostAccountService
             ->orderByDesc('updated_at')
             ->value('quote_amount');
 
-        $fraction = ($agreed > 0 && bccomp($billed, '0.00', 2) === 1)
-            ? bcdiv($billed, $this->money($agreed), 6)
+        // Deliberately still the invoice total over the agreed quote: this is
+        // the figure WorkInProgressReleaseService::billedFraction() releases
+        // cost by, and whether quotes are stated with or without VAT is a WNG
+        // confirmation that has not been given (Report 76 §32 item 8).
+        $fraction = ($agreed > 0 && bccomp($billedGross, '0.00', 2) === 1)
+            ? bcdiv($billedGross, $this->money($agreed), 6)
             : '0.000000';
 
         if (bccomp($fraction, '1.000000', 6) > 0) {
@@ -631,6 +666,9 @@ class CostAccountService
 
         return [
             'billed_revenue'         => $billed,
+            'revenue_basis'          => self::REVENUE_BASIS,
+            'billed_gross'           => $billedGross,
+            'output_vat'             => $outputVat,
             'cost_of_sales'          => $costOfSales,
             'cost_basis'             => $basis,
             'margin'                 => $margin,

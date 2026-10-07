@@ -1,0 +1,70 @@
+--------------
+SELECT '05 payments flagged advance GL posting failed', COUNT(*) FROM payments WHERE advance_gl_posting_failed_at IS NOT NULL
+--------------
+
+ERROR 1054 (42S22) at line 12: Unknown column 'advance_gl_posting_failed_at' in 'WHERE'
+01 payments total / active / voided	14	13	1
+02 active payments with no source link (no requisition, voucher, bill payment, source doc)	9	45000.00
+03 active payments with no journal sourced to them and no cost line	2	83610.65
+04 payments flagged cost/GL posting failed	0
+--------------
+SELECT '30 issues frozen at zero unit cost', COUNT(*), ROUND(SUM(ABS(quantity)),3) FROM inventory_logs WHERE type IN ('check_out','issue','consumption') AND COALESCE(receipt_unit_cost,0)<=0 AND movement_value IS NULL
+--------------
+
+ERROR 1054 (42S22) at line 42: Unknown column 'movement_value' in 'WHERE'
+06 active payments without a paying account	0
+07 journals total / posted / reversed	30	27	3
+08 journals without a source	0
+09 unbalanced journals (lines)	0
+10 journals with no lines	0
+11 cost lines (non-planned) without a source	0	NULL
+12 verified actual/accrued cost lines never posted (no journal)	actual	1	1	900.00
+13 reversed cost lines whose journal is still posted	0
+14 verified accruals by settled flag	1	1	13000.00
+15 verified cost lines with no project and no cost centre	0
+16 GRNs without a purchase order	0
+17 accepted GRN lines with no library material (non-stock/service lines)	1
+18 PO lines with no library material	2	13000.00
+19 accepted GRN lines by stock_status	not_stocked	1
+19 accepted GRN lines by stock_status	posted	1
+20 accepted GRN lines with no accrual cost line	0
+21 approved POs with no commitment cost line ever	0
+22 GRN line stock qty vs received qty mismatch (posted lines)	0
+23 GRN line receipt cost differs from PO unit price	0
+24 bills total / without PO (direct) / without verification	1	0	0
+25 bills paid status with balance > 0, or balance<>amount-paid	0	1
+26 stock receipts (check_in) by GRN linkage	1	13	1500.00
+27 stock movements by type	check_in	14	128.000
+27 stock movements by type	check_out	53	-102.000
+27 stock movements by type	return	1	2.000
+27 stock movements by type	adjustment	3	0.000
+28 issues with no project and no reference	9
+29 issues with project but no project_id (reference only)	0
+--------------
+SELECT '43 closed requisitions', COUNT(*) FROM petty_cash_requisitions WHERE closed_at IS NOT NULL
+--------------
+
+ERROR 1054 (42S22) at line 62: Unknown column 'closed_at' in 'WHERE'
+31 project issues with no verified cost line	43
+32 project issues with no outbox row at all	43
+33 stores finance outbox by status	issue_cost	posted	1
+34 damage/defective movements (no finance posting path)	0	NULL
+35 negative stock	0
+36 stock on hand with zero valuation (no unit cost, no default)	0	NULL
+37 stock on hand valued only by default price (no receipt cost)	0
+38 valuation without quantity (unit cost set, zero on hand)	4
+39 stock balance vs last movement balance_after mismatch	13
+40 Stores valuation (qty x unit cost)	10750.00
+41 GL balance of inventory-type accounts	AP-001	Accounts Payable (A/P)	0.00
+41 GL balance of inventory-type accounts	2160	Net Payroll Payable	0.00
+41 GL balance of inventory-type accounts	WHT-001	Withholding Tax Payable	-200.00
+41 GL balance of inventory-type accounts	AE-001	Accrued Expenses	-4279.32
+41 GL balance of inventory-type accounts	IA-001	Inventory Asset	12250.00
+42 requisitions status	surrendered	1
+44 projects financially closed	0
+45 cost lines posted to financially closed projects after closure	0
+46 client receipts: verified without journal / pending	0	0	1
+47 issued invoices without journal	0
+48 projects where verified actual > 0 and planned = 0	0
+49 projects with negative net actual	0
+50 queued jobs waiting / failed	20	0

@@ -5,9 +5,8 @@ namespace App\Listeners;
 use App\Events\PettyCashDisbursementPaid;
 use App\Modules\Finance\CostCollector\Services\PettyCashCostPoster;
 use App\Modules\Finance\Models\Payment;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use App\Modules\Finance\Services\FinanceEventPoster;
 use Illuminate\Support\Facades\Log;
-use Throwable;
 
 /**
  * Records a paid petty cash disbursement as a project cost.
@@ -17,10 +16,12 @@ use Throwable;
  * reach its project's cost account until someone remembered to run a command.
  * Every project's actuals were as stale as the last backfill.
  *
- * QUEUED deliberately. Hooking a cost-ledger write into the payment path means a
- * failure here could otherwise stop somebody paying out of the tin — and no
- * cost-reporting concern is worth blocking the workflow it observes. The cost
- * line lands a moment later instead.
+ * Not queued (Report 76A). It was, so that a cost-ledger failure could never
+ * stop somebody paying out of the tin — and on a host with no queue worker
+ * that meant the cost never posted at all, silently. The cost is now posted in
+ * the paying request, after the payment commits, through FinanceEventPoster:
+ * the payment still cannot be blocked, and a failure is a visible posting to
+ * retry.
  *
  * Re-running is safe: the producer posts through `postFromSource()`, which is
  * idempotent on `(source_type, source_id)`, so a retry is a no-op rather than a
@@ -32,29 +33,43 @@ use Throwable;
  * recorded as Finance-visible state and become retryable — not just logged —
  * the same STAB-4 principle already applied to requisition advances.
  */
-class RecordPettyCashCost implements ShouldQueue
+class RecordPettyCashCost
 {
-    public int $tries = 3;
-    public int $backoff = 30;
-
-    public function __construct(private PettyCashCostPoster $poster) {}
+    public function __construct(
+        private PettyCashCostPoster $poster,
+        private FinanceEventPoster $postings,
+    ) {}
 
     public function handle(PettyCashDisbursementPaid $event): void
     {
-        $disbursement = Payment::find($event->disbursementId);
+        $this->postings->record(FinanceEventPoster::PAYMENT_COST, $event->disbursementId);
+    }
+
+    public function post(array $payload, int $disbursementId): string
+    {
+        $disbursement = Payment::find($disbursementId);
 
         // Voided between payment and handling, or removed outright. The producer
         // would skip it anyway; reading it back is what makes that decision on
         // current state rather than on state at dispatch.
         if (! $disbursement) {
             Log::info('Petty cash disbursement gone before its cost could be recorded', [
-                'disbursement_id' => $event->disbursementId,
+                'disbursement_id' => $disbursementId,
             ]);
 
-            return;
+            return 'skipped_payment_missing';
         }
 
         $outcome = $this->poster->attempt($disbursement);
+
+        // The poster has already flagged the payment and alerted Finance. The
+        // posting record must say the same thing, or the two would disagree
+        // about whether this payment reached the books.
+        if ($outcome === 'gl_posting_failed') {
+            throw new \RuntimeException(
+                $disbursement->fresh()?->cost_gl_posting_error ?: 'The payment\'s cost/GL entry could not be posted.'
+            );
+        }
 
         // The skips are ordinary, not failures: spend with no job number and
         // ADM-coded overhead have no cost object to attach to. Logged at info so
@@ -66,17 +81,7 @@ class RecordPettyCashCost implements ShouldQueue
             'job_number' => $disbursement->job_number,
             'outcome' => $outcome,
         ]);
-    }
 
-    /**
-     * A payment that could not be costed must be visible, not silent — the
-     * project would otherwise under-report with nothing to explain it.
-     */
-    public function failed(PettyCashDisbursementPaid $event, Throwable $e): void
-    {
-        Log::error('Failed to record petty cash cost', [
-            'disbursement_id' => $event->disbursementId,
-            'error' => $e->getMessage(),
-        ]);
+        return $outcome;
     }
 }

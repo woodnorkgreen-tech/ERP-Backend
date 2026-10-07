@@ -6,7 +6,10 @@ use App\Models\User;
 use App\Modules\Finance\CostCollector\Exceptions\CostValidationException;
 use App\Modules\Finance\CostCollector\Models\AccountingPeriod;
 use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Services\JournalPostingService;
+use App\Modules\Finance\Services\PaymentSettlementService;
+use App\Modules\Finance\Support\DocumentNumber;
 use App\Modules\HR\Models\HRAuditLog;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -84,6 +87,13 @@ class CostVerificationService
             ])->save();
 
             $line->refresh();
+
+            // Money that has left a WNG account is a Payment, whoever recorded
+            // it and on whichever screen. Before the journal, so the entry
+            // below credits an account a payment document actually stands
+            // behind — and inside the transaction, so a refused payment (no
+            // float, a source that cannot pay) refuses the verification too.
+            $this->settleCompanyPaid($line, $verifier);
 
             // Inside the transaction on purpose: an override that is not
             // recorded did not happen, so the verification and its written
@@ -242,8 +252,25 @@ class CostVerificationService
      * Unposted lines are reversed by state; posted lines additionally receive a
      * balanced compensating journal in the current open period.
      */
-    public function reverse(CostLine $line, User $verifier, string $reason): CostLine
+    public function reverse(CostLine $line, User $verifier, string $reason, bool $viaPayment = false): CostLine
     {
+        // A cost that IS a payment's economic effect is never reversed apart
+        // from that payment. Reversing only the line would restore the paying
+        // account in the ledger while the payment stayed active and the
+        // cashbook stayed debited — the mirror image of Report 76 P0-2. So a
+        // reversal that starts here is handed to the one payment reversal,
+        // which comes back through this method with `$viaPayment` set.
+        if (! $viaPayment && ($payment = $this->activePaymentBehind($line))) {
+            try {
+                app(\App\Modules\Finance\Services\PaymentReversalService::class)
+                    ->reverse($payment, $verifier->id, $reason);
+            } catch (InvalidArgumentException $e) {
+                throw CostValidationException::withErrors(['status' => [$e->getMessage()]]);
+            }
+
+            return $line->fresh();
+        }
+
         return DB::transaction(function () use ($line, $verifier, $reason) {
             // Locked and re-read for the same reason as `verify()`: without it
             // two reversals of one posted line both pass the transition check,
@@ -275,6 +302,105 @@ class CostVerificationService
 
             return $line;
         });
+    }
+
+    /** The active payment whose cost this line is, if there is one. */
+    private function activePaymentBehind(CostLine $line): ?Payment
+    {
+        return Payment::query()
+            ->where('status', 'active')
+            ->where(function ($query) use ($line): void {
+                $query->where(function ($settles) use ($line): void {
+                    $settles->where('source_document_type', CostLine::class)
+                        ->where('source_document_id', $line->id);
+                });
+                if ($line->source_type === Payment::class && $line->source_id) {
+                    $query->orWhere('id', $line->source_id);
+                }
+            })
+            ->first();
+    }
+
+    public static function isCompanyPaid(CostLine $line): bool
+    {
+        return ($line->details['funding_mode'] ?? null) === 'company_paid'
+            && filled($line->details['payment_source_id'] ?? null);
+    }
+
+    /**
+     * A verified company-paid cost: record the money that left.
+     *
+     * Report 76 P0-9. "Company paid" used to end at the journal — Dr expense,
+     * Cr the chosen paying account — with no Payment behind the credit. The
+     * ledger said cash had gone; the petty-cash cashbook, the float balance and
+     * bank reconciliation had nothing to show for it.
+     *
+     * The Payment is created through the one settlement engine, so petty cash
+     * is checked, capped and debited exactly as any other payment from the
+     * float. It is the money movement only:
+     *
+     *   CostLine  — the project's actual cost, and the one journal
+     *               (Dr expense (+ input VAT) / Cr WHT / Cr paying account)
+     *   Payment   — settlement; no journal and no cost line of its own
+     *
+     * Linked both ways: the payment names the cost line as its source
+     * document, and the line carries `settled_by_payment_id`. Idempotent on
+     * `cost-line:{id}`, so a retried verification reuses the payment.
+     */
+    private function settleCompanyPaid(CostLine $line, User $verifier): void
+    {
+        if (! self::isCompanyPaid($line) || $line->nature !== CostLine::NATURE_ACTUAL) {
+            return;
+        }
+
+        // What actually left the account: gross less tax withheld for KRA —
+        // the same figure postCostLine() credits to the paying account.
+        $paid = bcsub(
+            bcadd((string) $line->net_amount, (string) ($line->tax_amount ?? '0'), 2),
+            (string) ($line->wht_amount ?? '0'),
+            2,
+        );
+        if (bccomp($paid, '0.00', 2) !== 1) {
+            return;
+        }
+
+        $paidOn = ($line->incurred_at ?? now())->toDateString();
+
+        // `payee_id` only means a supplier when the payee type says so.
+        $isSupplier = $line->payee_id && $line->payee_type_id
+            && DB::table('payee_types')->whereKey($line->payee_type_id)->value('code') === 'SUPPLIER';
+
+        $payment = app(PaymentSettlementService::class)->settle([
+            'idempotency_key' => 'cost-line:'.$line->id,
+            'payment_no' => DocumentNumber::next(DocumentNumber::PAYMENT, substr($paidOn, 0, 4)),
+            'payment_type' => 'direct',
+            'payment_source_id' => (int) $line->details['payment_source_id'],
+            'source_document_type' => CostLine::class,
+            'source_document_id' => $line->id,
+            'payee_name' => $line->payee_name ?: 'Payee not recorded',
+            'payee_type' => $isSupplier ? 'supplier' : 'other',
+            'payee_id' => $isSupplier ? $line->payee_id : null,
+            'account' => 'Company-paid cost '.$line->ref,
+            'expense_code_id' => $line->expense_code_id,
+            'amount' => $paid,
+            'transaction_cost' => '0.00',
+            'description' => $line->description ?: 'Company-paid cost '.$line->ref,
+            'date_disbursed' => $paidOn,
+            'external_reference' => $line->details['external_ref'] ?? null,
+            'payment_method' => $line->details['payment_method'] ?? null,
+            'classification' => $line->project_enquiry_id ? 'operations' : 'admin',
+            'project_id' => $line->project_id,
+            'project_enquiry_id' => $line->project_enquiry_id,
+            'job_number' => $line->job_number,
+            'tax' => 'no_etr',
+            'receipt_type' => 'none',
+            'created_by' => $verifier->id,
+        ]);
+
+        $line->forceFill([
+            'settled_by_payment_id' => $payment->id,
+            'details' => [...($line->details ?? []), 'settlement_payment_id' => $payment->id, 'settlement_payment_no' => $payment->payment_no],
+        ])->save();
     }
 
     /**

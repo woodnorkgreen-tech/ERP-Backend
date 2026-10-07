@@ -127,13 +127,15 @@ class BudgetProjectionOnCompletionTest extends TestCase
         $this->assertSame(0, CostLine::count());
     }
 
-    public function test_the_projection_is_queued(): void
+    public function test_the_projection_is_not_queued_and_cannot_block_completion(): void
     {
         // The whole point of the seam: a cost-ledger failure must never stop
         // somebody completing their task. The guarantee sits on the listener
         // that does the ledger write — completing a task only announces it, and
         // announcing cannot fail in a way worth queueing.
-        $this->assertInstanceOf(ShouldQueue::class, app(ProjectBudgetLines::class));
+        // Report 76A: no longer queued — a projection waiting on an absent
+        // worker never ran. It is posted through FinanceEventPoster instead.
+        $this->assertNotInstanceOf(ShouldQueue::class, app(ProjectBudgetLines::class));
         $this->assertNotInstanceOf(ShouldQueue::class, app(ProjectBudgetLinesOnTaskCompletion::class));
     }
 }

@@ -634,8 +634,16 @@ class PettyCashController extends Controller
             ]);
         }
 
-        $outcome = app(\App\Modules\Finance\CostCollector\Services\PettyCashCostPoster::class)
-            ->attempt($disbursement);
+        // Through the posting record, not straight to the poster: the record is
+        // what Finance's "postings needing attention" list reads, and a retry
+        // that fixed the payment but left that row saying `failed` would have
+        // the two disagree (Report 76A).
+        $posting = app(\App\Modules\Finance\Services\FinanceEventPoster::class);
+        $record = \App\Modules\Finance\Models\FinanceEventPosting::firstOrCreate(
+            ['posting_type' => $posting::PAYMENT_COST, 'subject_id' => $disbursement->id],
+            ['status' => \App\Modules\Finance\Models\FinanceEventPosting::STATUS_PENDING, 'requested_by' => Auth::id(), 'requested_at' => now()],
+        );
+        $outcome = $posting->retry($record, (int) Auth::id())->outcome ?? 'gl_posting_failed';
 
         $disbursement->refresh();
 

@@ -5,9 +5,8 @@ namespace App\Listeners;
 use App\Events\PettyCashRequisitionApproved;
 use App\Modules\Finance\CostCollector\Services\PettyCashCostProducer;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use App\Modules\Finance\Services\FinanceEventPoster;
 use Illuminate\Support\Facades\Log;
-use Throwable;
 
 /**
  * Records an approved fund requisition as a committed project cost.
@@ -17,33 +16,39 @@ use Throwable;
  * approved requisition for the same job showed nothing until somebody paid it
  * out. Budget-versus-actual understated what the project had already promised.
  *
- * QUEUED, and for the same reason as {@see RecordPettyCashCost}: a cost-ledger
- * write must never be able to stop an approval going through. The commitment
- * lands a moment later instead.
+ * Not queued (Report 76A): posted in the approving request, after it commits,
+ * through FinanceEventPoster. A cost-ledger problem still cannot stop an
+ * approval going through — it becomes a failed posting Finance can see and
+ * retry, rather than a job waiting on a worker that may not exist.
  *
  * Re-running is safe. The producer posts through `postFromSource()`, which is
  * idempotent on `(source_type, source_id)`, so re-approval cannot commit twice.
  */
-class RecordPettyCashCommitment implements ShouldQueue
+class RecordPettyCashCommitment
 {
-    public int $tries = 3;
-    public int $backoff = 30;
-
-    public function __construct(private PettyCashCostProducer $producer) {}
+    public function __construct(
+        private PettyCashCostProducer $producer,
+        private FinanceEventPoster $postings,
+    ) {}
 
     public function handle(PettyCashRequisitionApproved $event): void
     {
-        $requisition = PettyCashRequisition::find($event->requisitionId);
+        $this->postings->record(FinanceEventPoster::REQUISITION_COMMITMENT, $event->requisitionId);
+    }
+
+    public function post(array $payload, int $requisitionId): string
+    {
+        $requisition = PettyCashRequisition::find($requisitionId);
 
         // Read back rather than trust the dispatch: by the time this runs the
         // requisition may already have been paid out, which the producer treats
         // as "no longer a commitment" on current state.
         if (! $requisition) {
             Log::info('Fund requisition gone before its commitment could be recorded', [
-                'requisition_id' => $event->requisitionId,
+                'requisition_id' => $requisitionId,
             ]);
 
-            return;
+            return 'skipped_requisition_missing';
         }
 
         $outcome = $this->producer->commitFor($requisition);
@@ -56,17 +61,7 @@ class RecordPettyCashCommitment implements ShouldQueue
             'requisition_number' => $requisition->requisition_number,
             'outcome' => $outcome,
         ]);
-    }
 
-    /**
-     * A promise that could not be committed must be visible, not silent — the
-     * project would otherwise under-report with nothing to explain it.
-     */
-    public function failed(PettyCashRequisitionApproved $event, Throwable $e): void
-    {
-        Log::error('Failed to record fund requisition commitment', [
-            'requisition_id' => $event->requisitionId,
-            'error' => $e->getMessage(),
-        ]);
+        return $outcome;
     }
 }

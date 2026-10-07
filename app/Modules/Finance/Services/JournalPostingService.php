@@ -51,6 +51,17 @@ class JournalPostingService
      */
     private const INVENTORY_CODE = FinanceAccountFunctions::INVENTORY;      // material relieved from the shelf
 
+    /**
+     * The `source_ref` of every cost line a Stores movement produces
+     * (StoresCostProducer). Each one moves material between the shelf and a
+     * job, so its settlement side is Inventory and nothing else.
+     */
+    public const STOCK_MOVEMENT_REFS = [
+        'stock-issue', 'stock-return', 'stock-issue-reversal',
+        // Written only by finance:repost-misattributed-stores-costs.
+        'stock-return-reversal',
+    ];
+
     private const ACCRUED_CODE = FinanceAccountFunctions::ACCRUED_EXPENSES;        // goods received, not yet invoiced
 
     private const PAYABLE_CODE = FinanceAccountFunctions::ACCOUNTS_PAYABLE;        // incurred, still owed to someone
@@ -649,7 +660,13 @@ class JournalPostingService
         // Material off the shelf, or back onto it. No cash is involved either
         // way; the inventory asset is relieved or restored. A negative net on a
         // return swaps the legs, so one account serves both directions.
-        if (in_array($line->source_ref, ['stock-issue', 'stock-return'], true)) {
+        //
+        // Every Stores movement the cost producer can post is named in
+        // STOCK_MOVEMENT_REFS. A reversed issue used to be missing from this
+        // test, fell through to the last fallback below, and posted
+        // Dr Accounts Payable / Cr WIP — relieving a supplier liability with a
+        // stock movement and never putting the material back (Report 76 P0-1).
+        if (in_array($line->source_ref, self::STOCK_MOVEMENT_REFS, true)) {
             return $this->accountByCode(self::INVENTORY_CODE);
         }
 
