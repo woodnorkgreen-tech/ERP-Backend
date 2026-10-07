@@ -1031,6 +1031,33 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::put('work-queue/{workType}/{sourceId}/assignment', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'reassign']);
         Route::get('work-queue/{workType}/{sourceId}/assignment-history', [\App\Modules\Finance\Controllers\FinanceWorkQueueController::class, 'history']);
         Route::get('readiness', [\App\Modules\Finance\Controllers\FinanceReadinessController::class, 'show']);
+
+        /*
+         * Finance Setup & Controls (Report 75): the one route by which Finance
+         * configuration changes. Propose, submit, review, approve, activate; no
+         * endpoint here writes a setting directly. Authority is checked per
+         * action inside GovernanceService, not by route middleware, because the
+         * permission middleware passes for a Super Admin and accounting
+         * authority must not.
+         */
+        Route::prefix('governance')->group(function () {
+            Route::get('/', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'overview']);
+            Route::get('items', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'items']);
+            Route::get('numbering', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'numbering']);
+            Route::get('history', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'history']);
+            // A Super Admin approves and applies in one step (WNG decision, October 2026).
+            Route::post('apply-all', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'applyAll']);
+            Route::post('items/{key}/apply', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'applyNow'])->where('key', '[A-Za-z0-9_.\-]+');
+            Route::post('suggestions/submit', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'proposeSuggestions']);
+            Route::post('proposals/approve', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'approveMany']);
+            Route::post('proposals/activate', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'activateMany']);
+            Route::put('proposals/{version}', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'update']);
+            Route::post('proposals/{version}/{action}', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'act'])
+                ->whereIn('action', ['submit', 'withdraw', 'review', 'return', 'reject', 'approve', 'activate']);
+            Route::get('items/{key}/accounts', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'accounts'])->where('key', '[A-Za-z0-9_.\-]+');
+            Route::post('items/{key}/proposals', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'propose'])->where('key', '[A-Za-z0-9_.\-]+');
+            Route::get('items/{key}', [\App\Modules\Finance\Controllers\FinanceGovernanceController::class, 'show'])->where('key', '[A-Za-z0-9_.\-]+');
+        });
         // Finance Overview read projection, one section per request (Report 65).
         Route::get('overview', [\App\Modules\Finance\Controllers\FinanceOverviewController::class, 'show']);
 
@@ -1298,6 +1325,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::get('requisitions/project-team-members', [PettyCashRequisitionController::class, 'getProjectTeamMembers']);
             Route::get('requisitions/search-payees', [PettyCashRequisitionController::class, 'searchPayees']);
             Route::get('requisitions/{id}', [PettyCashRequisitionController::class, 'show']);
+            Route::post('requisitions/{id}/verify', [PettyCashRequisitionController::class, 'verify']);
             Route::post('requisitions/{id}/approve', [PettyCashRequisitionController::class, 'approve']);
             Route::post('requisitions/{id}/disburse', [PettyCashRequisitionController::class, 'disburse']);
             Route::post('requisitions/{id}/retry-advance-posting', [PettyCashRequisitionController::class, 'retryAdvancePosting']);
@@ -1305,6 +1333,14 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::post('requisitions/{id}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmReceipt']);
             Route::post('requisitions/{id}/items/{itemId}/confirm-receipt', [PettyCashRequisitionController::class, 'confirmItemReceipt']);
             Route::get('requisitions/{id}/voucher', [PettyCashRequisitionController::class, 'downloadVoucher']);
+            // Report 75R-B: after payment by receiver — confirm, account, reconcile, release, close.
+            Route::post('requisitions/{id}/receivers/confirm-receipt', [\App\Modules\Finance\PettyCash\Controllers\RequisitionAccountabilityController::class, 'confirmReceipt'])->whereNumber('id');
+            Route::post('requisitions/{id}/accountabilities', [\App\Modules\Finance\PettyCash\Controllers\RequisitionAccountabilityController::class, 'submit'])->whereNumber('id');
+            Route::post('requisitions/{id}/accountabilities/{surrender}/return', [\App\Modules\Finance\PettyCash\Controllers\RequisitionAccountabilityController::class, 'returnForCorrection'])->whereNumber(['id', 'surrender']);
+            Route::post('requisitions/{id}/accountabilities/{surrender}/reconcile', [\App\Modules\Finance\PettyCash\Controllers\RequisitionAccountabilityController::class, 'reconcile'])->whereNumber(['id', 'surrender']);
+            Route::post('requisitions/{id}/accountabilities/{surrender}/reverse', [\App\Modules\Finance\PettyCash\Controllers\RequisitionAccountabilityController::class, 'reverse'])->whereNumber(['id', 'surrender']);
+            Route::post('requisitions/{id}/release-unused', [\App\Modules\Finance\PettyCash\Controllers\RequisitionAccountabilityController::class, 'releaseUnused'])->whereNumber('id');
+            Route::post('requisitions/{id}/close', [\App\Modules\Finance\PettyCash\Controllers\RequisitionAccountabilityController::class, 'close'])->whereNumber('id');
             Route::post('requisitions/{id}/surrender', [PettyCashRequisitionController::class, 'submitSurrender']);
             Route::post('requisitions/{id}/surrender/return', [PettyCashRequisitionController::class, 'returnSurrenderForCorrection']);
             Route::post('requisitions/{id}/surrender/reverse', [PettyCashRequisitionController::class, 'reverseSurrender']);
@@ -1312,6 +1348,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             // W3 Finance workspace read projections (Report 61); workflow changes stay on the routes above.
             Route::get('finance/overview', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'overview']);
             Route::get('finance/requisitions', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'requisitions']);
+            // Report 75R-A: requisition payments and receiver balances across requisitions.
+            Route::get('finance/requisition-payments', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'requisitionPayments']);
+            Route::get('finance/receiver-balances', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'receiverBalances']);
+            Route::get('finance/receiver-compatibility', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'receiverCompatibility']);
             Route::get('finance/requisitions/{id}', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'requisition'])->whereNumber('id');
             Route::get('requisitions/{id}/attachments', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'attachments'])->whereNumber('id');
             Route::post('requisitions/{id}/attachments', [\App\Modules\Finance\PettyCash\Controllers\PettyCashWorkspaceController::class, 'storeAttachment'])->whereNumber('id');

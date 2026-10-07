@@ -101,7 +101,7 @@ class InventoryFinanceController extends Controller
             'adjustments' => $unposted,
             'opening_inventory_approved' => $openingApproved,
             'finance_sync' => ['failed' => (int) ($sync['failed'] ?? 0), 'pending' => (int) ($sync['pending'] ?? 0)],
-            'wip_policy' => config('finance_accounts.wip_policy') ?: null,
+            'wip_policy' => \App\Modules\Finance\Governance\GovernanceRuntime::instance()->wipPolicy()['policy'],
             'adjustment_account' => $this->account($this->accountId(FinanceAccountFunctions::INVENTORY_ADJUSTMENTS)),
         ]]);
     }

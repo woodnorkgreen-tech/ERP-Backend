@@ -198,6 +198,22 @@ class PettyCashService
                             'requisition_id' => ['Only an approved, undisbursed requisition may be paid.'],
                         ]];
                     }
+                    app(RequisitionVerificationService::class)->assertCurrent($requisition);
+                    // Report 75R-C: the approver must not be the payer.
+                    if ($requisition->approved_by !== null && (int) $requisition->approved_by === (int) Auth::id()) {
+                        return ['success' => false, 'errors' => [
+                            'requisition_id' => [RequisitionDisbursementService::APPROVER_IS_PAYER],
+                        ]];
+                    }
+                    // Report 75R-A: this path pays the whole requisition to one
+                    // receiver. Several receivers are paid one by one, each with
+                    // its own Payment and line allocations.
+                    if (! app(RequisitionReceiverIdentity::class)->isSinglePayment($requisition)) {
+                        throw \Illuminate\Validation\ValidationException::withMessages([
+                            'requisition_id' => 'This requisition has more than one receiver. Pay each receiver from the receiver list.',
+                        ]);
+                    }
+
                     if ($requisition->disbursement()->where('status', 'active')->exists()) {
                         return ['success' => false, 'errors' => [
                             'requisition_id' => ['This requisition has already been disbursed.'],

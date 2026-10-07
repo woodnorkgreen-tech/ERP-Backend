@@ -463,7 +463,20 @@ class ReceivablesPostingService
             );
         }
 
-        $accountId = PaymentSource::whereKey($sourceId)->value('gl_account_id');
+        $source = PaymentSource::query()->find($sourceId);
+
+        // Supplier Credit carries Accounts Payable. It is a liability, never somewhere
+        // money arrives: debiting it for a client receipt would write down what WNG
+        // owes its suppliers with a client's money. The receipt screen cannot pick
+        // it; this refuses a row that names it by any other route.
+        if ($source?->type === 'payable') {
+            throw new InvalidArgumentException(
+                'This receipt names Supplier Credit, which is a liability and not an account money can arrive in. '
+                . 'Correct the receiving account on the receipt before it is posted.'
+            );
+        }
+
+        $accountId = $source?->gl_account_id;
 
         if (! $accountId) {
             throw new InvalidArgumentException(

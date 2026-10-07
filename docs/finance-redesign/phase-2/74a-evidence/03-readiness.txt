@@ -1,0 +1,43 @@
+## readiness, wng_target_rehearsal, profile wng, NO policy
++-----------------------+--------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Check                 | Result | Detail                                                                                                                                                                                                                                                                                                                                         |
++-----------------------+--------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Chart of accounts     | PASS   | 148 postable accounts                                                                                                                                                                                                                                                                                                                          |
+| Chart profile         | FAIL   | POLICY REQUIRED — chart profile 'wng' is active but no WIP policy is approved (FINANCE_WIP_POLICY is not set). How project cost is carried (capitalise or expense_on_capture) is a Finance decision; the profile default is a suggestion and is never applied. Project-cost postings and work-in-progress release are refused until it is set. |
+| Expense-code accounts | PASS   | every required code resolves its debit account; 1 code(s) are off by design (2300)                                                                                                                                                                                                                                                             |
+| Purchase categories   | PASS   | 76 active in 14 families                                                                                                                                                                                                                                                                                                                       |
+| Paying accounts       | PASS   | 3 active, ledger-linked paying accounts                                                                                                                                                                                                                                                                                                        |
+| Accounting period     | PASS   | open period covers 2026-10-06                                                                                                                                                                                                                                                                                                                  |
+| Roles                 | PASS   | 15 present                                                                                                                                                                                                                                                                                                                                     |
++-----------------------+--------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+1 readiness check(s) failed. The app is running, but these screens will be empty or refuse work.
+  Fix: Set FINANCE_WIP_POLICY to the policy Finance has approved (it is not chosen for you), or fix FINANCE_ACCOUNT_PROFILE; then php artisan config:cache.
+exit=1
+## readiness, wng_target_rehearsal, profile wng, FINANCE_WIP_POLICY=capitalise
++-----------------------+--------+------------------------------------------------------------------------------------+
+| Check                 | Result | Detail                                                                             |
++-----------------------+--------+------------------------------------------------------------------------------------+
+| Chart of accounts     | PASS   | 148 postable accounts                                                              |
+| Chart profile         | PASS   | 'wng' active; WIP policy: capitalise                                               |
+| Expense-code accounts | PASS   | every required code resolves its debit account; 1 code(s) are off by design (2300) |
+| Purchase categories   | PASS   | 76 active in 14 families                                                           |
+| Paying accounts       | PASS   | 3 active, ledger-linked paying accounts                                            |
+| Accounting period     | PASS   | open period covers 2026-10-06                                                      |
+| Roles                 | PASS   | 15 present                                                                         |
++-----------------------+--------+------------------------------------------------------------------------------------+
+Finance reference data is ready.
+exit=0
+## readiness, dev db, no profile
++-----------------------+--------+----------------------------------------------------------+
+| Check                 | Result | Detail                                                   |
++-----------------------+--------+----------------------------------------------------------+
+| Chart of accounts     | PASS   | 200 postable accounts                                    |
+| Chart profile         | PASS   | none active: this installation keeps the reference chart |
+| Expense-code accounts | PASS   | every required code resolves its debit account           |
+| Purchase categories   | PASS   | 76 active in 14 families                                 |
+| Paying accounts       | PASS   | 5 active, ledger-linked paying accounts                  |
+| Accounting period     | PASS   | open period covers 2026-10-06                            |
+| Roles                 | PASS   | 15 present                                               |
++-----------------------+--------+----------------------------------------------------------+
+Finance reference data is ready.
+exit=0

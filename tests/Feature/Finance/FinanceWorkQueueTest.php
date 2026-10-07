@@ -278,6 +278,40 @@ class FinanceWorkQueueTest extends TestCase
         $this->assertArrayNotHasKey('fund_surrender', $this->types($requester));
     }
 
+    public function test_the_approver_of_a_cash_requisition_is_never_offered_its_disbursement(): void
+    {
+        // Report 75R-C: approver ≠ payer, with no self-approval override.
+        $approver = $this->userWith(Permissions::FINANCE_PETTY_CASH_UPDATE, Permissions::FINANCE_PETTY_CASH_CREATE, Permissions::APPROVALS_SELF_APPROVE);
+        $cashier = $this->userWith(Permissions::FINANCE_PETTY_CASH_CREATE);
+        $department = DB::table('departments')->insertGetId(['name' => 'Queue Dept 2', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('petty_cash_requisitions')->insert([
+            'requisition_number' => 'REQ-WQ-2', 'user_id' => $this->requester()->id, 'department_id' => $department,
+            'category' => 'general', 'purpose' => 'Approver is not payer', 'total_amount' => 1500, 'status' => 'approved',
+            'approved_by' => $approver->id, 'approved_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $this->assertArrayNotHasKey('fund_disbursement', $this->types($approver));
+        $this->assertSame(1, $this->types($cashier)['fund_disbursement']);
+    }
+
+    public function test_a_purchase_requisition_is_not_offered_to_the_person_who_raised_it(): void
+    {
+        $raiser = $this->userWith(Permissions::PROCUREMENT_REQUISITIONS_APPROVE);
+        $approver = $this->userWith(Permissions::PROCUREMENT_REQUISITIONS_APPROVE);
+        DB::table('requisitions')->insert([
+            'requisition_number' => 'PR-WQ-1', 'date' => '2026-09-10', 'status' => 'pending_approval',
+            'user_id' => $raiser->id, 'submitted_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $this->assertArrayNotHasKey('purchase_requisition', $this->types($raiser));
+        $this->assertSame(1, $this->types($approver)['purchase_requisition']);
+
+        // Each row says who raised the record, and never leaks the internal id.
+        $item = $this->actingAs($approver, 'sanctum')->getJson('/api/finance/work-queue')->assertOk()->json('data.items.0');
+        $this->assertSame($raiser->name, $item['originator']);
+        $this->assertArrayNotHasKey('originator_id', $item);
+    }
+
     public function test_labour_po_verification_is_scoped_to_the_officers_project(): void
     {
         $officer = $this->userWith(Permissions::FINANCE_LABOUR_PO_VERIFY);

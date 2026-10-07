@@ -169,18 +169,22 @@ class PettyCashControlController extends Controller
         $dueSoonDays = PettyCashRequisition::dueSoonDays();
         $today = now()->startOfDay();
         $rows = PettyCashRequisition::query()
-            ->with(['requester:id,name', 'disbursement:id,requisition_id,date_disbursed'])
-            ->whereIn('status', PettyCashRequisition::OUTSTANDING_ADVANCE_STATUSES)
+            ->with(['requester:id,name'])
+            // Report 75R-B: only money actually out and unaccounted is an outstanding
+            // advance, and a requisition paid in several transfers dates from the first.
+            ->outstandingAdvances()
+            ->withMin(['disbursements as first_paid_on' => fn ($q) => $q->where('status', 'active')], 'date_disbursed')
             ->orderByRaw('surrender_due_at IS NULL, surrender_due_at')
-            ->get(['id', 'requisition_number', 'user_id', 'total_amount', 'status', 'surrender_due_at', 'purpose'])
+            ->get()
             ->map(function (PettyCashRequisition $advance) use ($dueSoonDays, $today) {
-                $paidOn = $advance->disbursement?->date_disbursed;
+                $paidOn = $advance->first_paid_on;
                 return [
                     'id' => $advance->id,
                     'requisition_number' => $advance->requisition_number,
                     'requester' => $advance->requester?->name,
                     'purpose' => $advance->purpose,
-                    'amount' => (string) $advance->total_amount,
+                    'amount' => number_format((float) $advance->advance_exposure, 2, '.', ''),
+                    'approved_amount' => (string) $advance->total_amount,
                     'status' => $advance->status,
                     'disbursed_on' => $paidOn ? \Carbon\Carbon::parse($paidOn)->toDateString() : null,
                     'days_outstanding' => $paidOn ? (int) \Carbon\Carbon::parse($paidOn)->startOfDay()->diffInDays($today) : null,
@@ -217,7 +221,7 @@ class PettyCashControlController extends Controller
             ->selectRaw("COALESCE(SUM(CASE WHEN type='credit' THEN amount END),0) credits, COALESCE(SUM(CASE WHEN type='debit' THEN amount END),0) debits")
             ->first();
 
-        $outstanding = PettyCashRequisition::query()->whereIn('status', PettyCashRequisition::OUTSTANDING_ADVANCE_STATUSES);
+        $outstanding = PettyCashRequisition::query()->outstandingAdvances()->get();
 
         $floatAccountIds = PaymentSource::query()->where('type', 'petty_cash')->whereNotNull('gl_account_id')->pluck('gl_account_id');
         $glFloat = $floatAccountIds->isEmpty() ? null : number_format((float) DB::table('journal_lines as l')
@@ -230,8 +234,8 @@ class PettyCashControlController extends Controller
             'system_float_balance' => $systemBalance,
             'gl_float_balance' => $glFloat,
             'outstanding_advances' => [
-                'count' => (clone $outstanding)->count(),
-                'amount' => number_format((float) (clone $outstanding)->sum('total_amount'), 2, '.', ''),
+                'count' => $outstanding->count(),
+                'amount' => number_format((float) $outstanding->sum(fn ($advance) => (float) $advance->advance_exposure), 2, '.', ''),
             ],
             'since_last_count' => [
                 'from' => $lastCount?->toIso8601String(),

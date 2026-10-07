@@ -39,6 +39,7 @@ use Tests\TestCase;
 class SupplierPaymentGateTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Support\VerifiedFinancialRequisitionFixture;
 
     private User $accounts;
     private Supplier $supplier;
@@ -787,7 +788,7 @@ class SupplierPaymentGateTest extends TestCase
             'is_active' => true,
         ]);
 
-        return PettyCashRequisition::create([
+        return $this->verifiedRequisitionFixture(PettyCashRequisition::create([
             'requisition_number' => 'FR-'.uniqid(),
             'user_id' => $requester->id,
             'department_id' => Department::firstOrCreate(['name' => 'Procurement'])->id,
@@ -797,7 +798,7 @@ class SupplierPaymentGateTest extends TestCase
             'total_amount' => $amount,
             'status' => 'approved',
             'requester_name' => 'Site Supervisor',
-        ]);
+        ]));
     }
 
     /** @return array<string, mixed> */

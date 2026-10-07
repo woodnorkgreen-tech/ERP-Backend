@@ -40,16 +40,21 @@ class PettyCashWorkspaceController extends Controller
         abort_unless($user?->can('viewAllRequisitions', Payment::class), 403, 'You do not have access to the petty cash workspace.');
 
         $sum = fn (Builder $q) => $this->money((clone $q)->sum('total_amount'));
-        $status = fn (string ...$s) => PettyCashRequisition::query()->whereIn('status', $s);
+        $status = fn (string ...$s) => PettyCashRequisition::query()->whereIn('status', $s)
+            ->when(in_array('pending', $s, true) || in_array('approved', $s, true), fn ($q) => $q->where('verification_status', 'verified'));
 
-        $outstanding = PettyCashRequisition::query()->whereIn('status', PettyCashRequisition::OUTSTANDING_ADVANCE_STATUSES)
-            ->get(['id', 'status', 'total_amount', 'surrender_due_at']);
+        // Report 75R-B: one definition of an outstanding advance — money actually
+        // out and not yet accounted for — shared with every other advance figure.
+        $outstanding = PettyCashRequisition::query()->outstandingAdvances()->get();
         $dueSoon = PettyCashRequisition::dueSoonDays();
         $states = $outstanding->map(fn (PettyCashRequisition $r) => $r->surrenderState($dueSoon));
 
         $advanceFailures = PettyCashRequisition::query()->whereNotNull('advance_gl_posting_failed_at')
             ->latest('advance_gl_posting_failed_at')->limit(20)
             ->get(['id', 'requisition_number', 'total_amount', 'advance_gl_posting_failed_at', 'advance_gl_posting_error']);
+        $paymentAdvanceFailures = Payment::query()->whereNotNull('advance_gl_posting_failed_at')->where('status', 'active')
+            ->latest('advance_gl_posting_failed_at')->limit(20)
+            ->get(['id', 'requisition_id', 'requisition_child_reference', 'amount', 'advance_gl_posting_failed_at', 'advance_gl_posting_error']);
         $costFailures = Payment::query()->whereNotNull('cost_gl_posting_failed_at')->where('status', '!=', 'voided')
             ->latest('cost_gl_posting_failed_at')->limit(20)
             ->get(['id', 'payment_no', 'amount', 'cost_gl_posting_failed_at', 'cost_gl_posting_error', 'requisition_id']);
@@ -71,7 +76,7 @@ class PettyCashWorkspaceController extends Controller
             'approved_awaiting_disbursement' => ['count' => $status('approved')->count(), 'amount' => $sum($status('approved'))],
             'outstanding_advances' => [
                 'count' => $outstanding->count(),
-                'amount' => $this->money($outstanding->sum('total_amount')),
+                'amount' => $this->money($outstanding->sum(fn (PettyCashRequisition $r) => (float) $r->advance_exposure)),
                 'by_state' => $states->countBy()->all(),
                 'overdue' => $states->filter(fn ($s) => $s === 'overdue')->count(),
                 // W5-8: overdue exists only where a due date was set from an
@@ -87,7 +92,12 @@ class PettyCashWorkspaceController extends Controller
                 'advances' => $advanceFailures->map(fn (PettyCashRequisition $r) => [
                     'requisition_id' => $r->id, 'reference' => $r->requisition_number, 'amount' => $this->money($r->total_amount),
                     'failed_at' => $r->advance_gl_posting_failed_at?->toIso8601String(), 'error' => $this->safeError($r->advance_gl_posting_error),
-                ])->values(),
+                ])->concat($paymentAdvanceFailures->map(fn (Payment $p) => [
+                    // Report 75R-A: a receiver payment carries its own posting state.
+                    'requisition_id' => $p->requisition_id, 'payment_id' => $p->id, 'reference' => $p->requisition_child_reference,
+                    'amount' => $this->money($p->amount),
+                    'failed_at' => $p->advance_gl_posting_failed_at?->toIso8601String(), 'error' => $this->safeError($p->advance_gl_posting_error),
+                ]))->values(),
                 'costs' => $costFailures->map(fn (Payment $p) => [
                     'payment_id' => $p->id, 'reference' => $p->payment_no, 'amount' => $this->money($p->amount), 'requisition_id' => $p->requisition_id,
                     'failed_at' => $p->cost_gl_posting_failed_at?->toIso8601String(), 'error' => $this->safeError($p->cost_gl_posting_error),
@@ -132,6 +142,7 @@ class PettyCashWorkspaceController extends Controller
             ->with(['requester:id,name', 'department:id,name', 'enquiry:id,job_number,title', 'disbursement:id,requisition_id,amount,date_disbursed,payment_source_id,status'])
             ->when($filters['state'] ?? null, fn (Builder $q, $s) => $s === 'gl_posting_failed'
                 ? $q->whereNotNull('advance_gl_posting_failed_at') : $q->whereIn('status', $statusFor[$s]))
+            ->when(in_array($filters['state'] ?? null, ['awaiting_approval', 'approved'], true), fn ($q) => $q->where('verification_status', 'verified'))
             ->when($filters['classification'] ?? null, fn (Builder $q, $c) => $c === 'project'
                 ? $q->where(fn (Builder $w) => $w->whereNotNull('enquiry_id')->orWhereNotNull('project_id'))
                 : $q->whereNull('enquiry_id')->whereNull('project_id'))
@@ -170,7 +181,10 @@ class PettyCashWorkspaceController extends Controller
             'allSurrenderItems.expenseCode:id,code,simple_meaning',
             'advanceJournalEntry:id,entry_no,status', 'surrenderJournalEntry:id,entry_no,status',
         ])->findOrFail($id);
-        abort_unless((int) $r->user_id === (int) $user->id || $user->can('viewAllRequisitions', Payment::class), 403, 'You may only view your own requisitions.');
+        abort_unless((int) $r->user_id === (int) $user->id || $user->can('viewAllRequisitions', Payment::class)
+            // Report 75R-B: the verifier and an employee named as a receiver may read it too.
+            || (int) $r->responsible_verifier_id === (int) $user->id
+            || $r->items()->whereHas('payee.user', fn ($q) => $q->whereKey($user->id))->exists(), 403, 'You may only view your own requisitions.');
 
         $items = $r->allSurrenderItems;
         $current = $items->whereNull('superseded_at');
@@ -185,13 +199,43 @@ class PettyCashWorkspaceController extends Controller
         $spent = (float) ($r->actual_spent_amount ?? $current->sum('amount'));
         $returned = (float) ($r->cash_returned_amount ?? 0);
 
+        // Report 75R-B: a requisition paid by receiver has several Payments and its
+        // accountability is per receiver. The single-payment fields below are then
+        // filled from the whole position, never from whichever Payment came first.
+        $controls = app(\App\Modules\Finance\PettyCash\Services\RequisitionControlProjection::class)->forRequisition($r);
+        $byReceiver = $controls['payment_mode'] === 'by_receiver';
+        if ($byReceiver) {
+            $advance = (float) $controls['disbursed'];
+            $spent = (float) $controls['accounted'];
+            $returned = (float) $controls['returned'];
+        }
+        $activePayments = collect($controls['payments'])->where('status', 'active')->values();
+
         return response()->json(['data' => array_merge($this->row($user, $r, PettyCashRequisition::dueSoonDays()), [
+            'controls' => $controls,
             'approval' => [
                 'approved_by' => $r->approver ? ['id' => $r->approver->id, 'name' => $r->approver->name] : null,
                 'approved_at' => $r->approved_at?->toIso8601String(),
                 'rejection_reason' => $r->rejection_reason,
             ],
-            'disbursement' => $r->disbursement ? [
+            'disbursements' => $byReceiver ? $activePayments->map(fn (array $p) => [
+                'id' => $p['id'], 'reference' => $p['reference'], 'child_reference' => $p['child_reference'],
+                'amount' => $p['amount'], 'date' => $p['date'], 'source' => $p['source'], 'method' => $p['method'],
+                'recipient' => $p['receiver'], 'recorded_by' => $p['recorded_by'],
+            ])->all() : null,
+            'disbursement' => $byReceiver ? ($activePayments->isEmpty() ? null : [
+                'id' => null,
+                'reference' => $activePayments->count() === 1 ? $activePayments[0]['child_reference'] : $activePayments->count().' payments',
+                'amount' => $this->money($controls['disbursed']),
+                'date' => $activePayments->min('date'),
+                'source' => ($sources = $activePayments->pluck('source')->filter()->unique('id'))->count() === 1
+                    ? ['id' => $sources->first()['id'], 'code' => '', 'name' => $sources->first()['name'], 'type' => null]
+                    : ['id' => null, 'code' => '', 'name' => $sources->count().' paying accounts', 'type' => null],
+                'method' => $activePayments->pluck('method')->unique()->count() === 1 ? $activePayments[0]['method'] : 'several methods',
+                'recipient' => $activePayments->pluck('receiver')->filter()->unique()->count() === 1 ? $activePayments[0]['receiver'] : collect($controls['receivers'])->where('paid', '!=', '0.00')->count().' receivers',
+                'status' => 'active',
+                'recorded_by' => null,
+            ]) : ($r->disbursement ? [
                 'id' => $r->disbursement->id,
                 'reference' => $r->disbursement->payment_no,
                 'amount' => $this->money($r->disbursement->amount),
@@ -201,7 +245,7 @@ class PettyCashWorkspaceController extends Controller
                 'recipient' => $r->payee_name ?: $r->requester?->name,
                 'status' => $r->disbursement->status,
                 'recorded_by' => $this->person($names, $r->disbursement->created_by),
-            ] : null,
+            ] : null),
             // STAB-4: a disbursement stays recorded when its journal fails;
             // the failure is shown until an idempotent retry clears it.
             'posting' => [
@@ -322,12 +366,34 @@ class PettyCashWorkspaceController extends Controller
             'state' => PettyCashActions::state($r),
             'surrender_state' => $r->surrenderState($dueSoon),
             'created_at' => $r->created_at?->toIso8601String(),
-            'disbursed' => $r->disbursement ? ['amount' => $this->money($r->disbursement->amount),
-                'date' => $r->disbursement->date_disbursed ? \Illuminate\Support\Carbon::parse($r->disbursement->date_disbursed)->toDateString() : null] : null,
+            'disbursed' => $this->disbursedSummary($r),
             'gl_posting_failed' => (bool) $r->advance_gl_posting_failed_at,
             'actions' => $actions,
             'next_action' => $next,
         ];
+    }
+
+    /**
+     * What a list row says was paid. Report 75R-B: for a requisition paid by
+     * receiver this is every active Payment, not the first one.
+     */
+    private function disbursedSummary(PettyCashRequisition $r): ?array
+    {
+        $first = $r->disbursement;
+        if (! $first) {
+            return null;
+        }
+        if (! $first->requisition_child_reference) {
+            return ['amount' => $this->money($first->amount),
+                'date' => $first->date_disbursed ? \Illuminate\Support\Carbon::parse($first->date_disbursed)->toDateString() : null];
+        }
+        $active = $r->disbursements()->where('status', 'active')->get(['amount', 'date_disbursed']);
+        if ($active->isEmpty()) {
+            return null;
+        }
+
+        return ['amount' => $this->money($active->sum('amount')), 'payments' => $active->count(),
+            'date' => \Illuminate\Support\Carbon::parse($active->min('date_disbursed'))->toDateString()];
     }
 
     private function visible(Request $request, int $id): PettyCashRequisition
@@ -382,5 +448,58 @@ class PettyCashWorkspaceController extends Controller
     private function money(mixed $value): string
     {
         return number_format((float) ($value ?? 0), 2, '.', '');
+    }
+
+    /**
+     * Report 75R-A: every Payment made against a requisition — by parent,
+     * receiver, child reference, PAY reference, project, requester or verifier.
+     */
+    public function requisitionPayments(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->can('viewAllRequisitions', Payment::class), 403);
+        $filters = $request->validate([
+            'requisition_id' => ['nullable', 'integer'], 'search' => ['nullable', 'string', 'max:100'],
+            'receiver_type' => ['nullable', 'in:employee,supplier,other'], 'receiver_id' => ['nullable', 'integer'],
+            'status' => ['nullable', 'in:active,reversed'], 'instalments' => ['nullable', 'boolean'],
+            'receipt' => ['nullable', 'in:confirmed,unconfirmed'],
+            'project_id' => ['nullable', 'integer'], 'enquiry_id' => ['nullable', 'integer'],
+            'requester_id' => ['nullable', 'integer'], 'verifier_id' => ['nullable', 'integer'],
+            'from' => ['nullable', 'date'], 'to' => ['nullable', 'date'], 'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+        $page = app(\App\Modules\Finance\PettyCash\Services\RequisitionDisbursementReport::class)
+            ->payments($filters, (int) ($filters['per_page'] ?? 25));
+
+        return response()->json(['data' => $page->items(), 'meta' => ['total' => $page->total(),
+            'current_page' => $page->currentPage(), 'last_page' => $page->lastPage()]]);
+    }
+
+    /** Report 75R-A: approved against disbursed, with each receiver's outstanding balance. */
+    public function receiverBalances(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->can('viewAllRequisitions', Payment::class), 403);
+        $filters = $request->validate([
+            'disbursement_status' => ['nullable', 'in:not_disbursed,partially_disbursed,fully_disbursed,over_disbursement_exception'],
+            'project_id' => ['nullable', 'integer'], 'enquiry_id' => ['nullable', 'integer'],
+            'requester_id' => ['nullable', 'integer'], 'verifier_id' => ['nullable', 'integer'],
+            'include_closed' => ['nullable', 'boolean'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+        $page = app(\App\Modules\Finance\PettyCash\Services\RequisitionDisbursementReport::class)
+            ->receiverBalances($filters, (int) ($filters['per_page'] ?? 25));
+
+        return response()->json(['data' => $page->items(), 'meta' => ['total' => $page->total(),
+            'current_page' => $page->currentPage(), 'last_page' => $page->lastPage()]]);
+    }
+
+    /**
+     * Report 75R-B: read-only. Open, unpaid requisitions against the receiver
+     * rules, and what each one needs before it can be paid.
+     */
+    public function receiverCompatibility(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->can('viewAllRequisitions', Payment::class), 403);
+        $rows = app(\App\Modules\Finance\PettyCash\Services\RequisitionReceiverCompatibility::class)->report();
+
+        return response()->json(['data' => $rows, 'summary' => collect($rows)->countBy('classification')]);
     }
 }

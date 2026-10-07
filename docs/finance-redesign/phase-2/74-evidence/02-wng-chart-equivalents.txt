@@ -1,0 +1,69 @@
+## Non-journal references to the five accounts (db)
++------+---------------+-----------------+---------------+----------------+----------------+---------------+----------------+
+| code | expense_codes | payment_sources | posting_rules | vat_treatments | wht_categories | invoice_lines | cash_movements |
++------+---------------+-----------------+---------------+----------------+----------------+---------------+----------------+
+| 1330 |             1 |               0 |             0 |              2 |              0 |             0 |              0 |
+| 2110 |             0 |               0 |             0 |              0 |              0 |             0 |              0 |
+| 2120 |             1 |               0 |             0 |              0 |              2 |             0 |              0 |
+| 2150 |             0 |               0 |             0 |              0 |              0 |             0 |              0 |
+| 2200 |             1 |               0 |             0 |              0 |              0 |             0 |              0 |
++------+---------------+-----------------+---------------+----------------+----------------+---------------+----------------+
+## Provenance: created_at histogram of db.chart_of_accounts
++------------+-----+---------------+----------+
+| d          | n   | numeric_codes | mnemonic |
++------------+-----+---------------+----------+
+| 2026-03-06 | 120 |             0 |      120 |
+| 2026-10-02 |  88 |            88 |        0 |
++------------+-----+---------------+----------+
+## WNG chart (wng_source_rehearsal, 123 accounts): any account whose NAME could be VAT / WHT / tax / accrual / deposit / inventory / WIP / payroll liability / prepayment / sales
++---------+-------------------------------------------------+-----------+---------------+----------------+------+-----+
+| code    | name                                            | category  | account_type  | normal_balance | post | act |
++---------+-------------------------------------------------+-----------+---------------+----------------+------+-----+
+| 2160    | Net Payroll Payable                             | liability | balance_sheet | credit         |    1 |   1 |
+| COS-001 | Change in inventory - COS                       | expense   | NULL          | NULL           |    1 |   1 |
+| COS-002 | Cost of Sales                                   | expense   | NULL          | NULL           |    1 |   1 |
+| COS-003 | Cost of Sales:Branding                          | expense   | NULL          | NULL           |    1 |   1 |
+| COS-004 | Cost of Sales:Courier - Projects                | expense   | NULL          | NULL           |    1 |   1 |
+| COS-005 | Cost of Sales:Fabrication                       | expense   | NULL          | NULL           |    1 |   1 |
+| COS-006 | Cost of Sales:Field Facilitation                | expense   | NULL          | NULL           |    1 |   1 |
+| COS-007 | Cost of Sales:Jomat hardware                    | expense   | NULL          | NULL           |    1 |   1 |
+| COS-008 | Cost of Sales:Materials                         | expense   | NULL          | NULL           |    1 |   1 |
+| COS-009 | Cost of Sales:Motor bike and motor vehicle fuel | expense   | NULL          | NULL           |    1 |   1 |
+| COS-010 | Cost of Sales:Paints & Hardware                 | expense   | NULL          | NULL           |    1 |   1 |
+| COS-011 | Cost of Sales:Parking Fees                      | expense   | NULL          | NULL           |    1 |   1 |
+| COS-012 | Cost of Sales:Plotting & Cutting                | expense   | NULL          | NULL           |    1 |   1 |
+| COS-013 | Cost of Sales:Printing                          | expense   | NULL          | NULL           |    1 |   1 |
+| COS-014 | Cost of Sales:Team Meals                        | expense   | NULL          | NULL           |    1 |   1 |
+| COS-015 | Cost of Sales:Teams accomodation                | expense   | NULL          | NULL           |    1 |   1 |
+| COS-016 | Cost of Sales:Transport & Delivery              | expense   | NULL          | NULL           |    1 |   1 |
+| INV-001 | Inventory Shrinkage                             | expense   | NULL          | NULL           |    1 |   1 |
+| ITX-001 | Income tax expense                              | expense   | NULL          | NULL           |    1 |   1 |
+| LDO-001 | Loss on discontinued operations, net of tax     | expense   | NULL          | NULL           |    1 |   1 |
+| OCI-001 | Other comprehensive income                      | equity    | NULL          | NULL           |    1 |   1 |
+| PE-001  | Payroll Expenses                                | expense   | NULL          | NULL           |    1 |   1 |
+| PE-003  | Personnel Expenses:Housing levy                 | expense   | NULL          | NULL           |    1 |   1 |
+| PE-004  | Personnel Expenses:Nita Levy                    | expense   | NULL          | NULL           |    1 |   1 |
+| PE-005  | Personnel Expenses:NSSF Expense                 | expense   | NULL          | NULL           |    1 |   1 |
+| VP-001  | Vat Penalty                                     | expense   | NULL          | NULL           |    1 |   1 |
++---------+-------------------------------------------------+-----------+---------------+----------------+------+-----+
+## Same search on the local copy of the live source (woodnork_erpsystem) and its pristine copy
++----------------------+----------+------------+------------+
+| src                  | accounts | five_codes | five_names |
++----------------------+----------+------------+------------+
+| woodnork_erpsystem   |      120 |          0 |          0 |
+| wng_source_pristine  |      120 |          0 |          0 |
+| wng_source_rehearsal |      123 |          0 |          0 |
+| wng_target_rehearsal |      152 |          0 |          5 |
+| db (dev)             |      208 |          5 |          5 |
++----------------------+----------+------------+------------+
+## Non-mnemonic codes in each WNG-shaped chart
++----------------------+------+------------------------------+
+| src                  | code | name                         |
++----------------------+------+------------------------------+
+| wng_source_rehearsal | 2160 | Net Payroll Payable          |
+| wng_source_rehearsal | 7550 | Salaries & Wages             |
+| wng_source_rehearsal | 7150 | Office Supplies & Stationery |
+| wng_target_rehearsal | 2160 | Net Payroll Payable          |
+| wng_target_rehearsal | 7550 | Salaries & Wages             |
+| wng_target_rehearsal | 7150 | Office Supplies & Stationery |
++----------------------+------+------------------------------+

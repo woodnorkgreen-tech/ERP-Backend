@@ -1,0 +1,17 @@
+Local DDEV governance API recovery — 2026-10-06
+
+Cause: local database db had not applied migration 2026_10_06_000001_create_finance_governance_tables; finance_config_versions did not exist.
+Applied only that existing schema migration in local DDEV. No permissions migration, seeds, chart completion, policy activation, cutover or deployment.
+
+Read-only controller checks with the existing local requesting user permissions:
+overview: HTTP 200
+items?domain=policies: HTTP 200
+items?domain=mapping: HTTP 200
+items?domain=classification: HTTP 200
+items?domain=banks: HTTP 200
+items?domain=petty_cash: HTTP 200
+
+New tables remain empty:
+finance_config_versions: 0 rows
+finance_config_approvals: 0 rows
+finance_config_audit: 0 rows

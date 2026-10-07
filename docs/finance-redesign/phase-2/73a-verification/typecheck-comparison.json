@@ -1,0 +1,9 @@
+{
+  "baseline_diagnostics": 273,
+  "current_diagnostics": 275,
+  "new_diagnostics": [
+    "src/modules/finance/ledger/views/GeneralLedgerView.vue: error TS2322: Type 'string' is not assignable to type '\"\" | JournalSource | undefined'.",
+    "src/modules/finance/ledger/views/GeneralLedgerView.vue: error TS2322: Type 'string' is not assignable to type '\"\" | JournalStatus | undefined'."
+  ],
+  "methodology": "Diagnostic multiset, normalizing only source line/column offsets, retaining file, TS code and message."
+}

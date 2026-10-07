@@ -32,6 +32,7 @@ use Tests\TestCase;
 class PettyCashAdvancePostingTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Support\VerifiedFinancialRequisitionFixture;
 
     private User $requester;
     private User $disburser;
@@ -78,7 +79,7 @@ class PettyCashAdvancePostingTest extends TestCase
             'default_expense_code_id' => $this->expenseCodeId, 'is_active' => true,
         ]);
 
-        return PettyCashRequisition::create([
+        return $this->verifiedRequisitionFixture(PettyCashRequisition::create([
             'requisition_number' => 'PCR-'.uniqid(),
             'user_id' => $this->requester->id,
             'department_id' => $this->departmentId,
@@ -88,7 +89,7 @@ class PettyCashAdvancePostingTest extends TestCase
             'total_amount' => 10000.00,
             'status' => 'approved',
             'payee_name' => 'John Field Worker',
-        ]);
+        ]));
     }
 
     private function disburse(PettyCashRequisition $requisition)

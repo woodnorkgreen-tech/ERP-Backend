@@ -25,6 +25,13 @@ final class PettyCashActions
     public static function forRequisition(User $user, PettyCashRequisition $requisition): array
     {
         $status = $requisition->status;
+        $verified = app(\App\Modules\Finance\PettyCash\Services\RequisitionVerificationService::class)->isCurrent($requisition);
+        $singleReceiver = app(\App\Modules\Finance\PettyCash\Services\RequisitionReceiverIdentity::class)->isSinglePayment($requisition);
+        // Report 75R-B: a requisition paid by receiver is confirmed, accounted for
+        // and reconciled receiver by receiver; the whole-requisition actions below
+        // are then withheld, and the receiver list offers its own.
+        $byReceiver = $requisition->disbursements()->whereNotNull('requisition_child_reference')->exists();
+        $wholeOnly = [! $byReceiver, 'This requisition was paid to its receivers separately. Use the receiver list.'];
         $requester = (int) $requisition->user_id === (int) $user->id;
         $selfAllowed = SelfApproval::allowedFor($user);
         $review = $user->can('reviewRequisition', Payment::class);
@@ -35,6 +42,7 @@ final class PettyCashActions
             'approve' => self::rule([
                 [$review, 'You are not authorized to approve requisitions.'],
                 [$status === 'pending', 'Only a pending requisition can be approved.'],
+                [$verified, 'The current requisition details must be verified first.'],
                 [! $requester || $selfAllowed, 'You raised this requisition, so someone else has to approve it.'],
             ]),
             'reject' => self::rule([
@@ -45,15 +53,22 @@ final class PettyCashActions
             'disburse' => self::rule([
                 [$pay, 'You are not authorized to disburse requisitions.'],
                 [$status === 'approved', 'Only an approved requisition can be disbursed.'],
+                [$verified, 'The current requisition details must be verified first.'],
                 [! $requester || $selfAllowed, 'You raised this requisition, so someone else has to pay it out.'],
+                [$requisition->approved_by === null || (int) $requisition->approved_by !== (int) $user->id, \App\Modules\Finance\PettyCash\Services\RequisitionDisbursementService::APPROVER_IS_PAYER],
+                // Report 75R-A: this is the single whole-amount payment. A requisition
+                // with several receivers is paid receiver by receiver instead.
+                [$singleReceiver, 'This requisition has more than one receiver. Pay each receiver from the receiver list.'],
             ]),
             'confirm_receipt' => self::rule([
                 [$requester, 'Only the requester can confirm receipt.'],
                 [$status === 'disbursed', 'Only a disbursed requisition can have its receipt confirmed.'],
+                $wholeOnly,
             ]),
             'submit_surrender' => self::rule([
                 [in_array($status, ['disbursed', 'received', 'surrender_returned'], true), 'Only disbursed or received requisitions can be surrendered.'],
                 [$requester || $pay, 'Only the requester or Finance can submit this surrender.'],
+                $wholeOnly,
             ]),
             'return_surrender' => self::rule([
                 [$pay, 'You are not authorized to review surrenders.'],
@@ -63,10 +78,12 @@ final class PettyCashActions
             'reconcile_surrender' => self::rule([
                 [$pay, 'You are not authorized to reconcile surrenders.'],
                 [in_array($status, ['disbursed', 'received', 'surrender_pending'], true), 'This surrender cannot be reconciled in its current state.'],
+                $wholeOnly,
             ]),
             'reverse_surrender' => self::rule([
                 [$user->can(Permissions::FINANCE_JOURNALS_REVERSE), 'You do not have permission to reverse surrenders.'],
                 [$status === 'surrendered', 'Only a reconciled surrender can be reversed.'],
+                $wholeOnly,
                 [! $requester, 'The requester cannot reverse their own surrender.'],
                 [(bool) $requisition->surrender_journal_entry_id, 'This surrender has no posted clearing journal to reverse.'],
             ]),

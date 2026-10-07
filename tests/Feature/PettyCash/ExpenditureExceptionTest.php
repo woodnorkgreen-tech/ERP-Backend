@@ -37,6 +37,7 @@ use Tests\TestCase;
 class ExpenditureExceptionTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Support\VerifiedFinancialRequisitionFixture;
 
     private User $requester;
 
@@ -135,7 +136,7 @@ class ExpenditureExceptionTest extends TestCase
 
     private function requisition(string $amount): PettyCashRequisition
     {
-        return PettyCashRequisition::create([
+        return $this->verifiedRequisitionFixture(PettyCashRequisition::create([
             'requisition_number' => 'REQ-' . uniqid(),
             'user_id' => $this->requester->id,
             'department_id' => \App\Modules\HR\Models\Department::firstOrCreate(['name' => 'Production'])->id,
@@ -145,7 +146,7 @@ class ExpenditureExceptionTest extends TestCase
             'status' => 'pending',
             'enquiry_id' => $this->enquiry->id,
             'requester_name' => 'Requester',
-        ]);
+        ]));
     }
 
     private function approve(PettyCashRequisition $requisition, array $payload = [])

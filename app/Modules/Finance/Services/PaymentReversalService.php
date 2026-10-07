@@ -2,9 +2,13 @@
 
 namespace App\Modules\Finance\Services;
 
+use App\Models\GovernanceAuditLog;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashActivityLog;
+use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
+use App\Modules\Finance\PettyCash\Models\PettyCashSurrender;
+use App\Modules\Finance\PettyCash\Models\RequisitionReceiptConfirmation;
 use App\Modules\Finance\PettyCash\Services\LedgerEntry;
 use App\Modules\Finance\PettyCash\Services\LedgerService;
 use App\Modules\ProcurementStores\Models\BillPayment;
@@ -19,6 +23,35 @@ class PaymentReversalService
     public function reverse(Payment $payment, int $actorId, string $reason): Payment
     {
         return DB::transaction(function () use ($payment, $actorId, $reason): Payment {
+            // Report 75R-A: the parent requisition is locked before the Payment,
+            // the same order the receiver-payment path takes, so a reversal and a
+            // new instalment against the same balance cannot interleave.
+            $parent = null;
+            if ($payment->requisition_id) {
+                $parent = PettyCashRequisition::query()->lockForUpdate()->find($payment->requisition_id);
+                if ($parent && in_array($parent->status, ['surrender_pending', 'surrender_returned', 'surrendered'], true)) {
+                    throw new InvalidArgumentException(
+                        "Requisition {$parent->requisition_number} has been accounted for. Reverse its surrender before reversing the payment that funded it."
+                    );
+                }
+            }
+            if ($parent && $payment->requisition_child_reference) {
+                // Report 75R-B: money already accounted for cannot be un-paid from
+                // underneath its account. The surrender is unwound first, in order.
+                $accounted = PettyCashSurrender::query()
+                    ->whereIn('status', PettyCashSurrender::LIVE)
+                    ->whereHas('allocations', fn ($q) => $q->where('payment_id', $payment->id))
+                    ->pluck('reference');
+                if ($accounted->isNotEmpty()) {
+                    throw new InvalidArgumentException(
+                        "{$payment->requisition_child_reference} has been accounted for in ".$accounted->implode(', ')
+                        .'. Reverse or return that surrender before reversing the payment that funded it.'
+                    );
+                }
+                if ($parent->closed_at) {
+                    throw new InvalidArgumentException("Requisition {$parent->requisition_number} is closed. Its payments can no longer be reversed.");
+                }
+            }
             $payment = Payment::query()->with(['paymentSource', 'spendVoucher'])
                 ->lockForUpdate()->findOrFail($payment->id);
 
@@ -75,6 +108,9 @@ class PaymentReversalService
             }
 
             $payment->void($actorId, $reason);
+            if ($parent && $payment->requisition_child_reference) {
+                $this->reopenReceiverBalance($parent, $payment, $actorId, $reason);
+            }
 
             // A voided payment settled nothing: a liability it had completed is
             // payable again, so the fully-settled marker must not outlive it.
@@ -123,6 +159,50 @@ class PaymentReversalService
 
             return $payment->fresh(['paymentSource', 'spendVoucher', 'billPayment']);
         });
+    }
+
+    /**
+     * Report 75R-A: a reversed receiver payment stops counting the moment it is
+     * voided — paid and outstanding are summed from active Payments, so nothing
+     * needs recalculating. The Payment and its line allocations are kept as they
+     * were; only the parent's workflow stage is brought back in step, so that a
+     * requisition with no money out is not left reading "disbursed".
+     */
+    private function reopenReceiverBalance(PettyCashRequisition $parent, Payment $payment, int $actorId, string $reason): void
+    {
+        // Report 75R-B: money that came back was not received. The confirmation is
+        // kept as a record of what was said, and marked as no longer standing.
+        $confirmations = RequisitionReceiptConfirmation::query()->where('payment_id', $payment->id)->whereNull('invalidated_at')->get();
+        foreach ($confirmations as $confirmation) {
+            $confirmation->forceFill(['invalidated_at' => now(), 'invalidated_reason' => "Payment reversed: {$reason}"])->save();
+        }
+
+        $stillPaid = Payment::query()->where('requisition_id', $parent->id)->where('status', 'active')->exists();
+        $before = ['status' => $parent->status, 'received_at' => $parent->received_at?->toIso8601String()];
+
+        if (in_array($parent->status, ['disbursed', 'received'], true)) {
+            // A receipt confirmation covered money that has now come back.
+            $parent->forceFill(['status' => $stillPaid ? 'disbursed' : 'approved', 'received_at' => null])->save();
+        }
+
+        GovernanceAuditLog::query()->create([
+            'project_enquiry_id' => $parent->enquiry_id,
+            'user_id' => $actorId,
+            'gate_type' => 'requisition_payment_reversed',
+            'action_status' => 'recorded',
+            'model_type' => PettyCashRequisition::class,
+            'model_id' => $parent->id,
+            'message' => "{$payment->requisition_child_reference}: KES {$payment->amount} to {$payment->payee_name} reversed ({$payment->payment_no}) — {$reason}",
+            'context' => [
+                'payment_id' => $payment->id,
+                'payment_no' => $payment->payment_no,
+                'child_reference' => $payment->requisition_child_reference,
+                'amount' => (string) $payment->amount,
+                'reason' => $reason,
+                'parent_before' => $before,
+                'receipt_confirmations_invalidated' => $confirmations->pluck('id')->all(),
+            ],
+        ]);
     }
 
     private function cashbookReference(Payment $payment): string

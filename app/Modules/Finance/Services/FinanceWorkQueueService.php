@@ -121,9 +121,14 @@ class FinanceWorkQueueService
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = min(100, max(10, (int) ($filters['per_page'] ?? 25)));
         $pageItems = $filtered->slice(($page - 1) * $perPage, $perPage)->values();
+        // Who raised each record on this page: one lookup, names only.
+        $names = User::query()->whereIn('id', $pageItems->pluck('originator_id')->filter()->unique())->pluck('name', 'id');
+        $pageItems = $pageItems->map(fn (array $item) => $item + [
+            'originator' => $item['originator_id'] ? ($names[$item['originator_id']] ?? null) : null,
+        ]);
 
         return [
-            'items' => $pageItems->map(fn (array $item) => collect($item)->except('priority_rank')->all())->all(),
+            'items' => $pageItems->map(fn (array $item) => collect($item)->except(['priority_rank', 'originator_id'])->all())->all(),
             'summary' => [
                 'total' => $sorted->count(),
                 'overdue' => $sorted->where('priority', 'overdue')->count(),
@@ -261,7 +266,7 @@ class FinanceWorkQueueService
         $invoiceItem = fn (string $type, string $action) => fn (ProjectInvoice $invoice) => $this->item(
             $type, 'sales', $invoice->id, $invoice->invoice_number, $this->clientName($invoice->enquiry),
             $invoice->total_amount, 'KES', $invoice->resubmitted_at ?? $invoice->created_at, $action,
-            "/finance/invoices/{$invoice->id}", $invoice->enquiry?->job_number,
+            "/finance/invoices/{$invoice->id}", $invoice->enquiry?->job_number, $invoice->created_by,
         );
 
         $add('invoice_check', 'sales', $user->can(Permissions::FINANCE_RECEIVABLES_INVOICE_CHECK),
@@ -284,22 +289,25 @@ class FinanceWorkQueueService
                 'client_receipt', 'sales', $receipt->id, $receipt->transaction_reference ?: "RECEIPT-{$receipt->id}",
                 $this->clientName($receipt->enquiry), $receipt->amount, 'KES', $receipt->payment_date ?? $receipt->created_at,
                 'Verify receipt', "/finance/receipts?receipt_id={$receipt->id}", $receipt->enquiry?->job_number,
+                $receipt->recorded_by,
             ));
 
         // ── Purchasing & payables (W2) ────────────────────────────────────
         $add('purchase_requisition', 'purchasing', $user->can(Permissions::PROCUREMENT_REQUISITIONS_APPROVE),
-            fn () => Requisition::query()->where('status', 'pending_approval')->oldest('submitted_at'),
+            // RequisitionController::approve refuses the person who raised it.
+            fn () => $notMine(Requisition::query()->where('status', 'pending_approval'), 'user_id')->oldest('submitted_at'),
             fn (Requisition $request) => $this->item(
                 'purchase_requisition', 'purchasing', $request->id, $request->requisition_number, 'Internal request',
                 $request->total_amount, 'KES', $request->submitted_at ?? $request->created_at, 'Approve purchase',
-                "/procurement/requisition/{$request->id}", $request->job_number,
+                "/procurement/requisition/{$request->id}", $request->job_number, $request->user_id,
             ));
         $add('purchase_order', 'purchasing', $user->can(Permissions::PROCUREMENT_ORDERS_APPROVE),
-            fn () => PurchaseOrder::query()->with('supplier:id,supplier_name')->where('status', 'pending_approval')->oldest(),
+            // PurchaseOrderController::approve refuses the person who raised it.
+            fn () => $notMine(PurchaseOrder::query()->with('supplier:id,supplier_name')->where('status', 'pending_approval'), 'user_id')->oldest(),
             fn (PurchaseOrder $order) => $this->item(
                 'purchase_order', 'purchasing', $order->id, $order->po_number ?? "PO-{$order->id}",
                 $order->supplier?->supplier_name ?? 'Supplier', $order->total_amount ?? 0, 'KES', $order->created_at,
-                'Approve order', "/procurement/purchase-order/{$order->id}", null,
+                'Approve order', "/procurement/purchase-order/{$order->id}", null, $order->user_id,
             ));
         // Report 60: supplier bills. A bill returned for correction is with its
         // preparer, not the verifier, until it is resubmitted.
@@ -309,7 +317,7 @@ class FinanceWorkQueueService
             $type, 'purchasing', $bill->id, $bill->bill_number, $bill->supplier?->supplier_name ?? 'Supplier',
             $type === 'supplier_payment' ? $bill->balance : $bill->amount, 'KES',
             $type === 'supplier_invoice_correction' ? $bill->returned_at : ($bill->bill_date ?? $bill->created_at), $action,
-            "/finance/payables/bills/{$bill->id}", $bill->job_number,
+            "/finance/payables/bills/{$bill->id}", $bill->job_number, $bill->user_id,
         );
         $add('supplier_invoice', 'purchasing', $user->can(Permissions::FINANCE_PAYABLES_VERIFY),
             fn () => $notMine(Bill::query()->with('supplier:id,supplier_name')->whereNull('verified_at')
@@ -333,7 +341,7 @@ class FinanceWorkQueueService
             $type, 'cash', $request->id, $request->requisition_number,
             $request->payee_name ?: $request->requester_name ?: 'Internal requester', $request->total_amount, 'KES',
             $request->updated_at ?? $request->created_at, $action, "/finance/petty-cash/requisitions/{$request->id}",
-            $request->project_name,
+            $request->project_name, $request->user_id,
         );
         $add('fund_requisition', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_UPDATE),
             fn () => $notMine(PettyCashRequisition::query()->where('status', 'pending'), 'user_id')->oldest(),
@@ -342,7 +350,10 @@ class FinanceWorkQueueService
         // requester (disburse and return refuse them), so their own requests are
         // not offered to them as work.
         $add('fund_disbursement', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_CREATE),
-            fn () => $notMine(PettyCashRequisition::query()->where('status', 'approved'), 'user_id')->oldest('approved_at'),
+            // Report 75R-C: the approver is never the payer, whatever they hold
+            // (RequisitionDisbursementService::assertNotApprover has no override).
+            fn () => $notMine(PettyCashRequisition::query()->where('status', 'approved'), 'user_id')
+                ->where(fn (Builder $q) => $q->whereNull('approved_by')->orWhere('approved_by', '!=', $uid))->oldest('approved_at'),
             $fund('fund_disbursement', 'Disburse'));
         $add('fund_surrender_review', 'cash', $user->can(Permissions::FINANCE_PETTY_CASH_CREATE),
             fn () => $notMine(PettyCashRequisition::query()->where('status', 'surrender_pending'), 'user_id')->oldest('surrendered_at'),
@@ -368,12 +379,14 @@ class FinanceWorkQueueService
                     $payload['payee_name'] ?? 'Payee', $payload['amount'] ?? 0, $payload['currency'] ?? 'KES',
                     $request->created_at, 'Approve disbursement',
                     "/finance/petty-cash?direct_request={$request->id}#direct-request-{$request->id}", $payload['project_name'] ?? null,
+                    $request->requested_by,
                 );
             });
 
         $voucher = fn (string $type, string $action) => fn (SpendVoucher $v) => $this->item(
             $type, 'cash', $v->id, $v->voucher_no, $v->payee_name ?: 'Payee', $v->total_amount, $v->currency ?: 'KES',
             $v->resubmitted_at ?? $v->approved_at ?? $v->created_at, $action, "/finance/payment-vouchers/{$v->id}", null,
+            $v->requester_user_id,
         );
         $returned = ['returned_for_correction', 'corrected'];
         $add('spend_voucher', 'cash', $user->can(Permissions::FINANCE_SPEND_VOUCHERS_APPROVE),
@@ -396,18 +409,19 @@ class FinanceWorkQueueService
 
         // ── Project finance (W7) ──────────────────────────────────────────
         $add('cost_verification', 'project', $user->can(Permissions::FINANCE_COSTS_VERIFY),
-            fn () => CostLine::query()->where('nature', '!=', CostLine::NATURE_PLANNED)
-                ->where('status', CostLine::STATUS_SUBMITTED)->oldest('incurred_at'),
+            // CostVerificationService refuses the submitter unless they hold verifyOwn.
+            fn () => $notMine(CostLine::query()->where('nature', '!=', CostLine::NATURE_PLANNED)
+                ->where('status', CostLine::STATUS_SUBMITTED), 'submitted_by_user_id')->oldest('incurred_at'),
             fn (CostLine $cost) => $this->item(
                 'cost_verification', 'project', $cost->id, $cost->ref ?: "COST-{$cost->id}", $cost->payee_name ?: 'Unspecified payee',
                 $cost->net_amount, $cost->currency ?: 'KES', $cost->incurred_at ?? $cost->created_at, 'Verify cost',
-                "/finance/costs/verification?cost={$cost->ref}", $cost->job_number,
+                "/finance/costs/verification?cost={$cost->ref}", $cost->job_number, $cost->submitted_by_user_id,
             ));
         $labour = fn (string $type, string $action) => fn (ProjectLabourActual $actual) => $this->item(
             $type, 'project', $actual->id, $actual->enquiry?->job_number ? "{$actual->enquiry->job_number} · {$actual->labour_role}" : "LABOUR-{$actual->id}",
             trim(($actual->employee?->first_name ?? '').' '.($actual->employee?->last_name ?? '')) ?: 'Employee', $actual->calculated_cost, 'KES',
             $actual->po_verified_at ?? $actual->recorded_at ?? $actual->created_at, $action,
-            "/finance/costs?tab=account&enquiry={$actual->project_enquiry_id}", $actual->enquiry?->title,
+            "/finance/costs?tab=account&enquiry={$actual->project_enquiry_id}", $actual->enquiry?->title, $actual->recorded_by,
         );
         $add('labour_finance_verify', 'project', $this->access->canFinanceVerifyLabour($user),
             fn () => ProjectLabourActual::query()->with(['enquiry:id,job_number,title', 'employee:id,first_name,last_name'])
@@ -432,7 +446,7 @@ class FinanceWorkQueueService
         // ── Payroll (W6) ──────────────────────────────────────────────────
         $run = fn (string $type, string $action, string $url) => fn (PayrollRun $run) => $this->item(
             $type, 'payroll', $run->id, "PAYROLL {$run->payroll_month}", 'Payroll run', $run->total_net, 'KES',
-            $run->updated_at ?? $run->created_at, $action, $url, null,
+            $run->updated_at ?? $run->created_at, $action, $url, null, $run->created_by,
         );
         $manage = $user->can(Permissions::HR_MANAGE_PAYROLL);
         $add('payroll_lock', 'payroll', $manage,
@@ -451,7 +465,8 @@ class FinanceWorkQueueService
     }
 
     private function item(string $workType, string $area, int $id, ?string $reference, string $counterparty,
-        mixed $amount, string $currency, mixed $submittedAt, string $action, string $targetUrl, ?string $context): array
+        mixed $amount, string $currency, mixed $submittedAt, string $action, string $targetUrl, ?string $context,
+        mixed $originatorId = null): array
     {
         $date = $submittedAt ? \Illuminate\Support\Carbon::parse($submittedAt) : now();
         $age = (int) $date->diffInDays(now());
@@ -464,6 +479,7 @@ class FinanceWorkQueueService
             'priority' => $age > 30 ? 'overdue' : ($age > 7 ? 'watch' : 'normal'),
             'priority_rank' => $age > 30 ? 0 : ($age > 7 ? 1 : 2),
             'required_action' => $action, 'target_url' => $targetUrl, 'context' => $context,
+            'originator_id' => $originatorId ? (int) $originatorId : null,
         ];
     }
 

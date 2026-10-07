@@ -33,6 +33,7 @@ class EnquiryResource extends JsonResource
             'venue_place_id'         => $this->venue_place_id,
 
             // Structured scope items from the project_deliverables table
+            'elements_revision'      => (int) $this->elements_revision,
             'project_scope'          => $this->project_scope,
 
             // Workflow configuration

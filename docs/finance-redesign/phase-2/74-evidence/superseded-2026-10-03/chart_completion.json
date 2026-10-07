@@ -1,0 +1,513 @@
+{
+    "profile": "wng",
+    "database": "db_test",
+    "mode": "DRY RUN",
+    "wip_policy": "capitalise",
+    "accounts": [
+        {
+            "code": "SAL-001",
+            "name": "Sales",
+            "action": "create"
+        },
+        {
+            "code": "SAL-002",
+            "name": "Sales:Project Revenue",
+            "action": "create"
+        },
+        {
+            "code": "VAT-001",
+            "name": "Output VAT Payable",
+            "action": "create"
+        },
+        {
+            "code": "VAT-002",
+            "name": "Input VAT Recoverable",
+            "action": "create"
+        },
+        {
+            "code": "WHT-001",
+            "name": "Withholding Tax Payable",
+            "action": "create"
+        },
+        {
+            "code": "PL-001",
+            "name": "Payroll liabilities",
+            "action": "create"
+        },
+        {
+            "code": "PL-002",
+            "name": "Payroll liabilities:PAYE",
+            "action": "create"
+        },
+        {
+            "code": "PL-003",
+            "name": "Payroll liabilities:Statutory & Other Deductions",
+            "action": "create"
+        },
+        {
+            "code": "AE-001",
+            "name": "Accrued Expenses",
+            "action": "create"
+        },
+        {
+            "code": "CD-001",
+            "name": "Client Deposits",
+            "action": "create"
+        },
+        {
+            "code": "IA-001",
+            "name": "Inventory Asset",
+            "action": "create"
+        },
+        {
+            "code": "WIP-001",
+            "name": "Work in Progress",
+            "action": "create"
+        },
+        {
+            "code": "WIP-002",
+            "name": "Work in Progress:Materials",
+            "action": "create"
+        },
+        {
+            "code": "WIP-003",
+            "name": "Work in Progress:Direct Labour",
+            "action": "create"
+        },
+        {
+            "code": "WIP-004",
+            "name": "Work in Progress:Subcontractors",
+            "action": "create"
+        },
+        {
+            "code": "WIP-005",
+            "name": "Work in Progress:Transport & Delivery",
+            "action": "create"
+        },
+        {
+            "code": "WIP-006",
+            "name": "Work in Progress:Equipment Hire & Site",
+            "action": "create"
+        },
+        {
+            "code": "WIP-007",
+            "name": "Work in Progress:Project Utilities",
+            "action": "create"
+        },
+        {
+            "code": "WIP-008",
+            "name": "Work in Progress:Field Facilitation",
+            "action": "create"
+        },
+        {
+            "code": "WIP-009",
+            "name": "Work in Progress:Venue & Permits",
+            "action": "create"
+        },
+        {
+            "code": "WIP-010",
+            "name": "Work in Progress:Rework & Warranty",
+            "action": "create"
+        },
+        {
+            "code": "COS-021",
+            "name": "Cost of Sales:Equipment Hire & Site",
+            "action": "create"
+        },
+        {
+            "code": "COS-022",
+            "name": "Cost of Sales:Project Utilities",
+            "action": "create"
+        },
+        {
+            "code": "COS-023",
+            "name": "Cost of Sales:Venue & Permits",
+            "action": "create"
+        },
+        {
+            "code": "PRE-001",
+            "name": "Prepayments & Deposits",
+            "action": "create"
+        },
+        {
+            "code": "PRE-002",
+            "name": "Prepayments & Deposits:Supplier Advances",
+            "action": "create"
+        },
+        {
+            "code": "PRE-003",
+            "name": "Prepayments & Deposits:Refundable Deposits",
+            "action": "create"
+        },
+        {
+            "code": "PRE-004",
+            "name": "Prepayments & Deposits:Prepaid Expenses",
+            "action": "create"
+        },
+        {
+            "code": "OI-001",
+            "name": "Office Improvement",
+            "action": "create"
+        }
+    ],
+    "created": [],
+    "functions_resolved": "22 / 37",
+    "unresolved_functions": [
+        "bank_default",
+        "petty_cash_float",
+        "accounts_receivable",
+        "staff_advances",
+        "accounts_payable",
+        "opening_balance_equity",
+        "cos_direct_materials",
+        "cos_direct_labour",
+        "cos_subcontractors",
+        "cos_transport_logistics",
+        "cos_project_facilitation",
+        "cos_rework_warranty",
+        "inventory_adjustments",
+        "salaries_expense",
+        "bank_charges"
+    ],
+    "functions": {
+        "bank_default": {
+            "reference": "1010",
+            "account": "EQB-001",
+            "resolves": false,
+            "name": null
+        },
+        "petty_cash_float": {
+            "reference": "1030",
+            "account": "PETTY-001",
+            "resolves": false,
+            "name": null
+        },
+        "accounts_receivable": {
+            "reference": "1100",
+            "account": "AR-001",
+            "resolves": false,
+            "name": null
+        },
+        "staff_advances": {
+            "reference": "1300",
+            "account": "STD-001",
+            "resolves": false,
+            "name": null
+        },
+        "input_vat": {
+            "reference": "1330",
+            "account": "VAT-002",
+            "resolves": true,
+            "name": "Input VAT Recoverable"
+        },
+        "inventory": {
+            "reference": "1200",
+            "account": "IA-001",
+            "resolves": true,
+            "name": "Inventory Asset"
+        },
+        "wip_direct_materials": {
+            "reference": "1211",
+            "account": "WIP-002",
+            "resolves": true,
+            "name": "Work in Progress:Materials"
+        },
+        "wip_direct_labour": {
+            "reference": "1212",
+            "account": "WIP-003",
+            "resolves": true,
+            "name": "Work in Progress:Direct Labour"
+        },
+        "wip_subcontractors": {
+            "reference": "1213",
+            "account": "WIP-004",
+            "resolves": true,
+            "name": "Work in Progress:Subcontractors"
+        },
+        "wip_transport_logistics": {
+            "reference": "1214",
+            "account": "WIP-005",
+            "resolves": true,
+            "name": "Work in Progress:Transport & Delivery"
+        },
+        "wip_equipment_site": {
+            "reference": "1215",
+            "account": "WIP-006",
+            "resolves": true,
+            "name": "Work in Progress:Equipment Hire & Site"
+        },
+        "wip_project_utilities": {
+            "reference": "1216",
+            "account": "WIP-007",
+            "resolves": true,
+            "name": "Work in Progress:Project Utilities"
+        },
+        "wip_project_facilitation": {
+            "reference": "1217",
+            "account": "WIP-008",
+            "resolves": true,
+            "name": "Work in Progress:Field Facilitation"
+        },
+        "wip_venue_statutory": {
+            "reference": "1218",
+            "account": "WIP-009",
+            "resolves": true,
+            "name": "Work in Progress:Venue & Permits"
+        },
+        "wip_rework_warranty": {
+            "reference": "1219",
+            "account": "WIP-010",
+            "resolves": true,
+            "name": "Work in Progress:Rework & Warranty"
+        },
+        "accounts_payable": {
+            "reference": "2100",
+            "account": "AP-001",
+            "resolves": false,
+            "name": null
+        },
+        "output_vat": {
+            "reference": "2110",
+            "account": "VAT-001",
+            "resolves": true,
+            "name": "Output VAT Payable"
+        },
+        "wht_payable": {
+            "reference": "2120",
+            "account": "WHT-001",
+            "resolves": true,
+            "name": "Withholding Tax Payable"
+        },
+        "paye_payable": {
+            "reference": "2130",
+            "account": "PL-002",
+            "resolves": true,
+            "name": "Payroll liabilities:PAYE"
+        },
+        "statutory_payable": {
+            "reference": "2140",
+            "account": "PL-003",
+            "resolves": true,
+            "name": "Payroll liabilities:Statutory & Other Deductions"
+        },
+        "accrued_expenses": {
+            "reference": "2150",
+            "account": "AE-001",
+            "resolves": true,
+            "name": "Accrued Expenses"
+        },
+        "net_payroll_payable": {
+            "reference": "2160",
+            "account": "2160",
+            "resolves": true,
+            "name": "Net Payroll Payable"
+        },
+        "client_deposits": {
+            "reference": "2200",
+            "account": "CD-001",
+            "resolves": true,
+            "name": "Client Deposits"
+        },
+        "opening_balance_equity": {
+            "reference": "3900",
+            "account": "OBE-001",
+            "resolves": false,
+            "name": null
+        },
+        "project_revenue": {
+            "reference": "4100",
+            "account": "SAL-002",
+            "resolves": true,
+            "name": "Sales:Project Revenue"
+        },
+        "cos_direct_materials": {
+            "reference": "5100",
+            "account": "COS-008",
+            "resolves": false,
+            "name": null
+        },
+        "cos_direct_labour": {
+            "reference": "5200",
+            "account": "PE-007",
+            "resolves": false,
+            "name": null
+        },
+        "cos_subcontractors": {
+            "reference": "5300",
+            "account": "COS-020",
+            "resolves": false,
+            "name": null
+        },
+        "cos_transport_logistics": {
+            "reference": "5400",
+            "account": "COS-016",
+            "resolves": false,
+            "name": null
+        },
+        "cos_equipment_site": {
+            "reference": "5500",
+            "account": "COS-021",
+            "resolves": true,
+            "name": "Cost of Sales:Equipment Hire & Site"
+        },
+        "cos_project_utilities": {
+            "reference": "5600",
+            "account": "COS-022",
+            "resolves": true,
+            "name": "Cost of Sales:Project Utilities"
+        },
+        "cos_project_facilitation": {
+            "reference": "5700",
+            "account": "COS-006",
+            "resolves": false,
+            "name": null
+        },
+        "cos_venue_statutory": {
+            "reference": "5800",
+            "account": "COS-023",
+            "resolves": true,
+            "name": "Cost of Sales:Venue & Permits"
+        },
+        "cos_rework_warranty": {
+            "reference": "5900",
+            "account": "COS-018",
+            "resolves": false,
+            "name": null
+        },
+        "inventory_adjustments": {
+            "reference": "6800",
+            "account": "INV-001",
+            "resolves": false,
+            "name": null
+        },
+        "salaries_expense": {
+            "reference": "7550",
+            "account": "PE-006",
+            "resolves": false,
+            "name": null
+        },
+        "bank_charges": {
+            "reference": "7800",
+            "account": "FIN-003",
+            "resolves": false,
+            "name": null
+        }
+    },
+    "catalogue": {
+        "1310": {
+            "account": "PRE-002",
+            "resolves": true,
+            "meaning": "Supplier advances"
+        },
+        "1320": {
+            "account": "PRE-003",
+            "resolves": true,
+            "meaning": "Refundable deposits"
+        },
+        "1340": {
+            "account": "PRE-004",
+            "resolves": true,
+            "meaning": "Prepaid expenses"
+        },
+        "1600": {
+            "account": "OI-001",
+            "resolves": true,
+            "meaning": "Leasehold improvements (capex)"
+        },
+        "2300": {
+            "account": null,
+            "resolves": false,
+            "meaning": "Loans payable"
+        },
+        "6100": {
+            "account": "OPE-012",
+            "resolves": false,
+            "meaning": "Workshop electricity"
+        },
+        "6200": {
+            "account": "OPE-023",
+            "resolves": false,
+            "meaning": "Machinery repairs & maintenance"
+        },
+        "6400": {
+            "account": "OPE-006",
+            "resolves": false,
+            "meaning": "Small tools & workshop consumables"
+        },
+        "6600": {
+            "account": "OPE-006",
+            "resolves": false,
+            "meaning": "PPE & workshop safety"
+        },
+        "6700": {
+            "account": "OPE-014",
+            "resolves": false,
+            "meaning": "Cleaning & waste disposal"
+        },
+        "7100": {
+            "account": "OPE-022",
+            "resolves": false,
+            "meaning": "Office rent"
+        },
+        "7150": {
+            "account": "OPE-030",
+            "resolves": false,
+            "meaning": "Office supplies & stationery"
+        },
+        "7200": {
+            "account": "OPE-031",
+            "resolves": false,
+            "meaning": "Administration airtime & internet"
+        },
+        "7400": {
+            "account": "OPE-032",
+            "resolves": false,
+            "meaning": "Office transport"
+        },
+        "7600": {
+            "account": "OPE-029",
+            "resolves": false,
+            "meaning": "Staff welfare"
+        }
+    },
+    "payment_sources": {
+        "PC-MAIN": {
+            "account": "PETTY-001",
+            "resolves": false
+        },
+        "BANK-MAIN": {
+            "account": "EQB-001",
+            "resolves": false
+        },
+        "BANK-ALT": {
+            "account": "NCBA-001",
+            "resolves": false
+        },
+        "BANK-STANBIC": {
+            "account": "STB-001",
+            "resolves": false
+        },
+        "BANK-KCB": {
+            "account": "KCB-001",
+            "resolves": false
+        },
+        "BANK-FAMILY": {
+            "account": "FMB-001",
+            "resolves": false
+        },
+        "AP": {
+            "account": "AP-001",
+            "resolves": false
+        },
+        "MPESA": {
+            "account": null,
+            "resolves": false
+        },
+        "CARD": {
+            "account": null,
+            "resolves": false
+        }
+    },
+    "classified_existing": [],
+    "source_state": []
+}

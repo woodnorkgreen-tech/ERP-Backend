@@ -17,6 +17,7 @@ use App\Modules\Finance\Models\WhtCategory;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\Finance\Support\FinanceAccountFunctions;
+use App\Modules\Finance\Support\FinanceChartProfile;
 use App\Modules\ProcurementStores\Models\Bill;
 use App\Modules\ProcurementStores\Models\BillPayment;
 use App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem;
@@ -588,6 +589,7 @@ class JournalPostingService
         }
 
         if (! $debitId && $line->expense_code_id) {
+            $this->assertWipPolicy($line->expenseCode?->default_debit_gl, "cost line {$line->ref}");
             // `default_debit_account_id` is the column expense_codes actually
             // carries; `gl_account_id` belongs to payment_sources. Reading the
             // wrong name here returned null for every code ever posted, so the
@@ -617,6 +619,8 @@ class JournalPostingService
         // reference chart posts exactly as before, and a chart that has not mapped
         // it gets no debit, so the entry is refused below instead of guessed.
         if (! $debitId) {
+            // The fallback IS a work-in-progress account.
+            $this->assertWipPolicy(FinanceAccountFunctions::UNCODED_COST_FALLBACK, "cost line {$line->ref}");
             $debitId = $this->accountByCode(FinanceAccountFunctions::UNCODED_COST_FALLBACK);
         }
 
@@ -684,6 +688,23 @@ class JournalPostingService
     private function accountByCode(string $code): ?int
     {
         return ChartOfAccount::postable()->where('code', ChartAccountMap::local($code))->value('id');
+    }
+
+    /**
+     * Project cost is not posted on a WIP policy nobody approved.
+     *
+     * Whether job cost is carried as work in progress or expensed on capture is
+     * Finance's decision. With a company profile active and no policy set, an
+     * expense code may still carry an account from an earlier seed, or from the
+     * reference chart standing beside the company's own; posting to it would
+     * apply a treatment by accident. Costs that are not project WIP (office
+     * overheads, bank charges) are not the policy's to decide and post as usual.
+     */
+    private function assertWipPolicy(?string $debitGl, string $source): void
+    {
+        if (FinanceChartProfile::dependsOnWipPolicy($debitGl) && ($block = FinanceChartProfile::wipPolicyBlock()) !== null) {
+            throw new InvalidArgumentException("{$block} Refused: {$source}.");
+        }
     }
 
     /** No financial fact may enter an unassigned or closed reporting month. */
@@ -926,6 +947,7 @@ class JournalPostingService
         $this->assertOpenPeriod($period?->id, "supplier invoice {$bill->bill_number}");
 
         if ($bill->isDirect()) {
+            $this->assertWipPolicy($bill->expenseCode?->default_debit_gl, "supplier invoice {$bill->bill_number}");
             $debitAccountId = $bill->expenseCode?->default_debit_account_id;
             if (! $debitAccountId) {
                 throw new InvalidArgumentException(
@@ -1325,6 +1347,7 @@ class JournalPostingService
             return $existing;
         }
 
+        $this->assertWipPolicy($payment->expenseCode?->default_debit_gl, "payment {$entryNo}");
         $expenseAccount = $payment->expenseCode?->default_debit_account_id;
         $sourceAccount = $payment->payment_source_id
             ? PaymentSource::whereKey($payment->payment_source_id)->value('gl_account_id')
@@ -1575,7 +1598,11 @@ class JournalPostingService
             return null;
         }
 
-        $advanceAccount = $this->accountByCode(self::STAFF_ADVANCE_CODE);
+        // Report 75R-B: a receiver payment is held where Finance has approved for
+        // that kind of receiver; with nothing approved it is Staff Advances, as before.
+        $advanceAccount = $disbursement->requisition_child_reference
+            ? \App\Modules\Finance\Support\RequisitionAdvanceControl::for($disbursement->payee_type)['account_id']
+            : $this->accountByCode(self::STAFF_ADVANCE_CODE);
         $sourceAccount = $disbursement->payment_source_id
             ? PaymentSource::whereKey($disbursement->payment_source_id)->value('gl_account_id')
             : null;
@@ -1621,6 +1648,137 @@ class JournalPostingService
     }
 
     /**
+     * The expense side of a surrender: one debit per accepted item for its net
+     * amount, and one for claimable input VAT on an ETR receipt.
+     *
+     * Shared by the whole-requisition surrender and the receiver surrender
+     * (Report 75R-B), so an item is expensed by the same rule either way.
+     *
+     * @return array{0: list<array<string, mixed>>, 1: string} the legs and the gross total
+     */
+    private function surrenderItemLegs(PettyCashRequisition $requisition, iterable $items): array
+    {
+        $legs = [];
+        $totalSpent = '0.00';
+
+        foreach ($items as $item) {
+            $tax = $this->money($item->tax_amount ?: 0);
+            $net = $item->net_amount ? $this->money($item->net_amount) : bcsub($this->money($item->amount), $tax, 2);
+            $gross = bcadd($net, $tax, 2);
+            $totalSpent = bcadd($totalSpent, $gross, 2);
+
+            $this->assertWipPolicy($item->expenseCode?->default_debit_gl, 'a surrendered petty cash item');
+            $debitId = $item->expenseCode?->default_debit_account_id
+                ?: ChartOfAccount::postable()->where('category', 'expense')->orderBy('code')->value('id');
+
+            if (bccomp($net, '0.00', 2) === 1 && $debitId) {
+                $legs[] = [
+                    'account_id' => (int) $debitId,
+                    'entry_type' => 'debit',
+                    'amount' => $net,
+                    'description' => $item->description ?: "Receipt {$item->receipt_number} on {$requisition->requisition_number}",
+                    'project_id' => $requisition->project_id,
+                    'project_enquiry_id' => $requisition->enquiry_id,
+                ];
+            }
+
+            if (bccomp($tax, '0.00', 2) === 1 && $item->receipt_type === 'etr') {
+                $vatInputId = $this->accountByCode(self::VAT_INPUT_CODE);
+                if ($vatInputId) {
+                    $legs[] = [
+                        'account_id' => (int) $vatInputId,
+                        'entry_type' => 'debit',
+                        'amount' => $tax,
+                        'description' => "Input VAT on receipt {$item->receipt_number} (PIN: {$item->supplier_kra_pin})",
+                        'project_id' => $requisition->project_id,
+                        'project_enquiry_id' => $requisition->enquiry_id,
+                    ];
+                }
+            }
+        }
+
+        return [$legs, $totalSpent];
+    }
+
+    /**
+     * STAB-7: a surrender item's CostLine is created with postsIndependently
+     * false because the clearing entry — not a separate one per line — is its
+     * real, single posting. Stamp it so the CostLine reads as posted and points
+     * at the entry that recognised its amount.
+     */
+    private function stampSurrenderCostLines(iterable $items, JournalEntry $entry): void
+    {
+        foreach ($items as $item) {
+            if ($item->costLine && ! $item->costLine->posted_at) {
+                $item->costLine->forceFill([
+                    'journal_entry_id' => $entry->id,
+                    'posted_at' => now(),
+                ])->save();
+            }
+        }
+    }
+
+    /**
+     * Report 75R-B: the clearing entry for one receiver's reconciled surrender.
+     *
+     *   Dr  Expense / WIP (net)            per accepted item
+     *   Dr  Input VAT (ETR receipts)       per accepted item
+     *   Cr  Advance control account        per Payment whose advance is cleared
+     *
+     * The credit goes to whichever account each Payment's own advance journal
+     * debited, so the advance is cleared from where it actually sits. Money
+     * returned is not in this entry: each return is its own cash movement with
+     * its own journal. There is no overspend leg — a surrender claiming more
+     * than the receiver holds is never reconciled.
+     *
+     * @param  array<int, string>  $clearedByAccount  advance account id => amount accepted against it
+     */
+    public function postReceiverSurrender(\App\Modules\Finance\PettyCash\Models\PettyCashSurrender $surrender, array $clearedByAccount): JournalEntry
+    {
+        $entryNo = 'JE-PCS-R'.str_pad((string) $surrender->id, 7, '0', STR_PAD_LEFT);
+        if ($existing = JournalEntry::where('entry_no', $entryNo)->first()) {
+            return $existing;
+        }
+
+        $requisition = $surrender->requisition;
+        $surrender->loadMissing(['items.expenseCode', 'items.costLine']);
+        [$legs, $totalSpent] = $this->surrenderItemLegs($requisition, $surrender->items);
+
+        $cleared = '0.00';
+        foreach ($clearedByAccount as $accountId => $amount) {
+            $legs[] = [
+                'account_id' => (int) $accountId,
+                'entry_type' => 'credit',
+                'amount' => $this->money($amount),
+                'description' => "Clear advance to {$surrender->receiver_name} on {$requisition->requisition_number}",
+                'project_id' => $requisition->project_id,
+                'project_enquiry_id' => $requisition->enquiry_id,
+            ];
+            $cleared = bcadd($cleared, $this->money($amount), 2);
+        }
+        if (bccomp($cleared, $totalSpent, 2) !== 0) {
+            throw new InvalidArgumentException(
+                "Surrender {$surrender->reference} accepts KES {$totalSpent} but clears KES {$cleared} of advances."
+            );
+        }
+
+        $entry = $this->postBalancedEntry(
+            entryNo: $entryNo,
+            postingDate: (string) ($surrender->reconciled_at?->toDateString() ?? now()->toDateString()),
+            sourceType: \App\Modules\Finance\PettyCash\Models\PettyCashSurrender::class,
+            sourceId: $surrender->id,
+            sourceRef: $surrender->reference,
+            description: "Surrender {$surrender->reference}: {$surrender->receiver_name} ({$requisition->purpose})",
+            legs: $legs,
+            createdBy: $surrender->reconciled_by ?? auth()->id(),
+        );
+
+        $this->stampSurrenderCostLines($surrender->items, $entry);
+
+        return $entry;
+    }
+
+    /**
      * Create a balanced clearing GL journal entry when a petty cash requisition is surrendered and reconciled.
      *
      *   Dr  Expense / WIP (net)             per verified receipt item
@@ -1656,43 +1814,7 @@ class JournalPostingService
             );
         }
 
-        $legs = [];
-        $totalSpent = '0.00';
-
-        foreach ($requisition->surrenderItems as $item) {
-            $tax = $this->money($item->tax_amount ?: 0);
-            $net = $item->net_amount ? $this->money($item->net_amount) : bcsub($this->money($item->amount), $tax, 2);
-            $gross = bcadd($net, $tax, 2);
-            $totalSpent = bcadd($totalSpent, $gross, 2);
-
-            $debitId = $item->expenseCode?->default_debit_account_id
-                ?: ChartOfAccount::postable()->where('category', 'expense')->orderBy('code')->value('id');
-
-            if (bccomp($net, '0.00', 2) === 1 && $debitId) {
-                $legs[] = [
-                    'account_id' => (int) $debitId,
-                    'entry_type' => 'debit',
-                    'amount' => $net,
-                    'description' => $item->description ?: "Receipt {$item->receipt_number} on {$requisition->requisition_number}",
-                    'project_id' => $requisition->project_id,
-                    'project_enquiry_id' => $requisition->enquiry_id,
-                ];
-            }
-
-            if (bccomp($tax, '0.00', 2) === 1 && $item->receipt_type === 'etr') {
-                $vatInputId = $this->accountByCode(self::VAT_INPUT_CODE);
-                if ($vatInputId) {
-                    $legs[] = [
-                        'account_id' => (int) $vatInputId,
-                        'entry_type' => 'debit',
-                        'amount' => $tax,
-                        'description' => "Input VAT on receipt {$item->receipt_number} (PIN: {$item->supplier_kra_pin})",
-                        'project_id' => $requisition->project_id,
-                        'project_enquiry_id' => $requisition->enquiry_id,
-                    ];
-                }
-            }
-        }
+        [$legs, $totalSpent] = $this->surrenderItemLegs($requisition, $requisition->surrenderItems);
 
         $cashReturned = $this->money($requisition->cash_returned_amount ?? 0);
         if (bccomp($cashReturned, '0.00', 2) === 1) {
@@ -1710,10 +1832,19 @@ class JournalPostingService
         $totalAccounted = bcadd($totalSpent, $cashReturned, 2);
         $advanceAmount = $this->money($requisition->total_amount);
 
-        // Advance cleared cannot exceed the original advance amount
-        $advanceCleared = bccomp($totalAccounted, $advanceAmount, 2) === 1
-            ? $advanceAmount
-            : $totalAccounted;
+        // Report 75R-C (WNG decision): overspend is never reimbursed automatically.
+        // This entry used to credit the paying account for anything above the
+        // advance — money "paid back" with no Payment and no approval. A surrender
+        // above the advance is now not posted at all; the extra is requested,
+        // approved and paid as its own requisition. Entries already posted the old
+        // way are history and are left as they are.
+        if (bccomp($totalAccounted, $advanceAmount, 2) === 1) {
+            throw new InvalidArgumentException(
+                "Overspend requires resolution: {$requisition->requisition_number} accounts for KES {$totalAccounted} against KES {$advanceAmount} advanced. "
+                .\App\Modules\Finance\PettyCash\Services\RequisitionAccountabilityService::OVERSPEND_INSTRUCTION
+            );
+        }
+        $advanceCleared = $totalAccounted;
 
         if (bccomp($advanceCleared, '0.00', 2) === 1) {
             $legs[] = [
@@ -1721,19 +1852,6 @@ class JournalPostingService
                 'entry_type' => 'credit',
                 'amount' => $advanceCleared,
                 'description' => "Clear staff advance on {$requisition->requisition_number}",
-                'project_id' => $requisition->project_id,
-                'project_enquiry_id' => $requisition->enquiry_id,
-            ];
-        }
-
-        // If employee overspent, company owes / paid reimbursement
-        $overspent = bcsub($totalAccounted, $advanceAmount, 2);
-        if (bccomp($overspent, '0.00', 2) === 1) {
-            $legs[] = [
-                'account_id' => (int) $sourceAccount,
-                'entry_type' => 'credit',
-                'amount' => $overspent,
-                'description' => "Reimbursement for out-of-pocket overspend on {$requisition->requisition_number}",
                 'project_id' => $requisition->project_id,
                 'project_enquiry_id' => $requisition->enquiry_id,
             ];
@@ -1752,20 +1870,7 @@ class JournalPostingService
             createdBy: $requisition->surrender_reconciled_by ?? auth()->id(),
         );
 
-        // STAB-7: each surrender item's own CostLine was created with
-        // postsIndependently: false (see reconcileSurrender()) precisely
-        // because this entry — not a separate one per line — is its real,
-        // single posting. Stamp it here so the CostLine reads as posted and
-        // points at the entry that actually recognised its amount, instead
-        // of sitting unposted forever.
-        foreach ($requisition->surrenderItems as $item) {
-            if ($item->costLine && ! $item->costLine->posted_at) {
-                $item->costLine->forceFill([
-                    'journal_entry_id' => $entry->id,
-                    'posted_at' => now(),
-                ])->save();
-            }
-        }
+        $this->stampSurrenderCostLines($requisition->surrenderItems, $entry);
 
         return $entry;
     }
@@ -1937,6 +2042,8 @@ class JournalPostingService
         if ($payment->expense_code_id) {
             $expenseCode = \App\Modules\Finance\CostCollector\Models\ExpenseCode::find($payment->expense_code_id);
             if ($expenseCode && $expenseCode->default_debit_account_id) {
+                $this->assertWipPolicy($expenseCode->default_debit_gl, "payment {$payment->payment_no}");
+
                 return ChartOfAccount::find($expenseCode->default_debit_account_id);
             }
         }

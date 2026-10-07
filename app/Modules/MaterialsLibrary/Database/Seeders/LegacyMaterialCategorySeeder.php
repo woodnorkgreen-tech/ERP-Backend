@@ -296,3 +296,20 @@ class LegacyMaterialCategorySeeder extends Seeder
         }
     }
 }
+/* Category planning notes retained from the workspace.
+1. Group
+
+ Uncategorized
+ Boards
+ Sheet Materials
+ Veneer
+ Printing Media
+ Inks & Coatings
+ Adhesives & Laminates
+ Metals & Profiles
+ Electrical & LED
+Hardware & Fasteners
+ Packaging & Dispatch
+ Cutting Tools
+ Timber & Wood
+*/

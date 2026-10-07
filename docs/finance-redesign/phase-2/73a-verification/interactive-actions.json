@@ -1,0 +1,1914 @@
+[
+  {
+    "screen": "Invoice",
+    "view": "invoice-detail&scenario=invoice-check",
+    "permission": "finance.receivables.invoice_check",
+    "action": "Check",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "",
+      "buttons": []
+    },
+    "result": "FAIL",
+    "error": "Error: Control not found: Check invoice"
+  },
+  {
+    "screen": "Invoice",
+    "view": "invoice-detail&scenario=invoice-check",
+    "permission": "finance.receivables.invoice_check",
+    "action": "Check",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "",
+      "buttons": []
+    },
+    "result": "FAIL",
+    "error": "Error: Control not found: Check invoice"
+  },
+  {
+    "screen": "Invoice",
+    "view": "invoice-detail",
+    "permission": "finance.receivables.allocate",
+    "action": "Apply receipt",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "",
+      "buttons": []
+    },
+    "result": "FAIL",
+    "error": "Error: Control not found: Apply"
+  },
+  {
+    "screen": "Invoice",
+    "view": "invoice-detail",
+    "permission": "finance.receivables.allocate",
+    "action": "Apply receipt",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "",
+      "buttons": []
+    },
+    "result": "FAIL",
+    "error": "Error: Control not found: Apply"
+  },
+  {
+    "screen": "Receipt",
+    "view": "receipts&scenario=receipt-verify",
+    "permission": "finance.receivables.verify",
+    "action": "Verify",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tPending\n\nrecorded by Receipt preparer\n\n\tVerify receipt\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recordedFT-001\nKES 150,000.00\n\nRecorded · Receipt preparer · 4 Sept 2026, 11:00\n\nReceipt preparer\n\nVerification\n\nPending\n\nAllocation\n\nPending\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Receipt preparer\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nVerify\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Record receipt",
+          "disabled": false
+        },
+        {
+          "label": "Awaiting verification1Recorded but not yet confirmed by a second person; not yet in the ledger.",
+          "disabled": false
+        },
+        {
+          "label": "Held for clientsKES 50,000.00Verified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.",
+          "disabled": false
+        },
+        {
+          "label": "Acme Events",
+          "disabled": false
+        },
+        {
+          "label": "JOB-5",
+          "disabled": false
+        },
+        {
+          "label": "Verify receipt",
+          "disabled": false
+        },
+        {
+          "label": "Previous",
+          "disabled": true
+        },
+        {
+          "label": "Next",
+          "disabled": true
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nRehearsal action recorded.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tVerified\n\nrecorded by Receipt preparer\n\nverified by Finance fixture reviewer\n\n\t\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recordedFT-001\nKES 150,000.00\n\nRecorded · Receipt preparer · 4 Sept 2026, 11:00\n\nReceipt preparer\n\nVerification\n\nPending\n\nAllocation\n\nPending\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Receipt preparer\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nVerify\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/receipts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/journals"
+        },
+        {
+          "method": "post",
+          "url": "/api/projects/enquiries/5/payments/21/verify"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/receipts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        }
+      ],
+      "query": "/finance/receipts"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/projects/enquiries/5/payments/21/verify"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Receipt",
+    "view": "receipts&scenario=receipt-verify",
+    "permission": "finance.receivables.verify",
+    "action": "Verify",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tPending\n\nrecorded by Receipt preparer\n\n\tVerify receipt\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recordedFT-001\nKES 150,000.00\n\nRecorded · Receipt preparer · 4 Sept 2026, 11:00\n\nReceipt preparer\n\nVerification\n\nPending\n\nAllocation\n\nPending\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Receipt preparer\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nVerify\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Record receipt",
+          "disabled": false
+        },
+        {
+          "label": "Awaiting verification1Recorded but not yet confirmed by a second person; not yet in the ledger.",
+          "disabled": false
+        },
+        {
+          "label": "Held for clientsKES 50,000.00Verified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.",
+          "disabled": false
+        },
+        {
+          "label": "Acme Events",
+          "disabled": false
+        },
+        {
+          "label": "JOB-5",
+          "disabled": false
+        },
+        {
+          "label": "Verify receipt",
+          "disabled": false
+        },
+        {
+          "label": "Previous",
+          "disabled": true
+        },
+        {
+          "label": "Next",
+          "disabled": true
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tPending\n\nrecorded by Receipt preparer\n\n\tVerify receipt\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recordedFT-001\nKES 150,000.00\n\nRecorded · Receipt preparer · 4 Sept 2026, 11:00\n\nReceipt preparer\n\nVerification\n\nPending\n\nAllocation\n\nPending\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Receipt preparer\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nVerify\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/receipts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/journals"
+        },
+        {
+          "method": "post",
+          "url": "/api/projects/enquiries/5/payments/21/verify"
+        }
+      ],
+      "query": "/finance/receipts"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/projects/enquiries/5/payments/21/verify"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Receipt",
+    "view": "receipts",
+    "permission": "finance.receivables.correct",
+    "action": "Reverse",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tPending\n\nrecorded by Me Myself\n\n\t\n\nThis receipt was recorded by you, so someone else has to confirm it.\n\nReverse\nCorrect\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recordedFT-001\nKES 150,000.00\n\nRecorded · Me Myself · 4 Sept 2026, 11:00\n\nMe Myself\n\nVerification\n\nPending\n\nAllocation\n\nPending\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Me Myself\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nCorrect\nReverse\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Record receipt",
+          "disabled": false
+        },
+        {
+          "label": "Awaiting verification1Recorded but not yet confirmed by a second person; not yet in the ledger.",
+          "disabled": false
+        },
+        {
+          "label": "Held for clientsKES 50,000.00Verified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.",
+          "disabled": false
+        },
+        {
+          "label": "Acme Events",
+          "disabled": false
+        },
+        {
+          "label": "JOB-5",
+          "disabled": false
+        },
+        {
+          "label": "Reverse",
+          "disabled": false
+        },
+        {
+          "label": "Correct",
+          "disabled": false
+        },
+        {
+          "label": "Previous",
+          "disabled": true
+        },
+        {
+          "label": "Next",
+          "disabled": true
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nRehearsal action recorded.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tVoid\n\nrecorded by Me Myself\n\nreversed by Finance fixture reviewer\n\n\t\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recordedFT-001\nKES 150,000.00\n\nRecorded · Me Myself · 4 Sept 2026, 11:00\n\nMe Myself\n\nVerification\n\nPending\n\nAllocation\n\nPending\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Me Myself\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nCorrect\nReverse\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/receipts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/journals"
+        },
+        {
+          "method": "delete",
+          "url": "/api/projects/enquiries/5/payments/21"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/receipts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        }
+      ],
+      "query": "/finance/receipts"
+    },
+    "endpoints": [
+      {
+        "method": "delete",
+        "url": "/api/projects/enquiries/5/payments/21"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Receipt",
+    "view": "receipts",
+    "permission": "finance.receivables.correct",
+    "action": "Reverse",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tPending\n\nrecorded by Me Myself\n\n\t\n\nThis receipt was recorded by you, so someone else has to confirm it.\n\nReverse\nCorrect\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recordedFT-001\nKES 150,000.00\n\nRecorded · Me Myself · 4 Sept 2026, 11:00\n\nMe Myself\n\nVerification\n\nPending\n\nAllocation\n\nPending\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Me Myself\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nCorrect\nReverse\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Record receipt",
+          "disabled": false
+        },
+        {
+          "label": "Awaiting verification1Recorded but not yet confirmed by a second person; not yet in the ledger.",
+          "disabled": false
+        },
+        {
+          "label": "Held for clientsKES 50,000.00Verified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.",
+          "disabled": false
+        },
+        {
+          "label": "Acme Events",
+          "disabled": false
+        },
+        {
+          "label": "JOB-5",
+          "disabled": false
+        },
+        {
+          "label": "Reverse",
+          "disabled": false
+        },
+        {
+          "label": "Correct",
+          "disabled": false
+        },
+        {
+          "label": "Previous",
+          "disabled": true
+        },
+        {
+          "label": "Next",
+          "disabled": true
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tPending\n\nrecorded by Me Myself\n\n\t\n\nThis receipt was recorded by you, so someone else has to confirm it.\n\nReverse\nCorrect\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recordedFT-001\nKES 150,000.00\n\nRecorded · Me Myself · 4 Sept 2026, 11:00\n\nMe Myself\n\nVerification\n\nPending\n\nAllocation\n\nPending\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Me Myself\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nCorrect\nReverse\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/receipts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/journals"
+        },
+        {
+          "method": "delete",
+          "url": "/api/projects/enquiries/5/payments/21"
+        }
+      ],
+      "query": "/finance/receipts"
+    },
+    "endpoints": [
+      {
+        "method": "delete",
+        "url": "/api/projects/enquiries/5/payments/21"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Supplier Bill",
+    "view": "bill-detail",
+    "permission": "finance.payables.verify",
+    "action": "Verify",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSupplier bill BILL-2026-0031\nSupplier bill BILL-2026-0031\nAwaiting review\nPending\n\nTimber & Board Ltd · invoice SINV-88\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nREQUISITION\n\nPR-0008\n\nPURCHASE ORDER\n\nPO-0012 · 1 amendment\n\nGOODS RECEIVED\n\nGRN-0020\n\nSUPPLIER BILL\n\nBILL-2026-0031 · SINV-88\n\nPAYMENT\n\nNo payments have been recorded against this bill.\n\nProject billing & receipts\nSupplier identity\nBill payments\n\nBILL (GROSS)\n\nKES 58,000.00\n\nBilled 2026-09-01\n\nPAYABLE TO SUPPLIER\n\nKES 56,500.00\n\nafter KES 1,500.00 WHT\n\nSTILL OWED\n\nKES 56,500.00\n\n5 days past due (2026-09-10)\n\nVerify bill\nReturn for correction\nPay: Verify this bill first\nThree-way match\nPasses: ready to verify\n\nPurchase order approved\n\nOrder PO-0012\n\nPassed\n\nInvoice does not exceed the remaining accepted (unbilled) value\n\n50,000.00 invoiced against 50,000.00 remaining accepted\n\nPassed\nORDER LINE\tORDERED\tRECEIVED\tACCEPTED\tUNIT PRICE\tACCEPTED VALUE\tRESULT\nMDF 18mm (sheet)\t100\t100\t100\t500.00\t50,000.00\tFully accepted\nORDER VALUE\nKES 50,000.00\nPREVIOUSLY BILLED\nKES 0.00\nTHIS BILL (NET)\nKES 50,000.00\nBILLED IN TOTAL\nKES 50,000.00\nSTILL BILLABLE\nKES 0.00\n\nCompared net of VAT, the basis the order is priced on. Finance refuses a bill that takes the total past the order or past what Stores accepted.\n\nTax and withholding\nNet\nKES 50,000.00\nVAT (Standard 16%, claimable)\nKES 8,000.00\nGross supplier bill\nKES 58,000.00\n− Withholding tax (Professional fees, 3.00%)\nKES 1,500.00\n= Amount payable to supplier\nKES 56,500.00\n\nWHT liability: KES 1,500.00 retained and owed to KRA on WHT-001 Withholding Tax Payable. It is not a discount: the supplier's invoice is still KES 58,000.00.\n\neTIMS ETIMS-1 · supplier PIN P051234567M · tax point 2026-09-01\n\nPayments\n\nNo payments have been recorded against this bill.\n\nPaid KES 0.00 of KES 56,500.00 payable · KES 56,500.00 outstanding. A payment settles the liability; it adds no project cost.\n\nProject cost\n\nCosted when Stores accepted the goods.\n\nCL-0000009 · accrued · 50,000.00 · JOB-5 · receipt accrual settled by this bill\nProcurement basis\nOrder\nPO-0012 · 50,000.00\nApproved\nOps Manager · 29 Aug 2026, 11:00\nSenior approval\nNo senior-approval threshold has been set by WNG yet\nRequisition\nPR-0008 · approved by Ops Manager\n\nORIGINAL ORDER AND AMENDMENTS\n\nAmendment 1 · approved · commercial\n\nOriginal KES 45,000.00 → approved KES 50,000.00\n\nExtra sheets\n\nRequested by Proc Clerk · approved by Ops Manager 30 Aug 2026, 12:00\n\nGOODS RECEIVED\n\nGRN-0020 · 2026-08-31 · received by Store Keeper · confirmed\nMDF 18mm: 100 of 100 received\n\nService procurement uses the same goods receipt: a separate service confirmation is an open WNG policy decision (W2-8).\n\nControls\n\nRecorded by Proc Clerk\n\n1 Sept 2026, 11:00\n\nEvidence\nShow\nAudit trail\n\nNo control events have been logged for this bill beyond those above.",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Verify bill",
+          "disabled": false
+        },
+        {
+          "label": "Return for correction",
+          "disabled": false
+        },
+        {
+          "label": "Show",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSupplier bill BILL-2026-0031\nSupplier bill BILL-2026-0031\nAwaiting review\nPending\n\nTimber & Board Ltd · invoice SINV-88\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nRehearsal action recorded.\n\nREQUISITION\n\nPR-0008\n\nPURCHASE ORDER\n\nPO-0012 · 1 amendment\n\nGOODS RECEIVED\n\nGRN-0020\n\nSUPPLIER BILL\n\nBILL-2026-0031 · SINV-88\n\nPAYMENT\n\nNo payments have been recorded against this bill.\n\nProject billing & receipts\nSupplier identity\nBill payments\n\nBILL (GROSS)\n\nKES 58,000.00\n\nBilled 2026-09-01\n\nPAYABLE TO SUPPLIER\n\nKES 56,500.00\n\nafter KES 1,500.00 WHT\n\nSTILL OWED\n\nKES 56,500.00\n\n5 days past due (2026-09-10)\n\nReturn for correction\nPay: Verify this bill first\nThree-way match\nPasses: ready to verify\n\nPurchase order approved\n\nOrder PO-0012\n\nPassed\n\nInvoice does not exceed the remaining accepted (unbilled) value\n\n50,000.00 invoiced against 50,000.00 remaining accepted\n\nPassed\nORDER LINE\tORDERED\tRECEIVED\tACCEPTED\tUNIT PRICE\tACCEPTED VALUE\tRESULT\nMDF 18mm (sheet)\t100\t100\t100\t500.00\t50,000.00\tFully accepted\nORDER VALUE\nKES 50,000.00\nPREVIOUSLY BILLED\nKES 0.00\nTHIS BILL (NET)\nKES 50,000.00\nBILLED IN TOTAL\nKES 50,000.00\nSTILL BILLABLE\nKES 0.00\n\nCompared net of VAT, the basis the order is priced on. Finance refuses a bill that takes the total past the order or past what Stores accepted.\n\nTax and withholding\nNet\nKES 50,000.00\nVAT (Standard 16%, claimable)\nKES 8,000.00\nGross supplier bill\nKES 58,000.00\n− Withholding tax (Professional fees, 3.00%)\nKES 1,500.00\n= Amount payable to supplier\nKES 56,500.00\n\nWHT liability: KES 1,500.00 retained and owed to KRA on WHT-001 Withholding Tax Payable. It is not a discount: the supplier's invoice is still KES 58,000.00.\n\neTIMS ETIMS-1 · supplier PIN P051234567M · tax point 2026-09-01\n\nPayments\n\nNo payments have been recorded against this bill.\n\nPaid KES 0.00 of KES 56,500.00 payable · KES 56,500.00 outstanding. A payment settles the liability; it adds no project cost.\n\nProject cost\n\nCosted when Stores accepted the goods.\n\nCL-0000009 · accrued · 50,000.00 · JOB-5 · receipt accrual settled by this bill\nProcurement basis\nOrder\nPO-0012 · 50,000.00\nApproved\nOps Manager · 29 Aug 2026, 11:00\nSenior approval\nNo senior-approval threshold has been set by WNG yet\nRequisition\nPR-0008 · approved by Ops Manager\n\nORIGINAL ORDER AND AMENDMENTS\n\nAmendment 1 · approved · commercial\n\nOriginal KES 45,000.00 → approved KES 50,000.00\n\nExtra sheets\n\nRequested by Proc Clerk · approved by Ops Manager 30 Aug 2026, 12:00\n\nGOODS RECEIVED\n\nGRN-0020 · 2026-08-31 · received by Store Keeper · confirmed\nMDF 18mm: 100 of 100 received\n\nService procurement uses the same goods receipt: a separate service confirmation is an open WNG policy decision (W2-8).\n\nControls\n\nRecorded by Proc Clerk\n\n1 Sept 2026, 11:00\n\nVerified by Finance fixture reviewer\n\n3 Oct 2026, 12:00\n\nEvidence\nShow\nAudit trail\n\nNo control events have been logged for this bill beyond those above.\n\nVerify BILL-2026-0031?\n\nYou confirm Timber & Board Ltd's invoice SINV-88 for KES 58,000.00 agrees with the order and what Stores accepted. It posts to Accounts Payable, with KES 1,500.00 withholding owed to KRA, and becomes payable.\n\nCancel\nVerify bill",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payables/bills/31"
+        },
+        {
+          "method": "post",
+          "url": "/api/procurement-stores/bills/31/verify"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payables/bills/31"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        }
+      ],
+      "query": "/finance/payables/bills/31"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/procurement-stores/bills/31/verify"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Supplier Bill",
+    "view": "bill-detail",
+    "permission": "finance.payables.verify",
+    "action": "Verify",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSupplier bill BILL-2026-0031\nSupplier bill BILL-2026-0031\nAwaiting review\nPending\n\nTimber & Board Ltd · invoice SINV-88\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nREQUISITION\n\nPR-0008\n\nPURCHASE ORDER\n\nPO-0012 · 1 amendment\n\nGOODS RECEIVED\n\nGRN-0020\n\nSUPPLIER BILL\n\nBILL-2026-0031 · SINV-88\n\nPAYMENT\n\nNo payments have been recorded against this bill.\n\nProject billing & receipts\nSupplier identity\nBill payments\n\nBILL (GROSS)\n\nKES 58,000.00\n\nBilled 2026-09-01\n\nPAYABLE TO SUPPLIER\n\nKES 56,500.00\n\nafter KES 1,500.00 WHT\n\nSTILL OWED\n\nKES 56,500.00\n\n5 days past due (2026-09-10)\n\nVerify bill\nReturn for correction\nPay: Verify this bill first\nThree-way match\nPasses: ready to verify\n\nPurchase order approved\n\nOrder PO-0012\n\nPassed\n\nInvoice does not exceed the remaining accepted (unbilled) value\n\n50,000.00 invoiced against 50,000.00 remaining accepted\n\nPassed\nORDER LINE\tORDERED\tRECEIVED\tACCEPTED\tUNIT PRICE\tACCEPTED VALUE\tRESULT\nMDF 18mm (sheet)\t100\t100\t100\t500.00\t50,000.00\tFully accepted\nORDER VALUE\nKES 50,000.00\nPREVIOUSLY BILLED\nKES 0.00\nTHIS BILL (NET)\nKES 50,000.00\nBILLED IN TOTAL\nKES 50,000.00\nSTILL BILLABLE\nKES 0.00\n\nCompared net of VAT, the basis the order is priced on. Finance refuses a bill that takes the total past the order or past what Stores accepted.\n\nTax and withholding\nNet\nKES 50,000.00\nVAT (Standard 16%, claimable)\nKES 8,000.00\nGross supplier bill\nKES 58,000.00\n− Withholding tax (Professional fees, 3.00%)\nKES 1,500.00\n= Amount payable to supplier\nKES 56,500.00\n\nWHT liability: KES 1,500.00 retained and owed to KRA on WHT-001 Withholding Tax Payable. It is not a discount: the supplier's invoice is still KES 58,000.00.\n\neTIMS ETIMS-1 · supplier PIN P051234567M · tax point 2026-09-01\n\nPayments\n\nNo payments have been recorded against this bill.\n\nPaid KES 0.00 of KES 56,500.00 payable · KES 56,500.00 outstanding. A payment settles the liability; it adds no project cost.\n\nProject cost\n\nCosted when Stores accepted the goods.\n\nCL-0000009 · accrued · 50,000.00 · JOB-5 · receipt accrual settled by this bill\nProcurement basis\nOrder\nPO-0012 · 50,000.00\nApproved\nOps Manager · 29 Aug 2026, 11:00\nSenior approval\nNo senior-approval threshold has been set by WNG yet\nRequisition\nPR-0008 · approved by Ops Manager\n\nORIGINAL ORDER AND AMENDMENTS\n\nAmendment 1 · approved · commercial\n\nOriginal KES 45,000.00 → approved KES 50,000.00\n\nExtra sheets\n\nRequested by Proc Clerk · approved by Ops Manager 30 Aug 2026, 12:00\n\nGOODS RECEIVED\n\nGRN-0020 · 2026-08-31 · received by Store Keeper · confirmed\nMDF 18mm: 100 of 100 received\n\nService procurement uses the same goods receipt: a separate service confirmation is an open WNG policy decision (W2-8).\n\nControls\n\nRecorded by Proc Clerk\n\n1 Sept 2026, 11:00\n\nEvidence\nShow\nAudit trail\n\nNo control events have been logged for this bill beyond those above.",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Verify bill",
+          "disabled": false
+        },
+        {
+          "label": "Return for correction",
+          "disabled": false
+        },
+        {
+          "label": "Show",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSupplier bill BILL-2026-0031\nSupplier bill BILL-2026-0031\nAwaiting review\nPending\n\nTimber & Board Ltd · invoice SINV-88\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\n\nREQUISITION\n\nPR-0008\n\nPURCHASE ORDER\n\nPO-0012 · 1 amendment\n\nGOODS RECEIVED\n\nGRN-0020\n\nSUPPLIER BILL\n\nBILL-2026-0031 · SINV-88\n\nPAYMENT\n\nNo payments have been recorded against this bill.\n\nProject billing & receipts\nSupplier identity\nBill payments\n\nBILL (GROSS)\n\nKES 58,000.00\n\nBilled 2026-09-01\n\nPAYABLE TO SUPPLIER\n\nKES 56,500.00\n\nafter KES 1,500.00 WHT\n\nSTILL OWED\n\nKES 56,500.00\n\n5 days past due (2026-09-10)\n\nVerify bill\nReturn for correction\nPay: Verify this bill first\nThree-way match\nPasses: ready to verify\n\nPurchase order approved\n\nOrder PO-0012\n\nPassed\n\nInvoice does not exceed the remaining accepted (unbilled) value\n\n50,000.00 invoiced against 50,000.00 remaining accepted\n\nPassed\nORDER LINE\tORDERED\tRECEIVED\tACCEPTED\tUNIT PRICE\tACCEPTED VALUE\tRESULT\nMDF 18mm (sheet)\t100\t100\t100\t500.00\t50,000.00\tFully accepted\nORDER VALUE\nKES 50,000.00\nPREVIOUSLY BILLED\nKES 0.00\nTHIS BILL (NET)\nKES 50,000.00\nBILLED IN TOTAL\nKES 50,000.00\nSTILL BILLABLE\nKES 0.00\n\nCompared net of VAT, the basis the order is priced on. Finance refuses a bill that takes the total past the order or past what Stores accepted.\n\nTax and withholding\nNet\nKES 50,000.00\nVAT (Standard 16%, claimable)\nKES 8,000.00\nGross supplier bill\nKES 58,000.00\n− Withholding tax (Professional fees, 3.00%)\nKES 1,500.00\n= Amount payable to supplier\nKES 56,500.00\n\nWHT liability: KES 1,500.00 retained and owed to KRA on WHT-001 Withholding Tax Payable. It is not a discount: the supplier's invoice is still KES 58,000.00.\n\neTIMS ETIMS-1 · supplier PIN P051234567M · tax point 2026-09-01\n\nPayments\n\nNo payments have been recorded against this bill.\n\nPaid KES 0.00 of KES 56,500.00 payable · KES 56,500.00 outstanding. A payment settles the liability; it adds no project cost.\n\nProject cost\n\nCosted when Stores accepted the goods.\n\nCL-0000009 · accrued · 50,000.00 · JOB-5 · receipt accrual settled by this bill\nProcurement basis\nOrder\nPO-0012 · 50,000.00\nApproved\nOps Manager · 29 Aug 2026, 11:00\nSenior approval\nNo senior-approval threshold has been set by WNG yet\nRequisition\nPR-0008 · approved by Ops Manager\n\nORIGINAL ORDER AND AMENDMENTS\n\nAmendment 1 · approved · commercial\n\nOriginal KES 45,000.00 → approved KES 50,000.00\n\nExtra sheets\n\nRequested by Proc Clerk · approved by Ops Manager 30 Aug 2026, 12:00\n\nGOODS RECEIVED\n\nGRN-0020 · 2026-08-31 · received by Store Keeper · confirmed\nMDF 18mm: 100 of 100 received\n\nService procurement uses the same goods receipt: a separate service confirmation is an open WNG policy decision (W2-8).\n\nControls\n\nRecorded by Proc Clerk\n\n1 Sept 2026, 11:00\n\nEvidence\nShow\nAudit trail\n\nNo control events have been logged for this bill beyond those above.\n\nVerify BILL-2026-0031?\n\nYou confirm Timber & Board Ltd's invoice SINV-88 for KES 58,000.00 agrees with the order and what Stores accepted. It posts to Accounts Payable, with KES 1,500.00 withholding owed to KRA, and becomes payable.\n\nCancel\nVerify bill",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payables/bills/31"
+        },
+        {
+          "method": "post",
+          "url": "/api/procurement-stores/bills/31/verify"
+        }
+      ],
+      "query": "/finance/payables/bills/31"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/procurement-stores/bills/31/verify"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Payment Voucher",
+    "view": "voucher-detail&scenario=voucher-approve",
+    "permission": "finance.spend_vouchers.approve",
+    "action": "Approve",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSV-20260929-0000005\nSV-20260929-0000005\n\nA payment of liabilities that were already recognised as costs.\n\nSearch Finance\nAll vouchers\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nSupplier payment · Project\n\nTimber Traders\nKES 12,000.00\nPending\nApproval\nPending\nPosting\nPending\nPayment\nPending\nSubmitted\n→\nApproved\n→\nPosted and paid\nVoucher\nPurpose\nBoards for the Safaricom stand\nPaying account\nOperating Bank (BANK-01)\nMethod\nBank transfer\nReference\n—\nSupplier invoice\nINV-9\neTIMS invoice\n—\nTransfer fee\n0.00 (business overhead, not the job's cost)\nLiabilities paid\n\nEach was recognised as a cost when it was verified. This voucher pays it; it does not record the cost again.\n\nCOST LINE\tCHARGED TO\tEXPENSE CODE\tRECOGNISED BY\tPAYABLE\tTHIS VOUCHER PAYS\nCL-31\nMDF boards\n\tProject WNG-2026-001\nProduction\n\tDM-WD-001 · MDF boards\tJE-CL-0000031\t12,000.00\t12,000.00\nPayment\n\nNo payment has been made from this voucher.\n\nEvidence\n\nNo evidence is attached to this voucher.\n\nNEXT STEP\n\nSenior approval policy not yet configured. Vouchers need ordinary approval only.\n\nApprove\nWorkflow\nRequested · Rita Requester · 29 Sept 2026, 11:00\nAccounting\n\nNothing is in the ledger for this voucher until it is posted.\n\nHistory\nCreated and submitted · Rita Requester · 29 Sept 2026, 11:00",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Approve",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSV-20260929-0000005\nSV-20260929-0000005\n\nA payment of liabilities that were already recognised as costs.\n\nSearch Finance\nAll vouchers\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nSupplier payment · Project\n\nTimber Traders\nKES 12,000.00\nApproved\nApproval\nApproved\nPosting\nPending\nPayment\nPending\nSubmitted\n→\nApproved\n→\nPosted and paid\n\nSV-20260929-0000005 approved.\n\nVoucher\nPurpose\nBoards for the Safaricom stand\nPaying account\nOperating Bank (BANK-01)\nMethod\nBank transfer\nReference\n—\nSupplier invoice\nINV-9\neTIMS invoice\n—\nTransfer fee\n0.00 (business overhead, not the job's cost)\nLiabilities paid\n\nEach was recognised as a cost when it was verified. This voucher pays it; it does not record the cost again.\n\nCOST LINE\tCHARGED TO\tEXPENSE CODE\tRECOGNISED BY\tPAYABLE\tTHIS VOUCHER PAYS\nCL-31\nMDF boards\n\tProject WNG-2026-001\nProduction\n\tDM-WD-001 · MDF boards\tJE-CL-0000031\t12,000.00\t12,000.00\nPayment\n\nApproved, not paid yet. Posting the voucher makes the payment.\n\nEvidence\n\nNo evidence is attached to this voucher.\n\nNEXT STEP\n\nNo action is open to you on this voucher.\n\nWorkflow\nRequested · Rita Requester · 29 Sept 2026, 11:00\nAccounting\n\nNothing is in the ledger for this voucher until it is posted.\n\nHistory\nCreated and submitted · Rita Requester · 29 Sept 2026, 11:00",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/spend-vouchers/5/detail"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/spend-vouchers/5/approve"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/spend-vouchers/5/detail"
+        }
+      ],
+      "query": "/finance/payment-vouchers/5"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/spend-vouchers/5/approve"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Payment Voucher",
+    "view": "voucher-detail&scenario=voucher-approve",
+    "permission": "finance.spend_vouchers.approve",
+    "action": "Approve",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSV-20260929-0000005\nSV-20260929-0000005\n\nA payment of liabilities that were already recognised as costs.\n\nSearch Finance\nAll vouchers\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nSupplier payment · Project\n\nTimber Traders\nKES 12,000.00\nPending\nApproval\nPending\nPosting\nPending\nPayment\nPending\nSubmitted\n→\nApproved\n→\nPosted and paid\nVoucher\nPurpose\nBoards for the Safaricom stand\nPaying account\nOperating Bank (BANK-01)\nMethod\nBank transfer\nReference\n—\nSupplier invoice\nINV-9\neTIMS invoice\n—\nTransfer fee\n0.00 (business overhead, not the job's cost)\nLiabilities paid\n\nEach was recognised as a cost when it was verified. This voucher pays it; it does not record the cost again.\n\nCOST LINE\tCHARGED TO\tEXPENSE CODE\tRECOGNISED BY\tPAYABLE\tTHIS VOUCHER PAYS\nCL-31\nMDF boards\n\tProject WNG-2026-001\nProduction\n\tDM-WD-001 · MDF boards\tJE-CL-0000031\t12,000.00\t12,000.00\nPayment\n\nNo payment has been made from this voucher.\n\nEvidence\n\nNo evidence is attached to this voucher.\n\nNEXT STEP\n\nSenior approval policy not yet configured. Vouchers need ordinary approval only.\n\nApprove\nWorkflow\nRequested · Rita Requester · 29 Sept 2026, 11:00\nAccounting\n\nNothing is in the ledger for this voucher until it is posted.\n\nHistory\nCreated and submitted · Rita Requester · 29 Sept 2026, 11:00",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Approve",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSV-20260929-0000005\nSV-20260929-0000005\n\nA payment of liabilities that were already recognised as costs.\n\nSearch Finance\nAll vouchers\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nSupplier payment · Project\n\nTimber Traders\nKES 12,000.00\nPending\nApproval\nPending\nPosting\nPending\nPayment\nPending\nSubmitted\n→\nApproved\n→\nPosted and paid\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\n\nVoucher\nPurpose\nBoards for the Safaricom stand\nPaying account\nOperating Bank (BANK-01)\nMethod\nBank transfer\nReference\n—\nSupplier invoice\nINV-9\neTIMS invoice\n—\nTransfer fee\n0.00 (business overhead, not the job's cost)\nLiabilities paid\n\nEach was recognised as a cost when it was verified. This voucher pays it; it does not record the cost again.\n\nCOST LINE\tCHARGED TO\tEXPENSE CODE\tRECOGNISED BY\tPAYABLE\tTHIS VOUCHER PAYS\nCL-31\nMDF boards\n\tProject WNG-2026-001\nProduction\n\tDM-WD-001 · MDF boards\tJE-CL-0000031\t12,000.00\t12,000.00\nPayment\n\nNo payment has been made from this voucher.\n\nEvidence\n\nNo evidence is attached to this voucher.\n\nNEXT STEP\n\nSenior approval policy not yet configured. Vouchers need ordinary approval only.\n\nApprove\nWorkflow\nRequested · Rita Requester · 29 Sept 2026, 11:00\nAccounting\n\nNothing is in the ledger for this voucher until it is posted.\n\nHistory\nCreated and submitted · Rita Requester · 29 Sept 2026, 11:00",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/spend-vouchers/5/detail"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/spend-vouchers/5/approve"
+        }
+      ],
+      "query": "/finance/payment-vouchers/5"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/spend-vouchers/5/approve"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Petty Cash",
+    "view": "petty-detail&scenario=petty-retry",
+    "permission": "finance.petty_cash.disburse",
+    "action": "Retry advance posting",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance position\nAWAITING SURRENDER\nProject: WNG-5\n\nThe cash was paid out but the ledger entry did not post.\n\nPosting requires an open accounting period\n\nFailed 21 Sept 2026, 03:00. The disbursement stays recorded; nothing is lost.\n\nRetry ledger posting\nPAID OUT\nKES 2,000.00\n\n2026-09-21 · cash from PC-MAIN Petty Cash Float\n\nTo Field Worker · PC-0044 · recorded by Cashier\n\nLEDGER\n\nAdvance: failed\n\nSurrender: none yet\n\nPaying out debits Staff Advances. The expense (project cost) is recognised once, when the surrender is reconciled.\n\nSURRENDER\nAwaiting surrender\nADVANCE\nKES 2,000.00\nSPENT\nKES 1,500.00\nCASH RETURNED\nKES 0.00\nNOT YET ACCOUNTED FOR\nKES 500.00\nItem\tExpense code\tReceipt\tAmount\nNails\nHardware\n\tDM-01 Materials\tetr ETR-9\nPossible duplicate receipt accepted by Cashier: “Same shop, second purchase that day”\n\tKES 1,500.00\nEVIDENCE\nAdd evidence\n\nEvidence threshold: policy configuration required. Attach receipts where you have them.\n\nNo evidence attached.",
+      "buttons": [
+        {
+          "label": "Retry ledger posting",
+          "disabled": false
+        },
+        {
+          "label": "Add evidence",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance position\nAWAITING SURRENDER\nProject: WNG-5\n\nThe cash was paid out but the ledger entry did not post.\n\nPosting requires an open accounting period\n\nFailed 21 Sept 2026, 03:00. The disbursement stays recorded; nothing is lost.\n\nRetry ledger posting\nPAID OUT\nKES 2,000.00\n\n2026-09-21 · cash from PC-MAIN Petty Cash Float\n\nTo Field Worker · PC-0044 · recorded by Cashier\n\nLEDGER\n\nAdvance: failed\n\nSurrender: none yet\n\nPaying out debits Staff Advances. The expense (project cost) is recognised once, when the surrender is reconciled.\n\nSURRENDER\nAwaiting surrender\nADVANCE\nKES 2,000.00\nSPENT\nKES 1,500.00\nCASH RETURNED\nKES 0.00\nNOT YET ACCOUNTED FOR\nKES 500.00\nItem\tExpense code\tReceipt\tAmount\nNails\nHardware\n\tDM-01 Materials\tetr ETR-9\nPossible duplicate receipt accepted by Cashier: “Same shop, second purchase that day”\n\tKES 1,500.00\nEVIDENCE\nAdd evidence\n\nEvidence threshold: policy configuration required. Attach receipts where you have them.\n\nNo evidence attached.",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/petty-cash/requisitions/12/attachments"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/petty-cash/requisitions/12/retry-advance-posting"
+        }
+      ],
+      "query": "/finance/petty-cash/requisitions/12"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/petty-cash/requisitions/12/retry-advance-posting"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Petty Cash",
+    "view": "petty-detail&scenario=petty-retry",
+    "permission": "finance.petty_cash.disburse",
+    "action": "Retry advance posting",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance position\nAWAITING SURRENDER\nProject: WNG-5\n\nThe cash was paid out but the ledger entry did not post.\n\nPosting requires an open accounting period\n\nFailed 21 Sept 2026, 03:00. The disbursement stays recorded; nothing is lost.\n\nRetry ledger posting\nPAID OUT\nKES 2,000.00\n\n2026-09-21 · cash from PC-MAIN Petty Cash Float\n\nTo Field Worker · PC-0044 · recorded by Cashier\n\nLEDGER\n\nAdvance: failed\n\nSurrender: none yet\n\nPaying out debits Staff Advances. The expense (project cost) is recognised once, when the surrender is reconciled.\n\nSURRENDER\nAwaiting surrender\nADVANCE\nKES 2,000.00\nSPENT\nKES 1,500.00\nCASH RETURNED\nKES 0.00\nNOT YET ACCOUNTED FOR\nKES 500.00\nItem\tExpense code\tReceipt\tAmount\nNails\nHardware\n\tDM-01 Materials\tetr ETR-9\nPossible duplicate receipt accepted by Cashier: “Same shop, second purchase that day”\n\tKES 1,500.00\nEVIDENCE\nAdd evidence\n\nEvidence threshold: policy configuration required. Attach receipts where you have them.\n\nNo evidence attached.",
+      "buttons": [
+        {
+          "label": "Retry ledger posting",
+          "disabled": false
+        },
+        {
+          "label": "Add evidence",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance position\nAWAITING SURRENDER\nProject: WNG-5\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\n\nThe cash was paid out but the ledger entry did not post.\n\nPosting requires an open accounting period\n\nFailed 21 Sept 2026, 03:00. The disbursement stays recorded; nothing is lost.\n\nRetry ledger posting\nPAID OUT\nKES 2,000.00\n\n2026-09-21 · cash from PC-MAIN Petty Cash Float\n\nTo Field Worker · PC-0044 · recorded by Cashier\n\nLEDGER\n\nAdvance: failed\n\nSurrender: none yet\n\nPaying out debits Staff Advances. The expense (project cost) is recognised once, when the surrender is reconciled.\n\nSURRENDER\nAwaiting surrender\nADVANCE\nKES 2,000.00\nSPENT\nKES 1,500.00\nCASH RETURNED\nKES 0.00\nNOT YET ACCOUNTED FOR\nKES 500.00\nItem\tExpense code\tReceipt\tAmount\nNails\nHardware\n\tDM-01 Materials\tetr ETR-9\nPossible duplicate receipt accepted by Cashier: “Same shop, second purchase that day”\n\tKES 1,500.00\nEVIDENCE\nAdd evidence\n\nEvidence threshold: policy configuration required. Attach receipts where you have them.\n\nNo evidence attached.",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/petty-cash/requisitions/12/attachments"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/petty-cash/requisitions/12/retry-advance-posting"
+        }
+      ],
+      "query": "/finance/petty-cash/requisitions/12"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/petty-cash/requisitions/12/retry-advance-posting"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Payroll Finance",
+    "view": "payroll&scenario=payroll-pay",
+    "permission": "finance.payroll.pay",
+    "action": "Pay net payroll",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nPayroll\nPayroll finance\n\nFinance readiness, accounting, liabilities and settlement. HR prepares and calculates payroll.\n\nSearch Finance\nRefresh controls\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPayroll runs\n\nFinance readiness, accounting, liabilities, settlement and labour mapping.\n\nCURRENT PAYROLL\n2026-09\n12 employees\nPreparation / approval\nAPPROVED\nKES 120,000.00\nLOCKED\nNET PAYROLL PAYABLE\nKES 90,000.00\noutstanding\nSettled\n0.00\nSTATUTORY LIABILITIES\nKES 30,000.00\noutstanding\nRemittance rail\nNOT AVAILABLE\n\nDisplayed from payroll accounting; Finance does not recalculate PAYE.\n\nPAYROLL READINESS\nNOT READY\n3 exceptions\nSalary configured\n10 / 12\nPayroll runs\n1\nAwaiting posting\n0\nLiabilities\n0\nPayments\n0\nReadiness\n3\nLabour classification\n0\n\nHistorical payroll Payment records and opening balances are not backfilled.\n\nPayroll runs\n\nPreparation, approval, posting and settlement remain separate states.\n\nPERIOD · RUN\tEMPLOYEES\tGROSS\tAPPROVAL\tPOSTING\tSETTLEMENT\tOUTSTANDING\tACTION\n\n2026-09\n\nPAYROLL-2026-09\n\n\t12\tKES 120,000.00\tAPPROVED\tPOSTED\tOUTSTANDING\tKES 90,000.00\tPay\n\nPAYROLL-2026-09\nOUTSTANDING\n\nPayroll run\n\n2026-09\n\nKES 90,000.00\nEmployees\n12\nGross payroll\nKES 120,000.00\nOutstanding\nKES 90,000.00\nCONTROL CHAIN\nPayroll prepared\n\nRecorded · Actor not recorded · Time not recorded\n\nACCOUNTING IMPACT\nACTUAL JOURNAL\nJE-PR-A-9 · 2026-09-30\nDR\t7550 · Salaries\t120,000.00\nDR 120,000.00\nCR 120,000.00\nΔ 0.00\nLIABILITIES\nAUDIT RAIL\n\nPrepared · HR Preparer\n\n1 Sept 2026, 03:00\n\nDONE\n\nApproved · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPosted · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPaid\n\nPENDING\n\nAggregate Finance view.\n\nPay net payroll",
+      "buttons": [
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Refresh controls",
+          "disabled": false
+        },
+        {
+          "label": "Payroll runs1",
+          "disabled": false
+        },
+        {
+          "label": "Awaiting posting0",
+          "disabled": false
+        },
+        {
+          "label": "Liabilities0",
+          "disabled": false
+        },
+        {
+          "label": "Payments0",
+          "disabled": false
+        },
+        {
+          "label": "Readiness3",
+          "disabled": false
+        },
+        {
+          "label": "Labour classification0",
+          "disabled": false
+        },
+        {
+          "label": "Pay",
+          "disabled": false
+        },
+        {
+          "label": "Pay net payroll",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nPayroll\nPayroll finance\n\nFinance readiness, accounting, liabilities and settlement. HR prepares and calculates payroll.\n\nSearch Finance\nRefresh controls\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPayroll runs\n\nFinance readiness, accounting, liabilities, settlement and labour mapping.\n\nCURRENT PAYROLL\n2026-09\n12 employees\nPreparation / approval\nAPPROVED\nKES 120,000.00\nLOCKED\nNET PAYROLL PAYABLE\nKES 90,000.00\noutstanding\nSettled\n0.00\nSTATUTORY LIABILITIES\nKES 30,000.00\noutstanding\nRemittance rail\nNOT AVAILABLE\n\nDisplayed from payroll accounting; Finance does not recalculate PAYE.\n\nPAYROLL READINESS\nNOT READY\n3 exceptions\nSalary configured\n10 / 12\nPayroll runs\n1\nAwaiting posting\n0\nLiabilities\n0\nPayments\n0\nReadiness\n3\nLabour classification\n0\n\nHistorical payroll Payment records and opening balances are not backfilled.\n\nPayroll runs\n\nPreparation, approval, posting and settlement remain separate states.\n\nPERIOD · RUN\tEMPLOYEES\tGROSS\tAPPROVAL\tPOSTING\tSETTLEMENT\tOUTSTANDING\tACTION\n\n2026-09\n\nPAYROLL-2026-09\n\n\t12\tKES 120,000.00\tAPPROVED\tPOSTED\tSETTLED\tKES 0.00\tAlready paid\n\nPAYROLL-2026-09\nOUTSTANDING\n\nPayroll run\n\n2026-09\n\nKES 90,000.00\nEmployees\n12\nGross payroll\nKES 120,000.00\nOutstanding\nKES 90,000.00\nCONTROL CHAIN\nPayroll prepared\n\nRecorded · Actor not recorded · Time not recorded\n\nACCOUNTING IMPACT\nACTUAL JOURNAL\nJE-PR-A-9 · 2026-09-30\nDR\t7550 · Salaries\t120,000.00\nDR 120,000.00\nCR 120,000.00\nΔ 0.00\nLIABILITIES\nAUDIT RAIL\n\nPrepared · HR Preparer\n\n1 Sept 2026, 03:00\n\nDONE\n\nApproved · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPosted · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPaid\n\nPENDING\n\nAggregate Finance view.\n\nPay net payroll",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/liabilities"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/payments"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/readiness"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/labour-classification"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/9"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/payroll/9/pay"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/liabilities"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/payments"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/readiness"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/labour-classification"
+        }
+      ],
+      "query": "/finance/payroll-disbursement?run_id=9"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/payroll/9/pay"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Payroll Finance",
+    "view": "payroll&scenario=payroll-pay",
+    "permission": "finance.payroll.pay",
+    "action": "Pay net payroll",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nPayroll\nPayroll finance\n\nFinance readiness, accounting, liabilities and settlement. HR prepares and calculates payroll.\n\nSearch Finance\nRefresh controls\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPayroll runs\n\nFinance readiness, accounting, liabilities, settlement and labour mapping.\n\nCURRENT PAYROLL\n2026-09\n12 employees\nPreparation / approval\nAPPROVED\nKES 120,000.00\nLOCKED\nNET PAYROLL PAYABLE\nKES 90,000.00\noutstanding\nSettled\n0.00\nSTATUTORY LIABILITIES\nKES 30,000.00\noutstanding\nRemittance rail\nNOT AVAILABLE\n\nDisplayed from payroll accounting; Finance does not recalculate PAYE.\n\nPAYROLL READINESS\nNOT READY\n3 exceptions\nSalary configured\n10 / 12\nPayroll runs\n1\nAwaiting posting\n0\nLiabilities\n0\nPayments\n0\nReadiness\n3\nLabour classification\n0\n\nHistorical payroll Payment records and opening balances are not backfilled.\n\nPayroll runs\n\nPreparation, approval, posting and settlement remain separate states.\n\nPERIOD · RUN\tEMPLOYEES\tGROSS\tAPPROVAL\tPOSTING\tSETTLEMENT\tOUTSTANDING\tACTION\n\n2026-09\n\nPAYROLL-2026-09\n\n\t12\tKES 120,000.00\tAPPROVED\tPOSTED\tOUTSTANDING\tKES 90,000.00\tPay\n\nPAYROLL-2026-09\nOUTSTANDING\n\nPayroll run\n\n2026-09\n\nKES 90,000.00\nEmployees\n12\nGross payroll\nKES 120,000.00\nOutstanding\nKES 90,000.00\nCONTROL CHAIN\nPayroll preparedPAYROLL-2026-09\nKES 120,000.00\n\nRecorded · HR Preparer · 1 Sept 2026, 03:00\n\nACCOUNTING IMPACT\nACTUAL JOURNAL\nJE-PR-A-9 · 2026-09-30\nDR\t7550 · Salaries\t120,000.00\nDR 120,000.00\nCR 120,000.00\nΔ 0.00\nLIABILITIES\nAUDIT RAIL\n\nPrepared · HR Preparer\n\n1 Sept 2026, 03:00\n\nDONE\n\nApproved · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPosted · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPaid\n\nPENDING\n\nAggregate Finance view.\n\nPay net payroll",
+      "buttons": [
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Refresh controls",
+          "disabled": false
+        },
+        {
+          "label": "Payroll runs1",
+          "disabled": false
+        },
+        {
+          "label": "Awaiting posting0",
+          "disabled": false
+        },
+        {
+          "label": "Liabilities0",
+          "disabled": false
+        },
+        {
+          "label": "Payments0",
+          "disabled": false
+        },
+        {
+          "label": "Readiness3",
+          "disabled": false
+        },
+        {
+          "label": "Labour classification0",
+          "disabled": false
+        },
+        {
+          "label": "Pay",
+          "disabled": false
+        },
+        {
+          "label": "Pay net payroll",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nPayroll\nPayroll finance\n\nFinance readiness, accounting, liabilities and settlement. HR prepares and calculates payroll.\n\nSearch Finance\nRefresh controls\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPayroll runs\n\nFinance readiness, accounting, liabilities, settlement and labour mapping.\n\nCURRENT PAYROLL\n2026-09\n12 employees\nPreparation / approval\nAPPROVED\nKES 120,000.00\nLOCKED\nNET PAYROLL PAYABLE\nKES 90,000.00\noutstanding\nSettled\n0.00\nSTATUTORY LIABILITIES\nKES 30,000.00\noutstanding\nRemittance rail\nNOT AVAILABLE\n\nDisplayed from payroll accounting; Finance does not recalculate PAYE.\n\nPAYROLL READINESS\nNOT READY\n3 exceptions\nSalary configured\n10 / 12\nPayroll runs\n1\nAwaiting posting\n0\nLiabilities\n0\nPayments\n0\nReadiness\n3\nLabour classification\n0\n\nHistorical payroll Payment records and opening balances are not backfilled.\n\nPayroll runs\n\nPreparation, approval, posting and settlement remain separate states.\n\nPERIOD · RUN\tEMPLOYEES\tGROSS\tAPPROVAL\tPOSTING\tSETTLEMENT\tOUTSTANDING\tACTION\n\n2026-09\n\nPAYROLL-2026-09\n\n\t12\tKES 120,000.00\tAPPROVED\tPOSTED\tOUTSTANDING\tKES 90,000.00\tPay\n\nPAYROLL-2026-09\nOUTSTANDING\n\nPayroll run\n\n2026-09\n\nKES 90,000.00\nEmployees\n12\nGross payroll\nKES 120,000.00\nOutstanding\nKES 90,000.00\nCONTROL CHAIN\nPayroll preparedPAYROLL-2026-09\nKES 120,000.00\n\nRecorded · HR Preparer · 1 Sept 2026, 03:00\n\nACCOUNTING IMPACT\nACTUAL JOURNAL\nJE-PR-A-9 · 2026-09-30\nDR\t7550 · Salaries\t120,000.00\nDR 120,000.00\nCR 120,000.00\nΔ 0.00\nLIABILITIES\nAUDIT RAIL\n\nPrepared · HR Preparer\n\n1 Sept 2026, 03:00\n\nDONE\n\nApproved · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPosted · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPaid\n\nPENDING\n\nAggregate Finance view.\n\nPay net payroll\n\nSETTLE NET PAYROLL PAYABLE\n\nPAYROLL-2026-09\nKES 90,000.00\nPAYING ACCOUNT\nSelect active configured account\nEquity Bank · EQB\nNCBA · NCBA\nCompany M-Pesa · MPESA\nCompany Card · CARD\nSupplier Credit · SUPP-CR\nPAYMENT DATE\nREFERENCE\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\n\nThis creates a Payment and settles the existing liability. It does not recognise salary expense again.\n\nCancel\nRecord payment",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/liabilities"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/payments"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/readiness"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/labour-classification"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payroll/9"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/payroll/9/pay"
+        }
+      ],
+      "query": "/finance/payroll-disbursement?run_id=9"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/payroll/9/pay"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Project Finance",
+    "view": "projects",
+    "permission": "finance.receivables.billing_basis",
+    "action": "Change deposit terms",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nProject billing · JOB-5\nProject billing · JOB-5\n\nExpo stand · Acme Events\n\nSearch Finance\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient invoices, receipts, deposits and balances.\n\nView invoices\nProject costs & financial position\nView receipts\nView client position\nNew invoice\nSupplier bills\nProject Officer: Pat Officer\nFinance position\nAGREED PRICE\nKES 1,000,000.00\nINVOICED (ISSUED)\nKES 1,160,000.00\nRECEIVED (VERIFIED)\nKES 500,000.00\nINVOICE OUTSTANDING\nKES 660,000.00\nHELD FOR THE CLIENT (UNAPPLIED)\nKES 0.00\nREMAINING TO INVOICE\nKES 160,000.00\n\nNot yet in the figures above: KES 50,000.00 in draft invoices and KES 20,000.00 in credit notes awaiting issue.\n\nPROJECT REVENUE (ISSUED)\n\nKES 1,000,000.00\n\nDIRECT PROJECT COST\n\nKES 400,000.00\n\nDIRECT MARGIN\n\nKES 600,000.00\n\nFully loaded margin is not yet available (labour, logistics and overhead methodology pending).\n\nReceipts shared with other projects\n\nA single client payment split across projects. Record one with a total larger than this project's share; allocate the rest here.\n\nNo receipt for this project is shared with another project or has money left to allocate.\n\nBilling history\n\nfinancialQuote amount recorded directly in Project Billing\n\nChek Er · 2 Sept 2026, 11:00\n\n“Client agreed by phone”\n\nCommercial basis\n\nApproved quote\n\nKES 1,000,000.00\nSource\nApproved quote\nApproved\n2026-09-01\nException required\nNo\nBilling terms\n\nDeposit received and verified before production starts. Invoice payment terms are set up in Finance setup.\n\nDEPOSIT REQUIRED\n\n70%\n\nOF THE AGREED PRICE\n\nKES 700,000.00\n\n10.0% verified · KES 600,000.00 still to receive and verify · 1 receipt awaiting verification (not counted)\n\nChange deposit %\nProduction deposit control\n\nBlocked: 10.0% verified of the 70% required.\n\nThe verified deposit is below the 70% target. Early release requires the receivables override permission.",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Record receipt",
+          "disabled": false
+        },
+        {
+          "label": "Change deposit %",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nProject billing · JOB-5\nProject billing · JOB-5\n\nExpo stand · Acme Events\n\nSearch Finance\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient invoices, receipts, deposits and balances.\n\nRehearsal action recorded.\n\nView invoices\nProject costs & financial position\nView receipts\nView client position\nNew invoice\nSupplier bills\nProject Officer: Pat Officer\nFinance position\nAGREED PRICE\nKES 1,000,000.00\nINVOICED (ISSUED)\nKES 1,160,000.00\nRECEIVED (VERIFIED)\nKES 500,000.00\nINVOICE OUTSTANDING\nKES 660,000.00\nHELD FOR THE CLIENT (UNAPPLIED)\nKES 0.00\nREMAINING TO INVOICE\nKES 160,000.00\n\nNot yet in the figures above: KES 50,000.00 in draft invoices and KES 20,000.00 in credit notes awaiting issue.\n\nPROJECT REVENUE (ISSUED)\n\nKES 1,000,000.00\n\nDIRECT PROJECT COST\n\nKES 400,000.00\n\nDIRECT MARGIN\n\nKES 600,000.00\n\nFully loaded margin is not yet available (labour, logistics and overhead methodology pending).\n\nReceipts shared with other projects\n\nA single client payment split across projects. Record one with a total larger than this project's share; allocate the rest here.\n\nNo receipt for this project is shared with another project or has money left to allocate.\n\nBilling history\n\nfinancialQuote amount recorded directly in Project Billing\n\nChek Er · 2 Sept 2026, 11:00\n\n“Client agreed by phone”\n\nCommercial basis\n\nApproved quote\n\nKES 1,000,000.00\nSource\nApproved quote\nApproved\n2026-09-01\nException required\nNo\nBilling terms\n\nDeposit received and verified before production starts. Invoice payment terms are set up in Finance setup.\n\nDEPOSIT REQUIRED\n\n70%\n\nOF THE AGREED PRICE\n\nKES 700,000.00\n\n10.0% verified · KES 600,000.00 still to receive and verify · 1 receipt awaiting verification (not counted)\n\nChange deposit %\nProduction deposit control\n\nBlocked: 10.0% verified of the 70% required.\n\nThe verified deposit is below the 70% target. Early release requires the receivables override permission.",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/project-billing/5"
+        },
+        {
+          "method": "put",
+          "url": "/api/projects/enquiries/5/receivables-terms"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/project-billing/5"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        }
+      ],
+      "query": "/finance/project-billing/5"
+    },
+    "endpoints": [
+      {
+        "method": "put",
+        "url": "/api/projects/enquiries/5/receivables-terms"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Project Finance",
+    "view": "projects",
+    "permission": "finance.receivables.billing_basis",
+    "action": "Change deposit terms",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nProject billing · JOB-5\nProject billing · JOB-5\n\nExpo stand · Acme Events\n\nSearch Finance\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient invoices, receipts, deposits and balances.\n\nView invoices\nProject costs & financial position\nView receipts\nView client position\nNew invoice\nSupplier bills\nProject Officer: Pat Officer\nFinance position\nAGREED PRICE\nKES 1,000,000.00\nINVOICED (ISSUED)\nKES 1,160,000.00\nRECEIVED (VERIFIED)\nKES 500,000.00\nINVOICE OUTSTANDING\nKES 660,000.00\nHELD FOR THE CLIENT (UNAPPLIED)\nKES 0.00\nREMAINING TO INVOICE\nKES 160,000.00\n\nNot yet in the figures above: KES 50,000.00 in draft invoices and KES 20,000.00 in credit notes awaiting issue.\n\nPROJECT REVENUE (ISSUED)\n\nKES 1,000,000.00\n\nDIRECT PROJECT COST\n\nKES 400,000.00\n\nDIRECT MARGIN\n\nKES 600,000.00\n\nFully loaded margin is not yet available (labour, logistics and overhead methodology pending).\n\nReceipts shared with other projects\n\nA single client payment split across projects. Record one with a total larger than this project's share; allocate the rest here.\n\nNo receipt for this project is shared with another project or has money left to allocate.\n\nBilling history\n\nfinancialQuote amount recorded directly in Project Billing\n\nChek Er · 2 Sept 2026, 11:00\n\n“Client agreed by phone”\n\nCommercial basis\n\nApproved quote\n\nKES 1,000,000.00\nSource\nApproved quote\nApproved\n2026-09-01\nException required\nNo\nBilling terms\n\nDeposit received and verified before production starts. Invoice payment terms are set up in Finance setup.\n\nDEPOSIT REQUIRED\n\n70%\n\nOF THE AGREED PRICE\n\nKES 700,000.00\n\n10.0% verified · KES 600,000.00 still to receive and verify · 1 receipt awaiting verification (not counted)\n\nChange deposit %\nProduction deposit control\n\nBlocked: 10.0% verified of the 70% required.\n\nThe verified deposit is below the 70% target. Early release requires the receivables override permission.",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Record receipt",
+          "disabled": false
+        },
+        {
+          "label": "Change deposit %",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nProject billing · JOB-5\nProject billing · JOB-5\n\nExpo stand · Acme Events\n\nSearch Finance\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient invoices, receipts, deposits and balances.\n\nView invoices\nProject costs & financial position\nView receipts\nView client position\nNew invoice\nSupplier bills\nProject Officer: Pat Officer\nFinance position\nAGREED PRICE\nKES 1,000,000.00\nINVOICED (ISSUED)\nKES 1,160,000.00\nRECEIVED (VERIFIED)\nKES 500,000.00\nINVOICE OUTSTANDING\nKES 660,000.00\nHELD FOR THE CLIENT (UNAPPLIED)\nKES 0.00\nREMAINING TO INVOICE\nKES 160,000.00\n\nNot yet in the figures above: KES 50,000.00 in draft invoices and KES 20,000.00 in credit notes awaiting issue.\n\nPROJECT REVENUE (ISSUED)\n\nKES 1,000,000.00\n\nDIRECT PROJECT COST\n\nKES 400,000.00\n\nDIRECT MARGIN\n\nKES 600,000.00\n\nFully loaded margin is not yet available (labour, logistics and overhead methodology pending).\n\nReceipts shared with other projects\n\nA single client payment split across projects. Record one with a total larger than this project's share; allocate the rest here.\n\nNo receipt for this project is shared with another project or has money left to allocate.\n\nBilling history\n\nfinancialQuote amount recorded directly in Project Billing\n\nChek Er · 2 Sept 2026, 11:00\n\n“Client agreed by phone”\n\nCommercial basis\n\nApproved quote\n\nKES 1,000,000.00\nSource\nApproved quote\nApproved\n2026-09-01\nException required\nNo\nBilling terms\n\nDeposit received and verified before production starts. Invoice payment terms are set up in Finance setup.\n\nDEPOSIT REQUIRED\n\n70%\n\nOF THE AGREED PRICE\n\nKES 700,000.00\n\n10.0% verified · KES 600,000.00 still to receive and verify · 1 receipt awaiting verification (not counted)\n\nDEPOSIT %\nWHY IS IT CHANGING? (10+ CHARACTERS)\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\n\nCancel\nSave\nProduction deposit control\n\nBlocked: 10.0% verified of the 70% required.\n\nThe verified deposit is below the 70% target. Early release requires the receivables override permission.",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/project-billing/5"
+        },
+        {
+          "method": "put",
+          "url": "/api/projects/enquiries/5/receivables-terms"
+        }
+      ],
+      "query": "/finance/project-billing/5"
+    },
+    "endpoints": [
+      {
+        "method": "put",
+        "url": "/api/projects/enquiries/5/receivables-terms"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Journal",
+    "view": "journal&scenario=journal-reverse",
+    "permission": "finance.journals.reverse",
+    "action": "Reverse original journal",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nReports\n/\nAccount book\nOperational cost ledger\n\nTax and audit subledger of posted journals for costs, payments, client billing and payroll — not the company statutory books.\n\nSearch Finance\nHow this works\nExport journals\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nClose month\nJournal entries\n1\nAccount summary\nAccount book\nLOADED JOURNALS\n1\nTotal transaction count\nTOTAL DEBITS\nKES 20,000.00\nCurrent page debits\nTOTAL CREDITS\nKES 20,000.00\nCurrent page credits\nSUBLEDGER HEALTH\n100% Balanced\nDouble-entry verified\nFrom \nTo \nSource \nAll sources\nCost lines\nPayment vouchers\nStatus \nAny status\nPosted\nReversed\nDraft\nSearch \nApply\nClear\nENTRY\tDATE\tSOURCE\tREFERENCE\tDEBIT\tCREDIT\tSTATUS\n\nJE-123\nSupplier payment\n\t2026-09-30\tBillPayment\tPAY-2026-0070\tKES 20,000.00\tKES 20,000.00\tposted\n\nJOURNAL ENTRY\n\nJE-123\n\nSupplier payment\n\nClose\nSTATUS\nposted\nPOSTING DATE\n2026-09-30\nPERIOD\nNot assigned\nSOURCE\nCostLine\nSOURCE REFERENCE\nPAY-2026-0070\nPOSTED AT\n—\nORIGINATING DOCUMENT\n\nCostLine · PAY-2026-0070\n\nCorrect this entry\nLEGS\nACCOUNT\tDEBIT\tCREDIT\n5500 Materials\tKES 20,000.00\t—\n2100 Payable\t—\tKES 20,000.00\nTotal\tKES 20,000.00\tKES 20,000.00",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Export journals",
+          "disabled": true
+        },
+        {
+          "label": "Journal entries1",
+          "disabled": false
+        },
+        {
+          "label": "Account summary",
+          "disabled": false
+        },
+        {
+          "label": "Account book",
+          "disabled": false
+        },
+        {
+          "label": "Apply",
+          "disabled": false
+        },
+        {
+          "label": "Clear",
+          "disabled": false
+        },
+        {
+          "label": "Close",
+          "disabled": false
+        },
+        {
+          "label": "Correct this entry",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nReports\n/\nAccount book\nOperational cost ledger\n\nTax and audit subledger of posted journals for costs, payments, client billing and payroll — not the company statutory books.\n\nSearch Finance\nHow this works\nExport journals\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nClose month\nJournal entries\n1\nAccount summary\nAccount book\nLOADED JOURNALS\n1\nTotal transaction count\nTOTAL DEBITS\nKES 20,000.00\nCurrent page debits\nTOTAL CREDITS\nKES 20,000.00\nCurrent page credits\nSUBLEDGER HEALTH\n100% Balanced\nDouble-entry verified\nFrom \nTo \nSource \nAll sources\nCost lines\nPayment vouchers\nStatus \nAny status\nPosted\nReversed\nDraft\nSearch \nApply\nClear\nENTRY\tDATE\tSOURCE\tREFERENCE\tDEBIT\tCREDIT\tSTATUS\n\nJE-123\nSupplier payment\n\t2026-09-30\tBillPayment\tPAY-2026-0070\tKES 20,000.00\tKES 20,000.00\tposted\n\nJOURNAL ENTRY\n\nJE-123\n\nSupplier payment\n\nClose\nSTATUS\nreversed\nPOSTING DATE\n2026-09-30\nPERIOD\nNot assigned\nSOURCE\nCostLine\nSOURCE REFERENCE\nPAY-2026-0070\nPOSTED AT\n—\nORIGINATING DOCUMENT\n\nCostLine · PAY-2026-0070\n\nCorrect this entry\nLEGS\nACCOUNT\tDEBIT\tCREDIT\n5500 Materials\tKES 20,000.00\t—\n2100 Payable\t—\tKES 20,000.00\nTotal\tKES 20,000.00\tKES 20,000.00",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/journals/77"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/journals"
+        },
+        {
+          "method": "get",
+          "url": "/api/notifications/unread-count"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/journals/77/reverse"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/journals/77"
+        }
+      ],
+      "query": "/finance/ledger?entry_id=77"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/journals/77/reverse"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Journal",
+    "view": "journal&scenario=journal-reverse",
+    "permission": "finance.journals.reverse",
+    "action": "Reverse original journal",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nReports\n/\nAccount book\nOperational cost ledger\n\nTax and audit subledger of posted journals for costs, payments, client billing and payroll — not the company statutory books.\n\nSearch Finance\nHow this works\nExport journals\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nClose month\nJournal entries\n1\nAccount summary\nAccount book\nLOADED JOURNALS\n1\nTotal transaction count\nTOTAL DEBITS\nKES 20,000.00\nCurrent page debits\nTOTAL CREDITS\nKES 20,000.00\nCurrent page credits\nSUBLEDGER HEALTH\n100% Balanced\nDouble-entry verified\nFrom \nTo \nSource \nAll sources\nCost lines\nPayment vouchers\nStatus \nAny status\nPosted\nReversed\nDraft\nSearch \nApply\nClear\nENTRY\tDATE\tSOURCE\tREFERENCE\tDEBIT\tCREDIT\tSTATUS\n\nJE-123\nSupplier payment\n\t2026-09-30\tBillPayment\tPAY-2026-0070\tKES 20,000.00\tKES 20,000.00\tposted\n\nJOURNAL ENTRY\n\nJE-123\n\nSupplier payment\n\nClose\nSTATUS\nposted\nPOSTING DATE\n2026-09-30\nPERIOD\nNot assigned\nSOURCE\nCostLine\nSOURCE REFERENCE\nPAY-2026-0070\nPOSTED AT\n—\nORIGINATING DOCUMENT\n\nCostLine · PAY-2026-0070\n\nCorrect this entry\nLEGS\nACCOUNT\tDEBIT\tCREDIT\n5500 Materials\tKES 20,000.00\t—\n2100 Payable\t—\tKES 20,000.00\nTotal\tKES 20,000.00\tKES 20,000.00",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Export journals",
+          "disabled": true
+        },
+        {
+          "label": "Journal entries1",
+          "disabled": false
+        },
+        {
+          "label": "Account summary",
+          "disabled": false
+        },
+        {
+          "label": "Account book",
+          "disabled": false
+        },
+        {
+          "label": "Apply",
+          "disabled": false
+        },
+        {
+          "label": "Clear",
+          "disabled": false
+        },
+        {
+          "label": "Close",
+          "disabled": false
+        },
+        {
+          "label": "Correct this entry",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nReports\n/\nAccount book\nOperational cost ledger\n\nTax and audit subledger of posted journals for costs, payments, client billing and payroll — not the company statutory books.\n\nSearch Finance\nHow this works\nExport journals\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nClose month\nJournal entries\n1\nAccount summary\nAccount book\nLOADED JOURNALS\n1\nTotal transaction count\nTOTAL DEBITS\nKES 20,000.00\nCurrent page debits\nTOTAL CREDITS\nKES 20,000.00\nCurrent page credits\nSUBLEDGER HEALTH\n100% Balanced\nDouble-entry verified\nFrom \nTo \nSource \nAll sources\nCost lines\nPayment vouchers\nStatus \nAny status\nPosted\nReversed\nDraft\nSearch \nApply\nClear\nENTRY\tDATE\tSOURCE\tREFERENCE\tDEBIT\tCREDIT\tSTATUS\n\nJE-123\nSupplier payment\n\t2026-09-30\tBillPayment\tPAY-2026-0070\tKES 20,000.00\tKES 20,000.00\tposted\n\nJOURNAL ENTRY\n\nJE-123\n\nSupplier payment\n\nClose\nSTATUS\nposted\nPOSTING DATE\n2026-09-30\nPERIOD\nNot assigned\nSOURCE\nCostLine\nSOURCE REFERENCE\nPAY-2026-0070\nPOSTED AT\n—\nORIGINATING DOCUMENT\n\nCostLine · PAY-2026-0070\n\nCorrect this entry\n\nThis posts an opposite entry dated today. The original stays exactly as it is — nothing is erased — so both remain on the record and the month it belonged to is not restated.\n\nWHY IS IT BEING CORRECTED? \n\nKept with the correction. Whoever reads this in six months needs to know why it happened.\n\nCancel\nPost the correction\nLEGS\nACCOUNT\tDEBIT\tCREDIT\n5500 Materials\tKES 20,000.00\t—\n2100 Payable\t—\tKES 20,000.00\nTotal\tKES 20,000.00\tKES 20,000.00",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/journals/77"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/journals"
+        },
+        {
+          "method": "get",
+          "url": "/api/notifications/unread-count"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/journals/77/reverse"
+        }
+      ],
+      "query": "/finance/ledger?entry_id=77"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/journals/77/reverse"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Bank Matching",
+    "view": "reconciliation",
+    "permission": "finance.payment_sources.manage",
+    "action": "Record fee and match",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nCash & banks\n/\nBank matching\nBank reconciliation\n\nMatch bank and mobile-money statements against ledger movements to certify account balances.\n\nSearch Finance\nHow this works\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nCash & bank position\nCash movement\nCHECK & CLOSE\nBank matching\nHow Bank Reconciliation Works (Step-by-Step Guide)\n\nReconciliation proves that the money in your bank account matches the financial records in the ERP.\n\nDownload Sample CSV\n1\nUpload Bank Statement\n\nChoose your account and upload your monthly bank CSV. Opening balance is automatically inherited from the previous month.\n\n2\nAutomatic Matching\n\nPayments already entered in the ERP are matched automatically. If an inline suggestion appears on a row, click \"Match\" to link it.\n\n3\n1-Click Bank Fees\n\nFor bank charges or interest on the statement not yet in the ERP, click \"Record Fee\". It writes the ledger journal and matches in 1 click.\n\n4\nCertify & Lock Period\n\nWhen the Difference shows KES 0.00 and 0 unmatched lines remain, click \"Certify\" to seal the period.\n\nPaying Account\nNCBA Operating (NCBA)\nGL: 1100 · Bank\nBank Account\nStatement:\n2026-09-01 to 2026-09-30 [DRAFT] · 1 unmatched\nRefresh\nImport Statement\nBank Statement\nStatement\nKES 900.00\nClosing\nOpening: KES 1,000.00\nIn: +KES 0.00\nOut: -KES 0.00\nSystem Ledger\nGL Book\nKES 1,000.00\nExpected\nOpening: KES 1,000.00\nNet GL: KES 0.00\nDifference\nKES 0.00\nDiscrepancy\nStatement diff: KES 0.00 · Ledger diff: KES 100.00\nMatching Progress\n1 Unmatched\n0 / 1\n0%\nUnmatched Bank Lines\n1\nMatched Items\n0\nIgnored Rows\n0\nPeriod: 2026-09-01 to 2026-09-30\nDATE\tREFERENCE\tDESCRIPTION / NARRATION\tMONEY OUT (-)\tMONEY IN (+)\tQUICK ACTIONS\n2026-09-30\tBANK-73A\tBank charge\tKES 100.00\t—\t\nRecord Fee\nMatch\nReconciliation In Progress\n\nTo certify: resolve 1 unmatched line(s) and eliminate the KES 0.00 difference.\n\nCertify & Lock Reconciliation",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Download Sample CSV",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Refresh",
+          "disabled": false
+        },
+        {
+          "label": "Import Statement",
+          "disabled": false
+        },
+        {
+          "label": "Unmatched Bank Lines1",
+          "disabled": false
+        },
+        {
+          "label": "Matched Items0",
+          "disabled": false
+        },
+        {
+          "label": "Ignored Rows0",
+          "disabled": false
+        },
+        {
+          "label": "Record Fee",
+          "disabled": false
+        },
+        {
+          "label": "Match",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Certify & Lock Reconciliation",
+          "disabled": true
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nCash & banks\n/\nBank matching\nBank reconciliation\n\nMatch bank and mobile-money statements against ledger movements to certify account balances.\n\nSearch Finance\nHow this works\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nCash & bank position\nCash movement\nCHECK & CLOSE\nBank matching\nData refreshed.\nHow Bank Reconciliation Works (Step-by-Step Guide)\n\nReconciliation proves that the money in your bank account matches the financial records in the ERP.\n\nDownload Sample CSV\n1\nUpload Bank Statement\n\nChoose your account and upload your monthly bank CSV. Opening balance is automatically inherited from the previous month.\n\n2\nAutomatic Matching\n\nPayments already entered in the ERP are matched automatically. If an inline suggestion appears on a row, click \"Match\" to link it.\n\n3\n1-Click Bank Fees\n\nFor bank charges or interest on the statement not yet in the ERP, click \"Record Fee\". It writes the ledger journal and matches in 1 click.\n\n4\nCertify & Lock Period\n\nWhen the Difference shows KES 0.00 and 0 unmatched lines remain, click \"Certify\" to seal the period.\n\nPaying Account\nNCBA Operating (NCBA)\nGL: 1100 · Bank\nBank Account\nStatement:\n2026-09-01 to 2026-09-30 [DRAFT] · 1 unmatched\nRefresh\nImport Statement\nBank Statement\nStatement\nKES 900.00\nClosing\nOpening: KES 1,000.00\nIn: +KES 0.00\nOut: -KES 0.00\nSystem Ledger\nGL Book\nKES 1,000.00\nExpected\nOpening: KES 1,000.00\nNet GL: KES 0.00\nDifference\nKES 0.00\nDiscrepancy\nStatement diff: KES 0.00 · Ledger diff: KES 100.00\nMatching Progress\n1 Unmatched\n0 / 1\n0%\nUnmatched Bank Lines\n1\nMatched Items\n0\nIgnored Rows\n0\nPeriod: 2026-09-01 to 2026-09-30\nDATE\tREFERENCE\tDESCRIPTION / NARRATION\tMONEY OUT (-)\tMONEY IN (+)\tQUICK ACTIONS\n2026-09-30\tBANK-73A\tBank charge\tKES 100.00\t—\t\nRecord Fee\nMatch\nReconciliation In Progress\n\nTo certify: resolve 1 unmatched line(s) and eliminate the KES 0.00 difference.\n\nCertify & Lock Reconciliation",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/accounts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/offset-accounts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/statements"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/statements/prefill"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/statements/1"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/reconciliation/statements/1/transactions/1/create-and-match"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/statements/1"
+        }
+      ],
+      "query": "/finance/reconciliation"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/reconciliation/statements/1/transactions/1/create-and-match"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Bank Matching",
+    "view": "reconciliation",
+    "permission": "finance.payment_sources.manage",
+    "action": "Record fee and match",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nCash & banks\n/\nBank matching\nBank reconciliation\n\nMatch bank and mobile-money statements against ledger movements to certify account balances.\n\nSearch Finance\nHow this works\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nCash & bank position\nCash movement\nCHECK & CLOSE\nBank matching\nHow Bank Reconciliation Works (Step-by-Step Guide)\n\nReconciliation proves that the money in your bank account matches the financial records in the ERP.\n\nDownload Sample CSV\n1\nUpload Bank Statement\n\nChoose your account and upload your monthly bank CSV. Opening balance is automatically inherited from the previous month.\n\n2\nAutomatic Matching\n\nPayments already entered in the ERP are matched automatically. If an inline suggestion appears on a row, click \"Match\" to link it.\n\n3\n1-Click Bank Fees\n\nFor bank charges or interest on the statement not yet in the ERP, click \"Record Fee\". It writes the ledger journal and matches in 1 click.\n\n4\nCertify & Lock Period\n\nWhen the Difference shows KES 0.00 and 0 unmatched lines remain, click \"Certify\" to seal the period.\n\nPaying Account\nNCBA Operating (NCBA)\nGL: 1100 · Bank\nBank Account\nStatement:\n2026-09-01 to 2026-09-30 [DRAFT] · 1 unmatched\nRefresh\nImport Statement\nBank Statement\nStatement\nKES 900.00\nClosing\nOpening: KES 1,000.00\nIn: +KES 0.00\nOut: -KES 0.00\nSystem Ledger\nGL Book\nKES 1,000.00\nExpected\nOpening: KES 1,000.00\nNet GL: KES 0.00\nDifference\nKES 0.00\nDiscrepancy\nStatement diff: KES 0.00 · Ledger diff: KES 100.00\nMatching Progress\n1 Unmatched\n0 / 1\n0%\nUnmatched Bank Lines\n1\nMatched Items\n0\nIgnored Rows\n0\nPeriod: 2026-09-01 to 2026-09-30\nDATE\tREFERENCE\tDESCRIPTION / NARRATION\tMONEY OUT (-)\tMONEY IN (+)\tQUICK ACTIONS\n2026-09-30\tBANK-73A\tBank charge\tKES 100.00\t—\t\nRecord Fee\nMatch\nReconciliation In Progress\n\nTo certify: resolve 1 unmatched line(s) and eliminate the KES 0.00 difference.\n\nCertify & Lock Reconciliation",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Download Sample CSV",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Refresh",
+          "disabled": false
+        },
+        {
+          "label": "Import Statement",
+          "disabled": false
+        },
+        {
+          "label": "Unmatched Bank Lines1",
+          "disabled": false
+        },
+        {
+          "label": "Matched Items0",
+          "disabled": false
+        },
+        {
+          "label": "Ignored Rows0",
+          "disabled": false
+        },
+        {
+          "label": "Record Fee",
+          "disabled": false
+        },
+        {
+          "label": "Match",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Certify & Lock Reconciliation",
+          "disabled": true
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nCash & banks\n/\nBank matching\nBank reconciliation\n\nMatch bank and mobile-money statements against ledger movements to certify account balances.\n\nSearch Finance\nHow this works\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nCash & bank position\nCash movement\nCHECK & CLOSE\nBank matching\nHow Bank Reconciliation Works (Step-by-Step Guide)\n\nReconciliation proves that the money in your bank account matches the financial records in the ERP.\n\nDownload Sample CSV\n1\nUpload Bank Statement\n\nChoose your account and upload your monthly bank CSV. Opening balance is automatically inherited from the previous month.\n\n2\nAutomatic Matching\n\nPayments already entered in the ERP are matched automatically. If an inline suggestion appears on a row, click \"Match\" to link it.\n\n3\n1-Click Bank Fees\n\nFor bank charges or interest on the statement not yet in the ERP, click \"Record Fee\". It writes the ledger journal and matches in 1 click.\n\n4\nCertify & Lock Period\n\nWhen the Difference shows KES 0.00 and 0 unmatched lines remain, click \"Certify\" to seal the period.\n\nPaying Account\nNCBA Operating (NCBA)\nGL: 1100 · Bank\nBank Account\nStatement:\n2026-09-01 to 2026-09-30 [DRAFT] · 1 unmatched\nRefresh\nImport Statement\nBank Statement\nStatement\nKES 900.00\nClosing\nOpening: KES 1,000.00\nIn: +KES 0.00\nOut: -KES 0.00\nSystem Ledger\nGL Book\nKES 1,000.00\nExpected\nOpening: KES 1,000.00\nNet GL: KES 0.00\nDifference\nKES 0.00\nDiscrepancy\nStatement diff: KES 0.00 · Ledger diff: KES 100.00\nMatching Progress\n1 Unmatched\n0 / 1\n0%\nUnmatched Bank Lines\n1\nMatched Items\n0\nIgnored Rows\n0\nPeriod: 2026-09-01 to 2026-09-30\nDATE\tREFERENCE\tDESCRIPTION / NARRATION\tMONEY OUT (-)\tMONEY IN (+)\tQUICK ACTIONS\n2026-09-30\tBANK-73A\tBank charge\tKES 100.00\t—\t\nRecord Fee\nMatch\nReconciliation In Progress\n\nTo certify: resolve 1 unmatched line(s) and eliminate the KES 0.00 difference.\n\nCertify & Lock Reconciliation\nRecord Bank Fee / Spend & Match\n\nPosts an operational cash movement to the GL and automatically matches this statement row in 1 click.\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\nDate:2026-09-30\nDirection:Money Out (-)\nAmount:KES 100.00\nMOVEMENT TYPE\nBank charge / fee\nInternal transfer\nDirect withdrawal\nExcise / Tax levy\nApproved adjustment\nOFFSET LEDGER ACCOUNT (DEBITED/CREDITED AGAINST THIS)\n-- Select ledger account --\n7000 · Bank charges\n\nDebited to expense (e.g. 6100 Bank Charges), offsetting the bank withdrawal.\n\nREFERENCE\nCOUNTERPARTY (OPTIONAL)\nDESCRIPTION\nCancel\nPost & Match Line",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/accounts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/offset-accounts"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/statements"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/statements/prefill"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/reconciliation/statements/1"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/reconciliation/statements/1/transactions/1/create-and-match"
+        }
+      ],
+      "query": "/finance/reconciliation"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/reconciliation/statements/1/transactions/1/create-and-match"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Accounting Period",
+    "view": "periods",
+    "permission": "finance.periods.manage",
+    "action": "Close period",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\nMonth-end close\n\nCheck what is still unfinished in a month, then declare it final so nothing more can be recorded in it.\n\nSearch Finance\nRefresh\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nMonths\nAll years\n2026\nSeptember 2026 · this month\nopen\nSeptember 2026\n\n2026-09-01 to 2026-09-30 · currently open\n\nLock for review\nClose the month\n\nJournals balance\n\nAll journals balance",
+      "buttons": [
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Refresh",
+          "disabled": false
+        },
+        {
+          "label": "September 2026 · this monthopen",
+          "disabled": false
+        },
+        {
+          "label": "Lock for review",
+          "disabled": false
+        },
+        {
+          "label": "Close the month",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\nMonth-end close\n\nCheck what is still unfinished in a month, then declare it final so nothing more can be recorded in it.\n\nSearch Finance\nRefresh\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nMonths\nAll years\n2026\nSeptember 2026 · this month\nopen\nSeptember 2026\n\n2026-09-01 to 2026-09-30 · currently open\n\nLock for review\nClose the month\n\nJournals balance\n\nAll journals balance",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/accounting-periods"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/accounting-periods/1/checklist"
+        },
+        {
+          "method": "get",
+          "url": "/api/notifications/unread-count"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/accounting-periods/1/close"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/accounting-periods"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/accounting-periods/1/checklist"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/accounting-periods/1/checklist"
+        }
+      ],
+      "query": "/finance/accounting-periods"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/accounting-periods/1/close"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Accounting Period",
+    "view": "periods",
+    "permission": "finance.periods.manage",
+    "action": "Close period",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\nMonth-end close\n\nCheck what is still unfinished in a month, then declare it final so nothing more can be recorded in it.\n\nSearch Finance\nRefresh\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nMonths\nAll years\n2026\nSeptember 2026 · this month\nopen\nSeptember 2026\n\n2026-09-01 to 2026-09-30 · currently open\n\nLock for review\nClose the month\n\nJournals balance\n\nAll journals balance",
+      "buttons": [
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Refresh",
+          "disabled": false
+        },
+        {
+          "label": "September 2026 · this monthopen",
+          "disabled": false
+        },
+        {
+          "label": "Lock for review",
+          "disabled": false
+        },
+        {
+          "label": "Close the month",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\nMonth-end close\n\nCheck what is still unfinished in a month, then declare it final so nothing more can be recorded in it.\n\nSearch Finance\nRefresh\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nMonths\nAll years\n2026\nSeptember 2026 · this month\nopen\nSeptember 2026\n\n2026-09-01 to 2026-09-30 · currently open\n\nLock for review\nClose the month\n\nJournals balance\n\nAll journals balance",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/accounting-periods"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/accounting-periods/1/checklist"
+        },
+        {
+          "method": "get",
+          "url": "/api/notifications/unread-count"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/accounting-periods/1/close"
+        }
+      ],
+      "query": "/finance/accounting-periods"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/accounting-periods/1/close"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Finance Setup",
+    "view": "paying-accounts",
+    "permission": "finance.payment_sources.manage",
+    "action": "Create paying account",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nSetup\n/\nMoney accounts\nPaying accounts\n\nEvery account WNG's money can leave, and the ledger account each one credits.\n\nSearch Finance\nRefresh\nAdd financial account\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nBank accounts, mobile money and cash floats, and the ledger account each posts to.\n\nCODE\tACCOUNT\tTYPE\tLEDGER ACCOUNT\tBALANCE\tSTATUS\tEDIT\nEQB\tEquity Bank\tBank account\tEQB-001 · Configured ledger account\tNot tracked here\tActive\t\n\nNCBA\tNCBA\tBank account\tNCBA-001 · Configured ledger account\tNot tracked here\tActive\t\n\nMPESA\tCompany M-Pesa\tMobile money\tUnmapped\tNot tracked here\tInactive\t\n\nCARD\tCompany Card\tCard\tUnmapped\tNot tracked here\tInactive\t\n\nSUPP-CR\tSupplier Credit\tSupplier credit\t2100 · Configured ledger account\tNot tracked here\tActive\t",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Refresh",
+          "disabled": false
+        },
+        {
+          "label": "Add financial account",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nSetup\n/\nMoney accounts\nPaying accounts\n\nEvery account WNG's money can leave, and the ledger account each one credits.\n\nSearch Finance\nRefresh\nAdd financial account\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nBank accounts, mobile money and cash floats, and the ledger account each posts to.\n\nRehearsal action recorded.\nCODE\tACCOUNT\tTYPE\tLEDGER ACCOUNT\tBALANCE\tSTATUS\tEDIT\nEQB\tEquity Bank\tBank account\tEQB-001 · Configured ledger account\tNot tracked here\tActive\t\n\nNCBA\tNCBA\tBank account\tNCBA-001 · Configured ledger account\tNot tracked here\tActive\t\n\nMPESA\tCompany M-Pesa\tMobile money\tUnmapped\tNot tracked here\tInactive\t\n\nCARD\tCompany Card\tCard\tUnmapped\tNot tracked here\tInactive\t\n\nSUPP-CR\tSupplier Credit\tSupplier credit\t2100 · Configured ledger account\tNot tracked here\tActive\t",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources/ledger-accounts"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/payment-sources"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources"
+        }
+      ],
+      "query": "/finance/setup/paying-accounts"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/payment-sources"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Finance Setup",
+    "view": "paying-accounts",
+    "permission": "finance.payment_sources.manage",
+    "action": "Create paying account",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nSetup\n/\nMoney accounts\nPaying accounts\n\nEvery account WNG's money can leave, and the ledger account each one credits.\n\nSearch Finance\nRefresh\nAdd financial account\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nBank accounts, mobile money and cash floats, and the ledger account each posts to.\n\nCODE\tACCOUNT\tTYPE\tLEDGER ACCOUNT\tBALANCE\tSTATUS\tEDIT\nEQB\tEquity Bank\tBank account\tEQB-001 · Configured ledger account\tNot tracked here\tActive\t\n\nNCBA\tNCBA\tBank account\tNCBA-001 · Configured ledger account\tNot tracked here\tActive\t\n\nMPESA\tCompany M-Pesa\tMobile money\tUnmapped\tNot tracked here\tInactive\t\n\nCARD\tCompany Card\tCard\tUnmapped\tNot tracked here\tInactive\t\n\nSUPP-CR\tSupplier Credit\tSupplier credit\t2100 · Configured ledger account\tNot tracked here\tActive\t",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Refresh",
+          "disabled": false
+        },
+        {
+          "label": "Add financial account",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nSetup\n/\nMoney accounts\nPaying accounts\n\nEvery account WNG's money can leave, and the ledger account each one credits.\n\nSearch Finance\nRefresh\nAdd financial account\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nBank accounts, mobile money and cash floats, and the ledger account each posts to.\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\nCODE\tACCOUNT\tTYPE\tLEDGER ACCOUNT\tBALANCE\tSTATUS\tEDIT\nEQB\tEquity Bank\tBank account\tEQB-001 · Configured ledger account\tNot tracked here\tActive\t\n\nNCBA\tNCBA\tBank account\tNCBA-001 · Configured ledger account\tNot tracked here\tActive\t\n\nMPESA\tCompany M-Pesa\tMobile money\tUnmapped\tNot tracked here\tInactive\t\n\nCARD\tCompany Card\tCard\tUnmapped\tNot tracked here\tInactive\t\n\nSUPP-CR\tSupplier Credit\tSupplier credit\t2100 · Configured ledger account\tNot tracked here\tActive\t\nAdd financial account\n\nEvery payment made from this account credits the ledger account named below.\n\nCODE\nTYPE\nBank account\nPetty cash float\nMobile money\nCard\nSupplier credit\nACCOUNT NAME\nLEDGER ACCOUNT\nSelect the account this credits\n1100 · Bank\n\nOnly balance-sheet asset and liability accounts: a paying account names where cash sits.\n\nAvailable to pay from\nCancel\nSave account",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-sources/ledger-accounts"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/payment-sources"
+        }
+      ],
+      "query": "/finance/setup/paying-accounts"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/payment-sources"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Finance Setup",
+    "view": "payment-terms",
+    "permission": "finance.receivables.billing_basis",
+    "action": "Create payment term",
+    "outcome": "success",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nSetup\n/\nPayment terms\nPayment terms\n\nThe invoice payment terms Finance offers. An invoice picks one to set its due date; the preparer may still change the date.\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nThe invoice payment terms Finance offers, and which one is the default.\n\nAdd a payment term\nNAME\nDAYS\nCustom due date\nAdd term\nTERM\tDUE\tSTATUS\t\nACTIONS\n\nNet 30\t30 days after the invoice date\tActive\tMake defaultDeactivate",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Add term",
+          "disabled": true
+        },
+        {
+          "label": "Make default",
+          "disabled": false
+        },
+        {
+          "label": "Deactivate",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nSetup\n/\nPayment terms\nPayment terms\n\nThe invoice payment terms Finance offers. An invoice picks one to set its due date; the preparer may still change the date.\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nThe invoice payment terms Finance offers, and which one is the default.\n\nAdd a payment term\nNAME\nDAYS\nCustom due date\nAdd term\nTERM\tDUE\tSTATUS\t\nACTIONS\n\nNet 30\t30 days after the invoice date\tActive\tMake defaultDeactivate",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-terms"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/payment-terms"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-terms"
+        }
+      ],
+      "query": "/finance/setup/payment-terms"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/payment-terms"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  },
+  {
+    "screen": "Finance Setup",
+    "view": "payment-terms",
+    "permission": "finance.receivables.billing_basis",
+    "action": "Create payment term",
+    "outcome": "refusal",
+    "eligibility": "Authoritative-shaped workspace fixture; server still validates writes",
+    "before": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nSetup\n/\nPayment terms\nPayment terms\n\nThe invoice payment terms Finance offers. An invoice picks one to set its due date; the preparer may still change the date.\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nThe invoice payment terms Finance offers, and which one is the default.\n\nAdd a payment term\nNAME\nDAYS\nCustom due date\nAdd term\nTERM\tDUE\tSTATUS\t\nACTIONS\n\nNet 30\t30 days after the invoice date\tActive\tMake defaultDeactivate",
+      "buttons": [
+        {
+          "label": "",
+          "disabled": false
+        },
+        {
+          "label": "Search",
+          "disabled": true
+        },
+        {
+          "label": "Add term",
+          "disabled": true
+        },
+        {
+          "label": "Make default",
+          "disabled": false
+        },
+        {
+          "label": "Deactivate",
+          "disabled": false
+        }
+      ]
+    },
+    "after": {
+      "text": "Report 73A isolated fixture — no database access\n\nFinance\n/\nSetup\n/\nPayment terms\nPayment terms\n\nThe invoice payment terms Finance offers. An invoice picks one to set its due date; the preparer may still change the date.\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nThe invoice payment terms Finance offers, and which one is the default.\n\nThe accounting period closed after this record was loaded. Refresh the record and choose an open period.\n\nAdd a payment term\nNAME\nDAYS\nCustom due date\nAdd term\nTERM\tDUE\tSTATUS\t\nACTIONS\n\nNet 30\t30 days after the invoice date\tActive\tMake defaultDeactivate",
+      "calls": [
+        {
+          "method": "get",
+          "url": "/api/finance/work-queue/count"
+        },
+        {
+          "method": "get",
+          "url": "/api/finance/payment-terms"
+        },
+        {
+          "method": "post",
+          "url": "/api/finance/payment-terms"
+        }
+      ],
+      "query": "/finance/setup/payment-terms"
+    },
+    "endpoints": [
+      {
+        "method": "post",
+        "url": "/api/finance/payment-terms"
+      }
+    ],
+    "result": "EXECUTED",
+    "errors": []
+  }
+]

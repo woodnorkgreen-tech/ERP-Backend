@@ -460,8 +460,9 @@ class PettyCashController extends Controller
             $payload = $row->payload ?: [];
             $outstanding = \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::query()
                 ->where('user_id', $row->requested_by)
-                ->whereIn('status', \App\Modules\Finance\PettyCash\Models\PettyCashRequisition::OUTSTANDING_ADVANCE_STATUSES)
-                ->get(['id', 'requisition_number', 'total_amount', 'surrender_due_at', 'status']);
+                ->select(['id', 'requisition_number', 'total_amount', 'surrender_due_at', 'status'])
+                ->outstandingAdvances()
+                ->get();
             // W3-5: the same payee + receipt + amount already claimed. Flagged
             // for the independent approver; the approver is the control here.
             $duplicate = null;

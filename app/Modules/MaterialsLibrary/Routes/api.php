@@ -1,13 +1,13 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Modules\MaterialsLibrary\Controllers\WorkstationController;
-use App\Modules\MaterialsLibrary\Controllers\MaterialController;
-use App\Modules\MaterialsLibrary\Controllers\MaterialImportController;
-use App\Modules\MaterialsLibrary\Controllers\MaterialExportController;
-use App\Modules\MaterialsLibrary\Controllers\CategoryController;
-use App\Modules\MaterialsLibrary\Controllers\ReferenceDataController;
 use App\Constants\Permissions;
+use App\Modules\MaterialsLibrary\Controllers\CategoryController;
+use App\Modules\MaterialsLibrary\Controllers\MaterialController;
+use App\Modules\MaterialsLibrary\Controllers\MaterialExportController;
+use App\Modules\MaterialsLibrary\Controllers\MaterialImportController;
+use App\Modules\MaterialsLibrary\Controllers\ReferenceDataController;
+use App\Modules\MaterialsLibrary\Controllers\WorkstationController;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -37,6 +37,8 @@ Route::middleware('permission:'.Permissions::MATERIALS_LIBRARY_VIEW)->group(func
     Route::get('categories/{id}/normalization-preview', [CategoryController::class, 'normalizationPreview']);
     Route::get('categories/suggest-code', [CategoryController::class, 'suggestCode']);
     Route::get('categories', [CategoryController::class, 'index']);
+    Route::get('export', [MaterialExportController::class, 'downloadAll']);
+    Route::get('template', [MaterialExportController::class, 'blankTemplate']);
     Route::get('template/{workstationId}', [MaterialExportController::class, 'downloadTemplate']);
 });
 

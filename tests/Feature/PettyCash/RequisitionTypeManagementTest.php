@@ -274,6 +274,8 @@ class RequisitionTypeManagementTest extends TestCase
     public function test_create_and_update_stamp_the_schema_version_into_the_frozen_type_snapshot(): void
     {
         $user = User::factory()->create(['is_active' => true]);
+        $verifier = User::factory()->create(['is_active' => true]);
+        $verifier->givePermissionTo(\App\Modules\Finance\PettyCash\Services\RequisitionVerificationService::PERMISSION);
         $departmentId = DB::table('departments')->insertGetId([
             'name' => 'Operations', 'created_at' => now(), 'updated_at' => now(),
         ]);
@@ -293,6 +295,7 @@ class RequisitionTypeManagementTest extends TestCase
             ],
         ]);
         $payload = [
+            'responsible_verifier_id' => $verifier->id,
             'department_id' => $departmentId,
             'category' => $type->name,
             'requisition_type_id' => $type->id,

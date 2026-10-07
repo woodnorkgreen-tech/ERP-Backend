@@ -1,0 +1,95 @@
+   PASS  Tests\Unit\Finance\ChartAccountMapTest
+  ✓ an unmapped code resolves to itself                                  0.01s  
+  ✓ a mapped code resolves to this chart
+  ✓ mapping one code leaves the others alone
+  ✓ an indirect account stays unresolved
+  ✓ an indirect account can be resolved only by an explicit mapping
+  ✓ a code merely mentioned in the text never resolves however fully the chart is mapped
+  ✓ the two ways the catalogue designates an account still resolve
+  ✓ a blank mapping falls back rather than erasing the account
+   PASS  Tests\Unit\Finance\RequisitionSchemaServiceTest
+  ✓ it validates and strips values using the type contract               0.39s  
+  ✓ it rejects missing type specific and recipient data                  0.03s  
+  ✓ it synthesises a v2 document for a type that has never been edited   0.03s  
+  ✓ it normalises width and visibility onto every field                  0.03s  
+  ✓ a hidden required field is not enforced                              0.03s  
+  ✓ a visible required field is enforced                                 0.03s  
+  ✓ a stored document wins over the legacy columns                       0.03s  
+  ✓ a hidden section neither requires nor retains its fields             0.03s  
+  ✓ line field visibility is evaluated for each line                     0.03s  
+  ✓ a visible required line field is enforced for that line              0.03s  
+  ✓ a type definition stamps the schema version at the snapshot boundar… 0.03s  
+  ✓ a project picker keeps the label beside the reference                0.04s  
+  ✓ a required picker rejects a label with no reference                  0.03s  
+  ✓ the field type list covers the pickers but not attachments           0.03s  
+  ✓ Populated voucher_id for existing payment records
+  ✓ Migrated 0 allocation(s) from spend_voucher_allocations to payment_allocations
+  ✓ Populated settled_by_payment_id for 0 cost line(s)
+   PASS  Tests\Feature\Finance\WngChartCompletionTest
+  ✓ on wngs chart nothing resolves until the chart is completed        143.45s  
+  ✓ a dry run writes nothing and reports every function resolving        0.11s  
+  ✓ execute creates only the missing accounts and never touches an exis… 0.16s  
+  ✓ a second run creates nothing                                         0.16s  
+  ✓ new accounts carry their type balance and hierarchy                  0.09s  
+  ✓ every new account is classified consistently with its category       0.09s  
+  ✓ an existing code with a different definition is refused and nothing… 0.10s  
+  ✓ an account already kept under another code is refused as a duplicat… 0.09s  
+  ✓ execution needs the database typed and never runs against the live…  0.10s  
+  ✓ the wip timing policy is a switch not a chart fact                   0.08s  
+  ✓ with no wip policy set the profile default is never applied          0.10s  
+  ✓ with no wip policy project cost cannot post and readiness says poli… 2.40s  
+  ✓ seeding the catalogue with no wip policy links no job cost code      0.25s  
+  ✓ the planning tool labels the suggested policy and never cuts over o… 0.18s  
+  ✓ wngs own chart is identified as such                                 0.15s  
+  ✓ two charts in one database stop the run and nothing is merged moved… 0.16s  
+  ✓ a chart that is neither is sent for manual review                    0.21s  
+  ✓ under the full profile the codes that only mention an account stay…  0.38s  
+  ✓ a designated account missing from the chart fails readiness by name  0.34s  
+  ✓ an unreadable profile maps nothing and readiness names it            0.11s  
+  ✓ every bank links to its own account not the generic bank             0.24s  
+  ✓ after completion tax links and expense codes resolve to wng account… 0.41s  
+  ✓ the uncoded cost fallback lands on wngs materials wip                0.12s  
+  ✓ classification fills only null columns and touches nothing else      0.20s  
+  ✓ an existing classification is never overwritten                      0.06s  
+  ✓ unlinked unused paying accounts are disabled not given an invented…  0.19s  
+  ✓ the unconfigured loan code is reported but does not block readiness  2.95s  
+  ✓ a same named account is never reused unless the profile declares it  0.15s  
+  ✓ an explicitly declared existing account meets the requirement and n… 0.15s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.12s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.14s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.09s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.09s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.09s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.14s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.12s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.12s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.13s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.14s  
+  ✓ a new account is refused beside the reference account for the same…  0.14s  
+  ✓ a blocked dry run still reports the whole plan and writes nothing    0.11s  
+  ✓ the classification preview shows before and proposed and changes no… 0.17s  
+  ✓ a declared reuse loosens none of the execution guards                0.10s  
+  ✓ the dry run reports where each paying account is linked against the… 0.12s  
+  ✓ readiness reports the profile and all functions resolving            2.56s  
+   PASS  Tests\Feature\Finance\WngChartMappingTest
+  ✓ every posting function is a reference chart account                  0.20s  
+  ✓ on the wng chart readiness names every unmapped function and mappin… 0.05s  
+  ✓ readiness endpoint reports functions and accounts can open it        2.33s  
+  ✓ an unmapped function refuses posting with a clear message            0.04s  
+  ✓ an uncoded cost never falls back to an arbitrary account             0.05s  
+  ✓ the reference chart fallback is unchanged                            0.18s  
+  ✓ seeders link through the map and never wipe a finance set link       0.10s  
+  ✓ r1 project officers record and po verify labour only on their proje… 2.44s  
+  ✓ r3 accounts holds finance reports view and nothing else changed for… 0.03s  
+  ✓ the mapping command validates the proposal and emits only approved…  0.07s  
+  ✓ the committed wng proposal covers every function and approves nothi… 0.04s  
+   PASS  Tests\Feature\Finance\FinanceReadinessTest
+  ✓ a migrations only install fails readiness as production did          0.07s  
+  ✓ reference data makes the install ready                               3.77s  
+  ✓ a code the seeder switched off comes back once its account exists    2.68s  
+  ✓ a re run keeps a code finance switched off                           2.94s  
+  ✓ a re run keeps an account link the chart can no longer resolve       2.43s  
+  ✓ the seeder names the codes it leaves inactive                        0.15s  
+  Tests:    84 passed (539 assertions)
+  Duration: 176.06s
+exit=0

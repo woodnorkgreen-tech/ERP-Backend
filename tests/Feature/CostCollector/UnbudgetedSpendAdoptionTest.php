@@ -288,12 +288,12 @@ class UnbudgetedSpendAdoptionTest extends TestCase
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        $elementId = DB::table('project_elements')->insertGetId([
+        $elementId = \App\Models\ProjectElement::create([
             'persistent_id' => (string) Str::uuid(),
             'task_materials_data_id' => $materialsDataId,
             'element_type' => 'stand', 'name' => 'Stand', 'category' => 'production',
             'created_at' => now(), 'updated_at' => now(),
-        ]);
+        ])->id;
 
         $persistentId = (string) Str::uuid();
 

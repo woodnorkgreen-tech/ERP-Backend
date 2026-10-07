@@ -81,12 +81,12 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        $elementId = DB::table('project_elements')->insertGetId([
+        $elementId = \App\Models\ProjectElement::create([
             'persistent_id' => (string) Str::uuid(),
             'task_materials_data_id' => $dataId,
             'element_type' => 'stand', 'name' => 'BOOTH1', 'category' => 'production',
             'is_included' => true, 'created_at' => now(), 'updated_at' => now(),
-        ]);
+        ])->id;
 
         return ElementMaterial::create([
             'project_element_id' => $elementId,

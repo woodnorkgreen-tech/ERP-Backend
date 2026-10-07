@@ -1,0 +1,17 @@
+### A: FinanceReadinessTest -> W7LabourConcurrencyTest -> CostCollectorApiTest
+   PASS  Tests\Feature\Finance\FinanceReadinessTest
+   PASS  Tests\Feature\Finance\W7LabourConcurrencyTest
+   FAIL  Tests\Feature\CostCollector\CostCollectorApiTest
+  ⨯ the picker searches and filters by family                            0.22s  
+   FAILED  Tests\Feature\CostCollector\CostCollectorApiTest > the picker sea…   
+  Tests:    1 failed, 22 passed (127 assertions)
+TL-HIR-001	1	696
+active codes	101
+chart accounts	3
+### B (control): FinanceReadinessTest -> CostCollectorApiTest
+   PASS  Tests\Feature\Finance\FinanceReadinessTest
+   PASS  Tests\Feature\CostCollector\CostCollectorApiTest
+  Tests:    18 passed (74 assertions)
+TL-HIR-001	0	NULL
+active codes	2
+chart accounts	3

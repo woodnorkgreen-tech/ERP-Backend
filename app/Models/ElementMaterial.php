@@ -2,15 +2,15 @@
 
 namespace App\Models;
 
+use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-
 /**
  * @OA\Schema(
  *     schema="ElementMaterial",
  *     title="Element Material",
  *     description="A material used in a project element",
+ *
  *     @OA\Property(property="id", type="integer", description="Material ID"),
  *     @OA\Property(property="description", type="string", description="Material description"),
  *     @OA\Property(property="unitOfMeasurement", type="string", description="Unit of measurement"),
@@ -25,6 +25,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *     schema="ElementMaterialInput",
  *     title="Element Material Input",
  *     description="Input data for creating/updating an element material",
+ *
  *     @OA\Property(property="description", type="string", description="Material description"),
  *     @OA\Property(property="unitOfMeasurement", type="string", description="Unit of measurement"),
  *     @OA\Property(property="quantity", type="number", format="float", description="Material quantity"),
@@ -32,11 +33,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *     @OA\Property(property="notes", type="string", nullable=true, description="Material notes")
  * )
  */
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
 class ElementMaterial extends Model
 {
-    use HasFactory;
+    use HasFactory, \Illuminate\Database\Eloquent\SoftDeletes;
+
+    const DELETED_AT = 'archived_at';
 
     protected static function boot()
     {
@@ -50,6 +54,7 @@ class ElementMaterial extends Model
     }
 
     protected $fillable = [
+        'archived_at',
         'project_element_id',
         'library_material_id',
         'persistent_id',
@@ -61,7 +66,7 @@ class ElementMaterial extends Model
         'is_additional',
         'notes',
         'source_metadata',
-        'sort_order'
+        'sort_order',
     ];
 
     protected $casts = [
@@ -71,16 +76,16 @@ class ElementMaterial extends Model
         'is_included' => 'boolean',
         'is_additional' => 'boolean',
         'sort_order' => 'integer',
-        'source_metadata' => 'array'
+        'source_metadata' => 'array',
     ];
 
     public function element(): BelongsTo
     {
-        return $this->belongsTo(ProjectElement::class, 'project_element_id');
+        return $this->belongsTo(ProjectElement::class, 'project_element_id')->withTrashed();
     }
 
     public function libraryMaterial(): BelongsTo
     {
-        return $this->belongsTo(\App\Modules\MaterialsLibrary\Models\LibraryMaterial::class, 'library_material_id');
+        return $this->belongsTo(LibraryMaterial::class, 'library_material_id');
     }
 }

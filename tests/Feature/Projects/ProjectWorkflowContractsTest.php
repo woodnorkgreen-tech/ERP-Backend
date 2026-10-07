@@ -507,7 +507,7 @@ class ProjectWorkflowContractsTest extends TestCase
             ->assertJsonPath('data.projectInfo.quoteImportedFrom.snapshotSource', 'quote_approvals')
             ->assertJsonPath('data.projectInfo.quoteImportedFrom.approvalTaskId', $approvalTask->id);
 
-        $this->assertDatabaseHas('project_elements', ['name' => 'Approved Stage']);
+        $this->assertDatabaseHas('project_deliverables', ['name' => 'Approved Stage']);
         $this->assertDatabaseHas('element_materials', ['description' => 'Approved Truss']);
         $this->assertDatabaseMissing('element_materials', ['description' => 'LIVE DRAFT MATERIAL']);
     }

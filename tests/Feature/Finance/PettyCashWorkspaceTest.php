@@ -31,6 +31,7 @@ class PettyCashWorkspaceTest extends TestCase
 {
     use GrantsMatrixPermissions;
     use RefreshDatabase;
+    use \Tests\Support\VerifiedFinancialRequisitionFixture;
 
     private User $requester;
     private User $finance;
@@ -75,13 +76,13 @@ class PettyCashWorkspaceTest extends TestCase
             'default_expense_code_id' => $this->expenseCodeId, 'is_active' => true,
         ]);
 
-        return PettyCashRequisition::create([
+        return $this->verifiedRequisitionFixture(PettyCashRequisition::create([
             'requisition_number' => 'PCR-D-'.uniqid(), 'user_id' => $this->requester->id,
             'department_id' => $this->departmentId, 'category' => 'Site Materials',
             'requisition_type_id' => $type->id, 'purpose' => 'Site spend',
             'total_amount' => 2000.00, 'status' => $status, 'enquiry_id' => $enquiryId,
             'payee_name' => 'Field Worker',
-        ]);
+        ]));
     }
 
     private function enquiry(string $jobNumber): int

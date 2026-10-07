@@ -1,0 +1,7 @@
+REFUSED — nothing was written:
+  - Account VAT-001 ('Output VAT Payable') duplicates existing account 2110. Map to 2110 instead of creating it.
+  - Account VAT-002 ('Input VAT Recoverable') duplicates existing account 1330. Map to 1330 instead of creating it.
+  - Account WHT-001 ('Withholding Tax Payable') duplicates existing account 2120. Map to 2120 instead of creating it.
+  - Account AE-001 ('Accrued Expenses') duplicates existing account 2150. Map to 2150 instead of creating it.
+  - Account CD-001 ('Client Deposits') duplicates existing account 2200. Map to 2200 instead of creating it.
+exit=1

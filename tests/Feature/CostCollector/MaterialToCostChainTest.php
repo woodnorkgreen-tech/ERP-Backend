@@ -86,12 +86,12 @@ class MaterialToCostChainTest extends TestCase
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        $this->elementId = DB::table('project_elements')->insertGetId([
+        $this->elementId = \App\Models\ProjectElement::create([
             'persistent_id' => (string) Str::uuid(),
             'task_materials_data_id' => $this->materialsDataId,
             'element_type' => 'stand', 'name' => 'BOOTH1', 'category' => 'production',
             'is_included' => true, 'created_at' => now(), 'updated_at' => now(),
-        ]);
+        ])->id;
     }
 
     private function task(string $type, string $status): int
@@ -320,7 +320,7 @@ class MaterialToCostChainTest extends TestCase
         $this->saveSpecification();
         $this->issue($board, $line, 4, 1500);
 
-        DB::table('project_elements')->where('id', $this->elementId)->update(['name' => 'Booth 1']);
+        DB::table('project_deliverables')->where('id', $this->elementId)->update(['name' => 'Booth 1']);
         $this->saveSpecification();
 
         $elements = collect(app(\App\Modules\Finance\CostCollector\Services\CostAccountService::class)

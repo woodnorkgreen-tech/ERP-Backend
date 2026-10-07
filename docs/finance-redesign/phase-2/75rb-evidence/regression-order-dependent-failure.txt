@@ -1,0 +1,17 @@
+Earlier full run, before the race tests' cleanup restored in-place catalogue rows: 1 order-dependent failure
+   FAIL  Tests\Feature\CostCollector\CostCollectorApiTest
+  ⨯ the picker searches and filters by family                            0.08s  
+  Tests:    1 failed, 1290 passed (10773 assertions)
+  Duration: 851.18s
+exit=1
+
+Reproduction with only tests/Feature/Finance ahead of it (no petty cash tests):
+   FAIL  Tests\Feature\CostCollector\CostCollectorApiTest
+  ⨯ the picker searches and filters by family                            0.11s  
+  Tests:    1 failed, 642 passed (4565 assertions)
+exit=1
+
+Alone:
+   PASS  Tests\Feature\CostCollector\CostCollectorApiTest
+  Tests:    12 passed (53 assertions)
+exit=0

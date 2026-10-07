@@ -1,0 +1,53 @@
+## payment_sources — db
+--------------
+SELECT ps.id,ps.code,ps.name,ps.type,ps.is_active act,ps.can_make_payment pay,ps.can_receive_payment rcv,ps.gl_account_id gl,a.code acct,a.name acct_name,a.category cat,a.account_type atype,a.normal_balance nb,a.is_postable post,a.is_active a_act,DATE(a.created_at) acct_created,(SELECT COUNT(*) FROM db.journal_lines l WHERE l.account_id=a.id) jl FROM db.payment_sources ps LEFT JOIN db.chart_of_accounts a ON a.id=ps.gl_account_id ORDER BY ps.id
+--------------
+
+ERROR 1054 (42S22) at line 1: Unknown column 'ps.can_receive_payment' in 'SELECT'
+## documents using each source — db
+client_receipts.payment_source_id	PC-MAIN	2
+enquiry_payments.payment_source_id	PC-MAIN	2
+## payment_sources — wng_target_rehearsal
+--------------
+SELECT ps.id,ps.code,ps.name,ps.type,ps.is_active act,ps.can_make_payment pay,ps.can_receive_payment rcv,ps.gl_account_id gl,a.code acct,a.name acct_name,a.category cat,a.account_type atype,a.normal_balance nb,a.is_postable post,a.is_active a_act,DATE(a.created_at) acct_created,(SELECT COUNT(*) FROM wng_target_rehearsal.journal_lines l WHERE l.account_id=a.id) jl FROM wng_target_rehearsal.payment_sources ps LEFT JOIN wng_target_rehearsal.chart_of_accounts a ON a.id=ps.gl_account_id ORDER BY ps.id
+--------------
+
+ERROR 1054 (42S22) at line 1: Unknown column 'ps.can_receive_payment' in 'SELECT'
+## documents using each source — wng_target_rehearsal
+client_receipts.payment_source_id	BANK-MAIN	1
+enquiry_payments.payment_source_id	BANK-MAIN	1
+payroll_runs.payment_source_id	BANK-MAIN	1
+bill_payments.payment_source_id	PC-MAIN	1
+spend_vouchers.payment_source_id	PC-MAIN	1
+payments.payment_source_id	BANK-MAIN	1
+payments.payment_source_id	PC-MAIN	13
+## account id 128 — db
++-----+--------------------+------+----------+---------------+----------------+-----------+-------------+-----------+---------------------+---------------------+---------------+
+| id  | name               | code | category | account_type  | normal_balance | parent_id | is_postable | is_active | created_at          | updated_at          | journal_lines |
++-----+--------------------+------+----------+---------------+----------------+-----------+-------------+-----------+---------------------+---------------------+---------------+
+| 128 | Mobile Money Float | 1040 | asset    | balance_sheet | debit          |       124 |           1 |         1 | 2026-10-02 12:49:51 | 2026-10-02 12:49:51 |             0 |
++-----+--------------------+------+----------+---------------+----------------+-----------+-------------+-----------+---------------------+---------------------+---------------+
+## WNG's own cash/bank/mobile accounts (wng_source_rehearsal)
++-----------+---------------------------------+----------+------+-----+
+| code      | name                            | category | post | act |
++-----------+---------------------------------+----------+------+-----+
+| AR-001    | Accounts Receivable (A/R)       | asset    |    1 |   1 |
+| AR-002    | Accounts Receivable (A/R) - EUR | asset    |    1 |   1 |
+| CASH-001  | Cash Account                    | asset    |    1 |   1 |
+| EQB-001   | Equity Bank                     | asset    |    1 |   1 |
+| FK-001    | Faulu Kenya                     | asset    |    1 |   1 |
+| FMB-001   | Family Bank                     | asset    |    1 |   1 |
+| KCB-001   | KCB Bank                        | asset    |    1 |   1 |
+| NCBA-001  | NCBA                            | asset    |    1 |   1 |
+| NIC-001   | NIC Dollar Account              | asset    |    1 |   1 |
+| PETTY-001 | Petty cash                      | asset    |    1 |   1 |
+| SBM-001   | SBM                             | asset    |    1 |   1 |
+| STB-001   | Stanbic Bank                    | asset    |    1 |   1 |
+| STD-001   | Short Term Debtors              | asset    |    1 |   1 |
++-----------+---------------------------------+----------+------+-----+
+## Any WNG account naming M-Pesa / mobile / card
++---------+----------------------------+----------+
+| code    | name                       | category |
++---------+----------------------------+----------+
+| FIN-005 | Finance cost:Mpesa charges | expense  |
++---------+----------------------------+----------+

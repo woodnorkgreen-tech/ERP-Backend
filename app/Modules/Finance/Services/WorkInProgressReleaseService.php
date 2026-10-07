@@ -7,6 +7,7 @@ use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\ProjectInvoice;
 use App\Modules\Finance\Support\ChartAccountMap;
 use App\Modules\Finance\Support\FinanceAccountFunctions;
+use App\Modules\Finance\Support\FinanceChartProfile;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -58,7 +59,7 @@ class WorkInProgressReleaseService
      * release is what lets a finished job still say what it spent on materials
      * as against subcontractors.
      */
-    private const RELEASE_MAP = [
+    public const RELEASE_MAP = [
         FinanceAccountFunctions::WIP_DIRECT_MATERIALS => FinanceAccountFunctions::COS_DIRECT_MATERIALS,
         FinanceAccountFunctions::WIP_DIRECT_LABOUR => FinanceAccountFunctions::COS_DIRECT_LABOUR,
         FinanceAccountFunctions::WIP_SUBCONTRACTORS => FinanceAccountFunctions::COS_SUBCONTRACTORS,
@@ -85,6 +86,14 @@ class WorkInProgressReleaseService
     public function releaseForInvoice(ProjectInvoice $invoice, ?int $actorId = null): ?JournalEntry
     {
         $enquiryId = (int) $invoice->project_enquiry_id;
+
+        // What a release moves, and whether there is anything to move at all, is
+        // the WIP policy. Without one a family whose WIP account does not resolve
+        // would simply be skipped below, and the job's cost would never reach the
+        // P&L without anybody being told.
+        if (($block = FinanceChartProfile::wipPolicyBlock()) !== null) {
+            throw new InvalidArgumentException("{$block} Refused: the work-in-progress release for invoice {$invoice->invoice_number}.");
+        }
 
         $fraction = $this->billedFraction($enquiryId);
 

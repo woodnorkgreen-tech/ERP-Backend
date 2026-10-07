@@ -2,6 +2,8 @@
 
 namespace App\Modules\Finance\Support;
 
+use App\Modules\Finance\Governance\GovernanceRuntime;
+
 /**
  * Translates the catalogue's reference account codes into the ones this
  * installation actually keeps.
@@ -23,6 +25,15 @@ class ChartAccountMap
     /** The local chart code for one reference code. */
     public static function local(string $reference): string
     {
+        // Approved Finance configuration first (Report 75): an account mapping the
+        // accountant has approved and activated, and the WIP policy in force. This is
+        // the one adapter between governed decisions and the map; everything that
+        // resolves an account already comes through here.
+        $governed = GovernanceRuntime::instance()->account($reference);
+        if ($governed !== null) {
+            return $governed;
+        }
+
         $mapped = config('finance_accounts.map.'.$reference);
 
         return filled($mapped) ? (string) $mapped : $reference;
@@ -39,25 +50,45 @@ class ChartAccountMap
     }
 
     /**
-     * Reads the reference code out of the catalogue's GL prose and answers with
-     * the local code, or null when the text names an account indirectly
-     * ("Relevant 1400 PPE account", "Receiving cash/bank account").
+     * The local account a catalogue row DESIGNATES as its debit, or null.
      *
-     * Those stay unresolved on purpose: they describe a class of account for a
-     * human to choose within, and resolving one to a header would hand the
-     * posting engine an account it cannot post to.
+     * The catalogue has exactly two ways of designating an account, and this reads
+     * only those. Nothing else in the text is an instruction:
+     *
+     *  1. it LEADS with the code — "1211 Project WIP – Direct Materials". That is
+     *     the row's debit account, translated through the map;
+     *  2. it names one class by its header — "Relevant 1400 PPE account" — for a
+     *     person to choose within. That stays unresolved unless this installation
+     *     maps that very code, which is how Finance says "post the class here".
+     *
+     * Everything else is null: "Receiving cash/bank account" names no code;
+     * "Relevant 5100–5800 Cost of Sales account" names a range, which no single
+     * account answers; and "Bank / Cash (credit is 2200 Client Deposits)" only
+     * MENTIONS a code, and the credit side at that.
+     *
+     * It used to take the first four digits found anywhere and accept them when the
+     * code was mapped. That was sound against a map holding a handful of deliberate
+     * entries. A company profile maps every posting function, so every code a row
+     * happened to mention became "explicitly mapped": NE-018 took Client Deposits
+     * as its DEBIT, and NE-023 took Cost of Sales – Materials for a transfer whose
+     * account is chosen per job (Report 74A). A mention is not a designation.
      */
     public static function localFromGl(?string $gl): ?string
     {
-        if (blank($gl) || ! preg_match('/\b(\d{4})\b/', $gl, $matches)) {
+        if (blank($gl)) {
             return null;
         }
+        // A code followed by a second one ("5100–5800", "5100 to 5800") is a range.
+        $single = '(\d{4})\b(?!\s*(?:[-–—\/]|to\b)\s*\d{4})';
 
-        $reference = $matches[1];
-        $startsWithCode = (bool) preg_match('/^\s*'.preg_quote($reference, '/').'\b/', $gl);
-        $explicitlyMapped = filled(self::all()[$reference] ?? null);
+        if (preg_match('/^\s*'.$single.'/u', $gl, $matches)) {
+            return self::local($matches[1]);
+        }
+        if (preg_match('/^\s*Relevant\s+'.$single.'/iu', $gl, $matches) && filled(self::all()[$matches[1]] ?? null)) {
+            return self::local($matches[1]);
+        }
 
-        return $startsWithCode || $explicitlyMapped ? self::local($reference) : null;
+        return null;
     }
 
     /** Every reference code this installation redirects. Empty when the charts agree. */

@@ -1,0 +1,144 @@
+Final serial regression (isolated db_scratch_test): tests/Feature/{PettyCash,Finance,CostCollector,Procurement,Seeding} tests/Unit
+   PASS  Tests\Feature\PettyCash\AllocationIntegrationTest
+   PASS  Tests\Feature\PettyCash\ClearAllPettyCashDataCommandTest
+   PASS  Tests\Feature\PettyCash\DirectDisbursementApprovalTest
+   PASS  Tests\Feature\PettyCash\ExpenditureExceptionTest
+   PASS  Tests\Feature\PettyCash\FlatTransactionFiltersTest
+   PASS  Tests\Feature\PettyCash\FundCustodyServiceTest
+   PASS  Tests\Feature\PettyCash\OfflineBatchServiceTest
+   PASS  Tests\Feature\PettyCash\PettyCashPolicyTest
+   PASS  Tests\Feature\PettyCash\PettyCashReportsTest
+   PASS  Tests\Feature\PettyCash\RequisitionCategoryAlignmentTest
+   PASS  Tests\Feature\PettyCash\RequisitionProjectAllocationTest
+   PASS  Tests\Feature\PettyCash\RequisitionReceiverDisbursementConcurrencyTest
+   PASS  Tests\Feature\PettyCash\RequisitionReceiverDisbursementTest
+   PASS  Tests\Feature\PettyCash\RequisitionSettlementVisibilityTest
+   PASS  Tests\Feature\PettyCash\RequisitionTypeManagementTest
+   PASS  Tests\Feature\PettyCash\RequisitionVerificationControlTest
+   PASS  Tests\Feature\PettyCash\ServiceTransactionGuardTest
+   PASS  Tests\Feature\PettyCash\TopUpIntegrityTest
+   PASS  Tests\Feature\Finance\AccountingPeriodControlTest
+   PASS  Tests\Feature\Finance\BalanceSheetReportTest
+   PASS  Tests\Feature\Finance\BankCashReportTest
+   PASS  Tests\Feature\Finance\CashFlowReadinessTest
+   PASS  Tests\Feature\Finance\CashMovementReportTest
+   PASS  Tests\Feature\Finance\ClaimEvidenceGateTest
+   PASS  Tests\Feature\Finance\ClientFinancialPositionTest
+   PASS  Tests\Feature\Finance\CostLineTaxPostingTest
+   PASS  Tests\Feature\Finance\CreditNoteTest
+   PASS  Tests\Feature\Finance\DataIntegrityInvariantsTest
+   PASS  Tests\Feature\Finance\FinanceControlCentreTest
+   PASS  Tests\Feature\Finance\FinanceGovernanceTest
+   PASS  Tests\Feature\Finance\FinanceIntegrityTest
+   PASS  Tests\Feature\Finance\FinanceOverviewTest
+   PASS  Tests\Feature\Finance\FinanceReadinessTest
+   PASS  Tests\Feature\Finance\FinanceResetBoundaryTest
+   PASS  Tests\Feature\Finance\FinanceWorkQueueTest
+   PASS  Tests\Feature\Finance\FinancialReconciliationTest
+   PASS  Tests\Feature\Finance\InventoryFinanceTest
+   PASS  Tests\Feature\Finance\InvoiceReviewWorkflowTest
+   PASS  Tests\Feature\Finance\JournalLedgerReadTest
+   PASS  Tests\Feature\Finance\JournalPostingTest
+   PASS  Tests\Feature\Finance\LedgerCorrectionTest
+   PASS  Tests\Feature\Finance\LedgerExportTest
+   PASS  Tests\Feature\Finance\PayablesWorkspaceTest
+   PASS  Tests\Feature\Finance\PaymentArchitectureTest
+   PASS  Tests\Feature\Finance\PayrollFinanceTest
+   PASS  Tests\Feature\Finance\PayrollFinanceWorkspaceTest
+   PASS  Tests\Feature\Finance\PettyCashAdvancePostingTest
+   PASS  Tests\Feature\Finance\PettyCashSurrenderTest
+   PASS  Tests\Feature\Finance\PettyCashWorkspaceTest
+   PASS  Tests\Feature\Finance\ProfitAndLossReportTest
+   PASS  Tests\Feature\Finance\ProjectBillingClosureTest
+   PASS  Tests\Feature\Finance\ReceivablesAgeingTest
+   PASS  Tests\Feature\Finance\ReceivablesPostingTest
+   PASS  Tests\Feature\Finance\ReceivablesWorkspaceTest
+   PASS  Tests\Feature\Finance\ReconciliationTest
+   PASS  Tests\Feature\Finance\RehearsalW4PathTest
+   PASS  Tests\Feature\Finance\SelfApprovalPermissionTest
+   PASS  Tests\Feature\Finance\SettlementAccountTest
+   PASS  Tests\Feature\Finance\SpendVoucherWorkspaceTest
+   PASS  Tests\Feature\Finance\Stab7PettyCashTriplePostingTest
+   PASS  Tests\Feature\Finance\StockCountPostingTest
+   PASS  Tests\Feature\Finance\SupplierInvoiceTaxTest
+   PASS  Tests\Feature\Finance\SupplierLedgerRailTest
+   PASS  Tests\Feature\Finance\SupplierTaxTest
+   PASS  Tests\Feature\Finance\TaxScheduleTest
+   FAIL  Tests\Feature\Finance\W7LabourConcurrencyTest
+  ⨯ simultaneous finance verify creates one cost line                    0.07s  
+  ⨯ simultaneous corrections open one successor                          0.03s  
+  ⨯ simultaneous verification of a correction posts one pair             0.04s  
+  ⨯ simultaneous rate resolutions resolve once                           0.03s  
+  ⨯ simultaneous w6 transfers move a cost once                           0.04s  
+   PASS  Tests\Feature\Finance\W7LabourCostTest
+   PASS  Tests\Feature\Finance\Wave3PaymentVoucherControlsTest
+   PASS  Tests\Feature\Finance\Wave3PettyCashControlsTest
+   PASS  Tests\Feature\Finance\WngChartCompletionTest
+   PASS  Tests\Feature\Finance\WngChartMappingTest
+   PASS  Tests\Feature\Finance\WorkInProgressReleaseTest
+   PASS  Tests\Feature\CostCollector\BudgetProjectionOnCompletionTest
+   PASS  Tests\Feature\CostCollector\BudgetProjectorTest
+   PASS  Tests\Feature\CostCollector\CostAccountMarginalTest
+   PASS  Tests\Feature\CostCollector\CostAccountTest
+   PASS  Tests\Feature\CostCollector\CostAllocationTest
+   PASS  Tests\Feature\CostCollector\CostCollectorApiTest
+   PASS  Tests\Feature\CostCollector\CostCollectorServiceTest
+   PASS  Tests\Feature\CostCollector\CostNotificationTest
+   PASS  Tests\Feature\CostCollector\CostSettlementModeTest
+   PASS  Tests\Feature\CostCollector\CostTransferTest
+   PASS  Tests\Feature\CostCollector\CostVerificationReviewTest
+   PASS  Tests\Feature\CostCollector\CostVerificationTest
+   PASS  Tests\Feature\CostCollector\DepartmentalSpendTest
+   PASS  Tests\Feature\CostCollector\ExpenseCatalogueTest
+   PASS  Tests\Feature\CostCollector\ExpenseCodeJobContextTest
+   PASS  Tests\Feature\CostCollector\MaterialToCostChainTest
+   PASS  Tests\Feature\CostCollector\MyProjectsTest
+   PASS  Tests\Feature\CostCollector\PettyCashCommitmentTest
+   PASS  Tests\Feature\CostCollector\PettyCashCostListenerTest
+   PASS  Tests\Feature\CostCollector\PettyCashCostPostingFailureTest
+   PASS  Tests\Feature\CostCollector\PettyCashCostProducerTest
+   PASS  Tests\Feature\CostCollector\PortfolioMarginTest
+   PASS  Tests\Feature\CostCollector\ProjectFinancialClosureTest
+   PASS  Tests\Feature\CostCollector\StoresCostProducerTest
+   PASS  Tests\Feature\CostCollector\UnbudgetedSpendAdoptionTest
+   PASS  Tests\Feature\Procurement\BillVerificationSegregationTest
+   PASS  Tests\Feature\Procurement\DuplicateDetectionTest
+   PASS  Tests\Feature\Procurement\GoodsReceiptAccrualTest
+   PASS  Tests\Feature\Procurement\GoodsReceiptDeletionTest
+   PASS  Tests\Feature\Procurement\GoodsReceiptStoreConfirmationTest
+   PASS  Tests\Feature\Procurement\MaterialPickerTest
+   PASS  Tests\Feature\Procurement\ProcurementAttachmentTest
+   PASS  Tests\Feature\Procurement\ProcurementSpeedTest
+   PASS  Tests\Feature\Procurement\PurchaseFlowTest
+   PASS  Tests\Feature\Procurement\PurchaseOrderAmendmentCommitmentTest
+   PASS  Tests\Feature\Procurement\PurchaseOrderAmendmentSafetyTest
+   PASS  Tests\Feature\Procurement\PurchaseOrderAmendmentTest
+   PASS  Tests\Feature\Procurement\PurchaseOrderApprovalPricingTest
+   PASS  Tests\Feature\Procurement\PurchaseOrderApprovalSegregationTest
+   PASS  Tests\Feature\Procurement\PurchaseOrderMutabilityTest
+   PASS  Tests\Feature\Procurement\PurchaseOrderReviewWorkflowTest
+   PASS  Tests\Feature\Procurement\RequisitionApprovalSegregationTest
+   PASS  Tests\Feature\Procurement\RequisitionLineNameTest
+   PASS  Tests\Feature\Procurement\RequisitionSearchTest
+   PASS  Tests\Feature\Procurement\StagedBillingTest
+   PASS  Tests\Feature\Procurement\SupplierOptionsTest
+   PASS  Tests\Feature\Procurement\SupplierPaymentGateTest
+   PASS  Tests\Feature\Seeding\SeedingGuardTest
+   PASS  Tests\Unit\Constants\PermissionRegistryTest
+   PASS  Tests\Unit\Finance\ChartAccountMapTest
+   PASS  Tests\Unit\Finance\RequisitionSchemaServiceTest
+   PASS  Tests\Unit\Hr\EmployeeTemplateSchemaTest
+   PASS  Tests\Unit\Overtime\LedgerHashTest
+   PASS  Tests\Unit\PettyCash\LedgerServiceTest
+   PASS  TopUpAllocatorTest
+   PASS  Tests\Unit\Printing\PrintCalculationServiceTest
+   PASS  Tests\Unit\Projects\QuoteWorkbookExtractorTest
+   FAILED  Tests\Feature\Finance\W7LabourConcurrencyTe…  AssertionFailedError   
+   FAILED  Tests\Feature\Finance\W7LabourConcurrencyTe…  AssertionFailedError   
+   FAILED  Tests\Feature\Finance\W7LabourConcurrencyTe…  AssertionFailedError   
+   FAILED  Tests\Feature\Finance\W7LabourConcurrencyTe…  AssertionFailedError   
+   FAILED  Tests\Feature\Finance\W7LabourConcurrencyTe…  AssertionFailedError   
+  Tests:    5 failed, 1257 passed (10412 assertions)
+  Duration: 1092.67s
+
+The 5 failures: W7LabourConcurrencyTest refuses any database but db_test ("commits data and must only run against db_test").

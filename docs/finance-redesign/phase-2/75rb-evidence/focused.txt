@@ -1,0 +1,14 @@
+Focused run before the end-to-end (isolated db_scratch_test)
+   PASS  Tests\Feature\PettyCash\RequisitionReceiverAccountabilityTest
+   PASS  Tests\Feature\PettyCash\RequisitionReceiverDisbursementTest
+   PASS  Tests\Feature\PettyCash\RequisitionReceiverDisbursementConcurrencyTest
+   PASS  Tests\Feature\PettyCash\RequisitionVerificationControlTest
+   PASS  Tests\Feature\Finance\PettyCashSurrenderTest
+   PASS  Tests\Feature\Finance\Stab7PettyCashTriplePostingTest
+   PASS  Tests\Feature\Finance\PettyCashWorkspaceTest
+   PASS  Tests\Feature\Finance\FinanceResetBoundaryTest
+   PASS  Tests\Feature\Finance\FinanceGovernanceTest
+   PASS  Tests\Feature\CostCollector\PettyCashCommitmentTest
+  Tests:    146 passed (1408 assertions)
+  Duration: 234.28s
+exit=0

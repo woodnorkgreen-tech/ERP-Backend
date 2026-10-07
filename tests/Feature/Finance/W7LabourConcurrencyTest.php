@@ -33,14 +33,15 @@ use Tests\TestCase;
  *
  * This class cannot use RefreshDatabase: its wrapping transaction is invisible to
  * the children's connections. Instead it snapshots every table's max id and
- * deletes anything newer in tearDown, and it refuses to run against any database
- * other than db_test.
+ * deletes anything newer in tearDown, and it refuses to run against anything but
+ * a test database.
  */
 class W7LabourConcurrencyTest extends TestCase
 {
     private const RACERS = 4;
 
     private array $snapshot = [];
+    private array $referenceRows = [];
     private string $dir;
     private User $financier;
     private User $projectOfficer;
@@ -53,8 +54,11 @@ class W7LabourConcurrencyTest extends TestCase
         if (!function_exists('pcntl_fork')) {
             $this->markTestSkipped('pcntl is required for true concurrency tests.');
         }
-        if (DB::connection()->getDatabaseName() !== 'db_test') {
-            $this->fail('W7LabourConcurrencyTest commits data and must only run against db_test.');
+        // Report 75R-B: the isolated scratch database is a test database too. The
+        // guard exists to keep this off anything real, not to tie it to one name —
+        // tied to db_test alone, it could never run beside another session's suite.
+        if (! in_array(DB::connection()->getDatabaseName(), ['db_test', 'db_scratch_test'], true)) {
+            $this->fail('W7LabourConcurrencyTest commits data and must only run against a test database (db_test or db_scratch_test).');
         }
         if (!DB::getSchemaBuilder()->hasTable('project_labour_actual_returns')) {
             $this->markTestSkipped('db_test schema is not migrated yet; run the Feature suite first.');
@@ -326,6 +330,11 @@ class W7LabourConcurrencyTest extends TestCase
         foreach ($tables as $table) {
             $this->snapshot[$table] = (int) DB::table($table)->max('id');
         }
+        // Report 75R-B: the seeders this test runs edit migration-created
+        // catalogue rows where they stand (activating codes, linking accounts).
+        // Deleting newer ids does not undo that, and it leaked into whichever
+        // test ran next; the rows are put back as they were.
+        $this->referenceRows = DB::table('expense_codes')->get()->map(fn ($row) => (array) $row)->keyBy('id')->all();
     }
 
     private function restoreSnapshot(): void
@@ -334,6 +343,9 @@ class W7LabourConcurrencyTest extends TestCase
         try {
             foreach ($this->snapshot as $table => $maxId) {
                 DB::table($table)->where('id', '>', $maxId)->delete();
+            }
+            foreach ($this->referenceRows as $id => $row) {
+                DB::table('expense_codes')->where('id', $id)->update($row);
             }
             foreach (['model_has_roles', 'role_has_permissions'] as $pivot) {
                 DB::table($pivot)->where('role_id', '>', $this->snapshot['roles'] ?? PHP_INT_MAX)->delete();

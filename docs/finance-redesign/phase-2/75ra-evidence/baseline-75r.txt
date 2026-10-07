@@ -1,0 +1,13 @@
+   PASS  Tests\Feature\PettyCash\RequisitionVerificationControlTest
+   FAIL  Tests\Feature\PettyCash\RequisitionReceiverDisbursementTest
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   
+  Tests:    8 failed, 13 passed (92 assertions)
+  Duration: 133.03s
+   FAILED  Tests\Feature\PettyCash\RequisitionReceiv…  PermissionDoesNotExist   

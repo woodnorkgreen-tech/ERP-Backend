@@ -195,6 +195,35 @@ class ChartOfAccountSeeder extends Seeder
         ['8900', 'Unsupported / Non-deductible Expense', 'expense', 'opex', 'debit', null, true],
     ];
 
+    /**
+     * The reference chart's own codes. Read by `finance:complete-chart` to tell a
+     * company's chart from one that has had this chart seeded beside it.
+     *
+     * @return list<string>
+     */
+    public static function referenceCodes(): array
+    {
+        return array_map('strval', array_column(self::ACCOUNTS, 0));
+    }
+
+    /**
+     * What the reference chart says an account of this code IS: its category, type
+     * and normal balance. The governance centre uses it to judge whether an account
+     * somebody proposes for a posting function is the right kind of account.
+     *
+     * @return array{code: string, name: string, category: string, account_type: ?string, normal_balance: string}|null
+     */
+    public static function referenceAccount(string $code): ?array
+    {
+        foreach (self::ACCOUNTS as [$accountCode, $name, $category, $type, $balance]) {
+            if ((string) $accountCode === $code) {
+                return ['code' => $code, 'name' => $name, 'category' => $category, 'account_type' => $type, 'normal_balance' => $balance];
+            }
+        }
+
+        return null;
+    }
+
     public function run(): void
     {
         if (! config('finance_accounts.seed_reference_chart')) {

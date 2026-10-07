@@ -1,0 +1,1081 @@
+  ✓ Populated voucher_id for existing payment records
+  ✓ Migrated 0 allocation(s) from spend_voucher_allocations to payment_allocations
+  ✓ Populated settled_by_payment_id for 0 cost line(s)
+   PASS  Tests\Feature\Finance\AccountingPeriodControlTest
+  ✓ a clean month reports that it can be closed                        141.76s  
+  ✓ a cost still awaiting a decision blocks the close                    0.69s  
+  ✓ a blocked month can still be closed deliberately and says so         0.63s  
+  ✓ closing a month stops anything more being posted into it             0.66s  
+  ✓ a closed month can be reopened only with a recorded reason           0.52s  
+  ✓ locking freezes a month without declaring it final                   0.55s  
+  ✓ a month cannot be closed twice                                       0.64s  
+  ✓ reading periods is a different authority from closing one            0.42s  
+  ✓ the listing marks the month we are currently in                      0.54s  
+   PASS  Tests\Feature\Finance\BalanceSheetReportTest
+  ✓ permission is required                                               0.58s  
+  ✓ classifies posted asset liability and equity and calculates equatio… 0.36s  
+  ✓ equation difference does not create a balancing equity entry         0.47s  
+  ✓ credit normal contra asset reduces assets in the equation            0.51s  
+  ✓ unclassified posted balance sheet accounts are preserved for review  0.40s  
+  ✓ missing opening balances and retained earnings are reported as read… 0.47s  
+   PASS  Tests\Feature\Finance\BankCashReportTest
+  ✓ permission and date validation                                       0.68s  
+  ✓ configured accounts only and unconfigured channels have no fabricat… 0.74s  
+  ✓ debits credits cutoff drafts duplicates and petty cash scope         0.64s  
+  ✓ real reversal preserves original at earlier cutoff                   0.64s  
+  ✓ asset sign is debit minus credit even if normal balance is credit    0.47s  
+  ✓ function mapping and invalid source accounts are respected           0.55s  
+  ✓ csv uses same position and discloses readiness                       0.68s  
+  ✓ inactive and nonpostable channel accounts are excluded               0.51s  
+  ✓ large decimal amounts preserve cents without float rounding          0.77s  
+   PASS  Tests\Feature\Finance\CashFlowReadinessTest
+  ✓ cash flow readiness requires report permission                       0.73s  
+  ✓ cash flow is explicitly unsupported and never populated from moveme… 0.81s  
+   PASS  Tests\Feature\Finance\CashMovementReportTest
+  ✓ permission missing dates invalid dates and inverted range            0.82s  
+  ✓ period activity reconciles to recorded opening and closing without…  0.91s  
+  ✓ internal bank and petty cash transfers are eliminated only at compa… 0.66s  
+  ✓ mixed cash and fee journals are not guessed to be pure transfers     0.59s  
+  ✓ original and real reversal remain in period activity                 0.58s  
+  ✓ reversed transfer and its compensation do not inflate company flows  0.74s  
+  ✓ csv matches the same net movement and discloses transfer eliminatio… 0.65s  
+   PASS  Tests\Feature\Finance\ClaimEvidenceGateTest
+  ✓ recoverable vat without an etims number is refused                   0.25s  
+  ✓ the claim posts once the evidence is supplied                        0.28s  
+  ✓ a supplier with no kra pin cannot have a claim posted against them   0.33s  
+  ✓ spend that claims nothing is never asked for a claim reference       0.42s  
+  ✓ a tax point is recorded even when no claim is involved               0.38s  
+  ✓ a pin typed off the receipt substantiates a claim with no supplier…  0.30s  
+  ✓ a missing reference does not blank the numbers it is attached to     0.35s  
+  ✓ the preview announces the requirement before anyone commits          0.38s  
+  ✓ the preview quotes the deadline the claim dies on                    0.31s  
+   PASS  Tests\Feature\Finance\ClientFinancialPositionTest
+  ✓ the financial position distinguishes every confirmed figure          0.96s  
+  ✓ an unallocated receipt is visible as client credit with an age       0.86s  
+  ✓ verification and allocation are recorded as separate events by the…  0.91s  
+  ✓ over allocation beyond the payment or invoice balance remains block… 0.74s  
+   PASS  Tests\Feature\Finance\CostLineTaxPostingTest
+  ✓ recoverable vat is debited to the input vat account                  0.34s  
+  ✓ withholding is credited to the wht payable account                   0.55s  
+  ✓ vat and withholding post on the same entry                           0.36s  
+  ✓ a tax free cost still posts two legs                                 0.32s  
+  ✓ reversal mirrors every leg including the tax ones                    0.30s  
+  ✓ base amounts restate each leg at the line fx rate                    0.32s  
+  ✓ withholding larger than the cost is refused                          0.14s  
+  ✓ a zero value line posts nothing                                      0.31s  
+   PASS  Tests\Feature\Finance\CreditNoteTest
+  ✓ a credit note reverses exactly the revenue and tax it credits        0.84s  
+  ✓ the invoice list shows the net balance after a credit note           0.92s  
+  ✓ a credit note cannot exceed what remains to be credited              0.84s  
+  ✓ a credit note that would undercut an existing allocation is refused  0.77s  
+  ✓ voiding a credit note restores the invoices balance                  0.70s  
+  ✓ an invoice with an active credit note cannot be voided               0.73s  
+  ✓ a draft invoice cannot be credited                                   0.73s  
+  ✓ a credit note cannot itself be credited                              0.75s  
+  ✓ creating a credit note is closed to someone without the reversal pe… 0.49s  
+  ✓ every journal entry still balances across invoice and credit note    0.72s  
+   PASS  Tests\Feature\Finance\DataIntegrityInvariantsTest
+  ✓ invoice total equals gross minus discount plus tax                   0.52s  
+  ✓ cash received equals allocated plus unallocated client credit        0.80s  
+  ✓ invoice outstanding equals issued invoice amount minus valid alloca… 0.80s  
+   PASS  Tests\Feature\Finance\FinanceControlCentreTest
+  ✓ reference passes do not close policy or data gates                   0.05s  
+  ✓ a channel with a liability account is not ready                      0.04s  
+  ✓ closed period is not reference ready                                 0.05s  
+  ✓ unlinked active source is not a ready paying account                 0.04s  
+  ✓ readiness still requires reporting permission                        0.05s  
+  ✓ policy projection uses recorded setting approval and governance evi… 0.06s  
+   PASS  Tests\Feature\Finance\FinanceIntegrityTest
+  ✓ same month reversal nets to zero in every account                    0.54s  
+  ✓ later reversal preserves the original month and export               0.68s  
+  ✓ commitments are not reported as missing journals                     0.60s  
+  ✓ analytical w7 labour lines are not reported as missing journals      0.62s  
+  ✓ inactive control accounts block readiness                            0.53s  
+  ✓ inactive expense account blocks readiness                            0.50s  
+  ✓ inventory and input vat control accounts are required                0.70s  
+  ✓ an explicit payment source cannot post to an inactive account        0.45s  
+  ✓ a cash balance that disagrees with its ledger blocks readiness       0.69s  
+   PASS  Tests\Feature\Finance\FinanceOverviewTest
+  ✓ each section is gated on its own permission                          0.63s  
+  ✓ controls report period currency policy and ledger equality from the… 0.47s  
+  ✓ cash is the ledger balance of each linked account counted once       0.40s  
+  ✓ receivables and payables equal their own workspaces                  0.64s  
+  ✓ projects exclude closed work and never claim a fully loaded margin   0.57s  
+   PASS  Tests\Feature\Finance\FinanceReadinessTest
+  ✓ a migrations only install fails readiness as production did          0.08s  
+  ✓ reference data makes the install ready                               2.99s  
+  ✓ a code the seeder switched off comes back once its account exists    2.87s  
+  ✓ a re run keeps a code finance switched off                           2.64s  
+  ✓ a re run keeps an account link the chart can no longer resolve       2.73s  
+  ✓ the seeder names the codes it leaves inactive                        0.11s  
+   PASS  Tests\Feature\Finance\FinanceResetBoundaryTest
+  ✓ the reset plan is safe against the migrated schema                   1.84s  
+  ✓ every preserved primary and dependency table is protected            0.03s  
+  ✓ adding a protected table to the reset fails closed                  10.69s  
+  ✓ resetting a parent of preserved data fails closed even if unlisted   1.79s  
+  ✓ a parent before its blocking child fails closed                      1.83s  
+  ✓ the plan command is read only and reports safe                       1.86s  
+   PASS  Tests\Feature\Finance\FinanceWorkQueueTest
+  ✓ queue only returns work the user may action                          0.10s  
+  ✓ completed work disappears from queue count                           0.08s  
+  ✓ queue supports server side search and pagination                     0.09s  
+  ✓ user can claim and release an eligible item                          0.07s  
+  ✓ a second officer cannot take an existing claim                       0.08s  
+  ✓ the maker is never offered their own work                            0.10s  
+  ✓ invoices flow from check to issue and back to their preparer         0.17s  
+  ✓ a receipt is not offered to the person who recorded it               0.08s  
+  ✓ a voucher is posted by a third person after any senior approval      0.16s  
+  ✓ cash requisitions follow approval disbursement and surrender         0.16s  
+  ✓ labour po verification is scoped to the officers project             0.14s  
+  ✓ payroll is locked and paid by different people                       0.10s  
+  ✓ counts are grouped by area and match the list                        0.09s  
+   PASS  Tests\Feature\Finance\FinancialReconciliationTest
+  ✓ endpoint requires finance reports permission                         0.67s  
+  ✓ returns all seven control families with canonical contract and stat… 0.49s  
+  ✓ authoritative empty ar computes zero difference and unavailable con… 0.64s  
+  ✓ control filter returns one control                                   0.62s  
+  ✓ bank cash consumes the canonical position without reconciling gl to… 0.55s  
+  ✓ ar difference is subledger minus posted gl                           0.48s  
+  ✓ incomplete stores valuation gates inventory difference               0.51s  
+   PASS  Tests\Feature\Finance\InventoryFinanceTest
+  ✓ inventory figures are a finance read not a stores one                0.56s  
+  ✓ the stores valuation agrees with the stores screen and reconciles t… 0.54s  
+  ✓ a non stock receipt is shown as a named contributor to the differen… 0.53s  
+  ✓ a project issue is listed as actual cost with safe identities        0.63s  
+  ✓ adjustments say which reached the ledger                             0.45s  
+  ✓ the wip policy is reported as configured and never assumed           0.55s  
+   PASS  Tests\Feature\Finance\InvoiceReviewWorkflowTest
+  ✓ a draft invoice has no ledger impact                                 0.71s  
+  ✓ b1 the accounts role holds the invoice check permission              0.61s  
+  ✓ b1 scenario a an accounts preparer cannot check their own invoice    0.82s  
+  ✓ b1 scenario b and d another accounts user checks then the invoice i… 0.78s  
+  ✓ b1 scenario c a user without the check permission gets 403           0.72s  
+  ✓ b1 scenario e an unchecked invoice cannot be issued by accounts      0.74s  
+  ✓ the preparer cannot check their own invoice                          0.63s  
+  ✓ a preparer who also holds the check permission still cannot check t… 0.65s  
+  ✓ an authorized reviewer can check a draft invoice                     0.54s  
+  ✓ an unchecked invoice cannot be issued                                0.44s  
+  ✓ a checked invoice can be issued by the checker themself              0.71s  
+  ✓ a reviewer can return a draft invoice for correction                 0.56s  
+  ✓ a corrected invoice can be resubmitted and then checked              0.69s  
+  ✓ a checked invoice must be returned before it can be corrected again  0.44s  
+  ✓ an invoice cannot be prepared with no approved commercial basis      0.42s  
+  ✓ an authorized exception allows invoicing with no approved quote      0.41s  
+  ✓ the exception audit trail is retained                                0.74s  
+  ✓ naming an approver without the override permission is refused        0.42s  
+  ✓ the credit note preparer cannot approve and issue it themself        0.45s  
+  ✓ a configured payment term can be selected on a new invoice           0.65s  
+  ✓ an inactive payment term cannot be created selected via a stale ref… 0.66s  
+  ✓ a custom due date works without any configured term                  0.73s  
+  ✓ no payment term values are seeded by default                         0.67s  
+  ✓ a line discount is recorded distinctly from gross and net            0.70s  
+  ✓ a discount cannot exceed the lines gross amount                      0.66s  
+  ✓ a negative discount is refused                                       0.46s  
+  ✓ an undiscounted line still carries a zero discount and gross equal…  0.75s  
+  ✓ the negative line workaround for a credit is still refused           0.50s  
+   PASS  Tests\Feature\Finance\JournalLedgerReadTest
+  ✓ the ledger is not readable without the reports permission            0.28s  
+  ✓ entries are listed newest first with their headers                   0.26s  
+  ✓ entries can be filtered by source and searched by reference          0.29s  
+  ✓ filtering by account does not duplicate an entry per matching leg    0.29s  
+  ✓ an entry drills down to its legs and the accounts they hit           0.29s  
+  ✓ the trial balance agrees and says so                                 0.17s  
+  ✓ the coverage disclosure no longer claims revenue and cash are exclu… 0.26s  
+  ✓ trial balance is not shadowed by the entry route                     0.32s  
+  ✓ an account statement has brought forward and running balances        0.35s  
+  ✓ an account statement requires the reports permission                 0.32s  
+  ✓ an inverted date range is refused                                    0.26s  
+   PASS  Tests\Feature\Finance\JournalPostingTest
+  ✓ journal posting service posts cost line                              0.23s  
+  ✓ petty cash advance resolves the staff advance account through the c… 0.22s  
+  ✓ petty cash advance still resolves to the reference code when unmapp… 0.23s  
+  ✓ spend voucher endpoints flow                                         0.46s  
+  ✓ reversing a posted vouchers payment restores everything atomically   0.41s  
+  ✓ posting a voucher with a transaction fee debits bank charges         0.36s  
+  ✓ listing vouchers does not blow up once one exists                    0.34s  
+  ✓ showing a voucher does not blow up                                   0.33s  
+  ✓ the index summary counts every voucher not just the page             0.37s  
+  ✓ the index filters server side                                        0.16s  
+  ✓ payment sources are listed for the voucher form                      0.16s  
+  ✓ any authenticated user may read the paying accounts                  0.32s  
+  ✓ payment vouchers are listed at the spend vouchers url                0.29s  
+  ✓ payment context excludes liabilities and inactive sources            0.30s  
+  ✓ a voucher carries the period of its posting date                     0.32s  
+  ✓ a voucher cannot be posted into a locked period                      0.27s  
+  ✓ a draft voucher cannot be posted                                     0.17s  
+  ✓ posting rolls back when no gl accounts can be resolved               0.18s  
+  ✓ posting refuses a payment source that is itself a liability          0.30s  
+  ✓ posting refuses a petty cash voucher over the approved cap           0.34s  
+  ✓ spend voucher actions require their own permissions                  0.35s  
+  ✓ super admin can post a voucher they requested or approved            0.26s  
+   PASS  Tests\Feature\Finance\LedgerCorrectionTest
+  ✓ a payroll entry can now be reversed like any other                   0.58s  
+  ✓ reversing an entry whose lines do not match its own header is refus… 0.70s  
+  ✓ reversing an entry whose own lines do not balance is refused         0.55s  
+  ✓ the original entry is never altered by its reversal                  0.58s  
+  ✓ a reversal is dated when it is made not when the original was        0.62s  
+  ✓ reversing twice returns the same compensating entry                  0.54s  
+  ✓ a reversal cannot itself be reversed                                 0.49s  
+  ✓ the endpoint refuses anyone without the journal reversal permission  0.65s  
+  ✓ the endpoint reverses and explains itself                            0.54s  
+  ✓ a reason is required because the reversal is permanent               0.55s  
+  ✓ cost line reversal still behaves as it always did                    0.63s  
+   PASS  Tests\Feature\Finance\LedgerExportTest
+  ✓ one delivery note becomes one journal however many materials it car… 0.23s  
+  ✓ the collapse never changes a total                                   0.17s  
+  ✓ a multi line document is described by what it is not by its first l… 0.22s  
+  ✓ a single line document keeps its own description                     0.34s  
+  ✓ the export states it is not yet a complete set of statutory journal… 0.27s  
+  ✓ the csv carries one row per account per document                     0.27s  
+  ✓ the export is closed to anyone without the reports permission        0.29s  
+   PASS  Tests\Feature\Finance\PayablesWorkspaceTest
+  ✓ a role name alone never verifies a supplier bill                     0.45s  
+  ✓ the verify permission alone is enough when everything else holds     0.48s  
+  ✓ a role carrying the permission verifies through the permission       0.49s  
+  ✓ the preparer cannot verify their own bill even with the permission   0.33s  
+  ✓ my actions offer verify correct and pay only in an actionable state… 0.60s  
+  ✓ payables are closed to anyone without the read permission            0.38s  
+  ✓ the bill index filters on the server and pages                       1.10s  
+  ✓ rows carry backend figures the document chain and safe identities    0.46s  
+  ✓ prepare return correct resubmit then independent verify              0.68s  
+  ✓ a correction cannot breach the staged billing cap                    0.41s  
+  ✓ a duplicate bill is refused and an override is recorded              0.41s  
+  ✓ partial then full payment settles the bill and adds no project cost  0.74s  
+  ✓ an unverified bill cannot be paid and a duplicate payment reference… 0.51s  
+  ✓ the payments register filters by supplier and shows the bill         0.54s  
+  ✓ withholding reduces the payable is owed on the mapped account and r… 0.44s  
+  ✓ po commits grn accrues bill adds no second cost and payment adds no… 0.61s  
+  ✓ a verified direct bill becomes the projects actual cost once         0.37s  
+  ✓ the ap position reconciles supplier balances to the bills            0.48s  
+   PASS  Tests\Feature\Finance\PaymentArchitectureTest
+  ✓ the paying account does not dictate the payment method               0.84s  
+  ✓ a bank name is not a payment method                                  0.69s  
+  ✓ every payment is issued its own document number                      0.56s  
+  ✓ a document number is issued once                                     0.58s  
+  ✓ the credit leg follows the paying account                            0.55s  
+  ✓ a bank payment leaves the float alone                                0.70s  
+  ✓ anyone may read the paying accounts but only finance opens one       0.52s  
+  ✓ finance can open a new paying account without a developer            0.66s  
+  ✓ a paying account must name a ledger account                          0.57s  
+  ✓ the retired bank methods became accounts                             0.55s  
+   PASS  Tests\Feature\Finance\PayrollFinanceTest
+  ✓ a payroll payment cannot be reversed through the generic payment re… 0.30s  
+   PASS  Tests\Feature\Finance\PayrollFinanceWorkspaceTest
+  ✓ summary permission exposes aggregate payroll without employee salar… 0.08s  
+  ✓ payroll finance endpoints require the finance read permission        0.07s  
+  ✓ readiness distinguishes missing zero stale and configured salary re… 0.11s  
+  ✓ labour classification is effective dated and audited                 0.08s  
+   PASS  Tests\Feature\Finance\PettyCashAdvancePostingTest
+  ✓ a gl posting failure still completes the disbursement but flags it…  0.38s  
+  ✓ retrying after the chart is fixed posts the advance and clears the…  0.62s  
+  ✓ retrying an already posted advance does not duplicate the journal e… 0.62s  
+  ✓ retry still fails visibly if the underlying problem is not yet fixe… 0.66s  
+   PASS  Tests\Feature\Finance\PettyCashSurrenderTest
+  ✓ full float advance surrender and reconciliation flow                 0.75s  
+  ✓ reconciling an already surrendered requisition is refused and does…  0.88s  
+   PASS  Tests\Feature\Finance\PettyCashWorkspaceTest
+  ✓ balance and register reads require petty cash permissions            1.00s  
+  ✓ overview hides the float from a reader without view balance          0.92s  
+  ✓ the reset route no longer exists                                     0.76s  
+  ✓ a voucher cannot be downloaded for someone elses requisition         0.71s  
+  ✓ received is funds received awaiting surrender not complete           0.90s  
+  ✓ the requester cannot approve disburse or review their own requisiti… 0.94s  
+  ✓ a requester sees only their own requisition detail                   0.69s  
+  ✓ a disbursement is a staff advance not a project cost                 0.77s  
+  ✓ a failed advance posting is visible and the retry is idempotent      1.01s  
+  ✓ only a reviewer may retry a posting                                  0.98s  
+  ✓ evidence is attached listed and downloaded without exposing storage… 0.71s  
+   PASS  Tests\Feature\Finance\ProfitAndLossReportTest
+  ✓ the report is not readable without the reports permission            0.72s  
+  ✓ an empty period returns zeroes not an error                          0.32s  
+  ✓ revenue cost of sales and gross profit are computed for a period     0.61s  
+  ✓ overhead and opex reduce net profit below gross profit               0.77s  
+  ✓ an account with no account type is unclassified but still counted i… 0.57s  
+  ✓ reversed original entries remain counted consistent with the trial…  0.57s  
+  ✓ balance sheet snapshot groups by asset liability and equity          0.63s  
+   PASS  Tests\Feature\Finance\ProjectBillingClosureTest
+  ✓ a draft credit note changes no balance ageing capacity or ledger fi… 0.67s  
+  ✓ issuing a credit note rechecks money applied since it was drafted    0.69s  
+  ✓ an issued credit note moves every view and the ledger together and…  1.57s  
+  ✓ a draft credit note frees no billing headroom until issued           0.77s  
+  ✓ project billing is closed to anyone without receivables access       0.58s  
+  ✓ an approved quote needs no exception and cannot be overridden by a…  0.72s  
+  ✓ the quote waiver is the controlled exception with actor time and re… 0.66s  
+  ✓ deposit terms changes are recorded with who why and from to          0.75s  
+  ✓ early production release needs the override permission and a reason  0.69s  
+  ✓ a receipt split across projects shows every share and what is left   0.85s  
+   PASS  Tests\Feature\Finance\ReceivablesAgeingTest
+  ✓ ageing is not readable without the reports permission                0.70s  
+  ✓ an empty book returns zero buckets not an error                      0.59s  
+  ✓ draft and void invoices are excluded                                 0.81s  
+  ✓ an invoice is bucketed by days overdue                               0.96s  
+  ✓ a verified unreversed payment reduces and can clear the balance      0.81s  
+  ✓ a reversed payment reappears as outstanding                          0.62s  
+   PASS  Tests\Feature\Finance\ReceivablesPostingTest
+  ✓ the invoice total is summed from its lines not typed                 0.65s  
+  ✓ issuing an invoice recognises revenue and the tax it owes            0.48s  
+  ✓ a zero rated invoice raises no tax leg at all                        0.65s  
+  ✓ an invoice can only be issued once                                   0.64s  
+  ✓ revenue is never recognised when the month is closed                 0.54s  
+  ✓ money received before it is earned is a liability not revenue        0.76s  
+  ✓ a receipt into a disabled paying account is refused with a reason    0.55s  
+  ✓ supplier credit can never be the account a receipt arrives in        0.68s  
+  ✓ every receivables entry balances                                     0.74s  
+  ✓ the invoice form can load the tax rates it needs                     0.57s  
+  ✓ the tax rate list is closed to outsiders                             0.54s  
+  ✓ an invoice line cannot be negative                                   0.56s  
+  ✓ an invoice must carry at least one line                              0.47s  
+  ✓ the over billing cap now measures the real total                     0.51s  
+  ✓ voiding an issued invoice reverses its revenue and the tax it charg… 0.73s  
+  ✓ a voided invoice frees the agreed price it was holding               0.75s  
+  ✓ a draft invoice is voided without touching the ledger                0.66s  
+  ✓ an invoice with a receipt applied cannot be voided                   0.47s  
+  ✓ voiding is closed to someone without the reversal permission         0.75s  
+   PASS  Tests\Feature\Finance\ReceivablesWorkspaceTest
+  ✓ the workspace is closed to anyone without receivables read           0.54s  
+  ✓ the index filters on the server and paginates                        0.92s  
+  ✓ rows carry backend amounts and names only                            0.79s  
+  ✓ the invoice moves preparer checker preparer checker issuer           1.00s  
+  ✓ a receipt is verified independently then applied                     0.75s  
+  ✓ an unapplied receipt can be reversed and then offers nothing         0.86s  
+  ✓ a receipt into an unlinked mobile money account is refused           0.52s  
+  ✓ voiding and credit notes are described by the invoice                0.76s  
+   PASS  Tests\Feature\Finance\ReconciliationTest
+  ✓ statement must be resolved before it can be reconciled               0.61s  
+  ✓ ignoring a transaction requires a reason                             0.57s  
+  ✓ statements can be listed and prefilled                               0.54s  
+  ✓ create and match posts movement and matches statement transaction    0.70s  
+   PASS  Tests\Feature\Finance\RehearsalW4PathTest
+  ✓ a verified supplier invoice on credit is paid by a voucher end to e… 0.70s  
+   PASS  Tests\Feature\Finance\SelfApprovalPermissionTest
+  ✓ an ordinary user may not self approve                                0.07s  
+  ✓ the permission grants self approval                                  0.05s  
+  ✓ super admin may self approve without holding the permission          0.05s  
+  ✓ a null actor is never allowed                                        0.04s  
+  ✓ acting on another persons record is not a self approval              0.05s  
+  ✓ an unowned record is not a self approval                             0.05s  
+   PASS  Tests\Feature\Finance\SettlementAccountTest
+  ✓ a stores issue relieves inventory not the bank                       0.28s  
+  ✓ a stores return puts the value back into inventory                   0.28s  
+  ✓ goods received but not invoiced becomes a liability                  0.37s  
+  ✓ goods received land in stock not in project wip                      0.20s  
+  ✓ the full material cycle touches project wip exactly once             0.38s  
+  ✓ issuing material retires the receipt accrual                         0.28s  
+  ✓ petty cash spend credits the float it came out of                    0.24s  
+  ✓ an untraceable cost is owed rather than paid                         0.25s  
+   PASS  Tests\Feature\Finance\SpendVoucherWorkspaceTest
+  ✓ the register paginates filters and keeps the three facts apart       0.76s  
+  ✓ identities are id and name only                                      0.65s  
+  ✓ the correction path keeps one voucher and its whole history          0.50s  
+  ✓ reject and cancel are shown apart                                    0.65s  
+  ✓ a maker cannot approve their own voucher                             0.60s  
+  ✓ the approver does not become the poster                              0.58s  
+  ✓ posting needs its own permission                                     0.71s  
+  ✓ a role name alone grants nothing                                     0.62s  
+  ✓ super admin is the documented bypass and its use is recorded         0.77s  
+  ✓ case a a project voucher pays its cost without recognising it again  0.66s  
+  ✓ case b an overhead voucher relieves the liability and debits no exp… 0.43s  
+  ✓ case c a repeated post does not duplicate the payment or journal     0.73s  
+  ✓ case d reversal adds a reversing entry and keeps the original        0.62s  
+  ✓ a goods received accrual is never paid by a voucher                  0.54s  
+  ✓ senior policy is reported as it stands and enforced only when appro… 0.80s  
+  ✓ a closed period is named before posting is attempted                 0.56s  
+  ✓ evidence is added by the right people and never exposes a path       0.71s  
+  ✓ my actions links to the voucher itself                               0.40s  
+   PASS  Tests\Feature\Finance\Stab7PettyCashTriplePostingTest
+  ✓ full surrender recognises the expense exactly once                   0.73s  
+  ✓ partial spend with cash returned recognises only the real spend      0.75s  
+  ✓ spend exceeding the advance still recognises the expense exactly on… 0.58s  
+  ✓ multiple surrender items across categories each post exactly once    0.79s  
+  ✓ overhead requisition with no project posts exactly once              0.57s  
+  ✓ direct disbursement without a requisition still posts its own actua… 0.57s  
+  ✓ supplier settled disbursement is still excluded                      0.55s  
+  ✓ voucher settled disbursement is still excluded                       0.53s  
+  ✓ requisition linked advance alone is excluded from immediate posting  0.37s  
+  ✓ reconciling twice still refuses and does not duplicate the now shar… 0.70s  
+   PASS  Tests\Feature\Finance\StockCountPostingTest
+  ✓ opening stock is an asset against equity never an expense            0.47s  
+  ✓ a shortage found on a count is recorded as a loss                    0.58s  
+  ✓ a surplus is the same entry the other way round                      0.67s  
+  ✓ a count that agrees with the records posts nothing                   0.74s  
+  ✓ a material with no cost is left out rather than valued at nothing    0.71s  
+  ✓ offsetting differences net within one count                          0.59s  
+  ✓ a count cannot post twice                                            0.61s  
+  ✓ a count cannot be posted into a closed month                         0.57s  
+  ✓ the entry balances and names the count                               0.54s  
+   PASS  Tests\Feature\Finance\SupplierInvoiceTaxTest
+  ✓ a vat bearing invoice is split out of its gross                      0.41s  
+  ✓ the three way match is made on the net value                         0.31s  
+  ✓ verifying posts the input vat to its own account                     0.38s  
+  ✓ non recoverable vat is not claimed                                   0.31s  
+  ✓ withholding is retained and owed to kra                              0.35s  
+  ✓ withholding reduces what the supplier can be paid                    0.20s  
+  ✓ a stated vat beats the derived one                                   0.37s  
+  ✓ an unregistered supplier is charged no vat                           0.29s  
+  ✓ changing the tax after verification withdraws it                     0.28s  
+  ✓ the entry balances with vat and withholding                          0.48s  
+  ✓ paying the net of withholding settles the payable                    0.40s  
+  ✓ a verified invoice reaches the vat return                            0.39s  
+  ✓ an invoice with no etims number is flagged as at risk                0.34s  
+  ✓ an unverified invoice is not claimed                                 0.18s  
+  ✓ an invoice with no vat behaves as it always did                      0.24s  
+   PASS  Tests\Feature\Finance\SupplierLedgerRailTest
+  ✓ verifying a matched invoice moves the accrual onto accounts payable  0.23s  
+  ✓ verifying a bill closes the grn accrual it supersedes                0.37s  
+  ✓ verification posts once however many times it runs                   0.34s  
+  ✓ a legacy invoice posts nothing                                       0.18s  
+  ✓ a direct bill posts to its own expense code not the accrual          0.35s  
+  ✓ a direct bill cannot be verified without an expense code             0.15s  
+  ✓ a direct bill refuses a non procurable expense code                  0.25s  
+  ✓ a direct bill refuses a direct materials expense code                0.30s  
+  ✓ a direct bill refuses a supplier invoice already captured as a cost… 0.28s  
+  ✓ capturing a cost line refuses a supplier invoice already recorded a… 0.30s  
+  ✓ paying a posted invoice relieves the payable and credits the source  0.36s  
+  ✓ a supplier payment is refused from the request boundary when funded… 0.30s  
+  ✓ a supplier payment is refused at the posting choke point when funde… 0.35s  
+  ✓ a payment against an unposted invoice posts nothing                  0.28s  
+  ✓ a part payment leaves the balance on the payable                     0.34s  
+  ✓ reversing a payment preserves evidence and reopens the invoice       0.30s  
+  ✓ a verification that cannot post does not stick                       0.32s  
+  ✓ every posted entry balances                                          0.39s  
+  ✓ a verified supplier invoice cannot be deleted                        0.24s  
+   PASS  Tests\Feature\Finance\SupplierTaxTest
+  ✓ withholding uses the seeded rate not a constant                      0.21s  
+  ✓ a category that withholds nothing returns zero                       0.28s  
+  ✓ payments below the threshold are not withheld                        0.11s  
+  ✓ an unregistered supplier is out of scope for vat                     0.22s  
+  ✓ a registered supplier falls back to its default treatment            0.14s  
+  ✓ a rate that has expired is not applied                               0.27s  
+  ✓ a non resident is not given the resident rate                        0.19s  
+  ✓ verifying a supplier cost prices the withholding                     0.37s  
+  ✓ a non supplier payee is not withheld                                 0.22s  
+  ✓ the supplier endpoint captures and validates tax identity            0.13s  
+   PASS  Tests\Feature\Finance\TaxScheduleTest
+  ✓ the output schedule totals vat charged to clients                    0.34s  
+  ✓ draft and void invoices are excluded from output vat                 0.29s  
+  ✓ a paid invoice still counts toward output vat                        0.29s  
+  ✓ the vat return nets output against claimable input                   0.35s  
+  ✓ the vat return is positive when wng owes kra                         0.36s  
+  ✓ the claim schedule totals only what can be substantiated             0.16s  
+  ✓ a claim is dated by the supplier document not by consumption         0.20s  
+  ✓ unposted reversed and non recoverable lines stay out of the return   0.24s  
+  ✓ the etims gap separates what is lost from what can still be saved    0.36s  
+  ✓ a missing supplier pin makes a claim unsupported even with an etims… 0.30s  
+  ✓ the wht return groups a supplier month into one remittable row       0.34s  
+  ✓ the wht return exposes a month that crossed an aggregate threshold   0.21s  
+  ✓ the due date follows the finance setting rather than a constant      0.18s  
+  ✓ wht does not reuse the monthly vat deadline                          0.21s  
+  ✓ the schedules are closed to anyone without the reports permission    0.31s  
+  ✓ the json envelope matches what the screen binds to                   0.37s  
+  ✓ the account summary declares that it is not a statutory trial balan… 0.19s  
+  ✓ a schedule downloads as csv for the filing pack                      0.23s  
+  ✓ the output schedule downloads as csv                                 0.17s  
+   PASS  Tests\Feature\Finance\W7LabourConcurrencyTest
+  ✓ simultaneous finance verify creates one cost line                    1.22s  
+  ✓ simultaneous corrections open one successor                          1.09s  
+  ✓ simultaneous verification of a correction posts one pair             1.14s  
+  ✓ simultaneous rate resolutions resolve once                           1.07s  
+  ✓ simultaneous w6 transfers move a cost once                           1.20s  
+   PASS  Tests\Feature\Finance\W7LabourCostTest
+  ✓ server overrides client supplied budget fields on record             0.60s  
+  ✓ calculated cost uses server owned rate not client rate               0.44s  
+  ✓ hours formula actual hours times unit rate                           0.66s  
+  ✓ pax formula actual quantity times actual days times unit rate        0.36s  
+  ✓ hours formula rejects zero actual hours                              0.45s  
+  ✓ full workflow recorded to finance verified                           0.67s  
+  ✓ po verify requires recorded status                                   0.52s  
+  ✓ finance verify requires po verified status                           0.40s  
+  ✓ finance verify blocks unresolved rate                                0.73s  
+  ✓ unauthorized user cannot record labour                               0.44s  
+  ✓ unauthorized user cannot po verify                                   0.52s  
+  ✓ unauthorized user cannot finance verify                              0.73s  
+  ✓ financier can finance verify                                         0.55s  
+  ✓ http store requires record permission                                0.50s  
+  ✓ http store accepts valid data                                        0.42s  
+  ✓ http store rejects client tampered rate                              0.51s  
+  ✓ resource never serializes salary or bank fields                      0.40s  
+  ✓ unbudgeted labour records with zero rate                             0.39s  
+  ✓ unbudgeted without reason is rejected                                0.59s  
+  ✓ unbudgeted can finance verify when rate resolved                     0.36s  
+  ✓ finance resolve unbudgeted rate                                      0.49s  
+  ✓ finance verify idempotency                                           0.64s  
+  ✓ finance resolve rate requires po verified status                     0.42s  
+  ✓ finance resolve rate rejects already resolved                        0.61s  
+  ✓ finance resolve rate rejects budgeted actual                         0.53s  
+  ✓ correct creates reversing pair                                       0.51s  
+  ✓ correct recalculates cost with corrected values                      0.46s  
+  ✓ correct preserves rate snapshot                                      0.55s  
+  ✓ correct requires finance verified status                             0.57s  
+  ✓ correct cannot correct already superseded                            0.40s  
+  ✓ correct rejects rate edits                                           0.73s  
+  ✓ correct rejects already superseded actual                            0.45s  
+  ✓ correct rejects duplicate correction                                 0.41s  
+  ✓ reversal of id is unique                                             0.56s  
+  ✓ closed project rejects recording                                     0.53s  
+  ✓ closed project rejects po verification                               0.62s  
+  ✓ closed project rejects verified labour correction                    0.69s  
+  ✓ closed project rejects unbudgeted rate resolution                    0.42s  
+  ✓ closed project allows finance verify after reopen                    0.40s  
+  ✓ finance verify creates cost line with correct expense code           0.52s  
+  ✓ cost line postsindependently false                                   0.40s  
+  ✓ cost line consumes budget line                                       0.43s  
+  ✓ rework uses rework expense code                                      0.48s  
+  ✓ workshop labour uses workshop expense code                           0.56s  
+  ✓ return for correction from recorded status                           0.40s  
+  ✓ return for correction from po verified status                        0.42s  
+  ✓ cannot return finance verified                                       0.69s  
+  ✓ returned record is corrected resubmitted and verified                0.47s  
+  ✓ index excludes superseded                                            0.52s  
+  ✓ index excludes unbudgeted from consumption                           0.47s  
+  ✓ budget labour lines preserve negative over budget variance           0.48s  
+  ✓ budget labour lines api                                              0.49s  
+  ✓ record creates governance audit log                                  0.66s  
+  ✓ finance verify creates governance audit log                          0.53s  
+  ✓ return correct resubmit full lifecycle                               0.51s  
+  ✓ resubmit clears stale po verification                                0.73s  
+  ✓ resubmit requires returned status                                    0.57s  
+  ✓ resubmit requires recording permission                               0.48s  
+  ✓ return requires a reviewer for the stage                             0.61s  
+  ✓ return history is immutable                                          0.50s  
+  ✓ unbudgeted classification change resets resolved rate                0.32s  
+  ✓ rate resolution requires source reference and positive rate          0.71s  
+  ✓ correction 20000 to 16000 project costing is 16000                   0.55s  
+  ✓ correction of a correction stays exactly once                        0.56s  
+  ✓ reclassification uses w6 transfer                                    0.76s  
+  ✓ closed project blocks every labour transition                        0.66s  
+  ✓ explicit rate tampering 200 and 20000 is ignored                     0.70s  
+  ✓ project a actual cannot use project b budget line                    0.66s  
+  ✓ budget revision keeps historical rate and new labour uses v2         0.49s  
+  ✓ finance verification moves project labour but not the company ledge… 0.69s  
+  ✓ project costing normal budget actual variance                        0.42s  
+  ✓ project costing over budget is not capped                            0.56s  
+  ✓ project costing unused budget does not become actual                 0.65s  
+  ✓ portfolio actual labour equals sum of project statements             0.63s  
+  ✓ portfolio query count does not grow with projects                    0.72s  
+  ✓ fractional usage and rate are exact                                  0.69s  
+  ✓ usage beyond two decimals is rejected                                0.43s  
+  ✓ labour api payloads never expose payroll data                        0.70s  
+  ✓ every labour event is audited with actor and timestamp               0.56s  
+  ✓ q4 scenario a a finalized draft budget authorizes budgeted labour    0.57s  
+  ✓ q4 scenario b an in progress budget cannot authorize budgeted labou… 0.67s  
+  ✓ q4 scenario b a reopened budget stops new labour until completed ag… 0.43s  
+  ✓ q4 scenario c a line from a superseded budget version cannot author… 0.71s  
+  ✓ q4 scenario c a budget row outside the project budget task is ignor… 0.51s  
+  ✓ q4 scenario f and g project budgets command regenerates planned lin… 0.59s  
+   PASS  Tests\Feature\Finance\Wave3PaymentVoucherControlsTest
+  ✓ returned voucher is corrected resubmitted and approved with full hi… 0.51s  
+  ✓ reject is a reviewers refusal and releases the liability             0.36s  
+  ✓ senior approval gate is inactive until a threshold is approved       0.24s  
+  ✓ a voucher above an approved threshold needs independent senior appr… 0.38s  
+  ✓ a voucher at or below the threshold posts on ordinary approval       0.38s  
+  ✓ paying a 25000 cost does not recognise it a second time              0.40s  
+  ✓ a reversed payment frees the liability to be paid again              0.42s  
+  ✓ partial settlements pay exactly the cost and no more                 0.35s  
+   PASS  Tests\Feature\Finance\Wave3PettyCashControlsTest
+  ✓ a returned surrender is corrected and then recognised once           0.79s  
+  ✓ the same receipt cannot be claimed twice without an authorised over… 0.84s  
+  ✓ a reversed surrender is corrected and the real spend recognised onc… 1.05s  
+  ✓ a walk in cash purchase is classified on its payment                 0.49s  
+  ✓ the direct payment approver sees float history advances and duplica… 0.58s  
+  ✓ an overdue advance blocks another until an authorised exception is…  0.63s  
+  ✓ an outstanding advance that is not overdue is shown but does not bl… 0.49s  
+  ✓ an advance that becomes overdue after approval is blocked again at…  0.73s  
+  ✓ surrender due date comes from approved policy and ages into overdue  0.81s  
+  ✓ custody handover is confirmed by the incoming custodian              0.56s  
+  ✓ a cash count records and explains a variance without touching the l… 0.74s  
+  ✓ float alert thresholds follow an approved setting and fall back saf… 0.35s  
+   PASS  Tests\Feature\Finance\WngChartCompletionTest
+  ✓ on wngs chart nothing resolves until the chart is completed          0.10s  
+  ✓ a dry run writes nothing and reports every function resolving        0.08s  
+  ✓ execute creates only the missing accounts and never touches an exis… 0.11s  
+  ✓ a second run creates nothing                                         0.20s  
+  ✓ new accounts carry their type balance and hierarchy                  0.16s  
+  ✓ every new account is classified consistently with its category       0.06s  
+  ✓ an existing code with a different definition is refused and nothing… 0.10s  
+  ✓ an account already kept under another code is refused as a duplicat… 0.11s  
+  ✓ execution needs the database typed and never runs against the live…  0.09s  
+  ✓ the wip timing policy is a switch not a chart fact                   0.08s  
+  ✓ with no wip policy set the profile default is never applied          0.11s  
+  ✓ with no wip policy project cost cannot post and readiness says poli… 2.47s  
+  ✓ seeding the catalogue with no wip policy links no job cost code      0.40s  
+  ✓ the planning tool labels the suggested policy and never cuts over o… 0.13s  
+  ✓ wngs own chart is identified as such                                 0.12s  
+  ✓ two charts in one database stop the run and nothing is merged moved… 0.18s  
+  ✓ a chart that is neither is sent for manual review                    0.18s  
+  ✓ under the full profile the codes that only mention an account stay…  0.41s  
+  ✓ a designated account missing from the chart fails readiness by name  0.41s  
+  ✓ an unreadable profile maps nothing and readiness names it            0.10s  
+  ✓ every bank links to its own account not the generic bank             0.19s  
+  ✓ after completion tax links and expense codes resolve to wng account… 0.43s  
+  ✓ the uncoded cost fallback lands on wngs materials wip                0.21s  
+  ✓ classification fills only null columns and touches nothing else      0.23s  
+  ✓ an existing classification is never overwritten                      0.13s  
+  ✓ unlinked unused paying accounts are disabled not given an invented…  0.22s  
+  ✓ the unconfigured loan code is reported but does not block readiness  2.77s  
+  ✓ a same named account is never reused unless the profile declares it  0.10s  
+  ✓ an explicitly declared existing account meets the requirement and n… 0.24s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.12s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.14s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.13s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.12s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.13s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.08s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.11s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.08s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.15s  
+  ✓ a reuse declaration that is not exactly the declared account is ref… 0.12s  
+  ✓ a new account is refused beside the reference account for the same…  0.12s  
+  ✓ a blocked dry run still reports the whole plan and writes nothing    0.11s  
+  ✓ the classification preview shows before and proposed and changes no… 0.19s  
+  ✓ a declared reuse loosens none of the execution guards                0.16s  
+  ✓ the dry run reports where each paying account is linked against the… 0.20s  
+  ✓ readiness reports the profile and all functions resolving            2.36s  
+   PASS  Tests\Feature\Finance\WngChartMappingTest
+  ✓ every posting function is a reference chart account                  0.17s  
+  ✓ on the wng chart readiness names every unmapped function and mappin… 0.04s  
+  ✓ readiness endpoint reports functions and accounts can open it        2.37s  
+  ✓ an unmapped function refuses posting with a clear message            0.04s  
+  ✓ an uncoded cost never falls back to an arbitrary account             0.04s  
+  ✓ the reference chart fallback is unchanged                            0.22s  
+  ✓ seeders link through the map and never wipe a finance set link       0.07s  
+  ✓ r1 project officers record and po verify labour only on their proje… 2.38s  
+  ✓ r3 accounts holds finance reports view and nothing else changed for… 0.03s  
+  ✓ the mapping command validates the proposal and emits only approved…  0.10s  
+  ✓ the committed wng proposal covers every function and approves nothi… 0.03s  
+   PASS  Tests\Feature\Finance\WorkInProgressReleaseTest
+  ✓ billing a job in full empties its work in progress                   0.90s  
+  ✓ two cost families mapped to one wip account are refused not release… 1.11s  
+  ✓ each cost family releases into its own cost of sales account         0.82s  
+  ✓ a part billed job releases only that part of its cost                1.03s  
+  ✓ billing the rest releases the rest and nothing more                  1.05s  
+  ✓ a job with no costs releases nothing rather than failing             0.96s  
+  ✓ a job billed beyond its agreed price still releases only what it sp… 0.74s  
+  ✓ billing the exact agreed price releases every shilling               0.88s  
+  ✓ the release entry balances and names its invoice                     0.81s  
+  ✓ costs on one job are never released by another jobs invoice          1.17s  
+  ✓ voiding an invoice returns its costs to work in progress             1.04s  
+  ✓ a job re billed after a void releases its full cost                  1.20s  
+  ✓ a reversed cost is not mistaken for a release                        0.99s  
+   PASS  Tests\Unit\Finance\ChartAccountMapTest
+  ✓ an unmapped code resolves to itself                                  0.01s  
+  ✓ a mapped code resolves to this chart
+  ✓ mapping one code leaves the others alone
+  ✓ an indirect account stays unresolved
+  ✓ an indirect account can be resolved only by an explicit mapping
+  ✓ a code merely mentioned in the text never resolves however fully the chart is mapped
+  ✓ the two ways the catalogue designates an account still resolve
+  ✓ a blank mapping falls back rather than erasing the account
+   PASS  Tests\Unit\Finance\RequisitionSchemaServiceTest
+  ✓ it validates and strips values using the type contract               0.06s  
+  ✓ it rejects missing type specific and recipient data                  0.04s  
+  ✓ it synthesises a v2 document for a type that has never been edited   0.04s  
+  ✓ it normalises width and visibility onto every field                  0.03s  
+  ✓ a hidden required field is not enforced                              0.04s  
+  ✓ a visible required field is enforced                                 0.03s  
+  ✓ a stored document wins over the legacy columns                       0.05s  
+  ✓ a hidden section neither requires nor retains its fields             0.03s  
+  ✓ line field visibility is evaluated for each line                     0.04s  
+  ✓ a visible required line field is enforced for that line              0.03s  
+  ✓ a type definition stamps the schema version at the snapshot boundar… 0.04s  
+  ✓ a project picker keeps the label beside the reference                0.03s  
+  ✓ a required picker rejects a label with no reference                  0.04s  
+  ✓ the field type list covers the pickers but not attachments           0.03s  
+   PASS  Tests\Feature\CostCollector\BudgetProjectionOnCompletionTest
+  ✓ completing a budget task opens the cost account                      0.14s  
+  ✓ completing any other task projects nothing                           0.24s  
+  ✓ a task completed twice does not double the budget                    0.27s  
+  ✓ a budget task with no budget data is survivable                      0.15s  
+  ✓ the projection is queued                                             0.12s  
+   PASS  Tests\Feature\CostCollector\BudgetProjectorTest
+  ✓ it flattens nested materials and honours the exclusion flag          0.16s  
+  ✓ it honours the camel case exclusion flag too                         0.25s  
+  ✓ it projects the three flat arrays                                    0.24s  
+  ✓ reprojecting an unchanged budget changes nothing                     0.18s  
+  ✓ reprojecting a repriced line reverses the old version and posts the… 0.17s  
+  ✓ a line deleted from the budget stops counting                        0.28s  
+  ✓ a consumed line is never retired behind a real cost                  0.23s  
+  ✓ a budget addition is recorded as a client change                     0.23s  
+  ✓ zero priced placeholder rows are not budget                          0.17s  
+  ✓ it carries project identity and the task stage                       0.23s  
+   PASS  Tests\Feature\CostCollector\CostAccountMarginalTest
+  ✓ for enquiry margin includes cost completeness                        0.17s  
+  ✓ for enquiry margin status is provisional                             0.21s  
+  ✓ for enquiry includes financial closure status                        0.14s  
+   PASS  Tests\Feature\CostCollector\CostAccountTest
+  ✓ materials are reported per element                                   0.14s  
+  ✓ an element breaks down into the materials that built it              0.17s  
+  ✓ the same catalogue item is one row even when worded differently      0.19s  
+  ✓ material spend without an element is labelled not hidden             0.16s  
+  ✓ only materials are grouped by element                                0.18s  
+  ✓ the materials drilldown groups its lines by element                  0.27s  
+  ✓ a flat category drilldown is not grouped                             0.11s  
+  ✓ it reports planned against spend by category                         0.21s  
+  ✓ unbudgeted spend is surfaced separately                              0.14s  
+  ✓ exception spend groups on the cause flag                             0.10s  
+  ✓ coverage distinguishes a saving from an unreported cost              0.14s  
+  ✓ no alert fires when no threshold is configured                       0.16s  
+  ✓ cost overrun alert fires only past the configured tolerance          0.26s  
+  ✓ a project within tolerance does not alert                            0.17s  
+  ✓ margin below the escalation threshold flags both alerts              0.13s  
+  ✓ the accounts grid lists one row per project with grand totals        0.23s  
+  ✓ reversed and unverified lines do not count                           0.28s  
+  ✓ a category can be opened to the lines behind it                      0.29s  
+  ✓ the drill down finds costs with no category at all                   0.13s  
+  ✓ the grid can be narrowed to projects that are over budget            0.19s  
+  ✓ the grid can be narrowed to projects with unbudgeted spend           0.18s  
+  ✓ the grid searches the project not the cost description               0.19s  
+  ✓ the grid reports when a project last recorded a cost                 0.18s  
+   PASS  Tests\Feature\CostCollector\CostAllocationTest
+  ✓ allocations must sum to parent amount                                0.22s  
+  ✓ allocations sum invariant passes when equal                          0.28s  
+  ✓ requires finance costs allocate permission                           0.23s  
+  ✓ deallocate removes allocations                                       0.24s  
+  ✓ cannot allocate unverified line                                      0.25s  
+  ✓ allocation excludes parent and includes slices in margin             0.23s  
+  ✓ cannot allocate to financially closed project                        0.17s  
+   FAIL  Tests\Feature\CostCollector\CostCollectorApiTest
+  ⨯ the picker searches and filters by family                            0.21s  
+  ✓ it returns the form definition for a code                            0.27s  
+  ✓ it records a cost                                                    0.14s  
+  ✓ reporter can correct a queried cost with revision history            0.11s  
+  ✓ reporting a cost requires the create permission                      0.15s  
+  ✓ a catalogue rejection returns field level errors                     0.10s  
+  ✓ a submitter cannot approve their own cost                            0.13s  
+  ✓ it rejects a future dated cost and tax above the amount              0.14s  
+  ✓ budget lines expose what is left                                     0.19s  
+  ✓ budget lines are not readable without a cost permission              0.17s  
+  ✓ evidence uploads separately from the cost                            0.14s  
+  ✓ it lists only the callers own submissions                            0.24s  
+   PASS  Tests\Feature\CostCollector\CostCollectorServiceTest
+  ✓ it records a cost and derives the dimensions                         0.22s  
+  ✓ gross stays gross and project cost is net of tax                     0.42s  
+  ✓ it converts to base currency for reporting                           0.19s  
+  ✓ it enforces the catalogue job id rule both ways                      0.43s  
+  ✓ required detail fields come from the catalogue row                   0.28s  
+  ✓ required evidence comes from the catalogue row                       0.28s  
+  ✓ a producer that retries does not double post                         0.25s  
+  ✓ a source that carried its own approval lands verified                0.28s  
+  ✓ an approved purchase commitment reserves budget without posting gl   0.17s  
+  ✓ a locked period refuses the write                                    0.27s  
+  ✓ a producer cannot post into a locked period                          0.30s  
+  ✓ it snapshots budget remaining around the spend                       0.23s  
+  ✓ spend with no budget line is flagged unbudgeted                      0.31s  
+  ✓ an unknown or retired expense code is refused                        0.29s  
+   PASS  Tests\Feature\CostCollector\CostNotificationTest
+  ✓ a query reaches the person who reported it                           0.26s  
+  ✓ verifying and rejecting both reach the reporter                      0.34s  
+  ✓ answering a query puts it back in front of verifiers                 0.27s  
+  ✓ a producer posted cost notifies nobody                               0.25s  
+  ✓ a failed notification does not undo the verification                 0.23s  
+  ✓ Populated voucher_id for existing payment records
+  ✓ Migrated 0 allocation(s) from spend_voucher_allocations to payment_allocations
+  ✓ Populated settled_by_payment_id for 0 cost line(s)
+   PASS  Tests\Feature\CostCollector\CostSettlementModeTest
+  ✓ out of pocket claim credits ap and identifies claimant in voucher… 131.35s  
+  ✓ company paid cost credits bank directly without creating ap liabili… 0.53s  
+  ✓ capture requires an explicit funding mode                            0.37s  
+  ✓ cost cause must be a recognised code                                 0.51s  
+  ✓ an exception cause requires a note                                   0.53s  
+  ✓ the default cause needs no note                                      0.46s  
+  ✓ a supplier payee type requires a kra pin on the supplier record      0.47s  
+  ✓ a company paid cost tagged as a supplier must name a real supplier   0.52s  
+  ✓ cost causes are listed for the capture form                          0.27s  
+  ✓ supplier credit requires a supplier master payee                     0.30s  
+  ✓ supplier credit can only be paid to its supplier with a payment vou… 0.51s  
+  ✓ a payment voucher cannot be funded from supplier credit              0.62s  
+  ✓ incomplete voucher types are not accepted by the public endpoint     0.47s  
+   PASS  Tests\Feature\CostCollector\CostTransferTest
+  ✓ transfer creates reversing pair                                      0.13s  
+  ✓ transfer amounts balance to zero                                     0.16s  
+  ✓ transfer requires finance costs transfer permission                  0.17s  
+  ✓ cannot transfer to same project                                      0.16s  
+  ✓ cannot transfer unverified line                                      0.19s  
+  ✓ cannot transfer already transferred line                             0.14s  
+  ✓ cannot transfer to financially closed project                        0.08s  
+   PASS  Tests\Feature\CostCollector\CostVerificationReviewTest
+  ✓ the queue says who was paid                                          0.25s  
+  ✓ the queue carries the budget line and coding                         0.17s  
+  ✓ the payable figure is gross less withholding                         0.38s  
+  ✓ age is measured from when the cost was incurred                      0.31s  
+  ✓ the summary describes the filtered set not the system                0.34s  
+  ✓ unbudgeted value is reported separately                              0.30s  
+  ✓ ageing buckets split the queue by how old it is                      0.27s  
+  ✓ the ageing bar still offers every bucket while one is selected       0.31s  
+  ✓ the queue filters on date and amount ranges                          0.21s  
+  ✓ costs with nothing attached can be singled out                       0.33s  
+  ✓ the queue can be narrowed to where a cost came from                  0.33s  
+  ✓ search covers the payee not only the reference                       0.29s  
+  ✓ rejected and reversed costs are reachable                            0.24s  
+  ✓ the queue sorts by amount on request                                 0.20s  
+  ✓ the queue paginates                                                  0.27s  
+  ✓ the tax preview prices the split and the journal                     0.31s  
+  ✓ the preview offers the treatments in force on the cost date          0.34s  
+  ✓ an impossible tax amount previews as an error rather than failing    0.17s  
+  ✓ what the preview shows is what verifying writes                      0.24s  
+  ✓ unbudgeted spend can be pointed at its budget line                   0.18s  
+  ✓ a reclassification is recorded with its reason                       0.36s  
+  ✓ a cost can be detached from a budget line                            0.31s  
+  ✓ another projects budget line is refused                              0.30s  
+  ✓ a spend line cannot be pointed at another spend line                 0.23s  
+  ✓ a rejected cost cannot be reclassified                               0.20s  
+  ✓ reclassifying to the same line is refused                            0.19s  
+  ✓ reclassification needs a real reason                                 0.18s  
+  ✓ reclassifying requires the verify permission                         0.34s  
+  ✓ a single cost returns its whole history                              0.35s  
+  ✓ my submissions totals cover every page                               0.18s  
+   PASS  Tests\Feature\CostCollector\CostVerificationTest
+  ✓ the queue shows open items and never budget lines                    0.20s  
+  ✓ verifying records who and when                                       0.28s  
+  ✓ nobody may verify a cost they reported themselves                    0.25s  
+  ✓ a super admin still needs a reason to verify their own cost          0.26s  
+  ✓ a super admin may verify their own cost and the override is recorde… 0.34s  
+  ✓ the override never applies to someone elses cost                     0.29s  
+  ✓ finance splits the tax at verification                               0.36s  
+  ✓ tax above the receipt amount is refused                              0.14s  
+  ✓ a query goes back and can return                                     0.34s  
+  ✓ reversing stops a cost counting                                      0.31s  
+  ✓ a posted cost creates a compensating journal when reversed           0.34s  
+  ✓ illegal transitions are refused                                      0.14s  
+  ✓ verification requires the permission                                 0.24s  
+  ✓ a stale reject cannot overwrite a completed verification             0.33s  
+  ✓ a stale query cannot reopen a verified cost                          0.22s  
+  ✓ a cost cannot be reversed twice                                      0.31s  
+   PASS  Tests\Feature\CostCollector\DepartmentalSpendTest
+  ✓ every department has exactly one cost centre                         0.32s  
+  ✓ the expense catalogue resolves its own dimensions                    0.50s  
+  ✓ a departmental purchase order commits against its department         0.19s  
+  ✓ the requesting department outranks the catalogue default             0.30s  
+  ✓ a purchase with no department falls back to the catalogue            0.33s  
+  ✓ a purchase with no owner at all is still recorded                    0.31s  
+   PASS  Tests\Feature\CostCollector\ExpenseCatalogueTest
+  ✓ the catalogue seeds                                                  0.37s  
+  ✓ no code defaults to an account a journal cannot post to              0.53s  
+  ✓ every code names its account even when the fk is unresolved          0.62s  
+  ✓ every form field is renderable                                       0.41s  
+  ✓ every evidence requirement is labelled                               0.54s  
+  ✓ field and evidence keys are unique within a code                     0.60s  
+  ✓ tax defaults resolve to seeded treatments                            0.50s  
+  ✓ a code that forbids a job id is never a direct project cost          0.57s  
+  ✓ the seeder is idempotent                                             0.83s  
+   PASS  Tests\Feature\CostCollector\ExpenseCodeJobContextTest
+  ✓ without a job every code that does not demand one is offered         0.50s  
+  ✓ without a job a code that demands one is never offered               0.43s  
+  ✓ with a job only the codes that forbid one are withheld               0.63s  
+  ✓ the codes an office requisition actually needs are reachable         0.36s  
+  ✓ the procurable slice holds no accounting movements                   0.48s  
+  ✓ the procurable slice still holds everything you can buy              0.63s  
+  ✓ staff allowances stay available to finance but not procurement       0.53s  
+  ✓ finance cash payroll and accounting treatments stay out of procurem… 0.41s  
+  ✓ not asking for the procurable slice leaves the catalogue whole       0.61s  
+  ✓ an office requisition is offered only buyable codes                  0.49s  
+  ✓ an office requisition can name the things an office buys             0.45s  
+  ✓ nothing bought for the office or workshop can be charged to a job    0.54s  
+  ✓ the office supplies codes post somewhere real                        0.42s  
+  ✓ the categories are named for the purchase not the account            0.42s  
+  ✓ asking for no context filters nothing                                0.29s  
+  ✓ the family list agrees with the code list                            0.59s  
+   PASS  Tests\Feature\CostCollector\MaterialToCostChainTest
+  ✓ a specified material reaches the budget and the cost account         0.52s  
+  ✓ a material added after the budget is done still reaches the account  0.61s  
+  ✓ repricing the budget replaces the planned line rather than adding o… 0.68s  
+  ✓ issuing against a specified line charges the budget line it consume… 0.67s  
+  ✓ returning material gives the budget line its headroom back           0.67s  
+  ✓ renaming an element moves its history with it                        0.83s  
+  ✓ issuing a material that was never specified is reported as unplanne… 0.44s  
+  ✓ removing a specified material that was never issued retires its bud… 0.73s  
+  ✓ removing a material that was already issued keeps its budget line    0.59s  
+   PASS  Tests\Feature\CostCollector\MyProjectsTest
+  ✓ it returns only the projects the caller is assigned to               0.09s  
+  ✓ the legacy assignment column still counts                            0.07s  
+  ✓ closed and cancelled projects are not offered                        0.06s  
+  ✓ search does not widen the list without portfolio access              0.08s  
+  ✓ portfolio access reaches projects you are not assigned to            0.08s  
+  ✓ search also matches a job number                                     0.06s  
+  ✓ cost sheet returns every approved project in the selected stage      0.09s  
+  ✓ cost sheet stage tabs include completed and closed but never cancel… 0.09s  
+  ✓ cost sheet treats planning as an active in progress project          0.06s  
+  ✓ cost sheet portfolio requires finance read access                    0.07s  
+   PASS  Tests\Feature\CostCollector\PettyCashCommitmentTest
+  ✓ an approved requisition commits the projects money                   0.20s  
+  ✓ re approving cannot commit the same money twice                      0.16s  
+  ✓ a requisition awaiting approval promises nothing                     0.29s  
+  ✓ office spend with no project is not forced onto one                  0.26s  
+  ✓ paying a requisition releases its commitment                         0.37s  
+  ✓ a voided payment leaves the promise standing                         0.29s  
+  ✓ a type with no accounting code still commits the money               0.20s  
+  ✓ office overhead is never committed to a project                      0.34s  
+  ✓ withdrawing an approval releases the commitment                      0.25s  
+  ✓ releasing a requisition that promised nothing is harmless            0.19s  
+  ✓ re approving at a new amount commits the new amount                  0.23s  
+  ✓ a requisition approved then edited then rejected leaves nothing com… 0.34s  
+  ✓ paying a requisition classifies it under the approved code           0.25s  
+  ✓ a requisition whose type has no code leaves the payers choice        0.18s  
+   PASS  Tests\Feature\CostCollector\PettyCashCostListenerTest
+  ✓ paying petty cash records a project cost                             0.49s  
+  ✓ replaying a create key does not debit cash twice                     0.60s  
+  ✓ transaction fee posts as an overhead not a job cost                  0.68s  
+  ✓ a budget line from another project is rejected before payment        0.51s  
+  ✓ handling the event twice posts one cost line                         0.70s  
+  ✓ voiding a paid disbursement reverses its cost                        0.67s  
+  ✓ an overhead payment without a project reaches the gl and reverses o… 0.52s  
+  ✓ voiding an uncosted disbursement is a no op                          0.68s  
+  ✓ the service dispatches on pay and void                               0.63s  
+  ✓ a rejected disbursement dispatches nothing                           0.69s  
+   PASS  Tests\Feature\CostCollector\PettyCashCostPostingFailureTest
+  ✓ a gl posting failure is flagged and alerts finance                   0.60s  
+  ✓ retrying after the chart is fixed posts and clears the flag          0.64s  
+  ✓ retrying an already posted disbursement does not duplicate the entr… 0.68s  
+  ✓ retry still fails visibly if the underlying problem is not yet fixe… 0.68s  
+  ✓ a second queued attempt after success posts nothing twice            0.62s  
+   PASS  Tests\Feature\CostCollector\PettyCashCostProducerTest
+  ✓ settling a supplier invoice posts no project cost                    0.27s  
+  ✓ an unlinked disbursement is unaffected by the settlement guard       0.21s  
+  ✓ a paid disbursement becomes a verified project cost                  0.21s  
+  ✓ the older slash job number notation still finds its project          0.33s  
+  ✓ it normalises month and sequence padding                             0.26s  
+  ✓ overhead coded spend is not forced onto a project                    0.30s  
+  ✓ a disbursement with no job number is skipped                         0.26s  
+  ✓ a voided payment never becomes a cost                                0.29s  
+  ✓ rerunning the backfill posts nothing twice                           0.25s  
+  ✓ backfilled costs appear in the project cost account                  0.32s  
+   PASS  Tests\Feature\CostCollector\PortfolioMarginTest
+  ✓ portfolio margin returns margin per enquiry                          0.13s  
+  ✓ portfolio margin requires portfolio permission                       0.18s  
+  ✓ portfolio margin includes cost completeness                          0.15s  
+   PASS  Tests\Feature\CostCollector\ProjectFinancialClosureTest
+  ✓ closure check returns structured result                              0.16s  
+  ✓ close project sets status to closed                                  0.16s  
+  ✓ cannot close already closed project                                  0.17s  
+  ✓ reopen requires special permission                                   0.12s  
+  ✓ reopen sets status back to open when permission granted              0.11s  
+  ✓ collect blocked on financially closed project                        0.13s  
+   PASS  Tests\Feature\CostCollector\StoresCostProducerTest
+  ✓ stock checkout posts actual material cost line                       0.39s  
+  ✓ stock issue resolves identity from its own project not a colliding…  0.58s  
+  ✓ cost with job number from a different job is rejected                0.34s  
+  ✓ issue without an exact planned line posts unbudgeted                 0.37s  
+  ✓ stock checkout without project is skipped                            0.30s  
+  ✓ partial stock return posts proportional project credit               0.62s  
+  ✓ quarantine review caps credit at accepted recoverable value          0.61s  
+  ✓ an unpriced issue falls back to the approved budget rate             0.48s  
+  ✓ a stores issue records the element it served                         0.61s  
+  ✓ an unbudgeted issue still records its element                        0.47s  
+  ✓ a real receipt price always beats the budget rate                    0.55s  
+  ✓ an issue with no price anywhere still produces nothing               0.41s  
+  ✓ stock issue reversal posts one matching negative actual              0.60s  
+  ✓ controlled roll issue and return use one economic actual cost        0.45s  
+   PASS  Tests\Feature\CostCollector\UnbudgetedSpendAdoptionTest
+  ✓ budget line claims spend that was posted before it existed           0.60s  
+  ✓ the cost account stops reporting the same money two ways             0.52s  
+  ✓ ambiguous identity is left unbudgeted                                0.58s  
+  ✓ spend on another project is not claimed                              0.69s  
+  ✓ projecting a budget adopts the spend that preceded it                0.58s  
+   PASS  Tests\Feature\PettyCash\AllocationIntegrationTest
+  ✓ multi topup allocation persists and updates remaining balances       0.56s  
+  ✓ a disbursement over the approved petty cash cap is refused           0.65s  
+   PASS  Tests\Feature\PettyCash\ClearAllPettyCashDataCommandTest
+  ✓ it refuses to run in production                                      0.04s  
+  ✓ forced run wipes history and rebuilds the balance                    0.07s  
+  ✓ without force it asks first and does nothing on no                   0.05s  
+   PASS  Tests\Feature\PettyCash\DirectDisbursementApprovalTest
+  ✓ direct payment moves no cash until an independent checker approves…  0.71s  
+   PASS  Tests\Feature\PettyCash\ExpenditureExceptionTest
+  ✓ an earlier requisition counts against the next                       0.14s  
+  ✓ a released commitment is not exposure                                0.60s  
+  ✓ a requisition is not blocked by its own open commitment              0.46s  
+  ✓ a block says whether an exception is available                       0.14s  
+  ✓ a reason alone does not authorize the overrun                        0.11s  
+  ✓ the justification is not optional                                    0.11s  
+  ✓ an authorized exception approves and records the overrun             0.65s  
+  ✓ the justification survives the payment                               0.70s  
+  ✓ spending within budget is untouched                                  0.60s  
+   PASS  Tests\Feature\PettyCash\FlatTransactionFiltersTest
+  ✓ every entry carries the balance it left behind                       0.07s  
+  ✓ the classification filter narrows the ledger                         0.05s  
+  ✓ the payment method filter narrows the ledger                         0.07s  
+  ✓ a top up counts as active though it records no status                0.05s  
+  ✓ archiving a source record hides its ledger entry                     0.07s  
+  ✓ the archived view is empty rather than unfiltered when nothing is a… 0.04s  
+  ✓ filters narrow the paginated total not just the page                 0.06s  
+   PASS  Tests\Feature\PettyCash\FundCustodyServiceTest
+  ✓ it reconciles direct split voided and archived payments              0.24s  
+   PASS  Tests\Feature\PettyCash\OfflineBatchServiceTest
+  ✓ upload stages formula as an error without moving cash                0.24s  
+   PASS  Tests\Feature\PettyCash\PettyCashPolicyTest
+  ✓ the permission grant is now honoured without the super admin role    0.07s  
+  ✓ a disbursement can never be edited or deleted                        0.06s  
+  ✓ holding one petty cash permission does not grant the others          0.04s  
+  ✓ clear all is no longer an ability anyone can be granted              0.05s  
+  ✓ super admin still passes every remaining ability                     0.06s  
+  ✓ the clear all route no longer exists                                 0.08s  
+  ✓ a user without create permission cannot submit a disbursement        0.07s  
+  ✓ requisition visibility follows the policy                            0.09s  
+   PASS  Tests\Feature\PettyCash\PettyCashReportsTest
+  ✓ analytics requires the reports permission                            0.11s  
+  ✓ analytics returns the shape the client declares                      0.11s  
+  ✓ voided and archived spend is excluded from both reports              0.08s  
+  ✓ the project total agrees with the analytics total                    0.10s  
+  ✓ both reports cover the same period when none is given                0.10s  
+  ✓ an explicit range overrides the default month                        0.09s  
+  ✓ the export is a real spreadsheet from the server                     0.10s  
+  ✓ the export rejects an unknown type and requires permission           0.10s  
+  ✓ an inverted range is refused                                         0.07s  
+   PASS  Tests\Feature\PettyCash\RequisitionCategoryAlignmentTest
+  ✓ every category it creates names its accounting code                  0.21s  
+  ✓ a category requires a project exactly when its code does             0.19s  
+  ✓ the office categories never charge a project                         0.18s  
+  ✓ the superseded categories are retired not destroyed                  0.09s  
+  ✓ it carries forward the questions the old categories asked            0.21s  
+  ✓ running it twice does not duplicate a category                       0.28s  
+   PASS  Tests\Feature\PettyCash\RequisitionProjectAllocationTest
+  ✓ approved projects come before enquiries                              0.07s  
+  ✓ each list is newest first                                            0.07s  
+  ✓ a cancelled job cannot be spent against                              0.08s  
+  ✓ an approved quote is selectable before it becomes a project          0.07s  
+  ✓ an activated enquiry is offered only as its project                  0.05s  
+   PASS  Tests\Feature\PettyCash\RequisitionSettlementVisibilityTest
+  ✓ the register says which float paid each request                      0.21s  
+  ✓ the register can be filtered to what came out of the tin             0.16s  
+  ✓ an unpaid request is found by the absence of a payment               0.18s  
+   PASS  Tests\Feature\PettyCash\RequisitionTypeManagementTest
+  ✓ a finance manager can create a type and the form serves it           0.08s  
+  ✓ a field type the client cannot draw is refused                       0.08s  
+  ✓ two fields cannot share a key                                        0.08s  
+  ✓ the core panels cannot be removed or duplicated                      0.09s  
+  ✓ select fields need choices and conditions need a real source         0.06s  
+  ✓ renaming a type keeps its stable code when the editor omits it       0.10s  
+  ✓ managing types requires the permission                               0.08s  
+  ✓ an unused type is deleted outright                                   0.08s  
+  ✓ a used type is retired rather than deleted                           0.10s  
+  ✓ the index publishes the field types the builder may offer            0.06s  
+  ✓ create and update stamp the schema version into the frozen type sna… 0.10s  
+  ✓ payment defaults round trip onto the type and its snapshot           0.09s  
+  ✓ the builder is given the lists it must choose defaults from          0.07s  
+  ✓ a category without an accounting code is refused                     0.08s  
+  ✓ an unknown expense code is refused                                   0.09s  
+   PASS  Tests\Feature\PettyCash\ServiceTransactionGuardTest
+  ✓ insufficient balance does not leave an open transaction              0.28s  
+  ✓ Populated voucher_id for existing payment records
+  ✓ Migrated 0 allocation(s) from spend_voucher_allocations to payment_allocations
+  ✓ Populated settled_by_payment_id for 0 cost line(s)
+   PASS  Tests\Feature\PettyCash\TopUpIntegrityTest
+  ✓ deleting a top up reverses its ledger entry                        132.12s  
+  ✓ the cached balance still equals its ledger after a delete            0.08s  
+  ✓ deleting a top up requires permission                                0.07s  
+  ✓ creating a top up validates and keeps every field                    0.11s  
+  ✓ every canonical payment method is accepted                           0.17s  
+  ✓ a bank name is no longer a payment method                            0.08s  
+  ✓ a non cash top up needs a reference and a future date is refused     0.07s  
+  ✓ creating a top up requires permission                                0.09s  
+  ✓ editing a top up requires permission                                 0.09s  
+   PASS  Tests\Feature\Seeding\SeedingGuardTest
+  ✓ demo data refuses to run outside local and testing                   0.04s  
+  ✓ each demo seeder refuses on its own                                  0.06s  
+  ✓ demo data still seeds in testing                                     3.19s  
+  ✓ the reference chart is left alone where the company keeps its own    0.04s  
+  ✓ the reference chart is seeded where this installation keeps it       0.18s  
+  ✓ seeding the chart twice leaves a foreign account untouched           0.22s  
+   FAILED  Tests\Feature\CostCollector\CostCollectorApiTest > the picker sea…   
+  Tests:    1 failed, 971 passed (7756 assertions)
+  Duration: 831.60s
+exit=1

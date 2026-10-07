@@ -1,0 +1,172 @@
+## expense_codes resolution — db
++-------+--------+----------+
+| total | active | inactive |
++-------+--------+----------+
+|   109 |    101 |        8 |
++-------+--------+----------+
++----------+-----+
+| state    | n   |
++----------+-----+
+| RESOLVED | 101 |
++----------+-----+
+## active codes missing family / class / cost-centre / activity dimension — db
++-----------+----------+-------------------+----------------+-------------+
+| no_family | no_class | no_cost_centre_id | no_activity_id | no_job_rule |
++-----------+----------+-------------------+----------------+-------------+
+|         0 |        0 |                 0 |              0 |           0 |
++-----------+----------+-------------------+----------------+-------------+
+## active codes by debit account — db
++------+---------------------------------------+---------------+-------+
+| acct | name                                  | account_type  | codes |
++------+---------------------------------------+---------------+-------+
+| 1030 | Petty Cash Float                      | balance_sheet |     2 |
+| 1200 | Raw-material Inventory                | balance_sheet |     2 |
+| 1211 | Project WIP – Direct Materials        | balance_sheet |    43 |
+| 1212 | Project WIP – Direct Labour           | balance_sheet |     3 |
+| 1213 | Project WIP – Subcontractors          | balance_sheet |     4 |
+| 1214 | Project WIP – Transport & Logistics   | balance_sheet |     5 |
+| 1215 | Project WIP – Equipment & Site        | balance_sheet |     5 |
+| 1216 | Project WIP – Project Utilities       | balance_sheet |     4 |
+| 1217 | Project WIP – Project Facilitation    | balance_sheet |     3 |
+| 1218 | Project WIP – Venue & Statutory       | balance_sheet |     4 |
+| 1219 | Project WIP – Rework & Warranty       | balance_sheet |     3 |
+| 1300 | Staff Advances / Imprest              | balance_sheet |     1 |
+| 1310 | Supplier Advances                     | balance_sheet |     1 |
+| 1320 | Refundable Deposits                   | balance_sheet |     1 |
+| 1330 | Input VAT Recoverable                 | balance_sheet |     1 |
+| 1340 | Prepaid Expenses                      | balance_sheet |     2 |
+| 1600 | Leasehold Improvements                | capex         |     1 |
+| 2120 | Withholding Tax Payable               | balance_sheet |     1 |
+| 2200 | Client Deposits                       | balance_sheet |     1 |
+| 2300 | Loans Payable                         | balance_sheet |     1 |
+| 6100 | Workshop Electricity                  | overhead      |     1 |
+| 6200 | Machinery Repairs & Maintenance       | overhead      |     1 |
+| 6400 | Small Tools & Workshop Consumables    | overhead      |     1 |
+| 6600 | PPE & Workshop Safety                 | overhead      |     1 |
+| 6700 | Cleaning & Waste Disposal             | overhead      |     2 |
+| 7100 | Office Rent & Electricity             | opex          |     1 |
+| 7150 | Office Supplies & Stationery          | opex          |     2 |
+| 7200 | Administration Airtime & Internet     | opex          |     1 |
+| 7400 | Office Transport                      | opex          |     1 |
+| 7600 | Staff Welfare                         | opex          |     1 |
+| 7800 | Bank & Mobile-money Charges           | opex          |     1 |
++------+---------------------------------------+---------------+-------+
+## inactive codes and why — db
++--------+--------------------------------------------------+--------+------+
+| code   | default_debit_gl                                 | linked | post |
++--------+--------------------------------------------------+--------+------+
+| NE-002 | Receiving cash/bank account                      | NULL   | NULL |
+| NE-004 | Relevant expense, WIP, inventory or asset accoun | NULL   | NULL |
+| NE-015 | Relevant tax payable or income-tax receivable    | NULL   | NULL |
+| NE-017 | Equity / Dividends Payable                       | NULL   | NULL |
+| NE-018 | Bank / Cash (credit is 2200 Client Deposits)     | NULL   | NULL |
+| NE-020 | Relevant 1400 PPE account                        | NULL   | NULL |
+| NE-021 | Relevant 1500 Hire Asset account                 | NULL   | NULL |
+| NE-023 | Relevant 5100–5800 Cost of Sales account         | NULL   | NULL |
++--------+--------------------------------------------------+--------+------+
+## duplicate expense codes — db
+## finance_settings approval evidence — db
++------------------------------------------+-------+-------------+-------------+----------------+--------------+
+| key                                      | value | approved_by | approved_at | effective_from | effective_to |
++------------------------------------------+-------+-------------+-------------+----------------+--------------+
+| tax_return_due_day                       | 20    |        NULL | NULL        | 2020-01-01     | NULL         |
+| reconciliation_date_tolerance_days       | 3     |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_max_per_transaction           | 20000 |        NULL | NULL        | 2020-01-01     | NULL         |
+| input_vat_claim_window_months            | 6     |        NULL | NULL        | 2020-01-01     | NULL         |
+| margin_warning_percent                   | 40    |        NULL | NULL        | 2020-01-01     | NULL         |
+| margin_escalation_percent                | 35    |        NULL | NULL        | 2020-01-01     | NULL         |
+| cost_overrun_alert_percent               | 10    |        NULL | NULL        | 2020-01-01     | NULL         |
+| capitalisation_threshold                 | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| purchase_order_auto_approval_limit       | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| purchase_order_senior_approval_threshold | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| spend_voucher_senior_approval_threshold  | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_low_balance_threshold         | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_critical_balance_threshold    | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_surrender_due_days            | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_surrender_due_soon_days       | null  |        NULL | NULL        | 2020-01-01     | NULL         |
++------------------------------------------+-------+-------------+-------------+----------------+--------------+
+## expense_codes resolution — wng_target_rehearsal
++-------+--------+----------+
+| total | active | inactive |
++-------+--------+----------+
+|   109 |    102 |        7 |
++-------+--------+----------+
++----------+-----+
+| state    | n   |
++----------+-----+
+| RESOLVED | 102 |
++----------+-----+
+## active codes missing family / class / cost-centre / activity dimension — wng_target_rehearsal
++-----------+----------+-------------------+----------------+-------------+
+| no_family | no_class | no_cost_centre_id | no_activity_id | no_job_rule |
++-----------+----------+-------------------+----------------+-------------+
+|         0 |        0 |                 0 |              0 |           0 |
++-----------+----------+-------------------+----------------+-------------+
+## active codes by debit account — wng_target_rehearsal
++-----------+--------------------------------------------+---------------+-------+
+| acct      | name                                       | account_type  | codes |
++-----------+--------------------------------------------+---------------+-------+
+| CD-001    | Client Deposits                            | balance_sheet |     2 |
+| COS-008   | Cost of Sales:Materials                    | direct_cost   |     1 |
+| FIN-003   | Finance cost:Bank charges                  | opex          |     1 |
+| IA-001    | Inventory Asset                            | balance_sheet |     2 |
+| OI-001    | Office Improvement                         | balance_sheet |     1 |
+| OPE-006   | Operating Expenses:Consumables             | opex          |     2 |
+| OPE-012   | Operating Expenses:Electricity & Water     | opex          |     1 |
+| OPE-014   | Operating Expenses:Garbage Collections     | opex          |     2 |
+| OPE-022   | Operating Expenses:Rent & lease Payments   | opex          |     1 |
+| OPE-023   | Operating Expenses:Repairs and Maintenance | opex          |     1 |
+| OPE-029   | Operating Expenses:Staff Welfare           | opex          |     1 |
+| OPE-030   | Operating Expenses:Stationery & Printing   | opex          |     2 |
+| OPE-031   | Operating Expenses:Telephone & Internet    | opex          |     1 |
+| OPE-032   | Operating Expenses:Transport & Delivery    | opex          |     1 |
+| PETTY-001 | Petty cash                                 | balance_sheet |     2 |
+| PRE-002   | Prepayments & Deposits:Supplier Advances   | balance_sheet |     1 |
+| PRE-003   | Prepayments & Deposits:Refundable Deposits | balance_sheet |     1 |
+| PRE-004   | Prepayments & Deposits:Prepaid Expenses    | balance_sheet |     2 |
+| STD-001   | Short Term Debtors                         | balance_sheet |     1 |
+| VAT-002   | Input VAT Recoverable                      | balance_sheet |     1 |
+| WHT-001   | Withholding Tax Payable                    | balance_sheet |     1 |
+| WIP-002   | Work in Progress:Materials                 | balance_sheet |    43 |
+| WIP-003   | Work in Progress:Direct Labour             | balance_sheet |     3 |
+| WIP-004   | Work in Progress:Subcontractors            | balance_sheet |     4 |
+| WIP-005   | Work in Progress:Transport & Delivery      | balance_sheet |     5 |
+| WIP-006   | Work in Progress:Equipment Hire & Site     | balance_sheet |     5 |
+| WIP-007   | Work in Progress:Project Utilities         | balance_sheet |     4 |
+| WIP-008   | Work in Progress:Field Facilitation        | balance_sheet |     3 |
+| WIP-009   | Work in Progress:Venue & Permits           | balance_sheet |     4 |
+| WIP-010   | Work in Progress:Rework & Warranty         | balance_sheet |     3 |
++-----------+--------------------------------------------+---------------+-------+
+## inactive codes and why — wng_target_rehearsal
++--------+--------------------------------------------------+--------+------+
+| code   | default_debit_gl                                 | linked | post |
++--------+--------------------------------------------------+--------+------+
+| NE-002 | Receiving cash/bank account                      | NULL   | NULL |
+| NE-004 | Relevant expense, WIP, inventory or asset accoun | NULL   | NULL |
+| NE-015 | Relevant tax payable or income-tax receivable    | NULL   | NULL |
+| NE-016 | 2300 Loans Payable                               | NULL   | NULL |
+| NE-017 | Equity / Dividends Payable                       | NULL   | NULL |
+| NE-020 | Relevant 1400 PPE account                        | NULL   | NULL |
+| NE-021 | Relevant 1500 Hire Asset account                 | NULL   | NULL |
++--------+--------------------------------------------------+--------+------+
+## duplicate expense codes — wng_target_rehearsal
+## finance_settings approval evidence — wng_target_rehearsal
++------------------------------------------+-------+-------------+-------------+----------------+--------------+
+| key                                      | value | approved_by | approved_at | effective_from | effective_to |
++------------------------------------------+-------+-------------+-------------+----------------+--------------+
+| tax_return_due_day                       | 20    |        NULL | NULL        | 2020-01-01     | NULL         |
+| reconciliation_date_tolerance_days       | 3     |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_max_per_transaction           | 20000 |        NULL | NULL        | 2020-01-01     | NULL         |
+| input_vat_claim_window_months            | 6     |        NULL | NULL        | 2020-01-01     | NULL         |
+| margin_warning_percent                   | 40    |        NULL | NULL        | 2020-01-01     | NULL         |
+| margin_escalation_percent                | 35    |        NULL | NULL        | 2020-01-01     | NULL         |
+| cost_overrun_alert_percent               | 10    |        NULL | NULL        | 2020-01-01     | NULL         |
+| capitalisation_threshold                 | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| purchase_order_auto_approval_limit       | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| purchase_order_senior_approval_threshold | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| spend_voucher_senior_approval_threshold  | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_low_balance_threshold         | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_critical_balance_threshold    | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_surrender_due_days            | null  |        NULL | NULL        | 2020-01-01     | NULL         |
+| petty_cash_surrender_due_soon_days       | null  |        NULL | NULL        | 2020-01-01     | NULL         |
++------------------------------------------+-------+-------------+-------------+----------------+--------------+

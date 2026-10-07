@@ -44,13 +44,19 @@ trait ValidatesMaterialControls
                 }
                 // Only judge a unit that was actually supplied. A draft may leave
                 // it blank for the category default to settle later.
-                if ($category?->allowed_uoms && filled($this->input('unit_of_measure'))
-                    && !in_array($this->input('unit_of_measure'), $category->allowed_uoms, true)) {
-                    $validator->errors()->add('unit_of_measure', 'The unit of measure is not allowed for this category.');
+                $allowedUnits = $category?->allowedStockUomCodes();
+                if ($allowedUnits && filled($this->input('unit_of_measure'))
+                    && !in_array($this->input('unit_of_measure'), $allowedUnits, true)) {
+                    $unit = $this->input('unit_of_measure');
+                    $allowed = implode(', ', $allowedUnits);
+                    $validator->errors()->add('unit_of_measure', "Unit [{$unit}] is not allowed for category [{$category->name}]. Allowed stock units: {$allowed}. Choose the correct Stock unit; existing stock movements can prevent a unit change.");
                 }
-                if ($category?->item_type_id && $this->input('item_type_id')
-                    && (int) $category->item_type_id !== (int) $this->input('item_type_id')) {
-                    $validator->errors()->add('item_type_id', 'The selected item type does not own this category.');
+                $ownerId = $category?->item_type_id ?? $category?->parent?->item_type_id;
+                if ($ownerId && $this->input('item_type_id')
+                    && (int) $ownerId !== (int) $this->input('item_type_id')) {
+                    $owner = \App\Modules\MaterialsLibrary\Models\MaterialItemType::find($ownerId);
+                    $choice = $ownerId.' | '.($owner?->name ?? 'Unknown item type');
+                    $validator->errors()->add('item_type_id', "The selected item type does not own category [{$category->name}]. Choose Item type [{$choice}].");
                 }
 
                 // Attribute definitions are an extensible schema, not an escape
