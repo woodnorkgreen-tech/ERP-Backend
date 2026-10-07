@@ -18,6 +18,8 @@ class ProjectEnquiry extends Model
 
     protected $table = 'project_enquiries';
 
+    protected ?array $pendingProjectScope = null;
+
     protected $fillable = [
         'date_received',
         'expected_delivery_date',
@@ -183,61 +185,12 @@ class ProjectEnquiry extends Model
         });
 
         static::saved(function ($enquiry) {
-            if (!$enquiry->wasRecentlyCreated && !$enquiry->wasChanged('project_scope')) {
-                return;
-            }
-
-            // getRawOriginal() reads $this->original, which for newly created models is
-            // empty until syncOriginalAttributes() runs — which happens AFTER saved fires.
-            // getAttributes() reads $this->attributes, always set by setProjectScopeAttribute.
-            $raw = $enquiry->getAttributes()['project_scope'] ?? null;
-            if ($raw) {
-                $decoded = json_decode($raw, true);
-                if (is_array($decoded)) {
-                    $existingUuids = [];
-                    foreach ($decoded as $item) {
-                        if (is_array($item)) {
-                            $classification = $item['classification'] ?? 'PRE-DEFINED';
-                            $name = $item['name'] ?? 'Untitled';
-                            $status = $item['status'] ?? 'original';
-                            $uuid = $item['uuid'] ?? $item['id'] ?? \Illuminate\Support\Str::uuid()->toString();
-                        } else {
-                            $classification = 'PRE-DEFINED';
-                            $name = $item;
-                            $status = 'original';
-                            $uuid = \Illuminate\Support\Str::uuid()->toString();
-
-                            $parts = array_map('trim', explode('|', $item));
-                            $mainPart = $parts[0];
-
-                            if (preg_match('/^\[(.*?)\]\s*(.*)$/', $mainPart, $matches)) {
-                                $classification = trim($matches[1]);
-                                $name = trim($matches[2]);
-                            }
-
-                            foreach ($parts as $part) {
-                                if (str_starts_with($part, 'status:')) {
-                                    $status = trim(str_replace('status:', '', $part));
-                                } elseif (str_starts_with($part, 'id:')) {
-                                    $uuid = trim(str_replace('id:', '', $part));
-                                }
-                            }
-                        }
-
-                        $existingUuids[] = $uuid;
-
-                        $enquiry->deliverables()->updateOrCreate(
-                            ['uuid' => $uuid],
-                            [
-                                'name' => $name,
-                                'classification' => strtoupper($classification),
-                                'status' => $status
-                            ]
-                        );
-                    }
-                    $enquiry->deliverables()->whereNotIn('uuid', $existingUuids)->delete();
-                }
-            }
+            // An explicit scope write must run even when the legacy JSON cache
+            // compares equal: the live shared records may have changed in Materials.
+            if ($enquiry->pendingProjectScope === null) return;
+            $scope = $enquiry->pendingProjectScope;
+            $enquiry->pendingProjectScope = null;
+            app(\App\Services\ProjectElementRegistry::class)->syncScope($enquiry, $scope);
         });
     }
 
@@ -254,7 +207,7 @@ class ProjectEnquiry extends Model
      */
     public function getProjectScopeAttribute(): array
     {
-        return $this->deliverables->map(function ($d) {
+        return $this->deliverables()->orderBy('sort_order')->orderBy('id')->get()->map(function ($d) {
             return [
                 'id'             => $d->uuid,
                 'uuid'           => $d->uuid,
@@ -265,6 +218,10 @@ class ProjectEnquiry extends Model
                 'name'           => $d->name,
                 'classification' => $d->classification,
                 'status'         => $d->status,
+                'parent_id'      => $d->parent_id,
+                'required_quantity' => (float) $d->required_quantity,
+                'unit_of_measurement' => $d->unit_of_measurement,
+                'fulfilment_route' => $d->category,
                 'raw'            => "[{$d->classification}] {$d->name} | status:{$d->status} | id:{$d->uuid}",
             ];
         })->toArray();
@@ -299,7 +256,8 @@ class ProjectEnquiry extends Model
             return !empty($item);
         });
 
-        $this->attributes['project_scope'] = json_encode(array_values($processedItems));
+        $this->pendingProjectScope = array_values($processedItems);
+        $this->attributes['project_scope'] = json_encode($this->pendingProjectScope);
     }
 
     public function enquiryTasks(): HasMany

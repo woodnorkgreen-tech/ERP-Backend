@@ -24,6 +24,38 @@ use App\Modules\Projects\Actions\UpdateEnquiryAction;
 use App\Modules\Projects\Services\ProjectWorkflowStateService;
 use App\Services\Governance\ProjectGovernanceService;
 use App\Services\ProjectFinancialAccess;
+use App\Http\Requests\Modules\Projects\Enquiry\StoreEnquiryRequest;
+use App\Models\GovernanceAuditLog;
+use App\Models\Project;
+use App\Models\User;
+use App\Modules\Design\Services\DesignProjectSyncService;
+use App\Modules\Finance\Models\ClientReceipt;
+use App\Modules\Finance\Models\JournalEntry;
+use App\Modules\Finance\Models\PaymentSource;
+use App\Modules\Finance\Models\ProjectInvoice;
+use App\Modules\Finance\Services\ClientFinancialPositionService;
+use App\Modules\Finance\Services\InvoicePricer;
+use App\Modules\Finance\Services\JournalPostingService;
+use App\Modules\Finance\Services\ReceivablesPostingService;
+use App\Modules\Finance\Services\WorkInProgressReleaseService;
+use App\Modules\Finance\Support\InvoiceState;
+use App\Modules\Finance\Support\ReceivablesActions;
+use App\Modules\Projects\Support\ReceivablesTabs;
+use App\Modules\Projects\Filters\Enquiry\ClientFilter;
+use App\Modules\Projects\Filters\Enquiry\DateRangeFilter;
+use App\Modules\Projects\Filters\Enquiry\DeliveryDateStatusFilter;
+use App\Modules\Projects\Filters\Enquiry\OfficerFilter;
+use App\Modules\Projects\Filters\Enquiry\SearchFilter;
+use App\Modules\Projects\Filters\Enquiry\StatusFilter;
+use App\Modules\Projects\Filters\Enquiry\ViewTypeFilter;
+use App\Modules\Projects\Resources\EnquiryResource;
+use App\Modules\Projects\Resources\ReceivablesEnquiryResource;
+use App\Modules\Projects\Services\SequencingService;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Pipeline\Pipeline;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 /**
  * @OA\Schema(
@@ -46,6 +78,29 @@ use App\Services\ProjectFinancialAccess;
 class EnquiryController extends Controller
 {
     use HandlesProjectErrors;
+
+    /**
+     * The one enquiry filter pipeline.
+     *
+     * The list and the billing counts both run through this, so a register
+     * filtered to one client and its tab counts describe the same projects.
+     */
+    private const ENQUIRY_FILTERS = [
+        SearchFilter::class,
+        StatusFilter::class,
+        ViewTypeFilter::class,
+        DateRangeFilter::class,
+        ClientFilter::class,
+        OfficerFilter::class,
+        DeliveryDateStatusFilter::class,
+    ];
+
+    /**
+     * Billing needs only identity and finance-basis relationships. Loading the
+     * full project graph here previously serialized every task, assignee and
+     * deliverable for as many as 500 rows.
+     */
+    private const RECEIVABLES_RELATIONS = ['client', 'projectOfficer', 'payments', 'quoteApprovals', 'enquiryTasks.quoteData'];
 
     protected $notificationService;
     protected $financeService;
@@ -165,10 +220,11 @@ class EnquiryController extends Controller
 
         // Billing needs only identity and finance-basis relationships. Loading the
         // full project graph here previously serialized every task, assignee and
-        // deliverable for as many as 500 rows.
+        // deliverable for as many as 500 rows. `projectOfficer` is here because
+        // the register filters and names the officer on every row.
         $query = $view === 'receivables'
-            ? ProjectEnquiry::with('client', 'payments', 'quoteApprovals', 'enquiryTasks.quoteData')
-            : ProjectEnquiry::with(
+            ? $this->filteredEnquiryQuery(self::RECEIVABLES_RELATIONS)
+            : $this->filteredEnquiryQuery([
                 'client',
                 'department',
                 'projectOfficer',
@@ -177,21 +233,8 @@ class EnquiryController extends Controller
                 'enquiryTasks.quoteData',
                 'deliverables',
                 'payments',
-                'quoteApprovals'
-            );
-
-        $query = app(\Illuminate\Pipeline\Pipeline::class)
-            ->send($query)
-            ->through([
-                \App\Modules\Projects\Filters\Enquiry\SearchFilter::class,
-                \App\Modules\Projects\Filters\Enquiry\StatusFilter::class,
-                \App\Modules\Projects\Filters\Enquiry\ViewTypeFilter::class,
-                \App\Modules\Projects\Filters\Enquiry\DateRangeFilter::class,
-                \App\Modules\Projects\Filters\Enquiry\ClientFilter::class,
-                \App\Modules\Projects\Filters\Enquiry\OfficerFilter::class,
-                \App\Modules\Projects\Filters\Enquiry\DeliveryDateStatusFilter::class,
-            ])
-            ->thenReturn();
+                'quoteApprovals',
+            ]);
 
         // 2. Apply "Sub-Tab" filtering (Status Groups) - Kept for flexibility for now
         if ($request->filled('sub_status') && $request->sub_status !== 'all') {
@@ -217,6 +260,20 @@ class EnquiryController extends Controller
                 $query->whereIn('status', EnquiryConstants::getInProgressEnquiryStatuses());
             } elseif ($subStatus === 'pre_prod') {
                 $query->whereIn('status', EnquiryConstants::getPreProductionStatuses());
+            }
+        }
+
+        // A billing slice ("Needs action", "Deposit shortfall", …) is answered by
+        // the same predicate the tab counts use, so the count and the rows cannot
+        // disagree. The rows used to be picked in the browser, which was only ever
+        // right while every page had been fetched up front: with paging, a tab
+        // counted across the whole book and filtered across one page.
+        if ($view === 'receivables' && $request->filled('tab')) {
+            $tab = (string) $request->input('tab');
+            abort_unless(ReceivablesTabs::known($tab), 422, 'That project billing view does not exist.');
+
+            if ($tab !== ReceivablesTabs::ALL) {
+                $query->whereIn('id', $this->receivablesTabIds($tab, $query));
             }
         }
 
@@ -251,7 +308,8 @@ class EnquiryController extends Controller
         $enquiries = $query->paginate($perPage);
 
         // Enrich with payment progress for receivables/projects view
-        $enquiries->getCollection()->transform(function ($enquiry) {
+        $user = $request->user();
+        $enquiries->getCollection()->transform(function ($enquiry) use ($view, $user) {
             $progress = $this->financeService->getPaymentProgress($enquiry);
             $enquiry->finance_summary = $progress;
             $enquiry->payment_progress_percentage = $progress['percentage'];
@@ -260,6 +318,14 @@ class EnquiryController extends Controller
             $enquiry->payment_remaining = $progress['remaining'];
             $enquiry->payment_threshold_amount = $progress['threshold_amount'];
             $enquiry->payment_amount_required_for_threshold = $progress['amount_required_for_threshold'];
+
+            // Releasing production is offered from the register as well as from
+            // the project's own billing page, so each row carries the same
+            // authority and the same refusal the page would show.
+            if ($view === 'receivables' && $user) {
+                $enquiry->release_action = ReceivablesActions::forProjectBilling($user, $progress)['release'];
+            }
+
             return $enquiry;
         });
 
@@ -271,6 +337,56 @@ class EnquiryController extends Controller
             'data' => $resource::collection($enquiries)->response()->getData(true),
             'message' => 'Enquiries retrieved successfully'
         ]);
+    }
+
+    /**
+     * The enquiry query, filtered by whatever the request asked for.
+     *
+     * @param  list<string>  $relations
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    private function filteredEnquiryQuery(array $relations = [])
+    {
+        return app(\Illuminate\Pipeline\Pipeline::class)
+            ->send(ProjectEnquiry::with($relations))
+            ->through(self::ENQUIRY_FILTERS)
+            ->thenReturn();
+    }
+
+    /**
+     * The projects in one billing slice, as ids.
+     *
+     * Membership is decided by `ReceivablesTabs::matches` over the same
+     * `getPaymentProgress` figures the counts and the rows use — a billable
+     * amount depends on the quote basis, an approval snapshot and any recorded
+     * waiver, none of which a `where` clause can see. The candidate set is
+     * whatever the request's own filters already selected, so `?tab=shortfall`
+     * and `?client_id=3&tab=shortfall` mean what they say.
+     *
+     * Chunked, so resolving a slice costs flat memory as the book grows.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $filtered  the request's query, already filtered
+     * @return list<int>
+     */
+    private function receivablesTabIds(string $tab, $filtered): array
+    {
+        $ids = [];
+
+        // Full columns, not `id` alone: getPaymentProgress reads the project's own
+        // release flag, deposit percentage and quote-waiver columns, and a
+        // narrowed select would silently read them as null — deciding membership
+        // from figures that are not there.
+        (clone $filtered)
+            ->with(['payments', 'quoteApprovals', 'enquiryTasks.quoteData'])
+            ->chunkById(200, function ($enquiries) use (&$ids, $tab) {
+                foreach ($enquiries as $enquiry) {
+                    if (ReceivablesTabs::matches($tab, $enquiry, $this->financeService->getPaymentProgress($enquiry))) {
+                        $ids[] = (int) $enquiry->id;
+                    }
+                }
+            });
+
+        return $ids;
     }
 
     /**
@@ -695,15 +811,16 @@ class EnquiryController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'project_scope' => 'present|array',
+            'elementsRevision' => 'sometimes|integer|min:0',
         ]);
 
         if ($validator->fails()) {
             \Log::error('Deliverables update validation failed', [
                 'enquiry_id' => $enquiry->id,
                 'errors' => $validator->errors()->toArray(),
-                'request_data' => $request->all()
+                'request_data' => $request->all(),
             ]);
-            
+
             return response()->json([
                 'message' => 'Validation failed',
                 'errors' => $validator->errors(),
@@ -713,119 +830,21 @@ class EnquiryController extends Controller
         try {
             DB::beginTransaction();
 
+            $enquiry = ProjectEnquiry::whereKey($enquiry->id)->lockForUpdate()->firstOrFail();
+            if ($request->has('elementsRevision') && (int) $request->elementsRevision !== (int) $enquiry->elements_revision) {
+                DB::rollBack();
+
+                return response()->json(['message' => 'Project elements changed after this window was opened. Reopen it to review the current list.', 'code' => 'PROJECT_ELEMENTS_VERSION_CONFLICT'], 409);
+            }
             $newScope = $request->project_scope;
 
             $enquiry->update(['project_scope' => $newScope]);
 
-            // Dynamic Synchronisation back to existing Quote & Material Tasks!
-            if (is_array($newScope)) {
-                // Build scopeId → name map for materials task propagation
-                $scopeItems = [];
-                foreach ($newScope as $scopeItem) {
-                    $deliverableName = $scopeItem['name'] ?? '';
-                    $deliverableId   = $scopeItem['uuid'] ?? $scopeItem['id'] ?? '';
-                    if ($deliverableId) {
-                        $scopeItems[$deliverableId] = $deliverableName;
-                    }
-                }
-
-                // A. Sync Quote Task materials — propagate renames, category changes,
-                //    and inject new scope items that don't yet have a matching element.
-                $quoteTasks = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiry->id)
-                    ->where('type', 'quote')
-                    ->get();
-
-                // Build a full structured map: scopeId → { name, classification }
-                // Items are always structured arrays (via EnquiryResource / project_scope accessor)
-                $scopeStructured = [];
-                foreach ($newScope as $scopeItem) {
-                    $id = $scopeItem['uuid'] ?? $scopeItem['id'] ?? null;
-                    if ($id) {
-                        $scopeStructured[$id] = [
-                            'name'           => $scopeItem['name'] ?? 'Scope Item',
-                            'classification' => strtoupper($scopeItem['classification'] ?? 'PRE-DEFINED'),
-                        ];
-                    }
-                }
-
-                // Template mapping delegated to the single source of truth
-                // @see App\Constants\ScopeClassification
-
-                foreach ($quoteTasks as $quoteTask) {
-                    $quoteData = \App\Models\TaskQuoteData::firstOrCreate(
-                        ['enquiry_task_id' => $quoteTask->id]
-                    );
-
-                    $materials = is_array($quoteData->materials) ? $quoteData->materials : [];
-
-                    // Map existing elements by their scopeId for quick lookup
-                    $existingScopeIds = [];
-                    $updatedMaterials = [];
-                    foreach ($materials as $element) {
-                        $scopeId = $element['scopeId'] ?? null;
-                        if ($scopeId && isset($scopeStructured[$scopeId])) {
-                            // Update name AND category from the new scope
-                            $element['name']     = $scopeStructured[$scopeId]['name'];
-                            $element['category'] = $scopeStructured[$scopeId]['classification'];
-                        }
-                        if ($scopeId) $existingScopeIds[$scopeId] = true;
-                        $updatedMaterials[] = $element;
-                    }
-
-                    // Inject new scope items (in scope but not yet in quote materials)
-                    foreach ($scopeStructured as $scopeId => $info) {
-                        if (!isset($existingScopeIds[$scopeId])) {
-                            $cls  = $info['classification'];
-                            $updatedMaterials[] = [
-                                'id'               => (string) \Illuminate\Support\Str::uuid(),
-                                'scopeId'          => $scopeId,
-                                'name'             => $info['name'],
-                                'category'         => $cls,
-                                'description'      => '',
-                                'quantity'         => 1,
-                                'baseTotal'        => 0,
-                                'marginAmount'     => 0,
-                                'marginPercentage' => \App\Constants\ScopeClassification::defaultMargin($cls),
-                                'finalTotal'       => 0,
-                                'templateId'       => \App\Constants\ScopeClassification::toTemplateId($cls),
-                                'materials'        => [],
-                            ];
-                        }
-                    }
-
-                    // Remove elements that are scope-linked but no longer in scope
-                    $updatedMaterials = array_values(array_filter($updatedMaterials, function ($el) use ($scopeStructured) {
-                        $sid = $el['scopeId'] ?? null;
-                        // Keep manually-added elements (no scopeId) and elements still in scope
-                        return !$sid || isset($scopeStructured[$sid]);
-                    }));
-
-                    $quoteData->update(['materials' => $updatedMaterials]);
-                }
-
-                // B. Sync Material Task Elements
-                $materialsTasks = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiry->id)
-                    ->where('type', 'materials')
-                    ->get();
-
-                foreach ($materialsTasks as $materialsTask) {
-                    $materialsData = \App\Models\TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)->first();
-                    if ($materialsData) {
-                        // Direct DB updates for any ProjectElement linked to these scope IDs
-                        foreach ($scopeItems as $scopeId => $newName) {
-                            \App\Models\ProjectElement::where('task_materials_data_id', $materialsData->id)
-                                ->where('scope_id', $scopeId)
-                                ->update([
-                                    'name' => $newName
-                                ]);
-                        }
-                    }
-                }
-            }
+            // ProjectEnquiry's scope writer updates the shared registry and quote working copies.
 
             // Notification Logic: If a quote task already exists or enquiry is quote_approved
             $hasQuote = $enquiry->enquiryTasks()->where('type', 'quote')->exists() || $enquiry->quote_approved;
-            
+
             if ($hasQuote) {
                 $this->notificationService->sendDeliverablesUpdated(
                     $enquiry->fresh(),
@@ -838,13 +857,20 @@ class EnquiryController extends Controller
 
             return response()->json([
                 'message' => 'Deliverables updated successfully',
-                'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->load('client', 'department', 'projectOfficer', 'deliverables'))
+                'data' => new EnquiryResource($enquiry->load('client', 'department', 'projectOfficer', 'deliverables')),
             ]);
+        } catch (ValidationException $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'message' => 'Failed to update deliverables',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -1146,7 +1172,7 @@ class EnquiryController extends Controller
         ];
 
         // Named for the tabs they drive, so a count and its tab cannot drift.
-        $tabs = ['action' => 0, 'partial' => 0, 'mobilized' => 0, 'settled' => 0, 'all' => 0];
+        $tabs = array_fill_keys([...ReceivablesTabs::SLICES, ReceivablesTabs::ALL], 0);
 
         // Pushed through the same filter pipeline the list uses, with the view
         // forced to `receivables`. Re-stating the status set here would let the
@@ -1155,14 +1181,32 @@ class EnquiryController extends Controller
         // headline. The internal/external preset separation rides along for free.
         $request->merge(['view' => 'receivables']);
 
-        $query = app(\Illuminate\Pipeline\Pipeline::class)
-            ->send(ProjectEnquiry::with('payments', 'quoteApprovals', 'enquiryTasks.quoteData'))
+        // Two populations, deliberately:
+        //
+        //  - The headline money describes the WHOLE book, so it is unaffected by
+        //    whatever the register is currently filtered to. "Agreed project value"
+        //    that silently shrank when you searched one client would be a lie.
+        //  - The tab counts describe the rows you can actually reach, so they go
+        //    through the request's own filters. They used to be whole-book while
+        //    the rows were filtered, which is how "Deposit shortfall (12)" came to
+        //    sit above an empty list.
+        //
+        // The same pass collects the people the register can be narrowed to: the
+        // clients and project officers who actually appear in this book. Reading
+        // them from the client and user masters instead would offer a register
+        // full of choices that return nothing, and would need permissions a
+        // Finance reader may not hold.
+        $clients = [];
+        $officers = [];
+
+        $bookQuery = app(\Illuminate\Pipeline\Pipeline::class)
+            ->send(ProjectEnquiry::with('client', 'projectOfficer', 'payments', 'quoteApprovals', 'enquiryTasks.quoteData'))
             ->through([
                 \App\Modules\Projects\Filters\Enquiry\ViewTypeFilter::class,
             ])
             ->thenReturn();
 
-        $query->chunkById(200, function ($enquiries) use (&$stats, &$tabs) {
+        $bookQuery->chunkById(200, function ($enquiries) use (&$stats, &$clients, &$officers) {
                 foreach ($enquiries as $enquiry) {
                     $p = $this->financeService->getPaymentProgress($enquiry);
 
@@ -1174,37 +1218,55 @@ class EnquiryController extends Controller
                     $stats['total_project_value'] += $quote;
                     $stats['total_paid'] += $paid;
                     $stats['total_outstanding'] += $remaining;
-                    $tabs['all']++;
 
                     if ($settled) {
                         $stats['settled']++;
-                        $tabs['settled']++;
                     } elseif (in_array($enquiry->status, ['awaiting_deposit', 'quote_approved'], true)) {
                         $stats['awaiting_release']++;
                     } else {
                         $stats['in_production']++;
                     }
 
-                    // Mirrors the client predicates exactly; they are the tab
-                    // definitions and moving them must not redefine them.
-                    if (! $p['has_approved_quote']
-                        || ((float) $p['amount_required_for_threshold'] > 0 && empty($p['finance_released']))) {
-                        $tabs['action']++;
+                    if ($enquiry->client) {
+                        $clients[$enquiry->client->id] = [
+                            'id' => (int) $enquiry->client->id,
+                            'name' => $enquiry->client->company_name ?: $enquiry->client->full_name,
+                        ];
                     }
-                    if ($paid > 0 && $remaining > 0) {
-                        $tabs['partial']++;
-                    }
-                    if ((float) $p['percentage'] >= (float) $p['threshold_percentage'] && $remaining > 0) {
-                        $tabs['mobilized']++;
+                    if ($enquiry->projectOfficer) {
+                        $officers[$enquiry->projectOfficer->id] = [
+                            'id' => (int) $enquiry->projectOfficer->id,
+                            'name' => $enquiry->projectOfficer->name,
+                        ];
                     }
                 }
+        });
+
+        $this->filteredEnquiryQuery(self::RECEIVABLES_RELATIONS)->chunkById(200, function ($enquiries) use (&$tabs) {
+            foreach ($enquiries as $enquiry) {
+                $p = $this->financeService->getPaymentProgress($enquiry);
+                $tabs[ReceivablesTabs::ALL]++;
+
+                foreach (ReceivablesTabs::SLICES as $tab) {
+                    if (ReceivablesTabs::matches($tab, $enquiry, $p)) {
+                        $tabs[$tab]++;
+                    }
+                }
+            }
         });
 
         foreach (['total_outstanding', 'total_project_value', 'total_paid'] as $key) {
             $stats[$key] = round($stats[$key], 2);
         }
 
-        return response()->json(['data' => ['stats' => $stats, 'tabs' => $tabs]]);
+        $byName = fn (array $people) => collect($people)->sortBy('name')->values()->all();
+
+        return response()->json(['data' => [
+            'stats' => $stats,
+            'tabs' => $tabs,
+            'clients' => $byName($clients),
+            'officers' => $byName($officers),
+        ]]);
     }
 
         public function unallocatedReceipts(): JsonResponse

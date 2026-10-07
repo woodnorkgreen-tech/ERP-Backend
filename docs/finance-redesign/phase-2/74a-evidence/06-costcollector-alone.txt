@@ -1,0 +1,299 @@
+  ✓ Populated voucher_id for existing payment records
+  ✓ Migrated 0 allocation(s) from spend_voucher_allocations to payment_allocations
+  ✓ Populated settled_by_payment_id for 0 cost line(s)
+   PASS  Tests\Feature\CostCollector\BudgetProjectionOnCompletionTest
+  ✓ completing a budget task opens the cost account                    139.61s  
+  ✓ completing any other task projects nothing                           0.12s  
+  ✓ a task completed twice does not double the budget                    0.21s  
+  ✓ a budget task with no budget data is survivable                      0.18s  
+  ✓ the projection is queued                                             0.10s  
+   PASS  Tests\Feature\CostCollector\BudgetProjectorTest
+  ✓ it flattens nested materials and honours the exclusion flag          0.13s  
+  ✓ it honours the camel case exclusion flag too                         0.14s  
+  ✓ it projects the three flat arrays                                    0.13s  
+  ✓ reprojecting an unchanged budget changes nothing                     0.11s  
+  ✓ reprojecting a repriced line reverses the old version and posts the… 0.19s  
+  ✓ a line deleted from the budget stops counting                        0.21s  
+  ✓ a consumed line is never retired behind a real cost                  0.15s  
+  ✓ a budget addition is recorded as a client change                     0.11s  
+  ✓ zero priced placeholder rows are not budget                          0.09s  
+  ✓ it carries project identity and the task stage                       0.15s  
+   PASS  Tests\Feature\CostCollector\CostAccountMarginalTest
+  ✓ for enquiry margin includes cost completeness                        0.22s  
+  ✓ for enquiry margin status is provisional                             0.11s  
+  ✓ for enquiry includes financial closure status                        0.14s  
+   PASS  Tests\Feature\CostCollector\CostAccountTest
+  ✓ materials are reported per element                                   0.17s  
+  ✓ an element breaks down into the materials that built it              0.16s  
+  ✓ the same catalogue item is one row even when worded differently      0.16s  
+  ✓ material spend without an element is labelled not hidden             0.14s  
+  ✓ only materials are grouped by element                                0.16s  
+  ✓ the materials drilldown groups its lines by element                  0.18s  
+  ✓ a flat category drilldown is not grouped                             0.11s  
+  ✓ it reports planned against spend by category                         0.10s  
+  ✓ unbudgeted spend is surfaced separately                              0.09s  
+  ✓ exception spend groups on the cause flag                             0.11s  
+  ✓ coverage distinguishes a saving from an unreported cost              0.09s  
+  ✓ no alert fires when no threshold is configured                       0.09s  
+  ✓ cost overrun alert fires only past the configured tolerance          0.11s  
+  ✓ a project within tolerance does not alert                            0.09s  
+  ✓ margin below the escalation threshold flags both alerts              0.16s  
+  ✓ the accounts grid lists one row per project with grand totals        0.16s  
+  ✓ reversed and unverified lines do not count                           0.14s  
+  ✓ a category can be opened to the lines behind it                      0.14s  
+  ✓ the drill down finds costs with no category at all                   0.16s  
+  ✓ the grid can be narrowed to projects that are over budget            0.14s  
+  ✓ the grid can be narrowed to projects with unbudgeted spend           0.13s  
+  ✓ the grid searches the project not the cost description               0.11s  
+  ✓ the grid reports when a project last recorded a cost                 0.11s  
+   PASS  Tests\Feature\CostCollector\CostAllocationTest
+  ✓ allocations must sum to parent amount                                0.12s  
+  ✓ allocations sum invariant passes when equal                          0.10s  
+  ✓ requires finance costs allocate permission                           0.14s  
+  ✓ deallocate removes allocations                                       0.09s  
+  ✓ cannot allocate unverified line                                      0.09s  
+  ✓ allocation excludes parent and includes slices in margin             0.18s  
+  ✓ cannot allocate to financially closed project                        0.14s  
+   PASS  Tests\Feature\CostCollector\CostCollectorApiTest
+  ✓ the picker searches and filters by family                            0.15s  
+  ✓ it returns the form definition for a code                            0.12s  
+  ✓ it records a cost                                                    0.12s  
+  ✓ reporter can correct a queried cost with revision history            0.11s  
+  ✓ reporting a cost requires the create permission                      0.09s  
+  ✓ a catalogue rejection returns field level errors                     0.11s  
+  ✓ a submitter cannot approve their own cost                            0.11s  
+  ✓ it rejects a future dated cost and tax above the amount              0.09s  
+  ✓ budget lines expose what is left                                     0.11s  
+  ✓ budget lines are not readable without a cost permission              0.14s  
+  ✓ evidence uploads separately from the cost                            0.17s  
+  ✓ it lists only the callers own submissions                            0.18s  
+   PASS  Tests\Feature\CostCollector\CostCollectorServiceTest
+  ✓ it records a cost and derives the dimensions                         0.30s  
+  ✓ gross stays gross and project cost is net of tax                     0.29s  
+  ✓ it converts to base currency for reporting                           0.23s  
+  ✓ it enforces the catalogue job id rule both ways                      0.13s  
+  ✓ required detail fields come from the catalogue row                   0.36s  
+  ✓ required evidence comes from the catalogue row                       0.29s  
+  ✓ a producer that retries does not double post                         0.25s  
+  ✓ a source that carried its own approval lands verified                0.23s  
+  ✓ an approved purchase commitment reserves budget without posting gl   0.19s  
+  ✓ a locked period refuses the write                                    0.18s  
+  ✓ a producer cannot post into a locked period                          0.15s  
+  ✓ it snapshots budget remaining around the spend                       0.15s  
+  ✓ spend with no budget line is flagged unbudgeted                      0.23s  
+  ✓ an unknown or retired expense code is refused                        0.22s  
+   PASS  Tests\Feature\CostCollector\CostNotificationTest
+  ✓ a query reaches the person who reported it                           0.29s  
+  ✓ verifying and rejecting both reach the reporter                      0.30s  
+  ✓ answering a query puts it back in front of verifiers                 0.22s  
+  ✓ a producer posted cost notifies nobody                               0.16s  
+  ✓ a failed notification does not undo the verification                 0.37s  
+  ✓ Populated voucher_id for existing payment records
+  ✓ Migrated 0 allocation(s) from spend_voucher_allocations to payment_allocations
+  ✓ Populated settled_by_payment_id for 0 cost line(s)
+   PASS  Tests\Feature\CostCollector\CostSettlementModeTest
+  ✓ out of pocket claim credits ap and identifies claimant in voucher… 131.45s  
+  ✓ company paid cost credits bank directly without creating ap liabili… 0.65s  
+  ✓ capture requires an explicit funding mode                            0.37s  
+  ✓ cost cause must be a recognised code                                 0.42s  
+  ✓ an exception cause requires a note                                   0.54s  
+  ✓ the default cause needs no note                                      0.53s  
+  ✓ a supplier payee type requires a kra pin on the supplier record      0.41s  
+  ✓ a company paid cost tagged as a supplier must name a real supplier   0.54s  
+  ✓ cost causes are listed for the capture form                          0.46s  
+  ✓ supplier credit requires a supplier master payee                     0.38s  
+  ✓ supplier credit can only be paid to its supplier with a payment vou… 0.40s  
+  ✓ a payment voucher cannot be funded from supplier credit              0.56s  
+  ✓ incomplete voucher types are not accepted by the public endpoint     0.40s  
+   PASS  Tests\Feature\CostCollector\CostTransferTest
+  ✓ transfer creates reversing pair                                      0.12s  
+  ✓ transfer amounts balance to zero                                     0.12s  
+  ✓ transfer requires finance costs transfer permission                  0.14s  
+  ✓ cannot transfer to same project                                      0.09s  
+  ✓ cannot transfer unverified line                                      0.12s  
+  ✓ cannot transfer already transferred line                             0.12s  
+  ✓ cannot transfer to financially closed project                        0.12s  
+   PASS  Tests\Feature\CostCollector\CostVerificationReviewTest
+  ✓ the queue says who was paid                                          0.28s  
+  ✓ the queue carries the budget line and coding                         0.28s  
+  ✓ the payable figure is gross less withholding                         0.21s  
+  ✓ age is measured from when the cost was incurred                      0.24s  
+  ✓ the summary describes the filtered set not the system                0.28s  
+  ✓ unbudgeted value is reported separately                              0.21s  
+  ✓ ageing buckets split the queue by how old it is                      0.35s  
+  ✓ the ageing bar still offers every bucket while one is selected       0.37s  
+  ✓ the queue filters on date and amount ranges                          0.40s  
+  ✓ costs with nothing attached can be singled out                       0.21s  
+  ✓ the queue can be narrowed to where a cost came from                  0.22s  
+  ✓ search covers the payee not only the reference                       0.17s  
+  ✓ rejected and reversed costs are reachable                            0.29s  
+  ✓ the queue sorts by amount on request                                 0.33s  
+  ✓ the queue paginates                                                  0.18s  
+  ✓ the tax preview prices the split and the journal                     0.17s  
+  ✓ the preview offers the treatments in force on the cost date          0.30s  
+  ✓ an impossible tax amount previews as an error rather than failing    0.20s  
+  ✓ what the preview shows is what verifying writes                      0.36s  
+  ✓ unbudgeted spend can be pointed at its budget line                   0.31s  
+  ✓ a reclassification is recorded with its reason                       0.21s  
+  ✓ a cost can be detached from a budget line                            0.29s  
+  ✓ another projects budget line is refused                              0.24s  
+  ✓ a spend line cannot be pointed at another spend line                 0.18s  
+  ✓ a rejected cost cannot be reclassified                               0.16s  
+  ✓ reclassifying to the same line is refused                            0.31s  
+  ✓ reclassification needs a real reason                                 0.29s  
+  ✓ reclassifying requires the verify permission                         0.21s  
+  ✓ a single cost returns its whole history                              0.23s  
+  ✓ my submissions totals cover every page                               0.18s  
+   PASS  Tests\Feature\CostCollector\CostVerificationTest
+  ✓ the queue shows open items and never budget lines                    0.30s  
+  ✓ verifying records who and when                                       0.30s  
+  ✓ nobody may verify a cost they reported themselves                    0.33s  
+  ✓ a super admin still needs a reason to verify their own cost          0.28s  
+  ✓ a super admin may verify their own cost and the override is recorde… 0.30s  
+  ✓ the override never applies to someone elses cost                     0.17s  
+  ✓ finance splits the tax at verification                               0.27s  
+  ✓ tax above the receipt amount is refused                              0.29s  
+  ✓ a query goes back and can return                                     0.34s  
+  ✓ reversing stops a cost counting                                      0.18s  
+  ✓ a posted cost creates a compensating journal when reversed           0.22s  
+  ✓ illegal transitions are refused                                      0.24s  
+  ✓ verification requires the permission                                 0.34s  
+  ✓ a stale reject cannot overwrite a completed verification             0.35s  
+  ✓ a stale query cannot reopen a verified cost                          0.33s  
+  ✓ a cost cannot be reversed twice                                      0.17s  
+   PASS  Tests\Feature\CostCollector\DepartmentalSpendTest
+  ✓ every department has exactly one cost centre                         0.17s  
+  ✓ the expense catalogue resolves its own dimensions                    0.27s  
+  ✓ a departmental purchase order commits against its department         0.15s  
+  ✓ the requesting department outranks the catalogue default             0.24s  
+  ✓ a purchase with no department falls back to the catalogue            0.29s  
+  ✓ a purchase with no owner at all is still recorded                    0.30s  
+   PASS  Tests\Feature\CostCollector\ExpenseCatalogueTest
+  ✓ the catalogue seeds                                                  0.51s  
+  ✓ no code defaults to an account a journal cannot post to              0.60s  
+  ✓ every code names its account even when the fk is unresolved          0.57s  
+  ✓ every form field is renderable                                       0.47s  
+  ✓ every evidence requirement is labelled                               0.66s  
+  ✓ field and evidence keys are unique within a code                     0.59s  
+  ✓ tax defaults resolve to seeded treatments                            0.28s  
+  ✓ a code that forbids a job id is never a direct project cost          0.29s  
+  ✓ the seeder is idempotent                                             0.66s  
+   PASS  Tests\Feature\CostCollector\ExpenseCodeJobContextTest
+  ✓ without a job every code that does not demand one is offered         0.54s  
+  ✓ without a job a code that demands one is never offered               0.52s  
+  ✓ with a job only the codes that forbid one are withheld               0.44s  
+  ✓ the codes an office requisition actually needs are reachable         0.55s  
+  ✓ the procurable slice holds no accounting movements                   0.40s  
+  ✓ the procurable slice still holds everything you can buy              0.55s  
+  ✓ staff allowances stay available to finance but not procurement       0.56s  
+  ✓ finance cash payroll and accounting treatments stay out of procurem… 0.29s  
+  ✓ not asking for the procurable slice leaves the catalogue whole       0.49s  
+  ✓ an office requisition is offered only buyable codes                  0.45s  
+  ✓ an office requisition can name the things an office buys             0.54s  
+  ✓ nothing bought for the office or workshop can be charged to a job    0.46s  
+  ✓ the office supplies codes post somewhere real                        0.43s  
+  ✓ the categories are named for the purchase not the account            0.58s  
+  ✓ asking for no context filters nothing                                0.41s  
+  ✓ the family list agrees with the code list                            0.51s  
+   PASS  Tests\Feature\CostCollector\MaterialToCostChainTest
+  ✓ a specified material reaches the budget and the cost account         0.66s  
+  ✓ a material added after the budget is done still reaches the account  0.71s  
+  ✓ repricing the budget replaces the planned line rather than adding o… 0.54s  
+  ✓ issuing against a specified line charges the budget line it consume… 0.68s  
+  ✓ returning material gives the budget line its headroom back           0.48s  
+  ✓ renaming an element moves its history with it                        0.71s  
+  ✓ issuing a material that was never specified is reported as unplanne… 0.57s  
+  ✓ removing a specified material that was never issued retires its bud… 0.70s  
+  ✓ removing a material that was already issued keeps its budget line    0.79s  
+   PASS  Tests\Feature\CostCollector\MyProjectsTest
+  ✓ it returns only the projects the caller is assigned to               0.07s  
+  ✓ the legacy assignment column still counts                            0.06s  
+  ✓ closed and cancelled projects are not offered                        0.05s  
+  ✓ search does not widen the list without portfolio access              0.06s  
+  ✓ portfolio access reaches projects you are not assigned to            0.06s  
+  ✓ search also matches a job number                                     0.05s  
+  ✓ cost sheet returns every approved project in the selected stage      0.08s  
+  ✓ cost sheet stage tabs include completed and closed but never cancel… 0.08s  
+  ✓ cost sheet treats planning as an active in progress project          0.07s  
+  ✓ cost sheet portfolio requires finance read access                    0.05s  
+   PASS  Tests\Feature\CostCollector\PettyCashCommitmentTest
+  ✓ an approved requisition commits the projects money                   0.31s  
+  ✓ re approving cannot commit the same money twice                      0.30s  
+  ✓ a requisition awaiting approval promises nothing                     0.20s  
+  ✓ office spend with no project is not forced onto one                  0.14s  
+  ✓ paying a requisition releases its commitment                         0.16s  
+  ✓ a voided payment leaves the promise standing                         0.20s  
+  ✓ a type with no accounting code still commits the money               0.17s  
+  ✓ office overhead is never committed to a project                      0.28s  
+  ✓ withdrawing an approval releases the commitment                      0.27s  
+  ✓ releasing a requisition that promised nothing is harmless            0.27s  
+  ✓ re approving at a new amount commits the new amount                  0.24s  
+  ✓ a requisition approved then edited then rejected leaves nothing com… 0.21s  
+  ✓ paying a requisition classifies it under the approved code           0.18s  
+  ✓ a requisition whose type has no code leaves the payers choice        0.24s  
+   PASS  Tests\Feature\CostCollector\PettyCashCostListenerTest
+  ✓ paying petty cash records a project cost                             0.65s  
+  ✓ replaying a create key does not debit cash twice                     0.45s  
+  ✓ transaction fee posts as an overhead not a job cost                  0.64s  
+  ✓ a budget line from another project is rejected before payment        0.59s  
+  ✓ handling the event twice posts one cost line                         0.32s  
+  ✓ voiding a paid disbursement reverses its cost                        0.51s  
+  ✓ an overhead payment without a project reaches the gl and reverses o… 0.60s  
+  ✓ voiding an uncosted disbursement is a no op                          0.56s  
+  ✓ the service dispatches on pay and void                               0.59s  
+  ✓ a rejected disbursement dispatches nothing                           0.57s  
+   PASS  Tests\Feature\CostCollector\PettyCashCostPostingFailureTest
+  ✓ a gl posting failure is flagged and alerts finance                   0.41s  
+  ✓ retrying after the chart is fixed posts and clears the flag          0.45s  
+  ✓ retrying an already posted disbursement does not duplicate the entr… 0.35s  
+  ✓ retry still fails visibly if the underlying problem is not yet fixe… 0.61s  
+  ✓ a second queued attempt after success posts nothing twice            0.57s  
+   PASS  Tests\Feature\CostCollector\PettyCashCostProducerTest
+  ✓ settling a supplier invoice posts no project cost                    0.21s  
+  ✓ an unlinked disbursement is unaffected by the settlement guard       0.27s  
+  ✓ a paid disbursement becomes a verified project cost                  0.27s  
+  ✓ the older slash job number notation still finds its project          0.21s  
+  ✓ it normalises month and sequence padding                             0.22s  
+  ✓ overhead coded spend is not forced onto a project                    0.15s  
+  ✓ a disbursement with no job number is skipped                         0.18s  
+  ✓ a voided payment never becomes a cost                                0.16s  
+  ✓ rerunning the backfill posts nothing twice                           0.18s  
+  ✓ backfilled costs appear in the project cost account                  0.23s  
+   PASS  Tests\Feature\CostCollector\PortfolioMarginTest
+  ✓ portfolio margin returns margin per enquiry                          0.15s  
+  ✓ portfolio margin requires portfolio permission                       0.15s  
+  ✓ portfolio margin includes cost completeness                          0.14s  
+   PASS  Tests\Feature\CostCollector\ProjectFinancialClosureTest
+  ✓ closure check returns structured result                              0.12s  
+  ✓ close project sets status to closed                                  0.16s  
+  ✓ cannot close already closed project                                  0.10s  
+  ✓ reopen requires special permission                                   0.16s  
+  ✓ reopen sets status back to open when permission granted              0.17s  
+  ✓ collect blocked on financially closed project                        0.10s  
+   PASS  Tests\Feature\CostCollector\StoresCostProducerTest
+  ✓ stock checkout posts actual material cost line                       0.53s  
+  ✓ stock issue resolves identity from its own project not a colliding…  0.59s  
+  ✓ cost with job number from a different job is rejected                0.46s  
+  ✓ issue without an exact planned line posts unbudgeted                 0.38s  
+  ✓ stock checkout without project is skipped                            0.48s  
+  ✓ partial stock return posts proportional project credit               0.30s  
+  ✓ quarantine review caps credit at accepted recoverable value          0.37s  
+  ✓ an unpriced issue falls back to the approved budget rate             0.49s  
+  ✓ a stores issue records the element it served                         0.53s  
+  ✓ an unbudgeted issue still records its element                        0.52s  
+  ✓ a real receipt price always beats the budget rate                    0.32s  
+  ✓ an issue with no price anywhere still produces nothing               0.49s  
+  ✓ stock issue reversal posts one matching negative actual              0.52s  
+  ✓ controlled roll issue and return use one economic actual cost        0.49s  
+   PASS  Tests\Feature\CostCollector\UnbudgetedSpendAdoptionTest
+  ✓ budget line claims spend that was posted before it existed           0.56s  
+  ✓ the cost account stops reporting the same money two ways             0.52s  
+  ✓ ambiguous identity is left unbudgeted                                0.35s  
+  ✓ spend on another project is not claimed                              0.47s  
+  ✓ projecting a budget adopts the spend that preceded it                0.53s  
+  Tests:    262 passed (3368 assertions)
+  Duration: 345.83s
+exit=0
+committed after CostCollector-only run:	TL-HIR-001	0	NULL
+active codes	2
+chart	3

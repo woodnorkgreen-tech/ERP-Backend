@@ -794,7 +794,7 @@ class RealDataRehearsalSmokeTest extends BaseTestCase
     private function storesIssueToProject(): void
     {
         $requirement = DB::table('element_materials as em')
-            ->join('project_elements as pe', 'pe.id', '=', 'em.project_element_id')
+            ->join('project_deliverables as pe', 'pe.id', '=', 'em.project_element_id')
             ->join('task_materials_data as tmd', 'tmd.id', '=', 'pe.task_materials_data_id')
             ->join('enquiry_tasks as et', 'et.id', '=', 'tmd.enquiry_task_id')
             ->where('et.project_enquiry_id', $this->enquiry->id)->whereNotNull('em.library_material_id')->where('em.quantity', '>', 0)

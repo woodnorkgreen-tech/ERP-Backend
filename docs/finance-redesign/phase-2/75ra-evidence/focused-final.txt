@@ -1,0 +1,57 @@
+Focused run after the last code change (isolated db_scratch_test). 46 = 29 receiver feature + 3 concurrency + 13 Report 75R + 1 temporary fixture-export test, since deleted.
+   PASS  Tests\Feature\PettyCash\RequisitionReceiverDisbursementTest
+   PASS  Tests\Feature\PettyCash\RequisitionReceiverDisbursementConcurrencyTest
+   PASS  Tests\Feature\PettyCash\RequisitionVerificationControlTest
+   PASS  Tests\Feature\PettyCash\R75RAFixtureExportTest
+  Tests:    46 passed (328 assertions)
+  Duration: 161.47s
+exit=0
+  ✓ Populated voucher_id for existing payment records
+  ✓ Migrated 0 allocation(s) from spend_voucher_allocations to payment_allocations
+  ✓ Populated settled_by_payment_id for 0 cost line(s)
+  ✓ lines are projected to three distinct receivers that reconcile to… 134.70s  
+  ✓ one receiver one payment                                             0.81s  
+  ✓ three receivers three payments fully disburse the parent             0.83s  
+  ✓ one grouped payment keeps each line purpose                          0.60s  
+  ✓ one allocation paid in two instalments                               0.91s  
+  ✓ one payment cannot mix receivers and moves no cash                   0.75s  
+  ✓ the same typed name under two references is two receivers            0.70s  
+  ✓ payment above the outstanding allocation is refused                  0.81s  
+  ✓ a replayed request returns the same payment and changed instruction… 0.45s  
+  ✓ a double click through the api creates one payment                   0.69s  
+  ✓ the payment goes through the existing settlement service             0.69s  
+  ✓ payment needs payment authority which verifying creating and approv… 0.58s  
+  ✓ the creator cannot pay their own requisition even with payment auth… 0.68s  
+  ✓ a material edit revokes verification and blocks payment              0.40s  
+  ✓ verification is still required at the moment of payment              0.40s  
+  ✓ approval is still required                                           0.74s  
+  ✓ a line with only a typed name is not payable by receiver             0.46s  
+  ✓ submission refuses ambiguous receivers                               0.73s  
+  ✓ the api stores supplier and referenced recipient lines               0.82s  
+  ✓ reversal reduces active paid and keeps the history                   1.14s  
+  ✓ reversing the only payment returns the parent to approved            0.73s  
+  ✓ lines with payment history cannot be rewritten                       0.60s  
+  ✓ each payment posts its own journal once and the parent carries none  0.86s  
+  ✓ a posting failure is recorded on its payment and the retry is safe   0.92s  
+  ✓ several payments create no actual cost and release the commitment o… 0.87s  
+  ✓ the existing surrender is not duplicated and refuses a receiver pai… 0.84s  
+  ✓ whole requisition receipt waits until every receiver is paid         0.66s  
+  ✓ the story reads as a person would tell it                            0.61s  
+  ✓ search and reporting queries                                         1.25s  
+  ✓ two finance users paying the last 10000 at once settle it once       1.21s  
+  ✓ five simultaneous part payments never exceed the allocation and num… 1.32s  
+  ✓ the same request sent twice at once creates one payment and one jou… 1.29s  
+  ✓ verification authority is registered but not inherited from a defau… 0.06s  
+  ✓ creation requires verifier and returns the persisted submission sta… 0.12s  
+  ✓ only assigned authorised user can verify                             0.09s  
+  ✓ super admin without explicit verification authority is denied        0.08s  
+  ✓ creator cannot self verify even with verification permission         0.06s  
+  ✓ inactive verifier cannot be selected                                 0.05s  
+  ✓ return requires reason and resubmission preserves history            0.09s  
+  ✓ material parent and line edits invalidate current certification      0.29s  
+  ✓ edit submission revokes certification and audits previous verifier   0.09s  
+  ✓ unverified request cannot be approved or paid                        0.11s  
+  ✓ duplicate verification cannot create another review                  0.10s  
+  ✓ parent partial payment projection does not invent receipt or accoun… 0.12s  
+  ✓ receiver grouping preserves multiple lines and multiple people       0.08s  
+  ✓ export                                                               0.88s  

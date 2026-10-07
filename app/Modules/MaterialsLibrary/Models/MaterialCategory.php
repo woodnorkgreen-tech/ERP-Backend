@@ -76,6 +76,22 @@ class MaterialCategory extends Model
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
+    /**
+     * The fallback category is not a physical material family. Its historical
+     * pcs configuration supplies a default, not a restriction on existing units.
+     * Regular categories retain their own or inherited unit restrictions.
+     *
+     * @return array<int,string>
+     */
+    public function allowedStockUomCodes(): array
+    {
+        if ($this->code === 'UNCAT') {
+            return [];
+        }
+
+        return (array) ($this->allowed_uoms ?: $this->parent?->allowed_uoms ?: []);
+    }
+
     public function isRoot(): bool
     {
         return is_null($this->parent_id);

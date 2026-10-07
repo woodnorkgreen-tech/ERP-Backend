@@ -38,7 +38,7 @@ class Payment extends Model
      * @var array<string>
      */
     protected $fillable = [
-        'payment_no',
+        'payment_no', 'requisition_child_reference', 'requisition_request_fingerprint', 'advance_journal_entry_id', 'advance_gl_posting_failed_at', 'advance_gl_posting_error',
         'payment_type',
         'top_up_id',
         'payee_name',
@@ -92,6 +92,7 @@ class Payment extends Model
      * @var array<string,string>
      */
     protected $casts = [
+        'advance_gl_posting_failed_at' => 'datetime',
         'amount' => 'decimal:2',
         'voided_at' => 'datetime',
         'created_at' => 'datetime',
@@ -183,10 +184,27 @@ class Payment extends Model
         return $this->morphTo();
     }
 
+    /** Report 75R-B: the standing confirmation that this Payment reached its receiver. */
+    public function receiptConfirmation(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(\App\Modules\Finance\PettyCash\Models\RequisitionReceiptConfirmation::class, 'payment_id')->whereNull('invalidated_at');
+    }
+
+    /** Report 75R-B: what surrenders have accounted for against this Payment. */
+    public function surrenderAllocations(): HasMany
+    {
+        return $this->hasMany(\App\Modules\Finance\PettyCash\Models\PettyCashSurrenderAllocation::class, 'payment_id');
+    }
+
     /**
      * Direct allocations to cost lines (Phase 2: Architecture Redesign).
      * Replaces indirect link through spend_voucher_allocations.
      */
+    public function requisitionAllocations(): HasMany
+    {
+        return $this->hasMany(\App\Modules\Finance\PettyCash\Models\RequisitionPaymentAllocation::class, 'payment_id');
+    }
+
     public function paymentAllocations(): HasMany
     {
         return $this->hasMany(PaymentAllocation::class, 'payment_id');
@@ -273,6 +291,7 @@ class Payment extends Model
     {
         return $query->where(function ($q) use ($search) {
             $q->where('payee_name', 'like', '%' . $search . '%')
+              ->orWhere('requisition_child_reference', 'like', '%' . $search . '%')
               ->orWhere('payment_no', 'like', '%' . $search . '%')
               ->orWhere('account', 'like', '%' . $search . '%')
               ->orWhere('description', 'like', '%' . $search . '%')

@@ -334,6 +334,38 @@ class ReceivablesPostingTest extends TestCase
         $this->assertSame(0, \App\Models\EnquiryPayment::where('project_enquiry_id', $enquiry->id)->count());
     }
 
+    /** Report 74: Supplier Credit is a liability, not an account client money can arrive in. */
+    public function test_supplier_credit_can_never_be_the_account_a_receipt_arrives_in(): void
+    {
+        $enquiry = $this->enquiry();
+        $payable = PaymentSource::where('type', 'payable')->firstOrFail();
+        $receipt = fn (int $sourceId, string $reference) => $this->actingAs($this->accountant, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/payments", [
+                'amount' => 1000, 'received_amount' => 1000, 'payment_date' => '2026-09-05',
+                'payment_method' => 'bank_transfer', 'payment_source_id' => $sourceId,
+                'transaction_reference' => $reference,
+            ]);
+
+        // At the door: no receipt method answers to a payable.
+        $receipt($payable->id, 'AP-001')->assertStatus(422);
+        $this->assertSame(0, \App\Models\EnquiryPayment::where('project_enquiry_id', $enquiry->id)->count());
+
+        // At the ledger: a row that names it by another route still cannot post.
+        $receipt(PaymentSource::where('type', 'bank')->firstOrFail()->id, 'BANK-001')->assertOk();
+        $payment = \App\Models\EnquiryPayment::where('project_enquiry_id', $enquiry->id)->firstOrFail();
+        DB::table('enquiry_payments')->where('id', $payment->id)->update(['payment_source_id' => $payable->id]);
+        DB::table('client_receipts')->where('id', $payment->client_receipt_id)->update(['payment_source_id' => $payable->id]);
+        $verifier = User::factory()->create(['is_active' => true]);
+        $verifier->givePermissionTo(Permissions::FINANCE_RECEIVABLES_VERIFY);
+
+        $response = $this->actingAs($verifier, 'sanctum')
+            ->postJson("/api/projects/enquiries/{$enquiry->id}/payments/{$payment->id}/verify");
+
+        $this->assertGreaterThanOrEqual(400, $response->status(), 'the verification is refused');
+        $this->assertSame(0, JournalLine::where('account_id', $payable->gl_account_id)->count(), 'Accounts Payable is untouched');
+        $this->assertSame(0, JournalEntry::where('source_type', \App\Models\EnquiryPayment::class)->where('source_id', $payment->id)->count());
+    }
+
     public function test_every_receivables_entry_balances(): void
     {
         $vat = $this->standardRatedTreatment();

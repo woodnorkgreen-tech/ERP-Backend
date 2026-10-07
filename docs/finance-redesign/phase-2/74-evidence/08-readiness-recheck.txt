@@ -1,0 +1,41 @@
+## finance:readiness — dev db (no profile active)
++-----------------------+--------+------------------------------------------------+
+| Check                 | Result | Detail                                         |
++-----------------------+--------+------------------------------------------------+
+| Chart of accounts     | PASS   | 200 postable accounts                          |
+| Expense-code accounts | PASS   | every required code resolves its debit account |
+| Purchase categories   | PASS   | 76 active in 14 families                       |
+| Paying accounts       | PASS   | 5 active, ledger-linked paying accounts        |
+| Accounting period     | PASS   | open period covers 2026-10-06                  |
+| Roles                 | PASS   | 15 present                                     |
++-----------------------+--------+------------------------------------------------+
+Finance reference data is ready.
+exit=0
+
+## finance:readiness — wng_target_rehearsal (FINANCE_ACCOUNT_PROFILE=wng, FINANCE_WIP_POLICY=capitalise)
++-----------------------+--------+------------------------------------------------------------------------------------+
+| Check                 | Result | Detail                                                                             |
++-----------------------+--------+------------------------------------------------------------------------------------+
+| Chart of accounts     | PASS   | 148 postable accounts                                                              |
+| Expense-code accounts | PASS   | every required code resolves its debit account; 1 code(s) are off by design (2300) |
+| Purchase categories   | PASS   | 76 active in 14 families                                                           |
+| Paying accounts       | PASS   | 3 active, ledger-linked paying accounts                                            |
+| Accounting period     | PASS   | open period covers 2026-10-06                                                      |
+| Roles                 | PASS   | 15 present                                                                         |
++-----------------------+--------+------------------------------------------------------------------------------------+
+Finance reference data is ready.
+exit=0
+
+## active configuration in the main checkout (config:show finance_accounts, map/payment_sources elided)
+  map ..................................................................... []  
+  profile ............................................................... null  
+  wip_policy ............................................................ null  
+  payment_sources ......................................................... []  
+  seed_reference_chart .................................................. true  
+  database.default ................................................... mariadb  
+
+43:QUEUE_CONNECTION=database
+rehearsal checkout .env:
+9:DB_DATABASE=wng_target_rehearsal
+22:FINANCE_ACCOUNT_PROFILE=wng
+23:FINANCE_WIP_POLICY=capitalise

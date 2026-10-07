@@ -115,7 +115,7 @@ class InventoryLog extends Model
 
     public function projectMaterial(): BelongsTo
     {
-        return $this->belongsTo(\App\Models\ElementMaterial::class, 'project_material_id');
+        return $this->belongsTo(\App\Models\ElementMaterial::class, 'project_material_id')->withTrashed();
     }
 
     public function financePosting()

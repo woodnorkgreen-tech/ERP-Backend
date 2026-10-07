@@ -34,6 +34,7 @@ class FinanceReadiness
     {
         return [
             $this->chart(),
+            $this->chartProfile(),
             $this->expenseCodeAccounts(),
             $this->purchaseCategories(),
             $this->payingAccounts(),
@@ -49,9 +50,30 @@ class FinanceReadiness
 
     private function chart(): array
     {
-        $count = DB::table('chart_of_accounts')->where('is_postable', true)->count();
+        $count = DB::table('chart_of_accounts')->where('is_postable', true)->where('is_active', true)->count();
 
         return $this->result('Chart of accounts', $count > 0, "{$count} postable accounts", self::SEED);
+    }
+
+    /**
+     * The company chart profile, when one is active, and the WIP policy it needs.
+     *
+     * A profile with no approved WIP policy maps no work-in-progress account, so
+     * project cost cannot post. That is a decision waiting for Finance, and it is
+     * reported as one rather than as a list of "missing" accounts.
+     */
+    private function chartProfile(): array
+    {
+        $profile = config('finance_accounts.profile');
+        if (blank($profile)) {
+            return $this->result('Chart profile', true, 'none active: this installation keeps the reference chart', null);
+        }
+        $problems = FinanceChartProfile::runtimeProblems();
+        $policy = \App\Modules\Finance\Governance\GovernanceRuntime::instance()->wipPolicy();
+
+        return $this->result('Chart profile', $problems === [],
+            $problems === [] ? "'{$profile}' active; WIP policy: {$policy['policy']} ({$policy['source']})" : implode(' ', $problems),
+            'Approve and activate the project cost treatment in Finance Setup > Accounting Policies (it is not chosen for you), or fix FINANCE_ACCOUNT_PROFILE.');
     }
 
     /**
@@ -77,7 +99,8 @@ class FinanceReadiness
 
                 continue;
             }
-            if ($local === null || ($postable->has($local) && ! $postable[$local])) {
+            // Waiting for the WIP policy, not missing from the chart: chartProfile() reports it.
+            if ($local === null || $local === FinanceChartProfile::WIP_POLICY_REQUIRED || ($postable->has($local) && ! $postable[$local])) {
                 continue;
             }
             if (! $postable->has($local)) {
@@ -127,17 +150,19 @@ class FinanceReadiness
 
     private function payingAccounts(): array
     {
-        $count = DB::table('payment_sources')->where('is_active', true)->where('can_make_payment', true)->count();
+        $count = DB::table('payment_sources as ps')->join('chart_of_accounts as coa', 'coa.id', '=', 'ps.gl_account_id')
+            ->where('ps.is_active', true)->where('ps.can_make_payment', true)->where('ps.type', '<>', 'payable')
+            ->where('coa.is_active', true)->where('coa.is_postable', true)->where('coa.category', 'asset')->count();
 
-        return $this->result('Paying accounts', $count > 0, "{$count} active", self::SEED);
+        return $this->result('Paying accounts', $count > 0, "{$count} active, ledger-linked paying accounts", self::SEED);
     }
 
     private function currentPeriod(): array
     {
         $today = now()->toDateString();
-        $exists = DB::table('accounting_periods')->where('starts_on', '<=', $today)->where('ends_on', '>=', $today)->exists();
+        $exists = DB::table('accounting_periods')->where('starts_on', '<=', $today)->where('ends_on', '>=', $today)->where('status', 'open')->exists();
 
-        return $this->result('Accounting period', $exists, $exists ? "covers {$today}" : "none covers {$today}", self::SEED);
+        return $this->result('Accounting period', $exists, $exists ? "open period covers {$today}" : "no open period covers {$today}", self::SEED);
     }
 
     /** Permission migrations grant to these by name and skip the ones that do not exist. */

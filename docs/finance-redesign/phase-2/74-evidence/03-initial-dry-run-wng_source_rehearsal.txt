@@ -1,0 +1,78 @@
+DRY RUN — profile 'wng' on 'wng_source_rehearsal' (WIP policy: capitalise)
++---------+--------------------------------------------------+--------+
+| Code    | Account                                          | Action |
++---------+--------------------------------------------------+--------+
+| SAL-001 | Sales                                            | create |
+| SAL-002 | Sales:Project Revenue                            | create |
+| VAT-001 | Output VAT Payable                               | create |
+| VAT-002 | Input VAT Recoverable                            | create |
+| WHT-001 | Withholding Tax Payable                          | create |
+| PL-001  | Payroll liabilities                              | create |
+| PL-002  | Payroll liabilities:PAYE                         | create |
+| PL-003  | Payroll liabilities:Statutory & Other Deductions | create |
+| AE-001  | Accrued Expenses                                 | create |
+| CD-001  | Client Deposits                                  | create |
+| IA-001  | Inventory Asset                                  | create |
+| WIP-001 | Work in Progress                                 | create |
+| WIP-002 | Work in Progress:Materials                       | create |
+| WIP-003 | Work in Progress:Direct Labour                   | create |
+| WIP-004 | Work in Progress:Subcontractors                  | create |
+| WIP-005 | Work in Progress:Transport & Delivery            | create |
+| WIP-006 | Work in Progress:Equipment Hire & Site           | create |
+| WIP-007 | Work in Progress:Project Utilities               | create |
+| WIP-008 | Work in Progress:Field Facilitation              | create |
+| WIP-009 | Work in Progress:Venue & Permits                 | create |
+| WIP-010 | Work in Progress:Rework & Warranty               | create |
+| COS-021 | Cost of Sales:Equipment Hire & Site              | create |
+| COS-022 | Cost of Sales:Project Utilities                  | create |
+| COS-023 | Cost of Sales:Venue & Permits                    | create |
+| PRE-001 | Prepayments & Deposits                           | create |
+| PRE-002 | Prepayments & Deposits:Supplier Advances         | create |
+| PRE-003 | Prepayments & Deposits:Refundable Deposits       | create |
+| PRE-004 | Prepayments & Deposits:Prepaid Expenses          | create |
+| OI-001  | Office Improvement                               | create |
++---------+--------------------------------------------------+--------+
++--------------------------+------+-----------+--------------------------------------------------+----------+
+| Function                 | Ref  | Account   | Name                                             | Resolves |
++--------------------------+------+-----------+--------------------------------------------------+----------+
+| bank_default             | 1010 | EQB-001   | Equity Bank                                      | yes      |
+| petty_cash_float         | 1030 | PETTY-001 | Petty cash                                       | yes      |
+| accounts_receivable      | 1100 | AR-001    | Accounts Receivable (A/R)                        | yes      |
+| staff_advances           | 1300 | STD-001   | Short Term Debtors                               | yes      |
+| input_vat                | 1330 | VAT-002   | Input VAT Recoverable                            | yes      |
+| inventory                | 1200 | IA-001    | Inventory Asset                                  | yes      |
+| wip_direct_materials     | 1211 | WIP-002   | Work in Progress:Materials                       | yes      |
+| wip_direct_labour        | 1212 | WIP-003   | Work in Progress:Direct Labour                   | yes      |
+| wip_subcontractors       | 1213 | WIP-004   | Work in Progress:Subcontractors                  | yes      |
+| wip_transport_logistics  | 1214 | WIP-005   | Work in Progress:Transport & Delivery            | yes      |
+| wip_equipment_site       | 1215 | WIP-006   | Work in Progress:Equipment Hire & Site           | yes      |
+| wip_project_utilities    | 1216 | WIP-007   | Work in Progress:Project Utilities               | yes      |
+| wip_project_facilitation | 1217 | WIP-008   | Work in Progress:Field Facilitation              | yes      |
+| wip_venue_statutory      | 1218 | WIP-009   | Work in Progress:Venue & Permits                 | yes      |
+| wip_rework_warranty      | 1219 | WIP-010   | Work in Progress:Rework & Warranty               | yes      |
+| accounts_payable         | 2100 | AP-001    | Accounts Payable (A/P)                           | yes      |
+| output_vat               | 2110 | VAT-001   | Output VAT Payable                               | yes      |
+| wht_payable              | 2120 | WHT-001   | Withholding Tax Payable                          | yes      |
+| paye_payable             | 2130 | PL-002    | Payroll liabilities:PAYE                         | yes      |
+| statutory_payable        | 2140 | PL-003    | Payroll liabilities:Statutory & Other Deductions | yes      |
+| accrued_expenses         | 2150 | AE-001    | Accrued Expenses                                 | yes      |
+| net_payroll_payable      | 2160 | 2160      | Net Payroll Payable                              | yes      |
+| client_deposits          | 2200 | CD-001    | Client Deposits                                  | yes      |
+| opening_balance_equity   | 3900 | OBE-001   | Opening Balance Equity                           | yes      |
+| project_revenue          | 4100 | SAL-002   | Sales:Project Revenue                            | yes      |
+| cos_direct_materials     | 5100 | COS-008   | Cost of Sales:Materials                          | yes      |
+| cos_direct_labour        | 5200 | PE-007    | Personnel Expenses:Wages-Direct Labour           | yes      |
+| cos_subcontractors       | 5300 | COS-020   | Subcontractors - COS                             | yes      |
+| cos_transport_logistics  | 5400 | COS-016   | Cost of Sales:Transport & Delivery               | yes      |
+| cos_equipment_site       | 5500 | COS-021   | Cost of Sales:Equipment Hire & Site              | yes      |
+| cos_project_utilities    | 5600 | COS-022   | Cost of Sales:Project Utilities                  | yes      |
+| cos_project_facilitation | 5700 | COS-006   | Cost of Sales:Field Facilitation                 | yes      |
+| cos_venue_statutory      | 5800 | COS-023   | Cost of Sales:Venue & Permits                    | yes      |
+| cos_rework_warranty      | 5900 | COS-018   | Other - COS                                      | yes      |
+| inventory_adjustments    | 6800 | INV-001   | Inventory Shrinkage                              | yes      |
+| salaries_expense         | 7550 | PE-006    | Personnel Expenses:Salaries                      | yes      |
+| bank_charges             | 7800 | FIN-003   | Finance cost:Bank charges                        | yes      |
++--------------------------+------+-----------+--------------------------------------------------+----------+
+Functions resolved: 37 / 37
+Catalogue references resolved: 14 / 15; payment sources linked: 7 / 9
+exit=0

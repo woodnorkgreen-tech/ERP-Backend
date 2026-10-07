@@ -1,0 +1,289 @@
+Report: docs/finance-redesign/phase-2/74-evidence/final-db/chart_completion.json
+DRY RUN — profile 'wng' on 'db' (WIP policy: capitalise, profile default — FINANCE_WIP_POLICY is not set)
++---------+--------------------------------------------------+----------+
+| Code    | Account                                          | Action   |
++---------+--------------------------------------------------+----------+
+| SAL-001 | Sales                                            | create   |
+| SAL-002 | Sales:Project Revenue                            | CONFLICT |
+| VAT-001 | Output VAT Payable                               | CONFLICT |
+| VAT-002 | Input VAT Recoverable                            | CONFLICT |
+| WHT-001 | Withholding Tax Payable                          | CONFLICT |
+| PL-001  | Payroll liabilities                              | create   |
+| PL-002  | Payroll liabilities:PAYE                         | CONFLICT |
+| PL-003  | Payroll liabilities:Statutory & Other Deductions | CONFLICT |
+| AE-001  | Accrued Expenses                                 | CONFLICT |
+| CD-001  | Client Deposits                                  | CONFLICT |
+| IA-001  | Inventory Asset                                  | CONFLICT |
+| WIP-001 | Work in Progress                                 | create   |
+| WIP-002 | Work in Progress:Materials                       | CONFLICT |
+| WIP-003 | Work in Progress:Direct Labour                   | CONFLICT |
+| WIP-004 | Work in Progress:Subcontractors                  | CONFLICT |
+| WIP-005 | Work in Progress:Transport & Delivery            | CONFLICT |
+| WIP-006 | Work in Progress:Equipment Hire & Site           | CONFLICT |
+| WIP-007 | Work in Progress:Project Utilities               | CONFLICT |
+| WIP-008 | Work in Progress:Field Facilitation              | CONFLICT |
+| WIP-009 | Work in Progress:Venue & Permits                 | CONFLICT |
+| WIP-010 | Work in Progress:Rework & Warranty               | CONFLICT |
+| COS-021 | Cost of Sales:Equipment Hire & Site              | CONFLICT |
+| COS-022 | Cost of Sales:Project Utilities                  | CONFLICT |
+| COS-023 | Cost of Sales:Venue & Permits                    | CONFLICT |
+| PRE-001 | Prepayments & Deposits                           | create   |
+| PRE-002 | Prepayments & Deposits:Supplier Advances         | CONFLICT |
+| PRE-003 | Prepayments & Deposits:Refundable Deposits       | CONFLICT |
+| PRE-004 | Prepayments & Deposits:Prepaid Expenses          | CONFLICT |
+| OI-001  | Office Improvement                               | CONFLICT |
++---------+--------------------------------------------------+----------+
+Accounts: 4 to create, 0 already present, 0 met by an existing account (declared reuse), 25 in conflict
++--------------------------+------+-----------+--------------------------------------------------+----------+-------------------+
+| Function                 | Ref  | Account   | Name                                             | Resolves | Status            |
++--------------------------+------+-----------+--------------------------------------------------+----------+-------------------+
+| bank_default             | 1010 | EQB-001   | Equity Bank                                      | yes      | RESOLVED_EXISTING |
+| petty_cash_float         | 1030 | PETTY-001 | Petty cash                                       | yes      | RESOLVED_EXISTING |
+| accounts_receivable      | 1100 | AR-001    | Accounts Receivable (A/R)                        | yes      | RESOLVED_EXISTING |
+| staff_advances           | 1300 | STD-001   | Short Term Debtors                               | yes      | RESOLVED_EXISTING |
+| input_vat                | 1330 | VAT-002   | Input VAT Recoverable                            | NO       | CONFLICT          |
+| inventory                | 1200 | IA-001    | Inventory Asset                                  | NO       | CONFLICT          |
+| wip_direct_materials     | 1211 | WIP-002   | Work in Progress:Materials                       | NO       | CONFLICT          |
+| wip_direct_labour        | 1212 | WIP-003   | Work in Progress:Direct Labour                   | NO       | CONFLICT          |
+| wip_subcontractors       | 1213 | WIP-004   | Work in Progress:Subcontractors                  | NO       | CONFLICT          |
+| wip_transport_logistics  | 1214 | WIP-005   | Work in Progress:Transport & Delivery            | NO       | CONFLICT          |
+| wip_equipment_site       | 1215 | WIP-006   | Work in Progress:Equipment Hire & Site           | NO       | CONFLICT          |
+| wip_project_utilities    | 1216 | WIP-007   | Work in Progress:Project Utilities               | NO       | CONFLICT          |
+| wip_project_facilitation | 1217 | WIP-008   | Work in Progress:Field Facilitation              | NO       | CONFLICT          |
+| wip_venue_statutory      | 1218 | WIP-009   | Work in Progress:Venue & Permits                 | NO       | CONFLICT          |
+| wip_rework_warranty      | 1219 | WIP-010   | Work in Progress:Rework & Warranty               | NO       | CONFLICT          |
+| accounts_payable         | 2100 | AP-001    | Accounts Payable (A/P)                           | yes      | RESOLVED_EXISTING |
+| output_vat               | 2110 | VAT-001   | Output VAT Payable                               | NO       | CONFLICT          |
+| wht_payable              | 2120 | WHT-001   | Withholding Tax Payable                          | NO       | CONFLICT          |
+| paye_payable             | 2130 | PL-002    | Payroll liabilities:PAYE                         | NO       | CONFLICT          |
+| statutory_payable        | 2140 | PL-003    | Payroll liabilities:Statutory & Other Deductions | NO       | CONFLICT          |
+| accrued_expenses         | 2150 | AE-001    | Accrued Expenses                                 | NO       | CONFLICT          |
+| net_payroll_payable      | 2160 | 2160      | Net Payroll Payable                              | yes      | RESOLVED_EXISTING |
+| client_deposits          | 2200 | CD-001    | Client Deposits                                  | NO       | CONFLICT          |
+| opening_balance_equity   | 3900 | OBE-001   | Opening Balance Equity                           | yes      | RESOLVED_EXISTING |
+| project_revenue          | 4100 | SAL-002   | Sales:Project Revenue                            | NO       | CONFLICT          |
+| cos_direct_materials     | 5100 | COS-008   | Cost of Sales:Materials                          | yes      | RESOLVED_EXISTING |
+| cos_direct_labour        | 5200 | PE-007    | Personnel Expenses:Wages-Direct Labour           | yes      | RESOLVED_EXISTING |
+| cos_subcontractors       | 5300 | COS-020   | Subcontractors - COS                             | yes      | RESOLVED_EXISTING |
+| cos_transport_logistics  | 5400 | COS-016   | Cost of Sales:Transport & Delivery               | yes      | RESOLVED_EXISTING |
+| cos_equipment_site       | 5500 | COS-021   | Cost of Sales:Equipment Hire & Site              | NO       | CONFLICT          |
+| cos_project_utilities    | 5600 | COS-022   | Cost of Sales:Project Utilities                  | NO       | CONFLICT          |
+| cos_project_facilitation | 5700 | COS-006   | Cost of Sales:Field Facilitation                 | yes      | RESOLVED_EXISTING |
+| cos_venue_statutory      | 5800 | COS-023   | Cost of Sales:Venue & Permits                    | NO       | CONFLICT          |
+| cos_rework_warranty      | 5900 | COS-018   | Other - COS                                      | yes      | RESOLVED_EXISTING |
+| inventory_adjustments    | 6800 | INV-001   | Inventory Shrinkage                              | yes      | RESOLVED_EXISTING |
+| salaries_expense         | 7550 | PE-006    | Personnel Expenses:Salaries                      | yes      | RESOLVED_EXISTING |
+| bank_charges             | 7800 | FIN-003   | Finance cost:Bank charges                        | yes      | RESOLVED_EXISTING |
++--------------------------+------+-----------+--------------------------------------------------+----------+-------------------+
+Functions resolved: 16 / 37 — unresolved: input_vat, inventory, wip_direct_materials, wip_direct_labour, wip_subcontractors, wip_transport_logistics, wip_equipment_site, wip_project_utilities, wip_project_facilitation, wip_venue_statutory, wip_rework_warranty, output_vat, wht_payable, paye_payable, statutory_payable, accrued_expenses, client_deposits, project_revenue, cos_equipment_site, cos_project_utilities, cos_venue_statutory
+Classification preview (not applied; --classify-existing applies it): 116 account(s) would have a NULL account_type / normal_balance filled; left for the accountant: EQE-001, ITX-001, LDO-001, OPE-026; unclassified and not in the profile: none
++-----------+-------------------------------------------------------------------+----------+-------------+---------------+------------------+
+| Code      | Account                                                           | Type now | Balance now | Type proposed | Balance proposed |
++-----------+-------------------------------------------------------------------+----------+-------------+---------------+------------------+
+| AP-001    | Accounts Payable (A/P)                                            | NULL     | NULL        | balance_sheet | credit           |
+| AR-001    | Accounts Receivable (A/R)                                         | NULL     | NULL        | balance_sheet | debit            |
+| AR-002    | Accounts Receivable (A/R) - EUR                                   | NULL     | NULL        | balance_sheet | debit            |
+| STD-001   | Short Term Debtors                                                | NULL     | NULL        | balance_sheet | debit            |
+| CASH-001  | Cash Account                                                      | NULL     | NULL        | balance_sheet | debit            |
+| EQB-001   | Equity Bank                                                       | NULL     | NULL        | balance_sheet | debit            |
+| FMB-001   | Family Bank                                                       | NULL     | NULL        | balance_sheet | debit            |
+| FK-001    | Faulu Kenya                                                       | NULL     | NULL        | balance_sheet | debit            |
+| KCB-001   | KCB Bank                                                          | NULL     | NULL        | balance_sheet | debit            |
+| NCBA-001  | NCBA                                                              | NULL     | NULL        | balance_sheet | debit            |
+| NIC-001   | NIC Dollar Account                                                | NULL     | NULL        | balance_sheet | debit            |
+| PETTY-001 | Petty cash                                                        | NULL     | NULL        | balance_sheet | debit            |
+| SBM-001   | SBM                                                               | NULL     | NULL        | balance_sheet | debit            |
+| STB-001   | Stanbic Bank                                                      | NULL     | NULL        | balance_sheet | debit            |
+| COS-001   | Change in inventory - COS                                         | NULL     | NULL        | direct_cost   | debit            |
+| COS-002   | Cost of Sales                                                     | NULL     | NULL        | direct_cost   | debit            |
+| COS-003   | Cost of Sales:Branding                                            | NULL     | NULL        | direct_cost   | debit            |
+| COS-004   | Cost of Sales:Courier - Projects                                  | NULL     | NULL        | direct_cost   | debit            |
+| COS-005   | Cost of Sales:Fabrication                                         | NULL     | NULL        | direct_cost   | debit            |
+| COS-006   | Cost of Sales:Field Facilitation                                  | NULL     | NULL        | direct_cost   | debit            |
+| COS-007   | Cost of Sales:Jomat hardware                                      | NULL     | NULL        | direct_cost   | debit            |
+| COS-008   | Cost of Sales:Materials                                           | NULL     | NULL        | direct_cost   | debit            |
+| COS-009   | Cost of Sales:Motor bike and motor vehicle fuel                   | NULL     | NULL        | direct_cost   | debit            |
+| COS-010   | Cost of Sales:Paints & Hardware                                   | NULL     | NULL        | direct_cost   | debit            |
+| COS-011   | Cost of Sales:Parking Fees                                        | NULL     | NULL        | direct_cost   | debit            |
+| COS-012   | Cost of Sales:Plotting & Cutting                                  | NULL     | NULL        | direct_cost   | debit            |
+| COS-013   | Cost of Sales:Printing                                            | NULL     | NULL        | direct_cost   | debit            |
+| COS-014   | Cost of Sales:Team Meals                                          | NULL     | NULL        | direct_cost   | debit            |
+| COS-015   | Cost of Sales:Teams accomodation                                  | NULL     | NULL        | direct_cost   | debit            |
+| COS-016   | Cost of Sales:Transport & Delivery                                | NULL     | NULL        | direct_cost   | debit            |
+| COS-017   | Discounts given - COS                                             | NULL     | NULL        | direct_cost   | debit            |
+| INV-001   | Inventory Shrinkage                                               | NULL     | NULL        | opex          | debit            |
+| COS-018   | Other - COS                                                       | NULL     | NULL        | direct_cost   | debit            |
+| COS-019   | Overhead - COS                                                    | NULL     | NULL        | overhead      | debit            |
+| EXP-001   | Pasting Expenses                                                  | NULL     | NULL        | opex          | debit            |
+| COS-020   | Subcontractors - COS                                              | NULL     | NULL        | direct_cost   | debit            |
+| DIV-001   | Dividend disbursed                                                | NULL     | NULL        | balance_sheet | debit            |
+| OBE-001   | Opening Balance Equity                                            | NULL     | NULL        | balance_sheet | credit           |
+| OCI-001   | Other comprehensive income                                        | NULL     | NULL        | balance_sheet | credit           |
+| RE-001    | Retained Earnings                                                 | NULL     | NULL        | balance_sheet | credit           |
+| SC-001    | Share capital                                                     | NULL     | NULL        | balance_sheet | credit           |
+| ADM-001   | Administration expenses                                           | NULL     | NULL        | opex          | debit            |
+| ADM-002   | Administration expenses:Courier & Postage                         | NULL     | NULL        | opex          | debit            |
+| ADM-003   | Administration expenses:Depreciation Expense                      | NULL     | NULL        | opex          | debit            |
+| AMO-001   | Amortisation expense                                              | NULL     | NULL        | opex          | debit            |
+| ATM-001   | Atm charges                                                       | NULL     | NULL        | opex          | debit            |
+| BD-001    | Bad Debts                                                         | NULL     | NULL        | opex          | debit            |
+| DEL-001   | Delivery/Trolley expenses                                         | NULL     | NULL        | opex          | debit            |
+| EXD-001   | EXCISE DUTY                                                       | NULL     | NULL        | opex          | debit            |
+| FIN-001   | Finance cost                                                      | NULL     | NULL        | opex          | debit            |
+| FIN-002   | Finance cost:Bad debts                                            | NULL     | NULL        | opex          | debit            |
+| FIN-003   | Finance cost:Bank charges                                         | NULL     | NULL        | opex          | debit            |
+| FIN-004   | Finance cost:Interest expense                                     | NULL     | NULL        | opex          | debit            |
+| FIN-005   | Finance cost:Mpesa charges                                        | NULL     | NULL        | opex          | debit            |
+| INS-001   | Insurance - Disability                                            | NULL     | NULL        | opex          | debit            |
+| INS-002   | Insurance - General                                               | NULL     | NULL        | opex          | debit            |
+| INS-003   | Insurance - Liability                                             | NULL     | NULL        | opex          | debit            |
+| LPF-001   | Legal and professional fees                                       | NULL     | NULL        | opex          | debit            |
+| MC-001    | Management compensation                                           | NULL     | NULL        | opex          | debit            |
+| MAE-001   | Meals and entertainment                                           | NULL     | NULL        | opex          | debit            |
+| MED-001   | Medical expenses                                                  | NULL     | NULL        | opex          | debit            |
+| MBMV-001  | Motor bike and motor vehicle car wash                             | NULL     | NULL        | opex          | debit            |
+| MBMV-002  | Motor bike and motor vehicles Repair                              | NULL     | NULL        | opex          | debit            |
+| OPE-001   | Operating Expenses                                                | NULL     | NULL        | opex          | debit            |
+| OPE-002   | Operating Expenses:Advertising/Promotional                        | NULL     | NULL        | opex          | debit            |
+| OPE-003   | Operating Expenses:Audit & Accountancy Fees                       | NULL     | NULL        | opex          | debit            |
+| OPE-004   | Operating Expenses:Commissions and fees                           | NULL     | NULL        | opex          | debit            |
+| OPE-005   | Operating Expenses:Consultancy Fees                               | NULL     | NULL        | opex          | debit            |
+| OPE-006   | Operating Expenses:Consumables                                    | NULL     | NULL        | opex          | debit            |
+| OPE-007   | Operating Expenses:Corporate social Responsibility                | NULL     | NULL        | opex          | debit            |
+| OPE-008   | Operating Expenses:Director Expenses                              | NULL     | NULL        | opex          | debit            |
+| OPE-009   | Operating Expenses:Director Expenses:Courier - Director's Errands | NULL     | NULL        | opex          | debit            |
+| OPE-010   | Operating Expenses:Dues and subacriptions                         | NULL     | NULL        | opex          | debit            |
+| OPE-011   | Operating Expenses:Dues and subscriptions                         | NULL     | NULL        | opex          | debit            |
+| OPE-012   | Operating Expenses:Electricity & Water                            | NULL     | NULL        | opex          | debit            |
+| OPE-013   | Operating Expenses:Equipment Rental                               | NULL     | NULL        | opex          | debit            |
+| OPE-014   | Operating Expenses:Garbage Collections                            | NULL     | NULL        | opex          | debit            |
+| OPE-015   | Operating Expenses:Generator fuel, Repair and Maintenance         | NULL     | NULL        | opex          | debit            |
+| OPE-016   | Operating Expenses:Insurance premium                              | NULL     | NULL        | opex          | debit            |
+| OPE-017   | Operating Expenses:Licenses and permits                           | NULL     | NULL        | opex          | debit            |
+| OPE-018   | Operating Expenses:Office Casual/Stipend                          | NULL     | NULL        | opex          | debit            |
+| OPE-019   | Operating Expenses:Office expenses                                | NULL     | NULL        | opex          | debit            |
+| OPE-020   | Operating Expenses:Packaging and Delivery                         | NULL     | NULL        | opex          | debit            |
+| OPE-021   | Operating Expenses:Professional Fees                              | NULL     | NULL        | opex          | debit            |
+| OPE-022   | Operating Expenses:Rent & lease Payments                          | NULL     | NULL        | opex          | debit            |
+| OPE-023   | Operating Expenses:Repairs and Maintenance                        | NULL     | NULL        | opex          | debit            |
+| OPE-024   | Operating Expenses:Samples                                        | NULL     | NULL        | opex          | debit            |
+| OPE-025   | Operating Expenses:Security And Fees                              | NULL     | NULL        | opex          | debit            |
+| OPE-027   | Operating Expenses:Shipping & Delivery Expense                    | NULL     | NULL        | opex          | debit            |
+| OPE-028   | Operating Expenses:Site Visist                                    | NULL     | NULL        | opex          | debit            |
+| OPE-029   | Operating Expenses:Staff Welfare                                  | NULL     | NULL        | opex          | debit            |
+| OPE-030   | Operating Expenses:Stationery & Printing                          | NULL     | NULL        | opex          | debit            |
+| OPE-031   | Operating Expenses:Telephone & Internet                           | NULL     | NULL        | opex          | debit            |
+| OPE-032   | Operating Expenses:Transport & Delivery                           | NULL     | NULL        | opex          | debit            |
+| OGAE-001  | Other general and administrative expenses                         | NULL     | NULL        | opex          | debit            |
+| OSE-001   | Other selling expenses                                            | NULL     | NULL        | opex          | debit            |
+| OTEA-001  | Other Types of Expenses-Advertising Expenses                      | NULL     | NULL        | opex          | debit            |
+| OTE-001   | Overtime expense                                                  | NULL     | NULL        | opex          | debit            |
+| PE-001    | Payroll Expenses                                                  | NULL     | NULL        | opex          | debit            |
+| PE-002    | Personnel Expenses                                                | NULL     | NULL        | opex          | debit            |
+| PE-003    | Personnel Expenses:Housing levy                                   | NULL     | NULL        | opex          | debit            |
+| PE-004    | Personnel Expenses:Nita Levy                                      | NULL     | NULL        | opex          | debit            |
+| PE-005    | Personnel Expenses:NSSF Expense                                   | NULL     | NULL        | opex          | debit            |
+| PE-006    | Personnel Expenses:Salaries                                       | NULL     | NULL        | opex          | debit            |
+| PE-007    | Personnel Expenses:Wages-Direct Labour                            | NULL     | NULL        | direct_cost   | debit            |
+| PS-001    | Printing Supplies                                                 | NULL     | NULL        | opex          | debit            |
+| RI-001    | Return Inwards                                                    | NULL     | NULL        | revenue       | credit           |
+| RE-002    | Rider's Expense                                                   | NULL     | NULL        | opex          | debit            |
+| SUP-001   | Supplies                                                          | NULL     | NULL        | opex          | debit            |
+| TSE-001   | Travel expenses - selling expenses                                | NULL     | NULL        | opex          | debit            |
+| UCBPE-001 | Unapplied Cash Bill Payment Expense                               | NULL     | NULL        | opex          | debit            |
+| UE-001    | Uncategorised Expense                                             | NULL     | NULL        | opex          | debit            |
+| UTIL-001  | Utilities                                                         | NULL     | NULL        | opex          | debit            |
+| VP-001    | Vat Penalty                                                       | NULL     | NULL        | opex          | debit            |
+| WE-001    | Wage expenses                                                     | NULL     | NULL        | opex          | debit            |
+| WNGA-001  | WNG Give aways                                                    | NULL     | NULL        | opex          | debit            |
++-----------+-------------------------------------------------------------------+----------+-------------+---------------+------------------+
++----------------+--------------+--------+------------+------------------+----------------------------------------------------------------------------------+
+| Paying account | Type         | Active | Linked now | Profile declares | State                                                                            |
++----------------+--------------+--------+------------+------------------+----------------------------------------------------------------------------------+
+| PC-MAIN        | petty_cash   | yes    | 1030       | PETTY-001        | REVIEW: linked to 1030; the profile declares PETTY-001                           |
+| BANK-MAIN      | bank         | yes    | 1010       | EQB-001          | REVIEW: linked to 1010; the profile declares EQB-001                             |
+| BANK-ALT       | bank         | yes    | 1020       | NCBA-001         | REVIEW: linked to 1020; the profile declares NCBA-001                            |
+| BANK-STANBIC   | bank         | no     | 1010       | STB-001          | REVIEW: linked to 1010; the profile declares STB-001                             |
+| BANK-KCB       | bank         | no     | 1010       | KCB-001          | REVIEW: linked to 1010; the profile declares KCB-001                             |
+| BANK-FAMILY    | bank         | no     | 1010       | FMB-001          | REVIEW: linked to 1010; the profile declares FMB-001                             |
+| AP             | payable      | yes    | 2100       | AP-001           | REVIEW: linked to 2100; the profile declares AP-001                              |
+| MPESA          | mobile_money | yes    | 1040       | leave unlinked   | REVIEW: linked to 1040, but the profile leaves it unlinked until Finance decides |
+| CARD           | card         | yes    | 1010       | leave unlinked   | REVIEW: linked to 1010, but the profile leaves it unlinked until Finance decides |
++----------------+--------------+--------+------------+------------------+----------------------------------------------------------------------------------+
+WARNING — 48 reference-chart account(s) sit beside the account the profile posts to. One function, two accounts: is this chart the company's own, or two charts in one database?
+  - 'bank_default' (Default operating bank account): profile posts to EQB-001; 1010 'Bank – Main Account' is also here (0 journal line(s)).
+  - 'petty_cash_float' (Petty cash float (cash on hand)): profile posts to PETTY-001; 1030 'Petty Cash Float' is also here (1 journal line(s)).
+  - 'accounts_receivable' (Amounts clients owe): profile posts to AR-001; 1100 'Accounts Receivable' is also here (0 journal line(s)).
+  - 'staff_advances' (Staff advances / imprest (asset)): profile posts to STD-001; 1300 'Staff Advances / Imprest' is also here (0 journal line(s)).
+  - 'input_vat' (Input VAT recoverable (asset)): profile posts to VAT-002; 1330 'Input VAT Recoverable' is also here (0 journal line(s)).
+  - 'inventory' (Raw-material inventory (asset)): profile posts to IA-001; 1200 'Raw-material Inventory' is also here (3 journal line(s)).
+  - 'accounts_payable' (Amounts owed to suppliers and payees): profile posts to AP-001; 2100 'Accounts Payable' is also here (0 journal line(s)).
+  - 'output_vat' (Output VAT payable): profile posts to VAT-001; 2110 'Output VAT Payable' is also here (0 journal line(s)).
+  - 'wht_payable' (Withholding tax payable): profile posts to WHT-001; 2120 'Withholding Tax Payable' is also here (0 journal line(s)).
+  - 'paye_payable' (PAYE payable): profile posts to PL-002; 2130 'PAYE Payable' is also here (0 journal line(s)).
+  - 'statutory_payable' (Statutory deductions payable (NSSF, SHIF, housing levy)): profile posts to PL-003; 2140 'Statutory Deductions Payable' is also here (0 journal line(s)).
+  - 'accrued_expenses' (Goods received not yet invoiced / accrued expenses): profile posts to AE-001; 2150 'Accrued Expenses' is also here (2 journal line(s)).
+  - 'client_deposits' (Client deposits received before revenue is earned): profile posts to CD-001; 2200 'Client Deposits' is also here (1 journal line(s)).
+  - 'opening_balance_equity' (Opening balance equity (opening stock counts)): profile posts to OBE-001; 3900 'Opening Balance Equity' is also here (0 journal line(s)).
+  - 'project_revenue' (Project revenue): profile posts to SAL-002; 4100 'Project Revenue' is also here (0 journal line(s)).
+  - 'cos_direct_materials' (Cost of sales: direct materials (WIP release)): profile posts to COS-008; 5100 'Cost of Sales – Direct Materials' is also here (0 journal line(s)).
+  - 'cos_direct_labour' (Cost of sales: direct labour (WIP release; payroll direct labour)): profile posts to PE-007; 5200 'Cost of Sales – Direct Labour' is also here (0 journal line(s)).
+  - 'cos_subcontractors' (Cost of sales: subcontractors (WIP release)): profile posts to COS-020; 5300 'Cost of Sales – Subcontractors' is also here (0 journal line(s)).
+  - 'cos_transport_logistics' (Cost of sales: transport and logistics (WIP release)): profile posts to COS-016; 5400 'Cost of Sales – Transport & Logistics' is also here (0 journal line(s)).
+  - 'cos_equipment_site' (Cost of sales: equipment and site (WIP release)): profile posts to COS-021; 5500 'Cost of Sales – Equipment & Site' is also here (0 journal line(s)).
+  - 'cos_project_utilities' (Cost of sales: project utilities (WIP release)): profile posts to COS-022; 5600 'Cost of Sales – Project Utilities' is also here (0 journal line(s)).
+  - 'cos_project_facilitation' (Cost of sales: project facilitation (WIP release)): profile posts to COS-006; 5700 'Cost of Sales – Project Facilitation' is also here (0 journal line(s)).
+  - 'cos_venue_statutory' (Cost of sales: venue and statutory (WIP release)): profile posts to COS-023; 5800 'Cost of Sales – Venue & Statutory' is also here (0 journal line(s)).
+  - 'cos_rework_warranty' (Cost of sales: rework and warranty (WIP release)): profile posts to COS-018; 5900 'Cost of Sales – Rework & Warranty' is also here (0 journal line(s)).
+  - 'inventory_adjustments' (Inventory adjustments and shrinkage): profile posts to INV-001; 6800 'Inventory Adjustments & Shrinkage' is also here (0 journal line(s)).
+  - 'bank_charges' (Bank and mobile-money transaction charges): profile posts to FIN-003; 7800 'Bank & Mobile-money Charges' is also here (0 journal line(s)).
+  - 'wip_direct_materials' (Project work in progress: direct materials): profile posts to WIP-002; 1211 'Project WIP – Direct Materials' is also here (1 journal line(s)).
+  - 'wip_direct_labour' (Project work in progress: direct labour): profile posts to WIP-003; 1212 'Project WIP – Direct Labour' is also here (0 journal line(s)).
+  - 'wip_subcontractors' (Project WIP: subcontractors): profile posts to WIP-004; 1213 'Project WIP – Subcontractors' is also here (0 journal line(s)).
+  - 'wip_transport_logistics' (Project WIP: transport and logistics): profile posts to WIP-005; 1214 'Project WIP – Transport & Logistics' is also here (0 journal line(s)).
+  - 'wip_equipment_site' (Project WIP: equipment and site): profile posts to WIP-006; 1215 'Project WIP – Equipment & Site' is also here (0 journal line(s)).
+  - 'wip_project_utilities' (Project WIP: project utilities): profile posts to WIP-007; 1216 'Project WIP – Project Utilities' is also here (0 journal line(s)).
+  - 'wip_project_facilitation' (Project WIP: project facilitation (meals, accommodation, per diem)): profile posts to WIP-008; 1217 'Project WIP – Project Facilitation' is also here (0 journal line(s)).
+  - 'wip_venue_statutory' (Project WIP: venue and statutory): profile posts to WIP-009; 1218 'Project WIP – Venue & Statutory' is also here (0 journal line(s)).
+  - 'wip_rework_warranty' (Project WIP: rework and warranty): profile posts to WIP-010; 1219 'Project WIP – Rework & Warranty' is also here (0 journal line(s)).
+  - catalogue reference 1310 (Supplier advances): profile posts to PRE-002; 1310 'Supplier Advances' is also here (0 journal line(s)).
+  - catalogue reference 1320 (Refundable deposits): profile posts to PRE-003; 1320 'Refundable Deposits' is also here (0 journal line(s)).
+  - catalogue reference 1340 (Prepaid expenses): profile posts to PRE-004; 1340 'Prepaid Expenses' is also here (0 journal line(s)).
+  - catalogue reference 1600 (Leasehold improvements (capex)): profile posts to OI-001; 1600 'Leasehold Improvements' is also here (0 journal line(s)).
+  - catalogue reference 6100 (Workshop electricity): profile posts to OPE-012; 6100 'Workshop Electricity' is also here (0 journal line(s)).
+  - catalogue reference 6200 (Machinery repairs & maintenance): profile posts to OPE-023; 6200 'Machinery Repairs & Maintenance' is also here (0 journal line(s)).
+  - catalogue reference 6400 (Small tools & workshop consumables): profile posts to OPE-006; 6400 'Small Tools & Workshop Consumables' is also here (0 journal line(s)).
+  - catalogue reference 6600 (PPE & workshop safety): profile posts to OPE-006; 6600 'PPE & Workshop Safety' is also here (0 journal line(s)).
+  - catalogue reference 6700 (Cleaning & waste disposal): profile posts to OPE-014; 6700 'Cleaning & Waste Disposal' is also here (0 journal line(s)).
+  - catalogue reference 7100 (Office rent): profile posts to OPE-022; 7100 'Office Rent & Electricity' is also here (0 journal line(s)).
+  - catalogue reference 7200 (Administration airtime & internet): profile posts to OPE-031; 7200 'Administration Airtime & Internet' is also here (0 journal line(s)).
+  - catalogue reference 7400 (Office transport): profile posts to OPE-032; 7400 'Office Transport' is also here (0 journal line(s)).
+  - catalogue reference 7600 (Staff welfare): profile posts to OPE-029; 7600 'Staff Welfare' is also here (0 journal line(s)).
+Catalogue references resolved: 10 / 15; paying-account ledger accounts resolved: 7 / 9
+BLOCKED — nothing was written, and --execute would be REFUSED until these are resolved:
+  - Account SAL-002 would be a second account for 'project_revenue' (Project revenue): this chart already holds the reference account 4100 'Project Revenue' (0 journal line(s)). Declare reuse_existing for 4100, or settle which chart this database keeps, before creating SAL-002.
+  - Account VAT-001 ('Output VAT Payable') duplicates existing account 2110. Map to 2110 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2110, name: Output VAT Payable} on VAT-001 if they are one account.)
+  - Account VAT-002 ('Input VAT Recoverable') duplicates existing account 1330. Map to 1330 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 1330, name: Input VAT Recoverable} on VAT-002 if they are one account.)
+  - Account WHT-001 ('Withholding Tax Payable') duplicates existing account 2120. Map to 2120 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2120, name: Withholding Tax Payable} on WHT-001 if they are one account.)
+  - Account PL-002 would be a second account for 'paye_payable' (PAYE payable): this chart already holds the reference account 2130 'PAYE Payable' (0 journal line(s)). Declare reuse_existing for 2130, or settle which chart this database keeps, before creating PL-002.
+  - Account PL-003 would be a second account for 'statutory_payable' (Statutory deductions payable (NSSF, SHIF, housing levy)): this chart already holds the reference account 2140 'Statutory Deductions Payable' (0 journal line(s)). Declare reuse_existing for 2140, or settle which chart this database keeps, before creating PL-003.
+  - Account AE-001 ('Accrued Expenses') duplicates existing account 2150. Map to 2150 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2150, name: Accrued Expenses} on AE-001 if they are one account.)
+  - Account CD-001 ('Client Deposits') duplicates existing account 2200. Map to 2200 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2200, name: Client Deposits} on CD-001 if they are one account.)
+  - Account IA-001 would be a second account for 'inventory' (Raw-material inventory (asset)): this chart already holds the reference account 1200 'Raw-material Inventory' (3 journal line(s)). Declare reuse_existing for 1200, or settle which chart this database keeps, before creating IA-001.
+  - Account WIP-002 would be a second account for 'wip_direct_materials' (Project work in progress: direct materials): this chart already holds the reference account 1211 'Project WIP – Direct Materials' (1 journal line(s)). Declare reuse_existing for 1211, or settle which chart this database keeps, before creating WIP-002.
+  - Account WIP-003 would be a second account for 'wip_direct_labour' (Project work in progress: direct labour): this chart already holds the reference account 1212 'Project WIP – Direct Labour' (0 journal line(s)). Declare reuse_existing for 1212, or settle which chart this database keeps, before creating WIP-003.
+  - Account WIP-004 would be a second account for 'wip_subcontractors' (Project WIP: subcontractors): this chart already holds the reference account 1213 'Project WIP – Subcontractors' (0 journal line(s)). Declare reuse_existing for 1213, or settle which chart this database keeps, before creating WIP-004.
+  - Account WIP-005 would be a second account for 'wip_transport_logistics' (Project WIP: transport and logistics): this chart already holds the reference account 1214 'Project WIP – Transport & Logistics' (0 journal line(s)). Declare reuse_existing for 1214, or settle which chart this database keeps, before creating WIP-005.
+  - Account WIP-006 would be a second account for 'wip_equipment_site' (Project WIP: equipment and site): this chart already holds the reference account 1215 'Project WIP – Equipment & Site' (0 journal line(s)). Declare reuse_existing for 1215, or settle which chart this database keeps, before creating WIP-006.
+  - Account WIP-007 would be a second account for 'wip_project_utilities' (Project WIP: project utilities): this chart already holds the reference account 1216 'Project WIP – Project Utilities' (0 journal line(s)). Declare reuse_existing for 1216, or settle which chart this database keeps, before creating WIP-007.
+  - Account WIP-008 would be a second account for 'wip_project_facilitation' (Project WIP: project facilitation (meals, accommodation, per diem)): this chart already holds the reference account 1217 'Project WIP – Project Facilitation' (0 journal line(s)). Declare reuse_existing for 1217, or settle which chart this database keeps, before creating WIP-008.
+  - Account WIP-009 would be a second account for 'wip_venue_statutory' (Project WIP: venue and statutory): this chart already holds the reference account 1218 'Project WIP – Venue & Statutory' (0 journal line(s)). Declare reuse_existing for 1218, or settle which chart this database keeps, before creating WIP-009.
+  - Account WIP-010 would be a second account for 'wip_rework_warranty' (Project WIP: rework and warranty): this chart already holds the reference account 1219 'Project WIP – Rework & Warranty' (0 journal line(s)). Declare reuse_existing for 1219, or settle which chart this database keeps, before creating WIP-010.
+  - Account COS-021 would be a second account for 'cos_equipment_site' (Cost of sales: equipment and site (WIP release)): this chart already holds the reference account 5500 'Cost of Sales – Equipment & Site' (0 journal line(s)). Declare reuse_existing for 5500, or settle which chart this database keeps, before creating COS-021.
+  - Account COS-022 would be a second account for 'cos_project_utilities' (Cost of sales: project utilities (WIP release)): this chart already holds the reference account 5600 'Cost of Sales – Project Utilities' (0 journal line(s)). Declare reuse_existing for 5600, or settle which chart this database keeps, before creating COS-022.
+  - Account COS-023 would be a second account for 'cos_venue_statutory' (Cost of sales: venue and statutory (WIP release)): this chart already holds the reference account 5800 'Cost of Sales – Venue & Statutory' (0 journal line(s)). Declare reuse_existing for 5800, or settle which chart this database keeps, before creating COS-023.
+  - Account PRE-002 would be a second account for catalogue reference 1310 (Supplier advances): this chart already holds the reference account 1310 'Supplier Advances' (0 journal line(s)). Declare reuse_existing for 1310, or settle which chart this database keeps, before creating PRE-002.
+  - Account PRE-003 would be a second account for catalogue reference 1320 (Refundable deposits): this chart already holds the reference account 1320 'Refundable Deposits' (0 journal line(s)). Declare reuse_existing for 1320, or settle which chart this database keeps, before creating PRE-003.
+  - Account PRE-004 would be a second account for catalogue reference 1340 (Prepaid expenses): this chart already holds the reference account 1340 'Prepaid Expenses' (0 journal line(s)). Declare reuse_existing for 1340, or settle which chart this database keeps, before creating PRE-004.
+  - Account OI-001 would be a second account for catalogue reference 1600 (Leasehold improvements (capex)): this chart already holds the reference account 1600 'Leasehold Improvements' (0 journal line(s)). Declare reuse_existing for 1600, or settle which chart this database keeps, before creating OI-001.
+exit=1

@@ -72,7 +72,7 @@ class PayrollFinanceWorkspaceTest extends TestCase
         EmployeeSalaryHistory::create(['employee_id' => $configured->id, 'salary' => 60000, 'valid_from' => '2026-01-01']);
         AccountingPeriod::create(['year' => now()->year, 'month' => now()->month, 'starts_on' => now()->startOfMonth(), 'ends_on' => now()->endOfMonth(), 'status' => 'open']);
         foreach (['7550', '5200', '2160', '2130', '2140'] as $code) {
-            ChartOfAccount::create(['code' => $code, 'name' => $code, 'category' => str_starts_with($code, '7') || str_starts_with($code, '5') ? 'expense' : 'liability', 'account_type' => str_starts_with($code, '7') || str_starts_with($code, '5') ? ($code === '5200' ? 'direct_cost' : 'opex') : 'balance_sheet', 'normal_balance' => str_starts_with($code, '7') || str_starts_with($code, '5') ? 'debit' : 'credit', 'is_postable' => true, 'is_active' => true]);
+            ChartOfAccount::firstOrCreate(['code' => $code], [ 'name' => $code, 'category' => str_starts_with($code, '7') || str_starts_with($code, '5') ? 'expense' : 'liability', 'account_type' => str_starts_with($code, '7') || str_starts_with($code, '5') ? ($code === '5200' ? 'direct_cost' : 'opex') : 'balance_sheet', 'normal_balance' => str_starts_with($code, '7') || str_starts_with($code, '5') ? 'debit' : 'credit', 'is_postable' => true, 'is_active' => true]);
         }
 
         $data = $this->actingAs($this->reader, 'sanctum')->getJson('/api/finance/payroll/readiness')->assertOk()->json('data');
@@ -87,6 +87,8 @@ class PayrollFinanceWorkspaceTest extends TestCase
 
     public function test_labour_classification_is_effective_dated_and_audited(): void
     {
+        // A fixed date keeps the future-effective policy test stable after October 1.
+        $this->travelTo(\Carbon\Carbon::parse('2026-09-30'));
         $manager = User::factory()->create(['is_active' => true]);
         $manager->givePermissionTo([Permissions::FINANCE_PAYROLL_READ, Permissions::FINANCE_PAYROLL_LABOUR_CLASSIFICATION_MANAGE]);
         $department = Department::create(['name' => 'Production']);

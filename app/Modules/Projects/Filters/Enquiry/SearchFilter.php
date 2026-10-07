@@ -19,7 +19,8 @@ class SearchFilter
               ->orWhere('enquiry_number', 'like', "%{$search}%")
               ->orWhere('job_number', 'like', "%{$search}%")
               ->orWhereHas('client', function ($clientQuery) use ($search) {
-                  $clientQuery->where('full_name', 'like', "%{$search}%");
+                  $clientQuery->where('full_name', 'like', "%{$search}%")
+                      ->orWhere('company_name', 'like', "%{$search}%");
               })
               ->orWhere('contact_person', 'like', "%{$search}%");
         });

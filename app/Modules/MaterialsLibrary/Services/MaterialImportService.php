@@ -3,12 +3,15 @@
 namespace App\Modules\MaterialsLibrary\Services;
 
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
-use App\Modules\MaterialsLibrary\Models\Workstation;
 use App\Modules\MaterialsLibrary\Models\MaterialCategory;
+use App\Modules\MaterialsLibrary\Models\Workstation;
 use App\Modules\MaterialsLibrary\Support\MaterialCompleteness;
-use Maatwebsite\Excel\Facades\Excel;
+use App\Modules\MaterialsLibrary\Support\MaterialWorkbook;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Maatwebsite\Excel\Facades\Excel;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class MaterialImportService
@@ -26,7 +29,7 @@ class MaterialImportService
         'part_number' => 'material_code',
         'part_no' => 'material_code',
         'item_code' => 'material_code',
-        
+
         'material_item_name' => 'material_name',
         'material_name' => 'material_name',
         'item_name' => 'material_name',
@@ -37,18 +40,18 @@ class MaterialImportService
         'item' => 'material_name',
         'product_name' => 'material_name',
         'product' => 'material_name',
-        
+
         'category' => 'category',
         'sub_category' => 'subcategory',
         'subcategory' => 'subcategory',
         'sub_cat' => 'subcategory',
-        
+
         'uom' => 'unit_of_measure',
         'unit_of_measure' => 'unit_of_measure',
         'issue_unit' => 'unit_of_measure',
         'unit' => 'unit_of_measure',
         'measure' => 'unit_of_measure',
-        
+
         'notes' => 'notes',
         'remarks' => 'notes',
         'comment' => 'notes',
@@ -60,12 +63,29 @@ class MaterialImportService
      */
     public function import($file, $workstationId)
     {
-        $workstation = Workstation::findOrFail($workstationId);
-        
+
         // Load the spreadsheet
         $spreadsheet = IOFactory::load($file->getPathname());
+        // Identify the downloadable format by its headers, not the sheet name.
+        // Excel users may rename a sheet; legacy files may also call it Materials.
+        $sheets = $spreadsheet->getAllSheets();
+        usort($sheets, fn ($a, $b) => ($b->getTitle() === MaterialWorkbook::SHEET) <=> ($a->getTitle() === MaterialWorkbook::SHEET));
+        foreach ($sheets as $sheet) {
+            $headers = array_map(fn ($value) => trim((string) $value), $sheet->rangeToArray('A1:'.$sheet->getHighestDataColumn().'1')[0]);
+            if (in_array('Material ID', $headers, true) || (in_array('Material name', $headers, true) && in_array('Workshop area', $headers, true))) {
+                try {
+                    return app(MaterialWorkbookImportService::class)->import($sheet);
+                } finally {
+                    $spreadsheet->disconnectWorksheets();
+                }
+            }
+        }
+        if (! $workstationId) {
+            throw ValidationException::withMessages(['workstation_id' => 'Select a target workshop area for a legacy spreadsheet, or use the downloadable Materials workbook.']);
+        }
+        Workstation::findOrFail($workstationId);
         $worksheet = $spreadsheet->getActiveSheet();
-        
+
         // Get headers (first row)
         $headers = [];
         foreach ($worksheet->getRowIterator(1, 1) as $row) {
@@ -75,11 +95,11 @@ class MaterialImportService
                 $headers[] = $cell->getValue();
             }
         }
-        
+
         // Map headers to column indices
         $headerMap = [];
         foreach ($headers as $index => $header) {
-            if (!empty($header)) {
+            if (! empty($header)) {
                 $headerMap[$index] = trim($header);
             }
         }
@@ -89,7 +109,7 @@ class MaterialImportService
             'success' => 0,
             'errors' => [],
             'updated' => 0,
-            'created' => 0
+            'created' => 0,
         ];
 
         DB::beginTransaction();
@@ -99,10 +119,10 @@ class MaterialImportService
             foreach ($worksheet->getRowIterator(2) as $row) {
                 $cellIterator = $row->getCellIterator();
                 $cellIterator->setIterateOnlyExistingCells(false);
-                
+
                 $rowData = [];
                 foreach ($cellIterator as $cell) {
-                    $columnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($cell->getColumn()) - 1;
+                    $columnIndex = Coordinate::columnIndexFromString($cell->getColumn()) - 1;
                     if (isset($headerMap[$columnIndex])) {
                         $rowData[$headerMap[$columnIndex]] = $cell->getValue();
                     }
@@ -118,12 +138,12 @@ class MaterialImportService
                 try {
                     $this->processRow($rowData, $workstationId, $results);
                 } catch (\Exception $e) {
-                    $results['errors'][] = "Row {$rowIndex}: " . $e->getMessage();
+                    $results['errors'][] = "Row {$row->getRowIndex()}: ".$e->getMessage();
                 }
-                
+
                 $rowIndex++;
             }
-            
+
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
@@ -139,8 +159,11 @@ class MaterialImportService
     private function isRowEmpty($row)
     {
         foreach ($row as $value) {
-            if (!empty($value)) return false;
+            if (! empty($value)) {
+                return false;
+            }
         }
+
         return true;
     }
 
@@ -161,19 +184,19 @@ class MaterialImportService
             // Replace special chars with underscore, then collapse multiple underscores to single one
             $cleanHeader = preg_replace('/_+/', '_', str_replace([' ', '/', '-'], '_', $header));
             $normalizedHeader = Str::snake(strtolower($cleanHeader));
-            
+
             // Check if it's a standard DB column
             if (isset(self::STANDARD_COLUMNS[$normalizedHeader])) {
                 $dbColumn = self::STANDARD_COLUMNS[$normalizedHeader];
-                
+
                 // Don't overwrite existing value with empty value (especially for UOM/Issue Unit duplicate cols)
-                if (!empty($value) || !isset($materialData[$dbColumn])) {
+                if (! empty($value) || ! isset($materialData[$dbColumn])) {
                     $materialData[$dbColumn] = $value;
                 }
             } else {
                 // It's a dynamic attribute
                 $receiptOnly = ['quantity', 'qty', 'opening_stock', 'unit_cost', 'cost', 'cost_per_sqm', 'cost_per_roll', 'cost_per_unit', 'price', 'unit_price'];
-                if (!in_array($normalizedHeader, [...$receiptOnly, 'line_#', 'line', 'line#', 'workstation'])) {
+                if (! in_array($normalizedHeader, [...$receiptOnly, 'line_#', 'line', 'line#', 'workstation'])) {
                     $attributes[$normalizedHeader] = $value;
                 }
             }
@@ -184,10 +207,10 @@ class MaterialImportService
 
         // Validation: Required fields
         if (empty($materialData['material_code'])) {
-            throw new \Exception("Missing SKU/Material Code");
+            throw new \Exception('Missing SKU/Material Code');
         }
         if (empty($materialData['material_name'])) {
-            throw new \Exception("Missing Material Name");
+            throw new \Exception('Missing Material Name');
         }
 
         // Update or Create
@@ -209,7 +232,7 @@ class MaterialImportService
         }
 
         $materialData = $this->defaults->apply($materialData, $material);
-        $candidate = $material ?: new LibraryMaterial();
+        $candidate = $material ?: new LibraryMaterial;
         $candidate->fill($materialData);
         if ($category) {
             $candidate->setRelation('materialCategory', $category);
@@ -226,7 +249,7 @@ class MaterialImportService
             LibraryMaterial::create($materialData);
             $results['created']++;
         }
-        
+
         $results['success']++;
     }
 

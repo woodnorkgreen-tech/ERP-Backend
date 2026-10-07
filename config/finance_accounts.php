@@ -72,6 +72,23 @@ return [
     'wip_policy' => env('FINANCE_WIP_POLICY'),
 
     /*
+     | WHO DECIDES THE WIP POLICY (Report 75)
+     |
+     | The business authority is now a policy approved and activated in Finance
+     | Setup. FINANCE_WIP_POLICY remains as a bootstrap for the rehearsal and
+     | cutover tooling: it is used only while the ERP holds no active policy, is
+     | reported as "set by deployment, not approved", and if it ever disagrees
+     | with an approved policy nothing posts (CONFIGURATION CONFLICT).
+     |
+     |   transition (default)  approved ERP policy, else the deployment bootstrap
+     |   governed              approved ERP policy only; FINANCE_WIP_POLICY is ignored
+     |
+     | Move to `governed` once Finance has approved the policy in the ERP, then
+     | remove FINANCE_WIP_POLICY from the environment.
+     */
+    'wip_policy_authority' => env('FINANCE_WIP_POLICY_AUTHORITY', 'transition'),
+
+    /*
      | Payment source code => the local account it is linked to (null = leave it
      | unlinked). Only a profile fills this: the seeder names every bank by one
      | generic reference code, so a map alone would link every bank to the same

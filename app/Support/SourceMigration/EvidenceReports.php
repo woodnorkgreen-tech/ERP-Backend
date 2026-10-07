@@ -40,15 +40,15 @@ class EvidenceReports
             'teams_members.technical_labour_id → technical_labours' => $this->broken('teams_members', 'technical_labour_id', 'technical_labours'),
             'project_deliverables.enquiry_id → project_enquiries' => $this->broken('project_deliverables', 'enquiry_id', 'project_enquiries'),
             'task_materials_data.enquiry_task_id → enquiry_tasks' => $this->broken('task_materials_data', 'enquiry_task_id', 'enquiry_tasks'),
-            'project_elements.task_materials_data_id → task_materials_data' => $this->broken('project_elements', 'task_materials_data_id', 'task_materials_data'),
-            'element_materials.project_element_id → project_elements' => $this->broken('element_materials', 'project_element_id', 'project_elements'),
+            'project_deliverables.task_materials_data_id → task_materials_data' => $this->broken('project_deliverables', 'task_materials_data_id', 'task_materials_data'),
+            'element_materials.project_element_id → project_deliverables' => $this->broken('element_materials', 'project_element_id', 'project_deliverables'),
             'element_materials.library_material_id → library_materials' => $this->broken('element_materials', 'library_material_id', 'library_materials'),
         ];
 
         return [
             'totals' => $this->counts(['projects', 'project_enquiries', 'clients', 'enquiry_tasks', 'task_budget_data', 'task_quote_data',
                 'quote_versions', 'quote_approvals', 'teams_tasks', 'teams_members', 'project_deliverables', 'task_materials_data',
-                'project_elements', 'element_materials', 'budget_versions', 'budget_additions']),
+                'project_elements_legacy', 'element_materials', 'budget_versions', 'budget_additions']),
             'project_status' => $this->distribution('projects', 'status'),
             'enquiry_status' => $this->distribution('project_enquiries', 'status'),
             'coverage' => [
@@ -59,7 +59,7 @@ class EvidenceReports
                 'enquiries_with_quote_data' => $this->scalar('SELECT COUNT(DISTINCT et.project_enquiry_id) c FROM enquiry_tasks et JOIN task_quote_data q ON q.enquiry_task_id = et.id'),
                 'projects_with_team_tasks' => $this->scalar('SELECT COUNT(DISTINCT project_id) c FROM teams_tasks WHERE project_id IS NOT NULL'),
                 'enquiries_with_deliverables' => $this->scalar('SELECT COUNT(DISTINCT enquiry_id) c FROM project_deliverables'),
-                'enquiries_with_elements' => $this->scalar('SELECT COUNT(DISTINCT et.project_enquiry_id) c FROM enquiry_tasks et JOIN task_materials_data m ON m.enquiry_task_id = et.id JOIN project_elements pe ON pe.task_materials_data_id = m.id'),
+                'enquiries_with_elements' => $this->scalar('SELECT COUNT(DISTINCT et.project_enquiry_id) c FROM enquiry_tasks et JOIN task_materials_data m ON m.enquiry_task_id = et.id JOIN project_deliverables pe ON pe.task_materials_data_id = m.id'),
             ],
             'relationships' => $checks,
             'broken_relationships' => $this->onlyBroken($checks),

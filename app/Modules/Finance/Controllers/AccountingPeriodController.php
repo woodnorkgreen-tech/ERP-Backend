@@ -48,7 +48,7 @@ class AccountingPeriodController extends Controller
         ]);
 
         $query = AccountingPeriod::query()
-            ->with('latestAuditLog')
+            ->with('latestAuditLog.user:id,name')
             ->orderByDesc('year')
             ->orderByDesc('month');
 
@@ -77,6 +77,8 @@ class AccountingPeriodController extends Controller
                 'reopen_reason' => $period->reopen_reason,
                 'last_audit' => $period->latestAuditLog ? [
                     'action' => $period->latestAuditLog->action,
+                    // Report 75: who closed, locked or reopened it. Additive.
+                    'by' => $period->latestAuditLog->user?->name,
                     'from_status' => $period->latestAuditLog->from_status,
                     'to_status' => $period->latestAuditLog->to_status,
                     'reason' => $period->latestAuditLog->reason,

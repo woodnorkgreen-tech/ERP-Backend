@@ -33,6 +33,8 @@ use Tests\TestCase;
 class Stab7PettyCashTriplePostingTest extends TestCase
 {
     use RefreshDatabase;
+    // Report 75R: payment needs a verified requisition; the fixture goes through real verification.
+    use \Tests\Support\VerifiedFinancialRequisitionFixture;
 
     private User $user;
     private User $financeUser;
@@ -105,13 +107,13 @@ class Stab7PettyCashTriplePostingTest extends TestCase
             'default_expense_code_id' => $this->expenseCodeId, 'is_active' => true,
         ]);
 
-        return PettyCashRequisition::create([
+        return $this->verifiedRequisitionFixture(PettyCashRequisition::create([
             'requisition_number' => $number, 'user_id' => $this->user->id,
             'department_id' => $this->departmentId, 'category' => 'Site Materials',
             'requisition_type_id' => $type->id, 'purpose' => 'Site spend',
             'total_amount' => $amount, 'status' => 'approved', 'enquiry_id' => $enquiryId,
             'payee_name' => 'John Field Worker',
-        ]);
+        ]));
     }
 
     private function disburse(PettyCashRequisition $requisition, float $amount): void
@@ -230,12 +232,20 @@ class Stab7PettyCashTriplePostingTest extends TestCase
 
     // C. Spend exceeds advance: verify existing overspend/reimbursement handling
     // still works and the expense side still recognises the real spend once.
-    public function test_spend_exceeding_the_advance_still_recognises_the_expense_exactly_once(): void
+    /**
+     * Report 75R-C (WNG decision): overspend is never reimbursed automatically.
+     * This used to post the excess as a credit to the paying account — money
+     * "paid back" with no Payment and no approval. It is now not reconciled at
+     * all until it is brought within the advance.
+     */
+    public function test_spend_exceeding_the_advance_is_not_reconciled_and_reimburses_nothing(): void
     {
         $enquiryId = $this->enquiry('WNG-STAB7-C');
         $requisition = $this->requisition($enquiryId, 2000.00, 'PCR-STAB7-C');
         app(PettyCashCostProducer::class)->commitFor($requisition);
         $this->disburse($requisition, 2000.00);
+        $before = ['journals' => DB::table('journal_entries')->count(), 'payments' => DB::table('payments')->count(),
+            'actual' => DB::table('cost_lines')->where('nature', 'actual')->count(), 'float' => DB::table('petty_cash_ledger_entries')->count()];
 
         $this->actingAs($this->user);
         $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/surrender", [
@@ -247,10 +257,27 @@ class Stab7PettyCashTriplePostingTest extends TestCase
         ])->assertStatus(200);
 
         $this->actingAs($this->financeUser);
-        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/reconcile")->assertStatus(200);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/reconcile")
+            ->assertStatus(422)->assertJsonPath('code', 'OVERSPEND_REQUIRES_RESOLUTION')->assertJsonPath('overspend', '500.00')
+            ->assertJsonFragment(['success' => false]);
 
-        $this->assertSame('2500.00', $this->totalDebitedTo($this->wipAccountId));
-        // The advance itself is cleared only up to what was actually advanced.
+        // No hidden payment, journal, cost or float movement; the advance is still open.
+        $this->assertSame($before, ['journals' => DB::table('journal_entries')->count(), 'payments' => DB::table('payments')->count(),
+            'actual' => DB::table('cost_lines')->where('nature', 'actual')->count(), 'float' => DB::table('petty_cash_ledger_entries')->count()]);
+        $this->assertSame('surrender_pending', $requisition->fresh()->status);
+        $this->assertSame(0.0, (float) $this->totalCreditedTo($this->staffAdvanceAccountId), 'The advance is not cleared, in part or in whole.');
+
+        // Brought within the advance, it reconciles as usual.
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/surrender/return", ['reason' => 'Above the advance; resubmit within it.'])->assertOk();
+        $this->actingAs($this->user);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/surrender", [
+            'items' => [['expense_code_id' => $this->expenseCodeId, 'amount' => 2000.00, 'tax_amount' => 0.00,
+                'receipt_type' => 'non_etr', 'supplier_name' => 'Hardware Shop', 'description' => 'Nails']],
+            'cash_returned_amount' => 0.00,
+        ])->assertStatus(200);
+        $this->actingAs($this->financeUser);
+        $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/reconcile")->assertStatus(200);
+        $this->assertSame('2000.00', $this->totalDebitedTo($this->wipAccountId));
         $this->assertSame('2000.00', $this->totalCreditedTo($this->staffAdvanceAccountId));
         $this->assertEveryJournalEntryBalances();
     }
@@ -302,13 +329,13 @@ class Stab7PettyCashTriplePostingTest extends TestCase
             'code' => 'ADM-' . uniqid(), 'name' => 'Office Overhead',
             'default_expense_code_id' => $this->overheadExpenseCodeId, 'is_active' => true,
         ]);
-        $requisition = PettyCashRequisition::create([
+        $requisition = $this->verifiedRequisitionFixture(PettyCashRequisition::create([
             'requisition_number' => 'PCR-STAB7-F', 'user_id' => $this->user->id,
             'department_id' => $this->departmentId, 'category' => 'Office Overhead',
             'requisition_type_id' => $type->id, 'purpose' => 'Office supplies',
             'total_amount' => 1500.00, 'status' => 'approved', 'enquiry_id' => null,
             'payee_name' => 'Office Admin',
-        ]);
+        ]));
 
         $this->actingAs($this->financeUser);
         $this->postJson("/api/finance/petty-cash/requisitions/{$requisition->id}/disburse", [

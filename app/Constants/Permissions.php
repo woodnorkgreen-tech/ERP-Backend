@@ -232,8 +232,23 @@ class Permissions
      */
     const FINANCE_PERIODS_MANAGE = 'finance.periods.manage';
 
+    // Finance configuration & governance (Report 75). Seeing, preparing and
+    // reviewing a proposal are ordinary work. Approving and activating one are
+    // accounting AUTHORITY: see accountingAuthority().
+    const FINANCE_CONFIG_VIEW = 'finance.config.view';
+    const FINANCE_CONFIG_PROPOSE = 'finance.config.propose';
+    const FINANCE_CONFIG_REVIEW = 'finance.config.review';
+    const FINANCE_CONFIG_APPROVE_OPERATIONAL = 'finance.config.approve_operational';
+    const FINANCE_CONFIG_APPROVE_ACCOUNTING = 'finance.config.approve_accounting';
+    const FINANCE_CONFIG_APPROVE_MANAGEMENT = 'finance.config.approve_management';
+    const FINANCE_CONFIG_ACTIVATE = 'finance.config.activate';
+
     const FINANCE_REPORTS_VIEW = 'finance.reports.view';
     const FINANCE_ANALYTICS_VIEW = 'finance.analytics.view';
+
+    const FINANCE_REQUISITIONS_VERIFY = 'finance.requisitions.verify';
+    // Report 75R-B: giving up approved money that will not be paid. Assigned deliberately; no role holds it by default.
+    const FINANCE_REQUISITIONS_RELEASE_UNUSED = 'finance.requisitions.release_unused';
 
     const FINANCE_PETTY_CASH_VIEW = 'finance.petty_cash.view';
     const FINANCE_PETTY_CASH_VIEW_BALANCE = 'finance.petty_cash.view_balance';
@@ -494,6 +509,24 @@ class Permissions
     /**
      * Get all permission constants as an array
      */
+    /**
+     * Permissions that confer ACCOUNTING AUTHORITY rather than access.
+     *
+     * No role receives these by default, Super Admin included, and the governance
+     * service checks them directly so the Super Admin bypass does not satisfy
+     * them. Being able to administer the system is not being entitled to approve
+     * how WNG's books behave; WNG assigns this authority to a role on purpose.
+     *
+     * @return list<string>
+     */
+    public static function accountingAuthority(): array
+    {
+        return [
+            self::FINANCE_CONFIG_APPROVE_OPERATIONAL, self::FINANCE_CONFIG_APPROVE_ACCOUNTING,
+            self::FINANCE_CONFIG_APPROVE_MANAGEMENT, self::FINANCE_CONFIG_ACTIVATE,
+        ];
+    }
+
     public static function all(): array
     {
         return [
@@ -533,6 +566,9 @@ class Permissions
             self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
             self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
             self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PAYMENTS_REVERSE, self::FINANCE_PERIODS_MANAGE,
+            self::FINANCE_CONFIG_VIEW, self::FINANCE_CONFIG_PROPOSE, self::FINANCE_CONFIG_REVIEW,
+            self::FINANCE_CONFIG_APPROVE_OPERATIONAL, self::FINANCE_CONFIG_APPROVE_ACCOUNTING,
+            self::FINANCE_CONFIG_APPROVE_MANAGEMENT, self::FINANCE_CONFIG_ACTIVATE,
             self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
             self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE, self::FINANCE_EXPENSE_DUPLICATE_OVERRIDE,
             self::FINANCE_COSTS_PORTFOLIO, self::FINANCE_COSTS_ALLOCATE,
@@ -554,6 +590,8 @@ class Permissions
             self::APPROVALS_SELF_APPROVE,
             self::FINANCE_EXPENDITURE_EXCEPTION_APPROVE,
 
+            self::FINANCE_REQUISITIONS_VERIFY,
+            self::FINANCE_REQUISITIONS_RELEASE_UNUSED,
             self::FINANCE_PETTY_CASH_VIEW,
             self::FINANCE_PETTY_CASH_VIEW_BALANCE,
             self::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -675,6 +713,9 @@ class Permissions
                 self::FINANCE_INVOICE_READ, self::FINANCE_INVOICE_UPDATE, self::FINANCE_INVOICE_DELETE,
                 self::FINANCE_REPORTS_VIEW, self::FINANCE_ANALYTICS_VIEW,
                 self::FINANCE_JOURNALS_REVERSE, self::FINANCE_PAYMENTS_REVERSE, self::FINANCE_PERIODS_MANAGE,
+                self::FINANCE_CONFIG_VIEW, self::FINANCE_CONFIG_PROPOSE, self::FINANCE_CONFIG_REVIEW,
+                self::FINANCE_CONFIG_APPROVE_OPERATIONAL, self::FINANCE_CONFIG_APPROVE_ACCOUNTING,
+                self::FINANCE_CONFIG_APPROVE_MANAGEMENT, self::FINANCE_CONFIG_ACTIVATE,
                 self::FINANCE_COSTS_CREATE, self::FINANCE_COSTS_READ,
                 self::FINANCE_COSTS_VERIFY, self::FINANCE_COSTS_REVERSE,
                 self::FINANCE_COSTS_PORTFOLIO, self::FINANCE_COSTS_ALLOCATE,
@@ -691,6 +732,8 @@ class Permissions
                 self::FINANCE_RECEIVABLES_OVERRIDE, self::FINANCE_RECEIVABLES_INVOICE_CHECK,
                 self::FINANCE_PAYABLES_READ, self::FINANCE_PAYABLES_VERIFY,
                 self::FINANCE_PAYROLL_READ, self::FINANCE_PAYROLL_PAY, self::FINANCE_PAYROLL_LABOUR_CLASSIFICATION_MANAGE,
+                self::FINANCE_REQUISITIONS_VERIFY,
+                self::FINANCE_REQUISITIONS_RELEASE_UNUSED,
                 self::FINANCE_PETTY_CASH_VIEW,
                 self::FINANCE_PETTY_CASH_VIEW_BALANCE,
                 self::FINANCE_PETTY_CASH_VIEW_REPORTS,
@@ -780,6 +823,8 @@ class Permissions
     public static function getLabel(string $permission): string
     {
         $labels = [
+            self::FINANCE_REQUISITIONS_VERIFY => 'Verify Assigned Financial Requisitions',
+            self::FINANCE_REQUISITIONS_RELEASE_UNUSED => 'Release Unused Approved Requisition Balance',
             // User Management
             self::USER_CREATE => 'Create New User Accounts',
             self::USER_READ => 'View User Profiles',

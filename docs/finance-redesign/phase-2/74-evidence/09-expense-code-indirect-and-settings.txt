@@ -1,0 +1,35 @@
+## Codes whose catalogue text names an account indirectly but which are ACTIVE under the WNG profile (wng_target_rehearsal) and inactive on the reference chart (db)
++----+--------+-----+------+------------------------------+--------------------------------------------------------------+----------------------------------------------+--------+---------------+-----------+
+| db | code   | act | proc | accounting_class             | meaning                                                      | default_debit_gl                             | linked | linked_name   | category  |
++----+--------+-----+------+------------------------------+--------------------------------------------------------------+----------------------------------------------+--------+---------------+-----------+
+| db | NE-016 |   1 |    0 | Liability settlement         | The part of a loan payment that reduces the amount borrowed. | 2300 Loans Payable                           | 2300   | Loans Payable | liability |
+| db | NE-018 |   0 |    0 | Customer liability           | Money received from a client before WNG earns the revenue.   | Bank / Cash (credit is 2200 Client Deposits) | NULL   | NULL          | NULL      |
+| db | NE-023 |   0 |    0 | Internal accounting transfer | Costs accumulated on an open project are moved to P&L when t | Relevant 5100–5800 Cost of Sales account     | NULL   | NULL          | NULL      |
++----+--------+-----+------+------------------------------+--------------------------------------------------------------+----------------------------------------------+--------+---------------+-----------+
++----------------------+--------+-----+------+------------------------------+--------------------------------------------------------------+----------------------------------------------+---------+-------------------------+-----------+
+| db                   | code   | act | proc | accounting_class             | meaning                                                      | default_debit_gl                             | linked  | linked_name             | category  |
++----------------------+--------+-----+------+------------------------------+--------------------------------------------------------------+----------------------------------------------+---------+-------------------------+-----------+
+| wng_target_rehearsal | NE-016 |   0 |    0 | Liability settlement         | The part of a loan payment that reduces the amount borrowed. | 2300 Loans Payable                           | NULL    | NULL                    | NULL      |
+| wng_target_rehearsal | NE-018 |   1 |    0 | Customer liability           | Money received from a client before WNG earns the revenue.   | Bank / Cash (credit is 2200 Client Deposits) | CD-001  | Client Deposits         | liability |
+| wng_target_rehearsal | NE-023 |   1 |    0 | Internal accounting transfer | Costs accumulated on an open project are moved to P&L when t | Relevant 5100–5800 Cost of Sales account     | COS-008 | Cost of Sales:Materials | expense   |
++----------------------+--------+-----+------+------------------------------+--------------------------------------------------------------+----------------------------------------------+---------+-------------------------+-----------+
+## usage of those codes in the rehearsal
++--------+------------+
+| code   | cost_lines |
++--------+------------+
+| NE-018 |          0 |
+| NE-023 |          0 |
++--------+------------+
+## literal-null finance settings
++----+-------+---------+----------+-------+
+| d  | unset | present | approved | total |
++----+-------+---------+----------+-------+
+| db |     8 |       7 |        0 |    15 |
++----+-------+---------+----------+-------+
+## petty cash float_limit / custodian
++----------------------+---------+-------------+-------------------+----------+
+| d                    | code    | float_limit | custodian_user_id | currency |
++----------------------+---------+-------------+-------------------+----------+
+| db                   | PC-MAIN |        NULL |              NULL | KES      |
+| wng_target_rehearsal | PC-MAIN |        NULL |              NULL | KES      |
++----------------------+---------+-------------+-------------------+----------+

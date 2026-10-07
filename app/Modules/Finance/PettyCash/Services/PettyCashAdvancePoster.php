@@ -4,9 +4,11 @@ namespace App\Modules\Finance\PettyCash\Services;
 
 use App\Constants\Permissions;
 use App\Models\User;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashRequisition;
 use App\Modules\Finance\Services\JournalPostingService;
 use App\Modules\Notifications\Services\NotificationService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -73,6 +75,57 @@ class PettyCashAdvancePoster
     }
 
     /**
+     * Report 75R-A: the same guarantee for a requisition paid by receiver, where
+     * each transfer is its own Payment and its own journal.
+     *
+     * The posting state lives on the Payment, not on the parent, so three
+     * transfers are never represented by one journal link. The Payment row is
+     * locked for the duration, which serialises a retry against a reversal of
+     * the same transfer, and the entry number is derived from the Payment id, so
+     * calling this again for a transfer that already posted returns the existing
+     * entry instead of posting a second one.
+     */
+    public function attemptPayment(Payment $payment): void
+    {
+        DB::transaction(function () use ($payment) {
+            $payment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+            if ($payment->status !== 'active') {
+                return;
+            }
+
+            try {
+                // Savepoint: a failed post must not take the failure record down with it.
+                [$entry] = DB::transaction(fn () => [
+                    $this->posting->postPettyCashAdvance($payment),
+                    $this->posting->postPaymentFee($payment),
+                ]);
+
+                $payment->forceFill([
+                    'advance_journal_entry_id' => $entry?->id ?? $payment->advance_journal_entry_id,
+                    'advance_gl_posting_failed_at' => null,
+                    'advance_gl_posting_error' => null,
+                ])->save();
+            } catch (Throwable $e) {
+                Log::warning('Could not post requisition payment advance journal', [
+                    'payment_id' => $payment->id,
+                    'child_reference' => $payment->requisition_child_reference,
+                    'exception' => $e::class,
+                    'error' => $e->getMessage(),
+                ]);
+
+                $payment->forceFill([
+                    'advance_gl_posting_failed_at' => now(),
+                    'advance_gl_posting_error' => $e->getMessage(),
+                ])->save();
+
+                if ($payment->requisition) {
+                    $this->alertFinance($payment->requisition, $e, $payment);
+                }
+            }
+        });
+    }
+
+    /**
      * The whole body is one try/catch, not just the dispatch call: resolving
      * recipients can itself throw (e.g. a permission row that has not been
      * created/synced yet in this environment), and this method is called
@@ -81,7 +134,7 @@ class PettyCashAdvancePoster
      * exactly the "a courtesy that can fail on its own" case this exists to
      * guard against.
      */
-    private function alertFinance(PettyCashRequisition $requisition, Throwable $e): void
+    private function alertFinance(PettyCashRequisition $requisition, Throwable $e, ?Payment $payment = null): void
     {
         try {
             $recipients = $this->recipientIds();
@@ -94,8 +147,8 @@ class PettyCashAdvancePoster
                 title: 'Petty cash advance did not reach the ledger',
                 message: sprintf(
                     'Requisition %s disbursed KES %s, but the advance could not be posted to the general ledger: %s. The float and the books will disagree until this is corrected.',
-                    $requisition->requisition_number,
-                    number_format((float) $requisition->total_amount, 2),
+                    $payment?->requisition_child_reference ?: $requisition->requisition_number,
+                    number_format((float) ($payment?->amount ?? $requisition->total_amount), 2),
                     $e->getMessage(),
                 ),
                 module: 'finance',
@@ -103,6 +156,7 @@ class PettyCashAdvancePoster
                 data: [
                     'requisition_id' => $requisition->id,
                     'requisition_number' => $requisition->requisition_number,
+                    'payment_id' => $payment?->id,
                     'error' => $e->getMessage(),
                 ],
                 users: $recipients,

@@ -508,7 +508,24 @@
                 @endif
 
                 <!-- Disbursed -->
-                @if($requisition->disbursement)
+                @php($receiverPayments = $requisition->disbursements->whereNotNull('requisition_child_reference'))
+                @if($receiverPayments->isNotEmpty())
+                    {{-- Report 75R-B: paid receiver by receiver. Every payment is listed; none stands for the whole. --}}
+                    @foreach($receiverPayments as $payment)
+                        <div class="log-entry clearfix">
+                            <div class="log-dot dot-disbursed"></div>
+                            <span class="log-label">{{ $payment->status === 'active' ? 'Paid' : 'Reversed' }} {{ \Illuminate\Support\Str::afterLast($payment->requisition_child_reference, '-') }}</span>
+                            <span class="log-date">{{ \Carbon\Carbon::parse($payment->created_at)->format('d/m/y H:i') }}</span>
+                            <div class="log-user">{{ $payment->payee_name }} — KES {{ number_format((float) $payment->amount, 2) }}</div>
+                            <div class="log-user">Ref: {{ $payment->requisition_child_reference }} / {{ $payment->payment_no }}</div>
+                        </div>
+                    @endforeach
+                    <div class="log-entry clearfix">
+                        <div class="log-dot dot-disbursed"></div>
+                        <span class="log-label">Total paid</span>
+                        <div class="log-user">KES {{ number_format((float) $receiverPayments->where('status', 'active')->sum('amount'), 2) }} of KES {{ number_format((float) $requisition->total_amount, 2) }} approved</div>
+                    </div>
+                @elseif($requisition->disbursement)
                     <div class="log-entry clearfix">
                         <div class="log-dot dot-disbursed"></div>
                         <span class="log-label">Disbursed</span>

@@ -1,0 +1,3010 @@
+{
+    "profile": "wng",
+    "database": "db",
+    "mode": "DRY RUN",
+    "wip_policy": "capitalise",
+    "wip_policy_source": "DEFAULT / NOT APPROVED FOR PRODUCTION — FINANCE_WIP_POLICY is not set",
+    "wip_policy_approved": false,
+    "target_identity": {
+        "identity": "TWO_CHART_STATE",
+        "reason": "29 of the company's accounts are here together with 85 reference-chart account(s) the profile does not name",
+        "counts": {
+            "total": 208,
+            "active": 208,
+            "postable": 200,
+            "company_coded": 120,
+            "numeric": 88,
+            "reference": 88,
+            "reference_acknowledged": 3,
+            "reference_unnamed": 85,
+            "unexplained_numeric": 0,
+            "other_coded": 0,
+            "profile_existing_accounts": 29,
+            "profile_existing_missing": 0
+        },
+        "reference_accounts_not_named_by_profile": [
+            "1000",
+            "1010",
+            "1020",
+            "1030",
+            "1040",
+            "1100",
+            "1110",
+            "1200",
+            "1210",
+            "1211",
+            "1212",
+            "1213",
+            "1214",
+            "1215",
+            "1216",
+            "1217",
+            "1218",
+            "1219",
+            "1300",
+            "1310",
+            "1320",
+            "1330",
+            "1340",
+            "1400",
+            "1410",
+            "1420",
+            "1430",
+            "1440",
+            "1450",
+            "1500",
+            "1510",
+            "1520",
+            "1530",
+            "1600",
+            "1900",
+            "2000",
+            "2100",
+            "2110",
+            "2120",
+            "2130",
+            "2140",
+            "2150",
+            "2200",
+            "2300",
+            "3100",
+            "3200",
+            "3300",
+            "3900",
+            "4100",
+            "4200",
+            "4900",
+            "5000",
+            "5100",
+            "5200",
+            "5300",
+            "5400",
+            "5500",
+            "5600",
+            "5700",
+            "5800",
+            "5900",
+            "6000",
+            "6100",
+            "6110",
+            "6200",
+            "6300",
+            "6400",
+            "6500",
+            "6600",
+            "6700",
+            "6800",
+            "7000",
+            "7100",
+            "7200",
+            "7300",
+            "7400",
+            "7500",
+            "7600",
+            "7700",
+            "7800",
+            "7900",
+            "8100",
+            "8200",
+            "8300",
+            "8900"
+        ],
+        "reference_accounts_with_postings": {
+            "1030": 1,
+            "1200": 3,
+            "1211": 1,
+            "2150": 2,
+            "2200": 1
+        },
+        "unexplained_numeric_accounts": [],
+        "profile_accounts_missing": [],
+        "duplicate_names": {
+            "cost of sales": [
+                "COS-002",
+                "5000"
+            ],
+            "opening balance equity": [
+                "OBE-001",
+                "3900"
+            ],
+            "retained earnings": [
+                "RE-001",
+                "3200"
+            ],
+            "share capital": [
+                "SC-001",
+                "3100"
+            ],
+            "operating expenses": [
+                "OPE-001",
+                "7000"
+            ]
+        }
+    },
+    "accounts": [
+        {
+            "code": "SAL-001",
+            "name": "Sales",
+            "action": "create",
+            "reuse": null,
+            "problems": []
+        },
+        {
+            "code": "SAL-002",
+            "name": "Sales:Project Revenue",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account SAL-002 would be a second account for 'project_revenue' (Project revenue): this chart already holds the reference account 4100 'Project Revenue' (0 journal line(s)). Declare reuse_existing for 4100, or settle which chart this database keeps, before creating SAL-002."
+            ]
+        },
+        {
+            "code": "VAT-001",
+            "name": "Output VAT Payable",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account VAT-001 ('Output VAT Payable') duplicates existing account 2110. Map to 2110 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2110, name: Output VAT Payable} on VAT-001 if they are one account.)"
+            ]
+        },
+        {
+            "code": "VAT-002",
+            "name": "Input VAT Recoverable",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account VAT-002 ('Input VAT Recoverable') duplicates existing account 1330. Map to 1330 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 1330, name: Input VAT Recoverable} on VAT-002 if they are one account.)"
+            ]
+        },
+        {
+            "code": "WHT-001",
+            "name": "Withholding Tax Payable",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WHT-001 ('Withholding Tax Payable') duplicates existing account 2120. Map to 2120 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2120, name: Withholding Tax Payable} on WHT-001 if they are one account.)"
+            ]
+        },
+        {
+            "code": "PL-001",
+            "name": "Payroll liabilities",
+            "action": "create",
+            "reuse": null,
+            "problems": []
+        },
+        {
+            "code": "PL-002",
+            "name": "Payroll liabilities:PAYE",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account PL-002 would be a second account for 'paye_payable' (PAYE payable): this chart already holds the reference account 2130 'PAYE Payable' (0 journal line(s)). Declare reuse_existing for 2130, or settle which chart this database keeps, before creating PL-002."
+            ]
+        },
+        {
+            "code": "PL-003",
+            "name": "Payroll liabilities:Statutory & Other Deductions",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account PL-003 would be a second account for 'statutory_payable' (Statutory deductions payable (NSSF, SHIF, housing levy)): this chart already holds the reference account 2140 'Statutory Deductions Payable' (0 journal line(s)). Declare reuse_existing for 2140, or settle which chart this database keeps, before creating PL-003."
+            ]
+        },
+        {
+            "code": "AE-001",
+            "name": "Accrued Expenses",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account AE-001 ('Accrued Expenses') duplicates existing account 2150. Map to 2150 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2150, name: Accrued Expenses} on AE-001 if they are one account.)"
+            ]
+        },
+        {
+            "code": "CD-001",
+            "name": "Client Deposits",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account CD-001 ('Client Deposits') duplicates existing account 2200. Map to 2200 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2200, name: Client Deposits} on CD-001 if they are one account.)"
+            ]
+        },
+        {
+            "code": "IA-001",
+            "name": "Inventory Asset",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account IA-001 would be a second account for 'inventory' (Raw-material inventory (asset)): this chart already holds the reference account 1200 'Raw-material Inventory' (3 journal line(s)). Declare reuse_existing for 1200, or settle which chart this database keeps, before creating IA-001."
+            ]
+        },
+        {
+            "code": "WIP-001",
+            "name": "Work in Progress",
+            "action": "create",
+            "reuse": null,
+            "problems": []
+        },
+        {
+            "code": "WIP-002",
+            "name": "Work in Progress:Materials",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-002 would be a second account for 'wip_direct_materials' (Project work in progress: direct materials): this chart already holds the reference account 1211 'Project WIP – Direct Materials' (1 journal line(s)). Declare reuse_existing for 1211, or settle which chart this database keeps, before creating WIP-002."
+            ]
+        },
+        {
+            "code": "WIP-003",
+            "name": "Work in Progress:Direct Labour",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-003 would be a second account for 'wip_direct_labour' (Project work in progress: direct labour): this chart already holds the reference account 1212 'Project WIP – Direct Labour' (0 journal line(s)). Declare reuse_existing for 1212, or settle which chart this database keeps, before creating WIP-003."
+            ]
+        },
+        {
+            "code": "WIP-004",
+            "name": "Work in Progress:Subcontractors",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-004 would be a second account for 'wip_subcontractors' (Project WIP: subcontractors): this chart already holds the reference account 1213 'Project WIP – Subcontractors' (0 journal line(s)). Declare reuse_existing for 1213, or settle which chart this database keeps, before creating WIP-004."
+            ]
+        },
+        {
+            "code": "WIP-005",
+            "name": "Work in Progress:Transport & Delivery",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-005 would be a second account for 'wip_transport_logistics' (Project WIP: transport and logistics): this chart already holds the reference account 1214 'Project WIP – Transport & Logistics' (0 journal line(s)). Declare reuse_existing for 1214, or settle which chart this database keeps, before creating WIP-005."
+            ]
+        },
+        {
+            "code": "WIP-006",
+            "name": "Work in Progress:Equipment Hire & Site",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-006 would be a second account for 'wip_equipment_site' (Project WIP: equipment and site): this chart already holds the reference account 1215 'Project WIP – Equipment & Site' (0 journal line(s)). Declare reuse_existing for 1215, or settle which chart this database keeps, before creating WIP-006."
+            ]
+        },
+        {
+            "code": "WIP-007",
+            "name": "Work in Progress:Project Utilities",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-007 would be a second account for 'wip_project_utilities' (Project WIP: project utilities): this chart already holds the reference account 1216 'Project WIP – Project Utilities' (0 journal line(s)). Declare reuse_existing for 1216, or settle which chart this database keeps, before creating WIP-007."
+            ]
+        },
+        {
+            "code": "WIP-008",
+            "name": "Work in Progress:Field Facilitation",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-008 would be a second account for 'wip_project_facilitation' (Project WIP: project facilitation (meals, accommodation, per diem)): this chart already holds the reference account 1217 'Project WIP – Project Facilitation' (0 journal line(s)). Declare reuse_existing for 1217, or settle which chart this database keeps, before creating WIP-008."
+            ]
+        },
+        {
+            "code": "WIP-009",
+            "name": "Work in Progress:Venue & Permits",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-009 would be a second account for 'wip_venue_statutory' (Project WIP: venue and statutory): this chart already holds the reference account 1218 'Project WIP – Venue & Statutory' (0 journal line(s)). Declare reuse_existing for 1218, or settle which chart this database keeps, before creating WIP-009."
+            ]
+        },
+        {
+            "code": "WIP-010",
+            "name": "Work in Progress:Rework & Warranty",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account WIP-010 would be a second account for 'wip_rework_warranty' (Project WIP: rework and warranty): this chart already holds the reference account 1219 'Project WIP – Rework & Warranty' (0 journal line(s)). Declare reuse_existing for 1219, or settle which chart this database keeps, before creating WIP-010."
+            ]
+        },
+        {
+            "code": "COS-021",
+            "name": "Cost of Sales:Equipment Hire & Site",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account COS-021 would be a second account for 'cos_equipment_site' (Cost of sales: equipment and site (WIP release)): this chart already holds the reference account 5500 'Cost of Sales – Equipment & Site' (0 journal line(s)). Declare reuse_existing for 5500, or settle which chart this database keeps, before creating COS-021."
+            ]
+        },
+        {
+            "code": "COS-022",
+            "name": "Cost of Sales:Project Utilities",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account COS-022 would be a second account for 'cos_project_utilities' (Cost of sales: project utilities (WIP release)): this chart already holds the reference account 5600 'Cost of Sales – Project Utilities' (0 journal line(s)). Declare reuse_existing for 5600, or settle which chart this database keeps, before creating COS-022."
+            ]
+        },
+        {
+            "code": "COS-023",
+            "name": "Cost of Sales:Venue & Permits",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account COS-023 would be a second account for 'cos_venue_statutory' (Cost of sales: venue and statutory (WIP release)): this chart already holds the reference account 5800 'Cost of Sales – Venue & Statutory' (0 journal line(s)). Declare reuse_existing for 5800, or settle which chart this database keeps, before creating COS-023."
+            ]
+        },
+        {
+            "code": "PRE-001",
+            "name": "Prepayments & Deposits",
+            "action": "create",
+            "reuse": null,
+            "problems": []
+        },
+        {
+            "code": "PRE-002",
+            "name": "Prepayments & Deposits:Supplier Advances",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account PRE-002 would be a second account for catalogue reference 1310 (Supplier advances): this chart already holds the reference account 1310 'Supplier Advances' (0 journal line(s)). Declare reuse_existing for 1310, or settle which chart this database keeps, before creating PRE-002."
+            ]
+        },
+        {
+            "code": "PRE-003",
+            "name": "Prepayments & Deposits:Refundable Deposits",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account PRE-003 would be a second account for catalogue reference 1320 (Refundable deposits): this chart already holds the reference account 1320 'Refundable Deposits' (0 journal line(s)). Declare reuse_existing for 1320, or settle which chart this database keeps, before creating PRE-003."
+            ]
+        },
+        {
+            "code": "PRE-004",
+            "name": "Prepayments & Deposits:Prepaid Expenses",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account PRE-004 would be a second account for catalogue reference 1340 (Prepaid expenses): this chart already holds the reference account 1340 'Prepaid Expenses' (0 journal line(s)). Declare reuse_existing for 1340, or settle which chart this database keeps, before creating PRE-004."
+            ]
+        },
+        {
+            "code": "OI-001",
+            "name": "Office Improvement",
+            "action": "conflict",
+            "reuse": null,
+            "problems": [
+                "Account OI-001 would be a second account for catalogue reference 1600 (Leasehold improvements (capex)): this chart already holds the reference account 1600 'Leasehold Improvements' (0 journal line(s)). Declare reuse_existing for 1600, or settle which chart this database keeps, before creating OI-001."
+            ]
+        }
+    ],
+    "created": [],
+    "functions_resolved": "16 / 37",
+    "unresolved_functions": [
+        "input_vat",
+        "inventory",
+        "wip_direct_materials",
+        "wip_direct_labour",
+        "wip_subcontractors",
+        "wip_transport_logistics",
+        "wip_equipment_site",
+        "wip_project_utilities",
+        "wip_project_facilitation",
+        "wip_venue_statutory",
+        "wip_rework_warranty",
+        "output_vat",
+        "wht_payable",
+        "paye_payable",
+        "statutory_payable",
+        "accrued_expenses",
+        "client_deposits",
+        "project_revenue",
+        "cos_equipment_site",
+        "cos_project_utilities",
+        "cos_venue_statutory"
+    ],
+    "functions": {
+        "bank_default": {
+            "reference": "1010",
+            "account": "EQB-001",
+            "resolves": true,
+            "name": "Equity Bank",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Default operating bank account"
+        },
+        "petty_cash_float": {
+            "reference": "1030",
+            "account": "PETTY-001",
+            "resolves": true,
+            "name": "Petty cash",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Petty cash float (cash on hand)"
+        },
+        "accounts_receivable": {
+            "reference": "1100",
+            "account": "AR-001",
+            "resolves": true,
+            "name": "Accounts Receivable (A/R)",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Amounts clients owe"
+        },
+        "staff_advances": {
+            "reference": "1300",
+            "account": "STD-001",
+            "resolves": true,
+            "name": "Short Term Debtors",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Staff advances / imprest (asset)"
+        },
+        "input_vat": {
+            "reference": "1330",
+            "account": "VAT-002",
+            "resolves": false,
+            "name": "Input VAT Recoverable",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Input VAT recoverable (asset)"
+        },
+        "inventory": {
+            "reference": "1200",
+            "account": "IA-001",
+            "resolves": false,
+            "name": "Inventory Asset",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Raw-material inventory (asset)"
+        },
+        "wip_direct_materials": {
+            "reference": "1211",
+            "account": "WIP-002",
+            "resolves": false,
+            "name": "Work in Progress:Materials",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project work in progress: direct materials"
+        },
+        "wip_direct_labour": {
+            "reference": "1212",
+            "account": "WIP-003",
+            "resolves": false,
+            "name": "Work in Progress:Direct Labour",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project work in progress: direct labour"
+        },
+        "wip_subcontractors": {
+            "reference": "1213",
+            "account": "WIP-004",
+            "resolves": false,
+            "name": "Work in Progress:Subcontractors",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project WIP: subcontractors"
+        },
+        "wip_transport_logistics": {
+            "reference": "1214",
+            "account": "WIP-005",
+            "resolves": false,
+            "name": "Work in Progress:Transport & Delivery",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project WIP: transport and logistics"
+        },
+        "wip_equipment_site": {
+            "reference": "1215",
+            "account": "WIP-006",
+            "resolves": false,
+            "name": "Work in Progress:Equipment Hire & Site",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project WIP: equipment and site"
+        },
+        "wip_project_utilities": {
+            "reference": "1216",
+            "account": "WIP-007",
+            "resolves": false,
+            "name": "Work in Progress:Project Utilities",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project WIP: project utilities"
+        },
+        "wip_project_facilitation": {
+            "reference": "1217",
+            "account": "WIP-008",
+            "resolves": false,
+            "name": "Work in Progress:Field Facilitation",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project WIP: project facilitation (meals, accommodation, per diem)"
+        },
+        "wip_venue_statutory": {
+            "reference": "1218",
+            "account": "WIP-009",
+            "resolves": false,
+            "name": "Work in Progress:Venue & Permits",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project WIP: venue and statutory"
+        },
+        "wip_rework_warranty": {
+            "reference": "1219",
+            "account": "WIP-010",
+            "resolves": false,
+            "name": "Work in Progress:Rework & Warranty",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project WIP: rework and warranty"
+        },
+        "accounts_payable": {
+            "reference": "2100",
+            "account": "AP-001",
+            "resolves": true,
+            "name": "Accounts Payable (A/P)",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Amounts owed to suppliers and payees"
+        },
+        "output_vat": {
+            "reference": "2110",
+            "account": "VAT-001",
+            "resolves": false,
+            "name": "Output VAT Payable",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "credit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Output VAT payable"
+        },
+        "wht_payable": {
+            "reference": "2120",
+            "account": "WHT-001",
+            "resolves": false,
+            "name": "Withholding Tax Payable",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "credit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Withholding tax payable"
+        },
+        "paye_payable": {
+            "reference": "2130",
+            "account": "PL-002",
+            "resolves": false,
+            "name": "Payroll liabilities:PAYE",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "credit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "PAYE payable"
+        },
+        "statutory_payable": {
+            "reference": "2140",
+            "account": "PL-003",
+            "resolves": false,
+            "name": "Payroll liabilities:Statutory & Other Deductions",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "credit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Statutory deductions payable (NSSF, SHIF, housing levy)"
+        },
+        "accrued_expenses": {
+            "reference": "2150",
+            "account": "AE-001",
+            "resolves": false,
+            "name": "Accrued Expenses",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "credit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Goods received not yet invoiced / accrued expenses"
+        },
+        "net_payroll_payable": {
+            "reference": "2160",
+            "account": "2160",
+            "resolves": true,
+            "name": "Net Payroll Payable",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": "balance_sheet",
+            "normal_balance": "credit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Net pay owed to staff"
+        },
+        "client_deposits": {
+            "reference": "2200",
+            "account": "CD-001",
+            "resolves": false,
+            "name": "Client Deposits",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "balance_sheet",
+            "normal_balance": "credit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Client deposits received before revenue is earned"
+        },
+        "opening_balance_equity": {
+            "reference": "3900",
+            "account": "OBE-001",
+            "resolves": true,
+            "name": "Opening Balance Equity",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Opening balance equity (opening stock counts)"
+        },
+        "project_revenue": {
+            "reference": "4100",
+            "account": "SAL-002",
+            "resolves": false,
+            "name": "Sales:Project Revenue",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "revenue",
+            "normal_balance": "credit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Project revenue"
+        },
+        "cos_direct_materials": {
+            "reference": "5100",
+            "account": "COS-008",
+            "resolves": true,
+            "name": "Cost of Sales:Materials",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: direct materials (WIP release)"
+        },
+        "cos_direct_labour": {
+            "reference": "5200",
+            "account": "PE-007",
+            "resolves": true,
+            "name": "Personnel Expenses:Wages-Direct Labour",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: direct labour (WIP release; payroll direct labour)"
+        },
+        "cos_subcontractors": {
+            "reference": "5300",
+            "account": "COS-020",
+            "resolves": true,
+            "name": "Subcontractors - COS",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: subcontractors (WIP release)"
+        },
+        "cos_transport_logistics": {
+            "reference": "5400",
+            "account": "COS-016",
+            "resolves": true,
+            "name": "Cost of Sales:Transport & Delivery",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: transport and logistics (WIP release)"
+        },
+        "cos_equipment_site": {
+            "reference": "5500",
+            "account": "COS-021",
+            "resolves": false,
+            "name": "Cost of Sales:Equipment Hire & Site",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "direct_cost",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: equipment and site (WIP release)"
+        },
+        "cos_project_utilities": {
+            "reference": "5600",
+            "account": "COS-022",
+            "resolves": false,
+            "name": "Cost of Sales:Project Utilities",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "direct_cost",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: project utilities (WIP release)"
+        },
+        "cos_project_facilitation": {
+            "reference": "5700",
+            "account": "COS-006",
+            "resolves": true,
+            "name": "Cost of Sales:Field Facilitation",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: project facilitation (WIP release)"
+        },
+        "cos_venue_statutory": {
+            "reference": "5800",
+            "account": "COS-023",
+            "resolves": false,
+            "name": "Cost of Sales:Venue & Permits",
+            "status": "CONFLICT",
+            "source": "proposed new account",
+            "account_type": "direct_cost",
+            "normal_balance": "debit",
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: venue and statutory (WIP release)"
+        },
+        "cos_rework_warranty": {
+            "reference": "5900",
+            "account": "COS-018",
+            "resolves": true,
+            "name": "Other - COS",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Cost of sales: rework and warranty (WIP release)"
+        },
+        "inventory_adjustments": {
+            "reference": "6800",
+            "account": "INV-001",
+            "resolves": true,
+            "name": "Inventory Shrinkage",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Inventory adjustments and shrinkage"
+        },
+        "salaries_expense": {
+            "reference": "7550",
+            "account": "PE-006",
+            "resolves": true,
+            "name": "Personnel Expenses:Salaries",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Salaries and wages: office and admin staff (overhead)"
+        },
+        "bank_charges": {
+            "reference": "7800",
+            "account": "FIN-003",
+            "resolves": true,
+            "name": "Finance cost:Bank charges",
+            "status": "RESOLVED_EXISTING",
+            "source": "existing account",
+            "account_type": null,
+            "normal_balance": null,
+            "is_postable": true,
+            "is_active": true,
+            "meaning": "Bank and mobile-money transaction charges"
+        }
+    },
+    "catalogue": {
+        "1310": {
+            "account": "PRE-002",
+            "resolves": false,
+            "meaning": "Supplier advances"
+        },
+        "1320": {
+            "account": "PRE-003",
+            "resolves": false,
+            "meaning": "Refundable deposits"
+        },
+        "1340": {
+            "account": "PRE-004",
+            "resolves": false,
+            "meaning": "Prepaid expenses"
+        },
+        "1600": {
+            "account": "OI-001",
+            "resolves": false,
+            "meaning": "Leasehold improvements (capex)"
+        },
+        "2300": {
+            "account": null,
+            "resolves": false,
+            "meaning": "Loans payable"
+        },
+        "6100": {
+            "account": "OPE-012",
+            "resolves": true,
+            "meaning": "Workshop electricity"
+        },
+        "6200": {
+            "account": "OPE-023",
+            "resolves": true,
+            "meaning": "Machinery repairs & maintenance"
+        },
+        "6400": {
+            "account": "OPE-006",
+            "resolves": true,
+            "meaning": "Small tools & workshop consumables"
+        },
+        "6600": {
+            "account": "OPE-006",
+            "resolves": true,
+            "meaning": "PPE & workshop safety"
+        },
+        "6700": {
+            "account": "OPE-014",
+            "resolves": true,
+            "meaning": "Cleaning & waste disposal"
+        },
+        "7100": {
+            "account": "OPE-022",
+            "resolves": true,
+            "meaning": "Office rent"
+        },
+        "7150": {
+            "account": "OPE-030",
+            "resolves": true,
+            "meaning": "Office supplies & stationery"
+        },
+        "7200": {
+            "account": "OPE-031",
+            "resolves": true,
+            "meaning": "Administration airtime & internet"
+        },
+        "7400": {
+            "account": "OPE-032",
+            "resolves": true,
+            "meaning": "Office transport"
+        },
+        "7600": {
+            "account": "OPE-029",
+            "resolves": true,
+            "meaning": "Staff welfare"
+        }
+    },
+    "payment_sources": {
+        "PC-MAIN": {
+            "account": "PETTY-001",
+            "resolves": true,
+            "type": "petty_cash",
+            "is_active": true,
+            "linked": "1030",
+            "state": "REVIEW: linked to 1030; the profile declares PETTY-001"
+        },
+        "BANK-MAIN": {
+            "account": "EQB-001",
+            "resolves": true,
+            "type": "bank",
+            "is_active": true,
+            "linked": "1010",
+            "state": "REVIEW: linked to 1010; the profile declares EQB-001"
+        },
+        "BANK-ALT": {
+            "account": "NCBA-001",
+            "resolves": true,
+            "type": "bank",
+            "is_active": true,
+            "linked": "1020",
+            "state": "REVIEW: linked to 1020; the profile declares NCBA-001"
+        },
+        "BANK-STANBIC": {
+            "account": "STB-001",
+            "resolves": true,
+            "type": "bank",
+            "is_active": false,
+            "linked": "1010",
+            "state": "REVIEW: linked to 1010; the profile declares STB-001"
+        },
+        "BANK-KCB": {
+            "account": "KCB-001",
+            "resolves": true,
+            "type": "bank",
+            "is_active": false,
+            "linked": "1010",
+            "state": "REVIEW: linked to 1010; the profile declares KCB-001"
+        },
+        "BANK-FAMILY": {
+            "account": "FMB-001",
+            "resolves": true,
+            "type": "bank",
+            "is_active": false,
+            "linked": "1010",
+            "state": "REVIEW: linked to 1010; the profile declares FMB-001"
+        },
+        "AP": {
+            "account": "AP-001",
+            "resolves": true,
+            "type": "payable",
+            "is_active": true,
+            "linked": "2100",
+            "state": "REVIEW: linked to 2100; the profile declares AP-001"
+        },
+        "MPESA": {
+            "account": null,
+            "resolves": false,
+            "type": "mobile_money",
+            "is_active": true,
+            "linked": "1040",
+            "state": "REVIEW: linked to 1040, but the profile leaves it unlinked until Finance decides"
+        },
+        "CARD": {
+            "account": null,
+            "resolves": false,
+            "type": "card",
+            "is_active": true,
+            "linked": "1010",
+            "state": "REVIEW: linked to 1010, but the profile leaves it unlinked until Finance decides"
+        }
+    },
+    "classified_existing": [],
+    "classification_preview": {
+        "would_fill": [
+            {
+                "code": "AP-001",
+                "name": "Accounts Payable (A/P)",
+                "category": "liability",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "credit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "AR-001",
+                "name": "Accounts Receivable (A/R)",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "AR-002",
+                "name": "Accounts Receivable (A/R) - EUR",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "STD-001",
+                "name": "Short Term Debtors",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "CASH-001",
+                "name": "Cash Account",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "EQB-001",
+                "name": "Equity Bank",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "FMB-001",
+                "name": "Family Bank",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "FK-001",
+                "name": "Faulu Kenya",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "KCB-001",
+                "name": "KCB Bank",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "NCBA-001",
+                "name": "NCBA",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "NIC-001",
+                "name": "NIC Dollar Account",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PETTY-001",
+                "name": "Petty cash",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "SBM-001",
+                "name": "SBM",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "STB-001",
+                "name": "Stanbic Bank",
+                "category": "asset",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-001",
+                "name": "Change in inventory - COS",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-002",
+                "name": "Cost of Sales",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-003",
+                "name": "Cost of Sales:Branding",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-004",
+                "name": "Cost of Sales:Courier - Projects",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-005",
+                "name": "Cost of Sales:Fabrication",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-006",
+                "name": "Cost of Sales:Field Facilitation",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-007",
+                "name": "Cost of Sales:Jomat hardware",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-008",
+                "name": "Cost of Sales:Materials",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-009",
+                "name": "Cost of Sales:Motor bike and motor vehicle fuel",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-010",
+                "name": "Cost of Sales:Paints & Hardware",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-011",
+                "name": "Cost of Sales:Parking Fees",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-012",
+                "name": "Cost of Sales:Plotting & Cutting",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-013",
+                "name": "Cost of Sales:Printing",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-014",
+                "name": "Cost of Sales:Team Meals",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-015",
+                "name": "Cost of Sales:Teams accomodation",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-016",
+                "name": "Cost of Sales:Transport & Delivery",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-017",
+                "name": "Discounts given - COS",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "INV-001",
+                "name": "Inventory Shrinkage",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-018",
+                "name": "Other - COS",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-019",
+                "name": "Overhead - COS",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "overhead",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "EXP-001",
+                "name": "Pasting Expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "COS-020",
+                "name": "Subcontractors - COS",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "DIV-001",
+                "name": "Dividend disbursed",
+                "category": "equity",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OBE-001",
+                "name": "Opening Balance Equity",
+                "category": "equity",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "credit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OCI-001",
+                "name": "Other comprehensive income",
+                "category": "equity",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "credit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "RE-001",
+                "name": "Retained Earnings",
+                "category": "equity",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "credit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "SC-001",
+                "name": "Share capital",
+                "category": "equity",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "balance_sheet",
+                "proposed_normal_balance": "credit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "ADM-001",
+                "name": "Administration expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "ADM-002",
+                "name": "Administration expenses:Courier & Postage",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "ADM-003",
+                "name": "Administration expenses:Depreciation Expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "AMO-001",
+                "name": "Amortisation expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "ATM-001",
+                "name": "Atm charges",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "BD-001",
+                "name": "Bad Debts",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "DEL-001",
+                "name": "Delivery/Trolley expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "EXD-001",
+                "name": "EXCISE DUTY",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "FIN-001",
+                "name": "Finance cost",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "FIN-002",
+                "name": "Finance cost:Bad debts",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "FIN-003",
+                "name": "Finance cost:Bank charges",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "FIN-004",
+                "name": "Finance cost:Interest expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "FIN-005",
+                "name": "Finance cost:Mpesa charges",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "INS-001",
+                "name": "Insurance - Disability",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "INS-002",
+                "name": "Insurance - General",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "INS-003",
+                "name": "Insurance - Liability",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "LPF-001",
+                "name": "Legal and professional fees",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "MC-001",
+                "name": "Management compensation",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "MAE-001",
+                "name": "Meals and entertainment",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "MED-001",
+                "name": "Medical expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "MBMV-001",
+                "name": "Motor bike and motor vehicle car wash",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "MBMV-002",
+                "name": "Motor bike and motor vehicles Repair",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-001",
+                "name": "Operating Expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-002",
+                "name": "Operating Expenses:Advertising/Promotional",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-003",
+                "name": "Operating Expenses:Audit & Accountancy Fees",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-004",
+                "name": "Operating Expenses:Commissions and fees",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-005",
+                "name": "Operating Expenses:Consultancy Fees",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-006",
+                "name": "Operating Expenses:Consumables",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-007",
+                "name": "Operating Expenses:Corporate social Responsibility",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-008",
+                "name": "Operating Expenses:Director Expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-009",
+                "name": "Operating Expenses:Director Expenses:Courier - Director's Errands",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-010",
+                "name": "Operating Expenses:Dues and subacriptions",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-011",
+                "name": "Operating Expenses:Dues and subscriptions",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-012",
+                "name": "Operating Expenses:Electricity & Water",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-013",
+                "name": "Operating Expenses:Equipment Rental",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-014",
+                "name": "Operating Expenses:Garbage Collections",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-015",
+                "name": "Operating Expenses:Generator fuel, Repair and Maintenance",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-016",
+                "name": "Operating Expenses:Insurance premium",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-017",
+                "name": "Operating Expenses:Licenses and permits",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-018",
+                "name": "Operating Expenses:Office Casual/Stipend",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-019",
+                "name": "Operating Expenses:Office expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-020",
+                "name": "Operating Expenses:Packaging and Delivery",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-021",
+                "name": "Operating Expenses:Professional Fees",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-022",
+                "name": "Operating Expenses:Rent & lease Payments",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-023",
+                "name": "Operating Expenses:Repairs and Maintenance",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-024",
+                "name": "Operating Expenses:Samples",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-025",
+                "name": "Operating Expenses:Security And Fees",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-027",
+                "name": "Operating Expenses:Shipping & Delivery Expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-028",
+                "name": "Operating Expenses:Site Visist",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-029",
+                "name": "Operating Expenses:Staff Welfare",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-030",
+                "name": "Operating Expenses:Stationery & Printing",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-031",
+                "name": "Operating Expenses:Telephone & Internet",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OPE-032",
+                "name": "Operating Expenses:Transport & Delivery",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OGAE-001",
+                "name": "Other general and administrative expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OSE-001",
+                "name": "Other selling expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OTEA-001",
+                "name": "Other Types of Expenses-Advertising Expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "OTE-001",
+                "name": "Overtime expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PE-001",
+                "name": "Payroll Expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PE-002",
+                "name": "Personnel Expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PE-003",
+                "name": "Personnel Expenses:Housing levy",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PE-004",
+                "name": "Personnel Expenses:Nita Levy",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PE-005",
+                "name": "Personnel Expenses:NSSF Expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PE-006",
+                "name": "Personnel Expenses:Salaries",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PE-007",
+                "name": "Personnel Expenses:Wages-Direct Labour",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "direct_cost",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "PS-001",
+                "name": "Printing Supplies",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "RI-001",
+                "name": "Return Inwards",
+                "category": "revenue",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "revenue",
+                "proposed_normal_balance": "credit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "RE-002",
+                "name": "Rider's Expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "SUP-001",
+                "name": "Supplies",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "TSE-001",
+                "name": "Travel expenses - selling expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "UCBPE-001",
+                "name": "Unapplied Cash Bill Payment Expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "UE-001",
+                "name": "Uncategorised Expense",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "UTIL-001",
+                "name": "Utilities",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "VP-001",
+                "name": "Vat Penalty",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "WE-001",
+                "name": "Wage expenses",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            },
+            {
+                "code": "WNGA-001",
+                "name": "WNG Give aways",
+                "category": "expense",
+                "current_account_type": null,
+                "current_normal_balance": null,
+                "proposed_account_type": "opex",
+                "proposed_normal_balance": "debit",
+                "fills": [
+                    "account_type",
+                    "normal_balance"
+                ]
+            }
+        ],
+        "pending_decision": {
+            "EQE-001": "\"Equity in earnings of subsidiaries\" is recorded as EQUITY, but in QuickBooks it is normally an income-statement item. The category itself is ambiguous; left unclassified.",
+            "ITX-001": "Income tax expense: a tax charge below operating profit. None of direct_cost / overhead / opex is correct, and the ERP has no tax section. Left unclassified.",
+            "LDO-001": "Loss on discontinued operations, net of tax: below-the-line. Left unclassified for the same reason.",
+            "OPE-026": "Set Up Casuals: could be project setup labour (direct cost) or general casual labour (opex). No history line uses it, so there is no evidence either way. Left unclassified; the P&L shows it under `unclassified` until the accountant decides."
+        },
+        "not_in_profile": []
+    },
+    "source_state": [],
+    "reference_twins": [
+        {
+            "reference": "1010",
+            "reference_name": "Bank – Main Account",
+            "account": "EQB-001",
+            "label": "'bank_default' (Default operating bank account)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1030",
+            "reference_name": "Petty Cash Float",
+            "account": "PETTY-001",
+            "label": "'petty_cash_float' (Petty cash float (cash on hand))",
+            "journal_lines": 1,
+            "acknowledged": false
+        },
+        {
+            "reference": "1100",
+            "reference_name": "Accounts Receivable",
+            "account": "AR-001",
+            "label": "'accounts_receivable' (Amounts clients owe)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1300",
+            "reference_name": "Staff Advances / Imprest",
+            "account": "STD-001",
+            "label": "'staff_advances' (Staff advances / imprest (asset))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1330",
+            "reference_name": "Input VAT Recoverable",
+            "account": "VAT-002",
+            "label": "'input_vat' (Input VAT recoverable (asset))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1200",
+            "reference_name": "Raw-material Inventory",
+            "account": "IA-001",
+            "label": "'inventory' (Raw-material inventory (asset))",
+            "journal_lines": 3,
+            "acknowledged": false
+        },
+        {
+            "reference": "2100",
+            "reference_name": "Accounts Payable",
+            "account": "AP-001",
+            "label": "'accounts_payable' (Amounts owed to suppliers and payees)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "2110",
+            "reference_name": "Output VAT Payable",
+            "account": "VAT-001",
+            "label": "'output_vat' (Output VAT payable)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "2120",
+            "reference_name": "Withholding Tax Payable",
+            "account": "WHT-001",
+            "label": "'wht_payable' (Withholding tax payable)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "2130",
+            "reference_name": "PAYE Payable",
+            "account": "PL-002",
+            "label": "'paye_payable' (PAYE payable)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "2140",
+            "reference_name": "Statutory Deductions Payable",
+            "account": "PL-003",
+            "label": "'statutory_payable' (Statutory deductions payable (NSSF, SHIF, housing levy))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "2150",
+            "reference_name": "Accrued Expenses",
+            "account": "AE-001",
+            "label": "'accrued_expenses' (Goods received not yet invoiced / accrued expenses)",
+            "journal_lines": 2,
+            "acknowledged": false
+        },
+        {
+            "reference": "2200",
+            "reference_name": "Client Deposits",
+            "account": "CD-001",
+            "label": "'client_deposits' (Client deposits received before revenue is earned)",
+            "journal_lines": 1,
+            "acknowledged": false
+        },
+        {
+            "reference": "3900",
+            "reference_name": "Opening Balance Equity",
+            "account": "OBE-001",
+            "label": "'opening_balance_equity' (Opening balance equity (opening stock counts))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "4100",
+            "reference_name": "Project Revenue",
+            "account": "SAL-002",
+            "label": "'project_revenue' (Project revenue)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5100",
+            "reference_name": "Cost of Sales – Direct Materials",
+            "account": "COS-008",
+            "label": "'cos_direct_materials' (Cost of sales: direct materials (WIP release))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5200",
+            "reference_name": "Cost of Sales – Direct Labour",
+            "account": "PE-007",
+            "label": "'cos_direct_labour' (Cost of sales: direct labour (WIP release; payroll direct labour))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5300",
+            "reference_name": "Cost of Sales – Subcontractors",
+            "account": "COS-020",
+            "label": "'cos_subcontractors' (Cost of sales: subcontractors (WIP release))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5400",
+            "reference_name": "Cost of Sales – Transport & Logistics",
+            "account": "COS-016",
+            "label": "'cos_transport_logistics' (Cost of sales: transport and logistics (WIP release))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5500",
+            "reference_name": "Cost of Sales – Equipment & Site",
+            "account": "COS-021",
+            "label": "'cos_equipment_site' (Cost of sales: equipment and site (WIP release))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5600",
+            "reference_name": "Cost of Sales – Project Utilities",
+            "account": "COS-022",
+            "label": "'cos_project_utilities' (Cost of sales: project utilities (WIP release))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5700",
+            "reference_name": "Cost of Sales – Project Facilitation",
+            "account": "COS-006",
+            "label": "'cos_project_facilitation' (Cost of sales: project facilitation (WIP release))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5800",
+            "reference_name": "Cost of Sales – Venue & Statutory",
+            "account": "COS-023",
+            "label": "'cos_venue_statutory' (Cost of sales: venue and statutory (WIP release))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "5900",
+            "reference_name": "Cost of Sales – Rework & Warranty",
+            "account": "COS-018",
+            "label": "'cos_rework_warranty' (Cost of sales: rework and warranty (WIP release))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "6800",
+            "reference_name": "Inventory Adjustments & Shrinkage",
+            "account": "INV-001",
+            "label": "'inventory_adjustments' (Inventory adjustments and shrinkage)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "7550",
+            "reference_name": "Salaries & Wages",
+            "account": "PE-006",
+            "label": "'salaries_expense' (Salaries and wages: office and admin staff (overhead))",
+            "journal_lines": 0,
+            "acknowledged": true
+        },
+        {
+            "reference": "7800",
+            "reference_name": "Bank & Mobile-money Charges",
+            "account": "FIN-003",
+            "label": "'bank_charges' (Bank and mobile-money transaction charges)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1211",
+            "reference_name": "Project WIP – Direct Materials",
+            "account": "WIP-002",
+            "label": "'wip_direct_materials' (Project work in progress: direct materials)",
+            "journal_lines": 1,
+            "acknowledged": false
+        },
+        {
+            "reference": "1212",
+            "reference_name": "Project WIP – Direct Labour",
+            "account": "WIP-003",
+            "label": "'wip_direct_labour' (Project work in progress: direct labour)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1213",
+            "reference_name": "Project WIP – Subcontractors",
+            "account": "WIP-004",
+            "label": "'wip_subcontractors' (Project WIP: subcontractors)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1214",
+            "reference_name": "Project WIP – Transport & Logistics",
+            "account": "WIP-005",
+            "label": "'wip_transport_logistics' (Project WIP: transport and logistics)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1215",
+            "reference_name": "Project WIP – Equipment & Site",
+            "account": "WIP-006",
+            "label": "'wip_equipment_site' (Project WIP: equipment and site)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1216",
+            "reference_name": "Project WIP – Project Utilities",
+            "account": "WIP-007",
+            "label": "'wip_project_utilities' (Project WIP: project utilities)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1217",
+            "reference_name": "Project WIP – Project Facilitation",
+            "account": "WIP-008",
+            "label": "'wip_project_facilitation' (Project WIP: project facilitation (meals, accommodation, per diem))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1218",
+            "reference_name": "Project WIP – Venue & Statutory",
+            "account": "WIP-009",
+            "label": "'wip_venue_statutory' (Project WIP: venue and statutory)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1219",
+            "reference_name": "Project WIP – Rework & Warranty",
+            "account": "WIP-010",
+            "label": "'wip_rework_warranty' (Project WIP: rework and warranty)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1310",
+            "reference_name": "Supplier Advances",
+            "account": "PRE-002",
+            "label": "catalogue reference 1310 (Supplier advances)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1320",
+            "reference_name": "Refundable Deposits",
+            "account": "PRE-003",
+            "label": "catalogue reference 1320 (Refundable deposits)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1340",
+            "reference_name": "Prepaid Expenses",
+            "account": "PRE-004",
+            "label": "catalogue reference 1340 (Prepaid expenses)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "1600",
+            "reference_name": "Leasehold Improvements",
+            "account": "OI-001",
+            "label": "catalogue reference 1600 (Leasehold improvements (capex))",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "6100",
+            "reference_name": "Workshop Electricity",
+            "account": "OPE-012",
+            "label": "catalogue reference 6100 (Workshop electricity)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "6200",
+            "reference_name": "Machinery Repairs & Maintenance",
+            "account": "OPE-023",
+            "label": "catalogue reference 6200 (Machinery repairs & maintenance)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "6400",
+            "reference_name": "Small Tools & Workshop Consumables",
+            "account": "OPE-006",
+            "label": "catalogue reference 6400 (Small tools & workshop consumables)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "6600",
+            "reference_name": "PPE & Workshop Safety",
+            "account": "OPE-006",
+            "label": "catalogue reference 6600 (PPE & workshop safety)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "6700",
+            "reference_name": "Cleaning & Waste Disposal",
+            "account": "OPE-014",
+            "label": "catalogue reference 6700 (Cleaning & waste disposal)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "7100",
+            "reference_name": "Office Rent & Electricity",
+            "account": "OPE-022",
+            "label": "catalogue reference 7100 (Office rent)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "7150",
+            "reference_name": "Office Supplies & Stationery",
+            "account": "OPE-030",
+            "label": "catalogue reference 7150 (Office supplies & stationery)",
+            "journal_lines": 0,
+            "acknowledged": true
+        },
+        {
+            "reference": "7200",
+            "reference_name": "Administration Airtime & Internet",
+            "account": "OPE-031",
+            "label": "catalogue reference 7200 (Administration airtime & internet)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "7400",
+            "reference_name": "Office Transport",
+            "account": "OPE-032",
+            "label": "catalogue reference 7400 (Office transport)",
+            "journal_lines": 0,
+            "acknowledged": false
+        },
+        {
+            "reference": "7600",
+            "reference_name": "Staff Welfare",
+            "account": "OPE-029",
+            "label": "catalogue reference 7600 (Staff welfare)",
+            "journal_lines": 0,
+            "acknowledged": false
+        }
+    ],
+    "blocking": [
+        "ACCOUNTANT REVIEW REQUIRED — TWO CHARTS DETECTED: this database holds the company's chart and 85 reference-chart account(s) (1000, 1010, 1020, 1030, 1040, 1100, …), 5 of them carrying journal lines. Nothing is deleted, merged, moved, renamed, remapped or adopted automatically. An accountant decides which chart this database keeps; a reference account is used only where the profile declares it (reuse_existing, or erp_added_accounts).",
+        "Account SAL-002 would be a second account for 'project_revenue' (Project revenue): this chart already holds the reference account 4100 'Project Revenue' (0 journal line(s)). Declare reuse_existing for 4100, or settle which chart this database keeps, before creating SAL-002.",
+        "Account VAT-001 ('Output VAT Payable') duplicates existing account 2110. Map to 2110 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2110, name: Output VAT Payable} on VAT-001 if they are one account.)",
+        "Account VAT-002 ('Input VAT Recoverable') duplicates existing account 1330. Map to 1330 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 1330, name: Input VAT Recoverable} on VAT-002 if they are one account.)",
+        "Account WHT-001 ('Withholding Tax Payable') duplicates existing account 2120. Map to 2120 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2120, name: Withholding Tax Payable} on WHT-001 if they are one account.)",
+        "Account PL-002 would be a second account for 'paye_payable' (PAYE payable): this chart already holds the reference account 2130 'PAYE Payable' (0 journal line(s)). Declare reuse_existing for 2130, or settle which chart this database keeps, before creating PL-002.",
+        "Account PL-003 would be a second account for 'statutory_payable' (Statutory deductions payable (NSSF, SHIF, housing levy)): this chart already holds the reference account 2140 'Statutory Deductions Payable' (0 journal line(s)). Declare reuse_existing for 2140, or settle which chart this database keeps, before creating PL-003.",
+        "Account AE-001 ('Accrued Expenses') duplicates existing account 2150. Map to 2150 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2150, name: Accrued Expenses} on AE-001 if they are one account.)",
+        "Account CD-001 ('Client Deposits') duplicates existing account 2200. Map to 2200 instead of creating it. (Nothing is reused by name: declare reuse_existing {code: 2200, name: Client Deposits} on CD-001 if they are one account.)",
+        "Account IA-001 would be a second account for 'inventory' (Raw-material inventory (asset)): this chart already holds the reference account 1200 'Raw-material Inventory' (3 journal line(s)). Declare reuse_existing for 1200, or settle which chart this database keeps, before creating IA-001.",
+        "Account WIP-002 would be a second account for 'wip_direct_materials' (Project work in progress: direct materials): this chart already holds the reference account 1211 'Project WIP – Direct Materials' (1 journal line(s)). Declare reuse_existing for 1211, or settle which chart this database keeps, before creating WIP-002.",
+        "Account WIP-003 would be a second account for 'wip_direct_labour' (Project work in progress: direct labour): this chart already holds the reference account 1212 'Project WIP – Direct Labour' (0 journal line(s)). Declare reuse_existing for 1212, or settle which chart this database keeps, before creating WIP-003.",
+        "Account WIP-004 would be a second account for 'wip_subcontractors' (Project WIP: subcontractors): this chart already holds the reference account 1213 'Project WIP – Subcontractors' (0 journal line(s)). Declare reuse_existing for 1213, or settle which chart this database keeps, before creating WIP-004.",
+        "Account WIP-005 would be a second account for 'wip_transport_logistics' (Project WIP: transport and logistics): this chart already holds the reference account 1214 'Project WIP – Transport & Logistics' (0 journal line(s)). Declare reuse_existing for 1214, or settle which chart this database keeps, before creating WIP-005.",
+        "Account WIP-006 would be a second account for 'wip_equipment_site' (Project WIP: equipment and site): this chart already holds the reference account 1215 'Project WIP – Equipment & Site' (0 journal line(s)). Declare reuse_existing for 1215, or settle which chart this database keeps, before creating WIP-006.",
+        "Account WIP-007 would be a second account for 'wip_project_utilities' (Project WIP: project utilities): this chart already holds the reference account 1216 'Project WIP – Project Utilities' (0 journal line(s)). Declare reuse_existing for 1216, or settle which chart this database keeps, before creating WIP-007.",
+        "Account WIP-008 would be a second account for 'wip_project_facilitation' (Project WIP: project facilitation (meals, accommodation, per diem)): this chart already holds the reference account 1217 'Project WIP – Project Facilitation' (0 journal line(s)). Declare reuse_existing for 1217, or settle which chart this database keeps, before creating WIP-008.",
+        "Account WIP-009 would be a second account for 'wip_venue_statutory' (Project WIP: venue and statutory): this chart already holds the reference account 1218 'Project WIP – Venue & Statutory' (0 journal line(s)). Declare reuse_existing for 1218, or settle which chart this database keeps, before creating WIP-009.",
+        "Account WIP-010 would be a second account for 'wip_rework_warranty' (Project WIP: rework and warranty): this chart already holds the reference account 1219 'Project WIP – Rework & Warranty' (0 journal line(s)). Declare reuse_existing for 1219, or settle which chart this database keeps, before creating WIP-010.",
+        "Account COS-021 would be a second account for 'cos_equipment_site' (Cost of sales: equipment and site (WIP release)): this chart already holds the reference account 5500 'Cost of Sales – Equipment & Site' (0 journal line(s)). Declare reuse_existing for 5500, or settle which chart this database keeps, before creating COS-021.",
+        "Account COS-022 would be a second account for 'cos_project_utilities' (Cost of sales: project utilities (WIP release)): this chart already holds the reference account 5600 'Cost of Sales – Project Utilities' (0 journal line(s)). Declare reuse_existing for 5600, or settle which chart this database keeps, before creating COS-022.",
+        "Account COS-023 would be a second account for 'cos_venue_statutory' (Cost of sales: venue and statutory (WIP release)): this chart already holds the reference account 5800 'Cost of Sales – Venue & Statutory' (0 journal line(s)). Declare reuse_existing for 5800, or settle which chart this database keeps, before creating COS-023.",
+        "Account PRE-002 would be a second account for catalogue reference 1310 (Supplier advances): this chart already holds the reference account 1310 'Supplier Advances' (0 journal line(s)). Declare reuse_existing for 1310, or settle which chart this database keeps, before creating PRE-002.",
+        "Account PRE-003 would be a second account for catalogue reference 1320 (Refundable deposits): this chart already holds the reference account 1320 'Refundable Deposits' (0 journal line(s)). Declare reuse_existing for 1320, or settle which chart this database keeps, before creating PRE-003.",
+        "Account PRE-004 would be a second account for catalogue reference 1340 (Prepaid expenses): this chart already holds the reference account 1340 'Prepaid Expenses' (0 journal line(s)). Declare reuse_existing for 1340, or settle which chart this database keeps, before creating PRE-004.",
+        "Account OI-001 would be a second account for catalogue reference 1600 (Leasehold improvements (capex)): this chart already holds the reference account 1600 'Leasehold Improvements' (0 journal line(s)). Declare reuse_existing for 1600, or settle which chart this database keeps, before creating OI-001."
+    ],
+    "warnings": []
+}

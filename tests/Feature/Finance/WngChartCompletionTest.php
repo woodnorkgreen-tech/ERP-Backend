@@ -218,12 +218,264 @@ class WngChartCompletionTest extends TestCase
             $this->assertSame($expensed[$cos], $expensed[$wip], "{$wip} and {$cos} are one account, so the release has nothing to move");
         }
 
-        // An unknown policy is never guessed: no WIP function is mapped, and readiness says why.
+        // An unknown policy is never guessed: every WIP function maps to a marker that is no account, and readiness says why.
         $unknown = FinanceChartProfile::map('wng', 'on_a_whim');
-        $this->assertArrayNotHasKey('1211', $unknown);
+        $this->assertSame(FinanceChartProfile::WIP_POLICY_REQUIRED, $unknown['1211']);
         $this->assertSame('AR-001', $unknown['1100'], 'the rest of the map is unaffected');
-        $this->assertNotEmpty(FinanceChartProfile::problems('wng', 'on_a_whim'));
-        $this->assertSame([], FinanceChartProfile::problems('wng', null));
+        $this->assertStringStartsWith('POLICY REQUIRED', FinanceChartProfile::problems('wng', 'on_a_whim')[0]);
+        $this->assertSame([], FinanceChartProfile::problems('wng', FinanceChartProfile::WIP_CAPITALISE));
+        $this->assertSame([], FinanceChartProfile::problems('wng', FinanceChartProfile::WIP_EXPENSE_ON_CAPTURE));
+    }
+
+    // ---- Report 74A: the WIP policy is never assumed ----
+
+    /** The profile is active but nobody has set FINANCE_WIP_POLICY. */
+    private function activateProfileWithoutAPolicy(): void
+    {
+        config([
+            'finance_accounts.profile' => 'wng',
+            'finance_accounts.wip_policy' => null,
+            'finance_accounts.map' => FinanceChartProfile::map('wng', null),
+            'finance_accounts.payment_sources' => FinanceChartProfile::paymentSources('wng'),
+        ]);
+    }
+
+    public function test_with_no_wip_policy_set_the_profile_default_is_never_applied(): void
+    {
+        $this->assertSame('capitalise', FinanceChartProfile::suggestedWipPolicy('wng'), 'the profile does suggest one');
+        $map = FinanceChartProfile::map('wng', null);
+
+        foreach (FinanceChartProfile::wipFunctions() as $function) {
+            $reference = FinanceAccountFunctions::all()[$function]['code'];
+            $this->assertSame(FinanceChartProfile::WIP_POLICY_REQUIRED, $map[$reference], "{$function} is not given the suggested account");
+        }
+        $this->assertCount(9, FinanceChartProfile::wipFunctions());
+        $this->assertNotContains('WIP-002', $map, 'capitalise was not chosen');
+        $this->assertSame('COS-008', $map['5100'], 'and expense-on-capture was not chosen either: cost of sales keeps its own mapping only');
+        $this->assertSame('AR-001', $map['1100'], 'nothing else depends on the policy');
+        $this->assertStringStartsWith('POLICY REQUIRED', FinanceChartProfile::problems('wng', null)[0]);
+    }
+
+    public function test_with_no_wip_policy_project_cost_cannot_post_and_readiness_says_policy_required(): void
+    {
+        $this->execute()->assertSuccessful();   // the WIP accounts exist: only the decision is missing
+        $this->activateProfile();
+        $this->seed(ExpenseCodeSeeder::class);  // codes linked while a policy was in force
+        $this->seed(RoleAndPermissionSeeder::class);
+        $this->activateProfileWithoutAPolicy();
+
+        // The nine WIP functions resolve to nothing; the other 28 are untouched.
+        $unresolved = array_keys(array_filter(FinanceAccountFunctions::resolution(), fn ($f) => ! $f['resolved']));
+        $this->assertEqualsCanonicalizing(FinanceChartProfile::wipFunctions(), $unresolved);
+
+        $posting = app(JournalPostingService::class);
+        $account = new ReflectionMethod(JournalPostingService::class, 'accountByCode');
+        $this->assertNull($account->invoke($posting, FinanceAccountFunctions::UNCODED_COST_FALLBACK), 'no account, so no posting');
+        $this->assertNotNull($account->invoke($posting, FinanceAccountFunctions::ACCOUNTS_RECEIVABLE));
+
+        // A job-cost code still carries the account an earlier policy gave it. Posting through it is refused all the same.
+        $guard = new ReflectionMethod(JournalPostingService::class, 'assertWipPolicy');
+        $jobCode = DB::table('expense_codes')->where('default_debit_gl', 'like', '1211%')->whereNotNull('default_debit_account_id')->first();
+        $this->assertNotNull($jobCode);
+        try {
+            $guard->invoke($posting, $jobCode->default_debit_gl, 'cost line CL-TEST');
+            $this->fail('A project cost posted with no WIP policy.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringStartsWith('POLICY REQUIRED', $e->getMessage());
+            $this->assertStringContainsString('cost line CL-TEST', $e->getMessage());
+        }
+        // An office overhead is not the WIP policy's to decide.
+        $guard->invoke($posting, '7100 Office Rent & Electricity', 'cost line CL-OFFICE');
+
+        // The release that moves WIP to cost of sales is refused too, rather than quietly releasing nothing.
+        try {
+            app(\App\Modules\Finance\Services\WorkInProgressReleaseService::class)
+                ->releaseForInvoice(new \App\Modules\Finance\Models\ProjectInvoice(['project_enquiry_id' => 1, 'invoice_number' => 'INV-TEST']));
+            $this->fail('Work in progress was released with no WIP policy.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringStartsWith('POLICY REQUIRED', $e->getMessage());
+        }
+
+        // Readiness, on the command line and on the setup screen, names the decision rather than a missing account.
+        $cli = collect(app(FinanceReadiness::class)->checks())->keyBy('check');
+        $this->assertFalse($cli['Chart profile']['ok']);
+        $this->assertStringStartsWith('POLICY REQUIRED', $cli['Chart profile']['detail']);
+        $this->assertStringNotContainsString('complete-chart', (string) $cli['Chart profile']['fix']);
+        $this->assertFalse(app(FinanceReadiness::class)->passes());
+
+        $user = User::factory()->create(['is_active' => true]);
+        $user->assignRole('Accounts');
+        $checks = collect($this->actingAs($user, 'sanctum')->getJson('/api/finance/readiness')->assertOk()->json('data.checks'))->keyBy('key');
+        $this->assertFalse($checks['chart_profile']['ready']);
+        $this->assertStringContainsString('POLICY REQUIRED', $checks['chart_profile']['message']);
+        $this->assertFalse($checks['required_accounts']['ready']);
+
+        // With the decision made (either one), all of it clears.
+        foreach ([FinanceChartProfile::WIP_CAPITALISE, FinanceChartProfile::WIP_EXPENSE_ON_CAPTURE] as $policy) {
+            $this->activateProfile($policy);
+            $this->assertTrue(collect(app(FinanceReadiness::class)->checks())->firstWhere('check', 'Chart profile')['ok'], $policy);
+            $guard->invoke($posting, $jobCode->default_debit_gl, 'cost line CL-TEST');
+        }
+    }
+
+    public function test_seeding_the_catalogue_with_no_wip_policy_links_no_job_cost_code(): void
+    {
+        $this->execute()->assertSuccessful();
+        $this->activateProfileWithoutAPolicy();
+
+        $this->seed(ExpenseCodeSeeder::class);
+
+        $jobCodes = DB::table('expense_codes')->where('default_debit_gl', 'REGEXP', '^121[1-9] ')->get();
+        $this->assertGreaterThan(50, $jobCodes->count());
+        $this->assertSame(0, $jobCodes->whereNotNull('default_debit_account_id')->count(), 'no WIP account, and no cost-of-sales account, was chosen for them');
+        $this->assertSame(0, $jobCodes->where('is_active', true)->count());
+        $this->assertTrue((bool) DB::table('expense_codes')->where('code', 'OE-FIN-001')->value('is_active'), 'codes the policy does not govern are linked as usual');
+    }
+
+    public function test_the_planning_tool_labels_the_suggested_policy_and_never_cuts_over_on_it(): void
+    {
+        $before = $this->snapshot();
+        config(['source_migration.live_target_databases' => [$this->database()], 'finance_accounts.wip_policy' => null]);
+
+        $this->complete()->expectsOutputToContain('WIP policy: capitalise, DEFAULT / NOT APPROVED FOR PRODUCTION')->assertSuccessful();
+        $this->complete(['--execute' => true, '--confirm' => $this->database(), '--cutover' => true])
+            ->expectsOutputToContain('POLICY REQUIRED')->assertFailed();
+        $this->assertSame($before, $this->snapshot(), 'a cutover is not run on a default');
+
+        config(['finance_accounts.wip_policy' => FinanceChartProfile::WIP_EXPENSE_ON_CAPTURE]);
+        $this->complete()->expectsOutputToContain('WIP policy: expense_on_capture, configured (FINANCE_WIP_POLICY)')->assertSuccessful();
+    }
+
+    // ---- Report 74A: what chart is this, and the two-chart stop ----
+
+    private function identity(array $options = []): array
+    {
+        $dir = sys_get_temp_dir().'/r74a-'.uniqid();
+        $this->complete(['--output' => $dir] + $options)->run();
+        $report = json_decode(file_get_contents("{$dir}/chart_completion.json"), true);
+        @unlink("{$dir}/chart_completion.json");
+        @rmdir($dir);
+
+        return $report;
+    }
+
+    public function test_wngs_own_chart_is_identified_as_such(): void
+    {
+        $this->complete()->expectsOutputToContain('Target chart identity: WNG_CHART_ONLY')->assertSuccessful();
+
+        $identity = $this->identity()['target_identity'];
+        $this->assertSame('WNG_CHART_ONLY', $identity['identity']);
+        $this->assertSame(['total' => 123, 'active' => 123, 'postable' => 123, 'company_coded' => 120, 'numeric' => 3, 'reference' => 3,
+            'reference_acknowledged' => 3, 'reference_unnamed' => 0, 'unexplained_numeric' => 0, 'other_coded' => 0,
+            'profile_existing_accounts' => 29, 'profile_existing_missing' => 0], $identity['counts']);
+        $this->assertSame([], $identity['duplicate_names']);
+        $this->assertSame([], $identity['reference_accounts_with_postings']);
+    }
+
+    public function test_two_charts_in_one_database_stop_the_run_and_nothing_is_merged_moved_renamed_or_adopted(): void
+    {
+        // The reference chart seeded beside WNG's: under names that match, and names that do not.
+        $this->account('1010', 'Bank – Main Account', 'asset');
+        $this->account('1100', 'Accounts Receivable', 'asset');
+        $this->account('3900', 'Opening Balance Equity', 'equity');
+        $this->outputVat();
+        $period = DB::table('accounting_periods')->value('id');
+        $entry = DB::table('journal_entries')->insertGetId(['entry_no' => 'JE-74A', 'posting_date' => now()->toDateString(), 'accounting_period_id' => $period,
+            'description' => 'test', 'total_debit' => 10, 'total_credit' => 10, 'status' => 'posted', 'created_at' => now(), 'updated_at' => now()]);
+        foreach (['1010' => 'debit', '2110' => 'credit'] as $code => $side) {
+            DB::table('journal_lines')->insert(['journal_entry_id' => $entry, 'account_id' => DB::table('chart_of_accounts')->where('code', $code)->value('id'),
+                'entry_type' => $side, 'amount' => 10, 'base_amount' => 10, 'created_at' => now(), 'updated_at' => now()]);
+        }
+        $before = $this->snapshot();
+        $lines = DB::table('journal_lines')->orderBy('id')->get()->map(fn ($l) => (array) $l)->all();
+
+        $this->complete()->expectsOutputToContain('Target chart identity: TWO_CHART_STATE')
+            ->expectsOutputToContain('ACCOUNTANT REVIEW REQUIRED — TWO CHARTS DETECTED')->assertFailed();
+        $this->execute()->expectsOutputToContain('REFUSED')->expectsOutputToContain('ACCOUNTANT REVIEW REQUIRED — TWO CHARTS DETECTED')->assertFailed();
+        $this->complete(['--execute' => true, '--confirm' => $this->database(), '--classify-existing' => true, '--disable-unlinked-sources' => true])->assertFailed();
+
+        $this->assertSame($before, $this->snapshot(), 'no account deleted, merged, renamed, created or classified');
+        $this->assertSame($lines, DB::table('journal_lines')->orderBy('id')->get()->map(fn ($l) => (array) $l)->all(), 'no journal line moved or remapped');
+        $this->assertSame('VAT-001', FinanceChartProfile::map('wng', 'capitalise')['2110'], 'no reference account adopted');
+
+        $identity = $this->identity()['target_identity'];
+        $this->assertSame('TWO_CHART_STATE', $identity['identity']);
+        $this->assertSame(['1010', '1100', '2110', '3900'], collect($identity['reference_accounts_not_named_by_profile'])->sort()->values()->all());
+        $this->assertSame(['1010' => 1, '2110' => 1], $identity['reference_accounts_with_postings']);
+        $this->assertSame(['OBE-001', '3900'], $identity['duplicate_names']['opening balance equity']);
+        $this->assertArrayNotHasKey('accounts receivable', $identity['duplicate_names'], '1100 is found by its code: its name differs from AR-001\'s');
+
+        // Declaring one reuse does not make the other three reference accounts WNG's.
+        $profile = $this->variant(self::REUSE_OUTPUT_VAT);
+        $this->artisan('finance:complete-chart', ['--profile' => $profile, '--execute' => true, '--confirm' => $this->database()])
+            ->expectsOutputToContain('TWO CHARTS DETECTED')->assertFailed();
+        $this->assertSame($before, $this->snapshot());
+    }
+
+    public function test_a_chart_that_is_neither_is_sent_for_manual_review(): void
+    {
+        $this->account('9999', 'Suspense', 'asset');
+        $before = $this->snapshot();
+
+        $this->complete()->expectsOutputToContain('Target chart identity: OTHER / MANUAL_REVIEW_REQUIRED')->assertFailed();
+        $this->execute()->expectsOutputToContain('MANUAL REVIEW REQUIRED')->assertFailed();
+        $this->assertSame($before, $this->snapshot());
+        $this->assertSame(['9999'], $this->identity()['target_identity']['unexplained_numeric_accounts']);
+
+        // And so is a database that does not hold the company's accounts at all.
+        DB::table('chart_of_accounts')->where('code', '9999')->delete();
+        DB::table('chart_of_accounts')->whereIn('code', ['EQB-001', 'AR-001'])->delete();
+        $identity = $this->identity()['target_identity'];
+        $this->assertSame('OTHER / MANUAL_REVIEW_REQUIRED', $identity['identity']);
+        $this->assertEqualsCanonicalizing(['EQB-001', 'AR-001'], $identity['profile_accounts_missing']);
+    }
+
+    // ---- Report 74A: an expense code resolves only from the account its catalogue row designates ----
+
+    public function test_under_the_full_profile_the_codes_that_only_mention_an_account_stay_unresolved(): void
+    {
+        $this->execute()->assertSuccessful();
+        $this->activateProfile();
+        $this->seed(ExpenseCodeSeeder::class);
+        $code = fn (string $code) => DB::table('expense_codes')->where('code', $code)->first();
+
+        // NE-018 mentions 2200 as its CREDIT; NE-023 names the range 5100–5800. Both codes are mapped by WNG's profile.
+        $this->assertSame('CD-001', FinanceChartProfile::map('wng', 'capitalise')['2200']);
+        $this->assertSame('COS-008', FinanceChartProfile::map('wng', 'capitalise')['5100']);
+        foreach (['NE-018' => 'Bank / Cash (credit is 2200 Client Deposits)', 'NE-023' => 'Relevant 5100–5800 Cost of Sales account'] as $indirect => $text) {
+            $this->assertSame($text, $code($indirect)->default_debit_gl, 'the catalogue text is unchanged');
+            $this->assertNull($code($indirect)->default_debit_account_id, "{$indirect} takes no account from a code its text only mentions");
+            $this->assertFalse((bool) $code($indirect)->is_active, "{$indirect} stays out of capture until its own workflow supplies the account");
+        }
+        // No code whose text does not lead with an account is linked or active.
+        $this->assertSame(0, DB::table('expense_codes')->where('default_debit_gl', 'NOT REGEXP', '^[0-9]{4} ')
+            ->where(fn ($q) => $q->whereNotNull('default_debit_account_id')->orWhere('is_active', true))->count());
+
+        // Every code that DOES designate an account still resolves: 101 of them, less the loan WNG's profile leaves off.
+        $designated = DB::table('expense_codes')->where('default_debit_gl', 'REGEXP', '^[0-9]{4} ')->get();
+        $this->assertCount(101, $designated);
+        $this->assertSame(['NE-016'], $designated->whereNull('default_debit_account_id')->pluck('code')->values()->all());
+        $this->assertSame(100, $designated->where('is_active', true)->count());
+        $this->assertSame('WIP-002', DB::table('chart_of_accounts')->where('id', $code('DM-EL-001')->default_debit_account_id)->value('code'));
+        $this->assertSame('FIN-003', DB::table('chart_of_accounts')->where('id', $code('OE-FIN-001')->default_debit_account_id)->value('code'));
+
+        $this->assertTrue(collect(app(FinanceReadiness::class)->checks())->firstWhere('check', 'Expense-code accounts')['ok']);
+    }
+
+    public function test_a_designated_account_missing_from_the_chart_fails_readiness_by_name(): void
+    {
+        $this->execute()->assertSuccessful();
+        $this->activateProfile();
+        DB::table('chart_of_accounts')->where('code', 'OPE-022')->delete();   // WNG's rent account, which reference 7100 maps to
+
+        $this->seed(ExpenseCodeSeeder::class);
+
+        $rent = DB::table('expense_codes')->where('default_debit_gl', 'like', '7100%')->first();
+        $this->assertNull($rent->default_debit_account_id, 'not redirected to some other account');
+        $this->assertFalse((bool) $rent->is_active);
+        $check = collect(app(FinanceReadiness::class)->checks())->firstWhere('check', 'Expense-code accounts');
+        $this->assertFalse($check['ok']);
+        $this->assertStringContainsString('OPE-022', $check['detail']);
     }
 
     public function test_an_unreadable_profile_maps_nothing_and_readiness_names_it(): void
@@ -381,6 +633,226 @@ class WngChartCompletionTest extends TestCase
         $this->assertStringContainsString('off by design', $cliCheck['detail']);
         $this->assertStringContainsString('2300', $cliCheck['detail']);
         $this->assertFalse((bool) DB::table('expense_codes')->where('default_debit_gl', 'like', '2300%')->value('is_active'), 'the loan code stays inactive');
+    }
+
+    // ---- Report 74: explicit reuse of an existing account, and a dry run that reports instead of stopping ----
+
+    /** The WNG profile with some `new_accounts` entries changed, standing in under its own name. */
+    private function variant(array $changes): string
+    {
+        $profile = FinanceChartProfile::load('wng');
+        foreach ($profile['new_accounts'] as $i => $spec) {
+            $profile['new_accounts'][$i] = ($changes[$spec['code']] ?? []) + $spec;
+        }
+        FinanceChartProfile::fake('wng-reuse', $profile);
+
+        return 'wng-reuse';
+    }
+
+    private function account(string $code, string $name, string $category, array $columns = []): void
+    {
+        DB::table('chart_of_accounts')->insert($columns + ['code' => $code, 'name' => $name, 'category' => $category,
+            'is_postable' => true, 'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
+    }
+
+    private function outputVat(array $columns = []): void
+    {
+        $this->account('2110', 'Output VAT Payable', 'liability', $columns + ['account_type' => 'balance_sheet', 'normal_balance' => 'credit']);
+    }
+
+    private const REUSE_OUTPUT_VAT = ['VAT-001' => ['reuse_existing' => ['code' => '2110', 'name' => 'Output VAT Payable']]];
+
+    public function test_a_same_named_account_is_never_reused_unless_the_profile_declares_it(): void
+    {
+        $this->outputVat();
+        $before = $this->snapshot();
+
+        $this->complete()->expectsOutputToContain('duplicates existing account 2110')->assertFailed();
+        $this->execute()->expectsOutputToContain('REFUSED')->assertFailed();
+
+        $this->assertSame($before, $this->snapshot(), 'nothing created, nothing adopted');
+        $this->assertSame('VAT-001', FinanceChartProfile::map('wng')['2110'], 'the mapping still names the proposed account: the name match redirected nothing');
+        $this->assertSame([], FinanceChartProfile::reuse('wng'), 'WNG\'s own profile reuses nothing');
+    }
+
+    public function test_an_explicitly_declared_existing_account_meets_the_requirement_and_nothing_is_created_for_it(): void
+    {
+        $this->outputVat();
+        $before = $this->snapshot();
+        $profile = $this->variant(self::REUSE_OUTPUT_VAT);
+
+        $this->artisan('finance:complete-chart', ['--profile' => $profile])
+            ->expectsOutputToContain('reuse 2110')->expectsOutputToContain('Functions resolved: 37 / 37')->assertSuccessful();
+        $this->assertSame($before, $this->snapshot(), 'a dry run writes nothing');
+
+        $this->artisan('finance:complete-chart', ['--profile' => $profile, '--execute' => true, '--confirm' => $this->database()])
+            ->expectsOutputToContain('Functions resolved: 37 / 37')->assertSuccessful();
+
+        $this->assertFalse(DB::table('chart_of_accounts')->where('code', 'VAT-001')->exists(), 'no duplicate account');
+        $this->assertSame(count($before) + self::NEW_ACCOUNTS - 1, DB::table('chart_of_accounts')->count());
+        $existing = DB::table('chart_of_accounts')->whereIn('id', array_column($before, 'id'))->orderBy('id')->get()
+            ->map(fn ($a) => array_diff_key((array) $a, ['created_at' => 0, 'updated_at' => 0]))->all();
+        $this->assertSame($before, $existing, 'the reused account, like every existing account, keeps its id, code, name and every column');
+
+        // The function now posts to the existing account, under either reading of the profile.
+        $this->assertSame('2110', FinanceChartProfile::map($profile)['2110']);
+        config(['finance_accounts.map' => FinanceChartProfile::map($profile, FinanceChartProfile::WIP_CAPITALISE)]);
+        $resolution = FinanceAccountFunctions::resolution();
+        $this->assertSame('2110', $resolution['output_vat']['local_code']);
+        $this->assertSame([], array_keys(array_filter($resolution, fn ($f) => ! $f['resolved'])));
+
+        // Idempotent.
+        $after = $this->snapshot();
+        $this->artisan('finance:complete-chart', ['--profile' => $profile, '--execute' => true, '--confirm' => $this->database()])->assertSuccessful();
+        $this->assertSame($after, $this->snapshot());
+    }
+
+    /** @return array<string, array{0: \Closure, 1: array, 2: string}> */
+    public static function unsafeReuse(): array
+    {
+        $vat = fn (array $columns = []) => fn (self $t) => $t->outputVat($columns);
+        $declare = fn (string $code, string $name = 'Output VAT Payable') => ['VAT-001' => ['reuse_existing' => ['code' => $code, 'name' => $name]]];
+
+        return [
+            'a code that is not in the chart' => [$vat(), $declare('2119'), 'not in this chart'],
+            'a code that is another account' => [$vat(), $declare('AP-001'), 'that is not the account the profile describes'],
+            'a declaration with no name to check the code against' => [$vat(), ['VAT-001' => ['reuse_existing' => ['code' => '2110']]], "both 'code' and 'name'"],
+            'a non-postable header' => [$vat(['is_postable' => false]), $declare('2110'), 'non-postable header'],
+            'an inactive account' => [$vat(['is_active' => false]), $declare('2110'), 'is inactive'],
+            'an account of another category' => [fn (self $t) => $t->account('2110', 'Output VAT Payable', 'asset'), $declare('2110'), "category is 'asset'"],
+            'an account with the opposite normal balance' => [$vat(['normal_balance' => 'debit']), $declare('2110'), "normal_balance is 'debit'"],
+            'an account another requirement already reuses' => [$vat(), $declare('2110') + ['WHT-001' => ['reuse_existing' => ['code' => '2110', 'name' => 'Output VAT Payable']]], 'cannot stand in for two'],
+            'an account the profile itself proposes' => [$vat(), $declare('WHT-001', 'Withholding Tax Payable'), 'itself an account this profile proposes'],
+            'a requirement that is already in the chart as well' => [fn (self $t) => [$t->outputVat(), $t->account('VAT-001', 'Output VAT Payable (WNG)', 'liability')], $declare('2110'), 'cannot have two accounts'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('unsafeReuse')]
+    public function test_a_reuse_declaration_that_is_not_exactly_the_declared_account_is_refused(\Closure $chart, array $changes, string $reason): void
+    {
+        $chart($this);
+        $before = $this->snapshot();
+        $profile = $this->variant($changes);
+
+        $this->artisan('finance:complete-chart', ['--profile' => $profile])->expectsOutputToContain($reason)->assertFailed();
+        $this->artisan('finance:complete-chart', ['--profile' => $profile, '--execute' => true, '--confirm' => $this->database()])
+            ->expectsOutputToContain('REFUSED')->expectsOutputToContain($reason)->assertFailed();
+
+        $this->assertSame($before, $this->snapshot(), 'the whole run refuses: nothing created, nothing modified');
+    }
+
+    public function test_a_new_account_is_refused_beside_the_reference_account_for_the_same_function_whatever_its_name(): void
+    {
+        // The reference chart's inventory account, under a name the duplicate-name check cannot see.
+        $this->account('1200', 'Raw-material Inventory', 'asset', ['account_type' => 'balance_sheet', 'normal_balance' => 'debit']);
+        $before = $this->snapshot();
+
+        $this->execute()->expectsOutputToContain("IA-001 would be a second account for 'inventory'")->assertFailed();
+        $this->assertSame($before, $this->snapshot());
+
+        // Declared, it is the inventory account, and the catalogue and posting map follow it.
+        $profile = $this->variant(['IA-001' => ['reuse_existing' => ['code' => '1200', 'name' => 'Raw-material Inventory']]]);
+        $this->artisan('finance:complete-chart', ['--profile' => $profile, '--execute' => true, '--confirm' => $this->database()])->assertSuccessful();
+        $this->assertFalse(DB::table('chart_of_accounts')->where('code', 'IA-001')->exists());
+        $this->assertSame('1200', FinanceChartProfile::map($profile)[FinanceAccountFunctions::INVENTORY]);
+    }
+
+    public function test_a_blocked_dry_run_still_reports_the_whole_plan_and_writes_nothing(): void
+    {
+        $this->account('INVA-01', 'Inventory Asset', 'asset');
+        $before = $this->snapshot();
+        $dir = sys_get_temp_dir().'/r74-'.uniqid();
+
+        $this->complete(['--output' => $dir])
+            ->expectsOutputToContain('DRY RUN')
+            ->expectsOutputToContain('Accounts: 28 to create, 0 already present, 0 met by an existing account (declared reuse), 1 in conflict')
+            ->expectsOutputToContain('Functions resolved: 36 / 37')
+            ->expectsOutputToContain('Classification preview')
+            ->expectsOutputToContain('BLOCKED')
+            ->assertFailed();
+
+        $this->assertSame($before, $this->snapshot(), 'a dry run never writes, blocked or not');
+        $report = json_decode(file_get_contents("{$dir}/chart_completion.json"), true);
+        @unlink("{$dir}/chart_completion.json");
+        @rmdir($dir);
+        $this->assertCount(1, $report['blocking']);
+        $this->assertSame('conflict', collect($report['accounts'])->firstWhere('code', 'IA-001')['action']);
+        $this->assertSame('CONFLICT', $report['functions']['inventory']['status']);
+        $this->assertSame('RESOLVED_EXISTING', $report['functions']['accounts_receivable']['status']);
+        $this->assertSame('RESOLVED_PROPOSED_NEW', $report['functions']['output_vat']['status']);
+        $this->assertSame(['inventory'], $report['unresolved_functions']);
+    }
+
+    public function test_the_classification_preview_shows_before_and_proposed_and_changes_nothing(): void
+    {
+        $before = $this->snapshot();
+        $dir = sys_get_temp_dir().'/r74-'.uniqid();
+
+        // Previewed by default, and again when the flag is given without --execute.
+        $this->complete(['--output' => $dir])
+            ->expectsOutputToContain('116 account(s) would have a NULL account_type / normal_balance filled; left for the accountant: EQE-001, ITX-001, LDO-001, OPE-026')
+            ->assertSuccessful();
+        $this->complete(['--classify-existing' => true])->expectsOutputToContain('Existing accounts classified (NULL columns filled): 116 account(s) (dry run)')->assertSuccessful();
+
+        $this->assertSame($before, $this->snapshot(), 'previewing a classification classifies nothing');
+        $preview = json_decode(file_get_contents("{$dir}/chart_completion.json"), true)['classification_preview'];
+        @unlink("{$dir}/chart_completion.json");
+        @rmdir($dir);
+        $this->assertCount(116, $preview['would_fill']);
+        $materials = collect($preview['would_fill'])->firstWhere('code', 'COS-008');
+        $this->assertSame([null, null, 'direct_cost', 'debit'], [$materials['current_account_type'], $materials['current_normal_balance'], $materials['proposed_account_type'], $materials['proposed_normal_balance']]);
+        $this->assertSame(['EQE-001', 'ITX-001', 'LDO-001', 'OPE-026'], array_keys($preview['pending_decision']));
+        $this->assertSame([], $preview['not_in_profile'], 'every unclassified WNG account is either proposed or named as the accountant\'s');
+    }
+
+    public function test_a_declared_reuse_loosens_none_of_the_execution_guards(): void
+    {
+        $this->outputVat();
+        $before = $this->snapshot();
+        $profile = $this->variant(self::REUSE_OUTPUT_VAT);
+        $run = fn (array $options) => $this->artisan('finance:complete-chart', ['--profile' => $profile] + $options);
+
+        $run(['--execute' => true])->expectsOutputToContain('--confirm=')->assertFailed();
+        $run(['--execute' => true, '--confirm' => 'some_other_db'])->expectsOutputToContain('--confirm=')->assertFailed();
+
+        config(['source_migration.live_source_databases' => [$this->database()]]);
+        $run(['--execute' => true, '--confirm' => $this->database(), '--cutover' => true])->expectsOutputToContain('LIVE SOURCE')->assertFailed();
+
+        config(['source_migration.live_source_databases' => [], 'source_migration.live_target_databases' => [$this->database()]]);
+        $run(['--execute' => true, '--confirm' => $this->database()])->expectsOutputToContain('requires --cutover')->assertFailed();
+        $run(['--execute' => true, '--cutover' => true])->expectsOutputToContain('--confirm=')->assertFailed();
+        $run(['--execute' => true, '--confirm' => $this->database(), '--cutover' => true])->expectsOutputToContain('POLICY REQUIRED')->assertFailed();
+        $this->assertSame($before, $this->snapshot(), 'refused every time: nothing written');
+
+        // On the live target it runs only with the typed database, --cutover and an approved WIP policy.
+        config(['finance_accounts.wip_policy' => FinanceChartProfile::WIP_CAPITALISE]);
+        $run(['--execute' => true, '--confirm' => $this->database(), '--cutover' => true])->assertSuccessful();
+        $this->assertTrue(DB::table('chart_of_accounts')->where('code', 'SAL-002')->exists());
+    }
+
+    public function test_the_dry_run_reports_where_each_paying_account_is_linked_against_the_profile(): void
+    {
+        $this->execute()->assertSuccessful();
+        $this->activateProfile();
+        DB::table('payment_sources')->update(['gl_account_id' => null, 'is_active' => true]);
+        $this->seed(PaymentSourceSeeder::class);
+        // Somebody points M-Pesa at a liability, and Stanbic at Equity's account.
+        DB::table('payment_sources')->where('code', 'MPESA')->update(['gl_account_id' => DB::table('chart_of_accounts')->where('code', 'AP-001')->value('id')]);
+        DB::table('payment_sources')->where('code', 'BANK-STANBIC')->update(['gl_account_id' => DB::table('chart_of_accounts')->where('code', 'EQB-001')->value('id')]);
+        $sources = DB::table('payment_sources')->orderBy('id')->get()->map(fn ($s) => (array) $s)->all();
+        $dir = sys_get_temp_dir().'/r74-'.uniqid();
+
+        $this->complete(['--output' => $dir])->assertSuccessful();
+
+        $state = json_decode(file_get_contents("{$dir}/chart_completion.json"), true)['payment_sources'];
+        @unlink("{$dir}/chart_completion.json");
+        @rmdir($dir);
+        $this->assertSame('linked as the profile declares', $state['BANK-MAIN']['state']);
+        $this->assertStringContainsString('a liability account', $state['MPESA']['state']);
+        $this->assertStringContainsString('linked to EQB-001; the profile declares STB-001', $state['BANK-STANBIC']['state']);
+        $this->assertStringContainsString('unlinked and ACTIVE', $state['CARD']['state']);
+        $this->assertSame('linked as the profile declares', $state['AP']['state'], 'Supplier Credit belongs on the liability');
+        $this->assertSame($sources, DB::table('payment_sources')->orderBy('id')->get()->map(fn ($s) => (array) $s)->all(), 'reporting changes no paying account');
     }
 
     public function test_readiness_reports_the_profile_and_all_functions_resolving(): void

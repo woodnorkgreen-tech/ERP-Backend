@@ -256,6 +256,27 @@ class PettyCashCostProducer
             return 'skipped_office_code';
         }
 
+        $this->postCommitment(
+            $requisition, $enquiry, (string) $requisition->total_amount,
+            // One key per approval, not per requisition.
+            //
+            // postFromSource() is idempotent on (source_type, source_id,
+            // source_ref) and returns the existing line untouched — which is
+            // what stops a re-approval double-committing. But an edited
+            // requisition goes back to pending and is approved again, and
+            // with a fixed key that second approval would silently keep the
+            // first one's amount. Keying on the approval instant means the
+            // re-approval records what was actually approved, while a
+            // repeated event for the same approval still lands once.
+            'approval-' . ($requisition->approved_at?->format('YmdHis') ?? 'initial'),
+        );
+
+        return 'committed';
+    }
+
+    /** The one place a requisition's commitment line is written. */
+    private function postCommitment(PettyCashRequisition $requisition, $enquiry, string $amount, string $sourceRef): void
+    {
         $exception = $requisition->budget_exception ?: [];
 
         $this->collector->postFromSource(
@@ -264,23 +285,13 @@ class PettyCashCostProducer
                 // carries names the accounting treatment. One taxonomy, so the
                 // commitment and the payment that settles it classify alike.
                 expenseCode: (string) ($requisition->requisitionType?->defaultExpenseCode?->code ?? ''),
-                amount: (string) $requisition->total_amount,
+                amount: $amount,
                 nature: CostLine::NATURE_COMMITTED,
                 enquiryId: $enquiry->id,
                 jobNumber: $enquiry->job_number,
                 sourceType: PettyCashRequisition::class,
                 sourceId: $requisition->id,
-                // One key per approval, not per requisition.
-                //
-                // postFromSource() is idempotent on (source_type, source_id,
-                // source_ref) and returns the existing line untouched — which is
-                // what stops a re-approval double-committing. But an edited
-                // requisition goes back to pending and is approved again, and
-                // with a fixed key that second approval would silently keep the
-                // first one's amount. Keying on the approval instant means the
-                // re-approval records what was actually approved, while a
-                // repeated event for the same approval still lands once.
-                sourceRef: 'approval-' . ($requisition->approved_at?->format('YmdHis') ?? 'initial'),
+                sourceRef: $sourceRef,
                 taxAmount: '0',
                 incurredAt: (string) ($requisition->approved_at ?? now()),
                 payeeName: $requisition->payee_name ?: $requisition->requester_name,
@@ -304,8 +315,56 @@ class PettyCashCostProducer
             ),
             ['site' => $requisition->venue],
         );
+    }
 
-        return 'committed';
+    /**
+     * Report 75R-B: keep the commitment of a requisition paid by receiver equal
+     * to the money that is still promised to the project.
+     *
+     *   commitment = approved − accepted spend − returned − released
+     *
+     * That is everything not yet turned into an actual cost or given up: money
+     * approved but unpaid, and money paid out but not yet accounted for. Paying
+     * changes nothing (an advance is still a promise, not a cost); accepting
+     * spend moves that amount from commitment to actual; a return or a release
+     * removes it; reversing a surrender puts it back. Commitment plus actual can
+     * therefore never exceed what was approved, at any stage.
+     *
+     * A commitment line carries no journal, so "changing" it is retiring the
+     * open line and writing the new balance under its own key.
+     *
+     * @return 'nothing_committed'|'unchanged'|'released'|'restated'
+     */
+    public function syncReceiverCommitment(PettyCashRequisition $requisition, string $target): string
+    {
+        $history = CostLine::where('nature', CostLine::NATURE_COMMITTED)
+            ->where('source_type', PettyCashRequisition::class)
+            ->where('source_id', $requisition->id);
+
+        // Approval recorded no commitment (office spend, no project): nothing to keep in step.
+        if (! (clone $history)->exists()) {
+            return 'nothing_committed';
+        }
+
+        $open = $this->openCommitmentFor($requisition->id);
+        $current = $open ? bcadd((string) $open->net_amount, (string) ($open->tax_amount ?? '0'), 2) : '0.00';
+        if (bccomp($current, $target, 2) === 0) {
+            return 'unchanged';
+        }
+
+        if ($open) {
+            $this->collector->releaseCommitment($open, "Restated to KES {$target} still committed on {$requisition->requisition_number}.");
+        }
+        if (bccomp($target, '0.00', 2) !== 1) {
+            return 'released';
+        }
+
+        $enquiry = $requisition->enquiry ?? $requisition->project?->enquiry;
+        if ($enquiry) {
+            $this->postCommitment($requisition, $enquiry, $target, 'position-'.((clone $history)->count() + 1));
+        }
+
+        return 'restated';
     }
 
     /**

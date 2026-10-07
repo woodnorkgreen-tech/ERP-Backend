@@ -1,0 +1,5 @@
+REFUSED — nothing was written:
+  - Account COS-021 already exists with a different definition (parent_id: has '16', profile says 'null'). Existing accounts are never overwritten.
+  - Account COS-022 already exists with a different definition (parent_id: has '16', profile says 'null'). Existing accounts are never overwritten.
+  - Account COS-023 already exists with a different definition (parent_id: has '16', profile says 'null'). Existing accounts are never overwritten.
+exit=1

@@ -1,0 +1,248 @@
+{
+  "requisition": "REQ-2026-0003",
+  "figures": {
+    "approved": "75000.00",
+    "disbursed": "65000.00",
+    "confirmed_received": "65000.00",
+    "accounted": "61500.00",
+    "returned": "3500.00",
+    "released_unused": "10000.00",
+    "to_disburse": "0.00",
+    "to_account": "0.00",
+    "control_state": "closed",
+    "closure_status": "closed"
+  },
+  "checks": {
+    "approved = disbursed + released": true,
+    "disbursed = accounted + returned": true,
+    "nothing left to account": true,
+    "closed": true
+  },
+  "story": [
+    {
+      "kind": "created",
+      "title": "Created",
+      "detail": "KES 75,000.00 requested",
+      "actor": "Rita Wanjiru",
+      "at": "2026-10-06T17:33:23+03:00"
+    },
+    {
+      "kind": "verified",
+      "title": "Verified",
+      "detail": null,
+      "actor": "Winnie Achieng",
+      "at": "2026-10-06T17:33:26+03:00"
+    },
+    {
+      "kind": "approved",
+      "title": "Approved",
+      "detail": "KES 75,000.00 approved",
+      "actor": "Finance Approver",
+      "at": "2026-10-06T17:33:27+03:00"
+    },
+    {
+      "kind": "paid",
+      "title": "D01",
+      "reference": "PAY-2026-0009",
+      "detail": "Steve Otieno — KES 20,000.00 paid",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:33:28+03:00"
+    },
+    {
+      "kind": "paid",
+      "title": "D02",
+      "reference": "PAY-2026-0010",
+      "detail": "Timothy Mwangi — KES 20,000.00 part payment. Timothy Mwangi outstanding: KES 10,000.00",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:33:30+03:00"
+    },
+    {
+      "kind": "paid",
+      "title": "D03",
+      "reference": "PAY-2026-0011",
+      "detail": "Timothy Mwangi — KES 10,000.00 paid",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:33:31+03:00"
+    },
+    {
+      "kind": "paid",
+      "title": "D04",
+      "reference": "PAY-2026-0012",
+      "detail": "Winnie Supplies — KES 15,000.00 part payment. Winnie Supplies outstanding: KES 10,000.00",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:33:32+03:00"
+    },
+    {
+      "kind": "confirmed",
+      "title": "Receipt confirmed",
+      "detail": "Steve Otieno confirmed KES 20,000.00",
+      "actor": "Steve Otieno",
+      "at": "2026-10-06T17:33:37+03:00"
+    },
+    {
+      "kind": "confirmed",
+      "title": "Receipt confirmed",
+      "detail": "Timothy Mwangi confirmed KES 30,000.00 (confirmed on their behalf)",
+      "actor": "Rita Wanjiru",
+      "at": "2026-10-06T17:33:40+03:00"
+    },
+    {
+      "kind": "confirmed",
+      "title": "Receipt confirmed",
+      "detail": "Winnie Supplies confirmed KES 15,000.00 (confirmed on their behalf)",
+      "actor": "Rita Wanjiru",
+      "at": "2026-10-06T17:33:41+03:00"
+    },
+    {
+      "kind": "accountability_submitted",
+      "title": "A01 submitted",
+      "reference": "REQ-2026-0003-A01",
+      "detail": "Steve Otieno accounted for KES 19,500.00 spent and KES 500.00 returned",
+      "actor": "Steve Otieno",
+      "at": "2026-10-06T17:33:45+03:00"
+    },
+    {
+      "kind": "accountability_submitted",
+      "title": "A02 submitted",
+      "reference": "REQ-2026-0003-A02",
+      "detail": "Timothy Mwangi accounted for KES 18,000.00 spent",
+      "actor": "Rita Wanjiru",
+      "at": "2026-10-06T17:33:47+03:00"
+    },
+    {
+      "kind": "accountability_submitted",
+      "title": "A03 submitted",
+      "reference": "REQ-2026-0003-A03",
+      "detail": "Winnie Supplies accounted for KES 14,000.00 spent and KES 1,000.00 returned",
+      "actor": "Rita Wanjiru",
+      "at": "2026-10-06T17:33:48+03:00"
+    },
+    {
+      "kind": "accountability_reconciled",
+      "title": "A01 reconciled",
+      "reference": "REQ-2026-0003-A01",
+      "detail": "Steve Otieno accounted KES 19,500.00; returned KES 500.00",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:33:51+03:00"
+    },
+    {
+      "kind": "accountability_reconciled",
+      "title": "A02 reconciled",
+      "reference": "REQ-2026-0003-A02",
+      "detail": "Timothy Mwangi accounted KES 18,000.00",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:33:53+03:00"
+    },
+    {
+      "kind": "accountability_reconciled",
+      "title": "A03 reconciled",
+      "reference": "REQ-2026-0003-A03",
+      "detail": "Winnie Supplies accounted KES 14,000.00; returned KES 1,000.00",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:33:54+03:00"
+    },
+    {
+      "kind": "accountability_submitted",
+      "title": "A04 submitted",
+      "reference": "REQ-2026-0003-A04",
+      "detail": "Timothy Mwangi accounted for KES 10,000.00 spent and KES 2,000.00 returned",
+      "actor": "Rita Wanjiru",
+      "at": "2026-10-06T17:33:58+03:00"
+    },
+    {
+      "kind": "accountability_reconciled",
+      "title": "A04 reconciled",
+      "reference": "REQ-2026-0003-A04",
+      "detail": "Timothy Mwangi accounted KES 10,000.00; returned KES 2,000.00",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:34:01+03:00"
+    },
+    {
+      "kind": "released",
+      "title": "Unused balance released",
+      "detail": "Winnie Supplies — KES 10,000.00 will not be paid: Supplier delivered less than ordered; balance not needed",
+      "actor": "Finance Controller",
+      "at": "2026-10-06T17:34:05+03:00"
+    },
+    {
+      "kind": "closed",
+      "title": "Closed",
+      "detail": "Reconciled in full",
+      "actor": "Finance Cashier",
+      "at": "2026-10-06T17:34:09+03:00"
+    },
+    {
+      "kind": "receiver_position",
+      "title": "Steve Otieno",
+      "detail": "Complete",
+      "actor": null,
+      "at": null
+    },
+    {
+      "kind": "receiver_position",
+      "title": "Timothy Mwangi",
+      "detail": "Complete",
+      "actor": null,
+      "at": null
+    },
+    {
+      "kind": "receiver_position",
+      "title": "Winnie Supplies",
+      "detail": "Complete",
+      "actor": null,
+      "at": null
+    },
+    {
+      "kind": "overall",
+      "title": "Overall",
+      "detail": "KES 75,000.00 approved; KES 65,000.00 disbursed; KES 10,000.00 released; KES 61,500.00 accounted; KES 3,500.00 returned; KES 0.00 awaiting accountability",
+      "actor": null,
+      "at": null
+    }
+  ],
+  "steps": [
+    "Signed in 6 people through the real login endpoint.",
+    "1. Created REQ-2026-0003 for KES 75000.00 as Rita Wanjiru; verifier assigned: Winnie Achieng.",
+    "2. Verified in the browser by the assigned verifier.",
+    "   evidence: 01-desktop-verified.png, 02-mobile-verified.png",
+    "3. Approved as Finance Approver. awaiting_disbursement · disbursed 0.00 · confirmed 0.00 · accounted 0.00 · returned 0.00 · released 0.00 · to account 0.00",
+    "4. Paid Steve KES 20000 from Equity Bank – Operating Account.",
+    "   evidence: 03-desktop-payment-dialog.png, 04-mobile-payment-dialog.png",
+    "4. Paid Timothy KES 20000 from Equity Bank – Operating Account.",
+    "4. Paid Timothy KES 10000 from NCBA Bank – Operations Account.",
+    "4. Paid Winnie KES 15000 from Equity Bank – Operating Account.",
+    "   partially_disbursed · disbursed 65000.00 · confirmed 0.00 · accounted 0.00 · returned 0.00 · released 0.00 · to account 65000.00",
+    "   evidence: 05-desktop-paid-awaiting-confirmation.png, 06-mobile-paid-awaiting-confirmation.png",
+    "   evidence: 07-desktop-steve-confirms-own-receipt.png, 08-mobile-steve-confirms-own-receipt.png",
+    "5. Steve confirmed his own receipt, signed in as himself.",
+    "   evidence: 09-desktop-requester-confirms-on-behalf.png, 10-mobile-requester-confirms-on-behalf.png",
+    "5. Rita Wanjiru confirmed for Timothy on their behalf, evidence MPESA-TIM-778.",
+    "5. Rita Wanjiru confirmed for Winnie on their behalf, evidence BANK-ADV-4410.",
+    "   partially_disbursed · disbursed 65000.00 · confirmed 65000.00 · accounted 0.00 · returned 0.00 · released 0.00 · to account 65000.00",
+    "   evidence: 11-desktop-steve-accounts-with-return.png, 12-mobile-steve-accounts-with-return.png",
+    "6. Steve accounted for 19,500 across his two lines and returned 500.",
+    "6. Timothy: first stage, 18,000 accounted.",
+    "6. Winnie: 14,000 accounted and 1,000 returned.",
+    "   partially_disbursed · disbursed 65000.00 · confirmed 65000.00 · accounted 0.00 · returned 0.00 · released 0.00 · to account 65000.00",
+    "   evidence: 13-desktop-accountability-with-finance.png, 14-mobile-accountability-with-finance.png",
+    "7. Reconciled Steve's surrender as Finance Cashier.",
+    "7. Reconciled Timothy's surrender as Finance Cashier.",
+    "7. Reconciled Winnie's surrender as Finance Cashier.",
+    "   partially_disbursed · disbursed 65000.00 · confirmed 65000.00 · accounted 51500.00 · returned 1500.00 · released 0.00 · to account 12000.00",
+    "   evidence: 15-desktop-partially-accounted.png, 16-mobile-partially-accounted.png",
+    "   evidence: 17-desktop-timothy-second-stage-return-against-payment.png, 18-mobile-timothy-second-stage-return-against-payment.png",
+    "6. Timothy: second stage, 10,000 accounted and 2,000 returned against D03.",
+    "7. Reconciled Timothy's surrender as Finance Cashier.",
+    "   unused_balance_requires_release · disbursed 65000.00 · confirmed 65000.00 · accounted 61500.00 · returned 3500.00 · released 0.00 · to account 0.00",
+    "   Cannot close yet, as the screen says: Winnie Supplies has KES 10000.00 approved that is neither paid nor released.",
+    "   evidence: 19-desktop-unused-balance-requires-release.png, 20-mobile-unused-balance-requires-release.png",
+    "   evidence: 21-desktop-release-unused-dialog.png, 22-mobile-release-unused-dialog.png",
+    "8. Finance Controller released KES 10,000 of Winnie's approved allocation.",
+    "   ready_to_close · disbursed 65000.00 · confirmed 65000.00 · accounted 61500.00 · returned 3500.00 · released 10000.00 · to account 0.00",
+    "   evidence: 23-desktop-ready-to-close.png, 24-mobile-ready-to-close.png",
+    "9. Closed in the browser by Finance Cashier.",
+    "   evidence: 25-desktop-closed.png, 26-mobile-closed.png",
+    "Final: {\"approved\":\"75000.00\",\"disbursed\":\"65000.00\",\"confirmed_received\":\"65000.00\",\"accounted\":\"61500.00\",\"returned\":\"3500.00\",\"released_unused\":\"10000.00\",\"to_disburse\":\"0.00\",\"to_account\":\"0.00\",\"control_state\":\"closed\",\"closure_status\":\"closed\"}",
+    "Checks: {\"approved = disbursed + released\":true,\"disbursed = accounted + returned\":true,\"nothing left to account\":true,\"closed\":true}"
+  ]
+}

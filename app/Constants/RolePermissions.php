@@ -83,8 +83,12 @@ final class RolePermissions
     {
         return [
             // Super Admin is the whole registry by construction, never a list to maintain.
-            'Super Admin' => Permissions::all(),
+            // ...except accounting authority (Report 75): approving or activating a
+            // Finance configuration is never inherited from administering the system.
+            // Report 75R: assigned requisition verification also requires a deliberate grant.
+            'Super Admin' => array_values(array_diff(Permissions::all(), Permissions::accountingAuthority(), [Permissions::FINANCE_REQUISITIONS_VERIFY, Permissions::FINANCE_REQUISITIONS_RELEASE_UNUSED])),
             'Admin' => [
+                Permissions::FINANCE_CONFIG_VIEW,
                 Permissions::ADMIN_ACCESS, Permissions::CLIENT_HANDOVER_REVIEW,
                 Permissions::DASHBOARD_ADMIN, Permissions::DEPARTMENT_READ, Permissions::DEPARTMENT_UPDATE,
                 Permissions::EMPLOYEE_READ, Permissions::FINANCE_COSTS_CREATE,
@@ -131,6 +135,7 @@ final class RolePermissions
                 Permissions::STORES_BOARD_MANAGE, Permissions::STORES_RECEIPT_INSPECT, Permissions::STORES_MOVEMENT_REVERSE,
             ],
             'Manager' => [
+                Permissions::FINANCE_CONFIG_VIEW,
                 Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_ACCESS, Permissions::DEPARTMENT_READ,
                 Permissions::EMPLOYEE_READ, Permissions::FINANCE_PETTY_CASH_CREATE,
                 Permissions::FINANCE_PETTY_CASH_UPDATE,
@@ -150,6 +155,7 @@ final class RolePermissions
                 Permissions::USER_UPDATE,
             ],
             'Accounts' => [
+                Permissions::FINANCE_CONFIG_VIEW, Permissions::FINANCE_CONFIG_PROPOSE, Permissions::FINANCE_CONFIG_REVIEW,
                 Permissions::DASHBOARD_FINANCE, Permissions::FINANCE_BUDGET_READ,
                 Permissions::FINANCE_COSTS_CREATE, Permissions::FINANCE_COSTS_READ,
                 Permissions::FINANCE_COSTS_REVERSE, Permissions::FINANCE_COSTS_VERIFY,
@@ -200,6 +206,7 @@ final class RolePermissions
                 Permissions::FINANCE_PAYROLL_LABOUR_CLASSIFICATION_MANAGE,
             ],
             'Costing' => [
+                Permissions::FINANCE_CONFIG_VIEW, Permissions::FINANCE_CONFIG_PROPOSE,
                 Permissions::DASHBOARD_FINANCE, Permissions::FINANCE_BUDGET_APPROVE,
                 Permissions::FINANCE_BUDGET_READ, Permissions::FINANCE_BUDGET_UPDATE,
                 Permissions::FINANCE_EXPENSE_CODES_MANAGE, Permissions::FINANCE_QUOTE_APPROVE,

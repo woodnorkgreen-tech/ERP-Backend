@@ -31,6 +31,7 @@ use Tests\TestCase;
 class Wave3PettyCashControlsTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Support\VerifiedFinancialRequisitionFixture;
 
     private User $user;
     private User $financeUser;
@@ -108,13 +109,13 @@ class Wave3PettyCashControlsTest extends TestCase
             'default_expense_code_id' => $enquiryId ? $this->expenseCodeId : $this->overheadExpenseCodeId, 'is_active' => true,
         ]);
 
-        return PettyCashRequisition::create([
+        return $this->verifiedRequisitionFixture(PettyCashRequisition::create([
             'requisition_number' => $number, 'user_id' => $this->user->id,
             'department_id' => $this->departmentId, 'category' => 'Site Materials',
             'requisition_type_id' => $type->id, 'purpose' => 'Site spend',
             'total_amount' => $amount, 'status' => $status, 'enquiry_id' => $enquiryId,
             'payee_name' => 'John Field Worker', ...$extra,
-        ]);
+        ]));
     }
 
     private function disbursedAdvance(string $jobNumber, float $amount, string $number): PettyCashRequisition
@@ -386,7 +387,12 @@ class Wave3PettyCashControlsTest extends TestCase
         ]);
         $new = $this->requisition(null, 800.00, 'PCR-PAYOUT', 'pending');
 
-        $this->actingAs($this->financeUser)
+        // Report 75R-C: the approver must not be the payer, so a second Finance
+        // user with the same authority approves and the first one pays.
+        $approver = User::factory()->create(['is_active' => true]);
+        $approver->syncRoles($this->financeUser->roles);
+        $approver->syncPermissions($this->financeUser->getDirectPermissions());
+        $this->actingAs($approver)
             ->postJson("/api/finance/petty-cash/requisitions/{$new->id}/approve")
             ->assertOk();
         $this->assertNull($new->fresh()->outstanding_advance_exception);

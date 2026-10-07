@@ -29,9 +29,33 @@ use App\Exceptions\GovernanceException;
 use App\Services\Governance\ProjectGovernanceService;
 use App\Modules\Finance\PettyCash\Services\RequisitionSchemaService;
 use Illuminate\Validation\ValidationException;
+use App\Modules\Finance\PettyCash\Services\RequisitionVerificationService;
+use App\Modules\Finance\PettyCash\Services\RequisitionControlProjection;
+use App\Modules\Finance\PettyCash\Services\RequisitionDisbursementService;
+use App\Modules\Finance\PettyCash\Services\RequisitionReceiverIdentity;
+use Illuminate\Auth\Access\AuthorizationException;
 
 class PettyCashRequisitionController extends Controller
 {
+    public function verify(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'decision' => ['required', 'in:verified,returned_for_correction'],
+            'comment' => ['nullable', 'string', 'max:2000', 'required_if:decision,returned_for_correction'],
+        ]);
+        $r = app(RequisitionVerificationService::class)->review($id, $request->user(), $data['decision'], $data['comment'] ?? null);
+
+        return response()->json(['success' => true, 'data' => $r, 'message' => $data['decision'] === 'verified' ? 'Requisition verified.' : 'Returned for correction.']);
+    }
+
+    private const CONFIRM_BY_RECEIVER = 'This requisition was paid to its receivers separately. Confirm receipt for each receiver from the receiver list.';
+
+    /** Report 75R-B: whether money has gone out on this requisition receiver by receiver. */
+    private function paidByReceiver(PettyCashRequisition $requisition): bool
+    {
+        return $requisition->disbursements()->whereNotNull('requisition_child_reference')->exists();
+    }
+
     /**
      * Display a listing of requisitions.
      */
@@ -47,12 +71,17 @@ class PettyCashRequisitionController extends Controller
             $query = PettyCashRequisition::with([
                 'requisitionType', 'requester.employee', 'department', 'approver', 'payee',
                 'project.enquiry', 'enquiry', 'items.payee',
-                'disbursement.paymentSource',
+                'disbursement.paymentSource', 'disbursements.paymentSource', 'disbursements.requisitionAllocations',
             ])->withCount('items');
 
             // If not admin/finance, only show their own
             if ($user && !$user->can('viewAllRequisitions', Payment::class)) {
-                $query->where('user_id', $user->id);
+                $query->where(fn ($q) => $q->where('user_id', $user->id)->orWhere('responsible_verifier_id', $user->id)
+                    ->orWhereHas('items.payee.user', fn ($receiver) => $receiver->whereKey($user->id)));
+            }
+
+            if ($request->filled('verification_status')) {
+                $query->where('verification_status', $request->string('verification_status')->toString());
             }
 
             if ($request->filled('status')) {
@@ -64,7 +93,10 @@ class PettyCashRequisitionController extends Controller
                 $query->where(function($q) use ($search) {
                     $q->where('requisition_number', 'like', "%{$search}%")
                       ->orWhere('category', 'like', "%{$search}%")
-                      ->orWhere('purpose', 'like', "%{$search}%");
+                      ->orWhere('purpose', 'like', "%{$search}%")
+                      ->orWhereHas('disbursements', fn($p)=>$p->where('payment_no','like',"%{$search}%")->orWhere('requisition_child_reference','like',"%{$search}%"))
+                      ->orWhereHas('requester', fn($u)=>$u->where('name','like',"%{$search}%"))
+                      ->orWhereHas('responsibleVerifier', fn($u)=>$u->where('name','like',"%{$search}%"));
                 });
             }
 
@@ -95,9 +127,21 @@ class PettyCashRequisitionController extends Controller
                     : $query->whereHas('disbursement', fn ($q) => $q->where('status', 'active'));
             }
 
+            foreach (['project_id','user_id','responsible_verifier_id'] as $filter) {
+                if ($request->filled($filter)) $query->where($filter, $request->integer($filter));
+            }
+            if ($request->filled('receiver_type') && $request->filled('receiver_id')) {
+                $query->whereHas('disbursements', fn($p)=>$p->where('payee_type',$request->string('receiver_type'))->where('payee_id',$request->integer('receiver_id')));
+            }
+            if ($request->boolean('has_reversed_payments')) $query->whereHas('disbursements',fn($p)=>$p->where('status','voided'));
+            if ($request->filled('disbursement_status')) {
+                app(\App\Modules\Finance\PettyCash\Services\RequisitionDisbursementReport::class)
+                    ->whereDisbursementStatus($query, $request->string('disbursement_status')->toString());
+            }
             $perPage = $request->get('per_page', 15);
             $requisitions = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
+            foreach ($requisitions as $row) $row->setAttribute('controls', app(RequisitionControlProjection::class)->forRequisition($row));
             return response()->json([
                 'success' => true,
                 'data' => $requisitions->items(),
@@ -220,6 +264,7 @@ class PettyCashRequisitionController extends Controller
                 'venue' => $request->venue,
                 'enquiry_id' => $request->enquiry_id,
                 'bill_id' => $request->bill_id,
+                'responsible_verifier_id' => $request->integer('responsible_verifier_id'),
                 'status' => 'pending',
             ];
 
@@ -228,7 +273,7 @@ class PettyCashRequisitionController extends Controller
                 'payee_id' => $request->payee_id ?? null,
                 'payee_name' => $request->payee_name ?? null,
                 'payee_phone' => $request->payee_phone ?? null,
-                'total_amount' => collect($request->items)->sum('amount'),
+                'total_amount' => collect($request->items)->reduce(fn ($total, $item) => bcadd($total, (string) $item['amount'], 2), '0.00'),
             ]));
 
             foreach ($request->items as $index => $item) {
@@ -238,10 +283,15 @@ class PettyCashRequisitionController extends Controller
                     'details' => $typed['item_details'][$index] ?? [],
                     'amount' => $item['amount'],
                     'payee_id' => $item['payee_id'] ?? null,
+                    'supplier_id' => $item['supplier_id'] ?? null,
+                    'other_recipient_reference' => $item['other_recipient_reference'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
                     'payee_phone' => $item['payee_phone'] ?? null,
                 ]);
             }
+
+            app(RequisitionVerificationService::class)->submit($requisition->fresh(), Auth::id());
+            $requisition->refresh();
 
             DB::commit();
 
@@ -250,6 +300,9 @@ class PettyCashRequisitionController extends Controller
                 'message' => 'Requisition submitted successfully',
                 'data' => $requisition->load('items.payee')
             ], 201);
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (Exception $e) {
             DB::rollBack();
             
@@ -304,6 +357,8 @@ class PettyCashRequisitionController extends Controller
                 $requisition->save();
             }
 
+            $requisition->setAttribute('controls', app(RequisitionControlProjection::class)->forRequisition($requisition));
+
             $requisition->setAttribute('surrender_state', $requisition->surrenderState(PettyCashRequisition::dueSoonDays()));
             // W3-6 / W3-7: the full return, resubmission and reversal history.
             $requisition->setAttribute('surrender_reviews', DB::table('petty_cash_surrender_reviews')
@@ -334,7 +389,7 @@ class PettyCashRequisitionController extends Controller
             return response()->json(['success' => false, 'message' => 'This requisition cannot be edited by this user or in its current state'], 403);
         }
 
-        if (in_array($requisition->status, ['disbursed', 'received'], true)) {
+        if (!in_array($requisition->status, ['pending', 'approved', 'rejected'], true) || $requisition->hasPaymentHistory()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Paid or received requisitions are immutable. Create a correcting transaction instead.',
@@ -349,6 +404,11 @@ class PettyCashRequisitionController extends Controller
 
         try {
             DB::beginTransaction();
+            $requisition = PettyCashRequisition::query()->lockForUpdate()->findOrFail($id);
+            if (!in_array($requisition->status, ['pending', 'approved', 'rejected'], true) || $requisition->hasPaymentHistory()) {
+                throw ValidationException::withMessages(['requisition' => 'Paid and accounted requisitions cannot be edited.']);
+            }
+
 
             // Handling Pending/Approved/Rejected
             $commonData = [
@@ -366,11 +426,17 @@ class PettyCashRequisitionController extends Controller
                 'payee_id' => $request->payee_id ?? null,
                 'payee_name' => $request->payee_name ?? null,
                 'payee_phone' => $request->payee_phone ?? null,
-                'total_amount' => collect($request->items)->sum('amount'),
+                'total_amount' => collect($request->items)->reduce(fn ($total, $item) => bcadd($total, (string) $item['amount'], 2), '0.00'),
             ];
+
+            $commonData['responsible_verifier_id'] = $request->integer('responsible_verifier_id');
 
             // If it was approved, revert to pending for re-approval because details changed
             $approvalWithdrawn = $requisition->status === 'approved';
+            if ($requisition->status === 'rejected') {
+                $commonData['status'] = 'pending';
+                $commonData['rejection_reason'] = null;
+            }
 
             if ($approvalWithdrawn) {
                 $commonData['status'] = 'pending';
@@ -396,11 +462,16 @@ class PettyCashRequisitionController extends Controller
                     'details' => $typed['item_details'][$index] ?? [],
                     'amount' => $item['amount'],
                     'payee_id' => $item['payee_id'] ?? null,
+                    'supplier_id' => $item['supplier_id'] ?? null,
+                    'other_recipient_reference' => $item['other_recipient_reference'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
                     'payee_phone' => $item['payee_phone'] ?? null,
                     'requisition_id' => $requisition->id
                 ]);
             }
+
+            app(RequisitionVerificationService::class)->submit($requisition->fresh(), Auth::id());
+            $requisition->refresh();
 
             DB::commit();
 
@@ -412,6 +483,9 @@ class PettyCashRequisitionController extends Controller
                 'data' => $requisition->load('items.payee')
             ]);
 
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -456,11 +530,14 @@ class PettyCashRequisitionController extends Controller
     public function approve(Request $request, int $id): JsonResponse
     {
         try {
-            $requisition = PettyCashRequisition::findOrFail($id);
+            return DB::transaction(function () use ($request, $id) {
+            $requisition = PettyCashRequisition::query()->lockForUpdate()->findOrFail($id);
 
             if (!Auth::user()?->can('reviewRequisition', Payment::class)) {
                 return response()->json(['success' => false, 'message' => 'You are not authorized to approve requisitions'], 403);
             }
+            app(RequisitionVerificationService::class)->assertCurrent($requisition);
+
             $selfApproval = $requisition->user_id === Auth::id();
             if ($selfApproval && ! \App\Support\SelfApproval::allowed()) {
                 return response()->json([
@@ -492,9 +569,11 @@ class PettyCashRequisitionController extends Controller
             // "overdue" exists only where a surrender deadline was set.
             $outstandingAdvances = PettyCashRequisition::query()
                 ->where('user_id', $requisition->user_id)->whereKeyNot($requisition->id)
-                ->whereIn('status', PettyCashRequisition::OUTSTANDING_ADVANCE_STATUSES)
+                // Report 75R-B: an advance is what is actually out and unaccounted.
+                ->select(['id', 'requisition_number', 'total_amount', 'status', 'surrender_due_at'])
+                ->outstandingAdvances()
                 ->orderBy('surrender_due_at')
-                ->get(['id', 'requisition_number', 'total_amount', 'status', 'surrender_due_at']);
+                ->get();
             $overdueAdvances = $outstandingAdvances->filter(fn ($advance) => $advance->surrender_due_at
                 && $advance->surrender_due_at->lt(now()->startOfDay()));
             $advanceException = null;
@@ -635,6 +714,7 @@ class PettyCashRequisitionController extends Controller
                 // W5-9: shown to the approver, never a block on its own.
                 'outstanding_advances' => $outstandingAdvances->values(),
             ]);
+            });
         } catch (ValidationException $e) {
             // A rejected field is a 422 with field errors, not a server fault.
             // The generic handler below catches Exception, and ValidationException
@@ -789,12 +869,19 @@ class PettyCashRequisitionController extends Controller
                 return response()->json(['success' => false, 'message' => 'You raised this requisition, so someone else has to pay it out. If nobody else is available, an administrator can grant the "Approve Your Own Submissions" permission.'], 403);
             }
             
-            if ($requisition->status !== 'approved') {
+            // Report 75R-C: the approver must not be the payer, on either payment route.
+            if ($requisition->approved_by !== null && (int) $requisition->approved_by === (int) Auth::id()) {
+                return response()->json(['success' => false, 'message' => RequisitionDisbursementService::APPROVER_IS_PAYER], 403);
+            }
+
+            if ($requisition->status !== 'approved' && !($request->has('item_ids') && $requisition->status === 'disbursed')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only approved requisitions can be disbursed'
                 ], 400);
             }
+
+            app(RequisitionVerificationService::class)->assertCurrent($requisition);
 
             // W5-9 must be enforced again at the point money leaves the float.
             // An advance can become overdue after this requisition was approved,
@@ -805,11 +892,12 @@ class PettyCashRequisitionController extends Controller
             $overdueAdvances = PettyCashRequisition::query()
                 ->where('user_id', $requisition->user_id)
                 ->whereKeyNot($requisition->id)
-                ->whereIn('status', PettyCashRequisition::OUTSTANDING_ADVANCE_STATUSES)
+                ->select(['id', 'requisition_number', 'total_amount', 'status', 'surrender_due_at'])
+                ->outstandingAdvances()
                 ->whereNotNull('surrender_due_at')
                 ->whereDate('surrender_due_at', '<', now()->toDateString())
                 ->orderBy('surrender_due_at')
-                ->get(['id', 'requisition_number', 'total_amount', 'status', 'surrender_due_at']);
+                ->get();
 
             $coveredAdvanceIds = collect($requisition->outstanding_advance_exception['outstanding_advances'] ?? [])
                 ->pluck('id')->map(fn ($advanceId) => (int) $advanceId);
@@ -850,6 +938,40 @@ class PettyCashRequisitionController extends Controller
                     "Disbursed {$requisition->requisition_number} despite an overdue advance, under an authorised exception",
                     $advanceException,
                 );
+            }
+
+            // Report 75R-A: paying one receiver. `item_ids` names the receiver's
+            // lines; the amount, the receiver and what is still outstanding are
+            // all re-derived under lock by the service. The single whole-amount
+            // payment below remains for a requisition with one receiver.
+            if ($request->has('item_ids')) {
+                $instructions = $request->validate([
+                    'item_ids' => ['required', 'array', 'min:1'],
+                    'item_ids.*' => ['required', 'integer', 'distinct'],
+                    'idempotency_key' => ['required', 'uuid'],
+                    'amount' => ['required', 'numeric', 'decimal:0,2', 'min:0.01'],
+                    'transaction_cost' => ['nullable', 'numeric', 'decimal:0,2', 'min:0'],
+                    'expense_code_id' => ['required', 'integer', 'exists:expense_codes,id'],
+                    'payment_source_id' => ['required', 'integer', 'exists:payment_sources,id'],
+                    'payment_method' => ['required', Rule::in(PaymentMethods::values())],
+                    'date_disbursed' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+                    'external_reference' => ['nullable', 'string', 'max:255', 'required_unless:payment_method,cash'],
+                ]);
+
+                $payment = app(RequisitionDisbursementService::class)->pay($id, $request->user(), $instructions);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => "{$payment->requisition_child_reference} recorded ({$payment->payment_no}).",
+                    'data' => $payment,
+                    'controls' => app(RequisitionControlProjection::class)->forRequisition($requisition->fresh()),
+                ]);
+            }
+
+            if (! app(RequisitionReceiverIdentity::class)->isSinglePayment($requisition)) {
+                throw ValidationException::withMessages([
+                    'item_ids' => 'This requisition has more than one receiver. Pay each receiver from the receiver list.',
+                ]);
             }
 
             $service = app(PettyCashService::class);
@@ -931,6 +1053,8 @@ class PettyCashRequisitionController extends Controller
                 'message' => 'Requisition disbursed. QR code link generated.',
                 'data' => $requisition->fresh(['disbursement.paymentSource', 'requester', 'department', 'items', 'advanceJournalEntry'])
             ]);
+        } catch (ValidationException|AuthorizationException $e) {
+            throw $e;
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
@@ -955,6 +1079,26 @@ class PettyCashRequisitionController extends Controller
         }
 
         $requisition = PettyCashRequisition::with('disbursement')->findOrFail($id);
+        // Report 75R-A: a requisition paid by receiver posts one journal per
+        // Payment. Every active Payment is offered to the poster; the ones that
+        // already posted are confirmed, not posted again.
+        $allocated = $requisition->disbursements()->whereNotNull('requisition_child_reference')->where('status', 'active')->get();
+        if ($allocated->isNotEmpty()) {
+            $poster = app(\App\Modules\Finance\PettyCash\Services\PettyCashAdvancePoster::class);
+            foreach ($allocated as $payment) {
+                $poster->attemptPayment($payment);
+            }
+            $controls = app(RequisitionControlProjection::class)->forRequisition($requisition->fresh());
+            $failed = $controls['posting']['failed'];
+
+            return response()->json([
+                'success' => $failed === 0,
+                'message' => $failed === 0
+                    ? 'Every payment on this requisition is posted to the general ledger.'
+                    : "{$failed} payment(s) still could not be posted. The reason is shown against each one.",
+                'controls' => $controls,
+            ], $failed === 0 ? 200 : 422);
+        }
 
         if (! $requisition->disbursement) {
             return response()->json([
@@ -1075,6 +1219,13 @@ class PettyCashRequisitionController extends Controller
                 ], 400);
             }
 
+            // Report 75R-B: a requisition paid by receiver is confirmed receiver by
+            // receiver. One signature cannot stand for several people's money, and
+            // marking the whole requisition received would stop further payments.
+            if ($this->paidByReceiver($requisition)) {
+                return response()->json(['success' => false, 'message' => self::CONFIRM_BY_RECEIVER], 409);
+            }
+
             $requisition->update([
                 'status' => 'received',
                 'digital_signature' => $request->signature,
@@ -1122,7 +1273,11 @@ class PettyCashRequisitionController extends Controller
             if ($requisition->status !== 'disbursed') {
                 return response()->json(['success' => false, 'message' => 'Receipt can only be confirmed after disbursement'], 409);
             }
-            
+
+            if ($this->paidByReceiver($requisition)) {
+                return response()->json(['success' => false, 'message' => self::CONFIRM_BY_RECEIVER], 409);
+            }
+
             $item->update([
                 'digital_signature' => $request->signature,
                 'received_at' => now(),
@@ -1245,6 +1400,8 @@ class PettyCashRequisitionController extends Controller
 
         return response()->json([
             'success' => true,
+            'suppliers' => \App\Modules\ProcurementStores\Models\Supplier::query()->where('status', 'active')->orderBy('supplier_name')->get(['id','supplier_name']),
+                'verifiers' => app(RequisitionVerificationService::class)->eligibleVerifiers()->get(['id', 'name'])->map->only(['id', 'name']),
             'departments' => $departments,
             'employees' => $employees,
             'categories' => $types->pluck('name')->values(),
@@ -1368,7 +1525,9 @@ class PettyCashRequisitionController extends Controller
         $requisition = PettyCashRequisition::with([
             'requester', 'department', 'approver', 'payee',
             'project.enquiry', 'enquiry', 'items.payee',
-            'disbursement'
+            'disbursement',
+            // Report 75R-B: every payment, so a voucher never shows the first as if it were all.
+            'disbursements' => fn ($q) => $q->orderBy('id'),
         ])->findOrFail($id);
 
         // Report 61: the voucher of any requisition could be downloaded by any
@@ -1459,6 +1618,9 @@ class PettyCashRequisitionController extends Controller
 
         try {
             $requisition = PettyCashRequisition::where('signing_token', $token)->firstOrFail();
+            if ($this->paidByReceiver($requisition)) {
+                return response()->json(['success' => false, 'message' => self::CONFIRM_BY_RECEIVER], 409);
+            }
 
             if ($requisition->status !== 'disbursed') {
                 return response()->json([
@@ -1503,6 +1665,9 @@ class PettyCashRequisitionController extends Controller
 
         try {
             $requisition = PettyCashRequisition::where('signing_token', $token)->firstOrFail();
+            if ($this->paidByReceiver($requisition)) {
+                return response()->json(['success' => false, 'message' => self::CONFIRM_BY_RECEIVER], 409);
+            }
 
             if ($requisition->status !== 'disbursed') {
                 return response()->json([
@@ -1566,6 +1731,8 @@ class PettyCashRequisitionController extends Controller
 
         return response()->json([
             'success' => true,
+            'suppliers' => \App\Modules\ProcurementStores\Models\Supplier::query()->where('status', 'active')->orderBy('supplier_name')->get(['id','supplier_name']),
+                'verifiers' => app(RequisitionVerificationService::class)->eligibleVerifiers()->get(['id', 'name'])->map->only(['id', 'name']),
             'departments' => $departments,
             'categories' => $types->pluck('name')->values(),
             'requisition_types' => $types,
@@ -1579,7 +1746,9 @@ class PettyCashRequisitionController extends Controller
      */
     public function publicStore(Request $request): JsonResponse
     {
+        $request->merge(['items' => app(RequisitionReceiverIdentity::class)->withSupplierNames((array) $request->input('items', []))]);
         $validator = Validator::make($request->all(), [
+            'responsible_verifier_id' => 'required|integer|exists:users,id',
             'department_id' => 'required|exists:departments,id',
             'category' => 'required|string',
             'requisition_type_id' => 'nullable|exists:petty_cash_requisition_types,id',
@@ -1595,7 +1764,9 @@ class PettyCashRequisitionController extends Controller
             'items.*.description' => 'required|string',
             'items.*.remarks' => 'nullable|string',
             'items.*.details' => 'nullable|array',
-            'items.*.amount' => 'required|numeric|min:0.01',
+            'items.*.amount' => 'required|numeric|decimal:0,2|min:0.01',
+            'items.*.supplier_id' => 'nullable|integer|exists:suppliers,id',
+            'items.*.other_recipient_reference' => 'nullable|string|max:100|regex:/^[A-Za-z0-9._-]+$/',
             'items.*.payee_name' => 'nullable|string',
             'items.*.payee_phone' => 'nullable|string|max:255',
         ]);
@@ -1606,6 +1777,9 @@ class PettyCashRequisitionController extends Controller
                 'errors' => $validator->errors()
             ], 422);
         }
+
+        app(RequisitionVerificationService::class)->validateVerifier($request->integer('responsible_verifier_id'), null);
+        app(RequisitionReceiverIdentity::class)->validateSubmittedLines((array) $request->input('items', []), null, $request->input('payee_name'));
 
         $type = $this->resolveType($request);
         $typed = app(RequisitionSchemaService::class)->validate($type, $request->all());
@@ -1629,8 +1803,9 @@ class PettyCashRequisitionController extends Controller
                 'project_name' => $request->project_name,
                 'venue' => $request->venue,
                 'enquiry_id' => $request->enquiry_id,
+                'responsible_verifier_id' => $request->integer('responsible_verifier_id'),
                 'status' => 'pending',
-                'total_amount' => collect($request->items)->sum('amount'),
+                'total_amount' => collect($request->items)->reduce(fn ($total, $item) => bcadd($total, (string) $item['amount'], 2), '0.00'),
             ]);
 
             foreach ($request->items as $index => $item) {
@@ -1639,10 +1814,15 @@ class PettyCashRequisitionController extends Controller
                     'remarks' => $item['remarks'] ?? null,
                     'details' => $typed['item_details'][$index] ?? [],
                     'amount' => $item['amount'],
+                    'supplier_id' => $item['supplier_id'] ?? null,
+                    'other_recipient_reference' => $item['other_recipient_reference'] ?? null,
                     'payee_name' => $item['payee_name'] ?? null,
                     'payee_phone' => $item['payee_phone'] ?? null,
                 ]);
             }
+
+            app(RequisitionVerificationService::class)->submit($requisition->fresh(), Auth::id());
+            $requisition->refresh();
 
             DB::commit();
 
@@ -1651,6 +1831,9 @@ class PettyCashRequisitionController extends Controller
                 'message' => 'Public requisition submitted successfully',
                 'data' => $requisition->load('items')
             ], 201);
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (Exception $e) {
             DB::rollBack();
             \Log::error('Public Petty Cash Requisition Failed', [
@@ -1713,7 +1896,11 @@ class PettyCashRequisitionController extends Controller
     private function mayView(PettyCashRequisition $requisition): bool
     {
         return $requisition->user_id === Auth::id()
-            || (Auth::user()?->can('viewAllRequisitions', Payment::class) ?? false);
+            || $requisition->responsible_verifier_id === Auth::id()
+            || (Auth::user()?->can('viewAllRequisitions', Payment::class) ?? false)
+            // Report 75R-B: an employee named as a receiver sees the requisition they
+            // are paid under, so they can confirm receipt and account for it.
+            || $requisition->items()->whereHas('payee.user', fn ($q) => $q->whereKey(Auth::id()))->exists();
     }
 
     /**
@@ -1729,6 +1916,7 @@ class PettyCashRequisitionController extends Controller
         ?PettyCashRequisition $editing = null,
     ): array
     {
+        $request->merge(['items' => app(RequisitionReceiverIdentity::class)->withSupplierNames((array) $request->input('items', []))]);
         $payload = $request->all();
         $validator = Validator::make($payload, $this->submissionRules());
 
@@ -1741,6 +1929,9 @@ class PettyCashRequisitionController extends Controller
                 ], 422),
             );
         }
+
+        app(RequisitionVerificationService::class)->validateVerifier($request->integer('responsible_verifier_id'), $editing ? $editing->user_id : Auth::id());
+        app(RequisitionReceiverIdentity::class)->validateSubmittedLines((array) $request->input('items', []), $request->input('payee_id'), $request->input('payee_name'));
 
         $type = $this->resolveType($request, $editableTypeId);
         $sameHistoricalType = $editing
@@ -1775,6 +1966,7 @@ class PettyCashRequisitionController extends Controller
     private function submissionRules(): array
     {
         return [
+            'responsible_verifier_id' => 'required|integer|exists:users,id',
             'department_id' => 'required|exists:departments,id',
             'category' => 'required|string',
             'requisition_type_id' => 'nullable|exists:petty_cash_requisition_types,id',
@@ -1792,8 +1984,10 @@ class PettyCashRequisitionController extends Controller
             'items.*.description' => 'required|string',
             'items.*.remarks' => 'nullable|string',
             'items.*.details' => 'nullable|array',
-            'items.*.amount' => 'required|numeric|min:0.01',
+            'items.*.amount' => 'required|numeric|decimal:0,2|min:0.01',
             'items.*.payee_id' => 'nullable|exists:employees,id',
+            'items.*.supplier_id' => 'nullable|integer|exists:suppliers,id',
+            'items.*.other_recipient_reference' => 'nullable|string|max:100|regex:/^[A-Za-z0-9._-]+$/',
             'items.*.payee_name' => 'nullable|string',
             'items.*.payee_phone' => 'nullable|string|max:255',
         ];
@@ -1849,6 +2043,12 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $requisition = PettyCashRequisition::findOrFail($id);
+            if ($requisition->disbursements()->whereNotNull('requisition_child_reference')->exists()) {
+                // Report 75R-B: this is the one-payment surrender, which clears one
+                // advance against one paying account. A requisition paid by receiver
+                // is surrendered per receiver (RequisitionAccountabilityService).
+                throw ValidationException::withMessages(['surrender' => 'This requisition was paid to its receivers separately. Each receiver accounts for their own money from the receiver list.']);
+            }
 
             if (!in_array($requisition->status, ['disbursed', 'received', 'surrender_pending', 'surrender_returned'], true)) {
                 return response()->json([
@@ -2021,43 +2221,8 @@ class PettyCashRequisitionController extends Controller
      */
     private function duplicateReceiptFields(array $itemData, string $gross, PettyCashRequisition $requisition, array &$seen): array
     {
-        $none = ['duplicate_of_surrender_item_id' => null, 'duplicate_of_payment_id' => null,
-            'duplicate_override_reason' => null, 'duplicate_overridden_by' => null, 'duplicate_overridden_at' => null];
-
-        if (blank($itemData['supplier_name'] ?? null) || blank($itemData['receipt_number'] ?? null)) {
-            return $none;
-        }
-
-        $key = strtolower(trim($itemData['supplier_name'])).'|'.strtolower(trim($itemData['receipt_number'])).'|'.$gross;
-        if (isset($seen[$key])) {
-            throw ValidationException::withMessages(['duplicate_receipt' => "Receipt {$itemData['receipt_number']} from {$itemData['supplier_name']} appears twice in this surrender."]);
-        }
-        $seen[$key] = true;
-
-        $match = app(\App\Modules\Finance\Services\DuplicateDetectionService::class)->checkExpenseReceipt(
-            $itemData['supplier_name'], $itemData['receipt_number'], $gross, $requisition->id
-        );
-        if ($match['status'] !== 'confirmed') {
-            return $none;
-        }
-
-        $where = $match['matched_type'] === 'payment'
-            ? "petty cash payment #{$match['matched_id']}"
-            : "surrender item #{$match['matched_id']}";
-        if (blank($itemData['duplicate_override_reason'] ?? null)) {
-            throw ValidationException::withMessages(['duplicate_receipt' => "Receipt {$itemData['receipt_number']} from {$itemData['supplier_name']} for KES {$gross} is already claimed as {$where}. An authorised override with a reason is required."]);
-        }
-        if (! Auth::user()?->can(Permissions::FINANCE_EXPENSE_DUPLICATE_OVERRIDE)) {
-            throw ValidationException::withMessages(['duplicate_receipt' => "Receipt {$itemData['receipt_number']} is already claimed as {$where}, and you are not authorised to override a duplicate expense receipt."]);
-        }
-
-        return [
-            'duplicate_of_surrender_item_id' => $match['matched_type'] === 'surrender_item' ? $match['matched_id'] : null,
-            'duplicate_of_payment_id' => $match['matched_type'] === 'payment' ? $match['matched_id'] : null,
-            'duplicate_override_reason' => $itemData['duplicate_override_reason'],
-            'duplicate_overridden_by' => Auth::id(),
-            'duplicate_overridden_at' => now(),
-        ];
+        return app(\App\Modules\Finance\PettyCash\Services\SurrenderReceiptGuard::class)
+            ->fields($itemData, $gross, $requisition, $seen, Auth::user());
     }
 
     /**
@@ -2071,6 +2236,9 @@ class PettyCashRequisitionController extends Controller
     {
         try {
             $requisition = PettyCashRequisition::with(['surrenderItems.expenseCode', 'disbursement.paymentSource'])->findOrFail($id);
+            if ($requisition->disbursements()->whereNotNull('requisition_child_reference')->exists()) {
+                throw ValidationException::withMessages(['surrender' => 'This requisition was paid to its receivers separately. Reconcile each receiver\'s surrender from the receiver list.']);
+            }
 
             if (!Auth::user()?->can('create', Payment::class)) {
                 return response()->json([
@@ -2154,6 +2322,24 @@ class PettyCashRequisitionController extends Controller
                 ], 422);
             }
 
+            // Report 75R-C (WNG decision): no automatic reimbursement. A surrender
+            // above the amount advanced is not reconciled; nothing is posted, paid
+            // or costed for it until it is brought within the advance.
+            $accounted = bcadd($requisition->surrenderItems->reduce(fn (string $sum, $item) => bcadd($sum, (string) $item->amount, 2), '0.00'),
+                bcadd((string) ($requisition->cash_returned_amount ?? '0'), '0', 2), 2);
+            if (bccomp($accounted, (string) $requisition->total_amount, 2) === 1) {
+                $over = bcsub($accounted, (string) $requisition->total_amount, 2);
+
+                return response()->json([
+                    'success' => false,
+                    'code' => 'OVERSPEND_REQUIRES_RESOLUTION',
+                    'message' => "Overspend requires resolution: this surrender is KES {$over} above the KES {$requisition->total_amount} advanced. "
+                        .\App\Modules\Finance\PettyCash\Services\RequisitionAccountabilityService::OVERSPEND_INSTRUCTION
+                        .' Return it for correction within the amount advanced.',
+                    'overspend' => $over,
+                ], 422);
+            }
+
             // Guards the same invariant submitSurrender() enforces: without this, calling
             // reconcile a second time on an already-'surrendered' requisition would re-post
             // its cost lines and clearing journal, double-counting the spend.
@@ -2166,61 +2352,16 @@ class PettyCashRequisitionController extends Controller
 
             DB::beginTransaction();
 
-            $enquiry = $requisition->enquiry ?? $requisition->project?->enquiry;
-            $collector = app(\App\Modules\Finance\CostCollector\Services\CostCollectorService::class);
             $producer = app(\App\Modules\Finance\CostCollector\Services\PettyCashCostProducer::class);
             $journalPosting = app(\App\Modules\Finance\Services\JournalPostingService::class);
 
-            // STAB-7: the requisition's actual cost now lands here, at surrender,
-            // rather than at disbursement — so the budget-exception justification
-            // (previously only ever attached at disbursement time, in
-            // PettyCashCostProducer::postFor(), before that immediate posting was
-            // correctly removed) must be carried onto these CostLines instead, or
-            // an authorized over-budget spend would post with no recorded reason.
-            $exception = $requisition->budget_exception ?: [];
-
-            // 1. Create verified CostLines for each surrender item
-            foreach ($requisition->surrenderItems as $item) {
-                if ($enquiry) {
-                    $costLine = $collector->postFromSource(
-                        new \App\Modules\Finance\CostCollector\Contracts\CostContext(
-                            expenseCode: (string) ($item->expenseCode?->code ?? ''),
-                            amount: (string) $item->amount,
-                            nature: \App\Modules\Finance\CostCollector\Models\CostLine::NATURE_ACTUAL,
-                            enquiryId: $enquiry->id,
-                            jobNumber: $enquiry->job_number,
-                            sourceType: \App\Modules\Finance\PettyCash\Models\PettyCashSurrenderItem::class,
-                            sourceId: $item->id,
-                            taxAmount: (string) $item->tax_amount,
-                            incurredAt: (string) ($requisition->disbursement?->date_disbursed ?? now()->toDateString()),
-                            payeeName: $item->supplier_name ?: ($requisition->payee_name ?: $requisition->requester_name),
-                            description: $item->description,
-                            details: array_filter([
-                                'receipt_type' => $item->receipt_type,
-                                'receipt_number' => $item->receipt_number,
-                                'supplier_kra_pin' => $item->supplier_kra_pin,
-                                'requisition_id' => $requisition->id,
-                                'requisition_number' => $requisition->requisition_number,
-                                'venue' => $requisition->venue,
-                                'unbudgeted_reason' => $exception['reason'] ?? null,
-                                'budget_exception_log_id' => $exception['governance_log_id'] ?? null,
-                            ]),
-                            // STAB-7: this requisition's surrender is posted as one
-                            // balanced clearing entry by
-                            // JournalPostingService::postPettyCashSurrender() below,
-                            // which covers every surrender item at once and clears
-                            // the advance PettyCashAdvancePoster already posted at
-                            // disbursement. This CostLine is for project-cost
-                            // attribution only — it must not also post its own
-                            // journal entry, or the same spend is recognised twice.
-                            postsIndependently: false,
-                        ),
-                        ['site' => $requisition->venue]
-                    );
-
-                    $item->update(['cost_line_id' => $costLine->id]);
-                }
-            }
+            // 1. Create verified CostLines for each surrender item (STAB-7: the
+            //    actual cost lands here, once, and never at disbursement).
+            app(\App\Modules\Finance\PettyCash\Services\SurrenderCostPoster::class)->post(
+                $requisition, $requisition->surrenderItems,
+                (string) ($requisition->disbursement?->date_disbursed ?? now()->toDateString()),
+                $requisition->payee_name ?: $requisition->requester_name,
+            );
 
             // 2. Release the commitment
             $producer->releaseFor($requisition, "Reconciled upon surrender of receipts for {$requisition->requisition_number}");

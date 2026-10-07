@@ -89,7 +89,7 @@ class FinanceOverviewController extends Controller
                 'days_left' => max(0, (int) now()->startOfDay()->diffInDays($period->ends_on->copy()->startOfDay(), false)),
             ] : null,
             'currency' => self::BASE_CURRENCY,
-            'wip_policy' => config('finance_accounts.wip_policy') ?: null,
+            'wip_policy' => \App\Modules\Finance\Governance\GovernanceRuntime::instance()->wipPolicy()['policy'],
             'chart_profile' => config('finance_accounts.profile') ?: null,
             'paying_accounts' => [
                 'configured' => $sources->filter(fn ($s) => $s->gl_account_id !== null && $s->can_make_payment)->count(),
@@ -209,7 +209,7 @@ class FinanceOverviewController extends Controller
             'margin_type' => 'direct',
             'margin_status' => 'provisional',
             'wip_balance' => $this->money($wip ?? 0),
-            'wip_policy' => config('finance_accounts.wip_policy') ?: null,
+            'wip_policy' => \App\Modules\Finance\Governance\GovernanceRuntime::instance()->wipPolicy()['policy'],
             'incomplete_costing' => collect($margins)->filter(fn ($m) => in_array('not_included', $m['cost_completeness'], true))->count(),
             'snapshot' => $enquiry ? [
                 'project' => ['id' => $enquiry->id, 'job_number' => $enquiry->job_number, 'title' => $enquiry->title],

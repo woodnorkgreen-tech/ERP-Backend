@@ -171,12 +171,12 @@ class FinancialReconciliationService
 
     private function workInProgress(string $asAt): array
     {
-        $policy = config('finance_accounts.wip_policy');
+        $policy = \App\Modules\Finance\Governance\GovernanceRuntime::instance()->wipPolicy()['policy'];
         if (! in_array($policy, ['capitalise', 'expense_on_capture'], true)) {
             return $this->result('WIP', $asAt, null, null, null, self::POLICY_BLOCKED, self::POLICY_BLOCKED,
                 'Production WIP recognition policy is not configured/approved; no capitalisation assumption is made.', [
                     'configured_policy' => $policy,
-                ], ['/finance/costs?tab=account', '/finance/setup']);
+                ], ['/finance/costs?tab=account', '/finance/setup?section=policies']);
         }
 
         return $this->notReady('WIP', $asAt, 'The WIP policy is configured, but no independent authoritative as-at WIP subledger is available for comparison.', [

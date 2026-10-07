@@ -1,0 +1,28 @@
+## payment_sources — db
++----+--------------+-----------------------------------+--------------+-----+-----+------+------+----------------------------+-----------+------+-------+--------------+------+
+| id | code         | name                              | type         | act | pay | gl   | acct | acct_name                  | cat       | post | a_act | acct_created | jl   |
++----+--------------+-----------------------------------+--------------+-----+-----+------+------+----------------------------+-----------+------+-------+--------------+------+
+|  1 | PC-MAIN      | Main Petty Cash Float             | petty_cash   |   1 |   1 |  127 | 1030 | Petty Cash Float           | asset     |    1 |     1 | 2026-10-02   |    1 |
+|  2 | BANK-MAIN    | Equity Bank – Operating Account   | bank         |   1 |   1 |  125 | 1010 | Bank – Main Account        | asset     |    1 |     1 | 2026-10-02   |    0 |
+|  3 | BANK-ALT     | NCBA Bank – Operations Account    | bank         |   1 |   1 |  126 | 1020 | Bank – Secondary Account   | asset     |    1 |     1 | 2026-10-02   |    0 |
+|  4 | MPESA        | Company M-Pesa                    | mobile_money |   1 |   1 |  128 | 1040 | Mobile Money Float         | asset     |    1 |     1 | 2026-10-02   |    0 |
+|  5 | CARD         | Company Card                      | card         |   1 |   1 |  125 | 1010 | Bank – Main Account        | asset     |    1 |     1 | 2026-10-02   |    0 |
+|  6 | AP           | Supplier Credit (Payable)         | payable      |   1 |   0 |  160 | 2100 | Accounts Payable           | liability |    1 |     1 | 2026-10-02   |    0 |
+|  7 | BANK-STANBIC | Stanbic Bank                      | bank         |   0 |   1 |  125 | 1010 | Bank – Main Account        | asset     |    1 |     1 | 2026-10-02   |    0 |
+|  8 | BANK-KCB     | KCB Bank                          | bank         |   0 |   1 |  125 | 1010 | Bank – Main Account        | asset     |    1 |     1 | 2026-10-02   |    0 |
+|  9 | BANK-FAMILY  | Family Bank                       | bank         |   0 |   1 |  125 | 1010 | Bank – Main Account        | asset     |    1 |     1 | 2026-10-02   |    0 |
++----+--------------+-----------------------------------+--------------+-----+-----+------+------+----------------------------+-----------+------+-------+--------------+------+
+## payment_sources — wng_target_rehearsal
++----+--------------+-----------------------------------+--------------+-----+-----+------+-----------+------------------------+-----------+------+-------+--------------+------+
+| id | code         | name                              | type         | act | pay | gl   | acct      | acct_name              | cat       | post | a_act | acct_created | jl   |
++----+--------------+-----------------------------------+--------------+-----+-----+------+-----------+------------------------+-----------+------+-------+--------------+------+
+|  1 | PC-MAIN      | Main Petty Cash Float             | petty_cash   |   1 |   1 |   12 | PETTY-001 | Petty cash             | asset     |    1 |     1 | 2026-03-06   |   14 |
+|  2 | BANK-MAIN    | Equity Bank – Operating Account   | bank         |   1 |   1 |    6 | EQB-001   | Equity Bank            | asset     |    1 |     1 | 2026-03-06   |    2 |
+|  3 | BANK-ALT     | NCBA Bank – Operations Account    | bank         |   1 |   1 |   10 | NCBA-001  | NCBA                   | asset     |    1 |     1 | 2026-03-06   |    0 |
+|  4 | MPESA        | Company M-Pesa                    | mobile_money |   0 |   1 | NULL | NULL      | NULL                   | NULL      | NULL |  NULL | NULL         |    0 |
+|  5 | CARD         | Company Card                      | card         |   0 |   1 | NULL | NULL      | NULL                   | NULL      | NULL |  NULL | NULL         |    0 |
+|  6 | AP           | Supplier Credit (Payable)         | payable      |   1 |   0 |    1 | AP-001    | Accounts Payable (A/P) | liability |    1 |     1 | 2026-03-06   |    2 |
+|  7 | BANK-STANBIC | Stanbic Bank                      | bank         |   0 |   1 |   14 | STB-001   | Stanbic Bank           | asset     |    1 |     1 | 2026-03-06   |    0 |
+|  8 | BANK-KCB     | KCB Bank                          | bank         |   0 |   1 |    9 | KCB-001   | KCB Bank               | asset     |    1 |     1 | 2026-03-06   |    0 |
+|  9 | BANK-FAMILY  | Family Bank                       | bank         |   0 |   1 |    7 | FMB-001   | Family Bank            | asset     |    1 |     1 | 2026-03-06   |    0 |
++----+--------------+-----------------------------------+--------------+-----+-----+------+-----------+------------------------+-----------+------+-------+--------------+------+

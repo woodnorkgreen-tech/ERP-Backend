@@ -11,6 +11,10 @@ class FinanceServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Report 75: one governance catalogue per request, so the service that
+        // validates a proposal and the screen that describes it read one picture.
+        $this->app->scoped(\App\Modules\Finance\Governance\GovernanceCatalogue::class);
+
         // Every module reports costs through the contract, never the concrete
         // service, so Stores / HR / Procurement take no dependency on how a cost
         // is actually recorded.

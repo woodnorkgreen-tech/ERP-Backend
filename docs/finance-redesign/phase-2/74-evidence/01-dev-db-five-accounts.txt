@@ -1,0 +1,116 @@
+## Dev database 'db' — the five existing accounts (full rows)
++-----+------+-------------------------+-----------+---------------+----------------+------+-----+-----------+-------------+----------+---------------------+
+| id  | code | name                    | category  | account_type  | normal_balance | post | act | parent_id | parent_code | children | created_at          |
++-----+------+-------------------------+-----------+---------------+----------------+------+-----+-----------+-------------+----------+---------------------+
+| 145 | 1330 | Input VAT Recoverable   | asset     | balance_sheet | debit          |    1 |   1 |       124 | 1000        |        0 | 2026-10-02 12:49:51 |
+| 161 | 2110 | Output VAT Payable      | liability | balance_sheet | credit         |    1 |   1 |       159 | 2000        |        0 | 2026-10-02 12:49:51 |
+| 162 | 2120 | Withholding Tax Payable | liability | balance_sheet | credit         |    1 |   1 |       159 | 2000        |        0 | 2026-10-02 12:49:51 |
+| 165 | 2150 | Accrued Expenses        | liability | balance_sheet | credit         |    1 |   1 |       159 | 2000        |        0 | 2026-10-02 12:49:51 |
+| 166 | 2200 | Client Deposits         | liability | balance_sheet | credit         |    1 |   1 |       159 | 2000        |        0 | 2026-10-02 12:49:51 |
++-----+------+-------------------------+-----------+---------------+----------------+------+-----+-----------+-------------+----------+---------------------+
+## Journal usage and balance of the five (db)
++------+---------------+--------+-----------+
+| code | journal_lines | debits | credits   |
++------+---------------+--------+-----------+
+| 1330 |             0 |   0.00 |      0.00 |
+| 2110 |             0 |   0.00 |      0.00 |
+| 2120 |             0 |   0.00 |      0.00 |
+| 2150 |             2 |   0.00 |   1000.00 |
+| 2200 |             1 |   0.00 | 500000.00 |
++------+---------------+--------+-----------+
+## Every journal entry in db and the lines touching the five
+*************************** 1. row ***************************
+                  id: 1
+            entry_no: JE-CL-0000002
+        posting_date: 2026-10-02
+accounting_period_id: 34
+        cost_line_id: 2
+    spend_voucher_id: NULL
+         source_type: App\Modules\Finance\CostCollector\Models\CostLine
+           source_id: 2
+          source_ref: CL-0000002
+         description: Accepted goods: GRN-2026-0001
+         total_debit: 250.00
+        total_credit: 250.00
+              status: posted
+      reversal_of_id: NULL
+          created_by: NULL
+           posted_at: 2026-10-02 12:54:01
+*************************** 2. row ***************************
+                  id: 2
+            entry_no: JE-CL-0000004
+        posting_date: 2026-10-02
+accounting_period_id: 34
+        cost_line_id: 4
+    spend_voucher_id: NULL
+         source_type: App\Modules\Finance\CostCollector\Models\CostLine
+           source_id: 4
+          source_ref: CL-0000004
+         description: Accepted goods: GRN-2026-0002
+         total_debit: 750.00
+        total_credit: 750.00
+              status: posted
+      reversal_of_id: NULL
+          created_by: NULL
+           posted_at: 2026-10-02 14:12:54
+*************************** 3. row ***************************
+                  id: 3
+            entry_no: JE-CL-0000005
+        posting_date: 2026-10-02
+accounting_period_id: 34
+        cost_line_id: 5
+    spend_voucher_id: NULL
+         source_type: App\Modules\Finance\CostCollector\Models\CostLine
+           source_id: 5
+          source_ref: CL-0000005
+         description: Stores Issue: Adhesive F2 (x3)
+         total_debit: 750.00
+        total_credit: 750.00
+              status: posted
+      reversal_of_id: NULL
+          created_by: 32
+           posted_at: 2026-10-02 14:13:39
+*************************** 4. row ***************************
+                  id: 4
+            entry_no: JE-RCPT-000085
+        posting_date: 2026-10-03
+accounting_period_id: 34
+        cost_line_id: NULL
+    spend_voucher_id: NULL
+         source_type: App\Models\EnquiryPayment
+           source_id: 85
+          source_ref: hhhhhhh
+         description: Client receipt hhhhhhh
+         total_debit: 500000.00
+        total_credit: 500000.00
+              status: posted
+      reversal_of_id: NULL
+          created_by: 32
+           posted_at: 2026-10-03 10:23:21
++----+------+----------------------------------+------------+-------------+---------------------------------+
+| je | code | name                             | entry_type | base_amount | description                     |
++----+------+----------------------------------+------------+-------------+---------------------------------+
+|  1 | 1200 | Raw-material Inventory           | debit      |      250.00 | Accepted goods: GRN-2026-0001   |
+|  1 | 2150 | Accrued Expenses                 | credit     |      250.00 | Payable/Clearing for CL-0000002 |
+|  2 | 1200 | Raw-material Inventory           | debit      |      750.00 | Accepted goods: GRN-2026-0002   |
+|  2 | 2150 | Accrued Expenses                 | credit     |      750.00 | Payable/Clearing for CL-0000004 |
+|  3 | 1211 | Project WIP – Direct Materials   | debit      |      750.00 | Stores Issue: Adhesive F2 (x3)  |
+|  3 | 1200 | Raw-material Inventory           | credit     |      750.00 | Payable/Clearing for CL-0000005 |
+|  4 | 1030 | Petty Cash Float                 | debit      |   500000.00 | Client funds received           |
+|  4 | 2200 | Client Deposits                  | credit     |   500000.00 | Held on account until invoiced  |
++----+------+----------------------------------+------------+-------------+---------------------------------+
+## Every FK column that references chart_of_accounts (db)
++------------------------+--------------------------+
+| t                      | c                        |
++------------------------+--------------------------+
+| chart_of_accounts      | parent_id                |
+| expense_codes          | default_debit_account_id |
+| finance_cash_movements | offset_account_id        |
+| journal_lines          | account_id               |
+| payment_sources        | gl_account_id            |
+| posting_rules          | credit_account_id        |
+| posting_rules          | debit_account_id         |
+| project_invoice_lines  | revenue_account_id       |
+| vat_treatments         | gl_account_id            |
+| wht_categories         | gl_account_id            |
++------------------------+--------------------------+

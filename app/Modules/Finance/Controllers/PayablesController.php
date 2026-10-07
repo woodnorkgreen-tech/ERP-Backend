@@ -299,7 +299,7 @@ class PayablesController extends Controller
         ]);
 
         $page = BillPayment::query()
-            ->with(['bill:id,bill_number,supplier_invoice_number,supplier_id,amount,wht_amount', 'bill.supplier:id,supplier_name',
+            ->with(['bill:id,bill_number,supplier_invoice_number,supplier_id,amount,wht_amount,project_id,project_enquiry_id,purchase_order_id', 'bill.purchaseOrder.requisition:id,project_id', 'bill.supplier:id,supplier_name',
                 'paymentSource:id,code,name,type', 'disbursement:id,status'])
             ->when($filters['supplier_id'] ?? null, fn (Builder $q, $id) => $q->whereHas('bill', fn (Builder $b) => $b->where('supplier_id', $id)))
             ->when($filters['payment_source_id'] ?? null, fn (Builder $q, $id) => $q->where('payment_source_id', $id))
@@ -316,6 +316,10 @@ class PayablesController extends Controller
             ->paginate((int) ($filters['per_page'] ?? 25));
         $payments = collect($page->items());
         $names = $this->names($payments->flatMap(fn (BillPayment $p) => [$p->user_id, $p->duplicate_override_by]));
+        $projects = $this->projectsFor($payments->pluck('bill')->filter()->unique('id'));
+        $journals = $request->user()->can(Permissions::FINANCE_REPORTS_VIEW)
+            ? JournalEntry::query()->where('source_type', BillPayment::class)->whereIn('source_id', $payments->pluck('id'))->whereNull('reversal_of_id')->get(['id', 'entry_no', 'source_id'])->keyBy('source_id')
+            : collect();
 
         return response()->json([
             'data' => $payments->map(fn (BillPayment $p) => [
@@ -328,6 +332,8 @@ class PayablesController extends Controller
                 'reference' => $p->reference_number,
                 'bill' => $p->bill ? ['id' => $p->bill->id, 'number' => $p->bill->bill_number, 'supplier_invoice_number' => $p->bill->supplier_invoice_number] : null,
                 'supplier' => $p->bill?->supplier ? ['id' => $p->bill->supplier->id, 'name' => $p->bill->supplier->supplier_name] : null,
+                'project' => $p->bill ? $projects->get($p->bill->id) : null,
+                'journal' => isset($journals[$p->id]) ? ['id' => $journals[$p->id]->id, 'number' => $journals[$p->id]->entry_no] : null,
                 'recorded_by' => $this->person($names, $p->user_id),
                 'status' => $p->disbursement_id && $p->disbursement?->status !== 'active' ? 'reversed' : 'active',
                 'duplicate_override' => $p->duplicate_of_payment_id ? [

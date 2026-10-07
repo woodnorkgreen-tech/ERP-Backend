@@ -1,0 +1,628 @@
+[
+  {
+    "name": "desktop-overview",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nOverview\nFinance overview\n\nControls, positions and the work waiting for you, from the ledger and the Finance workflows.\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nOverview\nMy actions\n\nYour Finance actions, exceptions and balances at a glance.\n\nFINANCE CONTROL CENTRE\nPeriod:\nSep 2026 · OPEN · 1d left\nCurrency:\nKES\nWIP policy:\nCAPITALISE\nPaying accounts:\n2 configured\nUnlinked:\n1\nLedger:\nBALANCED\n\nNEEDS CONFIGURATION OR CORRECTION\n\nStores stock value and the Inventory ledger differ by -300.00.\nWhat needs my attention?\nAll actions\n3\nMoney in\n2\nSupplier payments\n0\nExpenses & petty cash\n1\nProjects\n0\nAll my actions\nREFERENCE\tPARTY · PROJECT\tAMOUNT\tWORKFLOW\tCONTROL\tAGE\tACTION\n\nINV-0005\nInvoice to check\n\t\nAcme Ltd\nJOB-9\n\tKES 11,600.00\tCheck invoice\tAgeing\t27d\tInspectingCheck invoice\nShowing 1–1 of 1 · 0 overdue\nPage 1 / 1\nProject finance snapshot ·\nJOB-11\n\nExpo stand · the active project with the highest direct cost\n\nWIP KES 75,000.00\n\nApproved quote value\n\nKES 600,000.00\n\nAmount invoiced\n\nKES 500,000.00\n\nCash received\n\nKES 350,000.00\n\nInvoice outstanding\n\nKES 150,000.00\n\nDirect cost (actual)\n\nKES 320,000.00\n\nDirect margin · provisional\n\nKES 180,000.0036%\n\nLABOUR NOT INCLUDED\nLOGISTICS NOT INCLUDED\nOVERHEAD NOT INCLUDED\nDirect margin only; fully loaded margin is not available.\n\nINV-0011\nIssued\n\nInvoice to check · Acme Events\n\nProject JOB-5\n\nKES 116,000.00\nDue\n2026-09-15\nPaid · balance\nKES 40,000.00 · KES 76,000.00\nCONTROL CHAIN\nCommercial basis\n\nApproved quote · KES 300,000.00\n\nInvoice prepared\n\nPrep Arer\n\nCheck\n\nChek Er\n\nIssue\n\nChek Er\n\nReceipt and allocation\n\nPart paid; KES 76,000.00 outstanding\n\nACCOUNTING IMPACT\n\nNot yet posted.\n\nAUDIT TRAIL\n\nInvoice INV-0011 returned for correction. · Chek Er\n\n30 Aug 2026, 11:00\n\n“Wrong client”\n\nREFUSED\nAllocate receipt\nCredit note\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.\n\nCASH & BANK POSITION\nKES 250,000.00\n0 ledger accounts\nBy paying-account type\nFloat KES 4,200.00\nLedger balance, not a bank statement\nMONEY OWED TO US\nKES 90,000.00\n4 open invoices\nAgeing\n3 overdue\nKES 80,000.00 overdue\nKES 5,000.00 unapplied\n2 receipts to verify\nMONEY WE OWE\nKES 120,000.00\n3 awaiting verification\nBills by stage\n2 verified, unpaid\nKES 80,000.00 ready to pay\nKES 36,500.00 overdue\n1 returned\nPROJECT FINANCE · DIRECT COST\nKES 320,000.00\n3 active projects\nDirect margin\nKES 180,000.00\nWIP KES 75,000.00\n3 with incomplete costing\n\nDirect and provisional; not a fully loaded profit.",
+    "width": 1440,
+    "scrollWidth": 1425,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/readiness"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payment-sources"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/petty-cash/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/inventory/position"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/spend-vouchers/register"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/invoices/5"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/journals"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-money-in",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney in\nClient invoices\n\nEvery client invoice across all projects: where it stands, what has been received, and what is still owed.\n\nSearch Finance\nReceipts\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nEvery client invoice: prepare, check, issue, and see what is still owed.\n\nSEARCH\nSTATE\nAny state\nDraft\nReturned\nAwaiting review\nChecked\nIssued, unpaid\nPartially paid\nPaid\nVoid\nINVOICE DATE\nDUE DATE\nOverdue only\nINVOICE\tCLIENT · PROJECT\tINVOICED\tRECEIVED\tBALANCE\tSTATE\t\nNEXT\n\nINV-0011\n\n2026-09-01 · due 2026-09-15\n\n\tAcme Events\n\nJOB-5 · PO Pat Officer\n\n\tKES 116,000.00\tKES 40,000.00\tKES 76,000.00\n\n13 days overdue\n\n\tIssuedPartially paid\tApply receipt\nShowing 1–1 of 1\nPrevious\nNext\n\nINV-0011\nIssued\n\nClient invoice · Acme Events\n\nProject JOB-5\n\nKES 116,000.00\nDue\n2026-09-15\nPaid · balance\nKES 40,000.00 · KES 76,000.00\nControl chain\nCommercial basis\n\nApproved quote · KES 300,000.00\n\nInvoice prepared\n\nPrep Arer\n\nCheck\n\nChek Er\n\nIssue\n\nChek Er\n\nReceipt and allocation\n\nPart paid; KES 76,000.00 outstanding\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nInvoice INV-0011 returned for correction. · Chek Er\n\n30 Aug 2026, 11:00\n\n“Wrong client”\n\nREFUSED\nAllocate receipt\nCredit note\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/invoices"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/invoices/11"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/journals"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-money-out",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney out\nSupplier bills\n\nSupplier invoices across all projects: verify them against the order and receipt, return the wrong ones, and pay what is owed.\n\nSearch Finance\nSupplier payments\nWhat we owe\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nVerify supplier invoices against the order and receipt, return wrong ones, and pay what is owed.\n\nAwaiting verification\n3\nbills\n1 returned for correction\nReturned for correction\n1\nwith their preparers\nVerified, awaiting payment\nKES 80,000.00\n2 bills\nKES 120,000.00 owed in total\nPast due date\nKES 36,500.00\n1 bills\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nReturned for correction\nVerified\nPAYMENT\nAny\nUnpaid\nPartially paid\nPaid\nWITHHOLDING\nAny\nWith WHT\nNo WHT\nBILL DATE\nDUE\nOverdue only\nBILL · SUPPLIER\tPROJECT · ORDER · RECEIPT\tDATES\tBILL · WHT\tPAYABLE · PAID · OWED\tSTATE\t\nNEXT\n\nBILL-2026-0031\n\nSupplier invoice SINV-88\n\nTimber & Board Ltd\t\nJOB-5\nPO-0012\nGRN-0020\n\t\n\nBilled 2026-09-01\n\nDue 2026-09-10\n\n5 days overdue\n\n\tKES 58,000.00\n\nWHT 1,500.00\n\n\tKES 56,500.00\n\npaid 0.00\n\nowed 56,500.00\n\n\tAwaiting reviewPending\tVerify bill\nShowing 1–1 of 1\nPrevious\nNext\n\nBILL-2026-0031\nAwaiting review\n\nSupplier bill · Timber & Board Ltd\n\nProject JOB-5\n\nKES 56,500.00\nVAT · WHT\nKES 8,000.00 · KES 1,500.00\nBalance\nKES 56,500.00\nControl chain\nRequisition\n\nPR-0008 · Ops Manager\n\nPurchase orderPO-0012\nKES 50,000.00\n\nOps Manager\n\nGoods received\n\nGRN-0020\n\nSupplier billSINV-88\nKES 58,000.00\n\nProc Clerk\n\nVerification\n\nAwaiting verification\n\nPayment\n\nNot paid\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nPrepared · Proc Clerk\n\n1 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nVerify\nReturn for correction\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+    "width": 1440,
+    "scrollWidth": 1425,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills/31"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/journals"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-projects",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nProject billing · JOB-5\nProject billing · JOB-5\n\nExpo stand · Acme Events\n\nSearch Finance\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient invoices, receipts, deposits and balances.\n\nView invoices\nView receipts\nView client position\nNew invoice\nSupplier bills\nProject Officer: Pat Officer\nFinance position\nAGREED PRICE\nKES 1,000,000.00\nINVOICED (ISSUED)\nKES 1,160,000.00\nRECEIVED (VERIFIED)\nKES 500,000.00\nINVOICE OUTSTANDING\nKES 660,000.00\nHELD FOR THE CLIENT (UNAPPLIED)\nKES 0.00\nREMAINING TO INVOICE\nKES 160,000.00\n\nNot yet in the figures above: KES 50,000.00 in draft invoices and KES 20,000.00 in credit notes awaiting issue.\n\nPROJECT REVENUE (ISSUED)\n\nKES 1,000,000.00\n\nDIRECT PROJECT COST\n\nKES 400,000.00\n\nDIRECT MARGIN\n\nKES 600,000.00\n\nFully loaded margin is not yet available (labour, logistics and overhead methodology pending).\n\nReceipts shared with other projects\n\nA single client payment split across projects. Record one with a total larger than this project's share; allocate the rest here.\n\nNo receipt for this project is shared with another project or has money left to allocate.\n\nBilling history\n\nfinancialQuote amount recorded directly in Project Billing\n\nChek Er · 2 Sept 2026, 11:00\n\n“Client agreed by phone”\n\nCommercial basis\n\nApproved quote\n\nKES 1,000,000.00\nSource\nApproved quote\nApproved\n2026-09-01\nException required\nNo\nBilling terms\n\nDeposit received and verified before production starts. Invoice payment terms are set up in Finance setup.\n\nDEPOSIT REQUIRED\n\n70%\n\nOF THE AGREED PRICE\n\nKES 700,000.00\n\n10.0% verified · KES 600,000.00 still to receive and verify · 1 receipt awaiting verification (not counted)\n\nChange deposit %\nProduction deposit control\n\nBlocked: 10.0% verified of the 70% required.\n\nThe verified deposit is below the 70% target. Early release requires the receivables override permission.",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/project-billing/5"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-banks",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nCash & banks\nFinancial reports\n\nLedger-backed financial statements, cash position and movements, ageing and reconciliation controls.\n\nSearch Finance\nHow this works\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nCash & bank position\nCash movement\nCHECK & CLOSE\nBank matching\nWhich question are you answering?\nBalance sheet\nBank & Cash\nReconciliation centre\nTrial balance\nCash Movement\nCash Flow readiness\nProfit and loss\nReceivables ageing\nPayables ageing\nDownload comma-separated values file\nAs at \nRun\n\nHISTORICAL DATA INCOMPLETE\n\nApproved historical cash openings are unavailable.\n\nReadiness: HISTORICAL_DATA_INCOMPLETE · Opening balance status: NOT_CONFIGURED\n\nOperating bank: CONFIGURED\nCompany M-Pesa: NOT CONFIGURED\nCompany Card: NOT CONFIGURED\n\nTOTAL CASH & BANK · KES\n\n(KES 1,234,567,890.12)\n\nAs at 2026-09-30\n\nConfigured cash/bank accounts including petty cash once.\n\nACCOUNT\tAPPROVED OPENING\tDEBITS TO DATE\tCREDITS TO DATE\tCLOSING LEDGER BALANCE\tREADINESS\n1010 Operating bank\n\nbank\n\n\tNOT AVAILABLE\tKES 100.00\tKES 1,234,567,990.12\t(KES 1,234,567,890.12)\tHISTORICAL_DATA_INCOMPLETE",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/reports/bank-cash-position"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-payroll",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nPayroll\nPayroll finance\n\nFinance readiness, accounting, liabilities and settlement. HR prepares and calculates payroll.\n\nSearch Finance\nRefresh controls\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPayroll runs\n\nFinance readiness, accounting, liabilities, settlement and labour mapping.\n\nCURRENT PAYROLL\n2026-09\n12 employees\nPreparation / approval\nAPPROVED\nKES 120,000.00\nLOCKED\nNET PAYROLL PAYABLE\nKES 90,000.00\noutstanding\nSettled\n0.00\nSTATUTORY LIABILITIES\nKES 30,000.00\noutstanding\nRemittance rail\nNOT AVAILABLE\n\nDisplayed from payroll accounting; Finance does not recalculate PAYE.\n\nPAYROLL READINESS\nNOT READY\n3 exceptions\nSalary configured\n10 / 12\nPayroll runs\n1\nAwaiting posting\n0\nLiabilities\n0\nPayments\n0\nReadiness\n3\nLabour classification\n0\n\nHistorical payroll Payment records and opening balances are not backfilled.\n\nPayroll runs\n\nPreparation, approval, posting and settlement remain separate states.\n\nPERIOD · RUN\tEMPLOYEES\tGROSS\tAPPROVAL\tPOSTING\tSETTLEMENT\tOUTSTANDING\tACTION\n\n2026-09\n\nPAYROLL-2026-09\n\n\t12\tKES 120,000.00\tAPPROVED\tPOSTED\tOUTSTANDING\tKES 90,000.00\tThe person who locked this payroll run cannot also pay it.\n\nPAYROLL-2026-09\nOUTSTANDING\n\nPayroll run\n\n2026-09\n\nKES 90,000.00\nEmployees\n12\nGross payroll\nKES 120,000.00\nOutstanding\nKES 90,000.00\nCONTROL CHAIN\nPayroll prepared\nACCOUNTING IMPACT\nACTUAL JOURNAL\n\nJE-PR-A-9 · 2026-09-30\n\nDR\t7550 · Salaries\t120,000.00\nDR 120,000.00\nCR 120,000.00\nΔ 0.00\nLIABILITIES\nAUDIT RAIL\n\nPrepared · HR Preparer\n\n1 Sept 2026, 03:00\n\nDONE\n\nApproved · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPosted · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPaid\n\nPENDING\n\nAggregate Finance view.\n\nThe person who locked this payroll run cannot also pay it.",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/liabilities"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/payments"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/readiness"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/labour-classification"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/9"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-inventory",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nInventory\nInventory position\n\nStores stock value beside the Inventory ledger account, what reached projects, and what has not reached the ledger.\n\nSearch Finance\nProject material issues\nAdjustments\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInventory position\nProject material issues\nStock adjustments\n\nStores valuation against the Inventory ledger account, with the difference explained.\n\nSTORES VALUATION\n\nKES 1,000.00\n\n1 stocked materials\n\nINVENTORY LEDGER\n\nKES 1,300.00\n\n1200 Raw-material Inventory; posted entries\n\nDIFFERENCE (STORES − LEDGER)\n\n(KES 300.00)\n\nDoes not agree. The known reasons are below.\n\nWhat can make them differ\nWrite-offs and counted balances set outside a stock count (no ledger posting)\n1 item(s)\nKES 200.00\nView\nService or non-stock lines received through a GRN (in the Inventory account, not in stock)\n1 item(s)\nKES 300.00\nStores movements awaiting their Finance posting\n0 item(s)\nNo opening inventory count approved: stock held before the ledger opened is not in the Inventory account\n\nService or non-stock lines received on a GRN go into the Inventory account and are never issued from Stores, so they stay there until WNG decides how services are confirmed (W2-8). Write-offs and balances set outside a stock count have no posting rule yet (policy pending).\n\nValuation method\n\nMoving weighted average\n\nEach priced receipt re-averages the unit cost.\n\nRecorded on the catalogue: Weighted Average.\n\nWhere issued material is charged\n\nWIP policy not set explicitly for this installation: the chart's default applies. Policy configuration required: Finance to confirm.\n\nEach issue's own debit account is shown on the issues list.\n\nISSUED TO PROJECTS (NET OF RETURNS)\n\nKES 200.00\n\n1 cost lines · ACTUAL project cost\n\nRECEIVED, NOT YET ISSUED\n\nKES 1,000.00\n\n1 GRN accruals · 1,000.00 awaiting the supplier bill\n\nSTORES POSTINGS TO FINANCE\n\n0 failed · 0 pending\n\nRetried from Stores, which owns the movement.",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/inventory/position"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-reports",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nReports\nFinancial reports\n\nLedger-backed financial statements, cash position and movements, ageing and reconciliation controls.\n\nSearch Finance\nHow this works\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nUNDERSTAND RESULTS\nReports\nAccount book\nCHECK & CLOSE\nTax review\nClose month\nWhich question are you answering?\nBalance sheet\nBank & Cash\nReconciliation centre\nTrial balance\nCash Movement\nCash Flow readiness\nProfit and loss\nReceivables ageing\nPayables ageing\nDownload comma-separated values file\nAs at \nRun\n\nHISTORICAL DATA INCOMPLETE\n\nOpening balances and retained earnings are not configured.\n\nOpening balances: NOT_CONFIGURED. Equity complete: No.\n\nLedger snapshot only.\n\nNot included: Opening balances and retained earnings.\n\nASSETS\n\nKES 120.00\n\nLIABILITIES\n\nKES 30.00\n\nEQUITY\n\nKES 50.00\n\nACCOUNT\tBALANCE\nAssets\n1000Cash\tKES 120.00\nAssets total\tKES 120.00\nLiabilities\n2000Payables\tKES 30.00\nLiabilities total\tKES 30.00\nEquity\n3000Capital\tKES 50.00\nEquity total\tKES 50.00\nUnclassified: accountant review required\nX-1Review accountREQUIRES_ACCOUNTANT_REVIEW\tKES 10.00\nEquation difference (assets - liabilities - equity)\tKES 40.00\nEquation does not balance. No automatic balancing entry has been created.",
+    "width": 1440,
+    "scrollWidth": 1425,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/reports/balance-sheet"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-setup",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nSetup\nFinance setup & readiness\n\nReview configuration, policy and data gates separately, then open the controls you are authorized to use.\n\nSearch Finance\nCheck again\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nControl centre\nMoney accounts\nPayment terms\n\nIs Finance configured? Checks, account mappings and integrity counters.\n\n1\nSet up\n\nDefine the forms and accounts transactions depend on.\n\nMoney accounts\nBank accounts, mobile money and cash floats, and the ledger account each posts to.\nPayment terms\nThe invoice payment terms Finance offers, and which one is the default.\n2\nCheck & close\n\nCompare records with outside evidence, review tax, then freeze the month.\n\nBank matching\nMatch bank statements to recorded ledger movements.\nTax review\nVAT schedules, eTIMS compliance and withholding tax (WHT) owed to KRA.\nClose month\nAudit unposted items, lock accounting periods, and prevent backdated entries.\n3\nUnderstand results\n\nTrace individual entries first, then read the summarized reports.\n\nCash & bank position\nCurrent recorded ledger position, with channel and history readiness.\nCash movement\nRecorded inflows, outflows and transfers; not a statutory Cash Flow statement.\nReports\nBalance Sheet, Bank & Cash, Cash Movement, profit and loss, reconciliation controls, trial balance and ageing.\nAccount book\nEvery journal the workflows have posted, by account.\nSystem readiness\n\nTechnical checks that must pass before transactions can post reliably. These checks do not replace bank reconciliation or month-end review.\n\nReference-data and integrity checks passed. Review configuration, policy and data gates separately. These reference checks do not certify production policy or historical financial data.\n\nReadiness by domain\n\nConfiguration and policy gates are separate from reference-data checks. No live readiness or accounting policy is inferred.\n\nControlled Finance workflows\n\nExisting posting, approval, period and reversal services are retained. This is not a verdict on live data.\n\nSoftware ready\nReview\nChart & account mappings\n\n120 active postable account(s) lack classification. Posting functions resolve through ChartAccountMap.\n\nConfiguration required\nReview\nPayment & receiving channels\n\nReview each channel and its actual asset account; no account is invented for M-Pesa or Card.\n\nReady\nReview\nAccounting periods\n\nCurrent period: open. Posting still checks assertOpenPeriod.\n\nReady\nReview\nExpense codes & posting dependencies\n\nCatalogue account, cost centre and activity resolution use the existing checks. An empty posting-rule table alone does not prove a defect; coded posting remains authoritative.\n\nReady\nReview\nTax configuration\n\nReference treatments only; effective tax rules and evidence require Finance review before filing.\n\nReady\nReview\nProject cost / WIP policy\n\nConfigured mode: not explicitly configured. Configuration is not signed production approval.\n\nPolicy required\nReview\nPayroll Finance policy\n\nW7-24, W7-25, W7-26 and salary-advance treatment remain separate from aggregate payroll readiness. Employee HR details are not exposed here.\n\nPolicy required\nReview\nPetty cash configuration\n\nThreshold and surrender policies need explicit approval; safe existing defaults do not establish policy readiness.\n\nPolicy required\nReview\nDocument controls\n\n2 sequence row(s) exist. Presence alone cannot establish every workflow sequence or history provenance.\n\nData required\nReview\nOpening / financial history\n\nOpening balances, AP authority, cash/bank history and period-end provenance are not certified by reference checks.\n\nData required\nReview\nStatutory Cash Flow statement\n\nThe canonical reporting service supports Cash Movement and Cash Flow readiness; it does not fabricate a statutory statement.\n\nNot supported\nReview\nChart & account mappings\nDefault operating bank account (bank_default)\n1010 Bank – Main Account · Resolved\nPetty cash float (cash on hand) (petty_cash_float)\n1030 Petty Cash Float · Resolved\nAmounts clients owe (accounts_receivable)\n1100 Accounts Receivable · Resolved\nStaff advances / imprest (asset) (staff_advances)\n1300 Staff Advances / Imprest · Resolved\nInput VAT recoverable (asset) (input_vat)\n1330 Input VAT Recoverable · Resolved\nRaw-material inventory (asset) (inventory)\n1200 Raw-material Inventory · Resolved\nProject work in progress: direct materials (wip_direct_materials)\n1211 Project WIP – Direct Materials · Resolved\nProject work in progress: direct labour (wip_direct_labour)\n1212 Project WIP – Direct Labour · Resolved\nProject WIP: subcontractors (wip_subcontractors)\n1213 Project WIP – Subcontractors · Resolved\nProject WIP: transport and logistics (wip_transport_logistics)\n1214 Project WIP – Transport & Logistics · Resolved\nProject WIP: equipment and site (wip_equipment_site)\n1215 Project WIP – Equipment & Site · Resolved\nProject WIP: project utilities (wip_project_utilities)\n1216 Project WIP – Project Utilities · Resolved\nProject WIP: project facilitation (meals, accommodation, per diem) (wip_project_facilitation)\n1217 Project WIP – Project Facilitation · Resolved\nProject WIP: venue and statutory (wip_venue_statutory)\n1218 Project WIP – Venue & Statutory · Resolved\nProject WIP: rework and warranty (wip_rework_warranty)\n1219 Project WIP – Rework & Warranty · Resolved\nAmounts owed to suppliers and payees (accounts_payable)\n2100 Accounts Payable · Resolved\nOutput VAT payable (output_vat)\n2110 Output VAT Payable · Resolved\nWithholding tax payable (wht_payable)\n2120 Withholding Tax Payable · Resolved\nPAYE payable (paye_payable)\n2130 PAYE Payable · Resolved\nStatutory deductions payable (NSSF, SHIF, housing levy) (statutory_payable)\n2140 Statutory Deductions Payable · Resolved\nGoods received not yet invoiced / accrued expenses (accrued_expenses)\n2150 Accrued Expenses · Resolved\nNet pay owed to staff (net_payroll_payable)\n2160 Net Payroll Payable · Resolved\nClient deposits received before revenue is earned (client_deposits)\n2200 Client Deposits · Resolved\nOpening balance equity (opening stock counts) (opening_balance_equity)\n3900 Opening Balance Equity · Resolved\nProject revenue (project_revenue)\n4100 Project Revenue · Resolved\nCost of sales: direct materials (WIP release) (cos_direct_materials)\n5100 Cost of Sales – Direct Materials · Resolved\nCost of sales: direct labour (WIP release; payroll direct labour) (cos_direct_labour)\n5200 Cost of Sales – Direct Labour · Resolved\nCost of sales: subcontractors (WIP release) (cos_subcontractors)\n5300 Cost of Sales – Subcontractors · Resolved\nCost of sales: transport and logistics (WIP release) (cos_transport_logistics)\n5400 Cost of Sales – Transport & Logistics · Resolved\nCost of sales: equipment and site (WIP release) (cos_equipment_site)\n5500 Cost of Sales – Equipment & Site · Resolved\nCost of sales: project utilities (WIP release) (cos_project_utilities)\n5600 Cost of Sales – Project Utilities · Resolved\nCost of sales: project facilitation (WIP release) (cos_project_facilitation)\n5700 Cost of Sales – Project Facilitation · Resolved\nCost of sales: venue and statutory (WIP release) (cos_venue_statutory)\n5800 Cost of Sales – Venue & Statutory · Resolved\nCost of sales: rework and warranty (WIP release) (cos_rework_warranty)\n5900 Cost of Sales – Rework & Warranty · Resolved\nInventory adjustments and shrinkage (inventory_adjustments)\n6800 Inventory Adjustments & Shrinkage · Resolved\nSalaries and wages: office and admin staff (overhead) (salaries_expense)\n7550 Salaries & Wages · Resolved\nBank and mobile-money transaction charges (bank_charges)\n7800 Bank & Mobile-money Charges · Resolved\nPayment & receiving channels\nSupplier Credit (Payable)\n\nAP · payable · Active\n\n2100 · Accounts Payable\n\nNot supported\n\nSupplier credit is a liability, not a receiving or paying channel.\n\nNCBA Bank – Operations Account\n\nBANK-ALT · bank · Active\n\n1020 · Bank – Secondary Account\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nFamily Bank\n\nBANK-FAMILY · bank · Inactive\n\n1010 · Bank – Main Account\n\nBlocked\n\nInactive; unavailable for receiving or paying.\n\nKCB Bank\n\nBANK-KCB · bank · Inactive\n\n1010 · Bank – Main Account\n\nBlocked\n\nInactive; unavailable for receiving or paying.\n\nEquity Bank – Operating Account\n\nBANK-MAIN · bank · Active\n\n1010 · Bank – Main Account\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nStanbic Bank\n\nBANK-STANBIC · bank · Inactive\n\n1010 · Bank – Main Account\n\nBlocked\n\nInactive; unavailable for receiving or paying.\n\nCompany Card\n\nCARD · card · Active\n\n1010 · Bank – Main Account\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nCompany M-Pesa\n\nMPESA · mobile_money · Active\n\n1040 · Mobile Money Float\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nMain Petty Cash Float\n\nPC-MAIN · petty_cash · Active\n\n1030 · Petty Cash Float\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nPolicy & data register\n\nConfigured WIP mode: Not explicitly configured. A rehearsal setting is not production approval.\n\nW1-10 · Credit-note COGS / WIP treatment — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nW7-24 · Project labour GL / WIP project dimensions — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nW7-25 · Standard labour versus actual payroll variance — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nW7-26 · Employer statutory costs in standard labour rates — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nsalary-advance · Salary advance GL treatment — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nstores-consumption · Non-project Stores consumption GL treatment — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nstock-adjustments · Manual stock adjustment authority — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nopening-balances · Opening balance and history provenance — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nretained-earnings · Retained earnings authority — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nperiod-end · Period-end / as-of financial authority — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nwip-production · Production approval of WIP recognition / release mode — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nEffective settings and approval evidence\nMaterials to project costs · readiness\n\n2 checks need attention before transactions begin.\n\nReview setup and records\n✓ Active material catalogue\n\n437 active materials available.\n\n! Material handling setup\n\n419 active materials need setup corrections.\n\nComplete categories, units, required specifications and compatible handling controls.\n\nExamples:\nMDF-06-0001\n,\nMDF-18-0001\n,\nACR-CLR-0005\n,\nCUT-BIT-0001\n,\nCUT-BIT-0002\n,\nTAPE-DBL-0001\n,\nCNC-0009\n,\nCNC-0010\n,\nCNC-0011\n,\nCNC-0017\n\nOpen records →\n✓ Buying and issuing units\n\n0 materials need unit corrections.\n\n✓ Active suppliers\n\n5 active suppliers available.\n\n✓ Stock and reservations\n\n0 invalid stock balances or reservations.\n\n! Stock valuation\n\n18 stocked materials have no valuation.\n\nRecord supported receipt or opening values before issuing to projects.\n\nExamples:\nUV-INK-CYN1\n,\nUV-INK-MAG1\n,\nUV-INK-YEL1\n,\nUV-INK-BLK1\n,\nSCR-CHIP-0001\n,\nSCR-CHIP-0003\n,\nUVFL-UVIN-0001\n,\nUVFL-XROL-0002\n,\nUVFL-XROL-0003\n,\nUVFL-0004\n\nOpen records →\n✓ Board valuation\n\n0 available boards have no value.\n\n✓ Board identification\n\n0 available boards await label confirmation.\n\n✓ Stores to Finance cost capture\n\n0 failed or stalled cost postings.\n\n0 draft materials · 0 cost postings in progress · Checked 10/3/2026, 10:20:29 AM\n\nOpen accounting period\n\nOctober 2026 is open.\n\nPostable accounts\n\n200 active record(s) available.\n\nRequired control accounts\n\nEvery account the posting code needs resolves to a postable, active account.\n\nChart profile\n\nNo chart profile: this installation keeps the reference chart.\n\nExpense catalogue\n\nEvery active expense code maps to a postable debit account.\n\nExpense catalogue account mapping\n\nEvery catalogue code naming an account resolves to one in this chart.\n\nPayment sources\n\nEvery active payment source maps to a postable ledger account.\n\nVAT treatments\n\n5 active record(s) available.\n\nWithholding tax categories\n\n3 active record(s) available.\n\nCost centres\n\nEvery active expense code naming a cost centre resolves to one.\n\nProject activities\n\nEvery active expense code naming a activity resolves to one.\n\nControlled operational ledger\n\nThis ledger records the supported Finance workflows. Opening/history provenance, policy-dependent treatments and unsupported statutory statements remain separate readiness gates.",
+    "width": 1440,
+    "scrollWidth": 1425,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/readiness"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-detail",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSupplier bill BILL-2026-0031\nSupplier bill BILL-2026-0031\nAwaiting review\nPending\n\nTimber & Board Ltd · invoice SINV-88\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nSupplier liabilities, payments, staff expenses and petty cash requiring action.\n\nREQUISITION\n\nPR-0008\n\nPURCHASE ORDER\n\nPO-0012 · 1 amendment\n\nGOODS RECEIVED\n\nGRN-0020\n\nSUPPLIER BILL\n\nBILL-2026-0031 · SINV-88\n\nPAYMENT\n\nNo payments have been recorded against this bill.\n\nBILL (GROSS)\n\nKES 58,000.00\n\nBilled 2026-09-01\n\nPAYABLE TO SUPPLIER\n\nKES 56,500.00\n\nafter KES 1,500.00 WHT\n\nSTILL OWED\n\nKES 56,500.00\n\n5 days past due (2026-09-10)\n\nVerify bill\nReturn for correction\nPay: Verify this bill first\nThree-way match\nPasses: ready to verify\n\nPurchase order approved\n\nOrder PO-0012\n\nPassed\n\nInvoice does not exceed the remaining accepted (unbilled) value\n\n50,000.00 invoiced against 50,000.00 remaining accepted\n\nPassed\nORDER LINE\tORDERED\tRECEIVED\tACCEPTED\tUNIT PRICE\tACCEPTED VALUE\tRESULT\nMDF 18mm (sheet)\t100\t100\t100\t500.00\t50,000.00\tFully accepted\nORDER VALUE\nKES 50,000.00\nPREVIOUSLY BILLED\nKES 0.00\nTHIS BILL (NET)\nKES 50,000.00\nBILLED IN TOTAL\nKES 50,000.00\nSTILL BILLABLE\nKES 0.00\n\nCompared net of VAT, the basis the order is priced on. Finance refuses a bill that takes the total past the order or past what Stores accepted.\n\nTax and withholding\nNet\nKES 50,000.00\nVAT (Standard 16%, claimable)\nKES 8,000.00\nGross supplier bill\nKES 58,000.00\n− Withholding tax (Professional fees, 3.00%)\nKES 1,500.00\n= Amount payable to supplier\nKES 56,500.00\n\nWHT liability: KES 1,500.00 retained and owed to KRA on WHT-001 Withholding Tax Payable. It is not a discount: the supplier's invoice is still KES 58,000.00.\n\neTIMS ETIMS-1 · supplier PIN P051234567M · tax point 2026-09-01\n\nPayments\n\nNo payments have been recorded against this bill.\n\nPaid KES 0.00 of KES 56,500.00 payable · KES 56,500.00 outstanding. A payment settles the liability; it adds no project cost.\n\nProject cost\n\nCosted when Stores accepted the goods.\n\nCL-0000009 · accrued · 50,000.00 · JOB-5 · receipt accrual settled by this bill\nProcurement basis\nOrder\nPO-0012 · 50,000.00\nApproved\nOps Manager · 29 Aug 2026, 11:00\nSenior approval\nNo senior-approval threshold has been set by WNG yet\nRequisition\nPR-0008 · approved by Ops Manager\n\nORIGINAL ORDER AND AMENDMENTS\n\nAmendment 1 · approved · commercial\n\nOriginal KES 45,000.00 → approved KES 50,000.00\n\nExtra sheets\n\nRequested by Proc Clerk · approved by Ops Manager 30 Aug 2026, 12:00\n\nGOODS RECEIVED\n\nGRN-0020 · 2026-08-31 · received by Store Keeper · confirmed\nMDF 18mm: 100 of 100 received\n\nService procurement uses the same goods receipt: a separate service confirmation is an open WNG policy decision (W2-8).\n\nControls\n\nRecorded by Proc Clerk\n\n1 Sept 2026, 11:00\n\nEvidence\nShow\nAudit trail\n\nNo control events have been logged for this bill beyond those above.",
+    "width": 1440,
+    "scrollWidth": 1425,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills/31"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-receipts",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nInvoices\nReceipts\nProject billing\n\nClient money received: verify it, apply it to invoices, and see what is held for clients.\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\n\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\n\tAcme Events\n\nJOB-5· billing\n\n\tKES 150,000.00\tNot applied\t—\tPending\n\nrecorded by Me Myself\n\n\t\n\nThis receipt was recorded by you, so someone else has to confirm it.\n\nReverse\nCorrect\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recorded\n\nMe Myself\n\nVerification\nAllocation\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Me Myself\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nCorrect\nReverse\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/receipts"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/journals"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-money-out-empty",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney out\nSupplier bills\n\nSupplier invoices across all projects: verify them against the order and receipt, return the wrong ones, and pay what is owed.\n\nSearch Finance\nSupplier payments\nWhat we owe\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nVerify supplier invoices against the order and receipt, return wrong ones, and pay what is owed.\n\nAwaiting verification\n0\nbills\n0 returned for correction\nReturned for correction\n0\nwith their preparers\nVerified, awaiting payment\nKES 0.00\n0 bills\nKES 0.00 owed in total\nPast due date\nKES 0.00\n0 bills\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nReturned for correction\nVerified\nPAYMENT\nAny\nUnpaid\nPartially paid\nPaid\nWITHHOLDING\nAny\nWith WHT\nNo WHT\nBILL DATE\nDUE\nOverdue only\n\nNo supplier bills have been recorded yet.\n\nSelect a bill to see its purchase chain, ledger impact and audit trail.",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop-money-out-error",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney out\nSupplier bills\n\nSupplier invoices across all projects: verify them against the order and receipt, return the wrong ones, and pay what is owed.\n\nSearch Finance\nSupplier payments\nWhat we owe\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nSupplier bills\nSupplier payments\nWithholding tax\nWhat we owe suppliers\nPurchase requisitions\nPurchase orders\nGoods received\nMy submissions\nPetty cash overview\nAdvances & surrenders\nPayment vouchers\n\nVerify supplier invoices against the order and receipt, return wrong ones, and pay what is owed.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nReturned for correction\nVerified\nPAYMENT\nAny\nUnpaid\nPartially paid\nPaid\nWITHHOLDING\nAny\nWith WHT\nNo WHT\nBILL DATE\nDUE\nOverdue only\n\nThe server could not load supplier bills. Nothing was changed; try again, and tell Finance support if it persists.\n\nTry again\n\nSelect a bill to see its purchase chain, ledger impact and audit trail.",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-overview",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nOverview\nFinance overview\n\nControls, positions and the work waiting for you, from the ledger and the Finance workflows.\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nFINANCE CONTROL CENTRE\nPeriod:\nSep 2026 · OPEN · 1d left\nCurrency:\nKES\nWIP policy:\nCAPITALISE\nPaying accounts:\n2 configured\nUnlinked:\n1\nLedger:\nBALANCED\n\nNEEDS CONFIGURATION OR CORRECTION\n\nStores stock value and the Inventory ledger differ by -300.00.\nWhat needs my attention?\nAll actions\n3\nMoney in\n2\nSupplier payments\n0\nExpenses & petty cash\n1\nProjects\n0\nAll my actions\nINV-0005\nKES 11,600.00\n\nAcme Ltd · JOB-9\n\nCheck invoice · Ageing\n\nCheck invoice\nInspect\nShowing 1–1 of 1 · 0 overdue\nPage 1 / 1\nProject finance snapshot ·\nJOB-11\n\nExpo stand · the active project with the highest direct cost\n\nWIP KES 75,000.00\n\nApproved quote value\n\nKES 600,000.00\n\nAmount invoiced\n\nKES 500,000.00\n\nCash received\n\nKES 350,000.00\n\nInvoice outstanding\n\nKES 150,000.00\n\nDirect cost (actual)\n\nKES 320,000.00\n\nDirect margin · provisional\n\nKES 180,000.0036%\n\nLABOUR NOT INCLUDED\nLOGISTICS NOT INCLUDED\nOVERHEAD NOT INCLUDED\nDirect margin only; fully loaded margin is not available.\n\nINV-0011\nIssued\n\nInvoice to check · Acme Events\n\nProject JOB-5\n\nKES 116,000.00\nDue\n2026-09-15\nPaid · balance\nKES 40,000.00 · KES 76,000.00\nCONTROL CHAIN\nCommercial basis\n\nApproved quote · KES 300,000.00\n\nInvoice prepared\n\nPrep Arer\n\nCheck\n\nChek Er\n\nIssue\n\nChek Er\n\nReceipt and allocation\n\nPart paid; KES 76,000.00 outstanding\n\nACCOUNTING IMPACT\n\nNot yet posted.\n\nAUDIT TRAIL\n\nInvoice INV-0011 returned for correction. · Chek Er\n\n30 Aug 2026, 11:00\n\n“Wrong client”\n\nREFUSED\nAllocate receipt\nCredit note\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.\n\nCASH & BANK POSITION\nKES 250,000.00\n0 ledger accounts\nBy paying-account type\nFloat KES 4,200.00\nLedger balance, not a bank statement\nMONEY OWED TO US\nKES 90,000.00\n4 open invoices\nAgeing\n3 overdue\nKES 80,000.00 overdue\nKES 5,000.00 unapplied\n2 receipts to verify\nMONEY WE OWE\nKES 120,000.00\n3 awaiting verification\nBills by stage\n2 verified, unpaid\nKES 80,000.00 ready to pay\nKES 36,500.00 overdue\n1 returned\nPROJECT FINANCE · DIRECT COST\nKES 320,000.00\n3 active projects\nDirect margin\nKES 180,000.00\nWIP KES 75,000.00\n3 with incomplete costing\n\nDirect and provisional; not a fully loaded profit.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/readiness"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payment-sources"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/petty-cash/finance/overview"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/inventory/position"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/spend-vouchers/register"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/invoices/5"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/journals"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-money-in",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney in\nClient invoices\n\nEvery client invoice across all projects: where it stands, what has been received, and what is still owed.\n\nSearch Finance\nReceipts\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nSEARCH\nSTATE\nAny state\nDraft\nReturned\nAwaiting review\nChecked\nIssued, unpaid\nPartially paid\nPaid\nVoid\nINVOICE DATE\nDUE DATE\nOverdue only\nINVOICE\tCLIENT · PROJECT\tINVOICED\tRECEIVED\tBALANCE\tSTATE\t\nNEXT\nINV-0011\n\n2026-09-01 · due 2026-09-15\n\nAcme Events\n\nJOB-5 · PO Pat Officer\n\nKES 116,000.00\nKES 40,000.00\nKES 76,000.00\n\n13 days overdue\n\nIssued\nPartially paid\nApply receipt\nShowing 1–1 of 1\nPrevious\nNext\n\nINV-0011\nIssued\n\nClient invoice · Acme Events\n\nProject JOB-5\n\nKES 116,000.00\nDue\n2026-09-15\nPaid · balance\nKES 40,000.00 · KES 76,000.00\nControl chain\nCommercial basis\n\nApproved quote · KES 300,000.00\n\nInvoice prepared\n\nPrep Arer\n\nCheck\n\nChek Er\n\nIssue\n\nChek Er\n\nReceipt and allocation\n\nPart paid; KES 76,000.00 outstanding\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nInvoice INV-0011 returned for correction. · Chek Er\n\n30 Aug 2026, 11:00\n\n“Wrong client”\n\nREFUSED\nAllocate receipt\nCredit note\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/invoices"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/invoices/11"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/journals"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-money-out",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney out\nSupplier bills\n\nSupplier invoices across all projects: verify them against the order and receipt, return the wrong ones, and pay what is owed.\n\nSearch Finance\nSupplier payments\nWhat we owe\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nAwaiting verification\n3\nbills\n1 returned for correction\nReturned for correction\n1\nwith their preparers\nVerified, awaiting payment\nKES 80,000.00\n2 bills\nKES 120,000.00 owed in total\nPast due date\nKES 36,500.00\n1 bills\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nReturned for correction\nVerified\nPAYMENT\nAny\nUnpaid\nPartially paid\nPaid\nWITHHOLDING\nAny\nWith WHT\nNo WHT\nBILL DATE\nDUE\nOverdue only\nBILL · SUPPLIER\tPROJECT · ORDER · RECEIPT\tDATES\tBILL · WHT\tPAYABLE · PAID · OWED\tSTATE\t\nNEXT\nBILL-2026-0031\n\nSupplier invoice SINV-88\n\nTimber & Board Ltd\nJOB-5\nPO-0012\nGRN-0020\n\nBilled 2026-09-01\n\nDue 2026-09-10\n\n5 days overdue\n\nKES 58,000.00\n\nWHT 1,500.00\n\nKES 56,500.00\n\npaid 0.00\n\nowed 56,500.00\n\nAwaiting review\nPending\nVerify bill\nShowing 1–1 of 1\nPrevious\nNext\n\nBILL-2026-0031\nAwaiting review\n\nSupplier bill · Timber & Board Ltd\n\nProject JOB-5\n\nKES 56,500.00\nVAT · WHT\nKES 8,000.00 · KES 1,500.00\nBalance\nKES 56,500.00\nControl chain\nRequisition\n\nPR-0008 · Ops Manager\n\nPurchase orderPO-0012\nKES 50,000.00\n\nOps Manager\n\nGoods received\n\nGRN-0020\n\nSupplier billSINV-88\nKES 58,000.00\n\nProc Clerk\n\nVerification\n\nAwaiting verification\n\nPayment\n\nNot paid\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nPrepared · Proc Clerk\n\n1 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nVerify\nReturn for correction\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills/31"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/journals"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-projects",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nProject billing · JOB-5\nProject billing · JOB-5\n\nExpo stand · Acme Events\n\nSearch Finance\nRecord receipt\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nView invoices\nView receipts\nView client position\nNew invoice\nSupplier bills\nProject Officer: Pat Officer\nFinance position\nAGREED PRICE\nKES 1,000,000.00\nINVOICED (ISSUED)\nKES 1,160,000.00\nRECEIVED (VERIFIED)\nKES 500,000.00\nINVOICE OUTSTANDING\nKES 660,000.00\nHELD FOR THE CLIENT (UNAPPLIED)\nKES 0.00\nREMAINING TO INVOICE\nKES 160,000.00\n\nNot yet in the figures above: KES 50,000.00 in draft invoices and KES 20,000.00 in credit notes awaiting issue.\n\nPROJECT REVENUE (ISSUED)\n\nKES 1,000,000.00\n\nDIRECT PROJECT COST\n\nKES 400,000.00\n\nDIRECT MARGIN\n\nKES 600,000.00\n\nFully loaded margin is not yet available (labour, logistics and overhead methodology pending).\n\nReceipts shared with other projects\n\nA single client payment split across projects. Record one with a total larger than this project's share; allocate the rest here.\n\nNo receipt for this project is shared with another project or has money left to allocate.\n\nBilling history\n\nfinancialQuote amount recorded directly in Project Billing\n\nChek Er · 2 Sept 2026, 11:00\n\n“Client agreed by phone”\n\nCommercial basis\n\nApproved quote\n\nKES 1,000,000.00\nSource\nApproved quote\nApproved\n2026-09-01\nException required\nNo\nBilling terms\n\nDeposit received and verified before production starts. Invoice payment terms are set up in Finance setup.\n\nDEPOSIT REQUIRED\n\n70%\n\nOF THE AGREED PRICE\n\nKES 700,000.00\n\n10.0% verified · KES 600,000.00 still to receive and verify · 1 receipt awaiting verification (not counted)\n\nChange deposit %\nProduction deposit control\n\nBlocked: 10.0% verified of the 70% required.\n\nThe verified deposit is below the 70% target. Early release requires the receivables override permission.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/project-billing/5"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-banks",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nCash & banks\nFinancial reports\n\nLedger-backed financial statements, cash position and movements, ageing and reconciliation controls.\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nWhich question are you answering?\nBalance sheet\nBank & Cash\nReconciliation centre\nTrial balance\nCash Movement\nCash Flow readiness\nProfit and loss\nReceivables ageing\nPayables ageing\nDownload comma-separated values file\nAs at \nRun\n\nHISTORICAL DATA INCOMPLETE\n\nApproved historical cash openings are unavailable.\n\nReadiness: HISTORICAL_DATA_INCOMPLETE · Opening balance status: NOT_CONFIGURED\n\nOperating bank: CONFIGURED\nCompany M-Pesa: NOT CONFIGURED\nCompany Card: NOT CONFIGURED\n\nTOTAL CASH & BANK · KES\n\n(KES 1,234,567,890.12)\n\nAs at 2026-09-30\n\nConfigured cash/bank accounts including petty cash once.\n\nACCOUNT\tAPPROVED OPENING\tDEBITS TO DATE\tCREDITS TO DATE\tCLOSING LEDGER BALANCE\tREADINESS\n1010 Operating bank\n\nbank\n\n\tNOT AVAILABLE\tKES 100.00\tKES 1,234,567,990.12\t(KES 1,234,567,890.12)\tHISTORICAL_DATA_INCOMPLETE",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/reports/bank-cash-position"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-payroll",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nPayroll\nPayroll finance\n\nFinance readiness, accounting, liabilities and settlement. HR prepares and calculates payroll.\n\nSearch Finance\nRefresh controls\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nCURRENT PAYROLL\n2026-09\n12 employees\nPreparation / approval\nAPPROVED\nKES 120,000.00\nLOCKED\nNET PAYROLL PAYABLE\nKES 90,000.00\noutstanding\nSettled\n0.00\nSTATUTORY LIABILITIES\nKES 30,000.00\noutstanding\nRemittance rail\nNOT AVAILABLE\n\nDisplayed from payroll accounting; Finance does not recalculate PAYE.\n\nPAYROLL READINESS\nNOT READY\n3 exceptions\nSalary configured\n10 / 12\nPayroll runs\n1\nAwaiting posting\n0\nLiabilities\n0\nPayments\n0\nReadiness\n3\nLabour classification\n0\n\nHistorical payroll Payment records and opening balances are not backfilled.\n\nPayroll runs\n\nPreparation, approval, posting and settlement remain separate states.\n\nPERIOD · RUN\tEMPLOYEES\tGROSS\tAPPROVAL\tPOSTING\tSETTLEMENT\tOUTSTANDING\tACTION\n\n2026-09\n\nPAYROLL-2026-09\n\n\t12\tKES 120,000.00\tAPPROVED\tPOSTED\tOUTSTANDING\tKES 90,000.00\tThe person who locked this payroll run cannot also pay it.\n\nPAYROLL-2026-09\nOUTSTANDING\n\nPayroll run\n\n2026-09\n\nKES 90,000.00\nEmployees\n12\nGross payroll\nKES 120,000.00\nOutstanding\nKES 90,000.00\nCONTROL CHAIN\nPayroll prepared\nACCOUNTING IMPACT\nACTUAL JOURNAL\n\nJE-PR-A-9 · 2026-09-30\n\nDR\t7550 · Salaries\t120,000.00\nDR 120,000.00\nCR 120,000.00\nΔ 0.00\nLIABILITIES\nAUDIT RAIL\n\nPrepared · HR Preparer\n\n1 Sept 2026, 03:00\n\nDONE\n\nApproved · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPosted · HR Approver\n\n30 Sept 2026, 03:00\n\nDONE\n\nPaid\n\nPENDING\n\nAggregate Finance view.\n\nThe person who locked this payroll run cannot also pay it.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/liabilities"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/payments"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/readiness"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/labour-classification"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payroll/9"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-inventory",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nInventory\nInventory position\n\nStores stock value beside the Inventory ledger account, what reached projects, and what has not reached the ledger.\n\nSearch Finance\nProject material issues\nAdjustments\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\n\nSTORES VALUATION\n\nKES 1,000.00\n\n1 stocked materials\n\nINVENTORY LEDGER\n\nKES 1,300.00\n\n1200 Raw-material Inventory; posted entries\n\nDIFFERENCE (STORES − LEDGER)\n\n(KES 300.00)\n\nDoes not agree. The known reasons are below.\n\nWhat can make them differ\nWrite-offs and counted balances set outside a stock count (no ledger posting)\n1 item(s)\nKES 200.00\nView\nService or non-stock lines received through a GRN (in the Inventory account, not in stock)\n1 item(s)\nKES 300.00\nStores movements awaiting their Finance posting\n0 item(s)\nNo opening inventory count approved: stock held before the ledger opened is not in the Inventory account\n\nService or non-stock lines received on a GRN go into the Inventory account and are never issued from Stores, so they stay there until WNG decides how services are confirmed (W2-8). Write-offs and balances set outside a stock count have no posting rule yet (policy pending).\n\nValuation method\n\nMoving weighted average\n\nEach priced receipt re-averages the unit cost.\n\nRecorded on the catalogue: Weighted Average.\n\nWhere issued material is charged\n\nWIP policy not set explicitly for this installation: the chart's default applies. Policy configuration required: Finance to confirm.\n\nEach issue's own debit account is shown on the issues list.\n\nISSUED TO PROJECTS (NET OF RETURNS)\n\nKES 200.00\n\n1 cost lines · ACTUAL project cost\n\nRECEIVED, NOT YET ISSUED\n\nKES 1,000.00\n\n1 GRN accruals · 1,000.00 awaiting the supplier bill\n\nSTORES POSTINGS TO FINANCE\n\n0 failed · 0 pending\n\nRetried from Stores, which owns the movement.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/inventory/position"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-reports",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nReports\nFinancial reports\n\nLedger-backed financial statements, cash position and movements, ageing and reconciliation controls.\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nWhich question are you answering?\nBalance sheet\nBank & Cash\nReconciliation centre\nTrial balance\nCash Movement\nCash Flow readiness\nProfit and loss\nReceivables ageing\nPayables ageing\nDownload comma-separated values file\nAs at \nRun\n\nHISTORICAL DATA INCOMPLETE\n\nOpening balances and retained earnings are not configured.\n\nOpening balances: NOT_CONFIGURED. Equity complete: No.\n\nLedger snapshot only.\n\nNot included: Opening balances and retained earnings.\n\nASSETS\n\nKES 120.00\n\nLIABILITIES\n\nKES 30.00\n\nEQUITY\n\nKES 50.00\n\nACCOUNT\tBALANCE\nAssets\n1000Cash\tKES 120.00\nAssets total\tKES 120.00\nLiabilities\n2000Payables\tKES 30.00\nLiabilities total\tKES 30.00\nEquity\n3000Capital\tKES 50.00\nEquity total\tKES 50.00\nUnclassified: accountant review required\nX-1Review accountREQUIRES_ACCOUNTANT_REVIEW\tKES 10.00\nEquation difference (assets - liabilities - equity)\tKES 40.00\nEquation does not balance. No automatic balancing entry has been created.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/reports/balance-sheet"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-setup",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nSetup\nFinance setup & readiness\n\nReview configuration, policy and data gates separately, then open the controls you are authorized to use.\n\nSearch Finance\nCheck again\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\n1\nSet up\n\nDefine the forms and accounts transactions depend on.\n\nMoney accounts\nBank accounts, mobile money and cash floats, and the ledger account each posts to.\nPayment terms\nThe invoice payment terms Finance offers, and which one is the default.\n2\nCheck & close\n\nCompare records with outside evidence, review tax, then freeze the month.\n\nBank matching\nMatch bank statements to recorded ledger movements.\nTax review\nVAT schedules, eTIMS compliance and withholding tax (WHT) owed to KRA.\nClose month\nAudit unposted items, lock accounting periods, and prevent backdated entries.\n3\nUnderstand results\n\nTrace individual entries first, then read the summarized reports.\n\nCash & bank position\nCurrent recorded ledger position, with channel and history readiness.\nCash movement\nRecorded inflows, outflows and transfers; not a statutory Cash Flow statement.\nReports\nBalance Sheet, Bank & Cash, Cash Movement, profit and loss, reconciliation controls, trial balance and ageing.\nAccount book\nEvery journal the workflows have posted, by account.\nSystem readiness\n\nTechnical checks that must pass before transactions can post reliably. These checks do not replace bank reconciliation or month-end review.\n\nReference-data and integrity checks passed. Review configuration, policy and data gates separately. These reference checks do not certify production policy or historical financial data.\n\nReadiness by domain\n\nConfiguration and policy gates are separate from reference-data checks. No live readiness or accounting policy is inferred.\n\nControlled Finance workflows\n\nExisting posting, approval, period and reversal services are retained. This is not a verdict on live data.\n\nSoftware ready\nReview\nChart & account mappings\n\n120 active postable account(s) lack classification. Posting functions resolve through ChartAccountMap.\n\nConfiguration required\nReview\nPayment & receiving channels\n\nReview each channel and its actual asset account; no account is invented for M-Pesa or Card.\n\nReady\nReview\nAccounting periods\n\nCurrent period: open. Posting still checks assertOpenPeriod.\n\nReady\nReview\nExpense codes & posting dependencies\n\nCatalogue account, cost centre and activity resolution use the existing checks. An empty posting-rule table alone does not prove a defect; coded posting remains authoritative.\n\nReady\nReview\nTax configuration\n\nReference treatments only; effective tax rules and evidence require Finance review before filing.\n\nReady\nReview\nProject cost / WIP policy\n\nConfigured mode: not explicitly configured. Configuration is not signed production approval.\n\nPolicy required\nReview\nPayroll Finance policy\n\nW7-24, W7-25, W7-26 and salary-advance treatment remain separate from aggregate payroll readiness. Employee HR details are not exposed here.\n\nPolicy required\nReview\nPetty cash configuration\n\nThreshold and surrender policies need explicit approval; safe existing defaults do not establish policy readiness.\n\nPolicy required\nReview\nDocument controls\n\n2 sequence row(s) exist. Presence alone cannot establish every workflow sequence or history provenance.\n\nData required\nReview\nOpening / financial history\n\nOpening balances, AP authority, cash/bank history and period-end provenance are not certified by reference checks.\n\nData required\nReview\nStatutory Cash Flow statement\n\nThe canonical reporting service supports Cash Movement and Cash Flow readiness; it does not fabricate a statutory statement.\n\nNot supported\nReview\nChart & account mappings\nDefault operating bank account (bank_default)\n1010 Bank – Main Account · Resolved\nPetty cash float (cash on hand) (petty_cash_float)\n1030 Petty Cash Float · Resolved\nAmounts clients owe (accounts_receivable)\n1100 Accounts Receivable · Resolved\nStaff advances / imprest (asset) (staff_advances)\n1300 Staff Advances / Imprest · Resolved\nInput VAT recoverable (asset) (input_vat)\n1330 Input VAT Recoverable · Resolved\nRaw-material inventory (asset) (inventory)\n1200 Raw-material Inventory · Resolved\nProject work in progress: direct materials (wip_direct_materials)\n1211 Project WIP – Direct Materials · Resolved\nProject work in progress: direct labour (wip_direct_labour)\n1212 Project WIP – Direct Labour · Resolved\nProject WIP: subcontractors (wip_subcontractors)\n1213 Project WIP – Subcontractors · Resolved\nProject WIP: transport and logistics (wip_transport_logistics)\n1214 Project WIP – Transport & Logistics · Resolved\nProject WIP: equipment and site (wip_equipment_site)\n1215 Project WIP – Equipment & Site · Resolved\nProject WIP: project utilities (wip_project_utilities)\n1216 Project WIP – Project Utilities · Resolved\nProject WIP: project facilitation (meals, accommodation, per diem) (wip_project_facilitation)\n1217 Project WIP – Project Facilitation · Resolved\nProject WIP: venue and statutory (wip_venue_statutory)\n1218 Project WIP – Venue & Statutory · Resolved\nProject WIP: rework and warranty (wip_rework_warranty)\n1219 Project WIP – Rework & Warranty · Resolved\nAmounts owed to suppliers and payees (accounts_payable)\n2100 Accounts Payable · Resolved\nOutput VAT payable (output_vat)\n2110 Output VAT Payable · Resolved\nWithholding tax payable (wht_payable)\n2120 Withholding Tax Payable · Resolved\nPAYE payable (paye_payable)\n2130 PAYE Payable · Resolved\nStatutory deductions payable (NSSF, SHIF, housing levy) (statutory_payable)\n2140 Statutory Deductions Payable · Resolved\nGoods received not yet invoiced / accrued expenses (accrued_expenses)\n2150 Accrued Expenses · Resolved\nNet pay owed to staff (net_payroll_payable)\n2160 Net Payroll Payable · Resolved\nClient deposits received before revenue is earned (client_deposits)\n2200 Client Deposits · Resolved\nOpening balance equity (opening stock counts) (opening_balance_equity)\n3900 Opening Balance Equity · Resolved\nProject revenue (project_revenue)\n4100 Project Revenue · Resolved\nCost of sales: direct materials (WIP release) (cos_direct_materials)\n5100 Cost of Sales – Direct Materials · Resolved\nCost of sales: direct labour (WIP release; payroll direct labour) (cos_direct_labour)\n5200 Cost of Sales – Direct Labour · Resolved\nCost of sales: subcontractors (WIP release) (cos_subcontractors)\n5300 Cost of Sales – Subcontractors · Resolved\nCost of sales: transport and logistics (WIP release) (cos_transport_logistics)\n5400 Cost of Sales – Transport & Logistics · Resolved\nCost of sales: equipment and site (WIP release) (cos_equipment_site)\n5500 Cost of Sales – Equipment & Site · Resolved\nCost of sales: project utilities (WIP release) (cos_project_utilities)\n5600 Cost of Sales – Project Utilities · Resolved\nCost of sales: project facilitation (WIP release) (cos_project_facilitation)\n5700 Cost of Sales – Project Facilitation · Resolved\nCost of sales: venue and statutory (WIP release) (cos_venue_statutory)\n5800 Cost of Sales – Venue & Statutory · Resolved\nCost of sales: rework and warranty (WIP release) (cos_rework_warranty)\n5900 Cost of Sales – Rework & Warranty · Resolved\nInventory adjustments and shrinkage (inventory_adjustments)\n6800 Inventory Adjustments & Shrinkage · Resolved\nSalaries and wages: office and admin staff (overhead) (salaries_expense)\n7550 Salaries & Wages · Resolved\nBank and mobile-money transaction charges (bank_charges)\n7800 Bank & Mobile-money Charges · Resolved\nPayment & receiving channels\nSupplier Credit (Payable)\n\nAP · payable · Active\n\n2100 · Accounts Payable\n\nNot supported\n\nSupplier credit is a liability, not a receiving or paying channel.\n\nNCBA Bank – Operations Account\n\nBANK-ALT · bank · Active\n\n1020 · Bank – Secondary Account\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nFamily Bank\n\nBANK-FAMILY · bank · Inactive\n\n1010 · Bank – Main Account\n\nBlocked\n\nInactive; unavailable for receiving or paying.\n\nKCB Bank\n\nBANK-KCB · bank · Inactive\n\n1010 · Bank – Main Account\n\nBlocked\n\nInactive; unavailable for receiving or paying.\n\nEquity Bank – Operating Account\n\nBANK-MAIN · bank · Active\n\n1010 · Bank – Main Account\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nStanbic Bank\n\nBANK-STANBIC · bank · Inactive\n\n1010 · Bank – Main Account\n\nBlocked\n\nInactive; unavailable for receiving or paying.\n\nCompany Card\n\nCARD · card · Active\n\n1010 · Bank – Main Account\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nCompany M-Pesa\n\nMPESA · mobile_money · Active\n\n1040 · Mobile Money Float\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nMain Petty Cash Float\n\nPC-MAIN · petty_cash · Active\n\n1030 · Petty Cash Float\n\nReady\n\nLinked to a postable asset account; live history still needs validation.\n\nPolicy & data register\n\nConfigured WIP mode: Not explicitly configured. A rehearsal setting is not production approval.\n\nW1-10 · Credit-note COGS / WIP treatment — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nW7-24 · Project labour GL / WIP project dimensions — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nW7-25 · Standard labour versus actual payroll variance — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nW7-26 · Employer statutory costs in standard labour rates — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nsalary-advance · Salary advance GL treatment — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nstores-consumption · Non-project Stores consumption GL treatment — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nstock-adjustments · Manual stock adjustment authority — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nopening-balances · Opening balance and history provenance — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nretained-earnings · Retained earnings authority — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nperiod-end · Period-end / as-of financial authority — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nwip-production · Production approval of WIP recognition / release mode — Policy required\n\nCarried forward for Finance / accountant review. This readiness contract has no signed decision evidence to close this gate.\n\nEffective settings and approval evidence\nMaterials to project costs · readiness\n\n2 checks need attention before transactions begin.\n\nReview setup and records\n✓ Active material catalogue\n\n437 active materials available.\n\n! Material handling setup\n\n419 active materials need setup corrections.\n\nComplete categories, units, required specifications and compatible handling controls.\n\nExamples:\nMDF-06-0001\n,\nMDF-18-0001\n,\nACR-CLR-0005\n,\nCUT-BIT-0001\n,\nCUT-BIT-0002\n,\nTAPE-DBL-0001\n,\nCNC-0009\n,\nCNC-0010\n,\nCNC-0011\n,\nCNC-0017\n\nOpen records →\n✓ Buying and issuing units\n\n0 materials need unit corrections.\n\n✓ Active suppliers\n\n5 active suppliers available.\n\n✓ Stock and reservations\n\n0 invalid stock balances or reservations.\n\n! Stock valuation\n\n18 stocked materials have no valuation.\n\nRecord supported receipt or opening values before issuing to projects.\n\nExamples:\nUV-INK-CYN1\n,\nUV-INK-MAG1\n,\nUV-INK-YEL1\n,\nUV-INK-BLK1\n,\nSCR-CHIP-0001\n,\nSCR-CHIP-0003\n,\nUVFL-UVIN-0001\n,\nUVFL-XROL-0002\n,\nUVFL-XROL-0003\n,\nUVFL-0004\n\nOpen records →\n✓ Board valuation\n\n0 available boards have no value.\n\n✓ Board identification\n\n0 available boards await label confirmation.\n\n✓ Stores to Finance cost capture\n\n0 failed or stalled cost postings.\n\n0 draft materials · 0 cost postings in progress · Checked 10/3/2026, 10:20:29 AM\n\nOpen accounting period\n\nOctober 2026 is open.\n\nPostable accounts\n\n200 active record(s) available.\n\nRequired control accounts\n\nEvery account the posting code needs resolves to a postable, active account.\n\nChart profile\n\nNo chart profile: this installation keeps the reference chart.\n\nExpense catalogue\n\nEvery active expense code maps to a postable debit account.\n\nExpense catalogue account mapping\n\nEvery catalogue code naming an account resolves to one in this chart.\n\nPayment sources\n\nEvery active payment source maps to a postable ledger account.\n\nVAT treatments\n\n5 active record(s) available.\n\nWithholding tax categories\n\n3 active record(s) available.\n\nCost centres\n\nEvery active expense code naming a cost centre resolves to one.\n\nProject activities\n\nEvery active expense code naming a activity resolves to one.\n\nControlled operational ledger\n\nThis ledger records the supported Finance workflows. Opening/history provenance, policy-dependent treatments and unsupported statutory statements remain separate readiness gates.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/readiness"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-detail",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney out\n/\nSupplier bill BILL-2026-0031\nSupplier bill BILL-2026-0031\nAwaiting review\nPending\n\nTimber & Board Ltd · invoice SINV-88\n\nSearch Finance\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\n\nREQUISITION\n\nPR-0008\n\nPURCHASE ORDER\n\nPO-0012 · 1 amendment\n\nGOODS RECEIVED\n\nGRN-0020\n\nSUPPLIER BILL\n\nBILL-2026-0031 · SINV-88\n\nPAYMENT\n\nNo payments have been recorded against this bill.\n\nBILL (GROSS)\n\nKES 58,000.00\n\nBilled 2026-09-01\n\nPAYABLE TO SUPPLIER\n\nKES 56,500.00\n\nafter KES 1,500.00 WHT\n\nSTILL OWED\n\nKES 56,500.00\n\n5 days past due (2026-09-10)\n\nVerify bill\nReturn for correction\nPay: Verify this bill first\nThree-way match\nPasses: ready to verify\n\nPurchase order approved\n\nOrder PO-0012\n\nPassed\n\nInvoice does not exceed the remaining accepted (unbilled) value\n\n50,000.00 invoiced against 50,000.00 remaining accepted\n\nPassed\nORDER LINE\tORDERED\tRECEIVED\tACCEPTED\tUNIT PRICE\tACCEPTED VALUE\tRESULT\nMDF 18mm (sheet)\t100\t100\t100\t500.00\t50,000.00\tFully accepted\nORDER VALUE\nKES 50,000.00\nPREVIOUSLY BILLED\nKES 0.00\nTHIS BILL (NET)\nKES 50,000.00\nBILLED IN TOTAL\nKES 50,000.00\nSTILL BILLABLE\nKES 0.00\n\nCompared net of VAT, the basis the order is priced on. Finance refuses a bill that takes the total past the order or past what Stores accepted.\n\nTax and withholding\nNet\nKES 50,000.00\nVAT (Standard 16%, claimable)\nKES 8,000.00\nGross supplier bill\nKES 58,000.00\n− Withholding tax (Professional fees, 3.00%)\nKES 1,500.00\n= Amount payable to supplier\nKES 56,500.00\n\nWHT liability: KES 1,500.00 retained and owed to KRA on WHT-001 Withholding Tax Payable. It is not a discount: the supplier's invoice is still KES 58,000.00.\n\neTIMS ETIMS-1 · supplier PIN P051234567M · tax point 2026-09-01\n\nPayments\n\nNo payments have been recorded against this bill.\n\nPaid KES 0.00 of KES 56,500.00 payable · KES 56,500.00 outstanding. A payment settles the liability; it adds no project cost.\n\nProject cost\n\nCosted when Stores accepted the goods.\n\nCL-0000009 · accrued · 50,000.00 · JOB-5 · receipt accrual settled by this bill\nProcurement basis\nOrder\nPO-0012 · 50,000.00\nApproved\nOps Manager · 29 Aug 2026, 11:00\nSenior approval\nNo senior-approval threshold has been set by WNG yet\nRequisition\nPR-0008 · approved by Ops Manager\n\nORIGINAL ORDER AND AMENDMENTS\n\nAmendment 1 · approved · commercial\n\nOriginal KES 45,000.00 → approved KES 50,000.00\n\nExtra sheets\n\nRequested by Proc Clerk · approved by Ops Manager 30 Aug 2026, 12:00\n\nGOODS RECEIVED\n\nGRN-0020 · 2026-08-31 · received by Store Keeper · confirmed\nMDF 18mm: 100 of 100 received\n\nService procurement uses the same goods receipt: a separate service confirmation is an open WNG policy decision (W2-8).\n\nControls\n\nRecorded by Proc Clerk\n\n1 Sept 2026, 11:00\n\nEvidence\nShow\nAudit trail\n\nNo control events have been logged for this bill beyond those above.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills/31"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-receipts",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney in\n/\nReceipts\nClient receipts\n\nMoney received from clients: recorded, verified by someone else, then applied to invoices. Verified money not yet applied is held for the client.\n\nSearch Finance\nInvoices\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\n\nAWAITING VERIFICATION\n\n1\n\nRecorded but not yet confirmed by a second person; not yet in the ledger.\n\nHELD FOR CLIENTS\n\nKES 50,000.00\n\nVerified money not yet applied to an invoice. A liability to the client (client deposits), not revenue.\n\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nVerified\nReversed\nAPPLIED TO INVOICES\nAny\nNot applied\nPartly applied\nFully applied\nRECEIVED\nRECEIPT\tCLIENT · PROJECT\tAMOUNT\tAPPLIED TO\tHELD FOR CLIENT\tVERIFICATION\t\nACTIONS\n\nFT-001\n\n2026-09-04 · Bank transfer into Equity Bank\n\nAcme Events\n\nJOB-5· billing\n\nKES 150,000.00\nNot applied\n—\nPending\n\nrecorded by Me Myself\n\nThis receipt was recorded by you, so someone else has to confirm it.\n\nReverse\nCorrect\nShowing 1–1 of 1\nPrevious\nNext\n\nFT-001\nPending\n\nClient receipt · Acme Events\n\nProject JOB-5\n\nKES 150,000.00\nPaid into\nEquity Bank\nDate\n2026-09-04\nControl chain\nReceipt recorded\n\nMe Myself\n\nVerification\nAllocation\n\nKES 0.00 unapplied\n\nAccounting impact\n\nNot yet posted.\n\nAudit trail\n\nRecorded · Me Myself\n\n4 Sept 2026, 11:00\n\nDONE\n\nVerified\n\nPENDING\nCorrect\nReverse\nOpen document\n\nActions are taken on the document's own screen, where its controls apply.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/receipts"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/journals"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-money-out-empty",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney out\nSupplier bills\n\nSupplier invoices across all projects: verify them against the order and receipt, return the wrong ones, and pay what is owed.\n\nSearch Finance\nSupplier payments\nWhat we owe\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nAwaiting verification\n0\nbills\n0 returned for correction\nReturned for correction\n0\nwith their preparers\nVerified, awaiting payment\nKES 0.00\n0 bills\nKES 0.00 owed in total\nPast due date\nKES 0.00\n0 bills\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nReturned for correction\nVerified\nPAYMENT\nAny\nUnpaid\nPartially paid\nPaid\nWITHHOLDING\nAny\nWith WHT\nNo WHT\nBILL DATE\nDUE\nOverdue only\n\nNo supplier bills have been recorded yet.\n\nSelect a bill to see its purchase chain, ledger impact and audit trail.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-money-out-error",
+    "text": "Report 73 isolated fixture — no database access\n\nFinance\n/\nMoney out\nSupplier bills\n\nSupplier invoices across all projects: verify them against the order and receipt, return the wrong ones, and pay what is owed.\n\nSearch Finance\nSupplier payments\nWhat we owe\nOverview\nMoney in\nMoney out\nProjects\nCash & banks\nPayroll\nInventory\nReports\nSetup\nPages in this workspace\nSEARCH\nVERIFICATION\nAny\nAwaiting verification\nReturned for correction\nVerified\nPAYMENT\nAny\nUnpaid\nPartially paid\nPaid\nWITHHOLDING\nAny\nWith WHT\nNo WHT\nBILL DATE\nDUE\nOverdue only\n\nThe server could not load supplier bills. Nothing was changed; try again, and tell Finance support if it persists.\n\nTry again\n\nSelect a bill to see its purchase chain, ledger impact and audit trail.",
+    "width": 390,
+    "scrollWidth": 390,
+    "calls": [
+      {
+        "method": "get",
+        "url": "/api/finance/work-queue/count"
+      },
+      {
+        "method": "get",
+        "url": "/api/finance/payables/bills"
+      }
+    ],
+    "errors": []
+  }
+]

@@ -1,0 +1,13 @@
+Full serial regression (isolated db_scratch_test): tests/Feature/{PettyCash,Finance,CostCollector,Procurement,Seeding} tests/Unit
+   FAIL  Tests\Feature\Finance\Wave3PettyCashControlsTest
+  ⨯ an advance that becomes overdue after approval is blocked again at…  1.05s  
+  Tests:    1 failed, 1301 passed (10917 assertions)
+  Duration: 1405.40s
+exit=1
+
+The one failure was a fixture in which the same user approved and paid; given a separate approver, rerun:
+   PASS  Tests\Feature\Finance\Wave3PettyCashControlsTest
+   PASS  Tests\Feature\PettyCash\RequisitionPolicyClosureTest
+   PASS  Tests\Feature\Finance\Stab7PettyCashTriplePostingTest
+  Tests:    31 passed (298 assertions)
+exit=0

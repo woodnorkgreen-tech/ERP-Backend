@@ -59,7 +59,7 @@ class CategoryController extends Controller
                 'is_selectable' => $parent->is_selectable,
                 'default_issue_disposition' => $parent->default_issue_disposition,
                 'default_tracking_mode' => $parent->default_tracking_mode,
-                'allowed_uoms' => $parent->allowed_uoms,
+                'allowed_uoms' => $parent->allowedStockUomCodes(),
                 'required_attributes' => $parent->required_attributes,
                 'children' => $parent->children->map(fn ($child) => [
                     'id'        => $child->id,
@@ -70,7 +70,7 @@ class CategoryController extends Controller
                     'is_selectable' => $child->is_selectable,
                     'default_issue_disposition' => $child->default_issue_disposition,
                     'default_tracking_mode' => $child->default_tracking_mode,
-                    'allowed_uoms' => $child->allowed_uoms,
+                    'allowed_uoms' => $child->allowedStockUomCodes(),
                     'required_attributes' => $child->required_attributes,
                 ]),
             ]);
@@ -98,7 +98,7 @@ class CategoryController extends Controller
                 'is_selectable' => $cat->is_selectable,
                 'default_issue_disposition' => $cat->default_issue_disposition,
                 'default_tracking_mode' => $cat->default_tracking_mode,
-                'allowed_uoms' => $cat->allowed_uoms,
+                'allowed_uoms' => $cat->allowedStockUomCodes(),
                 'required_attributes' => $cat->required_attributes,
             ]);
 

@@ -1,0 +1,3 @@
+DRY RUN — profile 'wng' on 'wng_source_rehearsal' (WIP policy: capitalise, configured (FINANCE_WIP_POLICY))
+Target chart identity: WNG_CHART_ONLY — all 29 existing accounts the profile posts to are here, and no reference-chart account is beyond the 3 the profile names
+DRY RUN — profile 'wng' on 'wng_source_rehearsal' (WIP policy: capitalise, DEFAULT / NOT APPROVED FOR PRODUCTION — FINANCE_WIP_POLICY is not set)

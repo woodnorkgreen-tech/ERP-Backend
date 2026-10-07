@@ -1,0 +1,47 @@
+{
+  "new": [
+    [
+      "GET",
+      "/api/finance/spend-vouchers"
+    ],
+    [
+      "GET",
+      "/api/procurement-stores/goods-receipt-notes"
+    ],
+    [
+      "GET",
+      "/api/procurement-stores/goods-receipt-notes/search"
+    ],
+    [
+      "GET",
+      "/api/procurement-stores/goods-receipt-notes/{}"
+    ],
+    [
+      "GET",
+      "/api/procurement-stores/purchase-orders"
+    ],
+    [
+      "GET",
+      "/api/procurement-stores/purchase-orders/{}"
+    ],
+    [
+      "GET",
+      "/api/procurement-stores/requisitions"
+    ],
+    [
+      "GET",
+      "/api/procurement-stores/requisitions/{}"
+    ],
+    [
+      "POST",
+      "/api/procurement-stores/search/purchase-orders"
+    ],
+    [
+      "POST",
+      "/api/procurement-stores/search/requisitions"
+    ]
+  ],
+  "newly_unmatched": [],
+  "unresolved_static": [],
+  "methodology": "Literal Finance API calls plus explicit FinanceSearch finite dispatch, normalized Laravel parameters. W1-W7 tests cover existing variable wrappers."
+}

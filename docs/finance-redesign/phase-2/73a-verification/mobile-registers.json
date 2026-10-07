@@ -1,0 +1,205 @@
+[
+  {
+    "file": "inventory/views/InventoryIssuesView.vue",
+    "cards": [
+      [
+        "Date \u00b7 reference",
+        "Project",
+        "Material",
+        "Qty",
+        "Value",
+        "Charged to",
+        "Posted"
+      ]
+    ]
+  },
+  {
+    "file": "inventory/views/InventoryAdjustmentsView.vue",
+    "cards": [
+      [
+        "Date \u00b7 source",
+        "Material",
+        "Qty",
+        "Value at today\u2019s average",
+        "Ledger",
+        "Recorded by \u00b7 note"
+      ]
+    ]
+  },
+  {
+    "file": "payables/views/SupplierPaymentListView.vue",
+    "cards": [
+      [
+        "Payment",
+        "Supplier \u00b7 bill",
+        "From",
+        "Amount",
+        "Recorded"
+      ]
+    ]
+  },
+  {
+    "file": "payables/views/PayablesPositionView.vue",
+    "cards": [
+      [
+        "Supplier",
+        "Open bills",
+        "Outstanding",
+        "Overdue",
+        "Not yet verified"
+      ]
+    ]
+  },
+  {
+    "file": "payables/views/WithholdingTaxView.vue",
+    "cards": [
+      [
+        "Bill \u00b7 supplier",
+        "Category",
+        "Gross bill",
+        "WHT",
+        "Paid to supplier",
+        "Liability"
+      ]
+    ]
+  },
+  {
+    "file": "vouchers/views/VoucherListView.vue",
+    "cards": [
+      [
+        "Voucher \u00b7 payee",
+        "Pays",
+        "Amount",
+        "State",
+        "Requested",
+        "Next"
+      ]
+    ]
+  },
+  {
+    "file": "views/PayrollDisbursement.vue",
+    "cards": [
+      [
+        "Period \u00b7 run",
+        "Employees",
+        "Gross",
+        "Approval",
+        "Posting",
+        "Settlement",
+        "Outstanding",
+        "Action"
+      ],
+      [
+        "Period",
+        "Liability",
+        "Account",
+        "Recognised",
+        "Settled",
+        "Outstanding",
+        "Status"
+      ],
+      [
+        "Payment",
+        "Period",
+        "Liability",
+        "Amount",
+        "Paying account",
+        "Reference \u00b7 date",
+        "Status"
+      ],
+      [
+        "Semantic function",
+        "Mapped code",
+        "Status"
+      ],
+      [
+        "Department",
+        "Active employees",
+        "Classification",
+        "Effective from",
+        "Changed by",
+        "Action"
+      ]
+    ]
+  },
+  {
+    "file": "cost-collector/views/CostVerificationView.vue",
+    "cards": [
+      [
+        "Reference",
+        "Status",
+        "Expense",
+        "Paid to",
+        "Job \u00b7 budget line",
+        "Reported",
+        "Amount",
+        "Actions"
+      ]
+    ]
+  },
+  {
+    "file": "setup/views/PayingAccountsView.vue",
+    "cards": [
+      [
+        "Code",
+        "Account",
+        "Type",
+        "Ledger account",
+        "Balance",
+        "Status",
+        "Edit"
+      ]
+    ]
+  },
+  {
+    "file": "setup/views/PaymentTermsView.vue",
+    "cards": [
+      [
+        "Term",
+        "Due",
+        "Status",
+        "Actions"
+      ]
+    ]
+  },
+  {
+    "file": "petty-cash/views/finance/PettyCashRequisitionListView.vue",
+    "cards": [
+      [
+        "Requisition \u00b7 requester",
+        "Charged to",
+        "Purpose",
+        "Requested \u00b7 paid out",
+        "State",
+        "Next"
+      ]
+    ]
+  },
+  {
+    "file": "reports/views/BankCashPositionReport.vue",
+    "cards": [
+      [
+        "Account",
+        "Approved opening",
+        "Debits to date",
+        "Credits to date",
+        "Closing ledger balance",
+        "Readiness"
+      ]
+    ]
+  },
+  {
+    "file": "reports/views/CashMovementReport.vue",
+    "cards": [
+      [
+        "Account",
+        "Approved opening",
+        "Ledger brought forward",
+        "Debits",
+        "Credits",
+        "Net movement",
+        "Closing ledger balance"
+      ]
+    ]
+  }
+]

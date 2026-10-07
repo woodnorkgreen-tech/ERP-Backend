@@ -21,6 +21,18 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Barryvdh\DomPDF\Facade\Pdf;
+use App\Models\DesignAsset;
+use App\Models\ElementType;
+use App\Models\ProjectEnquiry;
+use App\Modules\logisticsTask\Services\LogisticsTaskService;
+use App\Modules\Projects\Actions\AutoSyncTaskStateAction;
+use App\Modules\Projects\Exports\MaterialsTemplateExport;
+use App\Modules\Projects\Imports\MaterialsTemplateImport;
+use App\Services\ProcurementService;
+use App\Services\ProjectElementRegistry;
+use Carbon\Carbon;
+use Illuminate\Validation\ValidationException;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * @OA\Tag(
@@ -114,16 +126,9 @@ class MaterialsController extends Controller
     public function getMaterialsData(int $taskId): JsonResponse
     {
         try {
-            $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)
-                ->with(['elements.materials'])
-                ->first();
-
-            if (!$materialsData) {
-                return response()->json([
-                    'data' => $this->getDefaultMaterialsStructure($taskId),
-                    'designGate' => $this->checkDesignApprovalGate($taskId),
-                    'message' => 'Materials data retrieved successfully'
-                ]);
+            $materialsData = app(ProjectElementRegistry::class)->ensureForTask($taskId);
+            if (empty($materialsData->project_info)) {
+                $materialsData->project_info = $this->getDefaultMaterialsStructure($taskId)['projectInfo'];
             }
 
             $gate = $this->checkDesignApprovalGate($taskId);
@@ -131,12 +136,12 @@ class MaterialsController extends Controller
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData),
                 'designGate' => $gate,
-                'message' => 'Materials data retrieved successfully'
+                'message' => 'Materials data retrieved successfully',
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to retrieve materials data',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -229,24 +234,18 @@ class MaterialsController extends Controller
     {
         try {
             // Find materials task for this enquiry
-            $materialsTask = \App\Modules\Projects\Models\EnquiryTask::where('project_enquiry_id', $enquiryId)
+            $materialsTask = EnquiryTask::where('project_enquiry_id', $enquiryId)
                 ->where('type', 'materials')
                 ->first();
 
-            if (!$materialsTask) {
+            if (! $materialsTask) {
                 return response()->json([
                     'message' => 'Materials task not found for this enquiry',
-                    'data' => null
+                    'data' => null,
                 ], 404);
             }
 
-            $materialsData = TaskMaterialsData::where('enquiry_task_id', $materialsTask->id)
-                ->with(['elements.materials'])
-                ->first();
-
-            if (! $materialsData) {
-                return $this->getMaterialsData($materialsTask->id);
-            }
+            $materialsData = app(ProjectElementRegistry::class)->ensureForTask($materialsTask->id);
 
             $project = Project::where('enquiry_id', $enquiryId)->first();
             $lines = $materialsData->elements->flatMap->materials;
@@ -260,7 +259,7 @@ class MaterialsController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to retrieve materials data',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -318,7 +317,7 @@ class MaterialsController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -338,7 +337,7 @@ class MaterialsController extends Controller
                 ->withCount('elements')
                 ->first();
 
-            if ($existingMaterialsData && $existingMaterialsData->elements_count > 0 && !$request->boolean('force')) {
+            if ($existingMaterialsData && $existingMaterialsData->elements()->where(fn ($query) => $query->whereNotNull('source_metadata')->orWhereHas('materials'))->exists() && ! $request->boolean('force')) {
                 throw $this->clientError('Materials already exist for this task. Pass force=true to replace them from the approved quote snapshot.', 409);
             }
 
@@ -358,7 +357,7 @@ class MaterialsController extends Controller
                     ['enquiry_task_id' => $taskId],
                     [
                         'project_info' => $projectInfo,
-                        'updated_at' => now()
+                        'updated_at' => now(),
                     ]
                 );
 
@@ -374,17 +373,23 @@ class MaterialsController extends Controller
                     'System: Materials generated from approved quote snapshot.',
                     false
                 );
+            } catch (ValidationException $e) {
+                if (DB::transactionLevel() > 0) {
+                    DB::rollBack();
+                }
+
+                return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
             } catch (\Exception $e) {
                 \Log::warning('Materials import succeeded but version snapshot failed', [
                     'taskId' => $taskId,
-                    'error' => $e->getMessage()
+                    'error' => $e->getMessage(),
                 ]);
             }
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData),
                 'source' => $preview['source'],
-                'message' => 'Materials imported from approved quote snapshot successfully'
+                'message' => 'Materials imported from approved quote snapshot successfully',
             ]);
         } catch (\RuntimeException $e) {
             $status = $this->clientErrorStatus($e);
@@ -398,12 +403,12 @@ class MaterialsController extends Controller
             \Log::error('Failed to import approved quote materials', [
                 'taskId' => $taskId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to import approved quote materials',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
     }
@@ -494,7 +499,7 @@ class MaterialsController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -510,9 +515,10 @@ class MaterialsController extends Controller
             // Get existing materials data to compare for changes
             $existingMaterialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->lockForUpdate()->first();
             if ($existingMaterialsData && $request->filled('sourceUpdatedAt')) {
-                $clientVersion = \Carbon\Carbon::parse($request->input('sourceUpdatedAt'));
+                $clientVersion = Carbon::parse($request->input('sourceUpdatedAt'));
                 if (! $existingMaterialsData->updated_at->equalTo($clientVersion)) {
                     \DB::rollBack();
+
                     return response()->json([
                         'message' => 'This materials list changed after you opened it. Reload to review the newer list before saving; your browser draft is still available.',
                         'code' => 'MATERIALS_VERSION_CONFLICT',
@@ -522,7 +528,7 @@ class MaterialsController extends Controller
             }
             $existingProjectInfo = $existingMaterialsData ? $existingMaterialsData->project_info : [];
             $existingApprovalStatus = $existingProjectInfo['approval_status'] ?? null;
-            
+
             // Determine if materials content has actually changed
             $materialsChanged = $this->haveMaterialsChanged($existingMaterialsData, $request->projectElements);
             $changeSummary = $materialsChanged ? $this->generateChangeSummary($existingMaterialsData, $request->projectElements) : [];
@@ -535,21 +541,21 @@ class MaterialsController extends Controller
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
                     'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
                     'all_approved' => false,
-                    'last_approval_at' => null
+                    'last_approval_at' => null,
                 ];
-            } elseif (!$materialsChanged && $existingApprovalStatus) {
+            } elseif (! $materialsChanged && $existingApprovalStatus) {
                 // Preserve existing approval status if materials haven't changed
                 \Log::info('Materials unchanged - preserving approval status', ['taskId' => $taskId]);
                 $projectInfo['approval_status'] = $existingApprovalStatus;
-                
+
                 // Ensure production key exists for legacy data migration
-                if (!isset($projectInfo['approval_status']['production'])) {
+                if (! isset($projectInfo['approval_status']['production'])) {
                     $projectInfo['approval_status']['production'] = [
-                        'approved' => false, 
-                        'approved_by' => null, 
-                        'approved_by_name' => null, 
-                        'approved_at' => null, 
-                        'comments' => ''
+                        'approved' => false,
+                        'approved_by' => null,
+                        'approved_by_name' => null,
+                        'approved_at' => null,
+                        'comments' => '',
                     ];
                     $projectInfo['approval_status']['all_approved'] = false; // Reset overall if structure changed
                 }
@@ -559,7 +565,7 @@ class MaterialsController extends Controller
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'all_approved' => false,
-                    'last_approval_at' => null
+                    'last_approval_at' => null,
                 ];
             }
 
@@ -567,7 +573,7 @@ class MaterialsController extends Controller
             // This ensures backend enforces the rule regardless of frontend state
             $poApproved = $projectInfo['approval_status']['project_officer']['approved'] ?? false;
             $prodApproved = $projectInfo['approval_status']['production']['approved'] ?? false;
-            
+
             // STRICT GATE: Both must be true
             $projectInfo['approval_status']['all_approved'] = ($poApproved && $prodApproved);
 
@@ -575,101 +581,11 @@ class MaterialsController extends Controller
                 ['enquiry_task_id' => $taskId],
                 [
                     'project_info' => $projectInfo,
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ]
             );
 
-            // Delete the materials explicitly, then their elements.
-            //
-            // The create migration declared `onDelete('cascade')` on
-            // element_materials.project_element_id, but no such constraint
-            // exists in the database, so deleting an element silently orphaned
-            // every material under it. Two things then broke: the orphan kept
-            // the unique `persistent_id`, which forced a fresh UUID for the same
-            // material line on every save — destroying the stable identity that
-            // cost lines and stock movements point at — and the orphan itself
-            // stayed behind forever. Deleting children first frees the id so the
-            // line below can keep it.
-            ElementMaterial::whereIn(
-                'project_element_id',
-                $materialsData->elements()->pluck('id'),
-            )->delete();
-            $materialsData->elements()->delete();
-
-            $idMapping = [];
-            $usedPersistentIds = [];
-
-            // Save new elements and materials
-            foreach ($request->projectElements as $index => $elementData) {
-                // Log incoming ID for debugging
-                \Log::debug("Saving Element [$index]", [
-                    'name' => $elementData['name'],
-                    'incoming_id' => $elementData['id'] ?? 'NULL'
-                ]);
-
-                // Ensure ProjectElement persistent_id is unique and not duplicate in this transaction or globally
-                $persistentId = $elementData['persistent_id'] ?? $elementData['persistentId'] ?? null;
-                if (empty($persistentId) || in_array($persistentId, $usedPersistentIds) || ProjectElement::where('persistent_id', $persistentId)->exists()) {
-                    $persistentId = (string) \Illuminate\Support\Str::uuid();
-                }
-                $usedPersistentIds[] = $persistentId;
-
-                $element = ProjectElement::create([
-                    'task_materials_data_id' => $materialsData->id,
-                    'template_id' => $elementData['templateId'] ?? null,
-                    'scope_id' => $elementData['scopeId'] ?? null,
-                    'element_type' => $elementData['elementType'],
-                    'name' => $elementData['name'] ?? null,
-                    'persistent_id' => $persistentId,
-                    'category' => $elementData['category'],
-                    'required_quantity' => $elementData['requiredQuantity'] ?? 1,
-                    'unit_of_measurement' => $elementData['unitOfMeasurement'] ?? 'Pcs',
-                    'dimensions' => $elementData['dimensions'] ?? [],
-                    'is_included' => $elementData['isIncluded'] ?? true,
-                    'notes' => $elementData['notes'] ?? null,
-                    'source_metadata' => $elementData['sourceMetadata'] ?? $elementData['source_metadata'] ?? null,
-                    'sort_order' => $elementData['sortOrder'] ?? 0,
-                ]);
-
-                $materialMapping = [];
-
-                foreach (($elementData['materials'] ?? []) as $matIndex => $materialData) {
-                    // Ensure ElementMaterial persistent_id is unique and not duplicate
-                    $matPersistentId = $materialData['persistent_id'] ?? $materialData['persistentId'] ?? null;
-                    if (empty($matPersistentId) || in_array($matPersistentId, $usedPersistentIds) || ElementMaterial::where('persistent_id', $matPersistentId)->exists()) {
-                        $matPersistentId = (string) \Illuminate\Support\Str::uuid();
-                    }
-                    $usedPersistentIds[] = $matPersistentId;
-
-                    $material = ElementMaterial::create([
-                        'project_element_id' => $element->id,
-                        'library_material_id' => $materialData['libraryMaterialId'] ?? null,
-                        'persistent_id' => $matPersistentId,
-                        'description' => $materialData['description'],
-                        'unit_of_measurement' => $materialData['unitOfMeasurement'],
-                        'quantity' => $materialData['quantity'],
-                        'unit_cost' => $materialData['unitCost'] ?? null,
-                        'is_included' => $materialData['isIncluded'] ?? true,
-                        'is_additional' => $materialData['isAdditional'] ?? false,
-                        'notes' => $materialData['notes'] ?? null,
-                        'source_metadata' => $materialData['sourceMetadata'] ?? $materialData['source_metadata'] ?? null,
-                        'sort_order' => $materialData['sortOrder'] ?? 0,
-                    ]);
-
-                    $oldMatId = isset($materialData['id']) ? (string)$materialData['id'] : null;
-                    if ($oldMatId && !str_starts_with($oldMatId, 'temp_') && !str_starts_with($oldMatId, 'new_')) {
-                        $materialMapping[(string)$material->id] = $oldMatId;
-                    }
-                }
-
-                $oldElemId = isset($elementData['id']) ? (string)$elementData['id'] : null;
-                if ($oldElemId && !str_starts_with($oldElemId, 'temp_') && !str_starts_with($oldElemId, 'new_')) {
-                    $idMapping[(string)$element->id] = [
-                        'old_id' => $oldElemId,
-                        'materials' => $materialMapping
-                    ];
-                }
-            }
+            app(ProjectElementRegistry::class)->saveMaterials($materialsData, $request->projectElements);
 
             \DB::commit();
 
@@ -686,21 +602,27 @@ class MaterialsController extends Controller
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData->fresh(['elements.materials'])),
-                'message' => 'Materials data saved successfully'
+                'message' => 'Materials data saved successfully',
             ]);
 
+        } catch (ValidationException $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             \DB::rollBack();
 
             \Log::error('Failed to save materials data', [
                 'taskId' => $taskId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to save materials data',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
     }
@@ -1304,43 +1226,7 @@ class MaterialsController extends Controller
 
     private function replaceMaterialElements(TaskMaterialsData $materialsData, array $elements): void
     {
-        $materialsData->elements()->delete();
-
-        foreach ($elements as $elementData) {
-            $element = ProjectElement::create([
-                'task_materials_data_id' => $materialsData->id,
-                'template_id' => $elementData['templateId'] ?? null,
-                'scope_id' => $elementData['scopeId'] ?? null,
-                'element_type' => $elementData['elementType'],
-                'name' => $elementData['name'],
-                'persistent_id' => (string) Str::uuid(),
-                'category' => $elementData['category'],
-                'required_quantity' => $elementData['requiredQuantity'] ?? 1,
-                'unit_of_measurement' => $elementData['unitOfMeasurement'] ?? 'Pcs',
-                'dimensions' => $elementData['dimensions'] ?? [],
-                'is_included' => $elementData['isIncluded'] ?? true,
-                'notes' => $elementData['notes'] ?? null,
-                'source_metadata' => $elementData['sourceMetadata'] ?? $elementData['source_metadata'] ?? null,
-                'sort_order' => $elementData['sortOrder'] ?? 0,
-            ]);
-
-            foreach (($elementData['materials'] ?? []) as $materialData) {
-                ElementMaterial::create([
-                    'project_element_id' => $element->id,
-                    'library_material_id' => $materialData['libraryMaterialId'] ?? null,
-                    'persistent_id' => (string) Str::uuid(),
-                    'description' => $materialData['description'],
-                    'unit_of_measurement' => $materialData['unitOfMeasurement'],
-                    'quantity' => $materialData['quantity'],
-                    'unit_cost' => $materialData['unitCost'] ?? null,
-                    'is_included' => $materialData['isIncluded'] ?? true,
-                    'is_additional' => $materialData['isAdditional'] ?? false,
-                    'notes' => $materialData['notes'] ?? null,
-                    'source_metadata' => $materialData['sourceMetadata'] ?? $materialData['source_metadata'] ?? null,
-                    'sort_order' => $materialData['sortOrder'] ?? 0,
-                ]);
-            }
-        }
+        app(ProjectElementRegistry::class)->saveMaterials($materialsData, $elements);
     }
 
     private function defaultMaterialsApprovalStatus(string $comments = ''): array
@@ -1423,11 +1309,14 @@ class MaterialsController extends Controller
         try {
             return [
                 'projectInfo' => $materialsData->project_info ?? [],
+                'sourceUpdatedAt' => $materialsData->updated_at?->toISOString(),
                 'projectElements' => $materialsData->elements->map(function ($element) use ($fulfilment) {
                     return [
                         'id' => (string) $element->id,
                         'templateId' => $element->template_id,
                         'scopeId' => $element->scope_id,
+                        'classification' => $element->classification,
+                        'parentId' => $element->parent_id,
                         'elementType' => $element->element_type,
                         'name' => $element->name,
                         'persistent_id' => $element->persistent_id,
@@ -1438,6 +1327,7 @@ class MaterialsController extends Controller
                         'isIncluded' => (bool) $element->is_included,
                         'materials' => $element->materials->map(function ($material) use ($fulfilment) {
                             $state = $fulfilment[$material->id] ?? null;
+
                             return [
                                 'id' => (string) $material->id,
                                 'persistent_id' => $material->persistent_id,
@@ -1466,19 +1356,19 @@ class MaterialsController extends Controller
                         'addedAt' => $element->created_at?->toISOString(),
                     ];
                 })->toArray(),
-                'availableElements' => $this->getElementTemplates()->getData()->data ?? []
+                'availableElements' => $this->getElementTemplates()->getData()->data ?? [],
             ];
         } catch (\Exception $e) {
             \Log::error('Failed to format materials data', [
                 'materialsDataId' => $materialsData->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             // Return safe fallback structure
             return [
                 'projectInfo' => $materialsData->project_info ?? [],
                 'projectElements' => [],
-                'availableElements' => []
+                'availableElements' => [],
             ];
         }
     }
@@ -1886,13 +1776,13 @@ class MaterialsController extends Controller
     /**
      * Internal helper to handle version creation
      */
-    private function internalCreateVersion(int $taskId, ?string $label = null, ?string $reason = null, bool $isBase = false, $changeLog = null): \App\Models\MaterialVersion
+    private function internalCreateVersion(int $taskId, ?string $label = null, ?string $reason = null, bool $isBase = false, $changeLog = null): MaterialVersion
     {
         $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)
             ->with(['elements.materials'])
             ->first();
 
-        if (!$materialsData) {
+        if (! $materialsData) {
             throw new \Exception('Materials data not found');
         }
 
@@ -1906,6 +1796,11 @@ class MaterialsController extends Controller
             'elements' => $materialsData->elements->map(function ($element) {
                 return [
                     'id' => $element->id,
+                    'scope_id' => $element->uuid,
+                    'persistent_id' => $element->persistent_id,
+                    'required_quantity' => $element->required_quantity,
+                    'unit_of_measurement' => $element->unit_of_measurement,
+                    'source_metadata' => $element->source_metadata,
                     'template_id' => $element->template_id,
                     'element_type' => $element->element_type,
                     'name' => $element->name,
@@ -1917,6 +1812,10 @@ class MaterialsController extends Controller
                     'materials' => $element->materials->map(function ($material) {
                         return [
                             'id' => $material->id,
+                            'persistent_id' => $material->persistent_id,
+                            'library_material_id' => $material->library_material_id,
+                            'unit_cost' => $material->unit_cost,
+                            'source_metadata' => $material->source_metadata,
                             'description' => $material->description,
                             'unit_of_measurement' => $material->unit_of_measurement,
                             'quantity' => $material->quantity,
@@ -1925,16 +1824,16 @@ class MaterialsController extends Controller
                             'notes' => $material->notes,
                             'sort_order' => $material->sort_order,
                         ];
-                    })->toArray()
+                    })->toArray(),
                 ];
-            })->toArray()
+            })->toArray(),
         ];
 
         // Create version
         return $materialsData->versions()->create([
             'version_number' => $newVersionNumber,
             'is_base' => $isBase,
-            'label' => $label ?? ($isBase ? 'Base Materials' : 'Version ' . $newVersionNumber),
+            'label' => $label ?? ($isBase ? 'Base Materials' : 'Version '.$newVersionNumber),
             'reason' => $reason,
             'change_log' => $changeLog,
             'data' => $snapshot,
@@ -2058,16 +1957,17 @@ class MaterialsController extends Controller
      */
     public function restoreMaterialVersion(int $taskId, int $versionId): JsonResponse
     {
+        $this->authorizeMaterialsMutation($taskId);
         try {
             $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
-            
-            if (!$materialsData) {
+
+            if (! $materialsData) {
                 return response()->json(['message' => 'Materials data not found'], 404);
             }
 
-            $version = \App\Models\MaterialVersion::find($versionId);
-            
-            if (!$version) {
+            $version = MaterialVersion::find($versionId);
+
+            if (! $version) {
                 return response()->json(['message' => 'Version not found'], 404);
             }
 
@@ -2085,60 +1985,59 @@ class MaterialsController extends Controller
                     $changeWarning = 'Warning: Materials have been modified since this version was created. Restoring will overwrite current changes.';
                     \Log::warning('Restoring version with newer source data', [
                         'version_updated' => $version->source_updated_at,
-                        'current_updated' => $materialsData->updated_at
+                        'current_updated' => $materialsData->updated_at,
                     ]);
                 }
             }
 
             $restoredData = $version->data;
 
-            // Delete all existing elements and materials (cascade will handle materials)
+            // Restore specifications on the shared records; missing items are archived.
             \DB::transaction(function () use ($materialsData, $restoredData) {
-                // Delete existing elements (materials will cascade delete)
-                $materialsData->elements()->delete();
-
-                // Recreate elements from snapshot
-                foreach ($restoredData['elements'] as $elementData) {
-                    $element = $materialsData->elements()->create([
-                        'template_id' => $elementData['template_id'] ?? null,
-                        'element_type' => $elementData['element_type'],
-                        'name' => $elementData['name'],
-                        'category' => $elementData['category'],
-                        'dimensions' => $elementData['dimensions'] ?? null,
-                        'is_included' => $elementData['is_included'] ?? true,
-                        'sort_order' => $elementData['sort_order'] ?? 0,
-                        'notes' => $elementData['notes'] ?? null,
-                    ]);
-
-                    // Recreate materials for this element
-                    foreach (($elementData['materials'] ?? []) as $materialData) {
-                        $element->materials()->create([
-                            'description' => $materialData['description'],
-                            'unit_of_measurement' => $materialData['unit_of_measurement'],
-                            'quantity' => $materialData['quantity'],
-                            'is_included' => $materialData['is_included'] ?? true,
-                            'is_additional' => $materialData['is_additional'] ?? false,
-                            'notes' => $materialData['notes'] ?? null,
-                            'sort_order' => $materialData['sort_order'] ?? 0,
-                        ]);
-                    }
-                }
+                $elements = array_map(function ($element) use ($materialsData) {
+                    return [
+                        'id' => isset($element['scope_id']) || isset($element['persistent_id']) ? (string) $element['id'] : 'legacy-'.$element['id'],
+                        'scopeId' => $element['scope_id'] ?? ProjectElement::withTrashed()->where('task_materials_data_id', $materialsData->id)->where('legacy_project_element_id', $element['id'])->value('uuid'),
+                        'persistent_id' => $element['persistent_id'] ?? null,
+                        'templateId' => $element['template_id'] ?? null,
+                        'elementType' => $element['element_type'],
+                        'name' => $element['name'], 'category' => $element['category'],
+                        ...(array_key_exists('required_quantity', $element) ? ['requiredQuantity' => $element['required_quantity']] : []),
+                        ...(array_key_exists('unit_of_measurement', $element) ? ['unitOfMeasurement' => $element['unit_of_measurement']] : []),
+                        'dimensions' => $element['dimensions'] ?? [],
+                        'isIncluded' => $element['is_included'] ?? true,
+                        'sortOrder' => $element['sort_order'] ?? 0,
+                        'notes' => $element['notes'] ?? null,
+                        'sourceMetadata' => $element['source_metadata'] ?? null,
+                        'materials' => array_map(fn ($line) => [
+                            'id' => (string) $line['id'], 'persistent_id' => $line['persistent_id'] ?? null,
+                            ...(array_key_exists('library_material_id', $line) ? ['libraryMaterialId' => $line['library_material_id']] : []),
+                            'description' => $line['description'], 'unitOfMeasurement' => $line['unit_of_measurement'],
+                            'quantity' => $line['quantity'],
+                            ...(array_key_exists('unit_cost', $line) ? ['unitCost' => $line['unit_cost']] : []),
+                            'isIncluded' => $line['is_included'] ?? true, 'isAdditional' => $line['is_additional'] ?? false,
+                            'notes' => $line['notes'] ?? null, 'sourceMetadata' => $line['source_metadata'] ?? null,
+                            'sortOrder' => $line['sort_order'] ?? 0,
+                        ], $element['materials'] ?? []),
+                    ];
+                }, $restoredData['elements']);
+                app(ProjectElementRegistry::class)->saveMaterials($materialsData, $elements);
 
                 // Update project_info but RESET APPROVAL STATUS (Success Criteria #6)
                 $projectInfo = $restoredData['project_info'];
-                
+
                 // Reset all approvals to draft
                 $projectInfo['approval_status'] = [
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                     'all_approved' => false,
                     'last_approval_at' => null,
-                    'restored_from_version' => $elementData['version_number'] ?? null,
+                    'restored_from_version' => $restoredData['version_number'] ?? null,
                     'restored_at' => now()->toISOString(),
-                    'restored_by' => auth()->user()->name ?? 'System'
+                    'restored_by' => auth()->user()->name ?? 'System',
                 ];
 
                 $materialsData->update([
-                    'project_info' => $projectInfo
+                    'project_info' => $projectInfo,
                 ]);
             });
 
@@ -2146,39 +2045,47 @@ class MaterialsController extends Controller
                 'task_id' => $taskId,
                 'version_id' => $versionId,
                 'version_number' => $version->version_number,
-                'had_conflicts' => $hasChanged
+                'had_conflicts' => $hasChanged,
             ]);
 
             // NEW: Create a tracking version for the restoation event itself
             // This ensures the audit trail reflects the rollback in the versions table
             $this->internalCreateVersion(
-                $taskId, 
-                'Revision - Restored from v' . $version->version_number, 
-                'System: Restored to state from Snapshot #' . $version->version_number . '. Approvals reset.',
+                $taskId,
+                'Revision - Restored from v'.$version->version_number,
+                'System: Restored to state from Snapshot #'.$version->version_number.'. Approvals reset.',
                 false
             );
+
+            MaterialsListChanged::dispatch($taskId);
 
             // Reload data to return fresh snapshot
             $materialsData->load('elements.materials');
 
             return response()->json([
-                'message' => 'Materials restored to version ' . $version->version_number . ($hasChanged ? ' (with conflicts)' : ''),
+                'message' => 'Materials restored to version '.$version->version_number.($hasChanged ? ' (with conflicts)' : ''),
                 'warning' => $changeWarning,
                 'data' => $this->formatMaterialsData($materialsData),
-                'approvals_reset' => true
+                'approvals_reset' => true,
             ]);
 
+        } catch (ValidationException $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             \Log::error('Failed to restore material version', [
                 'taskId' => $taskId,
                 'versionId' => $versionId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to restore version',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
     }
@@ -2188,6 +2095,7 @@ class MaterialsController extends Controller
      */
     public function deleteElement(int $taskId, string $elementId): JsonResponse
     {
+        $this->authorizeMaterialsMutation($taskId);
         // Elements the user added but has not saved yet still carry a
         // client-generated id ("custom-1724...", "scope-3"). Those never reach
         // the database, and an `int` type hint turns them into a 500 TypeError
@@ -2202,10 +2110,10 @@ class MaterialsController extends Controller
         try {
             // Find the task materials data
             $materialsData = TaskMaterialsData::where('enquiry_task_id', $taskId)->first();
-            
-            if (!$materialsData) {
+
+            if (! $materialsData) {
                 return response()->json([
-                    'message' => 'Task materials data not found'
+                    'message' => 'Task materials data not found',
                 ], 404);
             }
 
@@ -2214,9 +2122,9 @@ class MaterialsController extends Controller
                 ->where('id', $elementId)
                 ->first();
 
-            if (!$element) {
+            if (! $element) {
                 return response()->json([
-                    'message' => 'Element not found'
+                    'message' => 'Element not found',
                 ], 404);
             }
 
@@ -2238,9 +2146,9 @@ class MaterialsController extends Controller
                         'production' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                         'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => ''],
                         'all_approved' => false,
-                        'last_approval_at' => null
+                        'last_approval_at' => null,
                     ];
-                    
+
                     $materialsData->project_info = $projectInfo;
                     $materialsData->save();
                     $approvalsReset = true;
@@ -2252,12 +2160,15 @@ class MaterialsController extends Controller
             // its material rows. Delete them explicitly — the same reason
             // saveMaterialsData() clears them by project_element_id rather than
             // trusting the constraint.
-            $element->materials()->delete();
             $element->delete();
+            ProjectEnquiry::whereKey($materialsData->task->project_enquiry_id)->increment('elements_revision');
+            app(ProjectElementRegistry::class)->syncQuoteDrafts($materialsData->task->enquiry);
+            $materialsData->touch();
+            MaterialsListChanged::dispatch($taskId);
 
             return response()->json([
                 'message' => 'Element deleted successfully',
-                'approvals_reset' => $approvalsReset
+                'approvals_reset' => $approvalsReset,
             ], 200);
 
         } catch (\Exception $e) {
@@ -2265,12 +2176,12 @@ class MaterialsController extends Controller
                 'task_id' => $taskId,
                 'element_id' => $elementId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to delete element',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
     }

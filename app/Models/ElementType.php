@@ -47,13 +47,11 @@ class ElementType extends Model
 
     /**
      * Check if this element type is being used by any project elements.
-     *
-     * @return bool
      */
     public function isInUse(): bool
     {
         // Check if any project_elements use this element type
-        return \DB::table('project_elements')
+        return ProjectElement::query()
             ->where('element_type', $this->name)
             ->exists();
     }

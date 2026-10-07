@@ -27,6 +27,7 @@ use Tests\TestCase;
 class PettyCashCommitmentTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Support\VerifiedFinancialRequisitionFixture;
 
     private PettyCashCostProducer $producer;
     private User $user;
@@ -96,7 +97,7 @@ class PettyCashCommitmentTest extends TestCase
             'is_active' => true,
         ]);
 
-        return PettyCashRequisition::create(array_merge([
+        return $this->verifiedRequisitionFixture(PettyCashRequisition::create(array_merge([
             'requisition_number' => 'REQ-' . uniqid(),
             'user_id' => $this->user->id,
             'department_id' => $this->departmentId,
@@ -109,7 +110,7 @@ class PettyCashCommitmentTest extends TestCase
             'approved_at' => now(),
             'payee_name' => 'Total Kenya',
             'is_public' => false,
-        ], $overrides));
+        ], $overrides)));
     }
 
     public function test_an_approved_requisition_commits_the_projects_money(): void
@@ -306,6 +307,11 @@ class PettyCashCommitmentTest extends TestCase
         // somebody approves the new version a moment later.
         $this->producer->releaseFor($requisition, 'Edited.');
         $requisition->update(['total_amount' => 45000.00, 'approved_at' => now()->addMinute()]);
+        // A material edit now withdraws certification and approval. Complete
+        // the new verification prerequisite before simulating re-approval.
+        $requisition->items()->update(['amount' => 45000.00]);
+        $this->verifiedRequisitionFixture($requisition->fresh());
+        $requisition->refresh()->update(['status' => 'approved', 'approved_at' => now()->addMinute()]);
 
         $this->assertSame('committed', $this->producer->commitFor($requisition->fresh()));
 

@@ -236,7 +236,8 @@ class MaterialController extends Controller
             $query->latest('library_materials.created_at');
         }
 
-        return $query;
+        // Equal names or timestamps must not shuffle rows between pages.
+        return $query->orderBy('library_materials.id');
     }
 
     /**

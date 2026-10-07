@@ -132,7 +132,7 @@ class JournalEntryController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'data' => new JournalEntryResource($journal),
+            'data' => array_merge((new JournalEntryResource($journal))->resolve($request), ['actions' => ['reverse' => $this->reversalAction($request, $journal)]]),
         ]);
     }
 
@@ -165,12 +165,7 @@ class JournalEntryController extends Controller
             'reason' => 'required|string|min:5|max:500',
         ]);
 
-        $belongsToPayment = ($journal->source_type === Payment::class
-                && Payment::query()->whereKey($journal->source_id)->exists())
-            || ($journal->source_type === BillPayment::class
-                && BillPayment::query()->whereKey($journal->source_id)->whereNotNull('disbursement_id')->exists())
-            || ($journal->spend_voucher_id
-                && Payment::query()->where('spend_voucher_id', $journal->spend_voucher_id)->exists());
+        $belongsToPayment = $this->belongsToPayment($journal);
 
         if ($belongsToPayment) {
             return response()->json([
@@ -194,6 +189,28 @@ class JournalEntryController extends Controller
             'message' => 'Entry ' . $journal->entry_no . ' reversed by ' . $reversal->entry_no . '.',
             'data' => new JournalEntryResource($reversal),
         ]);
+    }
+
+    private function belongsToPayment(JournalEntry $journal): bool
+    {
+        return ($journal->source_type === Payment::class
+                && Payment::query()->whereKey($journal->source_id)->exists())
+            || ($journal->source_type === BillPayment::class
+                && BillPayment::query()->whereKey($journal->source_id)->whereNotNull('disbursement_id')->exists())
+            || ($journal->spend_voucher_id
+                && Payment::query()->where('spend_voucher_id', $journal->spend_voucher_id)->exists());
+    }
+
+    /** Display eligibility only; the owning posting service still validates every write. */
+    private function reversalAction(Request $request, JournalEntry $journal): array
+    {
+        $reason = null;
+        if (! $request->user()?->can(Permissions::FINANCE_JOURNALS_REVERSE)) $reason = 'Permission required to reverse a journal.';
+        elseif ($this->belongsToPayment($journal)) $reason = 'Reverse the owning Payment so its liability, cashbook and audit trail are corrected together.';
+        elseif ($journal->status !== 'posted' || $journal->reversal_of_id || $journal->reversedBy) $reason = 'Only an original posted journal without an existing reversal can be reversed.';
+        elseif (! \App\Modules\Finance\CostCollector\Models\AccountingPeriod::forDate(now())?->isOpen()) $reason = 'No open accounting period is available for the reversal.';
+        elseif ($journal->lines->isEmpty()) $reason = 'This journal has no recorded accounting lines to reverse.';
+        return ['allowed' => $reason === null, 'reason' => $reason];
     }
 
     /**

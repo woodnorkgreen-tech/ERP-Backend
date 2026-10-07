@@ -2,8 +2,9 @@
 
 namespace App\Modules\MaterialsLibrary\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
 use App\Constants\Permissions;
+use Illuminate\Contracts\Validation\ValidationRule;
+use Illuminate\Foundation\Http\FormRequest;
 
 class ImportMaterialRequest extends FormRequest
 {
@@ -18,12 +19,12 @@ class ImportMaterialRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
         return [
-            'workstation_id' => 'required|exists:workstations,id',
+            'workstation_id' => 'nullable|integer|exists:workstations,id',
             'file' => 'required|file|mimes:xlsx,xls|max:5120', // Max 5MB
         ];
     }

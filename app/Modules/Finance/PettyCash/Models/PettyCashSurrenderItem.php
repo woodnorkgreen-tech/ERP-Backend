@@ -29,6 +29,8 @@ class PettyCashSurrenderItem extends Model
         'duplicate_of_surrender_item_id', 'duplicate_of_payment_id', 'duplicate_override_reason', 'duplicate_overridden_by', 'duplicate_overridden_at',
         'superseded_at',
         'cost_line_id',
+        // Report 75R-B: the receiver surrender this belongs to and the requisition line it accounts for.
+        'surrender_id', 'requisition_item_id',
     ];
 
     protected $casts = [
@@ -52,5 +54,15 @@ class PettyCashSurrenderItem extends Model
     public function costLine(): BelongsTo
     {
         return $this->belongsTo(CostLine::class, 'cost_line_id');
+    }
+
+    public function surrender(): BelongsTo
+    {
+        return $this->belongsTo(PettyCashSurrender::class, 'surrender_id');
+    }
+
+    public function requisitionLine(): BelongsTo
+    {
+        return $this->belongsTo(PettyCashRequisitionItem::class, 'requisition_item_id');
     }
 }

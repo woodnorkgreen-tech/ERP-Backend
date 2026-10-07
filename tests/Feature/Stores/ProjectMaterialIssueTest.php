@@ -105,12 +105,12 @@ class ProjectMaterialIssueTest extends TestCase
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        return DB::table('project_elements')->insertGetId([
+        return \App\Models\ProjectElement::create([
             'persistent_id' => (string) Str::uuid(),
             'task_materials_data_id' => $dataId,
             'element_type' => 'stand', 'name' => 'BOOTH1', 'category' => 'production',
             'is_included' => true, 'created_at' => now(), 'updated_at' => now(),
-        ]);
+        ])->id;
     }
 
     private function material(string $name, float $onHand): LibraryMaterial

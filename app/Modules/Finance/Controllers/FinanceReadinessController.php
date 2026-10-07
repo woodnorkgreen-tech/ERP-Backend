@@ -43,7 +43,8 @@ class FinanceReadinessController extends Controller
         // and the default bank were posted to but never checked (Report 53).
         $accountFunctions = FinanceAccountFunctions::resolution();
         $profile = config('finance_accounts.profile');
-        $profileProblems = FinanceChartProfile::problems($profile, config('finance_accounts.wip_policy'));
+        $profileProblems = FinanceChartProfile::runtimeProblems();
+        $wipPolicy = \App\Modules\Finance\Governance\GovernanceRuntime::instance()->wipPolicy();
         $missingRequiredAccounts = collect($accountFunctions)->reject(fn ($f) => $f['resolved'])
             ->map(fn ($f, $key) => $f['local_code'] === $f['code'] ? "{$key} ({$f['code']})" : "{$key} ({$f['code']} → {$f['local_code']})")
             ->values()->all();
@@ -124,7 +125,7 @@ class FinanceReadinessController extends Controller
                 $profileProblems !== []
                     ? implode(' ', $profileProblems)
                     : ($profile
-                        ? "Chart profile '{$profile}' is active; WIP policy: ".(config('finance_accounts.wip_policy') ?: 'profile default').'.'
+                        ? "Chart profile '{$profile}' is active; WIP policy: {$wipPolicy['policy']} ({$wipPolicy['source']})."
                         : 'No chart profile: this installation keeps the reference chart.'),
                 'Fix FINANCE_ACCOUNT_PROFILE / FINANCE_WIP_POLICY, or the profile file it names.'),
             $this->check('expense_codes', 'Expense catalogue',
@@ -225,20 +226,25 @@ class FinanceReadinessController extends Controller
             'ready' => $ready,
             'checked_at' => now()->toIso8601String(),
             'summary' => $ready
-                ? 'Finance setup is ready for controlled posting.'
+                ? 'Reference-data and integrity checks passed. Review configuration, policy and data gates separately.'
                 : 'Finance setup needs attention before live posting.',
             'checks' => $checks->values(),
             // Per posting function: reference code, the local code the map gives it,
             // and whether it resolves. Additive; the readiness screen reads `checks`.
             'account_functions' => $accountFunctions,
+            // Report 75: what people have approved, kept apart from what merely resolves.
+            // Not part of `checks` or `ready`: those are reference data, and the deploy
+            // gate reads them. A decision waiting for Finance is not a failed deploy.
+            'governance' => app(\App\Modules\Finance\Governance\GovernanceCentre::class)->readiness($request->user()),
+            'control_centre' => app(\App\Modules\Finance\Services\FinanceControlCentreService::class)->report($checks->all(), $accountFunctions),
             'integrity' => $integrity,
             'operations' => app(\App\Modules\ProcurementStores\Services\OperationsReadinessService::class)->report(),
             'setup_command' => app()->environment(['local', 'testing'])
                 ? 'php artisan db:seed --class="App\\Modules\\Finance\\Database\\Seeders\\FinanceReferenceSeeder"'
                 : null,
             'ledger_scope' => [
-                'label' => 'Operational cost ledger',
-                'note' => 'This ledger covers verified costs, spend vouchers and payroll explicitly posted from HR. Revenue, opening balances and other bank movements remain in the statutory accounting package.',
+                'label' => 'Controlled operational ledger',
+                'note' => 'This ledger records the supported Finance workflows. Opening/history provenance, policy-dependent treatments and unsupported statutory statements remain separate readiness gates.',
             ],
         ]]);
     }

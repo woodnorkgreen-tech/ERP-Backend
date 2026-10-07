@@ -1,0 +1,5 @@
+{
+  "branch --show-current": "master\n",
+  "rev-parse HEAD": "5a5a3db738110d153610e3e5b6e5da4d9ab2d4db\n",
+  "status --short": " M app/Modules/Finance/Controllers/FinanceReadinessController.php\n M app/Modules/Finance/Support/FinanceReadiness.php\n M app/Modules/MaterialsLibrary/Database/Seeders/LegacyMaterialCategorySeeder.php\n M tests/Feature/Finance/PayrollFinanceWorkspaceTest.php\n?? app/Modules/Finance/Services/FinanceControlCentreService.php\n?? docs/finance-redesign/phase-2/73-verification/\n?? docs/finance-redesign/phase-2/73_FINANCE_READINESS_CONTROL_CENTRE.md\n?? tests/Feature/Finance/FinanceControlCentreTest.php\n"
+}

@@ -47,9 +47,14 @@ final class FinanceResetBoundary
         'enquiry_payments',
         'client_receipts',
         // Petty cash and payments (Q1)
+        'petty_cash_surrender_allocations',     // Report 75R-B: before surrenders, items, slices and payments
+        'requisition_receipt_confirmations',
+        'requisition_balance_releases',
         'petty_cash_surrender_reviews',
         'petty_cash_surrender_items',
+        'petty_cash_surrenders',
         'petty_cash_disbursement_allocations',
+        'requisition_payment_allocations',   // Report 75R-A: line-to-Payment bridge, before both parents
         'petty_cash_requisition_items',
         'petty_cash_requisitions',
         'petty_cash_offline_rows',
@@ -103,7 +108,7 @@ final class FinanceResetBoundary
         'enquiry_tasks', 'enquiry_task_user', 'task_assignment_history', 'task_budget_data', 'budget_additions',
         'budget_versions', 'budget_approvals', 'task_quote_data', 'quote_approvals', 'quote_versions',
         'task_materials_data', 'task_procurement_data', 'task_production_data', 'project_deliverables',
-        'project_elements', 'element_materials', 'teams_tasks', 'teams_members', 'site_surveys',
+        'project_elements_legacy', 'element_materials', 'teams_tasks', 'teams_members', 'site_surveys',
         'design_requirements', 'design_assets', 'logistics_tasks', 'setup_tasks', 'setdown_tasks',
         'handover_surveys', 'archival_reports',
         // Required dependencies

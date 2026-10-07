@@ -1,0 +1,216 @@
+Report: docs/finance-redesign/phase-2/74a-evidence/identity-wng_source_rehearsal/chart_completion.json
+DRY RUN — profile 'wng' on 'wng_source_rehearsal' (WIP policy: capitalise, DEFAULT / NOT APPROVED FOR PRODUCTION — FINANCE_WIP_POLICY is not set)
+Target chart identity: WNG_CHART_ONLY — all 29 existing accounts the profile posts to are here, and no reference-chart account is beyond the 3 the profile names
+Chart of accounts: 123 accounts (123 active, 123 postable); 120 company-coded, 3 four-digit (3 reference-chart, of which 3 named by the profile); 0 other; 0 duplicated name(s); 0 reference account(s) carrying journal lines
++---------+--------------------------------------------------+--------+
+| Code    | Account                                          | Action |
++---------+--------------------------------------------------+--------+
+| SAL-001 | Sales                                            | create |
+| SAL-002 | Sales:Project Revenue                            | create |
+| VAT-001 | Output VAT Payable                               | create |
+| VAT-002 | Input VAT Recoverable                            | create |
+| WHT-001 | Withholding Tax Payable                          | create |
+| PL-001  | Payroll liabilities                              | create |
+| PL-002  | Payroll liabilities:PAYE                         | create |
+| PL-003  | Payroll liabilities:Statutory & Other Deductions | create |
+| AE-001  | Accrued Expenses                                 | create |
+| CD-001  | Client Deposits                                  | create |
+| IA-001  | Inventory Asset                                  | create |
+| WIP-001 | Work in Progress                                 | create |
+| WIP-002 | Work in Progress:Materials                       | create |
+| WIP-003 | Work in Progress:Direct Labour                   | create |
+| WIP-004 | Work in Progress:Subcontractors                  | create |
+| WIP-005 | Work in Progress:Transport & Delivery            | create |
+| WIP-006 | Work in Progress:Equipment Hire & Site           | create |
+| WIP-007 | Work in Progress:Project Utilities               | create |
+| WIP-008 | Work in Progress:Field Facilitation              | create |
+| WIP-009 | Work in Progress:Venue & Permits                 | create |
+| WIP-010 | Work in Progress:Rework & Warranty               | create |
+| COS-021 | Cost of Sales:Equipment Hire & Site              | create |
+| COS-022 | Cost of Sales:Project Utilities                  | create |
+| COS-023 | Cost of Sales:Venue & Permits                    | create |
+| PRE-001 | Prepayments & Deposits                           | create |
+| PRE-002 | Prepayments & Deposits:Supplier Advances         | create |
+| PRE-003 | Prepayments & Deposits:Refundable Deposits       | create |
+| PRE-004 | Prepayments & Deposits:Prepaid Expenses          | create |
+| OI-001  | Office Improvement                               | create |
++---------+--------------------------------------------------+--------+
+Accounts: 29 to create, 0 already present, 0 met by an existing account (declared reuse), 0 in conflict
++--------------------------+------+-----------+--------------------------------------------------+----------+-----------------------+
+| Function                 | Ref  | Account   | Name                                             | Resolves | Status                |
++--------------------------+------+-----------+--------------------------------------------------+----------+-----------------------+
+| bank_default             | 1010 | EQB-001   | Equity Bank                                      | yes      | RESOLVED_EXISTING     |
+| petty_cash_float         | 1030 | PETTY-001 | Petty cash                                       | yes      | RESOLVED_EXISTING     |
+| accounts_receivable      | 1100 | AR-001    | Accounts Receivable (A/R)                        | yes      | RESOLVED_EXISTING     |
+| staff_advances           | 1300 | STD-001   | Short Term Debtors                               | yes      | RESOLVED_EXISTING     |
+| input_vat                | 1330 | VAT-002   | Input VAT Recoverable                            | yes      | RESOLVED_PROPOSED_NEW |
+| inventory                | 1200 | IA-001    | Inventory Asset                                  | yes      | RESOLVED_PROPOSED_NEW |
+| wip_direct_materials     | 1211 | WIP-002   | Work in Progress:Materials                       | yes      | RESOLVED_PROPOSED_NEW |
+| wip_direct_labour        | 1212 | WIP-003   | Work in Progress:Direct Labour                   | yes      | RESOLVED_PROPOSED_NEW |
+| wip_subcontractors       | 1213 | WIP-004   | Work in Progress:Subcontractors                  | yes      | RESOLVED_PROPOSED_NEW |
+| wip_transport_logistics  | 1214 | WIP-005   | Work in Progress:Transport & Delivery            | yes      | RESOLVED_PROPOSED_NEW |
+| wip_equipment_site       | 1215 | WIP-006   | Work in Progress:Equipment Hire & Site           | yes      | RESOLVED_PROPOSED_NEW |
+| wip_project_utilities    | 1216 | WIP-007   | Work in Progress:Project Utilities               | yes      | RESOLVED_PROPOSED_NEW |
+| wip_project_facilitation | 1217 | WIP-008   | Work in Progress:Field Facilitation              | yes      | RESOLVED_PROPOSED_NEW |
+| wip_venue_statutory      | 1218 | WIP-009   | Work in Progress:Venue & Permits                 | yes      | RESOLVED_PROPOSED_NEW |
+| wip_rework_warranty      | 1219 | WIP-010   | Work in Progress:Rework & Warranty               | yes      | RESOLVED_PROPOSED_NEW |
+| accounts_payable         | 2100 | AP-001    | Accounts Payable (A/P)                           | yes      | RESOLVED_EXISTING     |
+| output_vat               | 2110 | VAT-001   | Output VAT Payable                               | yes      | RESOLVED_PROPOSED_NEW |
+| wht_payable              | 2120 | WHT-001   | Withholding Tax Payable                          | yes      | RESOLVED_PROPOSED_NEW |
+| paye_payable             | 2130 | PL-002    | Payroll liabilities:PAYE                         | yes      | RESOLVED_PROPOSED_NEW |
+| statutory_payable        | 2140 | PL-003    | Payroll liabilities:Statutory & Other Deductions | yes      | RESOLVED_PROPOSED_NEW |
+| accrued_expenses         | 2150 | AE-001    | Accrued Expenses                                 | yes      | RESOLVED_PROPOSED_NEW |
+| net_payroll_payable      | 2160 | 2160      | Net Payroll Payable                              | yes      | RESOLVED_EXISTING     |
+| client_deposits          | 2200 | CD-001    | Client Deposits                                  | yes      | RESOLVED_PROPOSED_NEW |
+| opening_balance_equity   | 3900 | OBE-001   | Opening Balance Equity                           | yes      | RESOLVED_EXISTING     |
+| project_revenue          | 4100 | SAL-002   | Sales:Project Revenue                            | yes      | RESOLVED_PROPOSED_NEW |
+| cos_direct_materials     | 5100 | COS-008   | Cost of Sales:Materials                          | yes      | RESOLVED_EXISTING     |
+| cos_direct_labour        | 5200 | PE-007    | Personnel Expenses:Wages-Direct Labour           | yes      | RESOLVED_EXISTING     |
+| cos_subcontractors       | 5300 | COS-020   | Subcontractors - COS                             | yes      | RESOLVED_EXISTING     |
+| cos_transport_logistics  | 5400 | COS-016   | Cost of Sales:Transport & Delivery               | yes      | RESOLVED_EXISTING     |
+| cos_equipment_site       | 5500 | COS-021   | Cost of Sales:Equipment Hire & Site              | yes      | RESOLVED_PROPOSED_NEW |
+| cos_project_utilities    | 5600 | COS-022   | Cost of Sales:Project Utilities                  | yes      | RESOLVED_PROPOSED_NEW |
+| cos_project_facilitation | 5700 | COS-006   | Cost of Sales:Field Facilitation                 | yes      | RESOLVED_EXISTING     |
+| cos_venue_statutory      | 5800 | COS-023   | Cost of Sales:Venue & Permits                    | yes      | RESOLVED_PROPOSED_NEW |
+| cos_rework_warranty      | 5900 | COS-018   | Other - COS                                      | yes      | RESOLVED_EXISTING     |
+| inventory_adjustments    | 6800 | INV-001   | Inventory Shrinkage                              | yes      | RESOLVED_EXISTING     |
+| salaries_expense         | 7550 | PE-006    | Personnel Expenses:Salaries                      | yes      | RESOLVED_EXISTING     |
+| bank_charges             | 7800 | FIN-003   | Finance cost:Bank charges                        | yes      | RESOLVED_EXISTING     |
++--------------------------+------+-----------+--------------------------------------------------+----------+-----------------------+
+Functions resolved: 37 / 37
+Classification preview (not applied; --classify-existing applies it): 116 account(s) would have a NULL account_type / normal_balance filled; left for the accountant: EQE-001, ITX-001, LDO-001, OPE-026; unclassified and not in the profile: none
++-----------+-------------------------------------------------------------------+----------+-------------+---------------+------------------+
+| Code      | Account                                                           | Type now | Balance now | Type proposed | Balance proposed |
++-----------+-------------------------------------------------------------------+----------+-------------+---------------+------------------+
+| AP-001    | Accounts Payable (A/P)                                            | NULL     | NULL        | balance_sheet | credit           |
+| AR-001    | Accounts Receivable (A/R)                                         | NULL     | NULL        | balance_sheet | debit            |
+| AR-002    | Accounts Receivable (A/R) - EUR                                   | NULL     | NULL        | balance_sheet | debit            |
+| STD-001   | Short Term Debtors                                                | NULL     | NULL        | balance_sheet | debit            |
+| CASH-001  | Cash Account                                                      | NULL     | NULL        | balance_sheet | debit            |
+| EQB-001   | Equity Bank                                                       | NULL     | NULL        | balance_sheet | debit            |
+| FMB-001   | Family Bank                                                       | NULL     | NULL        | balance_sheet | debit            |
+| FK-001    | Faulu Kenya                                                       | NULL     | NULL        | balance_sheet | debit            |
+| KCB-001   | KCB Bank                                                          | NULL     | NULL        | balance_sheet | debit            |
+| NCBA-001  | NCBA                                                              | NULL     | NULL        | balance_sheet | debit            |
+| NIC-001   | NIC Dollar Account                                                | NULL     | NULL        | balance_sheet | debit            |
+| PETTY-001 | Petty cash                                                        | NULL     | NULL        | balance_sheet | debit            |
+| SBM-001   | SBM                                                               | NULL     | NULL        | balance_sheet | debit            |
+| STB-001   | Stanbic Bank                                                      | NULL     | NULL        | balance_sheet | debit            |
+| COS-001   | Change in inventory - COS                                         | NULL     | NULL        | direct_cost   | debit            |
+| COS-002   | Cost of Sales                                                     | NULL     | NULL        | direct_cost   | debit            |
+| COS-003   | Cost of Sales:Branding                                            | NULL     | NULL        | direct_cost   | debit            |
+| COS-004   | Cost of Sales:Courier - Projects                                  | NULL     | NULL        | direct_cost   | debit            |
+| COS-005   | Cost of Sales:Fabrication                                         | NULL     | NULL        | direct_cost   | debit            |
+| COS-006   | Cost of Sales:Field Facilitation                                  | NULL     | NULL        | direct_cost   | debit            |
+| COS-007   | Cost of Sales:Jomat hardware                                      | NULL     | NULL        | direct_cost   | debit            |
+| COS-008   | Cost of Sales:Materials                                           | NULL     | NULL        | direct_cost   | debit            |
+| COS-009   | Cost of Sales:Motor bike and motor vehicle fuel                   | NULL     | NULL        | direct_cost   | debit            |
+| COS-010   | Cost of Sales:Paints & Hardware                                   | NULL     | NULL        | direct_cost   | debit            |
+| COS-011   | Cost of Sales:Parking Fees                                        | NULL     | NULL        | direct_cost   | debit            |
+| COS-012   | Cost of Sales:Plotting & Cutting                                  | NULL     | NULL        | direct_cost   | debit            |
+| COS-013   | Cost of Sales:Printing                                            | NULL     | NULL        | direct_cost   | debit            |
+| COS-014   | Cost of Sales:Team Meals                                          | NULL     | NULL        | direct_cost   | debit            |
+| COS-015   | Cost of Sales:Teams accomodation                                  | NULL     | NULL        | direct_cost   | debit            |
+| COS-016   | Cost of Sales:Transport & Delivery                                | NULL     | NULL        | direct_cost   | debit            |
+| COS-017   | Discounts given - COS                                             | NULL     | NULL        | direct_cost   | debit            |
+| INV-001   | Inventory Shrinkage                                               | NULL     | NULL        | opex          | debit            |
+| COS-018   | Other - COS                                                       | NULL     | NULL        | direct_cost   | debit            |
+| COS-019   | Overhead - COS                                                    | NULL     | NULL        | overhead      | debit            |
+| EXP-001   | Pasting Expenses                                                  | NULL     | NULL        | opex          | debit            |
+| COS-020   | Subcontractors - COS                                              | NULL     | NULL        | direct_cost   | debit            |
+| DIV-001   | Dividend disbursed                                                | NULL     | NULL        | balance_sheet | debit            |
+| OBE-001   | Opening Balance Equity                                            | NULL     | NULL        | balance_sheet | credit           |
+| OCI-001   | Other comprehensive income                                        | NULL     | NULL        | balance_sheet | credit           |
+| RE-001    | Retained Earnings                                                 | NULL     | NULL        | balance_sheet | credit           |
+| SC-001    | Share capital                                                     | NULL     | NULL        | balance_sheet | credit           |
+| ADM-001   | Administration expenses                                           | NULL     | NULL        | opex          | debit            |
+| ADM-002   | Administration expenses:Courier & Postage                         | NULL     | NULL        | opex          | debit            |
+| ADM-003   | Administration expenses:Depreciation Expense                      | NULL     | NULL        | opex          | debit            |
+| AMO-001   | Amortisation expense                                              | NULL     | NULL        | opex          | debit            |
+| ATM-001   | Atm charges                                                       | NULL     | NULL        | opex          | debit            |
+| BD-001    | Bad Debts                                                         | NULL     | NULL        | opex          | debit            |
+| DEL-001   | Delivery/Trolley expenses                                         | NULL     | NULL        | opex          | debit            |
+| EXD-001   | EXCISE DUTY                                                       | NULL     | NULL        | opex          | debit            |
+| FIN-001   | Finance cost                                                      | NULL     | NULL        | opex          | debit            |
+| FIN-002   | Finance cost:Bad debts                                            | NULL     | NULL        | opex          | debit            |
+| FIN-003   | Finance cost:Bank charges                                         | NULL     | NULL        | opex          | debit            |
+| FIN-004   | Finance cost:Interest expense                                     | NULL     | NULL        | opex          | debit            |
+| FIN-005   | Finance cost:Mpesa charges                                        | NULL     | NULL        | opex          | debit            |
+| INS-001   | Insurance - Disability                                            | NULL     | NULL        | opex          | debit            |
+| INS-002   | Insurance - General                                               | NULL     | NULL        | opex          | debit            |
+| INS-003   | Insurance - Liability                                             | NULL     | NULL        | opex          | debit            |
+| LPF-001   | Legal and professional fees                                       | NULL     | NULL        | opex          | debit            |
+| MC-001    | Management compensation                                           | NULL     | NULL        | opex          | debit            |
+| MAE-001   | Meals and entertainment                                           | NULL     | NULL        | opex          | debit            |
+| MED-001   | Medical expenses                                                  | NULL     | NULL        | opex          | debit            |
+| MBMV-001  | Motor bike and motor vehicle car wash                             | NULL     | NULL        | opex          | debit            |
+| MBMV-002  | Motor bike and motor vehicles Repair                              | NULL     | NULL        | opex          | debit            |
+| OPE-001   | Operating Expenses                                                | NULL     | NULL        | opex          | debit            |
+| OPE-002   | Operating Expenses:Advertising/Promotional                        | NULL     | NULL        | opex          | debit            |
+| OPE-003   | Operating Expenses:Audit & Accountancy Fees                       | NULL     | NULL        | opex          | debit            |
+| OPE-004   | Operating Expenses:Commissions and fees                           | NULL     | NULL        | opex          | debit            |
+| OPE-005   | Operating Expenses:Consultancy Fees                               | NULL     | NULL        | opex          | debit            |
+| OPE-006   | Operating Expenses:Consumables                                    | NULL     | NULL        | opex          | debit            |
+| OPE-007   | Operating Expenses:Corporate social Responsibility                | NULL     | NULL        | opex          | debit            |
+| OPE-008   | Operating Expenses:Director Expenses                              | NULL     | NULL        | opex          | debit            |
+| OPE-009   | Operating Expenses:Director Expenses:Courier - Director's Errands | NULL     | NULL        | opex          | debit            |
+| OPE-010   | Operating Expenses:Dues and subacriptions                         | NULL     | NULL        | opex          | debit            |
+| OPE-011   | Operating Expenses:Dues and subscriptions                         | NULL     | NULL        | opex          | debit            |
+| OPE-012   | Operating Expenses:Electricity & Water                            | NULL     | NULL        | opex          | debit            |
+| OPE-013   | Operating Expenses:Equipment Rental                               | NULL     | NULL        | opex          | debit            |
+| OPE-014   | Operating Expenses:Garbage Collections                            | NULL     | NULL        | opex          | debit            |
+| OPE-015   | Operating Expenses:Generator fuel, Repair and Maintenance         | NULL     | NULL        | opex          | debit            |
+| OPE-016   | Operating Expenses:Insurance premium                              | NULL     | NULL        | opex          | debit            |
+| OPE-017   | Operating Expenses:Licenses and permits                           | NULL     | NULL        | opex          | debit            |
+| OPE-018   | Operating Expenses:Office Casual/Stipend                          | NULL     | NULL        | opex          | debit            |
+| OPE-019   | Operating Expenses:Office expenses                                | NULL     | NULL        | opex          | debit            |
+| OPE-020   | Operating Expenses:Packaging and Delivery                         | NULL     | NULL        | opex          | debit            |
+| OPE-021   | Operating Expenses:Professional Fees                              | NULL     | NULL        | opex          | debit            |
+| OPE-022   | Operating Expenses:Rent & lease Payments                          | NULL     | NULL        | opex          | debit            |
+| OPE-023   | Operating Expenses:Repairs and Maintenance                        | NULL     | NULL        | opex          | debit            |
+| OPE-024   | Operating Expenses:Samples                                        | NULL     | NULL        | opex          | debit            |
+| OPE-025   | Operating Expenses:Security And Fees                              | NULL     | NULL        | opex          | debit            |
+| OPE-027   | Operating Expenses:Shipping & Delivery Expense                    | NULL     | NULL        | opex          | debit            |
+| OPE-028   | Operating Expenses:Site Visist                                    | NULL     | NULL        | opex          | debit            |
+| OPE-029   | Operating Expenses:Staff Welfare                                  | NULL     | NULL        | opex          | debit            |
+| OPE-030   | Operating Expenses:Stationery & Printing                          | NULL     | NULL        | opex          | debit            |
+| OPE-031   | Operating Expenses:Telephone & Internet                           | NULL     | NULL        | opex          | debit            |
+| OPE-032   | Operating Expenses:Transport & Delivery                           | NULL     | NULL        | opex          | debit            |
+| OGAE-001  | Other general and administrative expenses                         | NULL     | NULL        | opex          | debit            |
+| OSE-001   | Other selling expenses                                            | NULL     | NULL        | opex          | debit            |
+| OTEA-001  | Other Types of Expenses-Advertising Expenses                      | NULL     | NULL        | opex          | debit            |
+| OTE-001   | Overtime expense                                                  | NULL     | NULL        | opex          | debit            |
+| PE-001    | Payroll Expenses                                                  | NULL     | NULL        | opex          | debit            |
+| PE-002    | Personnel Expenses                                                | NULL     | NULL        | opex          | debit            |
+| PE-003    | Personnel Expenses:Housing levy                                   | NULL     | NULL        | opex          | debit            |
+| PE-004    | Personnel Expenses:Nita Levy                                      | NULL     | NULL        | opex          | debit            |
+| PE-005    | Personnel Expenses:NSSF Expense                                   | NULL     | NULL        | opex          | debit            |
+| PE-006    | Personnel Expenses:Salaries                                       | NULL     | NULL        | opex          | debit            |
+| PE-007    | Personnel Expenses:Wages-Direct Labour                            | NULL     | NULL        | direct_cost   | debit            |
+| PS-001    | Printing Supplies                                                 | NULL     | NULL        | opex          | debit            |
+| RI-001    | Return Inwards                                                    | NULL     | NULL        | revenue       | credit           |
+| RE-002    | Rider's Expense                                                   | NULL     | NULL        | opex          | debit            |
+| SUP-001   | Supplies                                                          | NULL     | NULL        | opex          | debit            |
+| TSE-001   | Travel expenses - selling expenses                                | NULL     | NULL        | opex          | debit            |
+| UCBPE-001 | Unapplied Cash Bill Payment Expense                               | NULL     | NULL        | opex          | debit            |
+| UE-001    | Uncategorised Expense                                             | NULL     | NULL        | opex          | debit            |
+| UTIL-001  | Utilities                                                         | NULL     | NULL        | opex          | debit            |
+| VP-001    | Vat Penalty                                                       | NULL     | NULL        | opex          | debit            |
+| WE-001    | Wage expenses                                                     | NULL     | NULL        | opex          | debit            |
+| WNGA-001  | WNG Give aways                                                    | NULL     | NULL        | opex          | debit            |
++-----------+-------------------------------------------------------------------+----------+-------------+---------------+------------------+
++----------------+------+--------+------------+------------------+-------------+
+| Paying account | Type | Active | Linked now | Profile declares | State       |
++----------------+------+--------+------------+------------------+-------------+
+| PC-MAIN        | —    | —      | —          | PETTY-001        | not present |
+| BANK-MAIN      | —    | —      | —          | EQB-001          | not present |
+| BANK-ALT       | —    | —      | —          | NCBA-001         | not present |
+| BANK-STANBIC   | —    | —      | —          | STB-001          | not present |
+| BANK-KCB       | —    | —      | —          | KCB-001          | not present |
+| BANK-FAMILY    | —    | —      | —          | FMB-001          | not present |
+| AP             | —    | —      | —          | AP-001           | not present |
+| MPESA          | —    | —      | —          | leave unlinked   | not present |
+| CARD           | —    | —      | —          | leave unlinked   | not present |
++----------------+------+--------+------------+------------------+-------------+
+Catalogue references resolved: 14 / 15; paying-account ledger accounts resolved: 7 / 9
+exit=0

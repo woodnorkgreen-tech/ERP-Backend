@@ -70,7 +70,10 @@ class MaterialDefaultsService
      */
     private function defaultUomId(MaterialCategory $category): ?int
     {
-        $allowed = $category->allowed_uoms ?: $category->parent?->allowed_uoms;
+        if ($category->code === 'UNCAT') {
+            return $this->resolveUomId('pcs');
+        }
+        $allowed = $category->allowedStockUomCodes();
         if (blank($allowed)) {
             return null;
         }

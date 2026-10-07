@@ -25,6 +25,7 @@ use Tests\TestCase;
 class PettyCashSurrenderTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Support\VerifiedFinancialRequisitionFixture;
 
     private User $user;
     private User $financeUser;
@@ -107,6 +108,7 @@ class PettyCashSurrenderTest extends TestCase
             'enquiry_id' => $enquiryId,
             'payee_name' => 'John Field Worker',
         ]);
+        $this->verifiedRequisitionFixture($requisition);
 
         // 2. Producer commits the requisition (commitment on project)
         $producer = app(PettyCashCostProducer::class);
@@ -248,6 +250,7 @@ class PettyCashSurrenderTest extends TestCase
             'enquiry_id' => $enquiryId,
             'payee_name' => 'John Field Worker',
         ]);
+        $this->verifiedRequisitionFixture($requisition);
 
         app(PettyCashCostProducer::class)->commitFor($requisition);
 
