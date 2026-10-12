@@ -21,6 +21,9 @@ class DriverController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
+        // Pull drivers straight from the HR employee list.
+        Driver::syncFromHr();
+
         $query = Driver::with('employee');
         
         // ✅ ADD THIS - Load active delivery if requested
@@ -55,8 +58,8 @@ class DriverController extends Controller
     {
         $validated = $request->validate([
             'employee_id'    => 'required|exists:employees,id|unique:drivers,employee_id',
-            'license_number' => 'required|string|max:50|unique:drivers,license_number',
-            'license_expiry' => 'required|date|after:today',
+            'license_number' => 'nullable|string|max:50|unique:drivers,license_number',
+            'license_expiry' => 'nullable|date|after:today',
             'status'         => 'sometimes|in:active,inactive,on_leave',
         ]);
 
@@ -82,8 +85,8 @@ class DriverController extends Controller
     public function update(Request $request, Driver $driver): DriverResource
     {
         $validated = $request->validate([
-            'license_number' => 'sometimes|string|max:50|unique:drivers,license_number,' . $driver->id,
-            'license_expiry' => 'sometimes|date|after:today',
+            'license_number' => 'sometimes|nullable|string|max:50|unique:drivers,license_number,' . $driver->id,
+            'license_expiry' => 'sometimes|nullable|date|after:today',
             'status'         => 'sometimes|in:active,inactive,on_leave',
         ]);
 
