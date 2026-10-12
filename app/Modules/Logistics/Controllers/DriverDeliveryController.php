@@ -521,6 +521,9 @@ class DriverDeliveryController extends Controller
 
     private function findDriverForUser($user): ?Driver
     {
+        // Make sure HR drivers are registered before looking one up.
+        Driver::syncFromHr();
+
         if (method_exists($user, 'employee') && $user->employee) {
             $driver = Driver::where('employee_id', $user->employee->id)->first();
             if ($driver) return $driver;

@@ -40,7 +40,10 @@ class DispatchBatchController extends Controller
         $requests = TripRequest::with(['requestedBy', 'project'])
             ->where('status', 'approved')
             ->whereNull('batch_id')
-            ->latest()
+            // Soonest-needed first, so requests for the same day and time
+            // sit together and are easy to group.
+            ->orderBy('required_date')
+            ->orderByRaw('required_delivery_at IS NULL, required_delivery_at')
             ->get();
 
         return response()->json(['data' => $requests]);
@@ -57,6 +60,15 @@ class DispatchBatchController extends Controller
             'trip_request_ids'   => 'required|array|min:1',
             'trip_request_ids.*' => 'exists:trip_requests,id',
         ]);
+
+        // A batch must make sense: one day, deliveries close in time. The
+        // dispatch date is the date the requests are needed by, not whatever
+        // was typed.
+        $problem = $this->batchProblem($validated['trip_request_ids'], $validated['dispatch_date']);
+        if ($problem) {
+            return response()->json(['message' => $problem], 422);
+        }
+        $validated['dispatch_date'] = $this->commonDate($validated['trip_request_ids']) ?? $validated['dispatch_date'];
 
         $batch = null;
 
@@ -90,6 +102,59 @@ class DispatchBatchController extends Controller
         return response()->json(['data' => $batch], 201);
     }
 
+    /** Most the requests in one batch may be apart, in hours. */
+    private const MAX_WINDOW_HOURS = 3;
+
+    private function commonDate(array $tripIds): ?string
+    {
+        $dates = TripRequest::whereIn('id', $tripIds)->pluck('required_date')
+            ->map(fn ($d) => $d ? \Illuminate\Support\Carbon::parse($d)->toDateString() : null)
+            ->filter()->unique()->values();
+
+        return $dates->count() === 1 ? $dates->first() : null;
+    }
+
+    /**
+     * Why these requests cannot travel together, or null if they can.
+     * Same needed-by day, and delivery times within MAX_WINDOW_HOURS.
+     */
+    private function batchProblem(array $tripIds, ?string $dispatchDate = null): ?string
+    {
+        $trips = TripRequest::whereIn('id', $tripIds)->get();
+
+        $byDate = $trips->groupBy(fn ($t) => $t->required_date
+            ? \Illuminate\Support\Carbon::parse($t->required_date)->toDateString()
+            : 'no date');
+
+        if ($byDate->count() > 1) {
+            $parts = $byDate->map(fn ($g, $d) => $d . ': ' . $g->pluck('request_code')->join(', '))->values()->join(' | ');
+            return 'Requests in one dispatch must be needed on the same day. Found ' . $parts . '.';
+        }
+
+        $timed = $trips->filter(fn ($t) => $t->required_delivery_at)
+            ->sortBy('required_delivery_at')->values();
+
+        if ($timed->count() > 1) {
+            $first = $timed->first();
+            $last  = $timed->last();
+            $hours = \Illuminate\Support\Carbon::parse($first->required_delivery_at)
+                ->diffInMinutes(\Illuminate\Support\Carbon::parse($last->required_delivery_at)) / 60;
+
+            if ($hours > self::MAX_WINDOW_HOURS) {
+                return sprintf(
+                    '%s is needed at %s but %s at %s. Keep requests in one dispatch within %d hours of each other.',
+                    $first->request_code,
+                    \Illuminate\Support\Carbon::parse($first->required_delivery_at)->format('H:i'),
+                    $last->request_code,
+                    \Illuminate\Support\Carbon::parse($last->required_delivery_at)->format('H:i'),
+                    self::MAX_WINDOW_HOURS
+                );
+            }
+        }
+
+        return null;
+    }
+
     public function show(DispatchBatch $dispatchBatch): JsonResponse
     {
         $dispatchBatch->load($this->with);
@@ -111,6 +176,16 @@ class DispatchBatchController extends Controller
             'trip_request_ids'   => 'sometimes|array',
             'trip_request_ids.*' => 'exists:trip_requests,id',
         ]);
+
+        if (isset($validated['trip_request_ids'])) {
+            $problem = $this->batchProblem($validated['trip_request_ids'], $validated['dispatch_date'] ?? null);
+            if ($problem) {
+                return response()->json(['message' => $problem], 422);
+            }
+            if ($date = $this->commonDate($validated['trip_request_ids'])) {
+                $validated['dispatch_date'] = $date;
+            }
+        }
 
         DB::transaction(function () use ($validated, $dispatchBatch) {
             $updates = collect($validated)->except('trip_request_ids')->toArray();
