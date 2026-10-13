@@ -31,12 +31,16 @@ class DesignJobController extends Controller
         $validated = $request->validate([
             'due_within_days' => ['sometimes', 'integer', Rule::in(DesignProjectSyncService::ALLOWED_SYNC_WINDOWS)],
             'overdue_only' => ['sometimes', 'boolean'],
+            'schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])],
         ]);
 
         $setupDate = ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id');
-        $applyFilters = function ($q) use ($request, $validated, $setupDate) {
-            if ($request->boolean('overdue_only')) {
+        $scope = $request->boolean('overdue_only') ? 'overdue' : ($validated['schedule_scope'] ?? 'upcoming');
+        $applyFilters = function ($q) use ($request, $validated, $setupDate, $scope) {
+            if ($scope === 'overdue') {
                 DesignSchedule::overdueJobs($q);
+            } else {
+                ProjectSetupSchedule::filterDateScope($q, $setupDate, $scope);
             }
             if ($request->filled('project_enquiry_id')) {
                 $q->where('project_enquiry_id', $request->project_enquiry_id);
@@ -52,7 +56,7 @@ class DesignJobController extends Controller
             }
 
             if (!empty($validated['due_within_days'])) {
-                $cutoff = now()->startOfDay()->addDays((int) $validated['due_within_days']);
+                $cutoff = now('Africa/Nairobi')->startOfDay()->addDays((int) $validated['due_within_days']);
                 $q->where(function ($inner) use ($cutoff, $setupDate) {
                     $inner->where($setupDate, '<=', $cutoff->toDateString())
                         ->orWhereRaw('('.$setupDate->toSql().') IS NULL', $setupDate->getBindings());

@@ -38,9 +38,12 @@ class PrintJobController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $myActiveCount = PrintJob::query()
+        $request->validate(['schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])]]);
+        $scope = $request->input('schedule_scope', 'upcoming');
+        $myActiveCount = ProjectSetupSchedule::filterDateScope(PrintJob::query()
             ->where('operator_id', auth()->id())
-            ->whereNotIn('status', ['completed', 'cancelled', 'reprint_required'])
+            ->whereNotIn('status', ['completed', 'cancelled', 'reprint_required']),
+            ProjectSetupSchedule::dateQuery('print_jobs.project_enquiry_id', 'print_jobs.project_id'), $scope)
             ->count();
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
@@ -53,6 +56,9 @@ class PrintJobController extends Controller
                 'stopRequestedBy:id,name', 'stopAcknowledgedBy:id,name',
             ])
             ->when($myWorkApplied, fn ($q) => $q->where('operator_id', auth()->id()))
+            ->tap(fn ($q) => ProjectSetupSchedule::filterDateScope($q,
+                ProjectSetupSchedule::dateQuery('print_jobs.project_enquiry_id', 'print_jobs.project_id'), $scope))
+            ->when($scope === 'overdue', fn ($q) => $q->whereNotIn('status', ['completed', 'cancelled']))
             ->when($request->input('source') === 'historical', fn ($q) => $q->where('origin', 'historical_import'))
             ->when($request->input('source') === 'live', fn ($q) => $q->where('origin', '!=', 'historical_import'))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
@@ -106,13 +112,19 @@ class PrintJobController extends Controller
 
     public function bundles(Request $request): JsonResponse
     {
-        $myActiveCount = PrintJob::query()
+        $request->validate(['schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])]]);
+        $scope = $request->input('schedule_scope', 'upcoming');
+        $myActiveCount = ProjectSetupSchedule::filterDateScope(PrintJob::query()
             ->where('operator_id', auth()->id())
-            ->whereNotIn('status', ['completed', 'cancelled', 'reprint_required'])
+            ->whereNotIn('status', ['completed', 'cancelled', 'reprint_required']),
+            ProjectSetupSchedule::dateQuery('print_jobs.project_enquiry_id', 'print_jobs.project_id'), $scope)
             ->count();
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
         $query = PrintJob::query()
+            ->tap(fn ($q) => ProjectSetupSchedule::filterDateScope($q,
+                ProjectSetupSchedule::dateQuery('print_jobs.project_enquiry_id', 'print_jobs.project_id'), $scope))
+            ->when($scope === 'overdue', fn ($q) => $q->whereNotIn('status', ['completed', 'cancelled']))
             ->when($myWorkApplied, fn ($q) => $q->where('operator_id', auth()->id()))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('tab'), fn ($q) => $this->applyTab($q, (string) $request->get('tab')))
