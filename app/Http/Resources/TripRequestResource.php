@@ -13,6 +13,7 @@ class TripRequestResource extends JsonResource
             'request_code'           => $this->request_code,
             'context_type'           => $this->context_type,
             'transport_arrangement'  => $this->transport_arrangement,
+            'trip_kind'              => $this->trip_kind ?? 'delivery',
             'project_id'             => $this->project_id,
 
             'project' => $this->whenLoaded('project', function () {
@@ -49,6 +50,9 @@ class TripRequestResource extends JsonResource
             'destination'     => $this->destination,
             'destination_lat' => $this->destination_lat,
             'destination_lng' => $this->destination_lng,
+            'start_location'  => $this->start_location,
+            'start_lat'       => $this->start_lat,
+            'start_lng'       => $this->start_lng,
             'required_date'   => $this->required_date?->toDateString(),
             // Merged in from the Logistics Log's planning timeline.
             'loading_time'    => $this->loading_time,
@@ -151,7 +155,7 @@ class TripRequestResource extends JsonResource
         $diff     = $planned !== null ? $actual - $planned : null;
 
         $lateBy = null;
-        if ($this->departure_by) {
+        if ($this->departure_by && ($this->trip_kind ?? 'delivery') !== 'collection') {
             $lateBy = (int) round(($this->loading_ended_at->timestamp - $this->departure_by->timestamp) / 60);
         }
 

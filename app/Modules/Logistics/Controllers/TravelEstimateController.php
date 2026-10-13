@@ -20,13 +20,31 @@ class TravelEstimateController extends Controller
     public function estimate(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'pickup_lat'      => 'required|numeric|between:-90,90',
-            'pickup_lng'      => 'required|numeric|between:-180,180',
-            'destination_lat' => 'required|numeric|between:-90,90',
-            'destination_lng' => 'required|numeric|between:-180,180',
+            'pickup_lat'          => 'required_without:pickup_address|nullable|numeric|between:-90,90',
+            'pickup_lng'          => 'required_without:pickup_address|nullable|numeric|between:-180,180',
+            'destination_lat'     => 'required_without:destination_address|nullable|numeric|between:-90,90',
+            'destination_lng'     => 'required_without:destination_address|nullable|numeric|between:-180,180',
+            // Plain addresses are accepted when a place has no map pin yet
+            // (e.g. a project venue saved as text) — Google resolves them.
+            'pickup_address'      => 'nullable|string|max:300',
+            'destination_address' => 'nullable|string|max:300',
+            // When the drive will actually happen, so traffic is for that time.
+            'depart_at'           => 'nullable|date',
         ]);
 
-        $key = env('GOOGLE_MAPS_SERVER_KEY');
+        $origin = isset($validated['pickup_lat'], $validated['pickup_lng'])
+            ? "{$validated['pickup_lat']},{$validated['pickup_lng']}"
+            : $validated['pickup_address'];
+        $destination = isset($validated['destination_lat'], $validated['destination_lng'])
+            ? "{$validated['destination_lat']},{$validated['destination_lng']}"
+            : $validated['destination_address'];
+
+        $departAt = isset($validated['depart_at']) ? strtotime($validated['depart_at']) : null;
+        $departure = ($departAt && $departAt > time()) ? $departAt : 'now';
+
+        // Read through config so it still works when config is cached
+        // (env() returns null outside config files once cached).
+        $key = config('logistics.google_maps_server_key') ?: config('logistics.google_maps_key');
         if (!$key) {
             return response()->json([
                 'message' => 'GOOGLE_MAPS_SERVER_KEY is not set in .env — travel time cannot be estimated automatically.',
@@ -34,12 +52,12 @@ class TravelEstimateController extends Controller
         }
 
         $response = Http::get('https://maps.googleapis.com/maps/api/distancematrix/json', [
-            'origins'      => "{$validated['pickup_lat']},{$validated['pickup_lng']}",
-            'destinations' => "{$validated['destination_lat']},{$validated['destination_lng']}",
+            'origins'      => $origin,
+            'destinations' => $destination,
             'key'          => $key,
             // Reflects real traffic rather than free-flow speed, since the
             // whole point is a realistic departure/loading timeline.
-            'departure_time' => 'now',
+            'departure_time' => $departure,
         ]);
 
         $body = $response->json();
