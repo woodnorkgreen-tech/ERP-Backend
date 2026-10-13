@@ -55,25 +55,34 @@ class DesignItemController extends Controller
     {
         $request->validate([
             'overdue_only' => ['sometimes', 'boolean'],
+            'schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])],
             'search' => ['nullable', 'string', 'max:255'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'mine' => ['sometimes', 'boolean'],
         ]);
+        $scope = $request->boolean('overdue_only') ? 'overdue' : $request->input('schedule_scope', 'upcoming');
         $query = DesignItem::where('stream', $stream);
-        $myActiveCount = DesignItem::query()
+        $myActiveQuery = DesignItem::query()
             ->where('stream', $stream)
             ->where('assigned_to', auth()->id())
-            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off'])
-            ->count();
+            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off']);
+        if ($scope === 'overdue') {
+            DesignSchedule::overdueItems($myActiveQuery);
+        } else {
+            ProjectSetupSchedule::filterDateScope($myActiveQuery, DesignSchedule::itemDateQuery(), $scope);
+        }
+        $myActiveCount = $myActiveQuery->count();
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
         if ($myWorkApplied) {
             $query->where('assigned_to', auth()->id());
         }
 
-        if ($request->boolean('overdue_only')) {
+        if ($scope === 'overdue') {
             DesignSchedule::overdueItems($query);
+        } else {
+            ProjectSetupSchedule::filterDateScope($query, DesignSchedule::itemDateQuery(), $scope);
         }
 
         if ($request->filled('design_job_id')) {
@@ -124,26 +133,35 @@ class DesignItemController extends Controller
     {
         $request->validate([
             'overdue_only' => ['sometimes', 'boolean'],
+            'schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])],
             'search' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', 'string', 'max:50'],
             'mine' => ['sometimes', 'boolean'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
+        $scope = $request->boolean('overdue_only') ? 'overdue' : $request->input('schedule_scope', 'upcoming');
 
-        $myActiveCount = DesignItem::query()
+        $myActiveQuery = DesignItem::query()
             ->where('stream', $stream)
             ->where('assigned_to', auth()->id())
-            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off'])
-            ->count();
+            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off']);
+        if ($scope === 'overdue') {
+            DesignSchedule::overdueItems($myActiveQuery);
+        } else {
+            ProjectSetupSchedule::filterDateScope($myActiveQuery, DesignSchedule::itemDateQuery(), $scope);
+        }
+        $myActiveCount = $myActiveQuery->count();
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
         $candidateQuery = DesignItem::query()->where('stream', $stream);
         if ($myWorkApplied) {
             $candidateQuery->where('assigned_to', auth()->id());
         }
-        if ($request->boolean('overdue_only')) {
+        if ($scope === 'overdue') {
             DesignSchedule::overdueItems($candidateQuery);
+        } else {
+            ProjectSetupSchedule::filterDateScope($candidateQuery, DesignSchedule::itemDateQuery(), $scope);
         }
         if ($request->filled('design_job_id')) {
             $candidateQuery->where('design_job_id', $request->integer('design_job_id'));

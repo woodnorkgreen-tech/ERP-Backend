@@ -3,11 +3,29 @@
 namespace App\Support;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
 class ProjectSetupSchedule
 {
+    public static function filterDateScope(EloquentBuilder $query, Builder|EloquentBuilder $dateQuery, string $scope): EloquentBuilder
+    {
+        $today = now('Africa/Nairobi')->toDateString();
+
+        if ($scope === 'overdue') {
+            return $query->where($dateQuery, '<', $today);
+        }
+
+        if ($scope === 'upcoming') {
+            return $query->where(fn (EloquentBuilder $match) => $match
+                ->where($dateQuery, '>=', $today)
+                ->orWhereRaw('('.$dateQuery->toSql().') IS NULL', $dateQuery->getBindings()));
+        }
+
+        return $query;
+    }
+
     /** Read the parent date live, including jobs linked through projects only. */
     public static function dateQuery(string $enquiryColumn, string $projectColumn): Builder
     {

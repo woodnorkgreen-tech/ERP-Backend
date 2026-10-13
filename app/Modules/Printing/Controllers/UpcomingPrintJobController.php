@@ -5,6 +5,7 @@ namespace App\Modules\Printing\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Design\Models\DesignItem;
 use App\Modules\Design\Models\DesignJob;
+use App\Modules\Design\Support\DesignSchedule;
 use App\Modules\Printing\Resources\UpcomingPrintJobResource;
 use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\JsonResponse;
@@ -27,8 +28,10 @@ class UpcomingPrintJobController extends Controller
             'status' => ['nullable', Rule::in(self::STATUSES)],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])],
         ]);
 
+        $scope = $filters['schedule_scope'] ?? 'upcoming';
         $items = DesignItem::query()
             ->select('design_items.*')
             ->selectSub(DesignJob::query()
@@ -37,6 +40,7 @@ class UpcomingPrintJobController extends Controller
             ->where('stream', DesignItem::STREAM_GRAPHIC)
             ->whereIn('status', self::STATUSES)
             ->whereHas('job', fn ($query) => $query->where('status', '!=', 'cancelled'))
+            ->tap(fn ($query) => ProjectSetupSchedule::filterDateScope($query, DesignSchedule::itemDateQuery(), $scope))
             ->with(['job.enquiry.client', 'job.client', 'assignedUser', 'printMaterial'])
             ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
             ->when(trim($filters['search'] ?? ''), function ($query, $search) {
