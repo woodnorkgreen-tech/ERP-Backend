@@ -116,7 +116,8 @@ class DispatchBatchController extends Controller
 
     /**
      * Why these requests cannot travel together, or null if they can.
-     * Same needed-by day, and delivery times within MAX_WINDOW_HOURS.
+     * Same needed-by day, and delivery times within MAX_WINDOW_HOURS
+     * (the time check is skipped when a set-down / pick-up is in the batch).
      */
     private function batchProblem(array $tripIds, ?string $dispatchDate = null): ?string
     {
@@ -129,6 +130,13 @@ class DispatchBatchController extends Controller
         if ($byDate->count() > 1) {
             $parts = $byDate->map(fn ($g, $d) => $d . ': ' . $g->pluck('request_code')->join(', '))->values()->join(' | ');
             return 'Requests in one dispatch must be needed on the same day. Found ' . $parts . '.';
+        }
+
+        // A set-down / pick-up in the batch means the vehicle does the jobs one
+        // after the other (e.g. a set-up, then a set-down on the way back), so
+        // the times are meant to be hours apart — no time-gap check.
+        if ($trips->contains(fn ($t) => $t->trip_kind === 'collection')) {
+            return null;
         }
 
         $timed = $trips->filter(fn ($t) => $t->required_delivery_at)
