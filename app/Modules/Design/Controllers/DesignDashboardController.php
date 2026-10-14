@@ -62,6 +62,18 @@ class DesignDashboardController extends Controller
 
         $activeStatuses = ['pending', 'in_design', 'awaiting_client_approval', 'client_changes_requested'];
 
+        $outsourced = (clone $itemScope)->whereNotNull('outsourced_partner_name');
+        $outsourcedByReason = (clone $outsourced)
+            ->selectRaw('outsourced_reason, count(*) as total')
+            ->groupBy('outsourced_reason')
+            ->pluck('total', 'outsourced_reason');
+        $outsourcedByPartner = (clone $outsourced)
+            ->selectRaw('outsourced_partner_name, count(*) as total')
+            ->groupBy('outsourced_partner_name')
+            ->orderByDesc('total')
+            ->limit(12)
+            ->pluck('total', 'outsourced_partner_name');
+
         return response()->json([
             'data' => [
                 'active_jobs' => DesignJob::whereNotIn('status', ['cancelled', 'done'])->count(),
@@ -78,6 +90,9 @@ class DesignDashboardController extends Controller
                 'status_counts' => $statusCounts,
                 'stream_counts' => $streamCounts,
                 'handoff_counts' => $handoffCounts,
+                'outsourced_items' => (clone $outsourced)->count(),
+                'outsourced_by_reason' => $outsourcedByReason,
+                'outsourced_by_partner' => $outsourcedByPartner,
                 'designer_metrics' => $designerMetrics,
             ],
         ]);

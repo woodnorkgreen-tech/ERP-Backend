@@ -32,6 +32,7 @@ class StoreDesignItemRequest extends FormRequest
             'print_notes' => 'nullable|string',
             'concept_notes' => 'nullable|string',
             'technical_notes' => 'nullable|string',
+            ...\App\Support\Outsourcing\OutsourcingAssignment::rules(),
         ];
     }
 }
