@@ -98,12 +98,6 @@ class PrintIntakeService
                     'bleed_per_side_m' => $payload['bleed_per_side_m'] ?? null,
                 ]);
 
-                // Carry the design's outside partner only when it is still set. A design that
-                // has returned to internal work must not clear a print-side outsourcing decision.
-                if (! empty($payload['outsourced_partner_name'])) {
-                    $existing->update($this->outsourcingFromPayload($payload));
-                }
-
                 $this->handoffs->accept($handoff, $existing->id);
 
                 return $existing->fresh(['consumptions.roll', 'operator', 'machine']);
@@ -132,7 +126,6 @@ class PrintIntakeService
                 'artwork_quantity' => $payload['quantity'] ?? null,
                 'application_surface' => $payload['application_surface'] ?? null,
                 'bleed_per_side_m' => $payload['bleed_per_side_m'] ?? null,
-                ...$this->outsourcingFromPayload($payload),
                 'order_type' => $isRedesignReprint ? 'reprint' : 'original',
                 'reprint_of_job_id' => $reprintOfJobId,
                 'reprint_reason' => $payload['redesign_reason'] ?? null,
@@ -152,24 +145,6 @@ class PrintIntakeService
 
             return $job->fresh(['consumptions.roll', 'operator', 'machine']);
         });
-    }
-
-    /**
-     * Outsourcing fields carried from a design handoff. Empty when the design item is not outsourced.
-     *
-     * @return array<string, mixed>
-     */
-    private function outsourcingFromPayload(array $payload): array
-    {
-        $partner = $payload['outsourced_partner_name'] ?? null;
-
-        return [
-            'outsourced_partner_name' => $partner,
-            'outsourced_reason' => $payload['outsourced_reason'] ?? null,
-            'outsourced_reason_note' => $payload['outsourced_reason_note'] ?? null,
-            'outsourced_by' => $partner !== null ? auth()->id() : null,
-            'outsourced_at' => $partner !== null ? now() : null,
-        ];
     }
 
     public function reject(DesignHandoff $handoff, string $reason): DesignHandoff

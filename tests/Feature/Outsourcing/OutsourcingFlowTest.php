@@ -97,7 +97,7 @@ class OutsourcingFlowTest extends TestCase
         $this->assertSame('Outsourced to Studio North (Workload / capacity)', $note);
     }
 
-    public function test_outsourced_design_item_carries_the_partner_into_the_print_job(): void
+    public function test_outsourced_design_item_does_not_outsource_the_print_job(): void
     {
         $this->printingStaff();
         Sanctum::actingAs(User::factory()->create(['is_active' => true]));
@@ -129,9 +129,37 @@ class OutsourcingFlowTest extends TestCase
         $handoff = app(DesignHandoffService::class)->createPrintingHandoffOnce($item);
         $printJob = app(PrintIntakeService::class)->accept($handoff);
 
-        $this->assertSame('Studio North', $printJob->outsourced_partner_name);
-        $this->assertSame('specialist_skill', $printJob->outsourced_reason);
-        $this->assertTrue($printJob->isOutsourced());
+        // A designer who is outsourced does not print. Print outsourcing is set separately.
+        $this->assertNull($printJob->outsourced_partner_name);
+        $this->assertSame('original', $printJob->order_type);
+        $this->assertFalse($printJob->isOutsourced());
+    }
+
+    public function test_print_outsourcing_sets_the_outsourced_order_type_and_clearing_restores_it(): void
+    {
+        $this->printingStaff();
+        $job = PrintJob::create(['title' => 'Banner run', 'status' => 'queued', 'order_type' => 'original']);
+
+        $this->putJson("/api/printing/jobs/{$job->id}", [
+            'outsourced' => true,
+            'outsourced_partner_name' => 'Acme Print Works',
+            'outsourced_reason' => 'equipment_down',
+        ])->assertOk()->assertJsonPath('data.order_type', 'outsourced');
+
+        $this->putJson("/api/printing/jobs/{$job->id}", ['outsourced' => false])
+            ->assertOk()->assertJsonPath('data.order_type', 'original');
+    }
+
+    public function test_outsourcing_a_reprint_keeps_the_reprint_order_type(): void
+    {
+        $this->printingStaff();
+        $job = PrintJob::create(['title' => 'Reprint', 'status' => 'queued', 'order_type' => 'reprint']);
+
+        $this->putJson("/api/printing/jobs/{$job->id}", [
+            'outsourced' => true,
+            'outsourced_partner_name' => 'Acme Print Works',
+            'outsourced_reason' => 'workload_capacity',
+        ])->assertOk()->assertJsonPath('data.order_type', 'reprint');
     }
 
     public function test_dashboard_counts_outsourced_print_jobs_by_reason_and_partner(): void

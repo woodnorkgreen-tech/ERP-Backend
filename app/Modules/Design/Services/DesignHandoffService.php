@@ -187,9 +187,6 @@ class DesignHandoffService
             'print_material_name' => $item->printMaterial?->material_name
                 ?? $item->printMaterial?->name,
             'print_notes' => $item->print_notes,
-            'outsourced_partner_name' => $item->outsourced_partner_name,
-            'outsourced_reason' => $item->outsourced_reason,
-            'outsourced_reason_note' => $item->outsourced_reason_note,
             'final_artwork' => [
                 'id' => $artwork->id,
                 'name' => $artwork->name,

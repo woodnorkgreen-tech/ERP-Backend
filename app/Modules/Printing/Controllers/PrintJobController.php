@@ -300,6 +300,16 @@ class PrintJobController extends Controller
         // Outsourcing is open to any Printing staff member (printing.jobs.update, checked by the route).
         $data = OutsourcingAssignment::apply($data, 'operator_id', $request->user()?->id);
 
+        // An outsourced print job uses the existing 'outsourced' order type. Only change it when the
+        // outsourcing fields are part of this update, so legacy rows and reprints are left alone.
+        if (array_key_exists('outsourced_partner_name', $data)) {
+            if ($data['outsourced_partner_name'] !== null && $job->order_type === 'original') {
+                $data['order_type'] = 'outsourced';
+            } elseif ($data['outsourced_partner_name'] === null && $job->order_type === 'outsourced') {
+                $data['order_type'] = 'original';
+            }
+        }
+
         $updated = $this->jobs->update($job, $data);
         if ($job->wasChanged(['outsourced_partner_name', 'outsourced_reason'])) {
             $job->events()->create([
