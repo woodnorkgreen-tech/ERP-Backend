@@ -11,14 +11,17 @@ use App\Modules\Printing\Models\PrintJob;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\GrantsMatrixPermissions;
 use Tests\TestCase;
 
 class UpcomingPrintJobsTest extends TestCase
 {
+    use GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private function loginPrinter(): User
     {
+        $this->grantMatrixPermissions('Printing');
         $user = User::factory()->create(['is_active' => true]);
         $user->assignRole(Role::findOrCreate('Printing', 'web'));
         Sanctum::actingAs($user);
@@ -127,10 +130,10 @@ class UpcomingPrintJobsTest extends TestCase
         $this->getJson('/api/printing/upcoming-jobs')->assertForbidden();
     }
 
-    public function test_printing_department_members_can_view_without_a_design_role(): void
+    public function test_printing_department_membership_alone_does_not_open_upcoming_jobs(): void
     {
         $department = Department::firstOrCreate(['name' => 'Printing']);
         Sanctum::actingAs(User::factory()->create(['is_active' => true, 'department_id' => $department->id]));
-        $this->getJson('/api/printing/upcoming-jobs')->assertOk();
+        $this->getJson('/api/printing/upcoming-jobs')->assertForbidden();
     }
 }

@@ -18,11 +18,6 @@ class UpcomingPrintJobController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $user = $request->user();
-        $hasRole = $user->hasRole(['Super Admin', 'Admin', 'Printing']);
-        $department = $hasRole ? null : ($user->department?->name ?? $user->employee?->department?->name);
-        abort_unless($hasRole || $department === 'Printing', 403);
-
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', Rule::in(self::STATUSES)],
