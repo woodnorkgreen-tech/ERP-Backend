@@ -19,6 +19,7 @@ class DeliveryController extends Controller
         'batch',
         'stops.tripRequest.requestedBy',
         'stops.tripRequest.project',
+        'stops.tripRequest.project.client',
     ];
 
     public function index(Request $request): JsonResponse
