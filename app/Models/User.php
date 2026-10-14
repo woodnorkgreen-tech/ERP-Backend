@@ -227,6 +227,7 @@ class User extends Authenticatable
             'can_view_reports' => $this->can('admin.access'),
             'is_manager' => $this->isManager(),
             'is_dept_lead' => $this->isDeptLead(),
+            'is_printing_lead' => \App\Modules\Printing\Support\PrintingAccess::isLead($this),
             'accessible_departments' => $this->getAccessibleDepartments()->pluck('id')->toArray(),
             'user_department' => $this->department ? [
                 'id' => $this->department->id,

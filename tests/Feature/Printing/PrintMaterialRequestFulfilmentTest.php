@@ -13,10 +13,12 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\GrantsMatrixPermissions;
 use Tests\TestCase;
 
 class PrintMaterialRequestFulfilmentTest extends TestCase
 {
+    use GrantsMatrixPermissions;
     use RefreshDatabase;
 
     private LibraryMaterial $material;
@@ -26,6 +28,7 @@ class PrintMaterialRequestFulfilmentTest extends TestCase
     {
         parent::setUp();
         foreach (['Stores', 'Printing'] as $role) Role::findOrCreate($role);
+        $this->grantMatrixPermissions('Printing');
         $metre = UnitOfMeasure::firstOrCreate(
             ['code' => 'm'],
             ['name' => 'Metre', 'dimension' => 'length', 'decimal_places' => 3, 'allows_fraction' => true, 'is_active' => true],
