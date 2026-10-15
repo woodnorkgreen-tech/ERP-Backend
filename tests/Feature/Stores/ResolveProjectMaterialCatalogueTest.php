@@ -161,38 +161,42 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
         $this->assertSame(50.0, (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand'));
     }
 
-    public function test_matches_an_existing_material_and_tops_up_stock_in_one_call(): void
+    /**
+     * Report 78B: a stock receipt no longer rides on a resolution. Stock on hand
+     * without a purchase comes in through Receive Stock, where the stores.review
+     * adjustment controls live. Nothing is linked and nothing moves.
+     */
+    public function test_a_stock_receipt_cannot_ride_on_a_resolution(): void
     {
         $line = $this->unlinkedLine();
         $material = $this->existingMaterial(2);
+        $logs = DB::table('inventory_logs')->count();
+        $journals = DB::table('journal_entries')->count();
 
         $this->resolve($line->id, [
             'material_id' => $material->id,
             'receive' => ['receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf', 'quantity' => 20, 'receipt_unit_cost' => 850],
-            'reason' => 'Only 2 on hand — topped up to cover the requirement.',
-        ])->assertOk();
+        ])->assertStatus(422)->assertJsonValidationErrors('receive');
 
-        $this->assertSame($material->id, $line->fresh()->library_material_id);
-        $this->assertSame(22.0, (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand'));
+        $this->assertNull($line->fresh()->library_material_id);
+        $this->assertSame(2.0, (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand'));
+        $this->assertSame($logs, DB::table('inventory_logs')->count());
+        $this->assertSame($journals, DB::table('journal_entries')->count());
     }
 
-    public function test_registers_a_new_material_receives_stock_and_links_it_atomically(): void
+    public function test_a_new_material_request_cannot_receive_stock(): void
     {
         $line = $this->unlinkedLine();
+        $before = LibraryMaterial::count();
 
         $this->resolve($line->id, [
             'new_material' => ['material_name' => 'Contact Adhesive 1L', 'material_category_id' => $this->categoryId],
+            'request_reason' => 'Not in the catalogue at all.',
             'receive' => ['receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf', 'quantity' => 15, 'receipt_unit_cost' => 900],
-            'reason' => 'Not in the catalogue at all — registered and received on the spot.',
-        ])->assertOk();
+        ])->assertStatus(422)->assertJsonValidationErrors('receive');
 
-        $line->refresh();
-        $this->assertNotNull($line->library_material_id);
-
-        $material = LibraryMaterial::find($line->library_material_id);
-        $this->assertSame('Contact Adhesive 1L', $material->material_name);
-        $this->assertSame('Active', $material->item_status);
-        $this->assertSame(15.0, (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand'));
+        $this->assertSame($before, LibraryMaterial::count());
+        $this->assertNull($line->fresh()->library_material_id);
     }
 
     /**
@@ -224,11 +228,13 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
                 'uom_conversions' => [['from_uom_id' => $boxId, 'factor' => 4]],
                 'default_unit_cost' => 750,
             ],
-            'receive' => ['receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf', 'quantity' => 8, 'receipt_unit_cost' => 900],
-            'reason' => 'Registered with an explicit disposition and buying unit.',
+            'request_reason' => 'Registered with an explicit disposition and buying unit.',
         ])->assertOk();
 
-        $material = LibraryMaterial::find($line->fresh()->library_material_id);
+        // Report 78B: a request, not a link — the custodian activates it.
+        $this->assertNull($line->fresh()->library_material_id);
+        $material = LibraryMaterial::find($line->fresh()->requested_material_id);
+        $this->assertSame('Under Review', $material->item_status);
         $this->assertSame('ADH-TEST-01', $material->material_code);
         $this->assertSame('returnable', $material->issue_disposition);
         $this->assertSame($litreId, $material->base_uom_id);
@@ -241,18 +247,21 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
         $this->assertSame(4.0, (float) $conversion->factor);
     }
 
-    public function test_a_new_material_without_a_receipt_is_allowed(): void
+    public function test_a_new_material_is_requested_not_linked(): void
     {
         $line = $this->unlinkedLine();
 
         $res = $this->resolve($line->id, [
             'new_material' => ['material_name' => 'Contact Adhesive 1L', 'material_category_id' => $this->categoryId],
-            'reason' => 'Registering material for purchasing without immediate receipt.',
+            'request_reason' => 'Registering material for purchasing.',
         ]);
 
-        $res->assertOk();
-        $this->assertNotNull($line->fresh()->library_material_id);
-        $this->assertNull($res->json('data.movement'));
+        $res->assertOk()->assertJsonPath('data.outcome', 'awaiting_registration');
+        $line->refresh();
+        $this->assertNull($line->library_material_id);
+        $this->assertSame('awaiting_registration', $line->effectiveDisposition());
+        $this->assertSame('Under Review', LibraryMaterial::find($line->requested_material_id)->item_status);
+        $this->assertSame(0, DB::table('inventory_logs')->count());
     }
 
     public function test_naming_both_an_existing_and_a_new_material_is_refused(): void
@@ -312,39 +321,26 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
         $this->assertNull($line->fresh()->library_material_id);
     }
 
-    public function test_resolves_and_receives_consumable_unit_with_controlled_units(): void
+    /** Report 78B: a requested item must be able to carry the requirement's unit (litres here). */
+    public function test_a_requested_material_must_carry_the_requirement_unit(): void
     {
         $line = $this->unlinkedLine();
-        $uomId = DB::table('units_of_measure')->where('code', 'm')->value('id')
-            ?? DB::table('units_of_measure')->insertGetId(['code' => 'm', 'name' => 'Metres', 'dimension' => 'length', 'is_active' => true]);
+        $metreId = DB::table('units_of_measure')->where('code', 'm')->value('id');
+        $before = LibraryMaterial::count();
 
-        $res = $this->resolve($line->id, [
+        $this->resolve($line->id, [
             'new_material' => [
                 'material_name' => 'Vinyl Sticker Roll 50m',
                 'material_category_id' => $this->categoryId,
                 'tracking_mode' => 'consumable_unit',
                 'issue_disposition' => 'consumed',
-                'base_uom_id' => $uomId,
+                'base_uom_id' => $metreId,
             ],
-            'receive' => ['receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
-                'quantity' => 100,
-                'receipt_unit_cost' => 250,
-                'controlled_units' => [
-                    ['quantity' => 50],
-                    ['quantity' => 50],
-                ],
-            ],
-            'reason' => 'Sticker roll registered and received as 2 physical rolls.',
-        ]);
+            'request_reason' => 'Sticker roll for the booth.',
+        ])->assertStatus(422)->assertJsonValidationErrors('new_material.base_uom_id');
 
-        $res->assertOk();
-        $this->assertCount(2, $res->json('data.controlled_units'));
-        $line->refresh();
-        $this->assertNotNull($line->library_material_id);
-        $material = LibraryMaterial::find($line->library_material_id);
-        $this->assertSame('CONSUMABLE_UNIT', $material->tracking_method);
-        $this->assertSame(100.0, (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand'));
-        $this->assertDatabaseCount('consumable_units', 2);
+        $this->assertSame($before, LibraryMaterial::count(), 'the Under Review item is rolled back with the refusal');
+        $this->assertNull($line->fresh()->requested_material_id);
     }
 
     public function test_resolves_existing_material_without_stock_receipt(): void
@@ -368,8 +364,8 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
     public function test_resolves_new_material_without_stock_receipt(): void
     {
         $line = $this->unlinkedLine();
-        $uomId = DB::table('units_of_measure')->where('code', 'pcs')->value('id')
-            ?? DB::table('units_of_measure')->insertGetId(['code' => 'pcs', 'name' => 'Pieces', 'dimension' => 'count', 'is_active' => true]);
+        // The requirement is in litres, so the requested item is stocked in litres.
+        $uomId = DB::table('units_of_measure')->where('code', 'l')->value('id');
 
         $res = $this->resolve($line->id, [
             'new_material' => [
@@ -379,13 +375,14 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
                 'issue_disposition' => 'consumed',
                 'base_uom_id' => $uomId,
             ],
-            'reason' => 'Registered new catalogue item for procurement without immediate receipt.',
+            'request_reason' => 'Registered new catalogue item for procurement without immediate receipt.',
         ]);
 
         $res->assertOk();
         $line->refresh();
-        $this->assertNotNull($line->library_material_id);
-        $material = LibraryMaterial::find($line->library_material_id);
+        $this->assertNull($line->library_material_id);
+        $material = LibraryMaterial::find($line->requested_material_id);
+        $this->assertSame('Under Review', $material->item_status);
         $this->assertSame('Special Bracket No Stock Yet', $material->material_name);
         $this->assertNull($res->json('data.movement'));
         $this->assertSame(0.0, (float) (DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand') ?? 0));

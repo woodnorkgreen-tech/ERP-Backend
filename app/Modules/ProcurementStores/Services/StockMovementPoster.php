@@ -447,7 +447,8 @@ class StockMovementPoster
      *
      *  - the planned line is locked, so two people issuing the same requirement
      *    at once cannot each read the same remaining quantity;
-     *  - the quantity is compared in the STOCK unit. The single path compared
+     *  - the quantity is compared in the STOCK unit — both sides since Report
+     *    78B, which reads the requirement through RequirementUnits. The single path compared
      *    the entered quantity against a base-unit requirement, so issuing in
      *    boxes against a requirement counted in metres passed a check it should
      *    have failed;
@@ -478,10 +479,17 @@ class StockMovementPoster
 
         $this->assertMaterialsApproved($materialsData);
 
+        // Report 78B (F-03): the requirement in the material's STOCK unit. The
+        // issue quantity is already in stock units; the BOM quantity is in the
+        // BOM's unit (sqm, Packets…). Comparing the two raw numbers let 12 sheets
+        // out against 12 sqm. A requirement whose unit cannot be read in stock
+        // units is refused here rather than guessed at.
+        $requiredBase = app(RequirementUnits::class)->requiredInBaseOrFail($planned, $material, 'quantity');
+
         if ($material->isConsumableUnit()) {
             $issued = (string) InventoryLog::where('project_material_id', $planned->id)->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'));
             $returns = (string) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
-            $remaining = bcsub((string) $planned->getRawOriginal('quantity'), bcsub($issued, $returns, 6), 6);
+            $remaining = bcsub($requiredBase, bcsub($issued, $returns, 6), 6);
             if (bccomp((string) $quantityInBase, $remaining, 6) > 0) $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement.");
             return;
         }
@@ -491,9 +499,9 @@ class StockMovementPoster
             - (float) InventoryLog::where('project_material_id', $planned->id)
                 ->fulfilmentReopeningReturns()->sum('quantity');
 
-        $netIssued += $this->legacyIssuedAgainst($planned, $project, $materialsData);
+        $netIssued += $this->legacyIssuedAgainst($planned, $project, $materialsData, (float) $requiredBase);
 
-        $remaining = max(0, (float) $planned->quantity - $netIssued);
+        $remaining = max(0, (float) $requiredBase - $netIssued);
         if ($quantityInBase > $remaining + 0.00001) {
             $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement.");
         }
@@ -510,7 +518,7 @@ class StockMovementPoster
      * lines absorb it first, and this line takes what is left, capped at its own
      * approved quantity.
      */
-    private function legacyIssuedAgainst(ElementMaterial $planned, Project $project, mixed $materialsData): float
+    private function legacyIssuedAgainst(ElementMaterial $planned, Project $project, mixed $materialsData, float $requiredBase): float
     {
         $legacyIssued = (float) InventoryLog::where('project_id', $project->id)
                 ->where('material_id', $planned->library_material_id)
@@ -522,14 +530,22 @@ class StockMovementPoster
                 ->whereNull('project_material_id')
                 ->fulfilmentReopeningReturns()->sum('quantity');
 
+        if ($legacyIssued <= 0) {
+            return 0.0;
+        }
+
+        // Earlier lines absorb legacy issues in stock units too (Report 78B).
+        $units = app(RequirementUnits::class);
         $earlierRequirement = (float) ElementMaterial::query()
+            ->with('libraryMaterial.uomConversions')
             ->where('library_material_id', $planned->library_material_id)
             ->where('is_included', true)
             ->where('id', '<', $planned->id)
             ->whereHas('element', fn ($query) => $query->where('task_materials_data_id', $materialsData->id))
-            ->sum('quantity');
+            ->get()
+            ->sum(fn (ElementMaterial $line) => (float) ($units->requiredInBase($line) ?? 0));
 
-        return min((float) $planned->quantity, max(0, $legacyIssued - $earlierRequirement));
+        return min($requiredBase, max(0, $legacyIssued - $earlierRequirement));
     }
 
     /* ── Returning ──────────────────────────────────────────────────────── */

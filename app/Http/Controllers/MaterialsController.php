@@ -351,6 +351,12 @@ class MaterialsController extends Controller
                     'importedAt' => now()->toISOString(),
                     'elementCount' => count($elements),
                 ]);
+                // Report 78B: the approvals an import supersedes stay on record.
+                $previousInfo = $existingMaterialsData?->project_info ?? [];
+                $projectInfo['approval_history'] = array_merge($previousInfo['approval_history'] ?? [], isset($previousInfo['approval_status']) ? [[
+                    'superseded_at' => now()->toISOString(), 'superseded_by' => auth()->id(),
+                    'approval_status' => $previousInfo['approval_status'], 'changes' => ['Approved quote import'],
+                ]] : []);
                 $projectInfo['approval_status'] = $this->defaultMaterialsApprovalStatus('System: Reset due to approved quote import');
 
                 $materialsData = TaskMaterialsData::updateOrCreate(
@@ -535,7 +541,19 @@ class MaterialsController extends Controller
 
             // Reset approval status ONLY if materials have actually changed
             $projectInfo = $request->projectInfo;
+            // Report 78B: approval history is server-owned. A reset files the
+            // approvals it replaces, with the changes that caused it, instead of
+            // discarding who signed what off.
+            $projectInfo['approval_history'] = $existingProjectInfo['approval_history'] ?? [];
             if ($materialsChanged && $existingApprovalStatus) {
+                if (($existingApprovalStatus['project_officer']['approved'] ?? false) || ($existingApprovalStatus['production']['approved'] ?? false)) {
+                    $projectInfo['approval_history'][] = [
+                        'superseded_at' => now()->toISOString(),
+                        'superseded_by' => auth()->id(),
+                        'approval_status' => $existingApprovalStatus,
+                        'changes' => array_slice(array_column($changeSummary, 'message'), 0, 50),
+                    ];
+                }
                 \Log::info('Materials content changed - resetting approval status', ['taskId' => $taskId]);
                 $projectInfo['approval_status'] = [
                     'project_officer' => ['approved' => false, 'approved_by' => null, 'approved_by_name' => null, 'approved_at' => null, 'comments' => 'System: Reset due to material changes'],
@@ -1307,10 +1325,15 @@ class MaterialsController extends Controller
     private function formatMaterialsData(TaskMaterialsData $materialsData, array $fulfilment = []): array
     {
         try {
+            // Report 78B: each line is served with how Stores reads it — its
+            // identity baseline, disposition and unit reading — loaded once.
+            \Illuminate\Database\Eloquent\Collection::make($materialsData->elements->flatMap->materials->all())->loadMissing(['libraryMaterial.uomConversions', 'requestedMaterial:id,material_name,material_code,item_status']);
+            $units = app(\App\Modules\ProcurementStores\Services\RequirementUnits::class);
+
             return [
                 'projectInfo' => $materialsData->project_info ?? [],
                 'sourceUpdatedAt' => $materialsData->updated_at?->toISOString(),
-                'projectElements' => $materialsData->elements->map(function ($element) use ($fulfilment) {
+                'projectElements' => $materialsData->elements->map(function ($element) use ($fulfilment, $units) {
                     return [
                         'id' => (string) $element->id,
                         'templateId' => $element->template_id,
@@ -1325,13 +1348,33 @@ class MaterialsController extends Controller
                         'unitOfMeasurement' => $element->unit_of_measurement,
                         'dimensions' => $element->dimensions ?? ['length' => '', 'width' => '', 'height' => ''],
                         'isIncluded' => (bool) $element->is_included,
-                        'materials' => $element->materials->map(function ($material) use ($fulfilment) {
+                        'materials' => $element->materials->map(function ($material) use ($fulfilment, $units) {
                             $state = $fulfilment[$material->id] ?? null;
+                            $unit = $units->assess($material);
 
                             return [
                                 'id' => (string) $material->id,
                                 'persistent_id' => $material->persistent_id,
                                 'libraryMaterialId' => $material->library_material_id,
+                                // Round-tripped untouched by the client: the identity it saw.
+                                'libraryMaterialIdBaseline' => $material->library_material_id,
+                                'requirementDisposition' => $material->effectiveDisposition(),
+                                'requestedMaterial' => $material->requestedMaterial ? [
+                                    'id' => $material->requestedMaterial->id,
+                                    'name' => $material->requestedMaterial->material_name,
+                                    'code' => $material->requestedMaterial->material_code,
+                                    'status' => $material->requestedMaterial->item_status,
+                                ] : null,
+                                'requirementUnit' => [
+                                    'status' => $unit['status'],
+                                    'factor' => $unit['factor'] !== null ? (float) $unit['factor'] : null,
+                                    'basis' => $unit['basis'],
+                                    'requirementUnit' => $unit['requirement_unit'],
+                                    'baseUnit' => $unit['base_unit'],
+                                    'approved' => $unit['stored'],
+                                    'reason' => $unit['reason'],
+                                    'requiredInBase' => $unit['status'] === 'compatible' ? round((float) $material->quantity * (float) $unit['factor'], 4) : null,
+                                ],
                                 'description' => $material->description,
                                 'unitOfMeasurement' => $material->unit_of_measurement,
                                 'quantity' => (float) $material->quantity,
@@ -1340,7 +1383,10 @@ class MaterialsController extends Controller
                                 'returnedQuantity' => $state['returned'] ?? 0.0,
                                 'netIssuedQuantity' => $state['net_issued'] ?? 0.0,
                                 'remainingQuantity' => $state['remaining'] ?? (float) $material->quantity,
-                                'availableToIssue' => $state['remaining'] ?? (float) $material->quantity,
+                                // In the material's stock unit (fulfilmentUnit); zero while the
+                                // requirement's unit cannot be read in stock units (Report 78B).
+                                'availableToIssue' => ($state['issuable'] ?? $unit['status'] === 'compatible') ? ($state['remaining'] ?? (float) $material->quantity) : 0.0,
+                                'fulfilmentUnit' => ($state['unit'] ?? null) === 'stock' ? $unit['base_unit'] : $material->unit_of_measurement,
                                 'isFullyIssued' => $state['fully_issued'] ?? false,
                                 'unitCost' => $material->unit_cost !== null ? (float) $material->unit_cost : null,
                                 'isIncluded' => (bool) $material->is_included,
@@ -1662,70 +1708,90 @@ class MaterialsController extends Controller
     }
 
     /**
-     * Generate a structured list of changes between existing data and new elements
+     * Generate a structured list of changes between existing data and new elements.
+     *
+     * Report 78B (F-11): lines are matched on their persistent identity, not their
+     * description, and a change of unit, material identity or inclusion is a real
+     * change — before this only description and quantity were compared, so a
+     * substitution or a Sheets→sqm edit kept both approvals. Identity is compared
+     * as MaterialLineIdentity will actually store it, so a stale client sending
+     * null for a Stores-resolved line is not mistaken for a change.
      */
     private function generateChangeSummary(?TaskMaterialsData $existingData, array $newProjectElements): array
     {
         if (!$existingData) return [['type' => 'addition', 'message' => 'Initial material list creation.']];
 
         $existingData->load('elements.materials');
-        $existingElements = $existingData->elements;
+        $identity = app(\App\Services\MaterialLineIdentity::class);
         $changes = [];
 
-        // Normalize existing for lookups
-        $existingMap = [];
-        foreach ($existingElements as $element) {
-            $key = $element->element_type . ' : ' . ($element->name ?? '');
-            $existingMap[$key] = $element;
-        }
+        $elementKey = fn ($type, $name) => $type . ' : ' . ($name ?? '');
+        $existingByPid = $existingData->elements->filter(fn ($e) => filled($e->persistent_id))->keyBy('persistent_id');
+        $existingByKey = $existingData->elements->keyBy(fn ($e) => $elementKey($e->element_type, $e->name));
+        $existingById = $existingData->elements->keyBy(fn ($e) => (string) $e->id);
+        $matchedElementIds = [];
 
-        // Track new/updated
-        $newKeys = [];
         foreach ($newProjectElements as $element) {
-            $key = $element['elementType'] . ' : ' . ($element['name'] ?? '');
-            $newKeys[] = $key;
+            $label = $element['name'] ?? 'Unnamed';
+            $pid = $element['persistent_id'] ?? $element['persistentId'] ?? null;
+            $oldElement = ($pid ? $existingByPid->get($pid) : null)
+                ?? (isset($element['id']) ? $existingById->get((string) $element['id']) : null)
+                ?? $existingByKey->get($elementKey($element['elementType'] ?? '', $element['name'] ?? null));
 
-            if (!isset($existingMap[$key])) {
+            if (! $oldElement || in_array($oldElement->id, $matchedElementIds, true)) {
                 $count = count($element['materials'] ?? []);
-                $changes[] = ['type' => 'addition', 'message' => "Added Element: " . ($element['name'] ?? 'Unnamed') . " ({$count} materials)"];
-            } else {
-                $oldElement = $existingMap[$key];
-                $oldMaterialsMap = [];
-                foreach ($oldElement->materials as $m) {
-                    $oldMaterialsMap[$m->description] = $m;
-                }
+                $changes[] = ['type' => 'addition', 'message' => "Added Element: {$label} ({$count} materials)"];
+                continue;
+            }
+            $matchedElementIds[] = $oldElement->id;
 
-                $newMaterials = $element['materials'] ?? [];
-                
-                foreach ($newMaterials as $m) {
-                    $desc = $m['description'];
-                    if (!isset($oldMaterialsMap[$desc])) {
-                        $changes[] = ['type' => 'addition', 'message' => "Element '" . ($element['name'] ?? 'Unnamed') . "': Added material '{$desc}'"];
-                    } else {
-                        $oldM = $oldMaterialsMap[$desc];
-                        if ((float)$oldM->quantity !== (float)$m['quantity']) {
-                            $changes[] = [
-                                'type' => 'modification', 
-                                'message' => "Element '" . ($element['name'] ?? 'Unnamed') . "': Changed '{$desc}' qty: {$oldM->quantity} -> {$m['quantity']}"
-                            ];
-                        }
-                    }
-                }
+            $oldByPid = $oldElement->materials->filter(fn ($m) => filled($m->persistent_id))->keyBy('persistent_id');
+            $oldById = $oldElement->materials->keyBy(fn ($m) => (string) $m->id);
+            $oldByDescription = $oldElement->materials->keyBy('description');
+            $matchedLineIds = [];
 
-                // Check for deletions
-                $currentMaterialNames = collect($newMaterials)->pluck('description')->toArray();
-                foreach (array_keys($oldMaterialsMap) as $oldMName) {
-                    if (!in_array($oldMName, $currentMaterialNames)) {
-                        $changes[] = ['type' => 'removal', 'message' => "Element '" . ($element['name'] ?? 'Unnamed') . "': Removed material '{$oldMName}'"];
-                    }
+            foreach ($element['materials'] ?? [] as $m) {
+                $desc = $m['description'] ?? '';
+                $linePid = $m['persistent_id'] ?? $m['persistentId'] ?? null;
+                $old = ($linePid ? $oldByPid->get($linePid) : null)
+                    ?? (isset($m['id']) && ctype_digit((string) $m['id']) ? $oldById->get((string) $m['id']) : null)
+                    ?? (! $linePid ? $oldByDescription->get($desc) : null);
+
+                if (! $old || in_array($old->id, $matchedLineIds, true)) {
+                    $changes[] = ['type' => 'addition', 'message' => "Element '{$label}': Added material '{$desc}'"];
+                    continue;
+                }
+                $matchedLineIds[] = $old->id;
+
+                if ($old->description !== $desc) {
+                    $changes[] = ['type' => 'modification', 'message' => "Element '{$label}': Renamed '{$old->description}' to '{$desc}'"];
+                }
+                if (round((float) $old->quantity, 4) !== round((float) ($m['quantity'] ?? 0), 4)) {
+                    $changes[] = ['type' => 'modification', 'message' => "Element '{$label}': Changed '{$desc}' qty: {$old->quantity} -> {$m['quantity']}"];
+                }
+                if (mb_strtolower(trim((string) $old->unit_of_measurement)) !== mb_strtolower(trim((string) ($m['unitOfMeasurement'] ?? '')))) {
+                    $changes[] = ['type' => 'modification', 'message' => "Element '{$label}': Changed '{$desc}' unit: {$old->unit_of_measurement} -> {$m['unitOfMeasurement']}"];
+                }
+                if ((bool) $old->is_included !== (bool) ($m['isIncluded'] ?? true)) {
+                    $changes[] = ['type' => 'modification', 'message' => "Element '{$label}': ".(($m['isIncluded'] ?? true) ? 'Included' : 'Excluded')." '{$desc}'"];
+                }
+                if ($identity->changes($old, $m)) {
+                    $from = $old->library_material_id ? "#{$old->library_material_id}" : 'no catalogue item';
+                    $to = $identity->effectiveId($old, $m);
+                    $changes[] = ['type' => 'modification', 'message' => "Element '{$label}': Material for '{$desc}' changed from {$from} to ".($to ? "#{$to}" : 'no catalogue item')];
+                }
+            }
+
+            foreach ($oldElement->materials as $old) {
+                if (! in_array($old->id, $matchedLineIds, true)) {
+                    $changes[] = ['type' => 'removal', 'message' => "Element '{$label}': Removed material '{$old->description}'"];
                 }
             }
         }
 
-        // Check for deleted elements
-        foreach ($existingMap as $key => $element) {
-            if (!in_array($key, $newKeys)) {
-                $changes[] = ['type' => 'removal', 'message' => "Removed Element: " . ($element->name ?? 'Unnamed')];
+        foreach ($existingData->elements as $element) {
+            if (! in_array($element->id, $matchedElementIds, true)) {
+                $changes[] = ['type' => 'removal', 'message' => 'Removed Element: ' . ($element->name ?? 'Unnamed')];
             }
         }
 
@@ -1885,7 +1951,10 @@ class MaterialsController extends Controller
             foreach ($materials as $material) {
                 $description = is_array($material) ? ($material['description'] ?? '') : $material->description;
                 $quantity = is_array($material) ? ($material['quantity'] ?? 0) : $material->quantity;
-                $materialsMap[$description] = round((float) $quantity, 4);
+                // Report 78B (F-11): a unit or material substitution is a change too.
+                $unit = is_array($material) ? ($material['unit_of_measurement'] ?? '') : $material->unit_of_measurement;
+                $libraryId = is_array($material) ? ($material['library_material_id'] ?? null) : $material->library_material_id;
+                $materialsMap[$description] = [round((float) $quantity, 4), mb_strtolower(trim((string) $unit)), $libraryId ? (int) $libraryId : null];
             }
             ksort($materialsMap);
             return [$key => $materialsMap];
@@ -2025,6 +2094,12 @@ class MaterialsController extends Controller
 
                 // Update project_info but RESET APPROVAL STATUS (Success Criteria #6)
                 $projectInfo = $restoredData['project_info'];
+                // Report 78B: the approvals a restore supersedes stay on record.
+                $currentInfo = $materialsData->project_info ?? [];
+                $projectInfo['approval_history'] = array_merge($currentInfo['approval_history'] ?? [], isset($currentInfo['approval_status']) ? [[
+                    'superseded_at' => now()->toISOString(), 'superseded_by' => auth()->id(),
+                    'approval_status' => $currentInfo['approval_status'], 'changes' => ['Restored from version '.($restoredData['version_number'] ?? '?')],
+                ]] : []);
 
                 // Reset all approvals to draft
                 $projectInfo['approval_status'] = [

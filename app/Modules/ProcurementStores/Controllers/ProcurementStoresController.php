@@ -1123,7 +1123,10 @@ class ProcurementStoresController extends Controller
                 - (float) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
             $movementNet = abs((float) $movement->quantity)
                 - (float) $movement->returns()->fulfilmentReopeningReturns()->sum('quantity');
-            if ($movementNet > max(0, (float) $planned->quantity - $alreadyLinked) + 0.00001) {
+            // Report 78B: both sides in the material's stock unit.
+            $requiredBase = (float) app(\App\Modules\ProcurementStores\Services\RequirementUnits::class)
+                ->requiredInBaseOrFail($planned, $movement->material, 'project_material_id');
+            if ($movementNet > max(0, $requiredBase - $alreadyLinked) + 0.00001) {
                 throw ValidationException::withMessages(['project_material_id' => 'This issue is larger than the quantity remaining on that approved material line.']);
             }
 
@@ -1139,127 +1142,8 @@ class ProcurementStoresController extends Controller
         return response()->json(['message' => 'Movement linked to the approved material line. Stock was not moved again; Finance posting was queued where required.']);
     }
 
-    /**
-     * Give an approved material line, typed freehand with nothing in the
-     * catalogue behind it, a real Material Library identity — by picking an
-     * existing item or registering one on the spot — optionally receiving
-     * stock in the same act.
-     *
-     * Unlike linkProjectMaterial() above, this never touches a posted
-     * movement or a Finance fact: an unlinked line has issued nothing, because
-     * nothing could be issued against it. It is refused once the line already
-     * has a library_material_id, so this only ever fills a gap and never
-     * overwrites a prior decision — swapping an established link is a bigger
-     * question than this endpoint answers.
-     */
-    public function resolveProjectMaterialCatalogue(Request $request, ElementMaterial $elementMaterial, StockMovementPoster $poster): JsonResponse
-    {
-        if (! $this->allows(Permissions::STORES_MANAGE)) {
-            return response()->json(['message' => 'Only Stores team members can resolve a material to the catalogue.'], 403);
-        }
-
-        $validated = $request->validate([
-            'material_id' => 'nullable|required_without:new_material|prohibits:new_material|integer|exists:library_materials,id',
-            'new_material' => 'nullable|array|required_without:material_id',
-            'new_material.material_name' => 'required_with:new_material|string|max:255',
-            'new_material.material_category_id' => 'required_with:new_material|integer|exists:material_categories,id',
-            'new_material.material_code' => 'nullable|string|max:100|unique:library_materials,material_code',
-            'new_material.attributes' => 'nullable|array',
-            'new_material.issue_disposition' => ['nullable', Rule::in(MaterialControl::DISPOSITIONS)],
-            'new_material.tracking_mode' => ['nullable', Rule::in(MaterialControl::TRACKING_MODES)],
-            'new_material.base_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'new_material.purchase_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'new_material.issue_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'new_material.uom_conversions' => 'nullable|array|max:2',
-            'new_material.uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
-            'new_material.uom_conversions.*.factor' => 'required|numeric|gt:0',
-            'new_material.default_unit_cost' => 'nullable|numeric|min:0',
-            // Stock receipt is optional for both existing materials and new catalogue registrations.
-            // When stock is not yet on hand, resolving links the project line so that a Purchase Requisition
-            // can be generated directly from the desk for purchasing.
-            'receive' => ['nullable', 'array'],
-            'receive.quantity' => 'required_with:receive|numeric|min:0.01',
-            'receive.entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'receive.receipt_unit_cost' => 'nullable|numeric|min:0',
-            'receive.lot_number' => 'nullable|string|max:100',
-            'receive.expiry_date' => 'nullable|date|after_or_equal:today',
-            'receive.length' => 'nullable|numeric|min:0',
-            'receive.width' => 'nullable|numeric|min:0',
-            'receive.thickness' => 'nullable|numeric|min:0',
-            'receive.location' => 'nullable|string|max:50',
-            'receive.controlled_units' => 'nullable|array|min:1|max:100',
-            'receive.controlled_units.*.quantity' => 'required_with:receive.controlled_units|numeric|gt:0',
-            'receive.controlled_units.*.notes' => 'nullable|string|max:2000',
-            // Stock taken in at the desk was not bought through an order, so it
-            // is a stock adjustment: the reason and the explanation behind it.
-            'receive.receipt_reason' => ['nullable', Rule::in(\App\Modules\ProcurementStores\Models\InventoryLog::EXCEPTIONAL_RECEIPT_REASONS)],
-            'receive.notes' => 'nullable|string|max:2000',
-        ]);
-
-        if ($elementMaterial->library_material_id) {
-            return response()->json(['message' => 'This line is already linked to a Material Library item.'], 422);
-        }
-
-        $elementMaterial->loadMissing('element.taskMaterialsData');
-        $this->assertMaterialsApproved($elementMaterial->element?->taskMaterialsData);
-
-        $movementLog = null;
-
-        DB::transaction(function () use ($request, $validated, $elementMaterial, $poster, &$movementLog) {
-            $locked = ElementMaterial::lockForUpdate()->findOrFail($elementMaterial->id);
-            if ($locked->library_material_id) {
-                throw ValidationException::withMessages(['material_id' => 'This line is already linked to a Material Library item.']);
-            }
-
-            if ($request->filled('receive')) {
-                $line = array_filter(array_merge($validated['receive'], [
-                    'material_id' => $validated['material_id'] ?? null,
-                    'new_material' => $validated['new_material'] ?? null,
-                ]), fn ($value) => $value !== null);
-                $posted = $poster->post('receive', $line);
-                $movementLog = $posted['log'];
-                $materialId = $movementLog->material_id;
-            } elseif ($request->filled('new_material')) {
-                $material = app(\App\Modules\MaterialsLibrary\Services\MaterialRegistrationService::class)->create(
-                    $validated['new_material'],
-                    (int) auth()->id()
-                );
-                $materialId = $material->id;
-            } else {
-                $material = LibraryMaterial::findOrFail($validated['material_id']);
-                if (($material->item_status ?? 'Active') !== 'Active') {
-                    throw ValidationException::withMessages([
-                        'material_id' => "Only Active Material Library items can be linked. '{$material->material_name}' is {$material->item_status}.",
-                    ]);
-                }
-                $materialId = $material->id;
-            }
-
-            $locked->library_material_id = $materialId;
-            $locked->source_metadata = array_merge($locked->source_metadata ?? [], [
-                'catalogue_resolution' => [
-                    'resolved_by' => auth()->id(),
-                    'resolved_at' => now()->toIso8601String(),
-                    'library_material_id' => $materialId,
-                ],
-            ]);
-            $locked->save();
-        });
-
-        $elementMaterial->refresh()->load('libraryMaterial');
-
-        return response()->json([
-            'message' => "Linked to \"{$elementMaterial->libraryMaterial?->material_name}\". The line can now be issued.",
-            'data' => [
-                'project_material' => $elementMaterial,
-                'material' => $elementMaterial->libraryMaterial,
-                'movement' => $movementLog,
-                'controlled_units' => $movementLog && $elementMaterial->libraryMaterial?->isConsumableUnit()
-                    ? \App\Modules\ProcurementStores\Models\ConsumableUnit::with('material')->where('source_log_id', $movementLog->id)->get()
-                    : [],
-            ],
-        ]);
-    }
+    // Resolve Material moved to ProjectMaterialResolutionController /
+    // ProjectMaterialResolution (Report 78B): identity only, no stock receipt.
 
     /**
      * Chronological stock card for one material. balance_after is written in the

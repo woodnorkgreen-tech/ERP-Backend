@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Modules\ProcurementStores\Controllers\ProcurementStoresController;
+use App\Modules\ProcurementStores\Controllers\ProjectMaterialResolutionController;
 use App\Modules\ProcurementStores\Controllers\StockMovementController;
 use App\Modules\ProcurementStores\Controllers\MaterialOptionsController;
 use App\Modules\ProcurementStores\Controllers\SupplierController;
@@ -79,7 +80,11 @@ Route::post('/finance-sync-exceptions/{inventoryLog}/resolve-valuation', [Procur
 Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'destroyLog']);
 Route::post('/inventory-logs/{id}/reverse', [ProcurementStoresController::class, 'reverseLog']);
 Route::post('/inventory-logs/{inventoryLog}/link-project-material', [ProcurementStoresController::class, 'linkProjectMaterial']);
-Route::post('/project-materials/{elementMaterial}/resolve-catalogue', [ProcurementStoresController::class, 'resolveProjectMaterialCatalogue']);
+// Report 78B: Resolve Material is identity/classification only.
+Route::post('/project-materials/{elementMaterial}/resolve-catalogue', [ProjectMaterialResolutionController::class, 'resolve']);
+Route::get('/project-materials/{elementMaterial}/compatibility', [ProjectMaterialResolutionController::class, 'compatibility']);
+Route::get('/project-materials/{elementMaterial}/registration-candidates', [ProjectMaterialResolutionController::class, 'registrationCandidates']);
+Route::post('/project-materials/{elementMaterial}/disposition', [ProjectMaterialResolutionController::class, 'classify']);
 Route::get('/stock-counts', [StockCountController::class, 'index']);
 Route::post('/stock-counts', [StockCountController::class, 'store']);
 Route::get('/stock-counts/{stockCount}', [StockCountController::class, 'show']);

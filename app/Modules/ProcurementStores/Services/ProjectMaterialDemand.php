@@ -54,6 +54,12 @@ class ProjectMaterialDemand
             return [];
         }
 
+        // Report 78B: movements are counted in the material's stock unit, so the
+        // requirement must be too. A line whose unit cannot be read in stock
+        // units is reported in its BOM unit and is not issuable.
+        \Illuminate\Database\Eloquent\Collection::make($lines->all())->loadMissing('libraryMaterial.uomConversions');
+        $units = app(RequirementUnits::class);
+
         $movements = InventoryLog::query()
             ->where('project_id', $project->id)
             ->whereIn('type', [...self::ISSUE_TYPES, 'return'])
@@ -78,8 +84,9 @@ class ProjectMaterialDemand
             fn (float $issued, $materialId) => max(0.0, $issued - (float) ($legacyReturns[$materialId] ?? 0)),
         )->all();
 
-        return $lines->mapWithKeys(function (ElementMaterial $line) use ($linkedIssues, $linkedReturns, &$legacyNetRemaining) {
-            $required = (float) $line->quantity;
+        return $lines->mapWithKeys(function (ElementMaterial $line) use ($linkedIssues, $linkedReturns, &$legacyNetRemaining, $units) {
+            $inBase = $units->requiredInBase($line);
+            $required = $inBase !== null ? (float) $inBase : (float) $line->quantity;
             $issued = (float) ($linkedIssues->get($line->id)?->sum(fn ($row) => abs((float) $row->quantity)) ?? 0);
             $returned = (float) ($linkedReturns->get($line->id)?->sum(fn ($row) => abs((float) $row->quantity)) ?? 0);
             $materialId = (int) $line->library_material_id;
@@ -95,6 +102,8 @@ class ProjectMaterialDemand
                 'net_issued' => round($netIssued, 4),
                 'remaining' => round($remaining, 4),
                 'fully_issued' => $remaining <= 0.00001,
+                'unit' => $inBase !== null ? 'stock' : 'bom',
+                'issuable' => $inBase !== null,
             ]];
         })->all();
     }
@@ -137,8 +146,9 @@ class ProjectMaterialDemand
         }
 
         [$issued, $returned] = $this->movementsByLine($projects->pluck('id'));
+        $units = app(RequirementUnits::class);
 
-        return $specified->map(function (ElementMaterial $line) use ($projects, $issued, $returned) {
+        return $specified->map(function (ElementMaterial $line) use ($projects, $issued, $returned, $units) {
             $task = $line->element?->taskMaterialsData?->task;
             $project = $projects->get($task?->project_enquiry_id);
 
@@ -148,7 +158,15 @@ class ProjectMaterialDemand
                 return null;
             }
 
-            $specifiedQuantity = (float) $line->quantity;
+            // Report 78B: demand is stock-unit demand. A requirement that cannot
+            // be read in the material's stock unit is not guessed at — it is an
+            // exception for Stores (see the Resolve Material exception register),
+            // never 12 sheets bought for 12 square metres.
+            $inBase = $units->requiredInBase($line);
+            if ($inBase === null) {
+                return null;
+            }
+            $specifiedQuantity = (float) $inBase;
 
             // Returns reopen the line by the quantity that came back, so a
             // material issued and then returned is owed to the job again.
@@ -182,7 +200,7 @@ class ProjectMaterialDemand
      */
     private function specifiedLines(?array $materialIds): Collection
     {
-        return ElementMaterial::with(['element.taskMaterialsData.task'])
+        return ElementMaterial::with(['element.taskMaterialsData.task', 'libraryMaterial.uomConversions'])
             ->where('is_included', true)
             ->whereNotNull('library_material_id')
             ->when($materialIds !== null, fn ($query) => $query->whereIn('library_material_id', $materialIds))

@@ -753,6 +753,17 @@ class MaterialController extends Controller
             ], 422);
         }
 
+        // Report 78B: element_materials.library_material_id is nullOnDelete, so a
+        // force-delete would silently strip the identity from every BOM line
+        // resolved to this material — the identity loss 78B closes elsewhere.
+        $bomLines = \App\Models\ElementMaterial::withTrashed()->where('library_material_id', $id)->count();
+        if ($bomLines > 0) {
+            return response()->json([
+                'message' => "Cannot permanently delete — {$bomLines} project material line(s) are linked to this material. "
+                    .'Deleting it would erase what those requirements were resolved to. Keep it soft-deleted instead.',
+            ], 422);
+        }
+
         $material->forceDelete();
 
         return response()->json(['message' => 'Material permanently deleted']);

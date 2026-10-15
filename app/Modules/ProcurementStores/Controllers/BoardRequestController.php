@@ -108,7 +108,11 @@ class BoardRequestController extends Controller
                 ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
                 - (float) InventoryLog::where('project_material_id', $planned->id)
                     ->fulfilmentReopeningReturns()->sum('quantity');
-            if ((float) $request->qty > max(0, (float) $planned->quantity - $alreadyIssued)) {
+            // Report 78B: boards are counted in the material's stock unit, so the
+            // requirement is read in it too (12 sqm is not 12 boards).
+            $requiredBase = (float) app(\App\Modules\ProcurementStores\Services\RequirementUnits::class)
+                ->requiredInBaseOrFail($planned, $material, 'qty');
+            if ((float) $request->qty > max(0, $requiredBase - $alreadyIssued)) {
                 return response()->json(['message' => 'Board quantity exceeds the remaining project requirement.'], 422);
             }
         }
