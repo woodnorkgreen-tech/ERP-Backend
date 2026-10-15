@@ -14,6 +14,15 @@ class TripRequestResource extends JsonResource
             'context_type'           => $this->context_type,
             'transport_arrangement'  => $this->transport_arrangement,
             'trip_kind'              => $this->trip_kind ?? 'delivery',
+            'loading_required'       => $this->loading_required ?? true,
+            // Only admins see the delete button.
+            'can_delete'             => (bool) (auth()->user()?->hasRole('Admin') || auth()->user()?->hasRole('Super Admin')),
+            // The Uber / Bolt the lead booked, when no company vehicle is used.
+            'external' => $this->transport_arrangement === 'external' ? [
+                'provider' => $this->external_provider,
+                'ref'      => $this->external_ref,
+                'cost'     => $this->external_cost,
+            ] : null,
             'project_id'             => $this->project_id,
 
             'project' => $this->whenLoaded('project', function () {
@@ -66,6 +75,8 @@ class TripRequestResource extends JsonResource
             'estimated_travel_minutes'  => $this->estimated_travel_minutes,
             'buffer_minutes'            => $this->buffer_minutes,
             'loading_start_by'          => $this->loading_start_by,
+            // The Mark Loading button shows from 30 min before loading is due.
+            'loading_window_opens_at'   => $this->loading_start_by?->copy()->subMinutes(30),
             'departure_by'              => $this->departure_by,
             'loading_started_at'        => $this->loading_started_at,
             'loading_ended_at'          => $this->loading_ended_at,
@@ -219,7 +230,10 @@ class TripRequestResource extends JsonResource
 
         // Allocation: a company trip gets a driver + vehicle; a client
         // pickup just has a note on who is collecting.
-        if ($this->transport_arrangement === 'client') {
+        if ($this->transport_arrangement === 'external') {
+            $allocDetail = trim(implode(' · ', array_filter([$this->external_provider, $this->external_ref]))) ?: null;
+            $allocLabel  = 'Ride arranged (not a company vehicle)';
+        } elseif ($this->transport_arrangement === 'client') {
             $allocDetail = $this->vehicle_note ? "Client collecting — {$this->vehicle_note}" : 'Client will collect';
             $allocLabel  = 'Client pickup arranged';
         } else {
@@ -241,7 +255,7 @@ class TripRequestResource extends JsonResource
         ];
 
         // Loading steps only exist for trips using the deadline calculation.
-        if ($this->loading_start_by) {
+        if ($this->loading_start_by && ($this->loading_required ?? true)) {
             $steps[] = [
                 'key' => 'loading_started', 'label' => 'Loading started',
                 'detail' => null, 'at' => $this->loading_started_at, 'done' => (bool) $this->loading_started_at,

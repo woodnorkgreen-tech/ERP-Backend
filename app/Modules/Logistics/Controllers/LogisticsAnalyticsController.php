@@ -44,6 +44,7 @@ class LogisticsAnalyticsController extends Controller
         $summary['trip_kinds'] = [
             'delivery'   => (int) ($kinds['delivery'] ?? 0),
             'collection' => (int) ($kinds['collection'] ?? 0),
+            'personnel'  => (int) ($kinds['personnel'] ?? 0),
         ];
 
         // ── Top routes ────────────────────────────────────────────────────────

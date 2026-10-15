@@ -57,6 +57,8 @@ Route::prefix('logistics')->group(function () {
     Route::patch('/trip-requests/{tripRequest}/cancel',   [TripRequestController::class, 'cancel']);
     Route::patch('/trip-requests/{tripRequest}/loading-started', [TripRequestController::class, 'markLoadingStarted']);
     Route::patch('/trip-requests/{tripRequest}/loading-ended',   [TripRequestController::class, 'markLoadingEnded']);
+    Route::patch('/trip-requests/{tripRequest}/no-loading',      [TripRequestController::class, 'markNoLoading']);
+    Route::get('/availability',                                  [TripRequestController::class, 'availability']);
 
     // Real drive-time between the picked pickup/destination points, to
     // auto-fill "Travel Takes (min)" on the loading-timeline auto-calc
@@ -79,6 +81,7 @@ Route::prefix('logistics')->group(function () {
         Route::patch('/deliveries/{delivery}/start',        [DeliveryController::class, 'start']);
         Route::patch('/deliveries/{delivery}/cancel',       [DeliveryController::class, 'cancel']);
         Route::patch('/deliveries/{delivery}/edit',         [DeliveryController::class, 'edit']);
+        Route::post('/deliveries/{delivery}/add-request',   [DeliveryController::class, 'addRequest']);
         Route::patch('/deliveries/{delivery}/stops/{stop}', [DeliveryController::class, 'updateStop']);
     });
 
@@ -94,6 +97,9 @@ Route::prefix('logistics')->group(function () {
         Route::post('/delivery/{delivery}/location',              [DriverDeliveryController::class, 'updateLocation']);
     });
 
+    // Dashboard
+    Route::get('/dashboard', [\App\Modules\Logistics\Controllers\LogisticsDashboardController::class, 'index']);
+
     // Analytics
     Route::get('/analytics', [\App\Modules\Logistics\Controllers\LogisticsAnalyticsController::class, 'index']);
 
@@ -103,6 +109,9 @@ Route::prefix('logistics')->group(function () {
     Route::get('/delivery-history', [DriverDeliveryController::class, 'deliveryHistory']);
 
     // Maintenance
+    // Fleet register: per-vehicle maintenance & service summary
+    Route::get('/fleet-register', [\App\Modules\Logistics\Controllers\FleetRegisterController::class, 'index']);
+
     Route::get('/maintenance/stats',                    [MaintenanceController::class, 'stats']);
     Route::get('/maintenance/vehicles-in-maintenance',  [MaintenanceController::class, 'vehiclesInMaintenance']);
     Route::get('/maintenance',                          [MaintenanceController::class, 'index']);

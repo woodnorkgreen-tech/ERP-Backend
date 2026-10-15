@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Logistics\Models\Delivery;
 use App\Modules\Logistics\Models\DeliveryStop;
 use App\Modules\Logistics\Models\Vehicle;
+use App\Modules\Logistics\Models\TripRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -164,6 +165,83 @@ class DeliveryController extends Controller
         'message' => 'Delivery updated successfully.',
     ]);
 }
+
+    /**
+     * Put an approved request on a delivery that is already planned or on
+     * the road — e.g. a pick-up that came in unscheduled and sits on the
+     * vehicle's route. It becomes another stop, right after the one the
+     * driver is heading to ('next') or at the very end ('end'), and takes
+     * this delivery's driver and vehicle.
+     */
+    public function addRequest(Request $request, Delivery $delivery): JsonResponse
+    {
+        $validated = $request->validate([
+            'trip_request_id' => 'required|integer|exists:trip_requests,id',
+            'position'        => 'sometimes|in:next,end',
+        ]);
+
+        if (!in_array($delivery->status, ['pending', 'in_transit'])) {
+            return response()->json(['message' => 'Requests can only be added to a pending or in-transit delivery.'], 422);
+        }
+        if (!$delivery->driver_id || !$delivery->vehicle_id) {
+            return response()->json(['message' => 'This delivery has no driver and vehicle yet.'], 422);
+        }
+
+        $trip = TripRequest::find($validated['trip_request_id']);
+        if ($trip->status !== 'approved') {
+            return response()->json(['message' => 'Only approved requests that are not yet assigned can be added.'], 422);
+        }
+        if ($trip->transport_arrangement === 'client') {
+            return response()->json(['message' => 'A client-collected request has no vehicle to add to.'], 422);
+        }
+
+        DB::transaction(function () use ($delivery, $trip, $validated) {
+            $inTransit = $delivery->status === 'in_transit';
+            $position  = $validated['position'] ?? 'next';
+            $stops     = $delivery->stops()->orderBy('stop_order')->get();
+
+            if ($position === 'end' || $stops->isEmpty()) {
+                $order = ($stops->max('stop_order') ?? 0) + 1;
+            } else {
+                // 'next' = straight after the stop being driven to now;
+                // on a delivery not yet started, the very first stop.
+                $current = $stops->firstWhere('status', 'en_route')
+                    ?? $stops->first(fn ($st) => $st->status === 'pending');
+                $order = $inTransit && $current ? $current->stop_order + 1 : ($current?->stop_order ?? 1);
+            }
+
+            $delivery->stops()->where('stop_order', '>=', $order)->increment('stop_order');
+
+            // Nothing in front of it still to do? Then it is the one being driven to.
+            $someoneActive = $delivery->stops()->where('status', 'en_route')->exists();
+            $status = ($inTransit && !$someoneActive) ? 'en_route' : 'pending';
+
+            DeliveryStop::create([
+                'delivery_id'     => $delivery->id,
+                'trip_request_id' => $trip->id,
+                'stop_order'      => $order,
+                'location'        => $trip->destination,
+                'lat'             => $trip->destination_lat,
+                'lng'             => $trip->destination_lng,
+                'status'          => $status,
+            ]);
+
+            $delivery->update(['total_stops' => $delivery->stops()->count()]);
+
+            $trip->update([
+                'status'              => $inTransit ? 'in_transit' : 'assigned',
+                'started_at'          => $inTransit ? now() : null,
+                'assigned_driver_id'  => $delivery->driver_id,
+                'assigned_vehicle_id' => $delivery->vehicle_id,
+                'assigned_by_id'      => Auth::user()->employee?->id,
+                'assigned_at'         => now(),
+                'assignment_notes'    => 'Added to delivery ' . ($delivery->delivery_code ?? '#' . $delivery->id),
+            ]);
+        });
+
+        $delivery->load($this->with);
+        return response()->json(['data' => $delivery, 'message' => 'Request added to the delivery.']);
+    }
 
     public function updateStop(Request $request, Delivery $delivery, DeliveryStop $stop): JsonResponse
     {
