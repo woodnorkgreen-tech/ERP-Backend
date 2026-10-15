@@ -137,6 +137,9 @@ class SupplierLedgerRailTest extends TestCase
             'stock_status' => 'posted',
             'unit_price' => 5000,
         ]);
+        // The receipt reaches the ledger as it does in the application: its accrual
+        // is what a supplier invoice later clears (Report 76A-3).
+        event(new \App\Events\GoodsReceiptRecorded($note->id));
     }
 
     private function bill(float $amount = 50000): Bill
@@ -193,8 +196,8 @@ class SupplierLedgerRailTest extends TestCase
         $this->assertSame('50000.00', (string) $entry->total_debit);
         $this->assertSame((string) $entry->total_debit, (string) $entry->total_credit);
 
-        // Dr Accrued Expenses — the receipt's liability is discharged.
-        $this->assertSame('50000.00', $this->movementOn(self::ACCRUED));
+        // The receipt raised the accrual; the invoice discharges exactly that. Flat.
+        $this->assertSame('0.00', $this->movementOn(self::ACCRUED));
         // Cr Accounts Payable — and reappears as a named creditor.
         $this->assertSame('-50000.00', $this->movementOn(self::PAYABLE));
     }
@@ -213,43 +216,9 @@ class SupplierLedgerRailTest extends TestCase
         $accruedAccountId = ChartOfAccount::where('code', self::ACCRUED)->value('id');
         $bankAccountId = ChartOfAccount::where('code', self::BANK)->value('id');
 
-        $costLine = CostLine::create([
-            'ref' => 'CL-TEST-GRN-' . uniqid(),
-            'nature' => CostLine::NATURE_ACCRUED,
-            'status' => CostLine::STATUS_VERIFIED,
-            'amount' => '50000.00',
-            'net_amount' => '50000.00',
-            'tax_amount' => '0.00',
-            'base_net_amount' => '50000.00',
-            'fx_rate' => '1.00',
-            'accounting_period_id' => $period->id,
-            'submitted_by_user_id' => $this->accounts->id,
-            'source_type' => GoodsReceiptNoteItem::class,
-            'source_id' => 999999,
-            'source_ref' => 'accrual',
-            'details' => ['purchase_order_item_id' => $this->orderItem->id, 'grn_number' => 'GRN-TEST'],
-            'payee_id' => $this->supplier->id,
-            'description' => 'Accepted goods: GRN-TEST',
-        ]);
-
-        $entry = JournalEntry::create([
-            'entry_no' => 'JE-CL-TEST-' . $costLine->id,
-            'posting_date' => now()->toDateString(),
-            'accounting_period_id' => $period->id,
-            'cost_line_id' => $costLine->id,
-            'source_type' => CostLine::class,
-            'source_id' => $costLine->id,
-            'source_ref' => $costLine->ref,
-            'description' => 'Test GRN accrual',
-            'total_debit' => '50000.00',
-            'total_credit' => '50000.00',
-            'status' => 'posted',
-            'created_by' => $this->accounts->id,
-            'posted_at' => now(),
-        ]);
-        JournalLine::create(['journal_entry_id' => $entry->id, 'account_id' => $bankAccountId, 'entry_type' => 'debit', 'amount' => '50000.00', 'base_amount' => '50000.00', 'currency' => 'KES', 'fx_rate' => 1]);
-        JournalLine::create(['journal_entry_id' => $entry->id, 'account_id' => $accruedAccountId, 'entry_type' => 'credit', 'amount' => '50000.00', 'base_amount' => '50000.00', 'currency' => 'KES', 'fx_rate' => 1]);
-        $costLine->forceFill(['journal_entry_id' => $entry->id, 'posted_at' => now()])->save();
+        // The accrual the receipt itself posted (deliverAndConfirm), not a hand-built one.
+        $costLine = CostLine::where('source_type', GoodsReceiptNoteItem::class)->where('source_ref', 'accrual')->firstOrFail();
+        $this->assertNotNull($costLine->journal_entry_id);
 
         \Spatie\Permission\Models\Permission::findOrCreate(Permissions::FINANCE_SPEND_VOUCHERS_CREATE, 'web');
         $this->accounts->givePermissionTo(Permissions::FINANCE_SPEND_VOUCHERS_CREATE);
@@ -291,7 +260,8 @@ class SupplierLedgerRailTest extends TestCase
 
         $this->assertSame(1, JournalEntry::where('source_type', Bill::class)
             ->where('source_id', $bill->id)->count());
-        $this->assertSame('50000.00', $this->movementOn(self::ACCRUED));
+        // Raised once by the receipt, cleared once by the invoice.
+        $this->assertSame('0.00', $this->movementOn(self::ACCRUED));
     }
 
     /**
@@ -313,7 +283,8 @@ class SupplierLedgerRailTest extends TestCase
             app(\App\Modules\Finance\Services\JournalPostingService::class)
                 ->postSupplierInvoice($bill->fresh())
         );
-        $this->assertSame('0.00', $this->movementOn(self::ACCRUED));
+        // The receipt's accrual stands untouched: a legacy invoice clears nothing.
+        $this->assertSame('-50000.00', $this->movementOn(self::ACCRUED));
         $this->assertSame('0.00', $this->movementOn(self::PAYABLE));
     }
 
@@ -601,7 +572,7 @@ class SupplierLedgerRailTest extends TestCase
                 "Invoice dup-inv-002 from this supplier is already recorded as bill {$bill->bill_number}. Pay it from Procurement rather than recording it again here.",
             );
 
-        $this->assertSame(0, CostLine::count());
+        $this->assertSame(0, CostLine::where('details->funding_mode', 'unpaid_invoice')->count());
     }
 
     public function test_paying_a_posted_invoice_relieves_the_payable_and_credits_the_source(): void
@@ -626,7 +597,7 @@ class SupplierLedgerRailTest extends TestCase
         // The bank actually gave up the cash.
         $this->assertSame('-50000.00', $this->movementOn(self::BANK));
         // The receipt accrual stays discharged.
-        $this->assertSame('50000.00', $this->movementOn(self::ACCRUED));
+        $this->assertSame('0.00', $this->movementOn(self::ACCRUED));
     }
 
     /**

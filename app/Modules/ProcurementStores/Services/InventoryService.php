@@ -246,6 +246,10 @@ class InventoryService
                 'project_material_id' => $meta['project_material_id'] ?? null,
                 'original_issue_log_id' => $meta['original_issue_log_id'] ?? null,
                 'reversal_of_log_id' => $meta['reversal_of_log_id'] ?? null,
+                // Report 76A Part 2: why stock moved when it was neither a
+                // project issue nor a purchase receipt, and who it was for.
+                'movement_reason' => $meta['movement_reason'] ?? null,
+                'cost_centre_id' => $meta['cost_centre_id'] ?? null,
                 'return_kind' => $type === 'return' ? ($meta['return_kind'] ?? 'whole_item') : null,
                 'supplier_id' => $meta['supplier_id'] ?? null,
                 'reference_no' => $meta['reference_no'] ?? null,
@@ -262,7 +266,12 @@ class InventoryService
                 $log->allocations()->create($allocation);
             }
 
-            if (in_array($type, ['check_out', 'issue', 'consumption'], true) && ($meta['project_id'] ?? $meta['reference_no'] ?? null)) {
+            // Stock used by the company itself is not a project cost: it has its
+            // own posting (InventoryLog::booted) and must never be offered to
+            // the project cost producer, which would read its reference as a job.
+            if (in_array($type, ['check_out', 'issue', 'consumption'], true)
+                && ! $log->isNonProjectReduction()
+                && ($meta['project_id'] ?? $meta['reference_no'] ?? null)) {
                 \App\Events\Stores\StockIssued::dispatch($log);
             }
 

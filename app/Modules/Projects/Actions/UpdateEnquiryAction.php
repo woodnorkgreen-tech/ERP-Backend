@@ -76,6 +76,25 @@ class UpdateEnquiryAction
             ], 200);
         }
 
+        // Report 78C (D-6): cancelling, and leaving a finished state, change what
+        // Stores and Procurement treat as live work. They go through the governed
+        // actions with a reason and an audit record, never a plain status edit.
+        if ($request->has('status') && $request->input('status') !== $enquiry->status) {
+            $finished = [EnquiryConstants::STATUS_COMPLETED, EnquiryConstants::STATUS_CLOSED, EnquiryConstants::STATUS_CANCELLED];
+            if ($request->input('status') === EnquiryConstants::STATUS_CANCELLED) {
+                return response()->json([
+                    'message' => 'Cancel a project with POST /enquiries/{id}/cancel, giving a reason. Its open purchase orders and bills are reported for review, never cancelled.',
+                    'errors' => ['status' => ['Use the Cancel Project action.']],
+                ], 422);
+            }
+            if (in_array($enquiry->status, $finished, true) && $request->input('status') !== EnquiryConstants::STATUS_CLOSED) {
+                return response()->json([
+                    'message' => "This project is {$enquiry->status}. Reopen it with POST /enquiries/{id}/reactivate, giving a reason.",
+                    'errors' => ['status' => ['Use the Reactivate Project action.']],
+                ], 422);
+            }
+        }
+
         if ($request->input('status') === EnquiryConstants::STATUS_CLOSED) {
             $readiness = $completionAction->buildClosureReadiness($enquiry);
 

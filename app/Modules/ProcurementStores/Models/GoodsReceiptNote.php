@@ -103,6 +103,7 @@ class GoodsReceiptNote extends Model
     {
         $stillPending = $this->items()
             ->where('accepted', true)
+            ->whereNull('reversed_at')
             ->where('store_status', 'pending')
             ->exists();
 

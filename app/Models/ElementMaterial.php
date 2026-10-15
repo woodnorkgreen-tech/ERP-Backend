@@ -67,7 +67,32 @@ class ElementMaterial extends Model
         'notes',
         'source_metadata',
         'sort_order',
+        // Report 78B — Stores' reading of the requirement. Never the BOM's own text.
+        'requirement_disposition',
+        'requested_material_id',
+        'requirement_uom_id',
+        'requirement_base_uom_id',
+        'requirement_base_factor',
+        'requirement_unit_basis',
     ];
+
+    public const DISPOSITION_NON_STOCK = 'non_stock';
+    public const DISPOSITION_AWAITING_REGISTRATION = 'awaiting_registration';
+
+    /**
+     * Where this requirement stands with Stores, derived from the stored facts:
+     * resolved | awaiting_resolution | awaiting_registration | non_stock.
+     */
+    public function effectiveDisposition(): string
+    {
+        if ($this->library_material_id) {
+            return 'resolved';
+        }
+
+        return in_array($this->requirement_disposition, [self::DISPOSITION_NON_STOCK, self::DISPOSITION_AWAITING_REGISTRATION], true)
+            ? $this->requirement_disposition
+            : 'awaiting_resolution';
+    }
 
     protected $casts = [
         'library_material_id' => 'integer',
@@ -77,7 +102,16 @@ class ElementMaterial extends Model
         'is_additional' => 'boolean',
         'sort_order' => 'integer',
         'source_metadata' => 'array',
+        'requested_material_id' => 'integer',
+        'requirement_uom_id' => 'integer',
+        'requirement_base_uom_id' => 'integer',
+        'requirement_unit_basis' => 'array',
     ];
+
+    public function requestedMaterial(): BelongsTo
+    {
+        return $this->belongsTo(LibraryMaterial::class, 'requested_material_id');
+    }
 
     public function element(): BelongsTo
     {

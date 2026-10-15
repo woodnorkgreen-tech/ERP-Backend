@@ -30,8 +30,22 @@ class StockMovementReversalService
             if (InventoryLog::where('reversal_of_log_id', $original->id)->exists()) {
                 throw ValidationException::withMessages(['movement' => 'This movement has already been reversed.']);
             }
-            if (! in_array($original->type, ['check_in', 'check_out', 'issue', 'consumption', 'adjustment'], true)) {
+            // A count adjustment is one line of an approved stock count, and the
+            // count posted one entry for all its lines. Backing out a single
+            // line here would restore the quantity and leave that entry
+            // standing. A count is corrected by another count, which posts the
+            // opposite entry and keeps both on record (Report 76A Part 2 §8).
+            if ($original->type === 'adjustment') {
+                throw ValidationException::withMessages(['movement' => 'A stock-count adjustment is corrected by recording a new stock count, not by reversing one of its lines. The new count posts the opposite entry and both stay on record.']);
+            }
+            if (! in_array($original->type, ['check_in', 'check_out', 'issue', 'consumption', 'defective'], true)) {
                 throw ValidationException::withMessages(['movement' => "Movement type '{$original->type}' is not reversible."]);
+            }
+            if ($original->type === 'defective' && $original->material?->isBoardTrackable()) {
+                throw ValidationException::withMessages(['movement' => 'A scrapped board is not brought back by reversing its write-off: the board itself stays scrapped. Register the board again as a stock adjustment if it is sound.']);
+            }
+            if ($original->type === 'defective' && $original->material?->isConsumableUnit()) {
+                throw ValidationException::withMessages(['movement' => 'A write-off from a roll is corrected through a reviewed count of that roll.']);
             }
 
             $stock = Stock::where('material_id', $original->material_id)->lockForUpdate()->first();
@@ -41,9 +55,8 @@ class StockMovementReversalService
 
             $isReceipt = $original->type === 'check_in';
             $isIssue = in_array($original->type, ['check_out', 'issue', 'consumption'], true);
-            $quantity = $isReceipt
-                ? -abs((float) $original->quantity)
-                : ($isIssue ? abs((float) $original->quantity) : -(float) $original->quantity);
+            // A receipt comes back out; an issue or a write-off goes back in.
+            $quantity = $isReceipt ? -abs((float) $original->quantity) : abs((float) $original->quantity);
 
             if ($original->material->isConsumableUnit()) $quantity = $isReceipt ? '-'.ltrim($original->quantity, '-') : ltrim($original->quantity, '-');
 
@@ -114,6 +127,12 @@ class StockMovementReversalService
                 $this->costProducer->postStockIssueReversal($reversal);
             }
 
+            // Report 76A Part 2 §8: a movement that owns a ledger entry of its
+            // own — company use, damage, waste, or stock taken in without a
+            // purchase — has that entry reversed with it: Inventory restored,
+            // the expense or adjustment backed out. Accounts Payable is not
+            // involved and no project cost is created or removed.
+            $this->reverseOwnJournal($original, $actorId, $reason);
             if ($isReceipt) {
                 $items = GoodsReceiptNoteItem::where('inventory_log_id', $original->id)->lockForUpdate()->get();
                 foreach ($items as $item) {
@@ -131,5 +150,35 @@ class StockMovementReversalService
 
             return $reversal->fresh(['material', 'user', 'reversedMovement']);
         });
+    }
+
+    private function reverseOwnJournal(InventoryLog $original, int $actorId, string $reason): void
+    {
+        $posting = \App\Modules\ProcurementStores\Models\StoresFinancePosting::where('inventory_log_id', $original->id)
+            ->whereIn('posting_type', [...array_values(InventoryLog::NON_PROJECT_POSTINGS), InventoryLog::POSTING_EXCEPTIONAL_RECEIPT])
+            ->lockForUpdate()->first();
+        $journalId = $posting?->journal_entry_id;
+
+        if ($posting && ! $journalId && in_array($posting->status, ['pending', 'processing', 'failed'], true)) {
+            // The stock is back; the entry it would have needed is no longer owed.
+            $posting->update(['status' => 'not_applicable', 'last_error' => 'Movement reversed before its entry was posted.', 'processing_started_at' => null]);
+
+            return;
+        }
+        if (! $journalId) {
+            return;
+        }
+
+        $entry = \App\Modules\Finance\Models\JournalEntry::find($journalId);
+        if (! $entry || $entry->status !== 'posted') {
+            return;
+        }
+
+        try {
+            app(\App\Modules\Finance\Services\JournalPostingService::class)
+                ->reverseEntry($entry, $actorId, "Stock movement #{$original->id} reversed: {$reason}");
+        } catch (\InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['movement' => 'The movement could not be reversed in the books: '.$exception->getMessage()]);
+        }
     }
 }

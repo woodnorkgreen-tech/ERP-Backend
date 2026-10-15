@@ -75,6 +75,18 @@ class Permissions
     const PROJECT_VIEW_REPORTS = 'project.view_reports';
     const PROJECT_CLOSE = 'project.close';
     const PROJECT_COSTS_READ_ASSIGNED = 'project.costs.read_assigned';
+    // Report 78C: lifecycle moves that used to be a free-text status edit.
+    // Cancelling and reactivating a job change what Stores and Procurement
+    // treat as live work, so they are governed actions with a reason.
+    const PROJECT_LIFECYCLE_GOVERN = 'project.lifecycle.govern';
+    const PROJECT_HOLD_MANAGE = 'project.hold.manage';
+    // Report 78C: recording that a requirement was fulfilled outside the ERP.
+    // Deliberately not a Stores permission — the person who issues stock should
+    // not also be the one who can make its outstanding demand disappear.
+    const PROJECT_MATERIALS_RETIRE_LEGACY = 'project_materials.retire_legacy';
+    // Report 78C: issue / board request / project requisition on a completed,
+    // closed or on-hold job, with a recorded reason (snag and remedial work).
+    const PROJECT_MATERIALS_CLOSED_JOB_OVERRIDE = 'project_materials.closed_job_override';
 
     // ===========================================
     // ENQUIRY MANAGEMENT PERMISSIONS
@@ -572,6 +584,8 @@ class Permissions
             self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
             self::PROJECT_ASSIGN_USERS, self::PROJECT_VIEW_REPORTS, self::PROJECT_CLOSE,
             self::PROJECT_COSTS_READ_ASSIGNED,
+            self::PROJECT_LIFECYCLE_GOVERN, self::PROJECT_HOLD_MANAGE,
+            self::PROJECT_MATERIALS_RETIRE_LEGACY, self::PROJECT_MATERIALS_CLOSED_JOB_OVERRIDE,
 
             // Enquiry Management
             self::ENQUIRY_CREATE, self::ENQUIRY_READ, self::ENQUIRY_UPDATE, self::ENQUIRY_DELETE,
@@ -728,6 +742,8 @@ class Permissions
                 self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
                 self::PROJECT_ASSIGN_USERS, self::PROJECT_VIEW_REPORTS, self::PROJECT_CLOSE,
                 self::PROJECT_COSTS_READ_ASSIGNED,
+                self::PROJECT_LIFECYCLE_GOVERN, self::PROJECT_HOLD_MANAGE,
+                self::PROJECT_MATERIALS_RETIRE_LEGACY, self::PROJECT_MATERIALS_CLOSED_JOB_OVERRIDE,
             ],
             'enquiry_management' => [
                 self::ENQUIRY_CREATE, self::ENQUIRY_READ, self::ENQUIRY_UPDATE, self::ENQUIRY_DELETE,
@@ -916,6 +932,10 @@ class Permissions
             self::PROJECT_UPDATE => 'Modify Project Parameters',
             self::PROJECT_DELETE => 'Archive/Delete Projects',
             self::PROJECT_ASSIGN_USERS => 'Allocate Staff to Projects',
+            self::PROJECT_LIFECYCLE_GOVERN => 'Cancel or Reactivate Projects',
+            self::PROJECT_HOLD_MANAGE => 'Place and Release Project Holds',
+            self::PROJECT_MATERIALS_RETIRE_LEGACY => 'Retire Requirements Fulfilled Outside the ERP',
+            self::PROJECT_MATERIALS_CLOSED_JOB_OVERRIDE => 'Authorize Material Work on Completed, Closed or On-Hold Jobs',
 
             // Finance
             self::FINANCE_VIEW => 'Access Finance Module',

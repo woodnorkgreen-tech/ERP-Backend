@@ -22,6 +22,7 @@ class SyncEnquiryStatusAction
         // Skip syncing for closed, approved, or active project statuses
         if (in_array($enquiry->status, [
             'completed', 
+            'closed', // Report 78C: a closed job was missing here, so a task change could rewrite it
             'cancelled', 
             'quote_approved', 
             'awaiting_deposit', 

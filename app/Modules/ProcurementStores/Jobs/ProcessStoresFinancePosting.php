@@ -27,14 +27,28 @@ class ProcessStoresFinancePosting implements ShouldQueue
     public function handle(StoresCostProducer $producer): void
     {
         $posting = StoresFinancePosting::with('inventoryLog')->findOrFail($this->postingId);
-        if ($posting->status === 'posted' && $posting->cost_line_id) return;
-
+        if ($posting->status === 'posted' && ($posting->cost_line_id || $posting->journal_entry_id)) return;
+        if ($posting->status === 'not_applicable') return;
         $posting->update([
             'status' => 'processing', 'attempts' => $posting->attempts + 1,
             'processing_started_at' => now(), 'last_error' => null, 'next_retry_at' => null,
         ]);
 
         try {
+            // Report 76A Part 2: stock that left Stores for the company's own
+            // use, or was written off as damage or waste. A ledger entry on its
+            // own governed account, and never a project cost — so no cost line.
+            if (in_array($posting->posting_type, InventoryLog::NON_PROJECT_POSTINGS, true)) {
+                $entry = app(\App\Modules\Finance\Services\StockMovementPostingService::class)
+                    ->postNonProjectReduction($posting->inventoryLog, $posting->last_retried_by ?: $posting->inventoryLog?->user_id);
+                $posting->update($entry
+                    ? ['status' => 'posted', 'journal_entry_id' => $entry->id, 'posted_at' => now(), 'processing_started_at' => null, 'last_error' => null]
+                    : ['status' => 'not_applicable', 'posted_at' => now(), 'processing_started_at' => null,
+                        'last_error' => 'No entry required: this stock was carried at no value.']);
+
+                return;
+            }
+
             // A historical zero-value issue has no project cost to reverse. It
             // is a valid no-posting outcome, not an accounting failure. Keep the
             // outbox record as terminal audit evidence without inventing a

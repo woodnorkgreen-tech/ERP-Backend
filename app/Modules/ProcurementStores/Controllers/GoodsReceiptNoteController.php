@@ -346,7 +346,7 @@ class GoodsReceiptNoteController extends Controller
         try {
             DB::beginTransaction();
 
-            $purchaseOrder = PurchaseOrder::with(['items.material.materialCategory.parent', 'items.material.baseUom', 'items.material.purchaseUom', 'items.material.uomConversions'])->lockForUpdate()
+            $purchaseOrder = PurchaseOrder::with(['items.material.materialCategory.parent', 'items.material.baseUom', 'items.material.purchaseUom', 'items.material.uomConversions', 'items.requisitionItem.expenseCode'])->lockForUpdate()
                 ->findOrFail($request->purchase_order_id);
 
             // W2-4: while a commercial amendment awaits approval, the order's
@@ -367,6 +367,7 @@ class GoodsReceiptNoteController extends Controller
                 }
                 $accepted = DB::table('goods_receipt_note_items')
                     ->where('purchase_order_item_id', $poItem->id)->where('accepted', true)
+                    ->whereNull('reversed_at')
                     ->sum('received_quantity');
                 $remaining = (float) $poItem->quantity - (float) $accepted;
                 if (($item['accepted'] ?? false) && (float) $item['received_quantity'] > $remaining) {
@@ -433,9 +434,20 @@ class GoodsReceiptNoteController extends Controller
                     }
                 }
 
-                $grnItem->update(['stock_status' => $stockStatus]);
+                $isNonStock = $stockStatus === 'not_stocked'
+                    && \App\Modules\Finance\CostCollector\Services\ProcurementCostProducer::isNonStock($poItem);
+                $grnItem->update(['stock_status' => $stockStatus] + ($isNonStock ? [
+                    // Not a Stores item — a service, a subcontract, an overhead:
+                    // there is no shelf to confirm it onto. This receipt is its
+                    // goods/service confirmation, made by the person recording
+                    // it (Report 76A Part 2, Decision B). A line with no
+                    // material whose category IS a stock material still waits
+                    // for Stores to match it, as before.
+                    'store_status' => 'confirmed',
+                    'confirmed_by' => auth()->id(),
+                    'confirmed_at' => now(),
+                ] : []));
             }
-
             // If nothing on this GRN was accepted, there is nothing left for
             // Stores to confirm — close the GRN out rather than leaving it
             // sitting at 'pending_confirmation'.
@@ -579,6 +591,59 @@ class GoodsReceiptNoteController extends Controller
     }
 
     /**
+     * Reverse one receipt line (Report 76A Part 2 §8).
+     *
+     * The controlled alternative to deleting a receipt: the line, its note and
+     * its journals stay on record, and the accrual (or, for a non-stock
+     * purchase, the cost) it raised is backed out. Refused while the goods are
+     * in Stores or a supplier invoice already covers them — see
+     * GoodsReceiptReversalService.
+     */
+    public function reverseItem(Request $request, $grnItemId)
+    {
+        abort_unless(
+            auth()->user()?->can(Permissions::STORES_MOVEMENT_REVERSE),
+            403,
+            'You are not permitted to reverse a goods receipt.'
+        );
+        $validated = $request->validate(['reason' => 'required|string|min:10|max:1000']);
+        $item = GoodsReceiptNoteItem::findOrFail($grnItemId);
+
+        try {
+            $reversed = app(\App\Modules\ProcurementStores\Services\GoodsReceiptReversalService::class)
+                ->reverse($item, $validated['reason'], auth()->user());
+        } catch (ValidationException $e) {
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
+        }
+
+        $this->syncProjectProcurement($reversed->goods_receipt_note_id);
+
+        return response()->json([
+            'message' => 'Receipt line reversed. The original receipt and its entries were kept.',
+            'data' => $reversed,
+        ]);
+    }
+
+    /**
+     * Close out received value the supplier will never invoice (Report 76A-3 §2).
+     * Finance's decision, after reconciling the order: it is not offered to Stores.
+     */
+    public function closeOutAccrual(Request $request, $grnItemId)
+    {
+        abort_unless(auth()->user()?->can(Permissions::FINANCE_PAYABLES_VERIFY), 403, 'Closing out a receipt accrual is a payables decision.');
+        $validated = $request->validate(['reason' => 'required|string|min:10|max:1000']);
+        $item = GoodsReceiptNoteItem::findOrFail($grnItemId);
+
+        try {
+            $closeout = app(\App\Modules\ProcurementStores\Services\SupplierCreditService::class)->closeOutReceipt($item, $validated['reason'], auth()->user());
+        } catch (ValidationException $e) {
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
+        }
+
+        return response()->json(['message' => 'Receipt accrual closed out.', 'data' => $closeout], 201);
+    }
+
+    /**
      * Get purchase orders that don't have a GRN yet
      */
     public function getAvailablePurchaseOrders()
@@ -590,7 +655,7 @@ class GoodsReceiptNoteController extends Controller
             ->orderBy('created_at', 'desc')
             ->get()
             ->filter(fn (PurchaseOrder $po) => $po->items->contains(fn ($item) =>
-                (float) $item->goodsReceiptNoteItems->where('accepted', true)->sum('received_quantity')
+                (float) $item->goodsReceiptNoteItems->where('accepted', true)->whereNull('reversed_at')->sum('received_quantity')
                     < (float) $item->quantity
             ))->values();
 

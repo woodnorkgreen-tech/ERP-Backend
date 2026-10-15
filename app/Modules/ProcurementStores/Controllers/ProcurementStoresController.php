@@ -509,6 +509,20 @@ class ProcurementStoresController extends Controller
     }
 
     /**
+     * The departments stock can be issued to when it is not for a project.
+     * A picker for anyone who can see Stores: names only, nothing financial.
+     */
+    public function costCentreOptions(): JsonResponse
+    {
+        if (! $this->allows(Permissions::STORES_VIEW, Permissions::STORES_MANAGE, Permissions::STORES_REVIEW)) {
+            return response()->json(['message' => 'Only Stores team members can see this list.'], 403);
+        }
+
+        return response()->json(['data' => DB::table('cost_centres')
+            ->where('is_active', true)->orderBy('name')->get(['id', 'code', 'name'])]);
+    }
+
+    /**
      * Process a stock check-in (Add to inventory)
      */
     /*
@@ -546,6 +560,8 @@ class ProcurementStoresController extends Controller
             'serial_numbers' => 'nullable|array',
             'serial_numbers.*' => 'string|max:150',
             'grn_item_id' => 'nullable|integer|exists:goods_receipt_note_items,id',
+            // With no goods receipt, the reason this stock exists (Report 76A Part 2).
+            'receipt_reason' => ['nullable', Rule::in(\App\Modules\ProcurementStores\Models\InventoryLog::EXCEPTIONAL_RECEIPT_REASONS)],
         ]);
 
         $result = $poster->post('receive', $request->except('type'));
@@ -670,31 +686,16 @@ class ProcurementStoresController extends Controller
                 // counted figure is now posted as an adjustment like any other
                 // movement, so the ledger stays the only account of the balance.
                 $difference = round($counted - (float) $stock->quantity_on_hand, 2);
+                // Report 76A Part 2 (Decisions C and D): typing a new balance here
+                // changed stock on one person's say-so and posted nothing to the
+                // accounts — Inventory in the ledger stayed where it was. A
+                // balance is corrected by a stock count: counted by one person,
+                // approved by another, and posted to Inventory Adjustments.
                 if (abs($difference) >= 0.01) {
-                    // Narrower than the "Stores team member" gate above: someone
-                    // can be trusted to hold stock settings generally without
-                    // being handed the ability to move the ledger via a count.
-                    if (! auth()->user()?->can(Permissions::STORES_ADJUST_QUANTITY)) {
-                        abort(403, 'You do not have permission to adjust stock quantities.');
-                    }
-
-                    if (blank($validated['stock_adjustment_reason'] ?? null)) {
-                        throw ValidationException::withMessages([
-                            'stock_adjustment_reason' => 'Say what the new count is based on — this posts a stock adjustment.',
-                        ]);
-                    }
-
-                    app(InventoryService::class)->adjustStock(
-                        $material->id,
-                        $difference,
-                        'adjustment',
-                        [
-                            'warehouse_code' => $stock->warehouse_code,
-                            'notes' => 'Counted balance set to '.$counted.' — '.$validated['stock_adjustment_reason'],
-                            'logged_at' => now(),
-                        ],
-                    );
-                    $stock->refresh();
+                    throw ValidationException::withMessages([
+                        'stock_quantity' => 'A stock balance is corrected through a stock count, which is reviewed and reaches the accounts. '
+                            .'Record the count in Stores > Stock counts; the other settings on this screen can still be saved.',
+                    ]);
                 }
             }
 
@@ -1122,7 +1123,10 @@ class ProcurementStoresController extends Controller
                 - (float) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
             $movementNet = abs((float) $movement->quantity)
                 - (float) $movement->returns()->fulfilmentReopeningReturns()->sum('quantity');
-            if ($movementNet > max(0, (float) $planned->quantity - $alreadyLinked) + 0.00001) {
+            // Report 78B: both sides in the material's stock unit.
+            $requiredBase = (float) app(\App\Modules\ProcurementStores\Services\RequirementUnits::class)
+                ->requiredInBaseOrFail($planned, $movement->material, 'project_material_id');
+            if ($movementNet > max(0, $requiredBase - $alreadyLinked) + 0.00001) {
                 throw ValidationException::withMessages(['project_material_id' => 'This issue is larger than the quantity remaining on that approved material line.']);
             }
 
@@ -1138,123 +1142,8 @@ class ProcurementStoresController extends Controller
         return response()->json(['message' => 'Movement linked to the approved material line. Stock was not moved again; Finance posting was queued where required.']);
     }
 
-    /**
-     * Give an approved material line, typed freehand with nothing in the
-     * catalogue behind it, a real Material Library identity — by picking an
-     * existing item or registering one on the spot — optionally receiving
-     * stock in the same act.
-     *
-     * Unlike linkProjectMaterial() above, this never touches a posted
-     * movement or a Finance fact: an unlinked line has issued nothing, because
-     * nothing could be issued against it. It is refused once the line already
-     * has a library_material_id, so this only ever fills a gap and never
-     * overwrites a prior decision — swapping an established link is a bigger
-     * question than this endpoint answers.
-     */
-    public function resolveProjectMaterialCatalogue(Request $request, ElementMaterial $elementMaterial, StockMovementPoster $poster): JsonResponse
-    {
-        if (! $this->allows(Permissions::STORES_MANAGE)) {
-            return response()->json(['message' => 'Only Stores team members can resolve a material to the catalogue.'], 403);
-        }
-
-        $validated = $request->validate([
-            'material_id' => 'nullable|required_without:new_material|prohibits:new_material|integer|exists:library_materials,id',
-            'new_material' => 'nullable|array|required_without:material_id',
-            'new_material.material_name' => 'required_with:new_material|string|max:255',
-            'new_material.material_category_id' => 'required_with:new_material|integer|exists:material_categories,id',
-            'new_material.material_code' => 'nullable|string|max:100|unique:library_materials,material_code',
-            'new_material.attributes' => 'nullable|array',
-            'new_material.issue_disposition' => ['nullable', Rule::in(MaterialControl::DISPOSITIONS)],
-            'new_material.tracking_mode' => ['nullable', Rule::in(MaterialControl::TRACKING_MODES)],
-            'new_material.base_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'new_material.purchase_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'new_material.issue_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'new_material.uom_conversions' => 'nullable|array|max:2',
-            'new_material.uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
-            'new_material.uom_conversions.*.factor' => 'required|numeric|gt:0',
-            'new_material.default_unit_cost' => 'nullable|numeric|min:0',
-            // Stock receipt is optional for both existing materials and new catalogue registrations.
-            // When stock is not yet on hand, resolving links the project line so that a Purchase Requisition
-            // can be generated directly from the desk for purchasing.
-            'receive' => ['nullable', 'array'],
-            'receive.quantity' => 'required_with:receive|numeric|min:0.01',
-            'receive.entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'receive.receipt_unit_cost' => 'nullable|numeric|min:0',
-            'receive.lot_number' => 'nullable|string|max:100',
-            'receive.expiry_date' => 'nullable|date|after_or_equal:today',
-            'receive.length' => 'nullable|numeric|min:0',
-            'receive.width' => 'nullable|numeric|min:0',
-            'receive.thickness' => 'nullable|numeric|min:0',
-            'receive.location' => 'nullable|string|max:50',
-            'receive.controlled_units' => 'nullable|array|min:1|max:100',
-            'receive.controlled_units.*.quantity' => 'required_with:receive.controlled_units|numeric|gt:0',
-            'receive.controlled_units.*.notes' => 'nullable|string|max:2000',
-        ]);
-
-        if ($elementMaterial->library_material_id) {
-            return response()->json(['message' => 'This line is already linked to a Material Library item.'], 422);
-        }
-
-        $elementMaterial->loadMissing('element.taskMaterialsData');
-        $this->assertMaterialsApproved($elementMaterial->element?->taskMaterialsData);
-
-        $movementLog = null;
-
-        DB::transaction(function () use ($request, $validated, $elementMaterial, $poster, &$movementLog) {
-            $locked = ElementMaterial::lockForUpdate()->findOrFail($elementMaterial->id);
-            if ($locked->library_material_id) {
-                throw ValidationException::withMessages(['material_id' => 'This line is already linked to a Material Library item.']);
-            }
-
-            if ($request->filled('receive')) {
-                $line = array_filter(array_merge($validated['receive'], [
-                    'material_id' => $validated['material_id'] ?? null,
-                    'new_material' => $validated['new_material'] ?? null,
-                ]), fn ($value) => $value !== null);
-                $posted = $poster->post('receive', $line);
-                $movementLog = $posted['log'];
-                $materialId = $movementLog->material_id;
-            } elseif ($request->filled('new_material')) {
-                $material = app(\App\Modules\MaterialsLibrary\Services\MaterialRegistrationService::class)->create(
-                    $validated['new_material'],
-                    (int) auth()->id()
-                );
-                $materialId = $material->id;
-            } else {
-                $material = LibraryMaterial::findOrFail($validated['material_id']);
-                if (($material->item_status ?? 'Active') !== 'Active') {
-                    throw ValidationException::withMessages([
-                        'material_id' => "Only Active Material Library items can be linked. '{$material->material_name}' is {$material->item_status}.",
-                    ]);
-                }
-                $materialId = $material->id;
-            }
-
-            $locked->library_material_id = $materialId;
-            $locked->source_metadata = array_merge($locked->source_metadata ?? [], [
-                'catalogue_resolution' => [
-                    'resolved_by' => auth()->id(),
-                    'resolved_at' => now()->toIso8601String(),
-                    'library_material_id' => $materialId,
-                ],
-            ]);
-            $locked->save();
-        });
-
-        $elementMaterial->refresh()->load('libraryMaterial');
-
-        return response()->json([
-            'message' => "Linked to \"{$elementMaterial->libraryMaterial?->material_name}\". The line can now be issued.",
-            'data' => [
-                'project_material' => $elementMaterial,
-                'material' => $elementMaterial->libraryMaterial,
-                'movement' => $movementLog,
-                'controlled_units' => $movementLog && $elementMaterial->libraryMaterial?->isConsumableUnit()
-                    ? \App\Modules\ProcurementStores\Models\ConsumableUnit::with('material')->where('source_log_id', $movementLog->id)->get()
-                    : [],
-            ],
-        ]);
-    }
+    // Resolve Material moved to ProjectMaterialResolutionController /
+    // ProjectMaterialResolution (Report 78B): identity only, no stock receipt.
 
     /**
      * Chronological stock card for one material. balance_after is written in the
@@ -1513,83 +1402,17 @@ class ProcurementStoresController extends Controller
          * spoken for while a buyer choosing that same material saw nothing of
          * it. One definition, so the two screens cannot disagree.
          */
-        $pendingLines = app(ProjectMaterialDemand::class)->pendingLines();
+        $pendingLines = app(ProjectMaterialDemand::class)->pendingLines(
+            null,
+            \App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility::CAP_SHORTAGE,
+        );
 
-        if ($pendingLines->isEmpty()) {
-            return response()->json(['data' => [], 'summary' => [
-                'materials' => 0, 'fully_covered' => 0, 'at_risk' => 0, 'covered_by_incoming' => 0,
-            ]]);
-        }
+        // Report 78C: the arithmetic lives in MaterialShortageForecast, so the
+        // "Procurement Shortage" tile and this drawer are one calculation.
+        $forecast = app(\App\Modules\ProcurementStores\Services\MaterialShortageForecast::class);
+        $rows = $forecast->rows($pendingLines);
 
-        $materialIds = $pendingLines->pluck('library_material_id')->unique()->values();
-        $materials = LibraryMaterial::with('stock')
-            ->whereIn('id', $materialIds)->get()->keyBy('id');
-
-        $boardMaterialIds = $materials->filter(fn ($material) => $material->isBoardTrackable())
-            ->pluck('id')->unique();
-        $boardAvailable = Board::query()->whereIn('library_material_id', $boardMaterialIds)
-            ->where('status', 'Available')->selectRaw('library_material_id, COUNT(*) AS quantity')
-            ->groupBy('library_material_id')->pluck('quantity', 'library_material_id');
-
-        $incoming = PurchaseOrderItem::query()
-            ->whereNotNull('material_id')
-            ->whereHas('purchaseOrder', fn ($query) => $query->whereNotIn('status', ['cancelled', 'rejected', 'completed']))
-            ->withSum('goodsReceiptNoteItems as received_total', 'received_quantity')
-            ->get(['id', 'material_id', 'quantity'])
-            ->groupBy('material_id')
-            ->map(fn ($rows) => (float) $rows->sum(fn ($row) => max(0, (float) $row->quantity - (float) ($row->received_total ?? 0))));
-
-        $rows = $pendingLines->groupBy('library_material_id')->map(function ($materialLines, $materialId) use ($materials, $boardAvailable, $incoming) {
-            $material = $materials->get($materialId);
-            // Shaped here rather than in the service: `approved` is the word
-            // this screen has always used for the specified quantity, and the
-            // service speaks of it as `specified` for callers with no notion of
-            // a materials-task approval.
-            $projectRows = $materialLines->map(fn (array $line) => [
-                'project_id' => $line['project_id'],
-                'project_code' => $line['project_code'],
-                'project_title' => $line['project_title'],
-                'project_material_id' => $line['project_material_id'],
-                'element' => $line['element'],
-                'approved' => $line['specified'],
-                'issued' => $line['issued'],
-                'pending' => $line['pending'],
-                'required_by' => $line['required_by'],
-            ])->values();
-
-            $pending = (float) $projectRows->sum('pending');
-            $reserved = (float) ($material?->stock?->quantity_reserved ?? 0);
-            $available = $material?->isBoardTrackable()
-                ? max(0, (float) ($boardAvailable[$materialId] ?? 0) - $reserved)
-                : max(0, (float) ($material?->stock?->quantity_on_hand ?? 0) - $reserved);
-            $incomingQuantity = (float) ($incoming[$materialId] ?? 0);
-            $immediateShortage = max(0, $pending - $available);
-            $projectedShortage = max(0, $pending - $available - $incomingQuantity);
-            $status = $immediateShortage <= 0 ? 'fully_covered' : ($projectedShortage <= 0 ? 'covered_by_incoming' : ($available > 0 ? 'partially_covered' : 'shortage'));
-
-            return [
-                'material_id' => (int) $materialId,
-                'material_name' => $material?->material_name ?? 'Material',
-                'material_code' => $material?->material_code,
-                'unit' => $material?->unit_of_measure,
-                'pending_demand' => round($pending, 4),
-                'available' => round($available, 4),
-                'incoming' => round($incomingQuantity, 4),
-                'immediate_shortage' => round($immediateShortage, 4),
-                'projected_shortage' => round($projectedShortage, 4),
-                'coverage_percent' => $pending > 0 ? min(100, round(($available / $pending) * 100, 1)) : 100,
-                'earliest_required_by' => $projectRows->pluck('required_by')->filter()->sort()->first(),
-                'status' => $status,
-                'projects' => $projectRows,
-            ];
-        })->filter()->sortByDesc('projected_shortage')->values();
-
-        return response()->json(['data' => $rows, 'summary' => [
-            'materials' => $rows->count(),
-            'fully_covered' => $rows->where('status', 'fully_covered')->count(),
-            'at_risk' => $rows->whereIn('status', ['partially_covered', 'shortage'])->count(),
-            'covered_by_incoming' => $rows->where('status', 'covered_by_incoming')->count(),
-        ]]);
+        return response()->json(['data' => $rows, 'summary' => $forecast->summary($rows)]);
     }
 
     /**

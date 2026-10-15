@@ -676,6 +676,14 @@ class JournalPostingService
             return $this->accountByCode(self::ACCRUED_CODE);
         }
 
+        // A non-stock purchase received or confirmed (Report 76A Part 2,
+        // Decision B): the cost is real from that moment and the supplier is
+        // owed for it, not yet invoiced. Same liability as a goods receipt;
+        // the debit is the expense or work in progress, never Inventory.
+        if ($line->isReceiptActual()) {
+            return $this->accountByCode(self::ACCRUED_CODE);
+        }
+
         // Spend that names the float or account it came out of — petty cash
         // disbursements and their transaction fees carry this.
         $sourceId = $line->details['payment_source_id'] ?? null;
@@ -998,7 +1006,10 @@ class JournalPostingService
         // total_debit/total_credit both set from the debit legs' sum alone
         // and no independent bccomp assertion that the credit legs actually
         // matched. The funnel is the one place that assertion is made).
-        $legs = array_map(function (array $leg) use ($projectId, $projectEnquiryId) {
+        // Built inside the transaction below: for a line-matched invoice the
+        // legs revalue stock on hand, and that must commit or roll back with
+        // the entry itself (Report 76A-3).
+        $buildLegs = fn () => array_map(function (array $leg) use ($projectId, $projectEnquiryId) {
             $leg['project_id'] ??= $projectId;
             $leg['project_enquiry_id'] ??= $projectEnquiryId;
 
@@ -1010,7 +1021,8 @@ class JournalPostingService
             : 'Supplier invoice '.($bill->supplier_invoice_number ?: $bill->bill_number)
                 .' accepted against '.($bill->purchaseOrder?->po_number ?? 'order');
 
-        return DB::transaction(function () use ($bill, $entryNo, $period, $legs, $description) {
+        return DB::transaction(function () use ($bill, $entryNo, $period, $buildLegs, $description) {
+            $legs = $buildLegs();
             $entry = $this->postBalancedEntry(
                 entryNo: $entryNo,
                 postingDate: (string) ($bill->bill_date?->toDateString() ?? now()->toDateString()),
@@ -1048,8 +1060,24 @@ class JournalPostingService
             return;
         }
 
+        // Only once the whole receipt accrual on the order has been covered by
+        // invoices. Marking every receipt line "settled" on the first part
+        // bill (Report 76 P1-13) hid goods that had been received and not yet
+        // invoiced. Both kinds of receipt line are liabilities a bill clears:
+        // stocked goods (`accrual`) and non-stock goods or services
+        // (`receipt-actual`).
+        $accrued = (string) CostLine::where('source_type', GoodsReceiptNoteItem::class)
+            ->whereIn('source_ref', CostLine::RECEIPT_LIABILITY_REFS)
+            ->whereIn('details->purchase_order_item_id', $poItemIds)
+            ->whereHas('journalEntry', fn ($journal) => $journal->where('status', 'posted'))
+            ->sum('net_amount');
+        $covered = $bill->purchaseOrder ? $bill->purchaseOrder->totalBilled() : '0.00';
+        if (bccomp($covered, $accrued, 2) < 0) {
+            return;
+        }
+
         CostLine::where('source_type', GoodsReceiptNoteItem::class)
-            ->where('source_ref', 'accrual')
+            ->whereIn('source_ref', CostLine::RECEIPT_LIABILITY_REFS)
             ->whereIn('details->purchase_order_item_id', $poItemIds)
             ->whereNull('settled_by_bill_id')
             ->update(['settled_by_bill_id' => $bill->id]);
@@ -1089,15 +1117,103 @@ class JournalPostingService
             );
         }
 
-        $legs = [[
-            'account_id' => $debitAccountId,
-            'entry_type' => 'debit',
-            'amount' => $net,
-            'description' => $bill->isDirect()
-                ? 'Expense recognized on direct supplier invoice '.$bill->bill_number
-                : 'Accrual cleared by supplier invoice '.$bill->bill_number,
-        ]];
+        if ($bill->isDirect()) {
+            $legs = [[
+                'account_id' => $debitAccountId,
+                'entry_type' => 'debit',
+                'amount' => $net,
+                'description' => 'Expense recognized on direct supplier invoice '.$bill->bill_number,
+            ]];
+        } else {
+            /*
+             * Report 76A Part 2, Decision A — the receipt-to-invoice true-up.
+             *
+             * The goods receipt accrued what was RECEIVED, at the order's
+             * prices. This invoice clears exactly the part of that accrual it
+             * covers, and no more. Whatever else the supplier charged — a
+             * different price, a discount, VAT that cannot be recovered — is a
+             * purchase-price variance and is posted as one, on its own
+             * approved account:
+             *
+             *   Dr  Accrued Expenses          receipt value covered
+             *   Dr  Purchase price variance   invoice basis − receipt value   (Cr when negative)
+             *   Dr  Input VAT                 recoverable VAT, from this invoice only
+             *   Cr  WHT payable
+             *   Cr  Accounts Payable          what the supplier is owed
+             *
+             * It used to debit Accrued Expenses for the invoice's own net,
+             * whatever the receipt had put there, so every difference stayed in
+             * the accrual and in the stock value for ever (Report 76 P0-3).
+             */
+            $covered = $this->money($bill->receiptValueCovered());
+            $legs = [];
+            if (bccomp($covered, '0.00', 2) > 0) {
+                $legs[] = [
+                    'account_id' => $debitAccountId,
+                    'entry_type' => 'debit',
+                    'amount' => $covered,
+                    'description' => 'Accrual cleared by supplier invoice '.$bill->bill_number,
+                ];
+            }
 
+            /*
+             * Report 76A-3 — where the difference goes.
+             *
+             * A line-matched invoice knows, per line, how its cost differs
+             * from the receipts it covers, and BillCostDifferenceService says
+             * where each difference belongs: stock still on the shelf is
+             * revalued (Inventory, and the material's average cost with it);
+             * the rest — stock already issued, non-stock purchases, VAT that
+             * cannot be recovered on goods no longer held — goes to the
+             * governed purchase-price-variance account, or the invoice is not
+             * posted. Nothing is left in the accrual and nothing is posted to
+             * a guessed account.
+             */
+            $bill->loadMissing('lines');
+            $toInventory = '0.00';
+            $toVariance = '0.00';
+            if ($bill->lines->isNotEmpty()) {
+                $differences = app(\App\Modules\ProcurementStores\Services\BillCostDifferenceService::class);
+                foreach ($differences->plan($bill, lock: true) as $part) {
+                    if ($part['material_id'] && bccomp($part['to_inventory'], '0.00', 2) !== 0) {
+                        $differences->revalue((int) $part['material_id'], $part['to_inventory']);
+                    }
+                    $part['line']->forceFill(['posted_to_inventory' => $part['to_inventory'], 'posted_to_variance' => $part['to_variance']])->save();
+                    $toInventory = bcadd($toInventory, $part['to_inventory'], 2);
+                    $toVariance = bcadd($toVariance, $part['to_variance'], 2);
+                }
+            } else {
+                // A bill with no lines (verified before line matching): the
+                // whole difference is a variance, as it was.
+                $toVariance = bcsub($net, $covered, 2);
+            }
+
+            if (bccomp($toInventory, '0.00', 2) !== 0) {
+                $inventory = $this->accountByCode(self::INVENTORY_CODE);
+                if (! $inventory) {
+                    throw new InvalidArgumentException("Supplier invoice {$bill->bill_number} cannot post: the Inventory account must be active and postable.");
+                }
+                $legs[] = [
+                    'account_id' => $inventory,
+                    'entry_type' => bccomp($toInventory, '0.00', 2) > 0 ? 'debit' : 'credit',
+                    'amount' => ltrim($toInventory, '-'),
+                    'description' => 'Stock on hand revalued to the invoiced cost on '.$bill->bill_number,
+                ];
+            }
+            if (bccomp($toVariance, '0.00', 2) !== 0) {
+                $legs[] = [
+                    'account_id' => \App\Modules\Finance\Support\GovernedPostingAccount::require(
+                        \App\Modules\Finance\Support\GovernedPostingAccount::PURCHASE_PRICE_VARIANCE,
+                        "the price difference on supplier invoice {$bill->bill_number}",
+                    ),
+                    'entry_type' => bccomp($toVariance, '0.00', 2) > 0 ? 'debit' : 'credit',
+                    'amount' => ltrim($toVariance, '-'),
+                    'description' => 'Purchase price variance on '.$bill->bill_number
+                        .' (cost not attributable to stock on hand)'
+                        .($bill->price_variance_reason ? ' — '.$bill->price_variance_reason : ''),
+                ];
+            }
+        }
         if (bccomp($vat, '0.00', 2) > 0) {
             $legs[] = [
                 'account_id' => $bill->vatTreatment?->gl_account_id

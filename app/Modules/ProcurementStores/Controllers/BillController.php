@@ -8,6 +8,7 @@ use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Http\Resources\BillResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
@@ -306,7 +307,23 @@ class BillController extends Controller
             // anything; the requester must separately hold the override
             // permission, checked below.
             'duplicate_override_reason' => 'nullable|string|min:5|max:1000',
+            // Report 76A-3: what the invoice charges, line by line. The receipt
+            // value each line covers is computed from the accepted receipts it
+            // is matched to — it is not accepted from the request.
+            'lines' => 'nullable|array|min:1|max:200',
+            'lines.*.purchase_order_item_id' => 'required_with:lines|integer',
+            'lines.*.quantity' => 'required_with:lines|numeric|gt:0',
+            'lines.*.unit_price_net' => 'required_with:lines|numeric|min:0',
+            'lines.*.discount_amount' => 'nullable|numeric|min:0',
+            'lines.*.taxable' => 'nullable|boolean',
+            'lines.*.description' => 'nullable|string|max:500',
+            'lines.*.variance_reason' => 'nullable|string|min:5|max:1000',
+            'lines.*.allocations' => 'nullable|array|min:1',
+            'lines.*.allocations.*.goods_receipt_note_item_id' => 'required_with:lines.*.allocations|integer',
+            'lines.*.allocations.*.quantity' => 'required_with:lines.*.allocations|numeric|gt:0',
+            'receipt_value_covered' => 'prohibited',
         ], [
+            'receipt_value_covered.prohibited' => 'The receipt value an invoice covers is worked out from its lines and the receipts they are matched to. Enter the invoice lines instead.',
             'expense_code_id.exists' => 'Choose a category for a service or overhead invoice. '
                 .'Staff payments, stores issues and non-purchase categories cannot classify a bill, '
                 .'and a materials purchase belongs on a purchase order, not a direct invoice.',
@@ -319,6 +336,8 @@ class BillController extends Controller
         try {
             if ($isDirect) {
                 $input['purchase_order_id'] = null;
+                // No receipt behind a direct bill, so nothing to measure a
+                // price difference against.
             } else {
                 $purchaseOrder = PurchaseOrder::findOrFail($input['purchase_order_id']);
 
@@ -426,16 +445,41 @@ class BillController extends Controller
             // once it exists — a pre-creation estimate using only the
             // request's raw amount/vat_amount would be wrong whenever VAT is
             // derived rather than explicitly stated on the invoice.
+            if (! $isDirect && ! empty($input['lines'])) {
+                try {
+                    app(\App\Modules\ProcurementStores\Services\BillMatchingService::class)->syncStated($bill, $input['lines']);
+                } catch (ValidationException $exception) {
+                    $bill->delete();
+
+                    return response(['error' => $exception->errors()], 422);
+                }
+                $bill->refresh();
+            }
+
             if (! $isDirect) {
+                // Measured on the receipt basis: how much of the ORDER this
+                // invoice bills, at the order's prices. A supplier charging a
+                // different price is a variance on top of that, not more of
+                // the order billed — and never a way to bill quantity that
+                // was not ordered.
                 $remainingBillable = $purchaseOrder->remainingBillable(excludingBillId: $bill->id);
-                if (bccomp((string) $bill->net_amount, $remainingBillable, 2) > 0) {
+                if (bccomp($bill->receiptValueCovered(), $remainingBillable, 2) > 0) {
+                    $covered = $bill->receiptValueCovered();
                     $bill->delete();
 
                     return response(['error' => [
-                        'amount' => ["This bill's net amount (".number_format((float) $bill->net_amount, 2).
-                            ') exceeds the '.number_format((float) $remainingBillable, 2).
-                            ' still billable on this order (Approved Value minus bills already recorded).'],
+                        'amount' => ['This bill covers '.number_format((float) $covered, 2).
+                            ' of the order, which exceeds the '.number_format((float) $remainingBillable, 2).
+                            ' still billable on it (Approved Value minus bills already recorded). '
+                            .'If the supplier charged a different price for goods already received, enter the invoice lines: '
+                            .'the quantity and the price actually charged on each.'],
                     ]], 422);
+                }
+
+                if ($refusal = $this->priceVarianceRefusal($bill)) {
+                    $bill->delete();
+
+                    return response(['error' => ['lines' => [$refusal]]], 422);
                 }
             }
 
@@ -527,6 +571,11 @@ class BillController extends Controller
             $bill->refresh();
         }
 
+        // Goods may have been received since the invoice was entered: match
+        // whatever of its lines could not be matched then.
+        app(\App\Modules\ProcurementStores\Services\BillMatchingService::class)->refresh($bill);
+        $bill->refresh();
+
         $state = $workflow->bill($bill);
 
         if (! $state['eligible_for_verification']) {
@@ -552,7 +601,16 @@ class BillController extends Controller
          * is still theirs to fix.
          */
         try {
-            DB::transaction(function () use ($bill, $state, $request) {
+            DB::transaction(function () use ($bill, $state, $request, $workflow) {
+                // Report 76A-3: an invoice entered as one amount gets its lines
+                // here, allocated to the accepted receipts it clears. If another
+                // invoice took them first this throws and nothing is verified.
+                if (! $bill->isDirect()) {
+                    app(\App\Modules\ProcurementStores\Services\BillMatchingService::class)->deriveLines($bill);
+                    $bill->refresh();
+                    $state['fingerprint'] = $workflow->fingerprint($bill);
+                }
+
                 $bill->forceFill([
                     'verified_by' => auth()->id(),
                     'verified_at' => now(),
@@ -725,6 +783,23 @@ class BillController extends Controller
             'tax_point_date' => 'nullable|date',
             'notes' => 'nullable|string|max:2000',
             'correction_note' => 'required|string|min:5|max:1000',
+            // Report 76A-3: what the invoice charges, line by line. The receipt
+            // value each line covers is computed from the accepted receipts it
+            // is matched to — it is not accepted from the request.
+            'lines' => 'nullable|array|min:1|max:200',
+            'lines.*.purchase_order_item_id' => 'required_with:lines|integer',
+            'lines.*.quantity' => 'required_with:lines|numeric|gt:0',
+            'lines.*.unit_price_net' => 'required_with:lines|numeric|min:0',
+            'lines.*.discount_amount' => 'nullable|numeric|min:0',
+            'lines.*.taxable' => 'nullable|boolean',
+            'lines.*.description' => 'nullable|string|max:500',
+            'lines.*.variance_reason' => 'nullable|string|min:5|max:1000',
+            'lines.*.allocations' => 'nullable|array|min:1',
+            'lines.*.allocations.*.goods_receipt_note_item_id' => 'required_with:lines.*.allocations|integer',
+            'lines.*.allocations.*.quantity' => 'required_with:lines.*.allocations|numeric|gt:0',
+            'receipt_value_covered' => 'prohibited',
+        ], [
+            'receipt_value_covered.prohibited' => 'The receipt value an invoice covers is worked out from its lines and the receipts they are matched to. Enter the invoice lines instead.',
         ]);
         if ($validator->fails()) {
             return response(['error' => $validator->errors()], 422);
@@ -745,16 +820,27 @@ class BillController extends Controller
                 $locked = Bill::whereKey($bill->id)->lockForUpdate()->firstOrFail();
                 $before = $locked->only(['bill_date', 'due_date', 'amount', 'supplier_invoice_number', 'vat_amount', 'wht_amount']);
 
-                $locked->fill(collect($input)->except('correction_note')->all());
+                $locked->fill(collect($input)->except(['correction_note', 'lines'])->all());
                 $locked->save();
                 $locked->forceFill(app(SupplierInvoiceTax::class)->priceFor($locked->fresh(), $input))->save();
                 $locked->refresh();
 
+                if (! $locked->isDirect() && ! empty($input['lines'])) {
+                    app(\App\Modules\ProcurementStores\Services\BillMatchingService::class)->syncStated($locked, $input['lines']);
+                    $locked->refresh();
+                } elseif (! $locked->isDirect() && $locked->lines()->exists()) {
+                    // The amounts changed under lines that no longer add up to them.
+                    throw new \DomainException('This invoice has lines. Send the corrected lines with the correction so they agree with the new total.');
+                }
+
                 if (! $locked->isDirect()) {
                     $remaining = $locked->purchaseOrder->remainingBillable(excludingBillId: $locked->id);
-                    if (bccomp((string) $locked->net_amount, $remaining, 2) > 0) {
-                        throw new \DomainException('The corrected net amount ('.number_format((float) $locked->net_amount, 2)
-                            .') exceeds the '.number_format((float) $remaining, 2).' still billable on this order.');
+                    if (bccomp($locked->receiptValueCovered(), $remaining, 2) > 0) {
+                        throw new \DomainException('The corrected bill covers '.number_format((float) $locked->receiptValueCovered(), 2)
+                            .' of the order, which exceeds the '.number_format((float) $remaining, 2).' still billable on it.');
+                    }
+                    if ($refusal = $this->priceVarianceRefusal($locked)) {
+                        throw new \DomainException($refusal);
                     }
                 }
 
@@ -780,6 +866,155 @@ class BillController extends Controller
             'message' => 'Bill corrected and resubmitted for independent verification.',
             'data' => app(PurchaseOrderWorkflow::class)->bill($corrected->fresh()),
         ]);
+    }
+
+    /**
+     * Reverse a verified bill (Report 76A-3 §4). The bill and its journal stay
+     * on record; a mirrored journal and a reversal document are added.
+     *
+     * Needs both the authority to verify payables and the authority to reverse
+     * a journal — the two things this does. Neither is granted here.
+     */
+    public function reverse(Request $request, Bill $bill)
+    {
+        $user = $request->user();
+        if (! $user?->can(Permissions::FINANCE_PAYABLES_VERIFY) || ! $user->can(Permissions::FINANCE_JOURNALS_REVERSE)) {
+            return response(['error' => 'Reversing a supplier invoice needs both payables verification and journal reversal authority.'], 403);
+        }
+        $validated = $request->validate(['reason' => 'required|string|min:10|max:1000']);
+
+        try {
+            $note = app(\App\Modules\ProcurementStores\Services\SupplierCreditService::class)->reverse($bill, $validated['reason'], $user);
+        } catch (ValidationException $exception) {
+            return response(['error' => collect($exception->errors())->flatten()->first(), 'errors' => $exception->errors()], 422);
+        }
+        $this->syncProjectProcurementFromBill($bill->fresh());
+
+        return response()->json(['message' => 'Invoice reversed. The original invoice and its entries were kept.', 'data' => $note]);
+    }
+
+    /**
+     * Record a supplier's credit note against a verified bill (Report 76A-3 §4).
+     * A correction of what was charged: it moves no stock.
+     */
+    public function creditNote(Request $request, Bill $bill)
+    {
+        if (! $this->canVerify()) {
+            return response(['error' => 'You do not have permission to record a supplier credit.'], 403);
+        }
+        $validated = $request->validate([
+            'supplier_reference' => 'required|string|max:120',
+            'credit_date' => 'required|date',
+            'reason' => 'required|string|min:10|max:1000',
+            'vat_amount' => 'nullable|numeric|min:0',
+            'lines' => 'required|array|min:1|max:200',
+            'lines.*.bill_line_id' => 'required|integer',
+            'lines.*.quantity' => 'nullable|numeric|min:0',
+            'lines.*.net_amount' => 'required|numeric|gt:0',
+        ]);
+
+        try {
+            $note = app(\App\Modules\ProcurementStores\Services\SupplierCreditService::class)->credit($bill, $validated, $request->user());
+        } catch (ValidationException $exception) {
+            return response(['error' => collect($exception->errors())->flatten()->first(), 'errors' => $exception->errors()], 422);
+        }
+        $this->syncProjectProcurementFromBill($bill->fresh());
+
+        return response()->json(['message' => 'Supplier credit recorded. No stock was moved.', 'data' => $note], 201);
+    }
+
+    /**
+     * What can be invoiced on an order, line by line (Report 76A-3): the order
+     * price, and how much of each line Stores has accepted that no live
+     * invoice yet covers. The bill form builds its lines from this; the server
+     * recomputes every figure when the bill is saved.
+     */
+    public function billableLines(PurchaseOrder $purchaseOrder)
+    {
+        $matching = app(\App\Modules\ProcurementStores\Services\BillMatchingService::class);
+        $purchaseOrder->load(['items.material:id,material_name', 'items.goodsReceiptNoteItems.goodsReceiptNote:id,grn_number,date']);
+
+        return response()->json(['data' => [
+            'purchase_order_id' => $purchaseOrder->id,
+            'price_basis' => $purchaseOrder->price_basis,
+            'lines' => $purchaseOrder->items->map(function ($item) use ($matching) {
+                $receipts = $item->goodsReceiptNoteItems->where('accepted', true)->whereNull('reversed_at')->map(function ($receipt) use ($matching) {
+                    $outstanding = $matching->outstanding($receipt);
+
+                    return ['goods_receipt_note_item_id' => $receipt->id, 'grn_number' => $receipt->goodsReceiptNote?->grn_number,
+                        'received_quantity' => (string) $receipt->received_quantity,
+                        'outstanding_quantity' => $outstanding['quantity'], 'outstanding_value' => $outstanding['value']];
+                })->values();
+
+                return [
+                    'purchase_order_item_id' => $item->id,
+                    'description' => $item->material?->material_name ?: $item->custom_description,
+                    'ordered_quantity' => (string) $item->quantity,
+                    'unit_price' => (string) $item->unit_price,
+                    'outstanding_quantity' => number_format((float) $receipts->sum(fn ($r) => (float) $r['outstanding_quantity']), 6, '.', ''),
+                    'outstanding_value' => number_format((float) $receipts->sum(fn ($r) => (float) $r['outstanding_value']), 2, '.', ''),
+                    'receipts' => $receipts,
+                ];
+            })->values(),
+        ]]);
+    }
+
+    /** The lines, the receipts they cover, and the credits against a bill (Report 76A-3). */
+    public function matching(Bill $bill)
+    {
+        $bill->load(['lines.allocations.goodsReceiptNoteItem.goodsReceiptNote:id,grn_number,date', 'lines.purchaseOrderItem.material:id,material_name',
+            'creditNotes.lines', 'creditNotes.createdBy:id,name']);
+
+        return response()->json(['data' => [
+            'lines' => $bill->lines->map(fn ($line) => [
+                'id' => $line->id, 'line_no' => $line->line_no, 'purchase_order_item_id' => $line->purchase_order_item_id,
+                'description' => $line->description ?: $line->purchaseOrderItem?->material?->material_name,
+                'quantity' => (string) $line->quantity, 'unit_price_net' => (string) $line->unit_price_net, 'discount_amount' => (string) $line->discount_amount,
+                'net_amount' => (string) $line->net_amount, 'vat_amount' => (string) $line->vat_amount, 'gross_amount' => (string) $line->gross_amount,
+                'allocated_quantity' => (string) $line->allocated_quantity, 'receipt_value_covered' => (string) $line->receipt_value_covered,
+                'cost_difference' => (string) $line->cost_difference, 'variance_reason' => $line->variance_reason,
+                'posted_to_inventory' => (string) $line->posted_to_inventory, 'posted_to_variance' => (string) $line->posted_to_variance,
+                'allocation_basis' => $line->allocation_basis, 'credited_quantity' => (string) $line->credited_quantity,
+                'credited_net' => (string) $line->credited_net, 'status' => $line->status,
+                'allocations' => $line->allocations->map(fn ($allocation) => [
+                    'goods_receipt_note_item_id' => $allocation->goods_receipt_note_item_id,
+                    'grn_number' => $allocation->goodsReceiptNoteItem?->goodsReceiptNote?->grn_number,
+                    'quantity' => (string) $allocation->quantity, 'receipt_value' => (string) $allocation->receipt_value,
+                    'released_quantity' => (string) $allocation->released_quantity,
+                ])->values(),
+            ])->values(),
+            'credit_notes' => $bill->creditNotes->map(fn ($note) => [
+                'id' => $note->id, 'credit_number' => $note->credit_number, 'kind' => $note->kind, 'supplier_reference' => $note->supplier_reference,
+                'credit_date' => $note->credit_date?->toDateString(), 'reason' => $note->reason, 'net_amount' => (string) $note->net_amount,
+                'vat_amount' => (string) $note->vat_amount, 'amount' => (string) $note->amount,
+                'receipt_value_released' => (string) $note->receipt_value_released, 'journal_entry_id' => $note->journal_entry_id,
+                'created_by' => $note->createdBy?->name,
+            ])->values(),
+            'reversed_at' => $bill->reversed_at?->toDateTimeString(), 'reversal_reason' => $bill->reversal_reason,
+            'credited_amount' => (string) ($bill->credited_amount ?? 0),
+        ]]);
+    }
+
+    /**
+     * A price difference on a line must be explained (Report 76A-3).
+     *
+     * The difference itself is computed — the line's net against the accrued
+     * value of the receipts it is matched to — so the only thing asked of the
+     * preparer is the reason. Whether an approved account exists to carry what
+     * cannot go to stock is checked at verification, where the accounting
+     * happens, so recording the invoice is not blocked on a Finance Setup
+     * decision.
+     */
+    private function priceVarianceRefusal(Bill $bill): ?string
+    {
+        $bill->load('lines');
+        $line = app(\App\Modules\ProcurementStores\Services\BillMatchingService::class)->unexplainedLines($bill)->first();
+        if (! $line) {
+            return null;
+        }
+
+        return 'Line '.$line->line_no.' is invoiced at '.number_format((float) $line->net_amount, 2).' but the goods it covers were received at '
+            .number_format((float) $line->receipt_value_covered, 2).'. Say why the supplier\'s price differs.';
     }
 
     /**

@@ -144,7 +144,7 @@ class SupplierPaymentGateTest extends TestCase
             'received_by' => $this->accounts->id,
         ]);
 
-        return GoodsReceiptNoteItem::create([
+        $receiptLine = GoodsReceiptNoteItem::create([
             'goods_receipt_note_id' => $note->id,
             'purchase_order_item_id' => $this->orderItem->id,
             'ordered_quantity' => 10,
@@ -155,6 +155,11 @@ class SupplierPaymentGateTest extends TestCase
             'stock_status' => $confirmed ? 'posted' : 'awaiting_stores_details',
             'unit_price' => 5000,
         ]);
+        // The receipt reaches the ledger as it does in the application: its accrual
+        // is what a supplier invoice later clears (Report 76A-3).
+        event(new \App\Events\GoodsReceiptRecorded($note->id));
+
+        return $receiptLine;
     }
 
     private function bill(float $amount, ?string $invoiceNumber = 'SINV-1001'): Bill

@@ -27,6 +27,9 @@ class GoodsReceiptNoteItem extends Model
         'unit_price',
         'confirmed_by',
         'confirmed_at',
+        'reversed_at',
+        'reversed_by',
+        'reversal_reason',
     ];
 
     protected $casts = [
@@ -38,6 +41,7 @@ class GoodsReceiptNoteItem extends Model
         'receipt_unit_cost' => 'decimal:4',
         'unit_price' => 'decimal:2',
         'confirmed_at' => 'datetime',
+        'reversed_at' => 'datetime',
     ];
 
     /**

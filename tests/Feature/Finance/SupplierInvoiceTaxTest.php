@@ -121,6 +121,9 @@ class SupplierInvoiceTaxTest extends TestCase
             'store_status' => 'confirmed', 'stock_status' => 'posted',
             'unit_price' => 500,
         ]);
+        // The receipt reaches the ledger as it does in the application: its accrual
+        // is what a supplier invoice later clears (Report 76A-3).
+        event(new \App\Events\GoodsReceiptRecorded($note->id));
     }
 
     /** Record an invoice through the endpoint, so it is priced the way production prices it. */
@@ -182,7 +185,7 @@ class SupplierInvoiceTaxTest extends TestCase
 
         $this->verify($bill)->assertOk();
 
-        $this->assertSame('50000.00', $this->movementOn(self::ACCRUED));    // net clears the accrual
+        $this->assertSame('0.00', $this->movementOn(self::ACCRUED));    // the receipt raised 50,000; the net clears exactly that
         $this->assertSame('8000.00', $this->movementOn(self::VAT_INPUT));   // VAT is claimable
         $this->assertSame('-58000.00', $this->movementOn(self::PAYABLE));   // the supplier is owed the gross
     }
@@ -198,11 +201,32 @@ class SupplierInvoiceTaxTest extends TestCase
         $this->supplier->update(['default_vat_treatment_id' => $treatment->id]);
 
         $bill = Bill::findOrFail($this->recordBill()->assertSuccessful()->json('data.id'));
+
+        // Report 76A Part 2 (Decision A). The receipt accrued 50,000; the
+        // invoice costs 58,000 because its VAT cannot be recovered. That 8,000
+        // used to be debited to the accrual as well, over-clearing it and
+        // leaving the difference there for ever. It is now a purchase-price
+        // variance, on an account Finance has approved — and until one is
+        // approved the invoice is not verified at all.
+        $refused = $this->verify($bill->fresh())->assertStatus(422);
+        $this->assertContains('PURCHASE PRICE VARIANCE ACCOUNT REQUIRED', $refused->json('blockers'));
+
+        $variance = \App\Modules\Finance\Models\ChartOfAccount::where('category', 'expense')->where('is_postable', true)->firstOrFail();
+        \App\Modules\Finance\Governance\FinanceConfigVersion::create([
+            'item_key' => \App\Modules\Finance\Support\GovernedPostingAccount::item(\App\Modules\Finance\Support\GovernedPostingAccount::PURCHASE_PRICE_VARIANCE),
+            'domain' => 'policies', 'version' => 1, 'value' => ['account_code' => $variance->code],
+            'status' => \App\Modules\Finance\Governance\FinanceConfigVersion::ACTIVE, 'proposed_by' => $this->accounts->id,
+            'in_force_from' => now()->subDay()->toDateString(),
+        ]);
+        \App\Modules\Finance\Governance\GovernanceRuntime::flush();
         $this->verify($bill->fresh())->assertOk();
 
         $this->assertSame('0.00', $this->movementOn(self::VAT_INPUT));
-        // The whole invoice clears the accrual, because all of it is cost.
-        $this->assertSame('58000.00', $this->movementOn(self::ACCRUED));
+        // The accrual is cleared for exactly what was received; the
+        // unrecoverable VAT is the variance; the supplier is owed the gross.
+        $this->assertSame('0.00', $this->movementOn(self::ACCRUED));
+        $this->assertSame('8000.00', $this->movementOn($variance->code));
+        $this->assertSame('-58000.00', $this->movementOn(self::PAYABLE));
     }
 
     public function test_withholding_is_retained_and_owed_to_kra(): void
@@ -383,7 +407,7 @@ class SupplierInvoiceTaxTest extends TestCase
         $this->verify($bill->fresh())->assertOk();
 
         $this->assertSame('50000.00', (string) $bill->fresh()->net_amount);
-        $this->assertSame('50000.00', $this->movementOn(self::ACCRUED));
+        $this->assertSame('0.00', $this->movementOn(self::ACCRUED));
         $this->assertSame('-50000.00', $this->movementOn(self::PAYABLE));
         $this->assertSame('0.00', $this->movementOn(self::VAT_INPUT));
     }

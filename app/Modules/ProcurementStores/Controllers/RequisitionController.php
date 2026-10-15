@@ -324,6 +324,13 @@ class RequisitionController extends Controller
             return response(['error' => $validator->errors()], 422);
         }
 
+        // Report 78C: a project requisition is new procurement demand, so the
+        // job must still be live (or an authorised manager says why it is not).
+        if ($input['requested_by_type'] === 'project') {
+            $this->assertProjectCanBuy($input['project_id'] ?? null, $input['lifecycle_override_reason'] ?? null, $input['items'] ?? []);
+        }
+        unset($input['lifecycle_override_reason']);
+
         try {
             DB::beginTransaction();
 
@@ -477,6 +484,15 @@ class RequisitionController extends Controller
             return response(['error' => $validator->errors()], 422);
         }
 
+        // Report 78C: pointing a requisition at a job (or at another job) is new
+        // demand on it; editing one already attached to a job is not re-judged.
+        $resolvedType = $input['requested_by_type'] ?? $requisition->requested_by_type;
+        $resolvedProject = $input['project_id'] ?? $requisition->project_id;
+        if ($resolvedType === 'project' && ((int) $resolvedProject !== (int) $requisition->project_id || $requisition->requested_by_type !== 'project')) {
+            $this->assertProjectCanBuy($resolvedProject, $input['lifecycle_override_reason'] ?? null, $input['items'] ?? $requisition->items()->get(['project_enquiry_id'])->toArray());
+        }
+        unset($input['lifecycle_override_reason']);
+
         try {
             DB::beginTransaction();
 
@@ -571,6 +587,12 @@ class RequisitionController extends Controller
             return response(['error' => 'Only draft requisitions can be submitted'], 422);
         }
 
+        // Report 78C: a draft kept back while its job finished must not now
+        // become a live request for it.
+        if ($requisition->requested_by_type === 'project') {
+            $this->assertProjectCanBuy($requisition->project_id, request()->input('lifecycle_override_reason'), $requisition->items()->get(['project_enquiry_id'])->toArray());
+        }
+
         $requisition->submitForApproval();
         $this->syncProjectProcurement($requisition);
 
@@ -644,6 +666,31 @@ class RequisitionController extends Controller
      * rather than its own key passed along, and a project with no enquiry yields
      * null instead of a plausible-looking wrong number.
      */
+    /**
+     * Report 78C — the shared lifecycle rule for new procurement on a job.
+     *
+     * The job is read from the lines' `project_enquiry_id` first. The Projects
+     * procurement task posts the ENQUIRY id in `project_id` (ProcurementTask.vue),
+     * while the Stores desk posts a projects key there, so `project_id` alone
+     * would check the wrong job — or none — for one of the two callers.
+     */
+    private function assertProjectCanBuy(mixed $projectId, ?string $overrideReason, array $items = []): void
+    {
+        $enquiryIds = collect($items)->pluck('project_enquiry_id')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+        if ($enquiryIds->isEmpty()) {
+            $enquiryIds = collect([$this->enquiryIdForProject($projectId)]);
+        }
+
+        $eligibility = app(\App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility::class);
+        foreach ($enquiryIds as $enquiryId) {
+            $eligibility->assertAllows(
+                $enquiryId,
+                \App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility::CAP_DEMAND,
+                $overrideReason,
+            );
+        }
+    }
+
     private function enquiryIdForProject(mixed $projectId): ?int
     {
         if (! $projectId) {

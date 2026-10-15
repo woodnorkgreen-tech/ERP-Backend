@@ -72,12 +72,19 @@ class StockMovementPoster
             throw ValidationException::withMessages(['type' => "Unknown movement type '{$type}'."]);
         }
 
-        return match ($type) {
-            'receive' => $this->postReceipt($line),
-            'issue'   => $this->postIssue($line),
-            'return'  => $this->postReturn($line),
-            'damage'  => $this->postDamage($line),
-        };
+        try {
+            return match ($type) {
+                'receive' => $this->postReceipt($line),
+                'issue'   => $this->postIssue($line),
+                'return'  => $this->postReturn($line),
+                'damage'  => $this->postDamage($line),
+            };
+        } catch (\InvalidArgumentException $exception) {
+            // Report 76A-3: a movement whose accounting cannot be posted — no
+            // approved account, a shut period — did not happen. The stock is
+            // where it was; the person is told exactly what is missing.
+            throw ValidationException::withMessages(['accounting' => $exception->getMessage()]);
+        }
     }
 
     /* ── Receiving ──────────────────────────────────────────────────────── */
@@ -110,6 +117,10 @@ class StockMovementPoster
             $line = $this->normaliseControlledMovement($line, $material, 'check_in');
             $meta = $line;
             $grnItem = $this->lockGrnLine($line, $material, $meta);
+            if (! $grnItem) {
+                $line = $this->assertExceptionalReceipt($line, $material);
+                $meta = array_merge($meta, ['movement_reason' => $line['receipt_reason']]);
+            }
             if ($grnItem && (float) ($line['receipt_unit_cost'] ?? 0) <= 0) {
                 $line['receipt_unit_cost'] = $grnItem->resolvedReceiptUnitCost();
                 $meta['receipt_unit_cost'] = $line['receipt_unit_cost'];
@@ -138,8 +149,16 @@ class StockMovementPoster
 
             if ($grnItem) {
                 $this->assertGrnQuantityMatches($grnItem, $log);
+            } else {
+                // Stock with no purchase behind it reaches the ledger in the
+                // same transaction it reaches the shelf, or not at all.
+                try {
+                    app(\App\Modules\Finance\Services\StockMovementPostingService::class)
+                        ->postExceptionalReceipt($log->fresh('material'), auth()->id(), (string) $line['adjustment_unit_value']);
+                } catch (\InvalidArgumentException $exception) {
+                    $this->reject('receipt_reason', $exception->getMessage());
+                }
             }
-
             if ($material->isBoardTrackable()) {
                 $boards = $this->boards->createBoardRecords(
                     material:    $material,
@@ -181,6 +200,51 @@ class StockMovementPoster
         });
 
         return ['log' => $log, 'boards' => $boards];
+    }
+
+    /**
+     * Stock may enter Stores without a goods receipt note only for a reason
+     * that is not a purchase (Report 76A Part 2, Decision C).
+     *
+     * Bought stock arrives through PO → GRN → Stores, which is what accrues it
+     * and what the supplier's invoice is later matched against. A manual
+     * receipt of bought stock skipped all of that: the shelf gained stock the
+     * ledger never received and no invoice could be checked against it. So a
+     * receipt with no GRN line must say why it is not a purchase — opening
+     * balance, stock found, or a correction — carry a value and a written
+     * explanation, and be made by someone who may approve stock adjustments
+     * (`stores.review`, the same authority that approves a stock count).
+     *
+     * No GRN and no purchase order are ever created to make a receipt fit.
+     */
+    private function assertExceptionalReceipt(array $line, LibraryMaterial $material): array
+    {
+        $reason = $line['receipt_reason'] ?? null;
+
+        if (! in_array($reason, \App\Modules\ProcurementStores\Models\InventoryLog::EXCEPTIONAL_RECEIPT_REASONS, true)) {
+            $this->reject('receipt_reason', 'Purchased stock must be received through the approved GRN. '
+                .'Stock that was not bought — an opening balance, stock found, or a correction — is recorded as a stock adjustment with its reason.');
+        }
+        if (! auth()->user()?->can(\App\Constants\Permissions::STORES_REVIEW)) {
+            $this->reject('receipt_reason', 'Taking stock in without a purchase is a stock adjustment and needs a Stores reviewer (the person who approves stock counts).');
+        }
+        if (mb_strlen(trim((string) ($line['notes'] ?? ''))) < 10) {
+            $this->reject('notes', 'Explain where this stock came from (at least a short sentence). It is the record behind the adjustment.');
+        }
+
+        $unitValue = (float) ($line['receipt_unit_cost'] ?? 0);
+        if ($unitValue <= 0) {
+            $unitValue = (float) $material->unit_cost > 0 ? (float) $material->unit_cost : (float) ($material->default_unit_cost ?? 0);
+        }
+        if ($unitValue <= 0) {
+            $this->reject('receipt_unit_cost', "Enter what each unit of '{$material->material_name}' is worth. Stock cannot be taken in at no value.");
+        }
+        // The value the accounts take this stock in at. Kept apart from the
+        // receipt price: a catalogue default is not money anyone paid, so it
+        // must not enter the material's average cost as though it were.
+        $line['adjustment_unit_value'] = $unitValue;
+
+        return $line;
     }
 
     /**
@@ -318,6 +382,8 @@ class StockMovementPoster
         $this->refuseBoard($material, 'Issue it through a Board Request, so individual boards are assigned to the job.');
         $line = $this->normaliseControlledMovement($line, $material, 'check_out');
 
+        $line = $this->classifyIssue($line);
+
         if (filled($line['project_material_id'] ?? null)) {
             $this->assertProjectLineCanTake(
                 $line,
@@ -339,6 +405,53 @@ class StockMovementPoster
     }
 
     /**
+     * Every issue is for a project or for the company — never for nobody
+     * (Report 76A Part 2, Decision D).
+     *
+     * An issue with no project used to leave Stores with no cost anywhere:
+     * not a project's, not a department's, not the ledger's. It is now either
+     * a project issue (which becomes that project's cost) or company use,
+     * which names the department it is for and why, is charged to the approved
+     * operating-expense account, and is never a project cost. No project is
+     * invented to make company use fit.
+     */
+    private function classifyIssue(array $line): array
+    {
+        if (filled($line['project_id'] ?? null)) {
+            unset($line['movement_reason'], $line['cost_centre_id']);
+
+            // Report 78C: stock goes only to a job that is being delivered.
+            // A completed, closed or on-hold job needs an authorised manager's
+            // recorded reason (D-4); a cancelled or not-yet-started job none.
+            $override = app(ProjectMaterialWorkflowEligibility::class)->assertAllows(
+                (int) Project::whereKey($line['project_id'])->value('enquiry_id') ?: null,
+                ProjectMaterialWorkflowEligibility::CAP_ISSUE,
+                $line['lifecycle_override_reason'] ?? null,
+            );
+            if ($override) {
+                $line['notes'] = trim(($line['notes'] ?? '').' [Lifecycle override: '.$override['reason'].']');
+            }
+            unset($line['lifecycle_override_reason']);
+
+            return $line;
+        }
+
+        if (($line['issue_purpose'] ?? null) !== \App\Modules\ProcurementStores\Models\InventoryLog::REASON_INTERNAL_CONSUMPTION) {
+            $this->reject('project_id', 'Choose the project this stock is for, or record it as company use with the department it is for.');
+        }
+        if (! filled($line['cost_centre_id'] ?? null)) {
+            $this->reject('cost_centre_id', 'Choose the department this stock is for.');
+        }
+        if (mb_strlen(trim((string) ($line['notes'] ?? ''))) < 5) {
+            $this->reject('notes', 'Say what the stock is being used for.');
+        }
+        $line['movement_reason'] = \App\Modules\ProcurementStores\Models\InventoryLog::REASON_INTERNAL_CONSUMPTION;
+        unset($line['project_material_id']);
+
+        return $line;
+    }
+
+    /**
      * A project line may only take what it was approved for, in the unit it was
      * approved in, and only for the project it belongs to.
      *
@@ -347,7 +460,8 @@ class StockMovementPoster
      *
      *  - the planned line is locked, so two people issuing the same requirement
      *    at once cannot each read the same remaining quantity;
-     *  - the quantity is compared in the STOCK unit. The single path compared
+     *  - the quantity is compared in the STOCK unit — both sides since Report
+     *    78B, which reads the requirement through RequirementUnits. The single path compared
      *    the entered quantity against a base-unit requirement, so issuing in
      *    boxes against a requirement counted in metres passed a check it should
      *    have failed;
@@ -378,10 +492,17 @@ class StockMovementPoster
 
         $this->assertMaterialsApproved($materialsData);
 
+        // Report 78B (F-03): the requirement in the material's STOCK unit. The
+        // issue quantity is already in stock units; the BOM quantity is in the
+        // BOM's unit (sqm, Packets…). Comparing the two raw numbers let 12 sheets
+        // out against 12 sqm. A requirement whose unit cannot be read in stock
+        // units is refused here rather than guessed at.
+        $requiredBase = app(RequirementUnits::class)->requiredInBaseOrFail($planned, $material, 'quantity');
+
         if ($material->isConsumableUnit()) {
             $issued = (string) InventoryLog::where('project_material_id', $planned->id)->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'));
             $returns = (string) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
-            $remaining = bcsub((string) $planned->getRawOriginal('quantity'), bcsub($issued, $returns, 6), 6);
+            $remaining = bcsub(bcsub($requiredBase, bcsub($issued, $returns, 6), 6), number_format($this->retiredAgainst($planned, (float) $requiredBase), 6, '.', ''), 6);
             if (bccomp((string) $quantityInBase, $remaining, 6) > 0) $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement.");
             return;
         }
@@ -391,11 +512,15 @@ class StockMovementPoster
             - (float) InventoryLog::where('project_material_id', $planned->id)
                 ->fulfilmentReopeningReturns()->sum('quantity');
 
-        $netIssued += $this->legacyIssuedAgainst($planned, $project, $materialsData);
+        $netIssued += $this->legacyIssuedAgainst($planned, $project, $materialsData, (float) $requiredBase);
 
-        $remaining = max(0, (float) $planned->quantity - $netIssued);
+        // Report 78C: quantity recorded as fulfilled outside the ERP is not
+        // owed any more; revoking the retirement is how it becomes issuable.
+        $retired = $this->retiredAgainst($planned, (float) $requiredBase);
+        $remaining = max(0, (float) $requiredBase - $netIssued - $retired);
         if ($quantityInBase > $remaining + 0.00001) {
-            $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement.");
+            $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement"
+                .($retired > 0 ? " ({$retired} was recorded as fulfilled outside the ERP)." : '.'));
         }
     }
 
@@ -410,7 +535,7 @@ class StockMovementPoster
      * lines absorb it first, and this line takes what is left, capped at its own
      * approved quantity.
      */
-    private function legacyIssuedAgainst(ElementMaterial $planned, Project $project, mixed $materialsData): float
+    private function legacyIssuedAgainst(ElementMaterial $planned, Project $project, mixed $materialsData, float $requiredBase): float
     {
         $legacyIssued = (float) InventoryLog::where('project_id', $project->id)
                 ->where('material_id', $planned->library_material_id)
@@ -422,14 +547,22 @@ class StockMovementPoster
                 ->whereNull('project_material_id')
                 ->fulfilmentReopeningReturns()->sum('quantity');
 
+        if ($legacyIssued <= 0) {
+            return 0.0;
+        }
+
+        // Earlier lines absorb legacy issues in stock units too (Report 78B).
+        $units = app(RequirementUnits::class);
         $earlierRequirement = (float) ElementMaterial::query()
+            ->with('libraryMaterial.uomConversions')
             ->where('library_material_id', $planned->library_material_id)
             ->where('is_included', true)
             ->where('id', '<', $planned->id)
             ->whereHas('element', fn ($query) => $query->where('task_materials_data_id', $materialsData->id))
-            ->sum('quantity');
+            ->get()
+            ->sum(fn (ElementMaterial $line) => (float) ($units->requiredInBase($line) ?? 0));
 
-        return min((float) $planned->quantity, max(0, $legacyIssued - $earlierRequirement));
+        return min($requiredBase, max(0, $legacyIssued - $earlierRequirement));
     }
 
     /* ── Returning ──────────────────────────────────────────────────────── */
@@ -492,7 +625,12 @@ class StockMovementPoster
 
         $this->refuseBoard($material, 'Scrap individual boards through the board lifecycle, with status Scrapped.');
         $line = $this->normaliseControlledMovement($line, $material, 'defective');
-
+        // Damage and waste are different losses with different approved
+        // accounts; neither is a project cost (Report 76A Part 2, Decision D).
+        $line['movement_reason'] = ($line['write_off_reason'] ?? null) === \App\Modules\ProcurementStores\Models\InventoryLog::REASON_WASTE
+            ? \App\Modules\ProcurementStores\Models\InventoryLog::REASON_WASTE
+            : \App\Modules\ProcurementStores\Models\InventoryLog::REASON_DAMAGE;
+        unset($line['project_id'], $line['project_material_id']);
         // Sufficiency is checked inside adjustStock's row lock — see postIssue().
         $log = $this->inventory->adjustStock(
             (int) $line['material_id'],
@@ -573,6 +711,14 @@ class StockMovementPoster
         }
 
         return $quantity * $factor;
+    }
+
+    /** Report 78C: the line's active legacy retirement, read in the requirement's stock unit. */
+    private function retiredAgainst(ElementMaterial $planned, float $requiredBase): float
+    {
+        $retirements = app(MaterialRequirementRetirements::class);
+
+        return $retirements->retiredIn($planned, $requiredBase, (float) ($retirements->retiredBomByLine([$planned->id])[$planned->id] ?? 0));
     }
 
     /** A project's materials must be approved before any of them can be issued. */

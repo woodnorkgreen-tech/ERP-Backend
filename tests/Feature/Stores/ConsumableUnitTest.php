@@ -19,12 +19,17 @@ use Tests\TestCase;
 class ConsumableUnitTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\ApprovesGovernedPostingAccounts;
     private LibraryMaterial $material;
     private ConsumableUnitService $units;
     private User $actor;
     protected function setUp(): void
     {
         parent::setUp();
+        // Report 76A-3: a stock movement and its ledger entry land together, so
+        // every test here needs a chart and the approved stock accounts.
+        $this->seed(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
+        $this->activateStoresPostingAccounts();
         $this->actor = User::factory()->create(['is_active' => true]);
         foreach ([Permissions::STORES_VIEW, Permissions::STORES_MANAGE, Permissions::STORES_REVIEW, Permissions::STORES_ADJUST_QUANTITY] as $p) $this->actor->givePermissionTo(Permission::findOrCreate($p));
         Sanctum::actingAs($this->actor);
@@ -36,7 +41,11 @@ class ConsumableUnitTest extends TestCase
     }
     private function receive(array $quantities = ['50'], ?string $cost = '200'): void
     {
-        app(StockMovementPoster::class)->post('receive', ['material_id' => $this->material->id, 'quantity' => \App\Modules\ProcurementStores\Services\StoresDecimal::sum($quantities), 'receipt_unit_cost' => $cost, 'controlled_units' => array_map(fn ($q) => ['quantity' => $q], $quantities)]);
+        // A fixture: rolls already on the shelf. Written through the stock
+        // ledger directly, because the receiving endpoint now accepts stock
+        // only against a goods receipt or as a reasoned adjustment (Report 76A
+        // Part 2, Decision C) — and neither is what these tests are about.
+        app(InventoryService::class)->adjustStock($this->material->id, \App\Modules\ProcurementStores\Services\StoresDecimal::sum($quantities), 'check_in', ['receipt_unit_cost' => $cost, 'controlled_units' => array_map(fn ($q) => ['quantity' => $q], $quantities)]);
     }
     private function unit(): ConsumableUnit { return ConsumableUnit::where('material_id', $this->material->id)->firstOrFail(); }
     private function issue(string $q = '12', ?ConsumableUnit $unit = null): InventoryLog
@@ -91,9 +100,13 @@ class ConsumableUnitTest extends TestCase
     public function test_multi_roll_issue_preserves_two_explicit_movement_lines(): void
     {
         $this->receive(['20', '50']); $ids = ConsumableUnit::pluck('id');
+        // An issue names where the stock went: no project here, so company use.
+        $departmentId = \Illuminate\Support\Facades\DB::table('departments')->insertGetId(['name' => 'Workshop 70B', 'created_at' => now(), 'updated_at' => now()]);
+        $centre = \Illuminate\Support\Facades\DB::table('cost_centres')->insertGetId(['code' => 'CC-70B', 'name' => 'Workshop', 'hr_department_id' => $departmentId, 'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $use = ['issue_purpose' => 'internal_consumption', 'cost_centre_id' => $centre, 'notes' => 'Upholstery for the workshop benches'];
         $this->postJson('/api/procurement-stores/movements', ['type'=>'issue','lines'=>[
-            ['material_id'=>$this->material->id,'consumable_unit_id'=>$ids[0],'quantity'=>'20','recipient_name'=>'Team'],
-            ['material_id'=>$this->material->id,'consumable_unit_id'=>$ids[1],'quantity'=>'50','recipient_name'=>'Team']]])->assertOk()->assertJsonPath('lines_posted',2);
+            ['material_id'=>$this->material->id,'consumable_unit_id'=>$ids[0],'quantity'=>'20','recipient_name'=>'Team'] + $use,
+            ['material_id'=>$this->material->id,'consumable_unit_id'=>$ids[1],'quantity'=>'50','recipient_name'=>'Team'] + $use]])->assertOk()->assertJsonPath('lines_posted',2);
         $this->assertSame('0.000000', $this->units->summary($this->material)['total_remaining']);
         $this->assertSame(2, InventoryLog::where('type','check_out')->distinct()->count('consumable_unit_id'));
     }

@@ -26,6 +26,8 @@ class Bill extends Model
         'verification_fingerprint',
         'verification_notes',
         'net_amount',
+        'receipt_value_covered',
+        'price_variance_reason',
         'vat_amount',
         'wht_amount',
         'vat_treatment_id',
@@ -49,6 +51,11 @@ class Bill extends Model
         'returned_at',
         'return_reason',
         'resubmitted_at',
+        // Report 76A-3: supplier credits and reversal.
+        'credited_amount',
+        'reversed_at',
+        'reversed_by',
+        'reversal_reason',
     ];
 
     protected $casts = [
@@ -65,6 +72,8 @@ class Bill extends Model
         'duplicate_override_at' => 'datetime',
         'returned_at' => 'datetime',
         'resubmitted_at' => 'datetime',
+        'credited_amount' => 'decimal:2',
+        'reversed_at' => 'datetime',
     ];
 
     protected static function boot()
@@ -134,17 +143,86 @@ class Bill extends Model
      */
     public function payableAmount(): string
     {
+        // Report 76A-3: less what the supplier has credited. A reversed bill
+        // is owed nothing.
+        if ($this->reversed_at) {
+            return '0.00';
+        }
+
         return bcsub(
-            number_format((float) $this->amount, 2, '.', ''),
-            number_format((float) ($this->wht_amount ?? 0), 2, '.', ''),
+            bcsub(
+                number_format((float) $this->amount, 2, '.', ''),
+                number_format((float) ($this->wht_amount ?? 0), 2, '.', ''),
+                2,
+            ),
+            number_format((float) ($this->credited_amount ?? 0), 2, '.', ''),
             2,
         );
+    }
+
+    /** Report 76A-3: what the invoice charges, line by line, and the receipts each line covers. */
+    public function lines()
+    {
+        return $this->hasMany(BillLine::class)->orderBy('line_no');
+    }
+
+    public function creditNotes()
+    {
+        return $this->hasMany(SupplierCreditNote::class);
+    }
+
+    public function isReversed(): bool
+    {
+        return $this->reversed_at !== null;
     }
 
     /** The VAT-exclusive value of the invoice — what the three-way match compares. */
     public function netAmount(): string
     {
         return number_format((float) ($this->net_amount ?? $this->amount), 2, '.', '');
+    }
+
+    /**
+     * What this invoice costs WNG before recoverable tax: its VAT-exclusive
+     * value, or the whole of it when the VAT cannot be recovered. The same
+     * figure JournalPostingService::supplierInvoiceLegs() posts.
+     */
+    public function invoiceCostBasis(): string
+    {
+        $recoverable = $this->vatTreatment?->is_recoverable && (float) ($this->vat_amount ?? 0) > 0;
+
+        return $recoverable ? $this->netAmount() : number_format((float) $this->amount, 2, '.', '');
+    }
+
+    /**
+     * The value of RECEIVED goods or services this invoice covers, at the
+     * order's own prices — the part of the receipt accrual it clears (Report
+     * 76A Part 2, Decision A). Unstated, an invoice covers its own
+     * VAT-exclusive value, which is what every invoice did before this.
+     */
+    public function receiptValueCovered(): string
+    {
+        return number_format((float) ($this->receipt_value_covered ?? $this->netAmount()), 2, '.', '');
+    }
+
+    /**
+     * Invoice basis less the receipt value it covers: the purchase-price
+     * variance. Positive when the supplier charged more than was accrued.
+     * Never left in stock, the job or the supplier balance — it is posted to
+     * its own governed account, or the invoice is not verified.
+     */
+    public function priceVariance(): string
+    {
+        if ($this->isDirect() || $this->reversed_at) {
+            return '0.00';
+        }
+        // Report 76A-3: a line-matched bill's difference is the sum of its
+        // lines', each measured against the receipts that line covers.
+        if ($this->relationLoaded('lines') ? $this->lines->isNotEmpty() : $this->lines()->exists()) {
+            return number_format((float) $this->lines->sum('cost_difference'), 2, '.', '');
+        }
+
+        return bcsub($this->invoiceCostBasis(), $this->receiptValueCovered(), 2);
     }
 
     public function updatePaymentStatus()
@@ -157,7 +235,16 @@ class Bill extends Model
             ->sum('amount_paid');
         $this->balance = $this->payableAmount() - $this->paid_amount;
         
-        if ($this->balance <= 0) {
+        if ($this->reversed_at) {
+            // Stored as `cancelled` so every existing "live bills" filter
+            // already leaves it out; `reversed_at` is what says it was a
+            // posted invoice withdrawn, not a draft thrown away.
+            $this->balance = 0;
+            $this->status = 'cancelled';
+        } elseif ($this->balance <= 0 && (float) $this->paid_amount <= 0 && (float) ($this->credited_amount ?? 0) > 0) {
+            // Nothing was paid: the supplier's credit cleared it. Not "paid".
+            $this->status = 'credited';
+        } elseif ($this->balance <= 0) {
             $this->status = 'paid';
         } elseif ($this->paid_amount > 0) {
             $this->status = 'partial';
@@ -253,7 +340,7 @@ class Bill extends Model
      */
     public function withdrawVerificationOnChange(): void
     {
-        if ($this->isDirty(['amount', 'supplier_invoice_number', 'supplier_id', 'purchase_order_id'])) {
+        if ($this->isDirty(['amount', 'supplier_invoice_number', 'supplier_id', 'purchase_order_id', 'receipt_value_covered'])) {
             $this->verified_at = null;
             $this->verified_by = null;
             $this->verification_basis = null;

@@ -66,6 +66,10 @@ class EnquiryResource extends JsonResource
                 : false,
 
             // Relationships
+            // Report 78C: an open hold pauses issue and new buying on this job.
+            'on_hold'         => $this->relationLoaded('openHold') && $this->openHold
+                ? ['id' => $this->openHold->id, 'reason' => $this->openHold->reason, 'placed_at' => $this->openHold->placed_at?->toIso8601String()]
+                : null,
             'client'          => $this->whenLoaded('client'),
             'department'      => $this->whenLoaded('department'),
             'project_officer' => $this->whenLoaded('projectOfficer'),

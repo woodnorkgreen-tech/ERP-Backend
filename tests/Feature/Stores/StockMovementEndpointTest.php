@@ -34,12 +34,17 @@ class StockMovementEndpointTest extends TestCase
 {
     use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
+    use \Tests\Concerns\ApprovesGovernedPostingAccounts;
 
     private int $workstationId;
 
     protected function setUp(): void
     {
         parent::setUp();
+        // Stock taken in without a goods receipt is a stock adjustment and posts its own entry.
+        $this->seed(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
+        // Report 76A-3: stock postings need an approved account; this suite is not about that approval.
+        $this->activateStoresPostingAccounts();
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         foreach (['Stores', 'Manager', 'Super Admin'] as $role) {
             Role::findOrCreate($role);
@@ -53,8 +58,20 @@ class StockMovementEndpointTest extends TestCase
         $user = User::factory()->create();
         $user->assignRole('Stores');
         $user->givePermissionTo(Permissions::MATERIALS_LIBRARY_VIEW);
+        // Receiving without a goods receipt is a stock adjustment and needs a Stores reviewer (Report 76A Part 2).
+        $user->givePermissionTo(Permission::findOrCreate(Permissions::STORES_REVIEW));
         // Roles are read off the fresh record, or every request answers 403.
         Sanctum::actingAs($user->fresh());
+    }
+
+    /** An issue names where the stock went. With no project, that is company use for a department. */
+    private function companyUse(): array
+    {
+        $departmentId = DB::table('departments')->insertGetId(['name' => 'Workshop '.uniqid(), 'created_at' => now(), 'updated_at' => now()]);
+        $centreId = DB::table('cost_centres')->insertGetId(['code' => 'CC-'.uniqid(), 'name' => 'Workshop', 'hr_department_id' => $departmentId,
+            'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
+
+        return ['issue_purpose' => 'internal_consumption', 'cost_centre_id' => $centreId, 'notes' => 'Fitted to the workshop store doors'];
     }
 
     private function material(string $name, float $onHand = 0, array $overrides = []): LibraryMaterial
@@ -117,8 +134,8 @@ class StockMovementEndpointTest extends TestCase
         $response = $this->postJson('/api/procurement-stores/movements', [
             'type' => 'receive',
             'lines' => [
-                ['material_id' => $first->id, 'quantity' => 12, 'receipt_unit_cost' => 3],
-                ['material_id' => $second->id, 'quantity' => 5, 'receipt_unit_cost' => 40],
+                ['material_id' => $first->id, 'quantity' => 12, 'receipt_unit_cost' => 3, 'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf'],
+                ['material_id' => $second->id, 'quantity' => 5, 'receipt_unit_cost' => 40, 'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf'],
             ],
         ])->assertOk();
 
@@ -141,6 +158,7 @@ class StockMovementEndpointTest extends TestCase
             'type' => 'receive',
             'material_id' => $material->id,
             'quantity' => 8,
+            'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
         ])->assertOk()->assertJsonPath('lines_posted', 1);
 
         $this->assertSame(8.0, $this->onHand($material));
@@ -177,8 +195,8 @@ class StockMovementEndpointTest extends TestCase
         $this->postJson('/api/procurement-stores/movements', [
             'type' => 'receive',
             'lines' => [
-                ['material_id' => $fine->id, 'quantity' => 2],
-                ['material_id' => $lotted->id, 'quantity' => 4],
+                ['material_id' => $fine->id, 'quantity' => 2, 'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf'],
+                ['material_id' => $lotted->id, 'quantity' => 4, 'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf'],
             ],
         ])->assertStatus(422)->assertJsonValidationErrors('lines.1.lot_number');
     }
@@ -203,6 +221,7 @@ class StockMovementEndpointTest extends TestCase
             'items' => [[
                 'material_id' => $lotted->id, 'quantity' => 6,
                 'lot_number' => 'LOT-9931', 'expiry_date' => now()->addYear()->toDateString(),
+                'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             ]],
         ])->assertOk();
 
@@ -228,7 +247,7 @@ class StockMovementEndpointTest extends TestCase
 
         $this->postJson('/api/procurement-stores/movements', [
             'type' => 'issue',
-            'lines' => [['material_id' => $material->id, 'quantity' => 3, 'recipient_name' => 'Achieng']],
+            'lines' => [['material_id' => $material->id, 'quantity' => 3, 'recipient_name' => 'Achieng'] + $this->companyUse()],
         ])->assertOk();
 
         $this->assertSame(7.0, $this->onHand($material));
@@ -322,6 +341,7 @@ class StockMovementEndpointTest extends TestCase
                 ],
                 'quantity' => 10,
                 'receipt_unit_cost' => 450,
+                'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             ]],
         ])->assertOk();
 

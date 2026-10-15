@@ -321,6 +321,18 @@ class CostVerificationService
             ->first();
     }
 
+    public const SETTLEMENT_AUTHORITY_MESSAGE = 'You can verify the cost, but recording a company-paid settlement requires authorised payment permission.';
+
+    /**
+     * The existing "may move money out of a WNG account" permission — the one
+     * a petty-cash disbursement and a supplier payment already require. No new
+     * authority is invented for this.
+     */
+    public static function maySettleCompanyPaid(?User $user): bool
+    {
+        return (bool) $user?->can(\App\Constants\Permissions::FINANCE_PETTY_CASH_CREATE);
+    }
+
     public static function isCompanyPaid(CostLine $line): bool
     {
         return ($line->details['funding_mode'] ?? null) === 'company_paid'
@@ -353,6 +365,15 @@ class CostVerificationService
             return;
         }
 
+        // Report 76A Part 2, Decision E. Verifying this cost records a payment
+        // and, from the float, moves WNG's money. Being allowed to verify a
+        // cost is not being allowed to do that: the verifier must ALSO hold the
+        // permission every other outgoing payment needs. Checked here, at the
+        // point the Payment would be created, so no caller can skip it — and
+        // as hasPermissionTo-style `can`, never granted to anyone by this code.
+        if (! self::maySettleCompanyPaid($verifier)) {
+            throw new \Illuminate\Auth\Access\AuthorizationException(self::SETTLEMENT_AUTHORITY_MESSAGE);
+        }
         // What actually left the account: gross less tax withheld for KRA —
         // the same figure postCostLine() credits to the paying account.
         $paid = bcsub(

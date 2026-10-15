@@ -52,6 +52,17 @@ class BoardController extends Controller
             return response()->json(['message' => 'Only Stores team members can receive boards.'], 403);
         }
 
+        // Report 76A Part 2 (Decision C). This added boards to stock with no
+        // goods receipt, no value and no ledger entry. Bought boards arrive
+        // through the purchase order's goods receipt (Stores > Receiving);
+        // boards that were not bought — opening stock, boards found, a
+        // correction — are taken in through Receive Stock with that reason,
+        // which values them and posts them.
+        return response()->json([
+            'message' => 'Purchased stock must be received through the approved GRN. '
+                .'Boards that were not bought are taken in through Receive Stock as a stock adjustment, with the reason.',
+        ], 422);
+
         try {
             $boards = $this->ingestionService->ingestBatch(
                 libraryMaterialId: $request->library_material_id,
@@ -1721,6 +1732,12 @@ class BoardController extends Controller
             $board = DB::transaction(function () use ($request, $id) {
                 $board = Board::whereKey($id)->lockForUpdate()->firstOrFail();
                 $previousStatus = $board->status;
+                // What the board is worth in Stores before it changes state, and
+                // whether that value is in Inventory at all: a returned board
+                // still awaiting its quarantine review has had no return credit
+                // posted, so its cost is still with the project.
+                $valueInStores = (float) $board->current_value;
+                $awaitingReturnReview = $board->return_log_id && $board->quarantine_review_status === 'pending';
                 $board->transitionTo(
                     $request->status,
                     auth()->id(),
@@ -1767,6 +1784,14 @@ class BoardController extends Controller
                 // quantity = -1 only when stock actually decremented here.
                 // quantity = 0 means board was already off the books (post-issue scrap).
                 'quantity'     => $wasInStores ? -1 : 0,
+                // Report 76A Part 2 (Decision D): a board scrapped while it is
+                // in Stores takes its value out of Inventory, to the approved
+                // damage account — never to a project. Without the value the
+                // write-off reached the shelf count and not the ledger. A board
+                // scrapped after issue carries none: its cost is already the
+                // project's, and stays there.
+                'movement_reason' => \App\Modules\ProcurementStores\Models\InventoryLog::REASON_DAMAGE,
+                'movement_value' => $wasInStores && ! $awaitingReturnReview && $valueInStores > 0 ? $valueInStores : null,
                 'balance_after'=> $stock?->fresh()->quantity_on_hand ?? 0,
                 'notes'        => "Board scrapped: {$board->tracking_code}"
                     . " (was {$previousStatus}"

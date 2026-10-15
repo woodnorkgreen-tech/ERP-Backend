@@ -30,3 +30,7 @@ Thumbs.db
 graphify-out/
 *.tar.gz
 /Modules/
+
+
+# AI docs and reference files
+/docs
