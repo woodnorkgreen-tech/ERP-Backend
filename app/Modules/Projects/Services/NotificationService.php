@@ -940,6 +940,48 @@ class NotificationService
     }
 
     /**
+     * Tell the project officer their job was completed automatically after
+     * three full overdue days, so a wrong completion is noticed and reopened
+     * (Reactivate, with a reason) rather than discovered weeks later.
+     */
+    public function sendProjectAutoCompleted(ProjectEnquiry $enquiry, int $daysOverdue): void
+    {
+        try {
+            $enquiry->loadMissing(['client', 'projectOfficer']);
+            $officer = $enquiry->projectOfficer;
+            if (! $officer) {
+                Log::info('Auto-completed project has no project officer to notify', ['enquiry_id' => $enquiry->id]);
+
+                return;
+            }
+
+            CentralNotificationService::send(
+                type: 'project_auto_completed',
+                title: 'Project completed automatically',
+                message: "'{$enquiry->title}' was {$daysOverdue} days past its delivery date and has been marked complete. If work is still going on, reactivate it.",
+                module: 'projects',
+                urgency: 'warning',
+                data: [
+                    'enquiry_id' => $enquiry->id,
+                    'enquiry_title' => $enquiry->title,
+                    'enquiry_number' => $enquiry->enquiry_number,
+                    'job_number' => $enquiry->job_number,
+                    'client_name' => $enquiry->client?->full_name ?? $enquiry->client?->name ?? 'Unknown Client',
+                    'expected_delivery_date' => $enquiry->expected_delivery_date?->toDateString(),
+                    'days_overdue' => $daysOverdue,
+                    'url' => "/projects/enquiries/{$enquiry->id}",
+                ],
+                users: [$officer],
+            );
+        } catch (\Exception $e) {
+            Log::error('Failed to send project auto-completed notification', [
+                'enquiry_id' => $enquiry->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Send notification when project deliverables are updated after a quote exists
      */
     public function sendDeliverablesUpdated(

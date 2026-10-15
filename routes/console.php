@@ -20,3 +20,9 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::command('logistics:loading-timeline-alerts')
     ->everyFiveMinutes()
     ->withoutOverlapping();
+
+// Date-only delivery deadlines use the application's local timezone. Running
+// every five minutes also catches up after downtime without requiring a page visit.
+\Illuminate\Support\Facades\Schedule::command('projects:auto-complete-overdue')
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
