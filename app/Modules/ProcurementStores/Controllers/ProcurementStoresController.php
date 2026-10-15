@@ -1402,83 +1402,17 @@ class ProcurementStoresController extends Controller
          * spoken for while a buyer choosing that same material saw nothing of
          * it. One definition, so the two screens cannot disagree.
          */
-        $pendingLines = app(ProjectMaterialDemand::class)->pendingLines();
+        $pendingLines = app(ProjectMaterialDemand::class)->pendingLines(
+            null,
+            \App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility::CAP_SHORTAGE,
+        );
 
-        if ($pendingLines->isEmpty()) {
-            return response()->json(['data' => [], 'summary' => [
-                'materials' => 0, 'fully_covered' => 0, 'at_risk' => 0, 'covered_by_incoming' => 0,
-            ]]);
-        }
+        // Report 78C: the arithmetic lives in MaterialShortageForecast, so the
+        // "Procurement Shortage" tile and this drawer are one calculation.
+        $forecast = app(\App\Modules\ProcurementStores\Services\MaterialShortageForecast::class);
+        $rows = $forecast->rows($pendingLines);
 
-        $materialIds = $pendingLines->pluck('library_material_id')->unique()->values();
-        $materials = LibraryMaterial::with('stock')
-            ->whereIn('id', $materialIds)->get()->keyBy('id');
-
-        $boardMaterialIds = $materials->filter(fn ($material) => $material->isBoardTrackable())
-            ->pluck('id')->unique();
-        $boardAvailable = Board::query()->whereIn('library_material_id', $boardMaterialIds)
-            ->where('status', 'Available')->selectRaw('library_material_id, COUNT(*) AS quantity')
-            ->groupBy('library_material_id')->pluck('quantity', 'library_material_id');
-
-        $incoming = PurchaseOrderItem::query()
-            ->whereNotNull('material_id')
-            ->whereHas('purchaseOrder', fn ($query) => $query->whereNotIn('status', ['cancelled', 'rejected', 'completed']))
-            ->withSum('goodsReceiptNoteItems as received_total', 'received_quantity')
-            ->get(['id', 'material_id', 'quantity'])
-            ->groupBy('material_id')
-            ->map(fn ($rows) => (float) $rows->sum(fn ($row) => max(0, (float) $row->quantity - (float) ($row->received_total ?? 0))));
-
-        $rows = $pendingLines->groupBy('library_material_id')->map(function ($materialLines, $materialId) use ($materials, $boardAvailable, $incoming) {
-            $material = $materials->get($materialId);
-            // Shaped here rather than in the service: `approved` is the word
-            // this screen has always used for the specified quantity, and the
-            // service speaks of it as `specified` for callers with no notion of
-            // a materials-task approval.
-            $projectRows = $materialLines->map(fn (array $line) => [
-                'project_id' => $line['project_id'],
-                'project_code' => $line['project_code'],
-                'project_title' => $line['project_title'],
-                'project_material_id' => $line['project_material_id'],
-                'element' => $line['element'],
-                'approved' => $line['specified'],
-                'issued' => $line['issued'],
-                'pending' => $line['pending'],
-                'required_by' => $line['required_by'],
-            ])->values();
-
-            $pending = (float) $projectRows->sum('pending');
-            $reserved = (float) ($material?->stock?->quantity_reserved ?? 0);
-            $available = $material?->isBoardTrackable()
-                ? max(0, (float) ($boardAvailable[$materialId] ?? 0) - $reserved)
-                : max(0, (float) ($material?->stock?->quantity_on_hand ?? 0) - $reserved);
-            $incomingQuantity = (float) ($incoming[$materialId] ?? 0);
-            $immediateShortage = max(0, $pending - $available);
-            $projectedShortage = max(0, $pending - $available - $incomingQuantity);
-            $status = $immediateShortage <= 0 ? 'fully_covered' : ($projectedShortage <= 0 ? 'covered_by_incoming' : ($available > 0 ? 'partially_covered' : 'shortage'));
-
-            return [
-                'material_id' => (int) $materialId,
-                'material_name' => $material?->material_name ?? 'Material',
-                'material_code' => $material?->material_code,
-                'unit' => $material?->unit_of_measure,
-                'pending_demand' => round($pending, 4),
-                'available' => round($available, 4),
-                'incoming' => round($incomingQuantity, 4),
-                'immediate_shortage' => round($immediateShortage, 4),
-                'projected_shortage' => round($projectedShortage, 4),
-                'coverage_percent' => $pending > 0 ? min(100, round(($available / $pending) * 100, 1)) : 100,
-                'earliest_required_by' => $projectRows->pluck('required_by')->filter()->sort()->first(),
-                'status' => $status,
-                'projects' => $projectRows,
-            ];
-        })->filter()->sortByDesc('projected_shortage')->values();
-
-        return response()->json(['data' => $rows, 'summary' => [
-            'materials' => $rows->count(),
-            'fully_covered' => $rows->where('status', 'fully_covered')->count(),
-            'at_risk' => $rows->whereIn('status', ['partially_covered', 'shortage'])->count(),
-            'covered_by_incoming' => $rows->where('status', 'covered_by_incoming')->count(),
-        ]]);
+        return response()->json(['data' => $rows, 'summary' => $forecast->summary($rows)]);
     }
 
     /**

@@ -234,6 +234,8 @@ class EnquiryController extends Controller
                 'deliverables',
                 'payments',
                 'quoteApprovals',
+                // Report 78C: so the list can show and toggle a hold.
+                'openHold',
             ]);
 
         // 2. Apply "Sub-Tab" filtering (Status Groups) - Kept for flexibility for now

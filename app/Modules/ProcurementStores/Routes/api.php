@@ -71,6 +71,12 @@ Route::get('/inventory-logs/pdf', [ProcurementStoresController::class, 'inventor
 Route::get('/material-ledger', [ProcurementStoresController::class, 'materialLedger']);
 Route::get('/outstanding-reusables', [ProcurementStoresController::class, 'outstandingReusables']);
 Route::get('/material-demand-forecast', [ProcurementStoresController::class, 'materialDemandForecast']);
+// Report 78C: active material work (each count is its list's length) and legacy retirement.
+Route::get('/material-workflow-summary', [\App\Modules\ProcurementStores\Controllers\ProjectMaterialWorkflowController::class, 'summary']);
+Route::get('/material-workflow-queue', [\App\Modules\ProcurementStores\Controllers\ProjectMaterialWorkflowController::class, 'queue']);
+Route::get('/projects/{project}/legacy-retirements', [\App\Modules\ProcurementStores\Controllers\ProjectMaterialWorkflowController::class, 'retirements']);
+Route::post('/projects/{project}/legacy-retirements', [\App\Modules\ProcurementStores\Controllers\ProjectMaterialWorkflowController::class, 'retire']);
+Route::post('/projects/{project}/legacy-retirements/revoke', [\App\Modules\ProcurementStores\Controllers\ProjectMaterialWorkflowController::class, 'revoke']);
 // What the demand forecast implies should be bought, and the draft that starts it.
 Route::get('/replenishment-suggestions', [ReplenishmentController::class, 'index']);
 Route::post('/replenishment-suggestions/draft-requisition', [ReplenishmentController::class, 'draft']);

@@ -135,6 +135,12 @@ class ProjectEnquiry extends Model
         return $this->hasOne(Project::class, 'enquiry_id');
     }
 
+    /** Report 78C — the hold currently pausing this job, if any. */
+    public function openHold(): HasOne
+    {
+        return $this->hasOne(\App\Modules\Projects\Models\ProjectHold::class, 'project_enquiry_id')->whereNull('released_at');
+    }
+
     public function quoteApprovals(): HasMany
     {
         return $this->hasMany(QuoteApproval::class, 'enquiry_id');

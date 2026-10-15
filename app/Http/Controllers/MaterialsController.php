@@ -253,6 +253,9 @@ class MaterialsController extends Controller
 
             return response()->json([
                 'data' => $this->formatMaterialsData($materialsData, $fulfilment),
+                // Report 78C: whether Stores may still issue, resolve or buy for this job.
+                'lifecycle' => app(\App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility::class)
+                    ->describeMany([$enquiryId])[$enquiryId] ?? null,
                 'designGate' => $this->checkDesignApprovalGate($materialsTask->id),
                 'message' => 'Materials data retrieved successfully',
             ]);
@@ -1382,6 +1385,8 @@ class MaterialsController extends Controller
                                 'issuedQuantity' => $state['issued'] ?? 0.0,
                                 'returnedQuantity' => $state['returned'] ?? 0.0,
                                 'netIssuedQuantity' => $state['net_issued'] ?? 0.0,
+                                // Report 78C: recorded as fulfilled outside the ERP, in fulfilmentUnit.
+                                'retiredQuantity' => $state['retired'] ?? 0.0,
                                 'remainingQuantity' => $state['remaining'] ?? (float) $material->quantity,
                                 // In the material's stock unit (fulfilmentUnit); zero while the
                                 // requirement's unit cannot be read in stock units (Report 78B).

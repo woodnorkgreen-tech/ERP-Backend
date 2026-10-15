@@ -4,7 +4,6 @@ namespace App\Modules\ProcurementStores\Services;
 
 use App\Events\MaterialsListChanged;
 use App\Models\ElementMaterial;
-use App\Models\Project;
 use App\Models\ProjectEnquiry;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\MaterialsLibrary\Services\MaterialDuplicateFinder;
@@ -263,10 +262,18 @@ class ProjectMaterialResolution
             ]);
         }
         $enquiryId = $materialsData?->task?->project_enquiry_id;
-        $enquiryStatus = $enquiryId ? ProjectEnquiry::whereKey($enquiryId)->value('status') : null;
-        $projectStatus = $enquiryId ? Project::where('enquiry_id', $enquiryId)->value('status') : null;
-        if (in_array($enquiryStatus, ['completed', 'cancelled', 'closed'], true) || in_array($projectStatus, ['completed', 'cancelled', 'closed'], true)) {
-            throw ValidationException::withMessages(['project_material_id' => 'This job is '.($projectStatus && in_array($projectStatus, ['completed', 'cancelled', 'closed'], true) ? $projectStatus : $enquiryStatus).'; its material requirements can no longer be changed from Stores.']);
+        // Report 78C: the shared lifecycle rule (enquiry status is the authority;
+        // the stale projects.status mirror is no longer read). Resolution is
+        // planning work, so active, pre-start and on-hold jobs may resolve.
+        app(ProjectMaterialWorkflowEligibility::class)->assertAllows(
+            $enquiryId ? (int) $enquiryId : null,
+            ProjectMaterialWorkflowEligibility::CAP_RESOLUTION,
+            null,
+            'project_material_id',
+        );
+        $retirements = app(MaterialRequirementRetirements::class);
+        if ((float) ($retirements->retiredBomByLine([$line->id])[$line->id] ?? 0) >= (float) $line->quantity - 0.00001) {
+            throw ValidationException::withMessages(['project_material_id' => 'This requirement was recorded as fulfilled outside the ERP. Revoke that retirement before changing it from Stores.']);
         }
     }
 

@@ -420,6 +420,19 @@ class StockMovementPoster
         if (filled($line['project_id'] ?? null)) {
             unset($line['movement_reason'], $line['cost_centre_id']);
 
+            // Report 78C: stock goes only to a job that is being delivered.
+            // A completed, closed or on-hold job needs an authorised manager's
+            // recorded reason (D-4); a cancelled or not-yet-started job none.
+            $override = app(ProjectMaterialWorkflowEligibility::class)->assertAllows(
+                (int) Project::whereKey($line['project_id'])->value('enquiry_id') ?: null,
+                ProjectMaterialWorkflowEligibility::CAP_ISSUE,
+                $line['lifecycle_override_reason'] ?? null,
+            );
+            if ($override) {
+                $line['notes'] = trim(($line['notes'] ?? '').' [Lifecycle override: '.$override['reason'].']');
+            }
+            unset($line['lifecycle_override_reason']);
+
             return $line;
         }
 
@@ -489,7 +502,7 @@ class StockMovementPoster
         if ($material->isConsumableUnit()) {
             $issued = (string) InventoryLog::where('project_material_id', $planned->id)->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'));
             $returns = (string) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
-            $remaining = bcsub($requiredBase, bcsub($issued, $returns, 6), 6);
+            $remaining = bcsub(bcsub($requiredBase, bcsub($issued, $returns, 6), 6), number_format($this->retiredAgainst($planned, (float) $requiredBase), 6, '.', ''), 6);
             if (bccomp((string) $quantityInBase, $remaining, 6) > 0) $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement.");
             return;
         }
@@ -501,9 +514,13 @@ class StockMovementPoster
 
         $netIssued += $this->legacyIssuedAgainst($planned, $project, $materialsData, (float) $requiredBase);
 
-        $remaining = max(0, (float) $requiredBase - $netIssued);
+        // Report 78C: quantity recorded as fulfilled outside the ERP is not
+        // owed any more; revoking the retirement is how it becomes issuable.
+        $retired = $this->retiredAgainst($planned, (float) $requiredBase);
+        $remaining = max(0, (float) $requiredBase - $netIssued - $retired);
         if ($quantityInBase > $remaining + 0.00001) {
-            $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement.");
+            $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement"
+                .($retired > 0 ? " ({$retired} was recorded as fulfilled outside the ERP)." : '.'));
         }
     }
 
@@ -694,6 +711,14 @@ class StockMovementPoster
         }
 
         return $quantity * $factor;
+    }
+
+    /** Report 78C: the line's active legacy retirement, read in the requirement's stock unit. */
+    private function retiredAgainst(ElementMaterial $planned, float $requiredBase): float
+    {
+        $retirements = app(MaterialRequirementRetirements::class);
+
+        return $retirements->retiredIn($planned, $requiredBase, (float) ($retirements->retiredBomByLine([$planned->id])[$planned->id] ?? 0));
     }
 
     /** A project's materials must be approved before any of them can be issued. */

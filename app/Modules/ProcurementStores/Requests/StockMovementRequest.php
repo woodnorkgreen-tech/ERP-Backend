@@ -113,6 +113,9 @@ class StockMovementRequest extends FormRequest
                 // Without this link a client can repeatedly present the original
                 // specification quantity and bypass the remaining-quantity guard.
                 'lines.*.project_material_id' => 'required_with:lines.*.project_id|exists:element_materials,id',
+                // Report 78C (D-4): why stock is needed on a completed, closed or
+                // on-hold job. Only honoured for a holder of the override permission.
+                'lines.*.lifecycle_override_reason' => 'nullable|string|max:1000',
                 // Custody is the point of an issue: an issue nobody is named on
                 // is stock that has left the shelf with no one accountable for
                 // it. Batch issuing always demanded this and single issuing

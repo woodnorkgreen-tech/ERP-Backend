@@ -376,7 +376,14 @@ class ReplenishmentPlannerTest extends TestCase
         $this->assertSame('normal', Requisition::findOrFail($response->json('data.id'))->urgency);
     }
 
-    public function test_existing_requests_are_visible_without_reducing_the_shortage(): void
+    /**
+     * Report 78C (requirement 11): an open request not yet on a purchase order
+     * is already on its way to becoming stock, so it reduces what is suggested.
+     * It used to be shown as context and then suggested again, which is how the
+     * same purchase got raised twice. It is still listed for the buyer, and a
+     * rejected request stops counting.
+     */
+    public function test_open_requests_are_visible_and_reduce_the_suggestion(): void
     {
         $material = $this->material('Board', onHand: 0);
         $this->specify($material, 10);
@@ -387,14 +394,16 @@ class ReplenishmentPlannerTest extends TestCase
         ])->assertCreated();
 
         $row = $this->getJson('/api/procurement-stores/replenishment-suggestions')->assertOk()->json('data.0');
-        $this->assertSame(10.0, (float) $row['suggested_quantity']);
+        $this->assertSame(2.0, (float) $row['suggested_quantity']);
+        $this->assertSame(8.0, (float) $row['requested_open']);
         $this->assertCount(1, $row['active_requests']);
         $this->assertSame($draft->json('data.id'), $row['active_requests'][0]['id']);
         $this->assertSame(8.0, (float) $row['active_requests'][0]['quantity']);
 
         Requisition::findOrFail($draft->json('data.id'))->update(['status' => 'rejected']);
-        $this->getJson('/api/procurement-stores/replenishment-suggestions')->assertOk()
-            ->assertJsonCount(0, 'data.0.active_requests');
+        $row = $this->getJson('/api/procurement-stores/replenishment-suggestions')->assertOk()->json('data.0');
+        $this->assertSame(10.0, (float) $row['suggested_quantity']);
+        $this->assertCount(0, $row['active_requests']);
     }
 
     public function test_duplicate_material_lines_are_rejected_instead_of_silently_overwritten(): void
