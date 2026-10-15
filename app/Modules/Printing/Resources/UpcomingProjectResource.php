@@ -15,8 +15,11 @@ class UpcomingProjectResource extends JsonResource
     public function toArray(Request $request): array
     {
         $enquiry = $this->enquiry;
+        // A deliverable can have more than one design task (for example graphic and structural),
+        // so every active task is listed, not just the first.
         $tasks = $this->items
             ->where('status', '!=', 'cancelled')
+            ->sortBy('id')
             ->groupBy('project_deliverable_id');
 
         return [
@@ -30,20 +33,20 @@ class UpcomingProjectResource extends JsonResource
             'design_status' => $this->status,
             'deliverables' => $enquiry
                 ? $enquiry->deliverables->map(function ($deliverable) use ($tasks) {
-                    $task = $tasks->get($deliverable->id)?->first();
+                    $deliverableTasks = $tasks->get($deliverable->id) ?? collect();
 
                     return [
                         'deliverable_id' => $deliverable->id,
                         'name' => $deliverable->name,
                         'classification' => $deliverable->element_type,
-                        'planning_status' => $task ? 'assigned' : 'awaiting_design',
-                        'design_item' => $task ? [
+                        'planning_status' => $deliverableTasks->isNotEmpty() ? 'assigned' : 'awaiting_design',
+                        'design_items' => $deliverableTasks->map(fn ($task) => [
                             'id' => $task->id,
                             'title' => $task->title,
                             'stream' => $task->stream,
                             'status' => $task->status,
                             'designer_name' => $task->assignedUser?->name,
-                        ] : null,
+                        ])->values(),
                     ];
                 })->values()
                 : [],

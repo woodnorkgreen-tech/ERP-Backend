@@ -90,7 +90,7 @@ class UpcomingPrintJobsTest extends TestCase
             ->assertJsonPath('data.0.project_name', 'Exhibition booth')
             ->assertJsonPath('data.0.deliverables.0.name', 'Entrance banner')
             ->assertJsonPath('data.0.deliverables.0.planning_status', 'awaiting_design')
-            ->assertJsonPath('data.0.deliverables.0.design_item', null);
+            ->assertJsonCount(0, 'data.0.deliverables.0.design_items');
     }
 
     public function test_deliverable_with_a_design_task_is_assigned_and_shows_the_designer(): void
@@ -109,9 +109,28 @@ class UpcomingPrintJobsTest extends TestCase
         $this->upcoming()->assertOk()
             ->assertJsonPath('data.0.deliverables.0.name', 'Banner')
             ->assertJsonPath('data.0.deliverables.0.planning_status', 'assigned')
-            ->assertJsonPath('data.0.deliverables.0.design_item.designer_name', 'Ada Designer')
+            ->assertJsonPath('data.0.deliverables.0.design_items.0.designer_name', 'Ada Designer')
             ->assertJsonPath('data.0.deliverables.1.name', 'Brochure')
             ->assertJsonPath('data.0.deliverables.1.planning_status', 'awaiting_design');
+    }
+
+    public function test_every_design_task_on_a_deliverable_is_listed_with_its_designer(): void
+    {
+        $this->loginPrinter();
+        $enquiry = $this->enquiry('Two tasks', now()->addDays(10)->toDateString());
+        $banner = $this->deliverable($enquiry, 'Banner');
+        $job = $this->designJob($enquiry, 'Two tasks');
+        $designer = User::factory()->create(['name' => 'Kevin Musame']);
+        DesignItem::create(['design_job_id' => $job->id, 'stream' => 'graphic', 'title' => 'Banner artwork',
+            'status' => 'awaiting_client_approval', 'project_deliverable_id' => $banner, 'assigned_to' => null]);
+        DesignItem::create(['design_job_id' => $job->id, 'stream' => 'graphic', 'title' => 'Banner artwork revision',
+            'status' => 'pending', 'project_deliverable_id' => $banner, 'assigned_to' => $designer->id]);
+
+        $this->upcoming()->assertOk()
+            ->assertJsonPath('data.0.deliverables.0.planning_status', 'assigned')
+            ->assertJsonCount(2, 'data.0.deliverables.0.design_items')
+            ->assertJsonPath('data.0.deliverables.0.design_items.0.designer_name', null)
+            ->assertJsonPath('data.0.deliverables.0.design_items.1.designer_name', 'Kevin Musame');
     }
 
     public function test_archived_deliverables_and_cancelled_design_jobs_are_excluded(): void
