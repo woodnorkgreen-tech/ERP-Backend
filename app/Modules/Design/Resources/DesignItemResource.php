@@ -27,6 +27,11 @@ class DesignItemResource extends JsonResource
             'description' => $this->description,
             'status' => $this->status,
             'assigned_to' => $this->assigned_to,
+            'outsourced_partner_name' => $this->outsourced_partner_name,
+            'outsourced_reason' => $this->outsourced_reason,
+            'outsourced_reason_label' => \App\Support\Outsourcing\OutsourcingAssignment::REASONS[$this->outsourced_reason] ?? null,
+            'outsourced_reason_note' => $this->outsourced_reason_note,
+            'outsourced_at' => $this->outsourced_at,
             'designer' => $this->whenLoaded('assignedUser', fn () => [
                 'id' => $this->assignedUser->id,
                 'name' => $this->assignedUser->name,

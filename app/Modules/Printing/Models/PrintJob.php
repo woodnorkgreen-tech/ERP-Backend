@@ -62,6 +62,11 @@ class PrintJob extends Model
         'machine_asset_id',
         'machine_name_snapshot',
         'remarks',
+        'outsourced_partner_name',
+        'outsourced_reason',
+        'outsourced_reason_note',
+        'outsourced_by',
+        'outsourced_at',
         'created_by',
         'updated_by',
     ];
@@ -73,6 +78,7 @@ class PrintJob extends Model
         'completed_at' => 'datetime',
         'stop_required_at' => 'datetime',
         'stop_acknowledged_at' => 'datetime',
+        'outsourced_at' => 'datetime',
         'artwork_version' => 'integer',
         'design_height_m' => 'decimal:3',
         'design_length_m' => 'decimal:3',
@@ -105,6 +111,11 @@ class PrintJob extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id');
+    }
+
+    public function isOutsourced(): bool
+    {
+        return $this->outsourced_partner_name !== null;
     }
 
     public function operator(): BelongsTo
