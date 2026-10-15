@@ -5,6 +5,7 @@ namespace App\Modules\Projects\Actions;
 use App\Constants\EnquiryConstants;
 use App\Models\GovernanceAuditLog;
 use App\Models\ProjectEnquiry;
+use App\Modules\Projects\Services\NotificationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -28,14 +29,16 @@ class AutoCompleteOverdueProjectAction
             ->whereDoesntHave('openHold');
     }
 
+    public function __construct(private readonly NotificationService $notifications) {}
+
     public function execute(int $enquiryId): bool
     {
-        return DB::transaction(function () use ($enquiryId) {
+        $completed = DB::transaction(function () use ($enquiryId) {
             // Recheck inside the lock: the date, status or hold may have
             // changed after the command selected this row.
             $enquiry = $this->candidates()->whereKey($enquiryId)->lockForUpdate()->first();
             if (! $enquiry) {
-                return false;
+                return null;
             }
 
             GovernanceAuditLog::create([
@@ -57,7 +60,19 @@ class AutoCompleteOverdueProjectAction
             $enquiry->save();
             $enquiry->project()->update(['status' => EnquiryConstants::STATUS_COMPLETED]);
 
-            return true;
+            return $enquiry;
         });
+
+        if (! $completed) {
+            return false;
+        }
+
+        // After the commit: a notice must never be sent for a completion that
+        // rolled back, and a failed notice must never undo the completion.
+        $daysOverdue = (int) abs(CarbonImmutable::today(config('app.timezone'))
+            ->diffInDays($completed->expected_delivery_date->toDateString()));
+        $this->notifications->sendProjectAutoCompleted($completed, $daysOverdue);
+
+        return true;
     }
 }

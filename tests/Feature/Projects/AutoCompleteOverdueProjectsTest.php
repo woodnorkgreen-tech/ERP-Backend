@@ -6,6 +6,7 @@ use App\Models\GovernanceAuditLog;
 use App\Models\Project;
 use App\Models\ProjectEnquiry;
 use App\Models\User;
+use App\Modules\Notifications\Models\AppNotification;
 use App\Modules\Projects\Actions\AutoCompleteOverdueProjectAction;
 use App\Modules\Projects\Models\ProjectHold;
 use Carbon\Carbon;
@@ -36,12 +37,12 @@ class AutoCompleteOverdueProjectsTest extends TestCase
         ]);
     }
 
-    private function project(?string $due = '2026-10-15', string $status = 'in_progress'): ProjectEnquiry
+    private function project(?string $due = '2026-10-15', string $status = 'in_progress', ?int $officerId = null): ProjectEnquiry
     {
         $enquiry = ProjectEnquiry::create([
             'date_received' => '2026-10-01', 'client_id' => $this->clientId,
             'title' => 'Overdue project', 'contact_person' => 'Client',
-            'status' => $status, 'expected_delivery_date' => $due,
+            'status' => $status, 'expected_delivery_date' => $due, 'project_officer_id' => $officerId,
             'enquiry_number' => 'ENQ-'.Str::uuid(), 'created_by' => $this->creator->id,
         ]);
         Project::create(['enquiry_id' => $enquiry->id, 'project_id' => 'JOB-'.Str::random(8), 'status' => 'in_progress']);
@@ -108,6 +109,44 @@ class AutoCompleteOverdueProjectsTest extends TestCase
             $this->assertSame('completed', $enquiry->fresh()->status);
             $this->assertSame('completed', $enquiry->project()->first()->status);
         }
+    }
+
+    public function test_the_project_officer_is_told_once_how_overdue_the_job_was(): void
+    {
+        $officer = User::factory()->create();
+        $enquiry = $this->project('2026-10-15', 'planning', $officer->id);
+
+        $this->artisan('projects:auto-complete-overdue')->assertSuccessful();
+        $this->artisan('projects:auto-complete-overdue')->assertSuccessful();
+
+        $notice = AppNotification::where('user_id', $officer->id)->where('type', 'project_auto_completed')->sole();
+        $this->assertSame($enquiry->id, $notice->data['enquiry_id']);
+        $this->assertSame(4, $notice->data['days_overdue']);
+        $this->assertSame("/projects/enquiries/{$enquiry->id}", $notice->data['url']);
+        $this->assertSame(1, AppNotification::where('type', 'project_auto_completed')->count());
+    }
+
+    public function test_a_job_without_a_project_officer_still_completes_and_notifies_nobody(): void
+    {
+        $enquiry = $this->project();
+
+        $this->assertTrue(app(AutoCompleteOverdueProjectAction::class)->execute($enquiry->id));
+        $this->assertSame('completed', $enquiry->fresh()->status);
+        $this->assertSame(0, AppNotification::where('type', 'project_auto_completed')->count());
+    }
+
+    public function test_a_job_that_is_not_completed_sends_no_notice(): void
+    {
+        $officer = User::factory()->create();
+        $held = $this->project('2026-09-01', 'in_progress', $officer->id);
+        ProjectHold::create(['project_enquiry_id' => $held->id, 'reason' => 'Waiting for client', 'placed_by' => $this->creator->id, 'placed_at' => now()]);
+        $recent = $this->project('2026-10-17', 'in_progress', $officer->id);
+
+        $this->artisan('projects:auto-complete-overdue')->assertSuccessful();
+
+        $this->assertSame('in_progress', $held->fresh()->status);
+        $this->assertSame('in_progress', $recent->fresh()->status);
+        $this->assertSame(0, AppNotification::where('user_id', $officer->id)->count());
     }
 
     public function test_rechecks_a_changed_deadline_before_completing(): void

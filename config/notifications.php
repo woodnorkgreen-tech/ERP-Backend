@@ -364,6 +364,10 @@ return [
             'module' => 'projects', 'label' => 'Project Completion Blocked',
             'default_channels' => ['database', 'push'], 'urgency' => 'warning',
         ],
+        'project_auto_completed' => [
+            'module' => 'projects', 'label' => 'Project Completed Automatically',
+            'default_channels' => ['database', 'push'], 'urgency' => 'warning',
+        ],
         'deliverables_updated' => [
             'module' => 'projects', 'label' => 'Project Scope Updated',
             'default_channels' => ['database', 'push'], 'urgency' => 'warning',
