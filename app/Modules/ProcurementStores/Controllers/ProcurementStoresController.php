@@ -509,6 +509,20 @@ class ProcurementStoresController extends Controller
     }
 
     /**
+     * The departments stock can be issued to when it is not for a project.
+     * A picker for anyone who can see Stores: names only, nothing financial.
+     */
+    public function costCentreOptions(): JsonResponse
+    {
+        if (! $this->allows(Permissions::STORES_VIEW, Permissions::STORES_MANAGE, Permissions::STORES_REVIEW)) {
+            return response()->json(['message' => 'Only Stores team members can see this list.'], 403);
+        }
+
+        return response()->json(['data' => DB::table('cost_centres')
+            ->where('is_active', true)->orderBy('name')->get(['id', 'code', 'name'])]);
+    }
+
+    /**
      * Process a stock check-in (Add to inventory)
      */
     /*
@@ -546,6 +560,8 @@ class ProcurementStoresController extends Controller
             'serial_numbers' => 'nullable|array',
             'serial_numbers.*' => 'string|max:150',
             'grn_item_id' => 'nullable|integer|exists:goods_receipt_note_items,id',
+            // With no goods receipt, the reason this stock exists (Report 76A Part 2).
+            'receipt_reason' => ['nullable', Rule::in(\App\Modules\ProcurementStores\Models\InventoryLog::EXCEPTIONAL_RECEIPT_REASONS)],
         ]);
 
         $result = $poster->post('receive', $request->except('type'));
@@ -670,31 +686,16 @@ class ProcurementStoresController extends Controller
                 // counted figure is now posted as an adjustment like any other
                 // movement, so the ledger stays the only account of the balance.
                 $difference = round($counted - (float) $stock->quantity_on_hand, 2);
+                // Report 76A Part 2 (Decisions C and D): typing a new balance here
+                // changed stock on one person's say-so and posted nothing to the
+                // accounts — Inventory in the ledger stayed where it was. A
+                // balance is corrected by a stock count: counted by one person,
+                // approved by another, and posted to Inventory Adjustments.
                 if (abs($difference) >= 0.01) {
-                    // Narrower than the "Stores team member" gate above: someone
-                    // can be trusted to hold stock settings generally without
-                    // being handed the ability to move the ledger via a count.
-                    if (! auth()->user()?->can(Permissions::STORES_ADJUST_QUANTITY)) {
-                        abort(403, 'You do not have permission to adjust stock quantities.');
-                    }
-
-                    if (blank($validated['stock_adjustment_reason'] ?? null)) {
-                        throw ValidationException::withMessages([
-                            'stock_adjustment_reason' => 'Say what the new count is based on — this posts a stock adjustment.',
-                        ]);
-                    }
-
-                    app(InventoryService::class)->adjustStock(
-                        $material->id,
-                        $difference,
-                        'adjustment',
-                        [
-                            'warehouse_code' => $stock->warehouse_code,
-                            'notes' => 'Counted balance set to '.$counted.' — '.$validated['stock_adjustment_reason'],
-                            'logged_at' => now(),
-                        ],
-                    );
-                    $stock->refresh();
+                    throw ValidationException::withMessages([
+                        'stock_quantity' => 'A stock balance is corrected through a stock count, which is reviewed and reaches the accounts. '
+                            .'Record the count in Stores > Stock counts; the other settings on this screen can still be saved.',
+                    ]);
                 }
             }
 
@@ -1189,6 +1190,10 @@ class ProcurementStoresController extends Controller
             'receive.controlled_units' => 'nullable|array|min:1|max:100',
             'receive.controlled_units.*.quantity' => 'required_with:receive.controlled_units|numeric|gt:0',
             'receive.controlled_units.*.notes' => 'nullable|string|max:2000',
+            // Stock taken in at the desk was not bought through an order, so it
+            // is a stock adjustment: the reason and the explanation behind it.
+            'receive.receipt_reason' => ['nullable', Rule::in(\App\Modules\ProcurementStores\Models\InventoryLog::EXCEPTIONAL_RECEIPT_REASONS)],
+            'receive.notes' => 'nullable|string|max:2000',
         ]);
 
         if ($elementMaterial->library_material_id) {

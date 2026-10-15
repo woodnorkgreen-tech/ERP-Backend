@@ -27,6 +27,7 @@ class InventoryFinanceTest extends TestCase
 {
     use GrantsMatrixPermissions;
     use RefreshDatabase;
+    use \Tests\Concerns\ApprovesGovernedPostingAccounts;
 
     private User $finance;
     private User $storekeeper;
@@ -41,6 +42,8 @@ class InventoryFinanceTest extends TestCase
         $this->seed(\App\Modules\Finance\Database\Seeders\FinanceDimensionSeeder::class);
         $this->seed(\App\Modules\Finance\Database\Seeders\AccountingPeriodSeeder::class);
         $this->seed(\App\Modules\Finance\Database\Seeders\PaymentSourceSeeder::class);
+        // Report 76A-3: stock postings need an approved account; this suite is not about that approval.
+        $this->activateStoresPostingAccounts();
         $this->posting = app(JournalPostingService::class);
 
         $this->grantMatrixPermissions('Accounts', 'Stores');

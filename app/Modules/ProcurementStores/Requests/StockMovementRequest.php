@@ -73,6 +73,9 @@ class StockMovementRequest extends FormRequest
                 'lines.*.serial_numbers' => 'nullable|array',
                 'lines.*.serial_numbers.*' => 'string|max:150',
                 'lines.*.grn_item_id' => 'nullable|integer|exists:goods_receipt_note_items,id',
+                // Report 76A Part 2: only for stock that was NOT bought. The
+                // poster refuses a receipt that has neither this nor a GRN line.
+                'lines.*.receipt_reason' => ['nullable', Rule::in(\App\Modules\ProcurementStores\Models\InventoryLog::EXCEPTIONAL_RECEIPT_REASONS)],
                 'lines.*.length' => 'nullable|numeric|min:0',
                 'lines.*.width' => 'nullable|numeric|min:0',
                 'lines.*.thickness' => 'nullable|numeric|min:0',
@@ -103,6 +106,9 @@ class StockMovementRequest extends FormRequest
             ],
             'issue' => [
                 'lines.*.project_id' => 'nullable|exists:projects,id',
+                // Company use: no project, a department, and a reason.
+                'lines.*.issue_purpose' => ['nullable', Rule::in([\App\Modules\ProcurementStores\Models\InventoryLog::REASON_INTERNAL_CONSUMPTION])],
+                'lines.*.cost_centre_id' => ['nullable', 'integer', Rule::exists('cost_centres', 'id')->where('is_active', true)],
                 // A project issue must name the approved requirement it fulfils.
                 // Without this link a client can repeatedly present the original
                 // specification quantity and bypass the remaining-quantity guard.
@@ -127,6 +133,10 @@ class StockMovementRequest extends FormRequest
             // hole in the balance, so the note is required here and only here.
             'damage' => [
                 'lines.*.notes' => 'required|string|min:5',
+                'lines.*.write_off_reason' => ['nullable', Rule::in([
+                    \App\Modules\ProcurementStores\Models\InventoryLog::REASON_DAMAGE,
+                    \App\Modules\ProcurementStores\Models\InventoryLog::REASON_WASTE,
+                ])],
                 'lines.*.reference_no' => 'nullable|string',
                 'lines.*.inventory_lot_id' => 'nullable|exists:inventory_lots,id',
                 'lines.*.serial_item_ids' => 'nullable|array',

@@ -97,6 +97,8 @@ Route::post('/goods-receipt-inspections/{item}/resolve', [GoodsReceiptInspection
 // The catalogue lookup behind the requisition and order pickers. Authorised
 // like the requisition it feeds, not like the material library itself.
 Route::get('/material-options', [MaterialOptionsController::class, 'index']);
+// The departments stock can be issued to for company use (Report 76A Part 2).
+Route::get('/cost-centre-options', [ProcurementStoresController::class, 'costCentreOptions']);
 
 Route::post('/search/suppliers', [SupplierController::class, 'search']);
 // Before the resource route, so /suppliers/options is never read as an id.
@@ -154,6 +156,13 @@ Route::get('/bills/{bill}/verification', [BillController::class, 'verification']
 Route::post('/bills/{bill}/verify', [BillController::class, 'verify']);
 // Report 60 §16: the verifier returns a bill; its preparer corrects it via PUT /bills/{bill}.
 Route::post('/bills/{bill}/return-for-correction', [BillController::class, 'returnForCorrection']);
+// Report 76A-3: a verified bill is corrected by a new document, never edited. Permissions are checked in the actions.
+Route::get('/purchase-orders/{purchaseOrder}/billable-lines', [BillController::class, 'billableLines']);
+Route::get('/bills/{bill}/matching', [BillController::class, 'matching']);
+Route::post('/bills/{bill}/reverse', [BillController::class, 'reverse']);
+Route::post('/bills/{bill}/credit-notes', [BillController::class, 'creditNote']);
+// Received value that will never be invoiced, released from the receipt accrual after reconciliation.
+Route::post('/goods-receipt-note-items/{grnItem}/close-out-accrual', [GoodsReceiptNoteController::class, 'closeOutAccrual']);
 Route::get('/bills/{bill}/download', [BillController::class, 'downloadPdf']);
 Route::post('/multi-payment', [BillController::class, 'recordMultiBillPayment']);
 
@@ -169,6 +178,8 @@ Route::get('/goods-receipt-notes/pending-confirmations', [GoodsReceiptNoteContro
 Route::get('/goods-receipt-notes/pending-confirmations-count', [GoodsReceiptNoteController::class, 'pendingConfirmationsCount']);
 Route::post('/goods-receipt-note-items/{grnItem}/confirm', [GoodsReceiptNoteController::class, 'confirmItem'])
     ->middleware('permission:stores.manage');
+// Report 76A Part 2: a receipt is reversed, never deleted. Permission checked in the action.
+Route::post('/goods-receipt-note-items/{grnItem}/reverse', [GoodsReceiptNoteController::class, 'reverseItem']);
 Route::get('/goods-receipt-notes/{id}/download', [GoodsReceiptNoteController::class, 'downloadPdf']);
 Route::get('/goods-receipt-notes/{id}', [GoodsReceiptNoteController::class, 'show']);
 Route::post('/goods-receipt-notes', [GoodsReceiptNoteController::class, 'store']);

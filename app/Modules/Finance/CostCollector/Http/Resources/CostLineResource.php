@@ -148,6 +148,15 @@ class CostLineResource extends JsonResource
             // the cost account can show "paid by voucher X" without folding the
             // payment amount into budget-vs-actual.
             'settlement' => $this->settlement(),
+            // Report 76A Part 2, Decision E: verifying a company-paid cost
+            // records a payment, so it needs payment authority as well. The
+            // screen reads these; the server enforces the rule regardless.
+            'company_paid_settlement' => [
+                'applies' => \App\Modules\Finance\CostCollector\Services\CostVerificationService::isCompanyPaid($this->resource)
+                    && $this->status === \App\Modules\Finance\CostCollector\Models\CostLine::STATUS_SUBMITTED,
+                'viewer_may_settle' => \App\Modules\Finance\CostCollector\Services\CostVerificationService::maySettleCompanyPaid($request->user()),
+                'message' => \App\Modules\Finance\CostCollector\Services\CostVerificationService::SETTLEMENT_AUTHORITY_MESSAGE,
+            ],
 
             // ── GL ────────────────────────────────────────────────────────
             'journal_entry_id' => $this->journal_entry_id,

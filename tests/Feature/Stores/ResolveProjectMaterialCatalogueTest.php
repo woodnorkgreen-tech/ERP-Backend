@@ -23,6 +23,7 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
 {
     use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
+    use \Tests\Concerns\ApprovesGovernedPostingAccounts;
 
     private int $enquiryId;
     private User $user;
@@ -31,11 +32,17 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Stock taken in without a goods receipt is a stock adjustment and posts its own entry.
+        $this->seed(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
+        // Report 76A-3: stock postings need an approved account; this suite is not about that approval.
+        $this->activateStoresPostingAccounts();
 
         Role::findOrCreate('Stores', 'web');
         $this->grantMatrixPermissions('Stores');
         $this->user = User::factory()->create(['is_active' => true]);
         $this->user->assignRole('Stores');
+        // Receiving at the desk is a stock adjustment and needs a Stores reviewer (Report 76A Part 2).
+        $this->user->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::STORES_REVIEW));
         Sanctum::actingAs($this->user->fresh());
 
         $clientId = DB::table('clients')->insertGetId([
@@ -161,7 +168,7 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
 
         $this->resolve($line->id, [
             'material_id' => $material->id,
-            'receive' => ['quantity' => 20, 'receipt_unit_cost' => 850],
+            'receive' => ['receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf', 'quantity' => 20, 'receipt_unit_cost' => 850],
             'reason' => 'Only 2 on hand — topped up to cover the requirement.',
         ])->assertOk();
 
@@ -175,7 +182,7 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
 
         $this->resolve($line->id, [
             'new_material' => ['material_name' => 'Contact Adhesive 1L', 'material_category_id' => $this->categoryId],
-            'receive' => ['quantity' => 15, 'receipt_unit_cost' => 900],
+            'receive' => ['receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf', 'quantity' => 15, 'receipt_unit_cost' => 900],
             'reason' => 'Not in the catalogue at all — registered and received on the spot.',
         ])->assertOk();
 
@@ -217,7 +224,7 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
                 'uom_conversions' => [['from_uom_id' => $boxId, 'factor' => 4]],
                 'default_unit_cost' => 750,
             ],
-            'receive' => ['quantity' => 8, 'receipt_unit_cost' => 900],
+            'receive' => ['receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf', 'quantity' => 8, 'receipt_unit_cost' => 900],
             'reason' => 'Registered with an explicit disposition and buying unit.',
         ])->assertOk();
 
@@ -319,7 +326,7 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
                 'issue_disposition' => 'consumed',
                 'base_uom_id' => $uomId,
             ],
-            'receive' => [
+            'receive' => ['receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
                 'quantity' => 100,
                 'receipt_unit_cost' => 250,
                 'controlled_units' => [

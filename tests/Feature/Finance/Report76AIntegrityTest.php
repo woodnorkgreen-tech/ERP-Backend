@@ -71,7 +71,10 @@ class Report76AIntegrityTest extends TestCase
             Permissions::FINANCE_REPORTS_VIEW, Permissions::FINANCE_COSTS_PORTFOLIO,
         ]);
         $this->verifier = User::factory()->create(['is_active' => true]);
-        $this->verifier->givePermissionTo([Permissions::FINANCE_COSTS_VERIFY, Permissions::FINANCE_REPORTS_VIEW]);
+        // Report 76A Part 2 (Decision E): verifying a company-paid cost moves
+        // money, so this verifier also holds the payment authority.
+        Permission::findOrCreate(Permissions::FINANCE_PETTY_CASH_CREATE, 'web');
+        $this->verifier->givePermissionTo([Permissions::FINANCE_COSTS_VERIFY, Permissions::FINANCE_REPORTS_VIEW, Permissions::FINANCE_PETTY_CASH_CREATE]);
         $this->actingAs($this->user, 'sanctum');
 
         $this->jobCodeId = (int) DB::table('expense_codes')->where('job_id_rule', '!=', 'not_allowed')

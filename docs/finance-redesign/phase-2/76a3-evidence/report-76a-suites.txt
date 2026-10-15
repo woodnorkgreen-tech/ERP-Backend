@@ -1,0 +1,68 @@
+   PASS  Tests\Feature\Finance\Report76A3AcceptanceTest
+  ✓ a partial receipts are billed by line against the receipts they cov… 0.69s  
+  ✓ b a price increase after part of the stock was issued splits betwee… 0.40s  
+  ✓ b a price decrease after everything was issued is all variance       0.37s  
+  ✓ c vat that cannot be recovered is cost of the stock not a variance   0.38s  
+  ✓ c a tax inclusive quote is normalised to a net order and the quote…  0.29s  
+  ✓ d a service is one project cost at confirmation and its price diffe… 0.67s  
+  ✓ c input vat without its tax document is stated on the invoice and l… 0.37s  
+  ✓ e lines must agree with the invoice and a receipt is billed once     0.55s  
+  ✓ e rounding never strands cents in the accrual                        0.45s  
+  ✓ f a price credit reduces the liability and the stock value and move… 0.44s  
+  ✓ f a quantity credit puts the receipt back to received not invoiced   0.44s  
+  ✓ f a posted bill is reversed once and only while unpaid               0.55s  
+  ✓ f received value never invoiced is closed out only to an approved a… 0.40s  
+  ✓ h a closed period refuses the stock movement with its entry          0.29s  
+  ✓ h damage waste and counts are refused without an approved account    0.31s  
+  ✓ k a bill with no lines is still read and verified and gets its line… 0.39s  
+  ⨯ two invoices claiming the same receipt at once bill it once          0.04s  
+   PASS  Tests\Feature\Finance\Report76A3MigrationTest
+  ✓ the migration rolls back and forward without touching existing amou… 2.58s  
+  ✓ Populated voucher_id for existing payment records
+  ✓ Migrated 0 allocation(s) from spend_voucher_allocations to payment_allocations
+  ✓ Populated settled_by_payment_id for 0 cost line(s)
+   PASS  Tests\Feature\Finance\Report76AIntegrityTest
+  ✓ a stock issue reversal restores inventory and never touches accou… 147.19s  
+  ✓ every stores movement reference settles against inventory            0.25s  
+  ✓ both reversal entry points leave a directly costed payment in the s… 0.29s  
+  ✓ a payment reversal is idempotent                                     0.39s  
+  ✓ reversing a payment that created no project cost invents none        0.32s  
+  ✓ a closed period refuses the whole reversal                           0.28s  
+  ✓ a company paid cost from the bank is one cost one payment one expen… 0.25s  
+  ✓ a company paid cost from petty cash moves custody                    0.23s  
+  ✓ company paid is refused when the float cannot cover it               0.33s  
+  ✓ a liability or unmapped account cannot be named as the paying accou… 0.23s  
+  ✓ reversing a company paid cost or its payment undoes both from eithe… 0.37s  
+  ✓ project margin is measured on revenue net of output vat              0.23s  
+  ✓ portfolio margin uses the same basis                                 0.31s  
+  ✓ the void listener reverses a standing cost when the actor is known   0.38s  
+  ✓ the void listener with no actor fails visibly and invents no user    0.32s  
+  ✓ the void listener is a no op for an already reversed or uncosted pa… 0.34s  
+  ✓ a cost that cannot be reversed is a failed posting not a silent log… 0.30s  
+  ✓ a payment reaches the cost ledger with an asynchronous queue and no… 0.30s  
+  ✓ no cost chain listener is queued                                     0.28s  
+  ✓ a failed posting is visible retryable and posts exactly once         0.36s  
+  ✓ a budget projection runs after the response in the same process not… 0.29s  
+  ✓ retrying a posting needs the cost verification permission            0.39s  
+   PASS  Tests\Feature\Finance\Report76APart2Test
+  ✓ a stocked purchase is one economic cost from order to issue          0.50s  
+  ✓ b a price difference on stock still on hand revalues the stock       0.41s  
+  ✓ b a lower invoice reduces stock on hand and clears the whole accrua… 0.45s  
+  ✓ c partial receipts and staged bills reconcile at every step          0.57s  
+  ✓ d a non stock project purchase is costed once at receipt and never…  0.39s  
+  ✓ e a non stock overhead purchase is an expense and never a project c… 0.41s  
+  ✓ d a non stock line whose category has no account is not posted to i… 0.26s  
+  ✓ f purchased stock cannot be received without a goods receipt note    0.23s  
+  ✓ g stock that was not bought enters through a controlled adjustment…  0.28s  
+  ✓ g an adjustment valued from the catalogue reaches the ledger withou… 0.27s  
+  ✓ g an exceptional receipt is refused when its accounts are not avail… 0.27s  
+  ✓ h company use is an operating expense with a department and no proj… 0.38s  
+  ✓ i and j damage and waste are losses on their own accounts and never… 0.39s  
+  ✓ i a board scrapped in stores takes its value out of inventory and i… 0.32s  
+  ✓ k a count adjustment moves inventory in the ledger and is corrected… 0.29s  
+  ✓ l a goods receipt is reversed not deleted and only while nothing re… 0.42s  
+  ✓ l a non stock receipt reversal backs out the project cost            0.31s  
+  ✓ m a company paid cost needs payment authority as well as cost verif… 0.27s  
+  ✓ the new accounts are governed items with no suggestion and no defau… 0.32s  
+   PASS  Tests\Feature\Finance\SelfApprovalPermissionTest
+  ✓ an ordinary user may not self approve                                0.03s  

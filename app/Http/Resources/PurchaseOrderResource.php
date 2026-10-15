@@ -24,6 +24,9 @@ class PurchaseOrderResource extends JsonResource
             'delivery_address' => $this->delivery_address,
             'description' => $this->description,
             'total_amount' => (float) $this->total_amount,
+            // Report 76A-3: 'net' = priced net of VAT under that rule. null =
+            // an earlier order whose basis was never recorded (shown as such).
+            'price_basis' => $this->price_basis,
             'status' => $this->status,
              'requisition' => $this->when($this->requisition, function () {
                 return [

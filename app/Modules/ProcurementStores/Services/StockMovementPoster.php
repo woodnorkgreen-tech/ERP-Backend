@@ -72,12 +72,19 @@ class StockMovementPoster
             throw ValidationException::withMessages(['type' => "Unknown movement type '{$type}'."]);
         }
 
-        return match ($type) {
-            'receive' => $this->postReceipt($line),
-            'issue'   => $this->postIssue($line),
-            'return'  => $this->postReturn($line),
-            'damage'  => $this->postDamage($line),
-        };
+        try {
+            return match ($type) {
+                'receive' => $this->postReceipt($line),
+                'issue'   => $this->postIssue($line),
+                'return'  => $this->postReturn($line),
+                'damage'  => $this->postDamage($line),
+            };
+        } catch (\InvalidArgumentException $exception) {
+            // Report 76A-3: a movement whose accounting cannot be posted — no
+            // approved account, a shut period — did not happen. The stock is
+            // where it was; the person is told exactly what is missing.
+            throw ValidationException::withMessages(['accounting' => $exception->getMessage()]);
+        }
     }
 
     /* ── Receiving ──────────────────────────────────────────────────────── */
@@ -110,6 +117,10 @@ class StockMovementPoster
             $line = $this->normaliseControlledMovement($line, $material, 'check_in');
             $meta = $line;
             $grnItem = $this->lockGrnLine($line, $material, $meta);
+            if (! $grnItem) {
+                $line = $this->assertExceptionalReceipt($line, $material);
+                $meta = array_merge($meta, ['movement_reason' => $line['receipt_reason']]);
+            }
             if ($grnItem && (float) ($line['receipt_unit_cost'] ?? 0) <= 0) {
                 $line['receipt_unit_cost'] = $grnItem->resolvedReceiptUnitCost();
                 $meta['receipt_unit_cost'] = $line['receipt_unit_cost'];
@@ -138,8 +149,16 @@ class StockMovementPoster
 
             if ($grnItem) {
                 $this->assertGrnQuantityMatches($grnItem, $log);
+            } else {
+                // Stock with no purchase behind it reaches the ledger in the
+                // same transaction it reaches the shelf, or not at all.
+                try {
+                    app(\App\Modules\Finance\Services\StockMovementPostingService::class)
+                        ->postExceptionalReceipt($log->fresh('material'), auth()->id(), (string) $line['adjustment_unit_value']);
+                } catch (\InvalidArgumentException $exception) {
+                    $this->reject('receipt_reason', $exception->getMessage());
+                }
             }
-
             if ($material->isBoardTrackable()) {
                 $boards = $this->boards->createBoardRecords(
                     material:    $material,
@@ -181,6 +200,51 @@ class StockMovementPoster
         });
 
         return ['log' => $log, 'boards' => $boards];
+    }
+
+    /**
+     * Stock may enter Stores without a goods receipt note only for a reason
+     * that is not a purchase (Report 76A Part 2, Decision C).
+     *
+     * Bought stock arrives through PO → GRN → Stores, which is what accrues it
+     * and what the supplier's invoice is later matched against. A manual
+     * receipt of bought stock skipped all of that: the shelf gained stock the
+     * ledger never received and no invoice could be checked against it. So a
+     * receipt with no GRN line must say why it is not a purchase — opening
+     * balance, stock found, or a correction — carry a value and a written
+     * explanation, and be made by someone who may approve stock adjustments
+     * (`stores.review`, the same authority that approves a stock count).
+     *
+     * No GRN and no purchase order are ever created to make a receipt fit.
+     */
+    private function assertExceptionalReceipt(array $line, LibraryMaterial $material): array
+    {
+        $reason = $line['receipt_reason'] ?? null;
+
+        if (! in_array($reason, \App\Modules\ProcurementStores\Models\InventoryLog::EXCEPTIONAL_RECEIPT_REASONS, true)) {
+            $this->reject('receipt_reason', 'Purchased stock must be received through the approved GRN. '
+                .'Stock that was not bought — an opening balance, stock found, or a correction — is recorded as a stock adjustment with its reason.');
+        }
+        if (! auth()->user()?->can(\App\Constants\Permissions::STORES_REVIEW)) {
+            $this->reject('receipt_reason', 'Taking stock in without a purchase is a stock adjustment and needs a Stores reviewer (the person who approves stock counts).');
+        }
+        if (mb_strlen(trim((string) ($line['notes'] ?? ''))) < 10) {
+            $this->reject('notes', 'Explain where this stock came from (at least a short sentence). It is the record behind the adjustment.');
+        }
+
+        $unitValue = (float) ($line['receipt_unit_cost'] ?? 0);
+        if ($unitValue <= 0) {
+            $unitValue = (float) $material->unit_cost > 0 ? (float) $material->unit_cost : (float) ($material->default_unit_cost ?? 0);
+        }
+        if ($unitValue <= 0) {
+            $this->reject('receipt_unit_cost', "Enter what each unit of '{$material->material_name}' is worth. Stock cannot be taken in at no value.");
+        }
+        // The value the accounts take this stock in at. Kept apart from the
+        // receipt price: a catalogue default is not money anyone paid, so it
+        // must not enter the material's average cost as though it were.
+        $line['adjustment_unit_value'] = $unitValue;
+
+        return $line;
     }
 
     /**
@@ -318,6 +382,8 @@ class StockMovementPoster
         $this->refuseBoard($material, 'Issue it through a Board Request, so individual boards are assigned to the job.');
         $line = $this->normaliseControlledMovement($line, $material, 'check_out');
 
+        $line = $this->classifyIssue($line);
+
         if (filled($line['project_material_id'] ?? null)) {
             $this->assertProjectLineCanTake(
                 $line,
@@ -336,6 +402,40 @@ class StockMovementPoster
         );
 
         return ['log' => $log, 'boards' => []];
+    }
+
+    /**
+     * Every issue is for a project or for the company — never for nobody
+     * (Report 76A Part 2, Decision D).
+     *
+     * An issue with no project used to leave Stores with no cost anywhere:
+     * not a project's, not a department's, not the ledger's. It is now either
+     * a project issue (which becomes that project's cost) or company use,
+     * which names the department it is for and why, is charged to the approved
+     * operating-expense account, and is never a project cost. No project is
+     * invented to make company use fit.
+     */
+    private function classifyIssue(array $line): array
+    {
+        if (filled($line['project_id'] ?? null)) {
+            unset($line['movement_reason'], $line['cost_centre_id']);
+
+            return $line;
+        }
+
+        if (($line['issue_purpose'] ?? null) !== \App\Modules\ProcurementStores\Models\InventoryLog::REASON_INTERNAL_CONSUMPTION) {
+            $this->reject('project_id', 'Choose the project this stock is for, or record it as company use with the department it is for.');
+        }
+        if (! filled($line['cost_centre_id'] ?? null)) {
+            $this->reject('cost_centre_id', 'Choose the department this stock is for.');
+        }
+        if (mb_strlen(trim((string) ($line['notes'] ?? ''))) < 5) {
+            $this->reject('notes', 'Say what the stock is being used for.');
+        }
+        $line['movement_reason'] = \App\Modules\ProcurementStores\Models\InventoryLog::REASON_INTERNAL_CONSUMPTION;
+        unset($line['project_material_id']);
+
+        return $line;
     }
 
     /**
@@ -492,7 +592,12 @@ class StockMovementPoster
 
         $this->refuseBoard($material, 'Scrap individual boards through the board lifecycle, with status Scrapped.');
         $line = $this->normaliseControlledMovement($line, $material, 'defective');
-
+        // Damage and waste are different losses with different approved
+        // accounts; neither is a project cost (Report 76A Part 2, Decision D).
+        $line['movement_reason'] = ($line['write_off_reason'] ?? null) === \App\Modules\ProcurementStores\Models\InventoryLog::REASON_WASTE
+            ? \App\Modules\ProcurementStores\Models\InventoryLog::REASON_WASTE
+            : \App\Modules\ProcurementStores\Models\InventoryLog::REASON_DAMAGE;
+        unset($line['project_id'], $line['project_material_id']);
         // Sufficiency is checked inside adjustStock's row lock — see postIssue().
         $log = $this->inventory->adjustStock(
             (int) $line['material_id'],

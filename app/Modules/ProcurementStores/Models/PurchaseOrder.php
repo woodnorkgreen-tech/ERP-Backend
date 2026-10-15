@@ -27,6 +27,8 @@ class PurchaseOrder extends Model
         'description',
         'total_amount',
         'status',
+        // Report 76A-3: 'net' when priced net of VAT under that rule; NULL = never recorded.
+        'price_basis',
         'user_id',
         'submitted_at',
         'approved_at',
@@ -135,10 +137,22 @@ class PurchaseOrder extends Model
      */
     public function totalBilled(?int $excludingBillId = null): string
     {
-        return (string) $this->bills()
-            ->where('status', '!=', 'cancelled')
-            ->when($excludingBillId, fn ($query) => $query->whereKeyNot($excludingBillId))
-            ->sum('net_amount');
+        // Report 76A Part 2/3: billed on the RECEIPT basis — the value of
+        // received goods each live invoice covers. A price difference is a
+        // variance, not more (or less) of the order billed; a reversed invoice
+        // bills nothing; a quantity credit gives its receipt value back.
+        // Identical to net_amount for an invoice that states no difference.
+        $bills = $this->bills()
+            ->where('status', '!=', 'cancelled')->whereNull('reversed_at')
+            ->when($excludingBillId, fn ($query) => $query->whereKeyNot($excludingBillId));
+        $billed = (string) (clone $bills)->sum(\Illuminate\Support\Facades\DB::raw('COALESCE(receipt_value_covered, net_amount)'));
+        // A line-matched bill's receipt value already nets its credits; a
+        // bill with no lines is reduced by the receipt value its credits released.
+        $released = (string) \Illuminate\Support\Facades\DB::table('supplier_credit_notes')
+            ->whereIn('bill_id', (clone $bills)->whereDoesntHave('lines')->select('id'))
+            ->sum('receipt_value_released');
+
+        return bcsub(number_format((float) $billed, 2, '.', ''), number_format((float) $released, 2, '.', ''), 2);
     }
 
     public function remainingBillable(?int $excludingBillId = null): string

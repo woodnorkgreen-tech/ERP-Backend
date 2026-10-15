@@ -26,12 +26,17 @@ class BoardLifecycleTest extends TestCase
 {
     use \Tests\Concerns\GrantsMatrixPermissions;
     use RefreshDatabase;
+    use \Tests\Concerns\ApprovesGovernedPostingAccounts;
 
     private LibraryMaterial $material;
 
     protected function setUp(): void
     {
         parent::setUp();
+        // Stock taken in without a goods receipt is a stock adjustment and posts its own entry.
+        $this->seed(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
+        // Report 76A-3: stock postings need an approved account; this suite is not about that approval.
+        $this->activateStoresPostingAccounts();
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         // The workflow notifies by role — registering an offcut raises a racking
@@ -77,6 +82,12 @@ class BoardLifecycleTest extends TestCase
         Role::findOrCreate($role);
         $this->grantMatrixPermissions($role);
         $user->assignRole($role);
+        // Stock taken in without a goods receipt needs a Stores reviewer
+        // (Report 76A Part 2). The receiving tests below are about boards and
+        // pricing, not about that control, so the Stores actor is given it.
+        if ($role === 'Stores') {
+            $user->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::STORES_REVIEW));
+        }
         Sanctum::actingAs($user->fresh());
 
         return $user;
@@ -129,6 +140,7 @@ class BoardLifecycleTest extends TestCase
         $this->material->update(['unit_cost' => 0]);
 
         $this->postJson('/api/procurement-stores/check-in', [
+            'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             'material_id' => $this->material->id,
             'quantity' => 2,
         ])->assertStatus(422);
@@ -143,6 +155,7 @@ class BoardLifecycleTest extends TestCase
         $this->material->update(['unit_cost' => 0]);
 
         $this->postJson('/api/procurement-stores/check-in', [
+            'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             'material_id' => $this->material->id,
             'quantity' => 2,
             'receipt_unit_cost' => 2750.00,
@@ -576,6 +589,7 @@ class BoardLifecycleTest extends TestCase
         $this->material->update(['unit_cost' => 0, 'default_unit_cost' => 2400.00]);
 
         $this->postJson('/api/procurement-stores/check-in', [
+            'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             'material_id' => $this->material->id,
             'quantity' => 2,
         ])->assertStatus(200);
@@ -601,6 +615,7 @@ class BoardLifecycleTest extends TestCase
         $this->material->update(['unit_cost' => 0, 'default_unit_cost' => 2400.00]);
 
         $this->postJson('/api/procurement-stores/check-in', [
+            'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             'material_id' => $this->material->id,
             'quantity' => 1,
             'receipt_unit_cost' => 3125.00,
@@ -617,6 +632,7 @@ class BoardLifecycleTest extends TestCase
         // The default priced the boards, but it is not money anyone spent, so
         // the catalogue average must still be built only from real receipts.
         $this->postJson('/api/procurement-stores/check-in', [
+            'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             'material_id' => $this->material->id,
             'quantity' => 2,
         ])->assertStatus(200);
@@ -624,6 +640,7 @@ class BoardLifecycleTest extends TestCase
         $this->assertSame(0.0, (float) $this->material->fresh()->unit_cost);
 
         $this->postJson('/api/procurement-stores/check-in', [
+            'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             'material_id' => $this->material->id,
             'quantity' => 1,
             'receipt_unit_cost' => 3000.00,
@@ -660,6 +677,7 @@ class BoardLifecycleTest extends TestCase
         $this->material->update(['unit_cost' => 0, 'default_unit_cost' => null]);
 
         $this->postJson('/api/procurement-stores/check-in', [
+            'receipt_reason' => 'opening_balance', 'notes' => 'Opening stock counted on the shelf',
             'material_id' => $this->material->id,
             'quantity' => 2,
         ])->assertStatus(422);
