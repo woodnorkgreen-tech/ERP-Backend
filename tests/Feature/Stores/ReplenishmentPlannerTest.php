@@ -57,6 +57,8 @@ class ReplenishmentPlannerTest extends TestCase
         ]);
 
         $this->enquiryId = DB::table('project_enquiries')->insertGetId([
+            // Report 78C: a job being delivered — the enquiry status is the lifecycle authority.
+            'status' => 'in_progress',
             'date_received' => now()->toDateString(), 'client_id' => $clientId,
             'title' => 'Activation', 'contact_person' => 'Contact',
             'enquiry_number' => 'ENQ-REP-001', 'job_number' => 'WNG-REP-001',

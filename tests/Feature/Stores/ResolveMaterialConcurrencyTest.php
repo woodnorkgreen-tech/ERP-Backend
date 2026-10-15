@@ -75,6 +75,8 @@ class ResolveMaterialConcurrencyTest extends TestCase
             'preferred_contact' => 'email', 'registration_date' => now()->toDateString(), 'created_at' => now(), 'updated_at' => now(),
         ]);
         $enquiryId = DB::table('project_enquiries')->insertGetId([
+            // Report 78C: a job being delivered — the enquiry status is the lifecycle authority.
+            'status' => 'in_progress',
             'date_received' => now()->toDateString(), 'client_id' => $clientId, 'title' => 'Race', 'contact_person' => 'C',
             'enquiry_number' => 'ENQ-RACE-'.uniqid(), 'job_number' => 'WNG-RACE-'.uniqid(), 'created_by' => $userId,
             'created_at' => now(), 'updated_at' => now(),

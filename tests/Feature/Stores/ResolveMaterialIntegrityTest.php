@@ -69,6 +69,8 @@ class ResolveMaterialIntegrityTest extends TestCase
             'registration_date' => now()->toDateString(), 'created_at' => now(), 'updated_at' => now(),
         ]);
         $this->enquiryId = DB::table('project_enquiries')->insertGetId([
+            // Report 78C: a job being delivered — the enquiry status is the lifecycle authority.
+            'status' => 'in_progress',
             'date_received' => now()->toDateString(), 'client_id' => $clientId,
             'title' => 'Stand build', 'contact_person' => 'Contact',
             'enquiry_number' => 'ENQ-78B-001', 'job_number' => 'WNG-78B-001',

@@ -53,6 +53,8 @@ class ResolveProjectMaterialCatalogueTest extends TestCase
         ]);
 
         $this->enquiryId = DB::table('project_enquiries')->insertGetId([
+            // Report 78C: a job being delivered — the enquiry status is the lifecycle authority.
+            'status' => 'in_progress',
             'date_received' => now()->toDateString(), 'client_id' => $clientId,
             'title' => 'Stand build', 'contact_person' => 'Contact',
             'enquiry_number' => 'ENQ-RES-001', 'job_number' => 'WNG-RES-001',
