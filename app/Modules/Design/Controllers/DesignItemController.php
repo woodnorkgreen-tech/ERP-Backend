@@ -19,6 +19,7 @@ use App\Modules\Design\Support\DesignPauseReason;
 use App\Modules\Printing\Services\PrintIntakeService;
 use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\JsonResponse;
+use App\Modules\Design\Models\DesignUpdate;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -83,6 +84,10 @@ class DesignItemController extends Controller
             DesignSchedule::overdueItems($query);
         } else {
             ProjectSetupSchedule::filterDateScope($query, DesignSchedule::itemDateQuery(), $scope);
+        }
+
+        if ($request->boolean('outsourced_only')) {
+            $query->whereNotNull('outsourced_partner_name');
         }
 
         if ($request->filled('design_job_id')) {
@@ -163,6 +168,10 @@ class DesignItemController extends Controller
         } else {
             ProjectSetupSchedule::filterDateScope($candidateQuery, DesignSchedule::itemDateQuery(), $scope);
         }
+        if ($request->boolean('outsourced_only')) {
+            $query->whereNotNull('outsourced_partner_name');
+        }
+
         if ($request->filled('design_job_id')) {
             $candidateQuery->where('design_job_id', $request->integer('design_job_id'));
         }
@@ -280,6 +289,40 @@ class DesignItemController extends Controller
         return 'job:' . $item->design_job_id;
     }
 
+    /**
+     * Outsourcing a design item is open to anyone in design (creatives.view, held by the Designer role).
+     * Clearing it or assigning an internal designer does not need the check.
+     */
+    private function applyOutsourcing(StoreDesignItemRequest $request, array $data): array
+    {
+        if (array_key_exists('outsourced', $data)) {
+            abort_unless($request->user()?->can(\App\Constants\Permissions::CREATIVES_VIEW), 403);
+        }
+
+        return \App\Support\Outsourcing\OutsourcingAssignment::apply($data, 'assigned_to', $request->user()?->id);
+    }
+
+    /**
+     * Write a design history note when the outsourcing partner or reason changed on the last save.
+     * Uses the item's own change tracking, so unrelated edits add no history.
+     */
+    private function recordOutsourcingChange(DesignItem $item): void
+    {
+        if (! $item->wasRecentlyCreated && ! $item->wasChanged(['outsourced_partner_name', 'outsourced_reason'])) {
+            return;
+        }
+
+        DesignUpdate::create([
+            'design_item_id' => $item->id,
+            'note' => \App\Support\Outsourcing\OutsourcingAssignment::historyNote(
+                $item->outsourced_partner_name,
+                $item->outsourced_reason,
+                $item->outsourced_reason_note,
+            ),
+            'created_by' => auth()->id(),
+        ]);
+    }
+
     private function bundleDescriptor(string $key): array
     {
         [$type, $id] = explode(':', $key, 2);
@@ -289,14 +332,18 @@ class DesignItemController extends Controller
 
     public function store(StoreDesignItemRequest $request, DesignJob $job, string $stream): JsonResponse
     {
-        $data = $this->dimensions->normalize($request->validated());
+        $data = $this->applyOutsourcing($request, $this->dimensions->normalize($request->validated()));
         $data['stream'] = $stream;
         $data['destination'] = $data['destination'] ?? ($stream === DesignItem::STREAM_GRAPHIC ? 'printing' : 'production');
         $data['design_job_id'] = $job->id;
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
 
-        $item = DesignItem::create($data)->load(['job.documents', 'assignedUser:id,name', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs', 'workSessions.user:id,name', 'workSessions.endedBy:id,name', ...self::HISTORY_RELATIONS]);
+        $item = DesignItem::create($data);
+        if ($item->outsourced_partner_name !== null) {
+            $this->recordOutsourcingChange($item);
+        }
+        $item->load(['job.documents', 'assignedUser:id,name', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs', 'workSessions.user:id,name', 'workSessions.endedBy:id,name', ...self::HISTORY_RELATIONS]);
 
         $this->notifications->notifyItemAssigned($item);
 
@@ -311,7 +358,7 @@ class DesignItemController extends Controller
         $previousAssignedTo = $item->assigned_to;
         $previousStatus = $item->status;
 
-        $data = $this->dimensions->normalize($request->validated());
+        $data = $this->applyOutsourcing($request, $this->dimensions->normalize($request->validated()));
         $data['updated_by'] = auth()->id();
 
         if (array_key_exists('status', $data) && $data['status'] !== 'print_ready' && $previousStatus === 'print_ready') {
@@ -319,6 +366,7 @@ class DesignItemController extends Controller
         }
 
         $item->update($data);
+        $this->recordOutsourcingChange($item);
 
         if (array_key_exists('status', $data) && $data['status'] !== $previousStatus) {
             if ($data['status'] === 'awaiting_client_approval') {
