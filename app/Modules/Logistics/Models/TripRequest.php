@@ -34,6 +34,7 @@ class TripRequest extends Model
         'request_code',
         'context_type',
         'transport_arrangement',
+        'trip_kind',
         'project_id',
         'delivery_type_label',
         'requested_by_id',
@@ -44,6 +45,9 @@ class TripRequest extends Model
         'destination',
         'destination_lat',
         'destination_lng',
+        'start_location',
+        'start_lat',
+        'start_lng',
         'required_date',
         'loading_time',
         'departure_time',
@@ -100,6 +104,8 @@ class TripRequest extends Model
         'pickup_lng'     => 'decimal:7',
         'destination_lat'=> 'decimal:7',
         'destination_lng'=> 'decimal:7',
+        'start_lat'      => 'decimal:7',
+        'start_lng'      => 'decimal:7',
     ];
 
     // ─── Relationships ────────────────────────────────────────────────────
@@ -164,6 +170,17 @@ class TripRequest extends Model
 
         $buffer = $this->buffer_minutes ?? 0;
 
+        // Set-down / pick-up: the time given is when the crew is wanted at the
+        // other end, so the truck leaves the store travel + buffer before it,
+        // loading happens there from that time, and the trip back follows.
+        if ($this->trip_kind === 'collection') {
+            $this->departure_by = $this->required_delivery_at->copy()
+                ->subMinutes($this->estimated_travel_minutes)
+                ->subMinutes($buffer);
+            $this->loading_start_by = $this->required_delivery_at->copy();
+            return;
+        }
+
         $departureBy = $this->required_delivery_at->copy()
             ->subMinutes($this->estimated_travel_minutes)
             ->subMinutes($buffer);
@@ -188,6 +205,10 @@ class TripRequest extends Model
         }
         if ($this->loading_ended_at) {
             return 'completed';
+        }
+        // Collections have no loading deadline at the store to be late for.
+        if ($this->trip_kind === 'collection') {
+            return 'not_tracked';
         }
 
         $now = now();
@@ -242,7 +263,7 @@ class TripRequest extends Model
         // calculation changes, so they're never stale for the reminder
         // command to query against.
         static::saving(function (TripRequest $trip) {
-            if ($trip->isDirty(['required_delivery_at', 'estimated_loading_minutes', 'estimated_travel_minutes', 'buffer_minutes'])) {
+            if ($trip->isDirty(['trip_kind', 'required_delivery_at', 'estimated_loading_minutes', 'estimated_travel_minutes', 'buffer_minutes'])) {
                 $trip->recalculateLoadingTimeline();
             }
         });

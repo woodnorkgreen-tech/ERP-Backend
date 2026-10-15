@@ -38,6 +38,12 @@ class DepartmentSeeder extends Seeder
                 'location' => ''
             ],
             [
+                'name' => 'Printing',
+                'description' => 'Printing operations, print jobs, and material usage',
+                'budget' => 0.00,
+                'location' => ''
+            ],
+            [
                 'name' => 'Procurement',
                 'description' => 'Supplier management and purchasing operations',
                 'budget' => 0.00,

@@ -8,15 +8,18 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\GrantsMatrixPermissions;
 use Tests\TestCase;
 
 class ManualPrintJobTest extends TestCase
 {
+    use GrantsMatrixPermissions;
     use RefreshDatabase;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->grantMatrixPermissions('Printing');
         $user = User::factory()->create(['is_active' => true]);
         $user->assignRole(Role::findOrCreate('Printing', 'web'));
         Sanctum::actingAs($user);

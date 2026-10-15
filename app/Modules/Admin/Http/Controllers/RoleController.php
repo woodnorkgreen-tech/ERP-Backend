@@ -16,7 +16,7 @@ class RoleController
      * Renaming or deleting these would silently break authorization everywhere, so
      * they are protected — their permissions/description may still be edited.
      */
-    private const PROTECTED_ROLES = ['Super Admin', 'Admin', 'HR', 'Project Manager', 'Project Officer'];
+    private const PROTECTED_ROLES = ['Super Admin', 'Admin', 'HR', 'Project Manager', 'Project Officer', 'Printing'];
 
     /**
      * Record a role-management action in the audit trail.

@@ -48,13 +48,18 @@ class PrintManualConsumptionController extends Controller
     private function designOperatorRule()
     {
         $departmentIds = Department::query()
-            ->where('name', 'like', '%design%')
-            ->orWhere('name', 'like', '%creative%')
+            ->where('name', 'Printing')
+            ->pluck('id');
+
+        $operatorIds = \App\Models\User::query()->active()
+            ->where(fn ($query) => $query
+                ->whereIn('department_id', $departmentIds)
+                ->orWhereHas('roles', fn ($roles) => $roles->where('name', 'Printing')))
             ->pluck('id');
 
         return Rule::exists('users', 'id')
             ->where(fn ($query) => $query
                 ->where('is_active', true)
-                ->whereIn('department_id', $departmentIds));
+                ->whereIn('id', $operatorIds));
     }
 }

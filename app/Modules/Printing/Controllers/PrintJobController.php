@@ -17,6 +17,7 @@ use App\Modules\Printing\Services\PrintWorkTrackingService;
 use App\Modules\Printing\Services\ClientArtworkChangeService;
 use App\Modules\Printing\Support\PrintPauseReason;
 use App\Modules\Printing\Support\PrintVarianceReason;
+use App\Modules\Printing\Support\PrintingAccess;
 use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,9 +39,12 @@ class PrintJobController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $myActiveCount = PrintJob::query()
+        $request->validate(['schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])]]);
+        $scope = $request->input('schedule_scope', 'upcoming');
+        $myActiveCount = ProjectSetupSchedule::filterDateScope(PrintJob::query()
             ->where('operator_id', auth()->id())
-            ->whereNotIn('status', ['completed', 'cancelled', 'reprint_required'])
+            ->whereNotIn('status', ['completed', 'cancelled', 'reprint_required']),
+            ProjectSetupSchedule::dateQuery('print_jobs.project_enquiry_id', 'print_jobs.project_id'), $scope)
             ->count();
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
@@ -53,6 +57,9 @@ class PrintJobController extends Controller
                 'stopRequestedBy:id,name', 'stopAcknowledgedBy:id,name',
             ])
             ->when($myWorkApplied, fn ($q) => $q->where('operator_id', auth()->id()))
+            ->tap(fn ($q) => ProjectSetupSchedule::filterDateScope($q,
+                ProjectSetupSchedule::dateQuery('print_jobs.project_enquiry_id', 'print_jobs.project_id'), $scope))
+            ->when($scope === 'overdue', fn ($q) => $q->whereNotIn('status', ['completed', 'cancelled']))
             ->when($request->input('source') === 'historical', fn ($q) => $q->where('origin', 'historical_import'))
             ->when($request->input('source') === 'live', fn ($q) => $q->where('origin', '!=', 'historical_import'))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
@@ -106,13 +113,19 @@ class PrintJobController extends Controller
 
     public function bundles(Request $request): JsonResponse
     {
-        $myActiveCount = PrintJob::query()
+        $request->validate(['schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])]]);
+        $scope = $request->input('schedule_scope', 'upcoming');
+        $myActiveCount = ProjectSetupSchedule::filterDateScope(PrintJob::query()
             ->where('operator_id', auth()->id())
-            ->whereNotIn('status', ['completed', 'cancelled', 'reprint_required'])
+            ->whereNotIn('status', ['completed', 'cancelled', 'reprint_required']),
+            ProjectSetupSchedule::dateQuery('print_jobs.project_enquiry_id', 'print_jobs.project_id'), $scope)
             ->count();
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
         $query = PrintJob::query()
+            ->tap(fn ($q) => ProjectSetupSchedule::filterDateScope($q,
+                ProjectSetupSchedule::dateQuery('print_jobs.project_enquiry_id', 'print_jobs.project_id'), $scope))
+            ->when($scope === 'overdue', fn ($q) => $q->whereNotIn('status', ['completed', 'cancelled']))
             ->when($myWorkApplied, fn ($q) => $q->where('operator_id', auth()->id()))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('tab'), fn ($q) => $this->applyTab($q, (string) $request->get('tab')))
@@ -277,6 +290,9 @@ class PrintJobController extends Controller
     public function update(Request $request, PrintJob $job): JsonResponse
     {
         $data = $request->validate($this->updateRules());
+        if (array_key_exists('operator_id', $data)) {
+            abort_unless(PrintingAccess::allows($request->user(), 'printing.jobs.assign', true), 403);
+        }
 
         return response()->json(['data' => new PrintJobResource($this->jobs->update($job, $data))]);
     }
@@ -287,6 +303,12 @@ class PrintJobController extends Controller
             'status' => ['required', 'in:' . implode(',', self::PILOT_STATUSES)],
             'reason' => ['nullable', 'string', 'max:2000'],
         ]);
+        if ($data['status'] === 'completed') {
+            abort_unless(PrintingAccess::allows($request->user(), 'printing.jobs.work'), 403);
+        }
+        if ($data['status'] === 'reprint_required') {
+            abort_unless(PrintingAccess::allows($request->user(), 'printing.jobs.reprint', true), 403);
+        }
 
         return response()->json(['data' => new PrintJobResource($this->jobs->transition($job, $data['status'], $data['reason'] ?? null))]);
     }
@@ -445,24 +467,28 @@ class PrintJobController extends Controller
         return [
             'due_date' => ['nullable', 'date'],
             'scheduled_at' => ['nullable', 'date'],
-            'operator_id' => ['nullable', 'integer', $this->designOperatorRule()],
+            'operator_id' => ['nullable', 'integer', $this->printingOperatorRule()],
             'machine_asset_id' => ['nullable', 'integer', $this->printingMachineRule()],
             'remarks' => ['nullable', 'string', 'max:3000'],
-            'status' => ['sometimes', 'in:' . implode(',', self::PILOT_STATUSES)],
         ];
     }
 
-    private function designOperatorRule()
+    private function printingOperatorRule()
     {
         $departmentIds = Department::query()
-            ->where('name', 'like', '%design%')
-            ->orWhere('name', 'like', '%creative%')
+            ->where('name', 'Printing')
+            ->pluck('id');
+
+        $operatorIds = \App\Models\User::query()->active()
+            ->where(fn ($query) => $query
+                ->whereIn('department_id', $departmentIds)
+                ->orWhereHas('roles', fn ($roles) => $roles->where('name', 'Printing')))
             ->pluck('id');
 
         return Rule::exists('users', 'id')
             ->where(fn ($query) => $query
                 ->where('is_active', true)
-                ->whereIn('department_id', $departmentIds));
+                ->whereIn('id', $operatorIds));
     }
 
     private function printingMachineRule()

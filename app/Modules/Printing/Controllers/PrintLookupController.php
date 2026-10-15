@@ -89,15 +89,16 @@ class PrintLookupController extends Controller
 
     public function operators(Request $request): JsonResponse
     {
-        $designDepartmentIds = Department::query()
-            ->where('name', 'like', '%design%')
-            ->orWhere('name', 'like', '%creative%')
+        $printingDepartmentIds = Department::query()
+            ->where('name', 'Printing')
             ->pluck('id');
 
         $operators = User::query()
             ->with('department:id,name')
             ->active()
-            ->whereIn('department_id', $designDepartmentIds)
+            ->where(fn ($query) => $query
+                ->whereIn('department_id', $printingDepartmentIds)
+                ->orWhereHas('roles', fn ($roles) => $roles->where('name', 'Printing')))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $term = '%' . $request->get('search') . '%';
                 $q->where(fn ($inner) => $inner

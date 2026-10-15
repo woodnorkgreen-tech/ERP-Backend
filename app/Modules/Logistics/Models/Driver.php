@@ -41,4 +41,77 @@ class Driver extends Model
             ->whereIn('status', ['pending', 'in_transit'])
             ->latest();
     }
+
+    /**
+     * Pull the logistics team from the HR employee list.
+     *
+     * Everyone active in the Logistics department, plus anyone anywhere whose
+     * position is a driver role, is registered as a driver. Employees that
+     * were removed as drivers (soft-deleted) are left alone. Licence details
+     * are filled in later by the Logistics Lead.
+     *
+     * Roles follow the HR position, and the two can overlap:
+     *   - every one of them gets the "Driver" role
+     *   - a lead (position contains "lead", or the department manager) also
+     *     gets "Logistics Lead", so a lead who drives has both.
+     *
+     * Returns the number of drivers created.
+     */
+    public static function syncFromHr(): int
+    {
+        $removed = static::onlyTrashed()->pluck('employee_id');
+
+        $employees = Employee::active()
+            ->whereNotIn('id', $removed)
+            ->where(function ($q) {
+                $q->where('position', 'like', '%driver%')
+                  ->orWhereHas('department', fn ($d) => $d->where('name', 'like', '%logistic%'));
+            })
+            ->with('department')
+            ->get();
+
+        $created = 0;
+
+        foreach ($employees as $employee) {
+            $driver = static::firstOrCreate(
+                ['employee_id' => $employee->id],
+                ['status' => 'active']
+            );
+            if ($driver->wasRecentlyCreated) {
+                $created++;
+            }
+
+            $isLead = stripos((string) $employee->position, 'lead') !== false
+                || ($employee->department && (int) $employee->department->manager_id === (int) $employee->id);
+
+            static::syncRoles($employee, $isLead);
+        }
+
+        return $created;
+    }
+
+    /** Give the matching login the Driver role, and Logistics Lead for leads. */
+    private static function syncRoles(Employee $employee, bool $isLead): void
+    {
+        try {
+            $user = $employee->email
+                ? \App\Models\User::where('email', $employee->email)->first()
+                : null;
+            if (!$user) {
+                return;
+            }
+
+            $guard = config('auth.defaults.guard', 'web');
+            $roles = $isLead ? ['Driver', 'Logistics Lead'] : ['Driver'];
+
+            foreach ($roles as $name) {
+                \Spatie\Permission\Models\Role::firstOrCreate(['name' => $name, 'guard_name' => $guard]);
+                if (!$user->hasRole($name)) {
+                    $user->assignRole($name);
+                }
+            }
+        } catch (\Throwable $e) {
+            // Never block registration over a role problem.
+        }
+    }
 }

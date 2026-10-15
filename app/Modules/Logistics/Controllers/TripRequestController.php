@@ -61,11 +61,24 @@ class TripRequestController extends Controller
             }))
             // "My Requests": only the trips this person asked for.
             ->when($request->boolean('mine'), fn($q) => $q->where('requested_by_id', $user->employee?->id ?? 0))
+            // "My Trips": only trips this person drives — for someone who is both
+            // Logistics lead and a driver, so their driver list is not the whole fleet.
+            ->when($request->boolean('assigned_to_me'), function ($q) use ($user) {
+                $driverId = $this->driverIdFor($user) ?: 0;
+                $q->where(fn ($w) => $w
+                        ->where('assigned_driver_id', $driverId)
+                        ->orWhereIn('batch_id', DispatchBatch::where('driver_id', $driverId)
+                            ->where('status', 'confirmed')->pluck('id')))
+                  ->whereNotIn('status', ['cancelled', 'rejected']);
+            })
             ->when($request->status,     fn($q) => $q->where('status', $request->status))
             ->when($request->priority,   fn($q) => $q->where('priority', $request->priority))
             ->when($request->project_id, fn($q) => $q->where('project_id', $request->project_id))
+            // Day / week / month plans: trips whose Needed By date falls in the range.
+            ->when($request->date_from, fn($q) => $q->whereDate('required_date', '>=', $request->date_from))
+            ->when($request->date_to,   fn($q) => $q->whereDate('required_date', '<=', $request->date_to))
             ->latest()
-            ->paginate(25);
+            ->paginate(min(max((int) $request->input('per_page', 25), 1), 200));
 
         return TripRequestResource::collection($query);
     }
@@ -75,6 +88,7 @@ class TripRequestController extends Controller
         $validated = $request->validate([
             'context_type'          => 'required|in:project,other',
             'transport_arrangement' => 'sometimes|in:company,client',
+            'trip_kind'             => 'sometimes|in:delivery,collection',
             'project_id'            => 'required_if:context_type,project|nullable|exists:project_enquiries,id',
             'delivery_type_label'   => 'required|string|max:150',
             'requested_by_id'       => 'required|exists:employees,id',
@@ -85,6 +99,9 @@ class TripRequestController extends Controller
             'destination'           => 'required|string|max:300',
             'destination_lat'       => 'nullable|numeric|between:-90,90',
             'destination_lng'       => 'nullable|numeric|between:-180,180',
+            'start_location'        => 'nullable|string|max:300',
+            'start_lat'             => 'nullable|numeric|between:-90,90',
+            'start_lng'             => 'nullable|numeric|between:-180,180',
             'required_date'         => 'required|date|after_or_equal:today',
             'loading_time'          => 'nullable|string|max:20',
             'departure_time'        => 'nullable|string|max:20',
@@ -135,6 +152,7 @@ class TripRequestController extends Controller
         $validated = $request->validate([
             'context_type'          => 'sometimes|in:project,other',
             'transport_arrangement' => 'sometimes|in:company,client',
+            'trip_kind'             => 'sometimes|in:delivery,collection',
             'project_id'            => 'nullable|exists:project_enquiries,id',
             'delivery_type_label'   => 'sometimes|string|max:150',
             'requested_by_id'       => 'sometimes|exists:employees,id',
@@ -145,6 +163,9 @@ class TripRequestController extends Controller
             'destination'           => 'sometimes|string|max:300',
             'destination_lat'       => 'nullable|numeric|between:-90,90',
             'destination_lng'       => 'nullable|numeric|between:-180,180',
+            'start_location'        => 'nullable|string|max:300',
+            'start_lat'             => 'nullable|numeric|between:-90,90',
+            'start_lng'             => 'nullable|numeric|between:-180,180',
             'required_date'         => 'sometimes|date|after_or_equal:today',
             'loading_time'          => 'nullable|string|max:20',
             'departure_time'        => 'nullable|string|max:20',
@@ -467,6 +488,16 @@ class TripRequestController extends Controller
         }
 
         $tripRequest->update(['status' => 'in_transit', 'started_at' => now()]);
+
+        // Starting a trip must also start its tracked delivery. The Live
+        // Delivery Map and the driver's My Deliveries read deliveries, so a
+        // trip that is only marked in transit would never show up there.
+        $delivery = $this->ensureDelivery($tripRequest);
+        if ($delivery && $delivery->status === 'pending') {
+            $delivery->update(['status' => 'in_transit', 'started_at' => now()]);
+            $delivery->stops()->where('stop_order', 1)->update(['status' => 'en_route']);
+        }
+
         $tripRequest->load($this->with);
         return new TripRequestResource($tripRequest);
     }

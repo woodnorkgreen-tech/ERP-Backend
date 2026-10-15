@@ -31,7 +31,7 @@ final class RolePermissions
     public const ROLES = [
         'Super Admin', 'Admin', 'Manager', 'Accounts', 'Costing', 'HR', 'Client Service',
         'Project Manager', 'Project Officer', 'Production', 'Procurement', 'Stores', 'Logistics',
-        'Designer', 'Employee',
+        'Designer', 'Printing', 'Employee',
     ];
 
     /**
@@ -75,6 +75,7 @@ final class RolePermissions
         'Stores' => 'Inventory and stores management',
         'Logistics' => 'Logistics and delivery coordination',
         'Designer' => 'Creative design and development',
+        'Printing' => 'Printing operations and material usage',
         'Employee' => 'Basic employee access',
     ];
 
@@ -339,6 +340,19 @@ final class RolePermissions
                 Permissions::CREATIVES_VIEW, Permissions::DASHBOARD_PROJECTS, Permissions::DASHBOARD_VIEW,
                 Permissions::DEPARTMENT_READ, Permissions::PROJECT_READ, Permissions::TASK_READ,
                 Permissions::TASK_UPDATE,
+            ],
+            'Printing' => [
+                Permissions::DASHBOARD_VIEW, Permissions::DEPARTMENT_READ, Permissions::PROJECT_READ,
+                Permissions::TASK_READ, Permissions::TASK_UPDATE,
+                Permissions::PRINTING_DASHBOARD_VIEW, Permissions::PRINTING_JOBS_VIEW,
+                Permissions::PRINTING_JOBS_CREATE, Permissions::PRINTING_JOBS_UPDATE,
+                Permissions::PRINTING_JOBS_WORK, Permissions::PRINTING_JOBS_ASSIGN,
+                Permissions::PRINTING_JOBS_REPRINT, Permissions::PRINTING_JOBS_CORRECT,
+                Permissions::PRINTING_MATERIALS_VIEW, Permissions::PRINTING_MATERIALS_REQUEST,
+                Permissions::PRINTING_MATERIALS_REQUESTS_DELETE, Permissions::PRINTING_MATERIALS_CONSUME,
+                Permissions::PRINTING_ROLLS_CREATE, Permissions::PRINTING_ROLLS_UPDATE,
+                Permissions::PRINTING_ROLLS_ADJUST, Permissions::PRINTING_ROLLS_DELETE,
+                Permissions::PRINTING_HISTORY_IMPORT,
             ],
             'Employee' => [
                 Permissions::DASHBOARD_VIEW, Permissions::COMPENSATION_CREATE,

@@ -256,16 +256,29 @@ class DriverDeliveryController extends Controller
                 ->sortBy('stop_order')
                 ->first();
 
-            // Fallback chain: live ping → trip dest → trip pickup → stop coords
+            // Where is the vehicle? Live ping first. With no ping the driver has
+            // not gone anywhere we can see, so place them where the run starts:
+            // the last finished stop, otherwise the first stop's start/pickup point.
+            $ordered   = $delivery->stops->sortBy('stop_order');
+            $firstTr   = $ordered->first()?->tripRequest;
+            $lastDone  = $ordered->whereIn('status', ['completed', 'delivered', 'arrived'])->last();
+            $lastDoneTr = $lastDone?->tripRequest;
+
             $lat = $loc?->latitude
-                ?? $nextStop?->tripRequest?->destination_lat
+                ?? ($lastDoneTr?->destination_lat)
+                ?? $firstTr?->start_lat
+                ?? $firstTr?->pickup_lat
                 ?? $nextStop?->tripRequest?->pickup_lat
+                ?? $nextStop?->tripRequest?->destination_lat
                 ?? $nextStop?->lat
                 ?? null;
 
             $lng = $loc?->longitude
-                ?? $nextStop?->tripRequest?->destination_lng
+                ?? ($lastDoneTr?->destination_lng)
+                ?? $firstTr?->start_lng
+                ?? $firstTr?->pickup_lng
                 ?? $nextStop?->tripRequest?->pickup_lng
+                ?? $nextStop?->tripRequest?->destination_lng
                 ?? $nextStop?->lng
                 ?? null;
 
@@ -299,6 +312,9 @@ class DriverDeliveryController extends Controller
                         'status'                  => $s->status,
                         'destination_lat'         => $tr?->destination_lat ?? $s->lat,
                         'destination_lng'         => $tr?->destination_lng ?? $s->lng,
+                        'pickup_location'         => $tr?->pickup_location ?? null,
+                        'pickup_lat'              => $tr?->start_lat ?? $tr?->pickup_lat,
+                        'pickup_lng'              => $tr?->start_lng ?? $tr?->pickup_lng,
                         'delivery_note'           => $s->delivery_note,
                         'distance_from_prev_km'   => $s->distance_from_prev_km,
                         'scheduled_eta_minutes'   => $s->scheduled_eta_minutes,
@@ -521,6 +537,9 @@ class DriverDeliveryController extends Controller
 
     private function findDriverForUser($user): ?Driver
     {
+        // Make sure HR drivers are registered before looking one up.
+        Driver::syncFromHr();
+
         if (method_exists($user, 'employee') && $user->employee) {
             $driver = Driver::where('employee_id', $user->employee->id)->first();
             if ($driver) return $driver;
