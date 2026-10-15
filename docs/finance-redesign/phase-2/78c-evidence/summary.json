@@ -1,0 +1,169 @@
+{
+    "database": "db",
+    "generated_at": "2026-10-15T09:43:23+03:00",
+    "today": "2026-10-15",
+    "approved_lines_by_lifecycle": {
+        "active": {
+            "lines": 119,
+            "linked": 12,
+            "unresolved": 107,
+            "awaiting_registration": 0,
+            "non_stock": 0,
+            "element_archived": 0,
+            "jobs": 8
+        },
+        "active_overdue": {
+            "lines": 1420,
+            "linked": 156,
+            "unresolved": 1264,
+            "awaiting_registration": 0,
+            "non_stock": 0,
+            "element_archived": 0,
+            "jobs": 87
+        },
+        "cancelled": {
+            "lines": 18,
+            "linked": 0,
+            "unresolved": 18,
+            "awaiting_registration": 0,
+            "non_stock": 0,
+            "element_archived": 0,
+            "jobs": 2
+        },
+        "completed": {
+            "lines": 3505,
+            "linked": 325,
+            "unresolved": 3180,
+            "awaiting_registration": 0,
+            "non_stock": 0,
+            "element_archived": 0,
+            "jobs": 252
+        },
+        "pre_project": {
+            "lines": 360,
+            "linked": 36,
+            "unresolved": 324,
+            "awaiting_registration": 0,
+            "non_stock": 0,
+            "element_archived": 0,
+            "jobs": 29
+        },
+        "pre_project_with_project_row": {
+            "lines": 51,
+            "linked": 4,
+            "unresolved": 47,
+            "awaiting_registration": 0,
+            "non_stock": 0,
+            "element_archived": 0,
+            "jobs": 2
+        }
+    },
+    "pending_issue_by_lifecycle": {
+        "active": {
+            "lines": 11,
+            "materials": 4,
+            "jobs": 3,
+            "pending_qty_sum": 27
+        },
+        "active_overdue": {
+            "lines": 129,
+            "materials": 12,
+            "jobs": 60,
+            "pending_qty_sum": 306.5
+        },
+        "completed": {
+            "lines": 198,
+            "materials": 39,
+            "jobs": 88,
+            "pending_qty_sum": 914.3
+        },
+        "pre_project_with_project_row": {
+            "lines": 4,
+            "materials": 4,
+            "jobs": 1,
+            "pending_qty_sum": 31
+        }
+    },
+    "materials_with_pending_demand": 41,
+    "materials_demand_only_from_inactive_jobs": 27,
+    "materials_demand_mixed": 14,
+    "replenishment_after_active_only": {
+        "suggestions": 12,
+        "job_shortfall": 12,
+        "below_minimum": 0
+    },
+    "active_overdue_jobs_by_days_past_due": {
+        "<=30d": 0,
+        "31-90d": 2,
+        "91-180d": 156,
+        "181-365d": 4,
+        ">365d": 0
+    },
+    "active_overdue_jobs_total": 162,
+    "active_overdue_jobs_with_stores_movement_last_90d": 2,
+    "replenishment_before": {
+        "suggestions": 36,
+        "job_shortfall": 36,
+        "below_minimum": 0
+    },
+    "project_vs_enquiry_status_mismatch": [
+        {
+            "project_status": "planning",
+            "enquiry_status": "enquiry_logged",
+            "n": 1
+        },
+        {
+            "project_status": "planning",
+            "enquiry_status": "quote_approved",
+            "n": 1
+        },
+        {
+            "project_status": "planning",
+            "enquiry_status": "in_progress",
+            "n": 1
+        },
+        {
+            "project_status": "planning",
+            "enquiry_status": "completed",
+            "n": 356
+        },
+        {
+            "project_status": "planning",
+            "enquiry_status": "cancelled",
+            "n": 2
+        },
+        {
+            "project_status": "in_progress",
+            "enquiry_status": "awaiting_deposit",
+            "n": 2
+        }
+    ],
+    "desk_in_progress_tab_by_true_enquiry_status": {
+        "completed": 356,
+        "planning": 173,
+        "quote_approved": 1,
+        "cancelled": 2,
+        "enquiry_logged": 1,
+        "in_progress": 1,
+        "awaiting_deposit": 2
+    },
+    "obligations_on_inactive_jobs": {
+        "requisitions_open": 2,
+        "requisition_items_on_inactive_enquiries": 0,
+        "bills_on_inactive": [],
+        "board_requests_open_on_inactive": [],
+        "pos_from_requisitions_on_inactive": []
+    },
+    "procurement_totals": {
+        "purchase_orders": {
+            "approved": 3
+        },
+        "requisitions": {
+            "pending_approval": 3,
+            "approved": 6,
+            "rejected": 1
+        },
+        "bills": [],
+        "board_requests": []
+    }
+}

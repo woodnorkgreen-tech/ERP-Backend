@@ -1,0 +1,65 @@
+{
+    "database": "db",
+    "generated_at": "2026-10-15T11:36:38+03:00",
+    "summary": {
+        "pending_to_issue": {
+            "lines": 140,
+            "jobs": 63,
+            "overdue_lines": 129
+        },
+        "pending_resolution": {
+            "lines": 1416,
+            "jobs": 96
+        },
+        "awaiting_registration": {
+            "lines": 0,
+            "jobs": 0
+        },
+        "unit_exceptions": {
+            "lines": 26,
+            "jobs": 15
+        },
+        "procurement_shortage": {
+            "materials": 13,
+            "materials_with_demand": 16
+        },
+        "historical": {
+            "outstanding_lines": 3031,
+            "retired_lines": 0
+        },
+        "queues": {
+            "active_work": 174,
+            "overdue_active": 162,
+            "pre_start": 3,
+            "on_hold": 0,
+            "historical": 358,
+            "pipeline": 1,
+            "all": 536
+        },
+        "generated_at": "2026-10-15T11:36:36+03:00"
+    },
+    "queue_list_lengths": {
+        "pending_to_issue": 140,
+        "pending_resolution": 1416,
+        "awaiting_registration": 0,
+        "unit_exceptions": 26,
+        "historical_outstanding": 3031,
+        "retired": 0
+    },
+    "replenishment": {
+        "suggestions": 13,
+        "job_shortfall": 13,
+        "below_minimum": 0,
+        "with_open_requests_subtracted": 2
+    },
+    "materials_with_procurement_demand": 16,
+    "overdue_triage_jobs": 162,
+    "overdue_triage_without_movement_90d": 160,
+    "obligations_on_historical_jobs": {
+        "open_requisitions": 2,
+        "open_purchase_orders": 0,
+        "unpaid_bills": 0,
+        "pending_board_requests": 0
+    },
+    "mirror_mismatches": 363
+}
