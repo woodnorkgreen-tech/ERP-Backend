@@ -35,6 +35,10 @@ class TripRequest extends Model
         'context_type',
         'transport_arrangement',
         'trip_kind',
+        'loading_required',
+        'external_provider',
+        'external_ref',
+        'external_cost',
         'project_id',
         'delivery_type_label',
         'requested_by_id',
@@ -95,6 +99,8 @@ class TripRequest extends Model
         'delivery_failed_at'   => 'datetime',
         'failure_resolved_at'  => 'datetime',
         'setdown_time'   => 'datetime',
+        'loading_required' => 'boolean',
+        'external_cost'  => 'decimal:2',
         'required_delivery_at' => 'datetime',
         'loading_start_by'     => 'datetime',
         'departure_by'         => 'datetime',
@@ -162,13 +168,25 @@ class TripRequest extends Model
      */
     public function recalculateLoadingTimeline(): void
     {
-        if (!$this->required_delivery_at || $this->estimated_travel_minutes === null || $this->estimated_loading_minutes === null) {
+        $needsLoadingMinutes = ($this->trip_kind ?? 'delivery') !== 'personnel';
+        if (!$this->required_delivery_at || $this->estimated_travel_minutes === null || ($needsLoadingMinutes && $this->estimated_loading_minutes === null)) {
             $this->loading_start_by = null;
             $this->departure_by = null;
             return;
         }
 
         $buffer = $this->buffer_minutes ?? 0;
+
+        // People-only trip (site visit, client visit): nothing to load. The
+        // time given is when they must be there, so leave travel + buffer
+        // before it. No loading deadline exists for this trip.
+        if ($this->trip_kind === 'personnel') {
+            $this->departure_by = $this->required_delivery_at->copy()
+                ->subMinutes($this->estimated_travel_minutes)
+                ->subMinutes($buffer);
+            $this->loading_start_by = null;
+            return;
+        }
 
         // Set-down / pick-up: the time given is when the crew is wanted at the
         // other end, so the truck leaves the store travel + buffer before it,
@@ -201,6 +219,11 @@ class TripRequest extends Model
     public function getTimelineStatusAttribute(): string
     {
         if (!$this->loading_start_by || !$this->departure_by) {
+            return 'not_tracked';
+        }
+        // Marked "no loading required" — nothing to be late for, and the
+        // reminder command (which keys off this) stays quiet.
+        if ($this->loading_required === false) {
             return 'not_tracked';
         }
         if ($this->loading_ended_at) {
@@ -263,6 +286,10 @@ class TripRequest extends Model
         // calculation changes, so they're never stale for the reminder
         // command to query against.
         static::saving(function (TripRequest $trip) {
+            if ($trip->trip_kind === 'personnel') {
+                $trip->loading_required = false;
+            }
+
             if ($trip->isDirty(['trip_kind', 'required_delivery_at', 'estimated_loading_minutes', 'estimated_travel_minutes', 'buffer_minutes'])) {
                 $trip->recalculateLoadingTimeline();
             }

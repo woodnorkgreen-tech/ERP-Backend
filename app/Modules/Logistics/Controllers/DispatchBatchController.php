@@ -5,6 +5,7 @@ namespace App\Modules\Logistics\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Logistics\Models\DispatchBatch;
 use App\Modules\Logistics\Models\TripRequest;
+use App\Modules\Logistics\Services\FleetAvailability;
 use App\Modules\Logistics\Models\Delivery;
 use App\Modules\Logistics\Models\DeliveryStop;
 use App\Modules\Logistics\Models\Vehicle;
@@ -135,7 +136,7 @@ class DispatchBatchController extends Controller
         // A set-down / pick-up in the batch means the vehicle does the jobs one
         // after the other (e.g. a set-up, then a set-down on the way back), so
         // the times are meant to be hours apart — no time-gap check.
-        if ($trips->contains(fn ($t) => $t->trip_kind === 'collection')) {
+        if ($trips->contains(fn ($t) => in_array($t->trip_kind, ['collection', 'personnel'], true))) {
             return null;
         }
 
@@ -238,22 +239,22 @@ class DispatchBatchController extends Controller
         return response()->json(['message' => 'Assign a driver and vehicle before confirming.'], 422);
     }
 
-    // ✅ ADD THIS - Check driver availability
-    $driverBusy = Delivery::where('driver_id', $dispatchBatch->driver_id)
-        ->whereIn('status', ['pending', 'in_transit'])
-        ->exists();
-    
-    if ($driverBusy) {
-        return response()->json(['message' => 'Driver is already on an active delivery.'], 422);
-    }
+    // Busy only where the times actually overlap — the same car and driver
+    // can run a morning batch and an afternoon one.
+    $batchTrips = $dispatchBatch->tripRequests()->get();
+    if ($batchTrips->isNotEmpty()) {
+        $starts = $batchTrips->map(fn ($t) => FleetAvailability::window($t)[0]);
+        $ends   = $batchTrips->map(fn ($t) => FleetAvailability::window($t)[1]);
+        $ids    = $batchTrips->pluck('id')->all();
 
-    // ✅ ADD THIS - Check vehicle availability
-    $vehicleBusy = Delivery::where('vehicle_id', $dispatchBatch->vehicle_id)
-        ->whereIn('status', ['pending', 'in_transit'])
-        ->exists();
-    
-    if ($vehicleBusy) {
-        return response()->json(['message' => 'Vehicle is already in use on an active delivery.'], 422);
+        $vHit = FleetAvailability::conflict((int) $dispatchBatch->vehicle_id, null, $starts->min(), $ends->max(), $ids);
+        if ($vHit) {
+            return response()->json(['message' => FleetAvailability::sentence($vHit, 'This vehicle')], 422);
+        }
+        $dHit = FleetAvailability::conflict(null, (int) $dispatchBatch->driver_id, $starts->min(), $ends->max(), $ids);
+        if ($dHit) {
+            return response()->json(['message' => FleetAvailability::sentence($dHit, 'This driver')], 422);
+        }
     }
 
     // ✅ ADD THIS - Check vehicle not in maintenance

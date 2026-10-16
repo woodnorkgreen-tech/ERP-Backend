@@ -9,6 +9,7 @@ use App\Modules\Logistics\Models\Vehicle;
 use App\Modules\Logistics\Models\Delivery;
 use App\Modules\Logistics\Models\DeliveryStop;
 use App\Modules\Logistics\Models\DispatchBatch;
+use App\Modules\Logistics\Services\FleetAvailability;
 use App\Http\Resources\TripRequestResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -88,7 +89,8 @@ class TripRequestController extends Controller
         $validated = $request->validate([
             'context_type'          => 'required|in:project,other',
             'transport_arrangement' => 'sometimes|in:company,client',
-            'trip_kind'             => 'sometimes|in:delivery,collection',
+            'trip_kind'             => 'sometimes|in:delivery,collection,personnel',
+            'loading_required'      => 'sometimes|boolean',
             'project_id'            => 'required_if:context_type,project|nullable|exists:project_enquiries,id',
             'delivery_type_label'   => 'required|string|max:150',
             'requested_by_id'       => 'required|exists:employees,id',
@@ -152,7 +154,8 @@ class TripRequestController extends Controller
         $validated = $request->validate([
             'context_type'          => 'sometimes|in:project,other',
             'transport_arrangement' => 'sometimes|in:company,client',
-            'trip_kind'             => 'sometimes|in:delivery,collection',
+            'trip_kind'             => 'sometimes|in:delivery,collection,personnel',
+            'loading_required'      => 'sometimes|boolean',
             'project_id'            => 'nullable|exists:project_enquiries,id',
             'delivery_type_label'   => 'sometimes|string|max:150',
             'requested_by_id'       => 'sometimes|exists:employees,id',
@@ -260,22 +263,50 @@ class TripRequestController extends Controller
             return new TripRequestResource($tripRequest);
         }
 
+        // The lead booked an Uber / Bolt / hired vehicle instead of our fleet:
+        // no car or driver to check, just who is carrying them and the details.
+        if ($request->input('mode') === 'external') {
+            $ext = $request->validate([
+                'external_provider' => 'required|string|max:60',
+                'external_ref'      => 'nullable|string|max:150',
+                'external_cost'     => 'nullable|numeric|min:0',
+                'assignment_notes'  => 'nullable|string|max:500',
+            ]);
+
+            $tripRequest->update([
+                'status'                => 'assigned',
+                'transport_arrangement' => 'external',
+                'external_provider'     => $ext['external_provider'],
+                'external_ref'          => $ext['external_ref'] ?? null,
+                'external_cost'         => $ext['external_cost'] ?? null,
+                'assigned_driver_id'    => null,
+                'assigned_vehicle_id'   => null,
+                'assigned_by_id'        => Auth::user()->employee?->id,
+                'assigned_at'           => now(),
+                'assignment_notes'      => $ext['assignment_notes'] ?? null,
+            ]);
+
+            $tripRequest->load($this->with);
+            return new TripRequestResource($tripRequest);
+        }
+
         $validated = $request->validate([
             'driver_id'        => 'required|exists:drivers,id',
             'vehicle_id'       => 'required|exists:vehicles,id',
             'assignment_notes' => 'nullable|string|max:500',
         ]);
 
-        $driverBusy = Delivery::where('driver_id', $validated['driver_id'])
-            ->whereIn('status', ['pending', 'in_transit'])->exists();
-        if ($driverBusy) {
-            return response()->json(['message' => 'Driver is already assigned to an active delivery.'], 422);
-        }
+        // Booked only for the time this trip needs: a car out on a morning
+        // run can still take an afternoon request. Overlap is the only block.
+        [$winStart, $winEnd] = FleetAvailability::window($tripRequest);
 
-        $vehicleBusy = Delivery::where('vehicle_id', $validated['vehicle_id'])
-            ->whereIn('status', ['pending', 'in_transit'])->exists();
-        if ($vehicleBusy) {
-            return response()->json(['message' => 'Vehicle is already in use on an active delivery.'], 422);
+        $vehicleHit = FleetAvailability::conflict((int) $validated['vehicle_id'], null, $winStart, $winEnd, [$tripRequest->id]);
+        if ($vehicleHit) {
+            return response()->json(['message' => FleetAvailability::sentence($vehicleHit, 'This vehicle')], 422);
+        }
+        $driverHit = FleetAvailability::conflict(null, (int) $validated['driver_id'], $winStart, $winEnd, [$tripRequest->id]);
+        if ($driverHit) {
+            return response()->json(['message' => FleetAvailability::sentence($driverHit, 'This driver')], 422);
         }
 
         $vehicle = Vehicle::find($validated['vehicle_id']);
@@ -283,7 +314,9 @@ class TripRequestController extends Controller
             return response()->json(['message' => 'Vehicle is currently under maintenance.'], 422);
         }
 
-        Vehicle::where('id', $validated['vehicle_id'])->update(['status' => 'booked']);
+        if ($winStart->lte(now()->addHours(2))) {
+            Vehicle::where('id', $validated['vehicle_id'])->update(['status' => 'booked']);
+        }
 
         $tripRequest->update([
             'status'              => 'assigned',
@@ -559,10 +592,81 @@ class TripRequestController extends Controller
         if ($tripRequest->loading_started_at) {
             return response()->json(['message' => 'Loading was already marked as started.'], 422);
         }
+        if ($tripRequest->loading_required === false) {
+            return response()->json(['message' => 'This request was marked as needing no loading.'], 422);
+        }
 
         $tripRequest->update(['loading_started_at' => now()]);
         $tripRequest->load($this->with);
         return new TripRequestResource($tripRequest);
+    }
+
+    /**
+     * "No loading required" — site visits, people only, or goods already on
+     * the vehicle. Takes the trip off the loading timeline so no reminders
+     * fire and nobody has to press Start/Finish loading.
+     */
+    public function markNoLoading(TripRequest $tripRequest): TripRequestResource|JsonResponse
+    {
+        if (!$this->canMarkLoading(Auth::user(), $tripRequest)) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+        if ($tripRequest->loading_started_at) {
+            return response()->json(['message' => 'Loading has already started for this request.'], 422);
+        }
+
+        $tripRequest->update(['loading_required' => false]);
+        $tripRequest->load($this->with);
+        return new TripRequestResource($tripRequest);
+    }
+
+    /**
+     * Who can take this request, and when the rest are free again. Vehicles
+     * and drivers booked for a clashing time come back with free=false and
+     * a "booked until" time; ones booked for another time stay selectable.
+     */
+    public function availability(Request $request): JsonResponse
+    {
+        if (!$this->isLogisticsTeam(Auth::user())) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+        $trip = TripRequest::findOrFail((int) $request->query('trip_request_id'));
+        [$start, $end] = FleetAvailability::window($trip);
+
+        $vehicles = Vehicle::whereIn('status', ['active', 'booked'])->get()->map(function ($v) use ($start, $end, $trip) {
+            $hit = FleetAvailability::conflict($v->id, null, $start, $end, [$trip->id]);
+            return [
+                'id'           => $v->id,
+                'plate_number' => $v->plate_number,
+                'make'         => $v->make,
+                'model'        => $v->model,
+                'free'         => $hit === null,
+                'booked_until' => $hit ? $hit['until']->toIso8601String() : null,
+                'booked_for'   => $hit ? $hit['trip']->request_code : null,
+                'bookings'     => FleetAvailability::bookings($v->id, null, [$trip->id]),
+            ];
+        })->values();
+
+        $drivers = Driver::with('employee')->where('status', 'active')->get()->map(function ($d) use ($start, $end, $trip) {
+            $hit = FleetAvailability::conflict(null, $d->id, $start, $end, [$trip->id]);
+            return [
+                'id'             => $d->id,
+                'name'           => $d->employee?->name ?? $d->employee?->full_name ?? 'Driver',
+                'license_number' => $d->license_number,
+                'free'           => $hit === null,
+                'booked_until'   => $hit ? $hit['until']->toIso8601String() : null,
+                'booked_for'     => $hit ? $hit['trip']->request_code : null,
+                'bookings'       => FleetAvailability::bookings(null, $d->id, [$trip->id]),
+            ];
+        })->values();
+
+        return response()->json([
+            'data' => [
+                'window'   => ['from' => $start->toIso8601String(), 'until' => $end->toIso8601String()],
+                'vehicles' => $vehicles,
+                'drivers'  => $drivers,
+            ],
+        ]);
     }
 
     /**
@@ -600,10 +704,29 @@ class TripRequestController extends Controller
             || $employeeId === $tripRequest->requested_by_id;
     }
 
+    /**
+     * Soft delete — the row stays in the database (deleted_at) but disappears
+     * from every list. Admin / Super Admin only; Logistics staff cancel
+     * instead. A trip on the road can't be deleted.
+     */
     public function destroy(TripRequest $tripRequest): JsonResponse
     {
-        if (!$this->isLogisticsTeam(Auth::user())) {
-            return response()->json(['message' => 'Unauthorized.'], 403);
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'hasRole') || !($user->hasRole('Admin') || $user->hasRole('Super Admin'))) {
+            return response()->json(['message' => 'Only an administrator can delete a request.'], 403);
+        }
+        if ($tripRequest->status === 'in_transit') {
+            return response()->json(['message' => 'This trip is on the road. Complete or cancel it first.'], 422);
+        }
+
+        // Release anything it was holding so the car and driver look free again.
+        if ($tripRequest->assigned_vehicle_id && in_array($tripRequest->status, ['assigned'])) {
+            Vehicle::where('id', $tripRequest->assigned_vehicle_id)->where('status', 'booked')->update(['status' => 'active']);
+        }
+        $stop = DeliveryStop::where('trip_request_id', $tripRequest->id)->latest('id')->first();
+        if ($stop?->delivery && $stop->delivery->status === 'pending' && !$stop->delivery->batch_id) {
+            $stop->delivery->update(['status' => 'cancelled', 'completed_at' => now()]);
+            $stop->update(['status' => 'failed']);
         }
 
         $tripRequest->delete();
