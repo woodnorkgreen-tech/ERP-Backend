@@ -33,6 +33,7 @@ class Employee extends Model
         'hikvision_id',
         'first_name',
         'last_name',
+        'middle_name',
         'id_number',
         'kra_pin',
         'nssf_id',
