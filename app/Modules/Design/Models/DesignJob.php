@@ -6,10 +6,12 @@ use App\Models\Project;
 use App\Models\ProjectEnquiry;
 use App\Models\User;
 use App\Modules\ClientService\Models\Client;
+use App\Modules\Printing\Models\PrintProjectSchedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class DesignJob extends Model
@@ -55,6 +57,11 @@ class DesignJob extends Model
     public function items(): HasMany
     {
         return $this->hasMany(DesignItem::class);
+    }
+
+    public function printingSchedule(): HasOne
+    {
+        return $this->hasOne(PrintProjectSchedule::class);
     }
 
     public function designers(): BelongsToMany

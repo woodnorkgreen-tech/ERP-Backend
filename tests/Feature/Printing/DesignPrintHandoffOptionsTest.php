@@ -8,6 +8,7 @@ use App\Modules\Design\Models\DesignItem;
 use App\Modules\Design\Models\DesignJob;
 use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Printing\Services\PrintIntakeService;
+use App\Modules\Printing\Models\PrintProjectSchedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
@@ -57,10 +58,16 @@ class DesignPrintHandoffOptionsTest extends TestCase
         ]);
 
         $handoff = app(DesignHandoffService::class)->createPrintingHandoffOnce($item);
+        PrintProjectSchedule::create([
+            'design_job_id' => $job->id,
+            'printing_date' => '2026-11-04',
+            'updated_by' => $user->id,
+        ]);
         $printJob = app(PrintIntakeService::class)->accept($handoff);
 
         $this->assertSame('Powder-coated frame', $printJob->application_surface);
         $this->assertEquals(0.125, $printJob->bleed_per_side_m);
+        $this->assertSame('2026-11-04', $printJob->scheduled_at?->format('Y-m-d'));
 
         $printer = User::factory()->create(['is_active' => true]);
         $this->grantMatrixPermissions('Printing');

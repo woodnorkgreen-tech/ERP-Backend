@@ -3,8 +3,10 @@
 namespace App\Modules\Printing\Services;
 
 use App\Modules\Design\Models\DesignHandoff;
+use App\Modules\Design\Models\DesignItem;
 use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Printing\Models\PrintJob;
+use App\Modules\Printing\Models\PrintProjectSchedule;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -28,6 +30,12 @@ class PrintIntakeService
             $reprintOfJobId = $payload['redesign_of_print_job_id'] ?? null;
             $isRedesignReprint = $reprintOfJobId !== null;
             $artworkVersion = $this->artworkVersion($artwork['version'] ?? null, $isRedesignReprint, $reprintOfJobId);
+            $designJobId = $payload['design_job_id'] ?? DesignItem::query()
+                ->whereKey($handoff->design_item_id)->value('design_job_id');
+            $schedule = !$isRedesignReprint && $designJobId
+                ? PrintProjectSchedule::query()->with('machine')->where('design_job_id', $designJobId)->first()
+                : null;
+            $scheduleDate = $schedule?->printing_date?->format('Y-m-d');
 
             $existing = $handoff->target_record_id
                 ? PrintJob::query()->whereKey($handoff->target_record_id)->first()
@@ -68,7 +76,7 @@ class PrintIntakeService
                     'design_handoff_id' => $existing->design_handoff_id ?: $handoff->id,
                     'original_design_handoff_id' => $isRedesignReprint ? null : ($existing->original_design_handoff_id ?: $handoff->id),
                     'design_item_id' => $payload['design_item_id'] ?? $handoff->design_item_id,
-                    'design_job_id' => $payload['design_job_id'] ?? null,
+                    'design_job_id' => $designJobId,
                     'project_enquiry_id' => $payload['project_enquiry_id'] ?? null,
                     'project_id' => $payload['project_id'] ?? null,
                     'client_id' => $payload['client_id'] ?? null,
@@ -88,6 +96,10 @@ class PrintIntakeService
                     'order_type' => $isRedesignReprint ? 'reprint' : $existing->order_type,
                     'reprint_of_job_id' => $reprintOfJobId ?? $existing->reprint_of_job_id,
                     'reprint_reason' => $payload['redesign_reason'] ?? $existing->reprint_reason,
+                    'scheduled_at' => $existing->scheduled_at ?: $scheduleDate,
+                    'machine_asset_id' => $existing->machine_asset_id ?: $schedule?->machine_asset_id,
+                    'machine_name_snapshot' => $existing->machine_name_snapshot ?: $schedule?->machine?->name,
+                    'operator_id' => $existing->operator_id ?: $schedule?->operator_id,
                     'remarks' => $payload['print_notes'] ?? $existing->remarks,
                     'updated_by' => auth()->id(),
                 ], fn ($value) => $value !== null));
@@ -107,7 +119,7 @@ class PrintIntakeService
                 'design_handoff_id' => $handoff->id,
                 'original_design_handoff_id' => $isRedesignReprint ? null : $handoff->id,
                 'design_item_id' => $payload['design_item_id'] ?? $handoff->design_item_id,
-                'design_job_id' => $payload['design_job_id'] ?? null,
+                'design_job_id' => $designJobId,
                 'project_enquiry_id' => $payload['project_enquiry_id'] ?? null,
                 'project_id' => $payload['project_id'] ?? null,
                 'client_id' => $payload['client_id'] ?? null,
@@ -130,6 +142,10 @@ class PrintIntakeService
                 'reprint_of_job_id' => $reprintOfJobId,
                 'reprint_reason' => $payload['redesign_reason'] ?? null,
                 'status' => 'queued',
+                'scheduled_at' => $scheduleDate,
+                'machine_asset_id' => $schedule?->machine_asset_id,
+                'machine_name_snapshot' => $schedule?->machine?->name,
+                'operator_id' => $schedule?->operator_id,
                 'remarks' => $payload['print_notes'] ?? null,
                 'created_by' => auth()->id(),
                 'updated_by' => auth()->id(),

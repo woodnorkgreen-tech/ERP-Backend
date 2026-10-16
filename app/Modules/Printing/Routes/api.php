@@ -2,6 +2,7 @@
 
 use App\Modules\Printing\Controllers\PrintHistoryImportController;
 use App\Modules\Printing\Controllers\PrintJobController;
+use App\Modules\Printing\Controllers\PrintProjectScheduleController;
 use App\Modules\Printing\Controllers\PrintLookupController;
 use App\Modules\Printing\Controllers\PrintManualConsumptionController;
 use App\Modules\Printing\Controllers\PrintMaterialRequestController;
@@ -28,9 +29,12 @@ Route::middleware($printing('printing.jobs.view'))->group(function () {
     Route::get('/jobs', [PrintJobController::class, 'index']);
     Route::get('/job-bundles', [PrintJobController::class, 'bundles']);
     Route::get('/upcoming-jobs', [UpcomingPrintJobController::class, 'index']);
+    Route::get('/upcoming-jobs/timeline', [PrintProjectScheduleController::class, 'timeline']);
     Route::get('/jobs/{job}', [PrintJobController::class, 'show']);
     Route::get('/jobs/{job}/consumption', [PrintJobController::class, 'consumptions']);
 });
+Route::patch('/upcoming-jobs/{designJob}/schedule', [PrintProjectScheduleController::class, 'update'])
+    ->middleware($printing('printing.jobs.update'));
 Route::post('/jobs', [PrintJobController::class, 'store'])->middleware($printing('printing.jobs.create'));
 Route::put('/jobs/{job}', [PrintJobController::class, 'update'])->middleware($printing('printing.jobs.update'));
 Route::post('/jobs/{job}/status', [PrintJobController::class, 'status'])->middleware($printing('printing.jobs.update'));
