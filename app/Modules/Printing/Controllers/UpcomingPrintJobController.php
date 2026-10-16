@@ -3,15 +3,20 @@
 namespace App\Modules\Printing\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Modules\Design\Models\DesignItem;
 use App\Modules\Design\Models\DesignJob;
 use App\Modules\Design\Support\DesignSchedule;
-use App\Modules\Printing\Resources\UpcomingPrintJobResource;
+use App\Modules\Printing\Resources\UpcomingProjectResource;
 use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
+/**
+ * Upcoming projects for printing planning, read-only.
+ *
+ * Starts from the same design jobs design sees (design-workflow projects due in the window),
+ * so a project appears here even before design has created a task for it.
+ */
 class UpcomingPrintJobController extends Controller
 {
     private const STATUSES = ['pending', 'in_design', 'awaiting_client_approval', 'client_changes_requested', 'done'];
@@ -27,34 +32,39 @@ class UpcomingPrintJobController extends Controller
         ]);
 
         $scope = $filters['schedule_scope'] ?? 'upcoming';
-        $items = DesignItem::query()
-            ->select('design_items.*')
-            ->selectSub(DesignJob::query()
-                ->selectSub(ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id'), 'setup_date')
-                ->whereColumn('design_jobs.id', 'design_items.design_job_id')->limit(1), 'project_setup_date')
-            ->where('stream', DesignItem::STREAM_GRAPHIC)
-            ->whereIn('status', self::STATUSES)
-            ->whereHas('job', fn ($query) => $query->where('status', '!=', 'cancelled'))
-            ->tap(fn ($query) => ProjectSetupSchedule::filterDateScope($query, DesignSchedule::itemDateQuery(), $scope))
-            ->with(['job.enquiry.client', 'job.client', 'assignedUser', 'printMaterial'])
+        $setupDate = ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id');
+
+        $projects = DesignJob::query()
+            ->select('design_jobs.*')
+            ->selectSub($setupDate, 'project_setup_date')
+            ->where('status', '!=', 'cancelled')
+            ->whereHas('enquiry.deliverables', fn ($query) => $query->whereNull('archived_at'))
+            // Same date rules as design's job list, so the two screens agree.
+            ->tap(fn ($query) => $scope === 'overdue'
+                ? DesignSchedule::overdueJobs($query)
+                : ProjectSetupSchedule::filterDateScope($query, $setupDate, $scope))
+            ->with([
+                'enquiry.client',
+                'client',
+                'enquiry.deliverables' => fn ($query) => $query->whereNull('archived_at')->orderBy('sort_order')->orderBy('id'),
+                'items.assignedUser:id,name',
+            ])
             ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
             ->when(trim($filters['search'] ?? ''), function ($query, $search) {
                 $term = '%'.$search.'%';
                 $query->where(fn ($match) => $match
                     ->where('title', 'like', $term)
-                    ->orWhereHas('job', fn ($job) => $job
+                    ->orWhere('job_number', 'like', $term)
+                    ->orWhereHas('client', fn ($client) => $client->where('full_name', 'like', $term))
+                    ->orWhereHas('enquiry', fn ($enquiry) => $enquiry
                         ->where('title', 'like', $term)
-                        ->orWhere('job_number', 'like', $term)
-                        ->orWhereHas('client', fn ($client) => $client->where('full_name', 'like', $term))
-                        ->orWhereHas('enquiry', fn ($enquiry) => $enquiry
-                            ->where('title', 'like', $term)
-                            ->orWhereHas('client', fn ($client) => $client->where('full_name', 'like', $term)))));
+                        ->orWhereHas('client', fn ($client) => $client->where('full_name', 'like', $term))));
             })
             ->orderByRaw('project_setup_date IS NULL')
             ->orderBy('project_setup_date')
-            ->latest('id')
+            ->orderBy('design_jobs.id')
             ->paginate($filters['per_page'] ?? 20);
 
-        return response()->json($items->through(fn ($item) => new UpcomingPrintJobResource($item)));
+        return response()->json($projects->through(fn ($project) => new UpcomingProjectResource($project)));
     }
 }
