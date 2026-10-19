@@ -140,6 +140,7 @@ class DesignProjectSyncService
                         ->whereNull('generated_scope_key')
                         ->whereNull('redesign_of_item_id')
                         ->whereNull('redesign_of_print_job_id')
+                        ->where('status', '!=', 'cancelled')
                         ->limit(2)->get();
                     if ($candidates->count() > 1) {
                         $result['ambiguous']++;

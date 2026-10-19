@@ -254,6 +254,30 @@ class DesignProjectAssignmentsTest extends TestCase
         $this->assertSame(0, $again['created'] + $again['adopted']);
     }
 
+    public function test_backfill_skips_cancelled_tasks_instead_of_adopting_them(): void
+    {
+        $enquiry = $this->enquiry();
+        $sync = app(DesignProjectSyncService::class);
+        $job = $sync->syncFromEnquiry($enquiry);
+        $alone = ProjectElement::create(['enquiry_id' => $enquiry->id, 'name' => 'Gate', 'classification' => 'BRANDING']);
+        $paired = ProjectElement::create(['enquiry_id' => $enquiry->id, 'name' => 'Podium', 'classification' => 'BRANDING']);
+        $manual = fn (ProjectElement $element, string $status) => DesignItem::create([
+            'design_job_id' => $job->id, 'project_deliverable_id' => $element->id, 'stream' => 'graphic',
+            'title' => $element->name, 'status' => $status,
+        ]);
+        $cancelledAlone = $manual($alone, 'cancelled');
+        $cancelledPaired = $manual($paired, 'cancelled');
+        $active = $manual($paired, 'in_design');
+
+        $result = $sync->syncItemsForJob($job);
+
+        $this->assertSame(0, $result['ambiguous']);
+        $this->assertNull($cancelledAlone->fresh()->generated_scope_key);
+        $this->assertSame('pending', DesignItem::where('generated_scope_key', "{$job->id}:{$alone->id}:graphic")->firstOrFail()->status);
+        $this->assertNull($cancelledPaired->fresh()->generated_scope_key);
+        $this->assertSame("{$job->id}:{$paired->id}:graphic", $active->fresh()->generated_scope_key);
+    }
+
     public function test_archived_element_flags_its_tasks_for_review_and_restoring_it_clears_the_flag(): void
     {
         $enquiry = $this->enquiry();
