@@ -882,6 +882,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         }); // No permission for debugging
 
         // Enquiry management
+        Route::get('enquiries/{enquiry}/printing-checklist', [App\Modules\Projects\Http\Controllers\ProjectPrintChecklistController::class, 'show']);
+        Route::put('enquiries/{enquiry}/printing-checklist', [App\Modules\Projects\Http\Controllers\ProjectPrintChecklistController::class, 'update'])
+            ->middleware('throttle:60,1');
         Route::get('approved-wng', [EnquiryController::class, 'approvedWngList']);
         Route::get('enquiries', [EnquiryController::class, 'index']);
         Route::get('enquiries/{enquiry}', [EnquiryController::class, 'show']);
