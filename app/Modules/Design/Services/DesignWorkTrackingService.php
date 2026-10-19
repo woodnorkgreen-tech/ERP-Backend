@@ -9,7 +9,7 @@ use Illuminate\Validation\ValidationException;
 
 class DesignWorkTrackingService
 {
-    private const FINISHED = ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off'];
+    private const FINISHED = ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off', 'not_required'];
 
     public function begin(DesignItem $item): DesignItem
     {

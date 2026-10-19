@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use App\Modules\Design\Console\Commands\SyncPrintingHandoffs;
 use App\Modules\Design\Console\Commands\SyncUpcomingDesignJobs;
+use App\Modules\Design\Console\Commands\SyncProjectElementTasks;
 
 class DesignServiceProvider extends ServiceProvider
 {
@@ -24,6 +25,7 @@ class DesignServiceProvider extends ServiceProvider
             $this->commands([
                 SyncPrintingHandoffs::class,
                 SyncUpcomingDesignJobs::class,
+                SyncProjectElementTasks::class,
             ]);
         }
 

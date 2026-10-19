@@ -27,11 +27,13 @@ class DesignDashboardController extends Controller
             ->pluck('total', 'status');
 
         $streamCounts = (clone $itemScope)
+            ->where('status', '!=', 'not_required')
             ->selectRaw('stream, count(*) as total')
             ->groupBy('stream')
             ->pluck('total', 'stream');
 
         $designerMetrics = DesignItem::query()
+            ->where('status', '!=', 'not_required')
             ->with('assignedUser:id,name,email')
             ->selectRaw('assigned_to, count(*) as total')
             ->selectRaw("sum(case when status in ('pending', 'in_design', 'awaiting_client_approval', 'client_changes_requested') then 1 else 0 end) as active")
@@ -77,7 +79,8 @@ class DesignDashboardController extends Controller
         return response()->json([
             'data' => [
                 'active_jobs' => DesignJob::whereNotIn('status', ['cancelled', 'done'])->count(),
-                'total_items' => (clone $itemScope)->count(),
+                'total_items' => (clone $itemScope)->where('status', '!=', 'not_required')->count(),
+                'not_required_items' => (int) ($statusCounts['not_required'] ?? 0),
                 'active_items' => (clone $itemScope)->whereIn('status', $activeStatuses)->count(),
                 'graphic_in_progress' => (clone $itemScope)->where('stream', 'graphic')->whereIn('status', $activeStatuses)->count(),
                 'structural_in_progress' => (clone $itemScope)->where('stream', 'structural')->whereIn('status', $activeStatuses)->count(),

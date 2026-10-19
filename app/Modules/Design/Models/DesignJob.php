@@ -28,6 +28,8 @@ class DesignJob extends Model
         'status',
         'priority',
         'due_date',
+        'graphic_main_designer_id',
+        'structural_main_designer_id',
         'created_by',
         'updated_by',
     ];
@@ -61,6 +63,16 @@ class DesignJob extends Model
     {
         return $this->belongsToMany(User::class, 'design_items', 'design_job_id', 'assigned_to')
             ->wherePivotNull('deleted_at')->distinct();
+    }
+
+    public function graphicMainDesigner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'graphic_main_designer_id');
+    }
+
+    public function structuralMainDesigner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'structural_main_designer_id');
     }
 
     public function documents(): HasMany

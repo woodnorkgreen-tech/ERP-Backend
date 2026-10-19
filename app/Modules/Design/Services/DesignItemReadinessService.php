@@ -11,6 +11,10 @@ class DesignItemReadinessService
     {
         $errors = [];
 
+        if ($item->status === 'not_required') {
+            $errors['status'][] = 'Restore this task before marking it print ready.';
+        }
+
         if ($item->stream !== DesignItem::STREAM_GRAPHIC) {
             $errors['stream'][] = 'Only Graphic Designs can be marked print ready.';
         }
@@ -46,6 +50,10 @@ class DesignItemReadinessService
     public function ensureProductionReady(DesignItem $item): void
     {
         $errors = [];
+
+        if ($item->status === 'not_required') {
+            $errors['status'][] = 'Restore this task before marking it production ready.';
+        }
 
         if ($item->stream !== DesignItem::STREAM_STRUCTURAL) {
             $errors['stream'][] = 'Only Structural Designs can be marked production ready.';

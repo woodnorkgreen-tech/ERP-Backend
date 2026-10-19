@@ -27,15 +27,22 @@ class DesignItemResource extends JsonResource
             'description' => $this->description,
             'status' => $this->status,
             'assigned_to' => $this->assigned_to,
+            'assignment_source' => $this->assignment_source,
+            'generated_scope_key' => $this->generated_scope_key,
+            'source_element_archived_at' => $this->source_element_archived_at,
+            'not_required_by' => $this->not_required_by,
+            'not_required_actor' => $this->whenLoaded('notRequiredActor', fn () => $this->notRequiredActor?->only(['id', 'name'])),
+            'not_required_at' => $this->not_required_at,
+            'not_required_reason' => $this->not_required_reason,
             'outsourced_partner_name' => $this->outsourced_partner_name,
             'outsourced_reason' => $this->outsourced_reason,
             'outsourced_reason_label' => \App\Support\Outsourcing\OutsourcingAssignment::REASONS[$this->outsourced_reason] ?? null,
             'outsourced_reason_note' => $this->outsourced_reason_note,
             'outsourced_at' => $this->outsourced_at,
-            'designer' => $this->whenLoaded('assignedUser', fn () => [
+            'designer' => $this->whenLoaded('assignedUser', fn () => $this->assignedUser ? [
                 'id' => $this->assignedUser->id,
                 'name' => $this->assignedUser->name,
-            ]),
+            ] : null),
             'quantity' => $this->quantity !== null ? (float) $this->quantity : null,
             'dimension_unit' => $this->dimension_unit,
             'length_value' => $this->length_value !== null ? (float) $this->length_value : null,
@@ -58,7 +65,7 @@ class DesignItemResource extends JsonResource
             'handoffs' => DesignHandoffResource::collection($this->whenLoaded('handoffs')),
             'work_tracking' => $this->whenLoaded('workSessions', fn () => WorkTrackingSummary::from(
                 $this->workSessions,
-                in_array($this->status, ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off'], true)
+                in_array($this->status, ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off', 'not_required'], true)
             )),
             'revisions' => DesignRevisionResource::collection($this->whenLoaded('revisions')),
             'change_requests' => DesignChangeRequestResource::collection($this->whenLoaded('changeRequests')),

@@ -19,6 +19,7 @@ Route::post('/jobs/sync-from-project/{enquiry}', [DesignJobController::class, 's
 Route::post('/jobs/sync-upcoming', [DesignJobController::class, 'syncUpcoming']);
 Route::get('/jobs/{job}', [DesignJobController::class, 'show']);
 Route::put('/jobs/{job}', [DesignJobController::class, 'update']);
+Route::put('/jobs/{job}/main-designers', [DesignJobController::class, 'updateMainDesigners']);
 
 Route::get('/designers', [DesignItemController::class, 'designers']);
 Route::get('/print-options', [DesignPrintOptionController::class, 'index']);
@@ -46,6 +47,9 @@ Route::post('/structural/items/{item}/mark-production-ready', [DesignItemControl
 Route::get('/structural/production-ready', [DesignItemController::class, 'index'])->defaults('stream', 'structural')->defaults('status', 'production_ready');
 
 Route::post('/items/{item}/redesign', [DesignItemController::class, 'redesign']);
+Route::post('/items/{item}/mark-not-required', [DesignItemController::class, 'markNotRequired']);
+Route::post('/items/{item}/restore-required', [DesignItemController::class, 'restoreRequired']);
+Route::post('/items/{item}/use-project-default', [DesignItemController::class, 'useProjectDefault']);
 Route::post('/items/{item}/work/begin', [DesignItemController::class, 'beginWork']);
 Route::post('/items/{item}/work/pause', [DesignItemController::class, 'pauseWork']);
 Route::post('/items/{item}/updates', [DesignHistoryController::class, 'storeUpdate']);

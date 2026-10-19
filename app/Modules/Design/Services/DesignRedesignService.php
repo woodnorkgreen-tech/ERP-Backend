@@ -49,6 +49,9 @@ class DesignRedesignService
                 ->whereKey($item->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+            if ($source === 'design' && $item->status === 'not_required') {
+                throw ValidationException::withMessages(['status' => ['Restore this task before requesting a redesign.']]);
+            }
 
             if ($source === 'printing' && $printJob) {
                 $existing = DesignItem::query()
@@ -68,6 +71,12 @@ class DesignRedesignService
                 'approved_at',
                 'print_ready_at',
                 'production_ready_at',
+                'generated_scope_key',
+                'last_synced_element_title',
+                'source_element_archived_at',
+                'not_required_by',
+                'not_required_at',
+                'not_required_reason',
                 'created_at',
                 'updated_at',
             ]);
@@ -76,6 +85,7 @@ class DesignRedesignService
             $redesign->description = $this->withRedesignNote($item->description, $reason);
             $redesign->status = 'pending';
             $redesign->assigned_to = null;
+            $redesign->assignment_source = 'individual';
             $redesign->redesign_of_item_id = $item->id;
             $redesign->redesign_of_print_job_id = $printJob?->id;
             $redesign->redesign_source = $source;
