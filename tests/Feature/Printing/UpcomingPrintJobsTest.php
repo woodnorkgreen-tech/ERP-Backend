@@ -131,6 +131,43 @@ class UpcomingPrintJobsTest extends TestCase
             ->assertOk()->assertJsonPath('data.0.design_job_id', $job->id);
     }
 
+    public function test_schedule_report_counts_scheduled_projects_and_unscheduled_projects_in_the_selected_setup_period(): void
+    {
+        $this->loginPrinter();
+        $from = now()->addDays(3)->toDateString();
+        $to = now()->addDays(9)->toDateString();
+
+        $scheduledEnquiry = $this->enquiry('Print before setup', now()->addDays(20)->toDateString());
+        $this->deliverable($scheduledEnquiry, 'Banner');
+        $scheduled = $this->designJob($scheduledEnquiry, 'Print before setup');
+        $this->patchJson("/api/printing/upcoming-jobs/{$scheduled->id}/schedule", [
+            'printing_date' => $from,
+        ])->assertOk();
+
+        $unscheduledEnquiry = $this->enquiry('Needs a printing date', $to);
+        $this->deliverable($unscheduledEnquiry, 'Sign');
+        $unscheduled = $this->designJob($unscheduledEnquiry, 'Needs a printing date');
+
+        $laterEnquiry = $this->enquiry('Later project', now()->addDays(25)->toDateString());
+        $this->deliverable($laterEnquiry, 'Panel');
+        $later = $this->designJob($laterEnquiry, 'Later project');
+
+        $reportUrl = '/api/printing/upcoming-jobs/report?'.http_build_query(['from' => $from, 'to' => $to]);
+        $this->getJson($reportUrl)->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.design_job_id', $scheduled->id)
+            ->assertJsonPath('data.0.printing_date', $from)
+            ->assertJsonPath('data.1.design_job_id', $unscheduled->id)
+            ->assertJsonPath('data.1.printing_date', null)
+            ->assertJsonPath('data.1.project_setup_date', $to);
+
+        $this->getJson($reportUrl.'&unscheduled_scope=upcoming')->assertOk()
+            ->assertJsonCount(3, 'data')
+            ->assertJsonPath('data.2.design_job_id', $later->id);
+
+        $this->getJson('/api/printing/upcoming-jobs/report?from=2026-01-01&to=2026-03-01')
+            ->assertUnprocessable();
+    }
+
     public function test_project_without_design_tasks_is_visible_with_deliverables_awaiting_design(): void
     {
         $this->loginPrinter();

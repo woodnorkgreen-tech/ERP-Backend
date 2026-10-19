@@ -30,6 +30,7 @@ Route::middleware($printing('printing.jobs.view'))->group(function () {
     Route::get('/job-bundles', [PrintJobController::class, 'bundles']);
     Route::get('/upcoming-jobs', [UpcomingPrintJobController::class, 'index']);
     Route::get('/upcoming-jobs/timeline', [PrintProjectScheduleController::class, 'timeline']);
+    Route::get('/upcoming-jobs/report', [PrintProjectScheduleController::class, 'report']);
     Route::get('/jobs/{job}', [PrintJobController::class, 'show']);
     Route::get('/jobs/{job}/consumption', [PrintJobController::class, 'consumptions']);
 });

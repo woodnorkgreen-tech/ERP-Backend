@@ -18,6 +18,7 @@ Printing staff choose a **printing date** for upcoming work. This date is indepe
 - `PATCH /api/printing/upcoming-jobs/{designJob}/schedule` saves or clears individual fields. It requires `printing.jobs.update`; changing the operator also requires the existing Printing lead assignment permission.
 - `GET /api/printing/upcoming-jobs` returns printing date and assignments beside the separate project setup date. It supports `printing_schedule=scheduled|unscheduled`.
 - `GET /api/printing/upcoming-jobs/timeline?from=YYYY-MM-DD&to=YYYY-MM-DD` returns scheduled projects for a date range of up to 31 days. The timeline filters by printing date, independent of project setup date.
+- `GET /api/printing/upcoming-jobs/report?from=YYYY-MM-DD&to=YYYY-MM-DD` returns scheduled projects in the selected range plus unscheduled projects whose setup date is in the range. `unscheduled_scope=upcoming` includes all upcoming unscheduled projects instead. The report uses one row per project for totals and assignment breakdowns.
 - Accepted Design handoffs copy the project's schedule into each new print job. Re-accepting a handoff only fills empty schedule fields on an existing job, so job-specific edits are preserved.
 
 ## First release boundary

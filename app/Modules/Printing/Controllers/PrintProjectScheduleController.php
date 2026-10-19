@@ -89,6 +89,52 @@ class PrintProjectScheduleController extends Controller
         return response()->json(['data' => UpcomingProjectResource::collection($projects)]);
     }
 
+    public function report(Request $request): JsonResponse
+    {
+        $dates = $request->validate([
+            'from' => ['required', 'date_format:Y-m-d'],
+            'to' => ['required', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'unscheduled_scope' => ['sometimes', Rule::in(['period', 'upcoming'])],
+        ]);
+
+        if (Carbon::parse($dates['from'])->diffInDays(Carbon::parse($dates['to'])) > 31) {
+            throw ValidationException::withMessages(['to' => ['Choose a range of 31 days or less.']]);
+        }
+
+        $setupDate = ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id');
+        $unscheduledScope = $dates['unscheduled_scope'] ?? 'period';
+        $projects = DesignJob::query()
+            ->select('design_jobs.*')
+            ->selectSub($setupDate, 'project_setup_date')
+            ->leftJoin('print_project_schedules as schedule', 'schedule.design_job_id', '=', 'design_jobs.id')
+            ->where('design_jobs.status', '!=', 'cancelled')
+            ->whereHas('enquiry.deliverables', fn ($query) => $query->whereNull('archived_at'))
+            ->where(function ($query) use ($dates, $setupDate, $unscheduledScope) {
+                $query->whereBetween('schedule.printing_date', [$dates['from'], $dates['to']])
+                    ->orWhere(function ($unscheduled) use ($dates, $setupDate, $unscheduledScope) {
+                        $unscheduled->whereNull('schedule.printing_date');
+                        if ($unscheduledScope === 'upcoming') {
+                            ProjectSetupSchedule::filterDateScope($unscheduled, $setupDate, 'upcoming');
+                        } else {
+                            $unscheduled->where($setupDate, '>=', $dates['from'])
+                                ->where($setupDate, '<=', $dates['to']);
+                        }
+                    });
+            })
+            ->with([
+                'enquiry.client',
+                'client',
+                'enquiry.deliverables' => fn ($query) => $query->whereNull('archived_at')->orderBy('sort_order')->orderBy('id'),
+                'items.assignedUser:id,name',
+                'printingSchedule.machine:id,name',
+                'printingSchedule.operator:id,name',
+            ])
+            ->orderBy('design_jobs.id')
+            ->get();
+
+        return response()->json(['data' => UpcomingProjectResource::collection($projects)]);
+    }
+
     private function printingOperatorRule()
     {
         $departmentIds = Department::query()->where('name', 'Printing')->pluck('id');
