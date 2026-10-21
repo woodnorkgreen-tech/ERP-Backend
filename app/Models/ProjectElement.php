@@ -149,6 +149,8 @@ class ProjectElement extends Model
 
     public function materials(): HasMany
     {
-        return $this->hasMany(ElementMaterial::class)->orderBy('sort_order');
+        // ProjectDeliverable is a compatibility subclass; the actual FK remains
+        // project_element_id, so don't infer one from the subclass name.
+        return $this->hasMany(ElementMaterial::class, 'project_element_id')->orderBy('sort_order');
     }
 }
