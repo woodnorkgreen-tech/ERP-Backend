@@ -35,37 +35,66 @@ class TripRequestSmsObserver
         }
 
         try {
-            $code    = $trip->request_code;
-            $dest    = $trip->destination;
+            $trip->loadMissing('project.client', 'requestedBy', 'assignedDriver.employee', 'assignedVehicle');
+
+            $code      = $trip->request_code;
+            $dest      = $trip->destination;
             $requester = $trip->requestedBy?->phone;
             $driver    = $trip->assignedDriver?->employee?->phone;
             $driverName = $trip->assignedDriver?->employee?->name
                 ?? trim(($trip->assignedDriver?->employee?->first_name ?? '') . ' ' . ($trip->assignedDriver?->employee?->last_name ?? ''));
-            $plate   = $trip->assignedVehicle?->plate_number;
+            $plate     = $trip->assignedVehicle?->plate_number;
+            $reqName   = $trip->requestedBy?->name
+                ?? trim(($trip->requestedBy?->first_name ?? '') . ' ' . ($trip->requestedBy?->last_name ?? ''));
+
+            // "Project: X (JOB-12) | Client: Y | Venue: Z", skipping what is missing.
+            $p       = $trip->project;
+            $parts   = [];
+            if ($p?->title) {
+                $parts[] = 'Project: ' . $p->title . ($p->job_number ? " ({$p->job_number})" : '');
+            } elseif ($trip->delivery_type_label) {
+                $parts[] = $trip->delivery_type_label;
+            }
+            if ($p?->client?->full_name) {
+                $parts[] = 'Client: ' . $p->client->full_name;
+            }
+            if ($p?->venue) {
+                $parts[] = 'Venue: ' . $p->venue;
+            }
+            $about = implode(' | ', $parts);
+            $about = $about !== '' ? " {$about}." : '';
+
+            $route = trim(($trip->pickup_location ?: '') . ($trip->pickup_location && $dest ? ' to ' : '') . ($dest ?: ''));
+            $route = $route !== '' ? " Route: {$route}." : '';
+
+            $needed = $trip->time_tbc
+                ? ' Time: to be communicated.'
+                : ($trip->required_delivery_at ? ' Needed by ' . $trip->required_delivery_at->format('D d M, H:i') . '.' : '');
 
             switch ($trip->status) {
                 case 'approved':
-                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} to {$dest} has been approved. A driver and vehicle will be assigned shortly.");
+                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} approved.{$about}{$route}{$needed} A driver and vehicle will be assigned shortly.");
                     break;
 
                 case 'rejected':
                     $why = $trip->rejection_reason ? " Reason: {$trip->rejection_reason}" : '';
-                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} was not approved.{$why}");
+                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} was not approved.{$about}{$why}");
                     break;
 
                 case 'assigned':
-                    $when = $trip->required_delivery_at ? ' Needed by ' . $trip->required_delivery_at->format('d M H:i') . '.' : '';
-                    SendSms::dispatchAfterResponse($driver, "Woodnork: New trip {$code}. {$trip->pickup_location} to {$dest}.{$when}" . ($plate ? " Vehicle {$plate}." : '') . ' Open the app for details.');
-                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} assigned" . ($driverName ? " to {$driverName}" : '') . ($plate ? ", vehicle {$plate}" : '') . '.');
+                    $veh = $plate ? " Vehicle: {$plate}." : '';
+                    $who = $reqName ? " Requested by {$reqName}" . ($requester ? " ({$requester})" : '') . '.' : '';
+                    SendSms::dispatchAfterResponse($driver, "Woodnork: New trip {$code}.{$about}{$route}{$needed}{$veh}{$who} Open the app for details.");
+                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} assigned.{$about}{$route}{$needed}" . ($driverName ? " Driver: {$driverName}." : '') . $veh);
                     break;
 
                 case 'completed':
-                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} to {$dest} is completed.");
+                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} completed.{$about}{$route}");
                     break;
 
                 case 'cancelled':
                     // Only the driver needs telling, and only if one was assigned.
-                    SendSms::dispatchAfterResponse($driver, "Woodnork: Trip {$code} to {$dest} has been cancelled.");
+                    SendSms::dispatchAfterResponse($driver, "Woodnork: Trip {$code} has been cancelled.{$about}{$route}{$needed}");
                     break;
             }
         } catch (Throwable $e) {
