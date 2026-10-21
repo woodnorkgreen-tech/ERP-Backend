@@ -6,7 +6,10 @@ use App\Constants\EnquiryConstants;
 use App\Constants\Permissions;
 use App\Models\ProjectEnquiry;
 use App\Models\User;
+use App\Models\TaskQuoteData;
 use App\Modules\ClientService\Models\Client;
+use App\Modules\Projects\Models\EnquiryTask;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -146,5 +149,50 @@ class ReceivablesSummaryTest extends TestCase
 
         $this->assertSame($list->json('data.meta.total'), $summary->json('data.tabs.all'));
         $this->assertSame(1, $summary->json('data.tabs.all'));
+    }
+
+    public function test_the_summary_cost_does_not_grow_with_the_book(): void
+    {
+        // Projects with no approval snapshot fall back to approved task quote
+        // data. That fallback used to query once per project, which took the
+        // summary to 800+ queries on the real book.
+        $queriesFor = function (): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->actingAs($this->reader, 'sanctum')->getJson('/api/projects/receivables/summary')->assertOk();
+            $count = count(DB::getQueryLog());
+            DB::disableQueryLog();
+
+            return $count;
+        };
+
+        $quoted = $this->enquiry(EnquiryConstants::STATUS_IN_PROGRESS);
+        $task = EnquiryTask::create([
+            'project_enquiry_id' => $quoted->id, 'title' => 'Quote', 'type' => 'quote', 'status' => 'completed',
+            'priority' => EnquiryConstants::PRIORITY_MEDIUM, 'task_description' => 'Quote', 'task_order' => 1,
+            'created_by' => $this->reader->id,
+        ]);
+        TaskQuoteData::create(['enquiry_task_id' => $task->id, 'quote_mode' => 'excel_upload', 'quote_amount' => 250000, 'status' => 'approved']);
+
+        foreach (range(1, 5) as $i) {
+            $this->enquiry(EnquiryConstants::STATUS_IN_PROGRESS);
+        }
+        $small = $queriesFor();
+
+        foreach (range(1, 20) as $i) {
+            $this->enquiry(EnquiryConstants::STATUS_IN_PROGRESS);
+        }
+        $large = $queriesFor();
+
+        // Twenty more projects may add a fixed query or two (caches warming), never
+        // one per project.
+        $this->assertLessThan($small + 10, $large, 'The summary must not query once per project.');
+
+        // The bulk path still reads the approved task quote.
+        $this->assertEqualsWithDelta(
+            250000.0,
+            (float) $this->actingAs($this->reader, 'sanctum')->getJson('/api/projects/receivables/summary')->json('data.stats.total_project_value'),
+            0.01,
+        );
     }
 }

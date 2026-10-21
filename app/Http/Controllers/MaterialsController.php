@@ -1633,6 +1633,9 @@ class MaterialsController extends Controller
                 'message' => ucfirst($department) . ' approval recorded successfully',
                 'approval_status' => $approvalStatus,
                 'task_status' => $materialsData->task()->value('status'),
+                // The approval rewrote the list record, so its version moved.
+                // The screen needs it to keep saving and drafting against it.
+                'sourceUpdatedAt' => $materialsData->fresh()?->updated_at?->toISOString(),
                 // Null until both departments have approved. Once they have, the
                 // caller can tell an actual budget update apart from a silent
                 // no-op (no budget task yet, sync error) instead of reading

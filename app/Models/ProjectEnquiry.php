@@ -18,6 +18,20 @@ class ProjectEnquiry extends Model
 
     protected $table = 'project_enquiries';
 
+    /**
+     * Workflow presets that put a job on the Internal pipeline. Everything else,
+     * including no preset, is External. The one list every screen and filter reads.
+     */
+    public const INTERNAL_PRESETS = ['internal_job', 'internal_prod', 'sponsorship'];
+
+    /** The preset a job gets when it is created or switched as Internal. */
+    public const DEFAULT_INTERNAL_PRESET = 'internal_job';
+
+    public function isInternal(): bool
+    {
+        return in_array($this->workflow_preset_type, self::INTERNAL_PRESETS, true);
+    }
+
     protected ?array $pendingProjectScope = null;
 
     protected $fillable = [
@@ -269,6 +283,26 @@ class ProjectEnquiry extends Model
     public function enquiryTasks(): HasMany
     {
         return $this->hasMany(\App\Modules\Projects\Models\EnquiryTask::class, 'project_enquiry_id');
+    }
+
+    /**
+     * Approved quote data on this project's quote tasks.
+     *
+     * Billing falls back to it when there is no approval snapshot. Eager-load it
+     * on lists: an empty loaded result is a definite "none", so billing does not
+     * query again per row. `enquiryTasks.quoteData` cannot say that, because
+     * callers sometimes load only some task types.
+     */
+    public function approvedQuoteData(): \Illuminate\Database\Eloquent\Relations\HasManyThrough
+    {
+        return $this->hasManyThrough(
+            TaskQuoteData::class,
+            \App\Modules\Projects\Models\EnquiryTask::class,
+            'project_enquiry_id',
+            'enquiry_task_id',
+        )
+            ->where('enquiry_tasks.type', 'quote')
+            ->whereRaw("COALESCE(task_quote_data.approval_status, task_quote_data.status) = 'approved'");
     }
 
     public function workOrders(): HasMany

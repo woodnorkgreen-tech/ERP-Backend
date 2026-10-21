@@ -39,6 +39,9 @@ class EnquiryResource extends JsonResource
             // Workflow configuration
             'selected_workflow_tasks' => $this->selected_workflow_tasks ?? [],
             'workflow_preset_type'    => $this->workflow_preset_type,
+            // Which pipeline the job is on. The edit form reads is_non_profit.
+            'is_internal'             => $this->resource->isInternal(),
+            'is_non_profit'           => $this->resource->isInternal(),
             'site_survey_skipped'     => (bool) $this->site_survey_skipped,
             'site_survey_skip_reason' => $this->site_survey_skip_reason,
 

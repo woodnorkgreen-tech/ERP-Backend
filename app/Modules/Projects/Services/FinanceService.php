@@ -391,7 +391,9 @@ class FinanceService
 
         // Fall back to APPROVED quote data only. Payment progress and the 70%
         // mobilization gate must never be measured against an unapproved draft.
-        $quoteData = $this->loadedApprovedQuoteData($enquiry) ?? $this->latestApprovedQuoteData($enquiry);
+        $quoteData = $enquiry->relationLoaded('approvedQuoteData')
+            ? $enquiry->approvedQuoteData->sortByDesc(fn ($data) => optional($data->updated_at)->timestamp ?? 0)->first()
+            : ($this->loadedApprovedQuoteData($enquiry) ?? $this->latestApprovedQuoteData($enquiry));
 
         if ($quoteData && (float) $quoteData->quote_amount > 0) {
             return [

@@ -890,6 +890,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::put('enquiries/{enquiry}/deliverables', [EnquiryController::class, 'updateDeliverables']);
+        // Move a job between the External (client) and Internal pipelines; governed.
+        Route::post('enquiries/{enquiry}/pipeline', [EnquiryController::class, 'changePipeline']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote'])
             ->middleware('quote.access');
         Route::get('enquiries/{enquiry}/workflow-state', [EnquiryController::class, 'workflowState']);

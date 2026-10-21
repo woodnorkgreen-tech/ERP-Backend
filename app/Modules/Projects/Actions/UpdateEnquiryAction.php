@@ -184,6 +184,18 @@ class UpdateEnquiryAction
             }
         }
 
+        // A general edit may change the kind of job, but not which pipeline it is
+        // on: Internal skips the client quote and deposit checks, so that move
+        // goes through the governed pipeline switch (EnquiryController::changePipeline).
+        if ($request->has('workflow_preset_type')) {
+            $wantsInternal = in_array($request->input('workflow_preset_type'), ProjectEnquiry::INTERNAL_PRESETS, true);
+            if ($wantsInternal !== $enquiry->isInternal()) {
+                $request->request->remove('workflow_preset_type');
+                $request->query->remove('workflow_preset_type');
+                $request->json()?->remove('workflow_preset_type');
+            }
+        }
+
         return DB::transaction(function () use ($request, $enquiry) {
             $enquiry->update($request->only([
                 'date_received',
