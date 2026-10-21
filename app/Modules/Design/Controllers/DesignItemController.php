@@ -248,7 +248,7 @@ class DesignItemController extends Controller
             ->get()
             ->groupBy(fn (DesignItem $item) => $this->bundleKey($item));
 
-        $completedStatuses = ['done', 'print_ready', 'production_ready', 'handed_off'];
+        $completedStatuses = DesignItem::COMPLETED_STATUSES;
         $workingStatuses = ['in_design'];
         $waitingStatuses = ['pending', 'awaiting_client_approval', 'client_changes_requested'];
         $data = $selectedKeys->map(function (string $key) use ($allItems, $groups, $completedStatuses, $workingStatuses, $waitingStatuses) {

@@ -346,6 +346,34 @@ class DesignProjectAssignmentsTest extends TestCase
         $this->assertTrue(collect($upcoming['deliverables'])->flatMap(fn ($deliverable) => $deliverable['design_items'])->every(fn ($task) => $task['stream'] === 'graphic'));
     }
 
+    public function test_project_users_can_read_live_design_progress_without_design_lead_access(): void
+    {
+        $enquiry = $this->enquiry();
+        Sanctum::actingAs($this->user('Project Officer'));
+
+        $this->getJson("/api/design/project-progress/{$enquiry->id}")
+            ->assertOk()->assertJsonPath('data.linked', false)->assertJsonPath('data.total', 0);
+
+        $wall = ProjectElement::create(['enquiry_id' => $enquiry->id, 'name' => 'Wall', 'classification' => 'BRANDING']);
+        $frame = ProjectElement::create(['enquiry_id' => $enquiry->id, 'name' => 'Frame', 'classification' => 'FABRICATION & STRUCTURES']);
+        $job = app(DesignProjectSyncService::class)->syncFromEnquiry($enquiry);
+        $job->items()->where('project_deliverable_id', $wall->id)->where('stream', 'graphic')->firstOrFail()->update(['status' => 'done']);
+        $job->items()->where('project_deliverable_id', $frame->id)->where('stream', 'graphic')->firstOrFail()->update(['status' => 'not_required']);
+        $job->items()->where('project_deliverable_id', $frame->id)->where('stream', 'structural')->firstOrFail()->update(['status' => 'production_ready']);
+
+        $this->getJson("/api/design/project-progress/{$enquiry->id}")
+            ->assertOk()
+            ->assertJsonPath('data.linked', true)
+            ->assertJsonPath('data.design_job_id', $job->id)
+            ->assertJsonPath('data.completed', 2)
+            ->assertJsonPath('data.total', 3)
+            ->assertJsonPath('data.progress_percent', 67)
+            ->assertJsonPath('data.streams.graphic.completed', 1)
+            ->assertJsonPath('data.streams.graphic.total', 1)
+            ->assertJsonPath('data.streams.structural.completed', 1)
+            ->assertJsonPath('data.streams.structural.total', 2);
+    }
+
     private function user(string $role): User
     {
         $user = User::create(['name' => uniqid('designer_'), 'email' => uniqid('designer_').'@test.local', 'password' => bcrypt('secret'), 'is_active' => true])->fresh();

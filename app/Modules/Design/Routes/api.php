@@ -7,11 +7,13 @@ use App\Modules\Design\Controllers\DesignHandoffController;
 use App\Modules\Design\Controllers\DesignHistoryController;
 use App\Modules\Design\Controllers\DesignItemController;
 use App\Modules\Design\Controllers\DesignPrintOptionController;
+use App\Modules\Design\Controllers\ProjectDesignProgressController;
 use App\Modules\Design\Controllers\DesignJobController;
 use App\Modules\Design\Controllers\DesignTypeController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/dashboard', [DesignDashboardController::class, 'index']);
+Route::get('/project-progress/{enquiry}', ProjectDesignProgressController::class);
 
 Route::get('/jobs', [DesignJobController::class, 'index']);
 Route::post('/jobs', [DesignJobController::class, 'store']);

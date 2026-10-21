@@ -16,6 +16,7 @@ class DesignItem extends Model
 
     public const STREAM_GRAPHIC = 'graphic';
     public const STREAM_STRUCTURAL = 'structural';
+    public const COMPLETED_STATUSES = ['done', 'print_ready', 'production_ready', 'handed_off'];
 
     protected $fillable = [
         'design_job_id',
