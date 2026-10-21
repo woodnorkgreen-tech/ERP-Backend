@@ -39,6 +39,7 @@ Route::prefix('logistics')->group(function () {
     // Trip Requests
     Route::get('/trip-requests',                          [TripRequestController::class, 'index']);
     Route::post('/trip-requests',                         [TripRequestController::class, 'store']);
+    Route::get('/fleet-options',                          [TripRequestController::class, 'fleetOptions']);
     Route::get('/trip-requests/{tripRequest}',            [TripRequestController::class, 'show']);
     Route::put('/trip-requests/{tripRequest}',            [TripRequestController::class, 'update']);
     Route::patch('/trip-requests/{tripRequest}',          [TripRequestController::class, 'update']);
@@ -46,6 +47,7 @@ Route::prefix('logistics')->group(function () {
     Route::patch('/trip-requests/{tripRequest}/approve',  [TripRequestController::class, 'approve']);
     Route::patch('/trip-requests/{tripRequest}/reject',   [TripRequestController::class, 'reject']);
     Route::patch('/trip-requests/{tripRequest}/assign',   [TripRequestController::class, 'assign']);
+    Route::patch('/trip-requests/{tripRequest}/set-time', [TripRequestController::class, 'setTime']);
     Route::patch('/trip-requests/{tripRequest}/start',    [TripRequestController::class, 'start']);
     Route::patch('/trip-requests/{tripRequest}/complete', [TripRequestController::class, 'complete']);
     // The assigned driver starts / finishes their own trip (tracking + steps)

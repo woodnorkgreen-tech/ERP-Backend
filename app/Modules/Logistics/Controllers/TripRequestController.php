@@ -86,6 +86,10 @@ class TripRequestController extends Controller
 
     public function store(Request $request): TripRequestResource|JsonResponse
     {
+        // "Log a past trip": it already happened and was never entered, so
+        // the date may be in the past and the trip goes straight to completed.
+        $isPast = $request->boolean('is_past_log');
+
         $validated = $request->validate([
             'context_type'          => 'required|in:project,other',
             'transport_arrangement' => 'sometimes|in:company,client',
@@ -104,9 +108,15 @@ class TripRequestController extends Controller
             'start_location'        => 'nullable|string|max:300',
             'start_lat'             => 'nullable|numeric|between:-90,90',
             'start_lng'             => 'nullable|numeric|between:-180,180',
-            'required_date'         => 'required|date|after_or_equal:today',
+            'required_date'         => $isPast ? 'required|date|before_or_equal:today' : 'required|date|after_or_equal:today',
             'loading_time'          => 'nullable|string|max:20',
             'departure_time'        => 'nullable|string|max:20',
+            // Only used when logging a past trip.
+            'assigned_driver_id'    => 'nullable|exists:drivers,id',
+            'assigned_vehicle_id'   => 'nullable|exists:vehicles,id',
+            'started_at'            => 'nullable|date',
+            'past_outcome'          => 'nullable|in:completed,in_transit',
+            'completed_at'          => 'nullable|date|after_or_equal:started_at',
             // A literal "to be communicated" string is never sent for
             // setdown_time — the client leaves it out and says so in notes
             // instead, matching how the old Log avoided this exact field
@@ -117,6 +127,8 @@ class TripRequestController extends Controller
             // a trip can still just use the plain loading_time/
             // departure_time fields above instead).
             'required_delivery_at'      => 'nullable|date',
+            // The day is known but the time is still to be communicated.
+            'time_tbc'                  => 'sometimes|boolean',
             'estimated_loading_minutes' => 'nullable|integer|min:0|max:1440',
             // Purely informational tag driving the create form's minute
             // presets — doesn't change the calculation itself.
@@ -126,6 +138,51 @@ class TripRequestController extends Controller
             'loading_responsible_id'    => 'nullable|exists:employees,id',
             'notes'                 => 'nullable|string|max:1000',
         ]);
+
+        // A time still to be communicated carries no time at all, so nothing
+        // is calculated until it is set.
+        if (!$isPast && !empty($validated['time_tbc'])) {
+            $validated['required_delivery_at'] = null;
+        }
+
+        if ($isPast) {
+            $employeeId = Auth::user()->employee?->id;
+            $day        = \Illuminate\Support\Carbon::parse($validated['required_date']);
+
+            // Without an exact finish time, assume the end of the working day
+            // (never later than now, so it cannot sit in the future).
+            $finished = isset($validated['completed_at'])
+                ? \Illuminate\Support\Carbon::parse($validated['completed_at'])
+                : ($validated['required_delivery_at'] ?? null
+                    ? \Illuminate\Support\Carbon::parse($validated['required_delivery_at'])
+                    : $day->copy()->setTime(17, 0));
+            if ($finished->gt(now())) {
+                $finished = now();
+            }
+
+            // A trip that is still on the road is logged as in transit so it
+            // can be completed later through the normal flow.
+            $stillOut = ($validated['past_outcome'] ?? 'completed') === 'in_transit';
+            unset($validated['past_outcome']);
+
+            $validated['status']         = $stillOut ? 'in_transit' : 'completed';
+            $validated['logged_late']    = true;
+            $validated['logged_late_at'] = now();
+            $validated['approved_by_id'] = $employeeId;
+            $validated['approved_at']    = now();
+            $validated['assigned_by_id'] = $employeeId;
+            $validated['assigned_at']    = now();
+            if ($stillOut) {
+                $started = isset($validated['started_at'])
+                    ? \Illuminate\Support\Carbon::parse($validated['started_at'])
+                    : $finished;
+                $validated['started_at']   = $started->gt(now()) ? now() : $started;
+                $validated['completed_at'] = null;
+            } else {
+                $validated['completed_at'] = $finished;
+            }
+            $validated['loading_required'] = false;
+        }
 
         $trip = TripRequest::create($validated);
         $trip->load($this->with);
@@ -288,6 +345,12 @@ class TripRequestController extends Controller
 
             $tripRequest->load($this->with);
             return new TripRequestResource($tripRequest);
+        }
+
+        // A car and driver are booked for a window of time, so the time has to
+        // be known first.
+        if ($tripRequest->time_tbc || !$tripRequest->required_delivery_at) {
+            return response()->json(['message' => 'The time for this trip is still to be communicated. Set the time first, then assign.'], 422);
         }
 
         $validated = $request->validate([
@@ -553,6 +616,56 @@ class TripRequestController extends Controller
         return new TripRequestResource($tripRequest);
     }
 
+    /**
+     * Set (or change) the time of a trip whose time was "to be communicated".
+     * The loading and departure times are worked out again from it. If a car
+     * and driver are already on the trip, the new time must still be free.
+     */
+    public function setTime(Request $request, TripRequest $tripRequest): TripRequestResource|JsonResponse
+    {
+        $user = Auth::user();
+        $isRequester = $tripRequest->requested_by_id && $tripRequest->requested_by_id === $user->employee?->id;
+        if (!$this->isLogisticsTeam($user) && !$isRequester) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+        if (!in_array($tripRequest->status, ['requested', 'approved', 'assigned'])) {
+            return response()->json(['message' => 'The time can only be set before the trip starts.'], 422);
+        }
+
+        $validated = $request->validate([
+            'required_delivery_at'      => 'required|date',
+            'estimated_loading_minutes' => 'nullable|integer|min:0|max:1440',
+            'estimated_travel_minutes'  => 'nullable|integer|min:0|max:1440',
+            'buffer_minutes'            => 'nullable|integer|min:0|max:1440',
+        ]);
+
+        $tripRequest->fill(array_filter($validated, fn ($v) => $v !== null));
+        $tripRequest->time_tbc      = false;
+        $tripRequest->required_date = \Illuminate\Support\Carbon::parse($validated['required_delivery_at'])->toDateString();
+
+        // Already has a car and driver: make sure the new time is free for both.
+        if ($tripRequest->assigned_vehicle_id || $tripRequest->assigned_driver_id) {
+            $tripRequest->recalculateLoadingTimeline();
+            [$winStart, $winEnd] = FleetAvailability::window($tripRequest);
+            if ($tripRequest->assigned_vehicle_id) {
+                $hit = FleetAvailability::conflict((int) $tripRequest->assigned_vehicle_id, null, $winStart, $winEnd, [$tripRequest->id]);
+                if ($hit) {
+                    return response()->json(['message' => FleetAvailability::sentence($hit, 'The assigned vehicle')], 422);
+                }
+            }
+            if ($tripRequest->assigned_driver_id) {
+                $hit = FleetAvailability::conflict(null, (int) $tripRequest->assigned_driver_id, $winStart, $winEnd, [$tripRequest->id]);
+                if ($hit) {
+                    return response()->json(['message' => FleetAvailability::sentence($hit, 'The assigned driver')], 422);
+                }
+            }
+        }
+
+        $tripRequest->save();
+        $tripRequest->load($this->with);
+        return new TripRequestResource($tripRequest);
+    }
+
     public function cancel(TripRequest $tripRequest): TripRequestResource|JsonResponse
     {
         if (!in_array($tripRequest->status, ['requested', 'approved', 'assigned'])) {
@@ -618,6 +731,28 @@ class TripRequestController extends Controller
         $tripRequest->update(['loading_required' => false]);
         $tripRequest->load($this->with);
         return new TripRequestResource($tripRequest);
+    }
+
+    /**
+     * Plain driver and vehicle lists for the "log a past trip" form. Open to
+     * anyone who can log a trip (names and plates only), unlike the fleet
+     * screens, and not paginated.
+     */
+    public function fleetOptions(): JsonResponse
+    {
+        $drivers = Driver::with('employee')->get()->map(fn ($d) => [
+            'id'   => $d->id,
+            'name' => $d->employee?->name ?? $d->employee?->full_name ?? 'Driver',
+        ])->sortBy('name')->values();
+
+        $vehicles = Vehicle::orderBy('plate_number')->get()->map(fn ($v) => [
+            'id'           => $v->id,
+            'plate_number' => $v->plate_number,
+            'make'         => $v->make,
+            'model'        => $v->model,
+        ])->values();
+
+        return response()->json(['data' => ['drivers' => $drivers, 'vehicles' => $vehicles]]);
     }
 
     /**

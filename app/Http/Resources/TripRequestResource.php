@@ -88,6 +88,9 @@ class TripRequestResource extends JsonResource
 
             'notes'           => $this->notes,
             'status'          => $this->status,
+            'time_tbc'        => (bool) $this->time_tbc,
+            'logged_late'     => (bool) $this->logged_late,
+            'logged_late_at'  => $this->logged_late_at,
 
             'approved_by' => $this->whenLoaded('approvedBy', fn() => $this->approvedBy ? [
                 'id'   => $this->approvedBy->id,
