@@ -100,7 +100,6 @@
             border-top: 1px solid #cbd5e1; padding-top: 5px; line-height: 1.3;
         }
         .footer p { margin: 1px 0; }
-        .footer .pageno:after { content: "Page " counter(page) " of " counter(pages); }
     </style>
     @yield('styles')
 </head>
@@ -139,7 +138,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        <p class="font-bold text-gray-900">Woodnork Green Ltd <span class="text-gray-500">&bull;</span> <span class="pageno"></span></p>
+        <p class="font-bold text-gray-900">Woodnork Green Ltd</p>
         <p>Tel: +254 780 397 798 | Email: admin@woodnorkgreen.co.ke</p>
         <p>Karen Village, Ngong Road, Nairobi, Kenya | www.woodnorkgreen.co.ke</p>
     </div>

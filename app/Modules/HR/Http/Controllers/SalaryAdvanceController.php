@@ -17,28 +17,124 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use App\Modules\HR\Exports\SalaryAdvanceRegisterExport;
+use App\Modules\HR\Services\SalaryAdvanceRegister;
+use App\Modules\HR\Support\Pdf\Documents\SalaryAdvanceRegisterDocument;
+use Maatwebsite\Excel\Facades\Excel;
 
 class SalaryAdvanceController extends Controller
 {
-    /**
-     * List all salary advance requests (for HR).
-     */
-    public function index(Request $request): JsonResponse
+    /** Nobody decides on their own advance — another HR officer must. */
+    private function refuseOwnAdvance(Request $request, int $id): void
     {
-        $query = SalaryAdvanceRequest::with(['employee.department', 'ledger', 'ledgers', 'payment', 'recoveries']);
+        $employeeId = $request->user()?->employee_id;
+        $applicant = SalaryAdvanceRequest::whereKey($id)->value('employee_id');
+        abort_if($employeeId && $applicant && (int) $employeeId === (int) $applicant, 403,
+            'You cannot approve or reject your own salary advance. Another HR officer must decide on it.');
+    }
 
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
+    /** HR decides on advances; Finance pays them. Both may see the register. */
+    private function canSeeRegister(Request $request): bool
+    {
+        $user = $request->user();
 
-        if ($request->has('employee_id')) {
-            $query->where('employee_id', $request->employee_id);
-        }
+        return (bool) ($user?->can(Permissions::HR_MANAGE_PAYROLL) || $user?->can(Permissions::FINANCE_SPEND_VOUCHERS_POST));
+    }
+
+    /**
+     * The salary-advance register for HR (and Finance), filtered by stage,
+     * person, department, payment method, recovery month and submission date.
+     */
+    public function index(Request $request, SalaryAdvanceRegister $register): JsonResponse
+    {
+        abort_unless($this->canSeeRegister($request), 403, 'Only HR or Finance can see salary advance applications.');
+
+        $filters = $register->filters($request);
+        $perPage = min(max($request->integer('per_page', 25), 5), 100);
 
         return response()->json([
             'success' => true,
-            'data' => $query->latest()->paginate(15)
+            'data' => $register->query($filters)->paginate($perPage),
+            'summary' => $register->summary($filters),
+            'filters' => $filters,
         ]);
+    }
+
+    /** The filtered register as an Excel workbook for Finance. */
+    public function export(Request $request, SalaryAdvanceRegister $register)
+    {
+        abort_unless($this->canSeeRegister($request), 403, 'Only HR or Finance can download salary advance applications.');
+
+        $filters = $register->filters($request);
+        $rows = $register->rows($filters);
+        $user = $request->user();
+
+        HRAuditLog::create([
+            'user_id' => $user->id,
+            'action' => 'salary_advance_register_exported',
+            'model_type' => 'SalaryAdvanceRequest',
+            'message' => "Salary advance register exported ({$rows->count()} applications)",
+            'context' => ['filters' => $filters, 'count' => $rows->count(), 'format' => 'xlsx'],
+            'ip_address' => $request->ip(),
+        ]);
+
+        $stamp = now()->format('Y-m-d_Hi');
+
+        return Excel::download(
+            new SalaryAdvanceRegisterExport($rows, $this->describeFilters($filters), $user->name ?? 'HR', now()->format('d M Y, H:i')),
+            "salary-advances_{$stamp}.xlsx",
+        );
+    }
+
+    /** The filtered register as a WNG-branded PDF for Finance sign-off. */
+    public function exportPdf(Request $request, SalaryAdvanceRegister $register)
+    {
+        abort_unless($this->canSeeRegister($request), 403, 'Only HR or Finance can download salary advance applications.');
+
+        $filters = $register->filters($request);
+        $rows = $register->rows($filters);
+        $user = $request->user();
+
+        HRAuditLog::create([
+            'user_id' => $user->id,
+            'action' => 'salary_advance_register_exported',
+            'model_type' => 'SalaryAdvanceRequest',
+            'message' => "Salary advance register exported as PDF ({$rows->count()} applications)",
+            'context' => ['filters' => $filters, 'count' => $rows->count(), 'format' => 'pdf'],
+            'ip_address' => $request->ip(),
+        ]);
+
+        return (new SalaryAdvanceRegisterDocument($rows, $this->describeFilters($filters), $user->name ?? 'HR'))->download();
+    }
+
+    /** @return array<int, string> the filters in words, printed on the workbook */
+    private function describeFilters(array $filters): array
+    {
+        $lines = [];
+        if (! empty($filters['status'])) {
+            $lines[] = 'Status: '.implode(', ', array_map(fn ($stage) => SalaryAdvanceRegister::STAGES[$stage], $filters['status']));
+        }
+        if (! empty($filters['department_id'])) {
+            $lines[] = 'Department: '.(\App\Modules\HR\Models\Department::find($filters['department_id'])?->name ?? '#'.$filters['department_id']);
+        }
+        if (! empty($filters['employee_id'])) {
+            $employee = Employee::find($filters['employee_id']);
+            $lines[] = 'Employee: '.trim(($employee?->first_name ?? '').' '.($employee?->last_name ?? ''));
+        }
+        if (! empty($filters['payment_method'])) {
+            $lines[] = 'Paid via: '.str_replace('_', ' ', $filters['payment_method']);
+        }
+        if (! empty($filters['month_from']) || ! empty($filters['month_to'])) {
+            $lines[] = 'Recover from month: '.($filters['month_from'] ?? '…').' to '.($filters['month_to'] ?? '…');
+        }
+        if (! empty($filters['submitted_from']) || ! empty($filters['submitted_to'])) {
+            $lines[] = 'Submitted: '.($filters['submitted_from'] ?? '…').' to '.($filters['submitted_to'] ?? '…');
+        }
+        if (! empty($filters['search'])) {
+            $lines[] = 'Search: "'.$filters['search'].'"';
+        }
+
+        return $lines;
     }
 
     /**
@@ -100,6 +196,8 @@ class SalaryAdvanceController extends Controller
      */
     public function approve(Request $request, $id): JsonResponse
     {
+        abort_unless($request->user()?->can(Permissions::HR_MANAGE_PAYROLL), 403, 'Only HR can decide on salary advances.');
+        $this->refuseOwnAdvance($request, (int) $id);
         $advance = SalaryAdvanceRequest::findOrFail($id);
 
         if ($advance->status !== 'pending') {
@@ -243,6 +341,8 @@ class SalaryAdvanceController extends Controller
      */
     public function reject(Request $request, $id): JsonResponse
     {
+        abort_unless($request->user()?->can(Permissions::HR_MANAGE_PAYROLL), 403, 'Only HR can decide on salary advances.');
+        $this->refuseOwnAdvance($request, (int) $id);
         $advance = SalaryAdvanceRequest::findOrFail($id);
 
         if ($advance->status !== 'pending') {

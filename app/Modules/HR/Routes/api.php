@@ -200,6 +200,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         // Salary Advances
         Route::get('advances', [SalaryAdvanceController::class, 'index']);
+        Route::get('advances/export', [SalaryAdvanceController::class, 'export']);
+        Route::get('advances/export/pdf', [SalaryAdvanceController::class, 'exportPdf']);
         Route::post('advances/{id}/approve', [SalaryAdvanceController::class, 'approve']);
         Route::post('advances/{id}/reject', [SalaryAdvanceController::class, 'reject']);
         Route::post('advances/{id}/disburse', [SalaryAdvanceController::class, 'disburse']);

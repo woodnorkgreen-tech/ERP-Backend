@@ -20,12 +20,15 @@ class SalaryAdvanceSplitTest extends TestCase
     {
         parent::setUp();
 
-        $this->actingAs(User::create([
+        $hr = User::create([
             'name'     => 'HR Officer',
             'email'    => 'hr.officer@test.local',
             'password' => bcrypt('secret'),
             'is_active'=> true
-        ]));
+        ]);
+        // Deciding on an advance is HR's authority (hr.manage_payroll).
+        $hr->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate(\App\Constants\Permissions::HR_MANAGE_PAYROLL, 'web'));
+        $this->actingAs($hr->fresh());
 
         $dept = Department::create(['name' => 'Engineering']);
         $this->employee = Employee::create([

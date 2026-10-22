@@ -32,8 +32,19 @@ abstract class HrPdfDocument
 
     protected function build(): DomPdf
     {
-        return Pdf::loadView($this->view(), $this->data())
+        $pdf = Pdf::loadView($this->view(), $this->data())
             ->setPaper($this->paper[0], $this->paper[1] ?? 'portrait');
+
+        // "Page X of Y" is stamped after layout: dompdf cannot resolve
+        // counter(pages) in CSS (it printed "of 0"), but its canvas knows the
+        // final count once every page exists.
+        $pdf->render();
+        $dompdf = $pdf->getDomPDF();
+        $canvas = $dompdf->getCanvas();
+        $font = $dompdf->getFontMetrics()->getFont('Helvetica', 'bold');
+        $canvas->page_text($canvas->get_width() - 92, $canvas->get_height() - 30, 'Page {PAGE_NUM} of {PAGE_COUNT}', $font, 7, [0.07, 0.09, 0.15]);
+
+        return $pdf;
     }
 
     public function download(): Response
