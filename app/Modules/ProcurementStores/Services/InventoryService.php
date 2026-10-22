@@ -65,24 +65,29 @@ class InventoryService
                     ]);
                 }
 
-                $expectedAlternateUomId = $meta['expected_entered_uom_id'] ?? ($type === 'check_in'
-                    ? $material->purchase_uom_id
-                    : $material->issue_uom_id);
-                if ((int) $expectedAlternateUomId !== $enteredUomId) {
+                // A delivery against an order is completed in the unit the order
+                // was placed in. Anything else may be entered in any unit the
+                // material converts — a roll or metres of the same wire.
+                if (isset($meta['expected_entered_uom_id']) && (int) $meta['expected_entered_uom_id'] !== $enteredUomId) {
                     throw ValidationException::withMessages([
-                        'entered_uom_id' => 'Choose the stock unit or the buying/issuing unit configured in the Materials Library.',
+                        'entered_uom_id' => 'Complete this delivery in the unit it was ordered in.',
                     ]);
                 }
 
-                $conversion = $material->uomConversions
-                    ->first(fn ($row) => (int) $row->from_uom_id === $enteredUomId
-                        && (int) $row->to_uom_id === (int) $material->base_uom_id);
-                if (! $conversion || (float) $conversion->factor <= 0) {
-                    throw ValidationException::withMessages([
-                        'entered_uom_id' => 'This unit has no conversion to the material’s Stores unit. Complete the unit setup in the Materials Library first.',
-                    ]);
+                if (isset($meta['entered_conversion_factor']) && (float) $meta['entered_conversion_factor'] > 0) {
+                    // Set by StockMovementPoster from a project line's approved reading.
+                    $conversionFactor = (float) $meta['entered_conversion_factor'];
+                } else {
+                    $conversion = $material->uomConversions
+                        ->first(fn ($row) => (int) $row->from_uom_id === $enteredUomId
+                            && (int) $row->to_uom_id === (int) $material->base_uom_id);
+                    if (! $conversion || (float) $conversion->factor <= 0) {
+                        throw ValidationException::withMessages([
+                            'entered_uom_id' => 'This unit has no conversion to the material’s Stores unit. Add it to the material’s units in the Materials Library first.',
+                        ]);
+                    }
+                    $conversionFactor = (float) $conversion->factor;
                 }
-                $conversionFactor = (float) $conversion->factor;
                 $quantity *= $conversionFactor;
                 if ($type === 'check_in' && isset($meta['receipt_unit_cost']) && $meta['receipt_unit_cost'] !== null) {
                     $meta['receipt_unit_cost'] = (float) $meta['receipt_unit_cost'] / $conversionFactor;

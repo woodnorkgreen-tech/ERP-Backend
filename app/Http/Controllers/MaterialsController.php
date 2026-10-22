@@ -1322,6 +1322,28 @@ class MaterialsController extends Controller
         return $status >= 400 && $status < 500 ? $status : null;
     }
 
+    /** @return array<int, array{id: int, code: string, factor: float, basis: string}> */
+    private function issueUnitsFor($line, $uomCodes): array
+    {
+        $material = $line->libraryMaterial;
+        if (! $material || ! $material->base_uom_id) {
+            return [];
+        }
+        $base = (int) $material->base_uom_id;
+        $units = [$base => ['id' => $base, 'code' => (string) ($uomCodes[$base] ?? $material->unit_of_measure), 'factor' => 1.0, 'basis' => 'stock']];
+        foreach ($material->uomConversions as $conversion) {
+            if ((int) $conversion->to_uom_id !== $base || (float) $conversion->factor <= 0) continue;
+            $id = (int) $conversion->from_uom_id;
+            $units[$id] ??= ['id' => $id, 'code' => (string) ($uomCodes[$id] ?? '?'), 'factor' => (float) $conversion->factor, 'basis' => 'material'];
+        }
+        $lineUnit = (int) $line->requirement_uom_id;
+        if ($lineUnit && $line->requirement_base_factor !== null && (int) $line->requirement_base_uom_id === $base) {
+            $units[$lineUnit] ??= ['id' => $lineUnit, 'code' => (string) ($uomCodes[$lineUnit] ?? $line->unit_of_measurement), 'factor' => (float) $line->requirement_base_factor, 'basis' => 'line'];
+        }
+
+        return array_values($units);
+    }
+
     /**
      * Format materials data for frontend
      */
@@ -1332,11 +1354,12 @@ class MaterialsController extends Controller
             // identity baseline, disposition and unit reading — loaded once.
             \Illuminate\Database\Eloquent\Collection::make($materialsData->elements->flatMap->materials->all())->loadMissing(['libraryMaterial.uomConversions', 'requestedMaterial:id,material_name,material_code,item_status']);
             $units = app(\App\Modules\ProcurementStores\Services\RequirementUnits::class);
+            $uomCodes = \App\Modules\MaterialsLibrary\Models\UnitOfMeasure::query()->pluck('code', 'id');
 
             return [
                 'projectInfo' => $materialsData->project_info ?? [],
                 'sourceUpdatedAt' => $materialsData->updated_at?->toISOString(),
-                'projectElements' => $materialsData->elements->map(function ($element) use ($fulfilment, $units) {
+                'projectElements' => $materialsData->elements->map(function ($element) use ($fulfilment, $units, $uomCodes) {
                     return [
                         'id' => (string) $element->id,
                         'templateId' => $element->template_id,
@@ -1351,7 +1374,7 @@ class MaterialsController extends Controller
                         'unitOfMeasurement' => $element->unit_of_measurement,
                         'dimensions' => $element->dimensions ?? ['length' => '', 'width' => '', 'height' => ''],
                         'isIncluded' => (bool) $element->is_included,
-                        'materials' => $element->materials->map(function ($material) use ($fulfilment, $units) {
+                        'materials' => $element->materials->map(function ($material) use ($fulfilment, $units, $uomCodes) {
                             $state = $fulfilment[$material->id] ?? null;
                             $unit = $units->assess($material);
 
@@ -1378,6 +1401,10 @@ class MaterialsController extends Controller
                                     'reason' => $unit['reason'],
                                     'requiredInBase' => $unit['status'] === 'compatible' ? round((float) $material->quantity * (float) $unit['factor'], 4) : null,
                                 ],
+                                // Units Stores may issue this line in: the stock unit, any unit
+                                // the material converts, and the line's own BOM unit when it has
+                                // an approved reading. Factor = stock units in one of that unit.
+                                'issueUnits' => $this->issueUnitsFor($material, $uomCodes),
                                 'description' => $material->description,
                                 'unitOfMeasurement' => $material->unit_of_measurement,
                                 'quantity' => (float) $material->quantity,

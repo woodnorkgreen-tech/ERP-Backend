@@ -66,11 +66,15 @@ class StockMovementPoster
      * @param  array<string, mixed>  $line
      * @return array{log: InventoryLog, boards: array}
      */
+    /** Decided here, never taken from the client: how an entered unit converts. */
+    private const INTERNAL_LINE_KEYS = ['entered_conversion_factor', 'expected_entered_uom_id'];
+
     public function post(string $type, array $line): array
     {
         if (! in_array($type, self::TYPES, true)) {
             throw ValidationException::withMessages(['type' => "Unknown movement type '{$type}'."]);
         }
+        $line = array_diff_key($line, array_flip(self::INTERNAL_LINE_KEYS));
 
         try {
             return match ($type) {
@@ -385,10 +389,17 @@ class StockMovementPoster
         $line = $this->classifyIssue($line);
 
         if (filled($line['project_material_id'] ?? null)) {
+            // A job may ask in its own unit (4 pcs of timber at 2.4 m each):
+            // that line's approved reading converts it, where the catalogue has none.
+            $lineFactor = $this->lineReadingFactor($line, $material);
+            if ($lineFactor !== null) {
+                $line['entered_conversion_factor'] = $lineFactor;
+            }
             $this->assertProjectLineCanTake(
                 $line,
                 $material,
-                $material->isConsumableUnit() ? StoresDecimal::quantity($line['quantity']) : $this->inBaseUnit($material, (float) $line['quantity'], $line['entered_uom_id'] ?? null),
+                $material->isConsumableUnit() ? StoresDecimal::quantity($line['quantity'])
+                    : ($lineFactor !== null ? (float) $line['quantity'] * (float) $lineFactor : $this->inBaseUnit($material, (float) $line['quantity'], $line['entered_uom_id'] ?? null)),
             );
         }
 
@@ -711,6 +722,30 @@ class StockMovementPoster
         }
 
         return $quantity * $factor;
+    }
+
+    /**
+     * The factor for a quantity entered in a project line's own BOM unit, when
+     * the material itself has no conversion for that unit but the line has an
+     * approved reading of it (RequirementUnits rule 4). Null otherwise.
+     */
+    private function lineReadingFactor(array $line, LibraryMaterial $material): ?string
+    {
+        $entered = (int) ($line['entered_uom_id'] ?? 0);
+        if (! $entered || $entered === (int) $material->base_uom_id) {
+            return null;
+        }
+        $catalogue = $material->uomConversions->first(fn ($row) => (int) $row->from_uom_id === $entered && (int) $row->to_uom_id === (int) $material->base_uom_id);
+        if ($catalogue) {
+            return null;
+        }
+        $planned = ElementMaterial::find($line['project_material_id']);
+        if (! $planned || (int) $planned->requirement_uom_id !== $entered || $planned->requirement_base_factor === null
+            || (int) $planned->requirement_base_uom_id !== (int) $material->base_uom_id) {
+            return null;
+        }
+
+        return (string) $planned->requirement_base_factor;
     }
 
     /** Report 78C: the line's active legacy retirement, read in the requirement's stock unit. */

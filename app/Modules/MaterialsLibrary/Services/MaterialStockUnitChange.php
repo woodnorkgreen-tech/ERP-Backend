@@ -76,7 +76,7 @@ class MaterialStockUnitChange
 
             // Keep what was typed, then restate the stock-unit reading of it.
             DB::table('inventory_logs')->where('material_id', $material->id)->whereNull('entered_uom_id')->update([
-                'entered_quantity' => DB::raw('ABS(quantity)'),
+                'entered_quantity' => DB::raw('quantity'), // signed, like every movement's entry
                 'entered_uom_id' => $from->id,
                 'uom_conversion_factor' => 1,
             ]);
