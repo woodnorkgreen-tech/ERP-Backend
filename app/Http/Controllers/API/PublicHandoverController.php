@@ -159,6 +159,11 @@ class PublicHandoverController extends Controller
                         $rules[$fieldPath] = "{$required}|boolean";
                         break;
 
+                    case 'choice':
+                        $options = implode(',', $question['options'] ?? []);
+                        $rules[$fieldPath] = "{$required}|string|in:{$options}";
+                        break;
+
                     case 'text':
                         $rules[$fieldPath] = "{$required}|string|max:255";
                         break;

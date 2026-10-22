@@ -345,7 +345,9 @@ class AttendanceController extends Controller
             if ($connection === 'sync') {
                 Bus::dispatchSync(new SyncHikvisionAttendanceJob($syncRequest->id));
             } else {
-                SyncHikvisionAttendanceJob::dispatch($syncRequest->id)->onConnection($connection);
+                SyncHikvisionAttendanceJob::dispatch($syncRequest->id)
+                    ->onConnection($connection)
+                    ->onQueue('attendance');
             }
 
             $syncRequest->refresh();
