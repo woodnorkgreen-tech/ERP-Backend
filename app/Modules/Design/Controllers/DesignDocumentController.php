@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class DesignDocumentController extends Controller
 {
@@ -44,8 +45,9 @@ class DesignDocumentController extends Controller
     {
         $validated = $request->validate([
             'design_job_id' => 'nullable|integer|exists:design_jobs,id|required_without:design_item_id',
-            'design_item_id' => 'nullable|integer|exists:design_items,id|required_without:design_job_id',
-            'design_revision_id' => 'nullable|integer|exists:design_revisions,id',
+            'design_item_id' => 'nullable|integer|exists:design_items,id|required_without:design_job_id|required_with:design_revision_id',
+            'design_revision_id' => ['nullable', 'integer',
+                Rule::exists('design_revisions', 'id')->where('design_item_id', $request->input('design_item_id'))],
             'document_type' => 'nullable|string|max:80',
             'name' => 'nullable|string|max:255',
             'notes' => 'nullable|string|max:2000',

@@ -54,9 +54,11 @@ Route::post('/items/{item}/restore-required', [DesignItemController::class, 'res
 Route::post('/items/{item}/use-project-default', [DesignItemController::class, 'useProjectDefault']);
 Route::post('/items/{item}/work/begin', [DesignItemController::class, 'beginWork']);
 Route::post('/items/{item}/work/pause', [DesignItemController::class, 'pauseWork']);
+Route::post('/items/{item}/work/stop', [DesignItemController::class, 'stopWork']);
 Route::post('/items/{item}/updates', [DesignHistoryController::class, 'storeUpdate']);
 Route::post('/items/{item}/change-requests', [DesignHistoryController::class, 'storeChangeRequest']);
 Route::post('/items/{item}/revisions', [DesignHistoryController::class, 'storeRevision']);
+Route::post('/revisions/{revision}/complete', [DesignHistoryController::class, 'completeRevision']);
 Route::post('/revisions/{revision}/approve', [DesignHistoryController::class, 'approveRevision']);
 
 Route::get('/structural/items/{item}/bom', [DesignBomItemController::class, 'index']);
