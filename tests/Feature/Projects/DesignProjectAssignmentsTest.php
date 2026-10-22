@@ -10,6 +10,7 @@ use App\Modules\Design\Models\DesignHandoff;
 use App\Modules\Design\Models\DesignItem;
 use App\Modules\Design\Models\DesignUpdate;
 use App\Modules\Design\Services\DesignProjectSyncService;
+use App\Modules\Projects\Actions\ProjectLifecycleAction;
 use App\Modules\Printing\Resources\UpcomingProjectResource;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -26,6 +27,26 @@ class DesignProjectAssignmentsTest extends TestCase
     {
         parent::setUp();
         app(PermissionRegistrar::class)->forgetCachedPermissions();
+    }
+
+    public function test_project_cancellation_retains_design_time_and_closes_running_work(): void
+    {
+        $enquiry = $this->enquiry();
+        ProjectElement::create(['enquiry_id' => $enquiry->id, 'name' => 'Banner', 'classification' => 'FABRICATION & STRUCTURES']);
+        $job = app(DesignProjectSyncService::class)->syncFromEnquiry($enquiry);
+        $item = $job->items()->firstOrFail();
+        $designer = $this->user('Designer');
+        Sanctum::actingAs($designer);
+        $this->postJson("/api/design/items/{$item->id}/work/begin")->assertOk();
+
+        app(ProjectLifecycleAction::class)->cancel($enquiry->fresh(), $designer->id, 'Client cancelled the whole project');
+
+        $session = $item->workSessions()->firstOrFail();
+        $this->assertSame('cancelled', $job->fresh()->status);
+        $this->assertSame('cancelled', $session->end_type);
+        $this->assertSame('Client cancelled the whole project', $session->stop_reason);
+        $this->assertNotNull($session->ended_at);
+        $this->postJson("/api/design/items/{$item->id}/work/begin")->assertUnprocessable();
     }
 
     public function test_project_sync_creates_one_task_per_element_and_stream_without_duplication(): void
