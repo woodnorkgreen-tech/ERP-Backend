@@ -11,8 +11,17 @@ class DesignHandoffService
 {
     public function createPrintingHandoffOnce(DesignItem $item): DesignHandoff
     {
+        if ($item->job?->status === 'cancelled' || $item->job?->enquiry?->status === 'cancelled') {
+            throw ValidationException::withMessages(['status' => ['A cancelled design job cannot be sent to Printing.']]);
+        }
         if ($item->status === 'not_required') {
             throw ValidationException::withMessages(['status' => ['Restore this task before handing it off.']]);
+        }
+        if ($item->status !== 'print_ready') {
+            throw ValidationException::withMessages(['status' => ['Mark this Graphic Design Print Ready before handing it off.']]);
+        }
+        if ($item->changeRequests()->where('status', 'open')->exists()) {
+            throw ValidationException::withMessages(['change_requests' => ['Address all client changes before handing this item to Printing.']]);
         }
         $item->loadMissing(['job.enquiry.client', 'type', 'printMaterial', 'documents']);
 
@@ -128,16 +137,18 @@ class DesignHandoffService
 
     private function finalArtworkLink(DesignItem $item)
     {
-        $approvedRevisionId = $item->revisions()
-            ->where('status', 'approved')
-            ->orderByDesc('version_number')
-            ->value('id');
+        $latest = $item->revisions()->first();
+        if (!$latest || $latest->status !== 'approved' || !$latest->completed_at) {
+            throw ValidationException::withMessages([
+                'revision' => ['Complete and approve the latest artwork version before sending to Printing.'],
+            ]);
+        }
 
         $artwork = $item->documents
             ->where('status', 'active')
             ->where('document_type', 'artwork')
             ->where('source', 'link')
-            ->when($approvedRevisionId, fn ($documents) => $documents->where('design_revision_id', $approvedRevisionId))
+            ->where('design_revision_id', $latest->id)
             ->sortByDesc(fn ($document) => sprintf(
                 '%010d-%010d-%s',
                 (int) ($document->version ?? 0),
@@ -194,7 +205,8 @@ class DesignHandoffService
                 'id' => $artwork->id,
                 'name' => $artwork->name,
                 'url' => $artwork->external_url ?: $artwork->file_path,
-                'version' => $artwork->version,
+                'version' => $artwork->revision?->version_number,
+                'design_revision_id' => $artwork->design_revision_id,
             ],
             'synced_at' => now()->toISOString(),
         ];

@@ -15,6 +15,7 @@ class DesignRevisionResource extends JsonResource
             'version_number' => (int) $this->version_number,
             'change_summary' => $this->change_summary,
             'status' => $this->status,
+            'completed_at' => $this->completed_at,
             'creator_name' => $this->creator?->name,
             'approver_name' => $this->approver?->name,
             'approval_evidence' => $this->approval_evidence,

@@ -9,8 +9,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class DesignWorkSession extends Model
 {
     protected $fillable = [
-        'design_item_id', 'user_id', 'started_at', 'ended_at', 'end_type',
-        'pause_reason_code', 'pause_reason_details', 'ended_by',
+        'design_item_id', 'revision_round', 'user_id', 'started_at', 'ended_at', 'end_type',
+        'stop_reason', 'pause_reason_code', 'pause_reason_details', 'ended_by',
     ];
 
     protected $casts = ['started_at' => 'datetime', 'ended_at' => 'datetime'];

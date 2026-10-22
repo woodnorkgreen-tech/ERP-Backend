@@ -153,6 +153,8 @@ class DesignJobController extends Controller
             'items.documents',
             'items.bomItems.material.baseUom',
             'items.handoffs',
+            'items.workSessions.user:id,name',
+            'items.workSessions.endedBy:id,name',
             'documents',
         ]);
 
@@ -166,7 +168,14 @@ class DesignJobController extends Controller
         $data = $request->validated();
         $data['updated_by'] = auth()->id();
 
-        $job->update($data);
+        DB::transaction(function () use ($job, $data) {
+            $job->update($data);
+            if ($job->status === 'cancelled') {
+                foreach ($job->items()->get() as $item) {
+                    $this->workTracking->closeForWorkflow($item, 'cancelled', 'design_job_cancelled');
+                }
+            }
+        });
         $job->load(['enquiry.client', 'enquiry.deliverables', 'enquiry.projectOfficer', 'project', 'items', 'documents', 'graphicMainDesigner:id,name', 'structuralMainDesigner:id,name']);
 
         return response()->json([

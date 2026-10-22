@@ -12,6 +12,8 @@ use App\Modules\ProcurementStores\Models\PurchaseOrder;
 use App\Modules\ProcurementStores\Models\Requisition;
 use App\Modules\ProcurementStores\Services\ProjectMaterialDemand;
 use App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility;
+use App\Modules\Design\Models\DesignJob;
+use App\Modules\Design\Services\DesignWorkTrackingService;
 use App\Modules\Projects\Models\ProjectHold;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -39,6 +41,10 @@ class ProjectLifecycleAction
         EnquiryConstants::STATUS_CANCELLED,
     ];
 
+    public function __construct(private readonly DesignWorkTrackingService $designWorkTracking)
+    {
+    }
+
     /** @return array{enquiry: ProjectEnquiry, open_commitments: array} */
     public function cancel(ProjectEnquiry $enquiry, int $userId, string $reason): array
     {
@@ -56,6 +62,14 @@ class ProjectLifecycleAction
             $enquiry->status = EnquiryConstants::STATUS_CANCELLED;
             $enquiry->save();
             $enquiry->project()->update(['status' => EnquiryConstants::STATUS_CANCELLED]);
+
+            $designJob = DesignJob::query()->where('project_enquiry_id', $enquiry->id)->lockForUpdate()->first();
+            if ($designJob) {
+                $designJob->update(['status' => 'cancelled', 'updated_by' => $userId]);
+                foreach ($designJob->items()->get() as $item) {
+                    $this->designWorkTracking->closeForWorkflow($item, 'cancelled', $reason, $userId);
+                }
+            }
 
             ProjectHold::query()->open()->where('project_enquiry_id', $enquiry->id)->update([
                 'released_by' => $userId, 'released_at' => now(), 'release_reason' => 'Job cancelled: '.$reason,
@@ -105,6 +119,11 @@ class ProjectLifecycleAction
             $enquiry->status = $to;
             $enquiry->save();
             $enquiry->project()->update(['status' => EnquiryConstants::STATUS_PLANNING]);
+
+            if ($from === EnquiryConstants::STATUS_CANCELLED) {
+                DesignJob::query()->where('project_enquiry_id', $enquiry->id)->where('status', 'cancelled')
+                    ->update(['status' => 'in_design', 'updated_by' => $userId]);
+            }
 
             $this->audit($enquiry, $userId, 'project_reactivated', "Project reactivated from {$from}: {$reason}", [
                 'from_status' => $from,
