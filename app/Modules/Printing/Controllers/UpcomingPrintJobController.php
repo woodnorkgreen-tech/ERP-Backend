@@ -29,6 +29,7 @@ class UpcomingPrintJobController extends Controller
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
             'schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])],
+            'printing_schedule' => ['sometimes', Rule::in(['scheduled', 'unscheduled'])],
         ]);
 
         $scope = $filters['schedule_scope'] ?? 'upcoming';
@@ -42,13 +43,22 @@ class UpcomingPrintJobController extends Controller
             // Same date rules as design's job list, so the two screens agree.
             ->tap(fn ($query) => $scope === 'overdue'
                 ? DesignSchedule::overdueJobs($query)
-                : ProjectSetupSchedule::filterDateScope($query, $setupDate, $scope))
+                : ($scope === 'upcoming'
+                    ? $query->where(fn ($match) => ProjectSetupSchedule::filterDateScope($match, $setupDate, $scope)
+                        ->orWhereHas('printingSchedule', fn ($scheduled) => $scheduled
+                            ->whereDate('printing_date', '>=', now('Africa/Nairobi')->toDateString())))
+                    : $query))
             ->with([
                 'enquiry.client',
                 'client',
                 'enquiry.deliverables' => fn ($query) => $query->whereNull('archived_at')->orderBy('sort_order')->orderBy('id'),
                 'items.assignedUser:id,name',
+                'printingSchedule.machine:id,name',
+                'printingSchedule.operator:id,name',
             ])
+            ->when($filters['printing_schedule'] ?? null, fn ($query, $status) => $status === 'scheduled'
+                ? $query->whereHas('printingSchedule', fn ($scheduled) => $scheduled->whereNotNull('printing_date'))
+                : $query->whereDoesntHave('printingSchedule', fn ($scheduled) => $scheduled->whereNotNull('printing_date')))
             ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
             ->when(trim($filters['search'] ?? ''), function ($query, $search) {
                 $term = '%'.$search.'%';

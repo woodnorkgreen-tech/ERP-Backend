@@ -79,6 +79,95 @@ class UpcomingPrintJobsTest extends TestCase
         return $this->getJson('/api/printing/upcoming-jobs?'.http_build_query($query));
     }
 
+    public function test_printing_date_is_independent_of_setup_and_assignment_can_follow_later(): void
+    {
+        $printer = $this->loginPrinter();
+        $setupDate = now()->addDays(10)->toDateString();
+        $printingDate = now()->addDays(3)->toDateString();
+        $enquiry = $this->enquiry('Scheduled exhibition', $setupDate);
+        $this->deliverable($enquiry, 'Banner');
+        $job = $this->designJob($enquiry, 'Scheduled exhibition');
+
+        $this->patchJson("/api/printing/upcoming-jobs/{$job->id}/schedule", [
+            'printing_date' => $printingDate,
+        ])->assertOk()
+            ->assertJsonPath('data.printing_date', $printingDate)
+            ->assertJsonPath('data.operator_id', null);
+
+        $this->upcoming(['search' => 'Scheduled exhibition'])->assertOk()
+            ->assertJsonPath('data.0.printing_date', $printingDate)
+            ->assertJsonPath('data.0.project_setup_date', $setupDate);
+
+        $this->getJson('/api/printing/upcoming-jobs/timeline?'.http_build_query([
+            'from' => $printingDate, 'to' => $printingDate,
+        ]))->assertOk()->assertJsonPath('data.0.design_job_id', $job->id);
+
+        $pastEnquiry = $this->enquiry('Rescheduled after setup', now()->subDays(2)->toDateString());
+        $this->deliverable($pastEnquiry, 'Sign');
+        $pastJob = $this->designJob($pastEnquiry, 'Rescheduled after setup');
+        $this->patchJson("/api/printing/upcoming-jobs/{$pastJob->id}/schedule", [
+            'printing_date' => $printingDate,
+        ])->assertOk();
+        $this->upcoming(['search' => 'Rescheduled after setup'])->assertOk()
+            ->assertJsonPath('data.0.design_job_id', $pastJob->id);
+
+        $this->patchJson("/api/printing/upcoming-jobs/{$job->id}/schedule", [
+            'operator_id' => $printer->id,
+        ])->assertForbidden();
+        $printer->assignRole(Role::findOrCreate('Super Admin', 'web'));
+        Sanctum::actingAs($printer->fresh());
+
+        $this->patchJson("/api/printing/upcoming-jobs/{$job->id}/schedule", [
+            'operator_id' => $printer->id,
+        ])->assertOk()
+            ->assertJsonPath('data.printing_date', $printingDate)
+            ->assertJsonPath('data.operator_id', $printer->id);
+
+        $this->patchJson("/api/printing/upcoming-jobs/{$job->id}/schedule", [
+            'printing_date' => null,
+        ])->assertOk()->assertJsonPath('data.printing_date', null);
+
+        $this->upcoming(['printing_schedule' => 'unscheduled', 'search' => 'Scheduled exhibition'])
+            ->assertOk()->assertJsonPath('data.0.design_job_id', $job->id);
+    }
+
+    public function test_schedule_report_counts_scheduled_projects_and_unscheduled_projects_in_the_selected_setup_period(): void
+    {
+        $this->loginPrinter();
+        $from = now()->addDays(3)->toDateString();
+        $to = now()->addDays(9)->toDateString();
+
+        $scheduledEnquiry = $this->enquiry('Print before setup', now()->addDays(20)->toDateString());
+        $this->deliverable($scheduledEnquiry, 'Banner');
+        $scheduled = $this->designJob($scheduledEnquiry, 'Print before setup');
+        $this->patchJson("/api/printing/upcoming-jobs/{$scheduled->id}/schedule", [
+            'printing_date' => $from,
+        ])->assertOk();
+
+        $unscheduledEnquiry = $this->enquiry('Needs a printing date', $to);
+        $this->deliverable($unscheduledEnquiry, 'Sign');
+        $unscheduled = $this->designJob($unscheduledEnquiry, 'Needs a printing date');
+
+        $laterEnquiry = $this->enquiry('Later project', now()->addDays(25)->toDateString());
+        $this->deliverable($laterEnquiry, 'Panel');
+        $later = $this->designJob($laterEnquiry, 'Later project');
+
+        $reportUrl = '/api/printing/upcoming-jobs/report?'.http_build_query(['from' => $from, 'to' => $to]);
+        $this->getJson($reportUrl)->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.design_job_id', $scheduled->id)
+            ->assertJsonPath('data.0.printing_date', $from)
+            ->assertJsonPath('data.1.design_job_id', $unscheduled->id)
+            ->assertJsonPath('data.1.printing_date', null)
+            ->assertJsonPath('data.1.project_setup_date', $to);
+
+        $this->getJson($reportUrl.'&unscheduled_scope=upcoming')->assertOk()
+            ->assertJsonCount(3, 'data')
+            ->assertJsonPath('data.2.design_job_id', $later->id);
+
+        $this->getJson('/api/printing/upcoming-jobs/report?from=2026-01-01&to=2026-03-01')
+            ->assertUnprocessable();
+    }
+
     public function test_project_without_design_tasks_is_visible_with_deliverables_awaiting_design(): void
     {
         $this->loginPrinter();
