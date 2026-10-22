@@ -30,3 +30,5 @@ Thumbs.db
 graphify-out/
 *.tar.gz
 /Modules/
+.env.example
+laravel_backup.sql
