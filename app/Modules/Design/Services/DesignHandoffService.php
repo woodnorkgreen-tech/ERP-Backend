@@ -11,6 +11,9 @@ class DesignHandoffService
 {
     public function createPrintingHandoffOnce(DesignItem $item): DesignHandoff
     {
+        if ($item->status === 'not_required') {
+            throw ValidationException::withMessages(['status' => ['Restore this task before handing it off.']]);
+        }
         $item->loadMissing(['job.enquiry.client', 'type', 'printMaterial', 'documents']);
 
         $existing = $item->handoffs()

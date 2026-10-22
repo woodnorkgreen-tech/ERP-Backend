@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 class DesignSchedule
 {
     public const CLOSED_JOBS = ['done', 'handed_off', 'cancelled'];
-    public const CLOSED_ITEMS = ['done', 'print_ready', 'production_ready', 'handed_off', 'cancelled'];
+    public const CLOSED_ITEMS = ['done', 'print_ready', 'production_ready', 'handed_off', 'cancelled', 'not_required'];
 
     public static function itemDateQuery(): Builder
     {

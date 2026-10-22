@@ -7,7 +7,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * An upcoming project as design sees it, with each of its deliverables.
- * A deliverable is "assigned" when design has a task for it, otherwise "awaiting design".
+ * A deliverable is "assigned" when Graphic Design has required work for it.
  * Read-only for printing: planning only, no actions.
  */
 class UpcomingProjectResource extends JsonResource
@@ -15,12 +15,13 @@ class UpcomingProjectResource extends JsonResource
     public function toArray(Request $request): array
     {
         $enquiry = $this->enquiry;
-        // A deliverable can have more than one design task (for example graphic and structural),
-        // so every active task is listed, not just the first.
+        // A deliverable can have multiple Graphic tasks, so list each required one.
         $tasks = $this->items
-            ->where('status', '!=', 'cancelled')
+            ->where('stream', 'graphic')
+            ->whereNotIn('status', ['cancelled', 'not_required'])
             ->sortBy('id')
             ->groupBy('project_deliverable_id');
+        $notRequired = $this->items->where('stream', 'graphic')->where('status', 'not_required')->groupBy('project_deliverable_id');
 
         return [
             'design_job_id' => $this->id,
@@ -37,14 +38,16 @@ class UpcomingProjectResource extends JsonResource
             'client_name' => $enquiry?->client?->full_name ?? $this->client?->full_name,
             'design_status' => $this->status,
             'deliverables' => $enquiry
-                ? $enquiry->deliverables->map(function ($deliverable) use ($tasks) {
+                ? $enquiry->deliverables->map(function ($deliverable) use ($tasks, $notRequired) {
                     $deliverableTasks = $tasks->get($deliverable->id) ?? collect();
+                    $planningStatus = $deliverableTasks->isNotEmpty() ? 'assigned'
+                        : (($notRequired->get($deliverable->id) ?? collect())->isNotEmpty() ? 'not_required' : 'awaiting_design');
 
                     return [
                         'deliverable_id' => $deliverable->id,
                         'name' => $deliverable->name,
                         'classification' => $deliverable->element_type,
-                        'planning_status' => $deliverableTasks->isNotEmpty() ? 'assigned' : 'awaiting_design',
+                        'planning_status' => $planningStatus,
                         'design_items' => $deliverableTasks->map(fn ($task) => [
                             'id' => $task->id,
                             'title' => $task->title,

@@ -10,6 +10,7 @@ use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Design\Services\DesignNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class DesignHandoffController extends Controller
 {
@@ -21,6 +22,9 @@ class DesignHandoffController extends Controller
 
     public function store(Request $request, DesignItem $item): JsonResponse
     {
+        if ($item->status === 'not_required') {
+            throw ValidationException::withMessages(['status' => ['Restore this task before handing it off.']]);
+        }
         $data = $request->validate([
             'target_module' => 'required|in:printing,production,materials',
             'target_record_id' => 'nullable|integer',

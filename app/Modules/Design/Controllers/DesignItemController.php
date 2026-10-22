@@ -16,12 +16,15 @@ use App\Modules\Design\Services\DimensionConversionService;
 use App\Modules\Design\Services\DesignWorkTrackingService;
 use App\Modules\Design\Support\DesignSchedule;
 use App\Modules\Design\Support\DesignPauseReason;
+use App\Modules\Design\Support\DesignAccess;
 use App\Modules\Printing\Services\PrintIntakeService;
 use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\JsonResponse;
 use App\Modules\Design\Models\DesignUpdate;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
 
 class DesignItemController extends Controller
 {
@@ -67,7 +70,7 @@ class DesignItemController extends Controller
         $myActiveQuery = DesignItem::query()
             ->where('stream', $stream)
             ->where('assigned_to', auth()->id())
-            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off']);
+            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off', 'not_required']);
         if ($scope === 'overdue') {
             DesignSchedule::overdueItems($myActiveQuery);
         } else {
@@ -108,13 +111,15 @@ class DesignItemController extends Controller
         $status = $request->input('status', $request->route('status'));
         if ($status) {
             $query->where('status', $status);
+        } else {
+            $query->where('status', '!=', 'not_required');
         }
 
         $items = $query->select('design_items.*')->selectSub(DesignSchedule::itemDateQuery(), 'project_setup_date')
             ->with([
                 'job' => fn ($job) => $job->select('design_jobs.*')->selectSub(
                     ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id'), 'project_setup_date'),
-                'job.enquiry.deliverables', 'job.documents', 'assignedUser:id,name', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs',
+                'job.enquiry.deliverables', 'job.documents', 'assignedUser:id,name', 'notRequiredActor:id,name', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs',
                 'workSessions.user:id,name', 'workSessions.endedBy:id,name',
                 ...self::HISTORY_RELATIONS,
             ])
@@ -128,7 +133,7 @@ class DesignItemController extends Controller
             'last_page' => $items->lastPage(),
             'total' => $items->total(),
             'per_page' => $items->perPage(),
-            'counts' => array_merge($counts->map(fn ($count) => (int) $count)->all(), ['all' => (int) $counts->sum()]),
+            'counts' => array_merge($counts->map(fn ($count) => (int) $count)->all(), ['all' => (int) ($counts->sum() - $counts->get('not_required', 0))]),
             'my_work_active_count' => $myActiveCount,
             'my_work_applied' => $myWorkApplied,
         ]);
@@ -150,7 +155,7 @@ class DesignItemController extends Controller
         $myActiveQuery = DesignItem::query()
             ->where('stream', $stream)
             ->where('assigned_to', auth()->id())
-            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off']);
+            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off', 'not_required']);
         if ($scope === 'overdue') {
             DesignSchedule::overdueItems($myActiveQuery);
         } else {
@@ -169,7 +174,7 @@ class DesignItemController extends Controller
             ProjectSetupSchedule::filterDateScope($candidateQuery, DesignSchedule::itemDateQuery(), $scope);
         }
         if ($request->boolean('outsourced_only')) {
-            $query->whereNotNull('outsourced_partner_name');
+            $candidateQuery->whereNotNull('outsourced_partner_name');
         }
 
         if ($request->filled('design_job_id')) {
@@ -188,6 +193,8 @@ class DesignItemController extends Controller
         $counts = (clone $candidateQuery)->selectRaw('status, count(*) as aggregate')->groupBy('status')->pluck('aggregate', 'status');
         if ($request->filled('status')) {
             $candidateQuery->where('status', $request->string('status'));
+        } else {
+            $candidateQuery->where('status', '!=', 'not_required');
         }
 
         $candidates = $candidateQuery
@@ -224,12 +231,15 @@ class DesignItemController extends Controller
         $allItems = DesignItem::query()
             ->where('stream', $stream)
             ->whereIn('design_job_id', $jobIds)
+            ->when($request->input('status') === 'not_required',
+                fn ($query) => $query->where('status', 'not_required'),
+                fn ($query) => $query->where('status', '!=', 'not_required'))
             ->select('design_items.*')
             ->selectSub(DesignSchedule::itemDateQuery(), 'project_setup_date')
             ->with([
                 'job' => fn ($job) => $job->select('design_jobs.*')->selectSub(
                     ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id'), 'project_setup_date'),
-                'job.enquiry.client', 'job.enquiry.deliverables', 'job.documents', 'assignedUser:id,name', 'type',
+                'job.enquiry.client', 'job.enquiry.deliverables', 'job.documents', 'assignedUser:id,name', 'notRequiredActor:id,name', 'type',
                 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs',
                 'workSessions.user:id,name', 'workSessions.endedBy:id,name', ...self::HISTORY_RELATIONS,
             ])
@@ -244,7 +254,7 @@ class DesignItemController extends Controller
         $data = $selectedKeys->map(function (string $key) use ($allItems, $groups, $completedStatuses, $workingStatuses, $waitingStatuses) {
             $items = $allItems->get($key, collect())->values();
             $first = $items->first();
-            $total = $items->count();
+            $total = $items->where('status', '!=', 'not_required')->count();
             $completed = $items->whereIn('status', $completedStatuses)->count();
             $matchingIds = $groups->get($key, collect())->pluck('id')->values();
 
@@ -275,7 +285,7 @@ class DesignItemController extends Controller
             'last_page' => max(1, (int) ceil($groupKeys->count() / $perPage)),
             'total' => $groupKeys->count(),
             'per_page' => $perPage,
-            'counts' => array_merge($counts->map(fn ($count) => (int) $count)->all(), ['all' => (int) $counts->sum()]),
+            'counts' => array_merge($counts->map(fn ($count) => (int) $count)->all(), ['all' => (int) ($counts->sum() - $counts->get('not_required', 0))]),
             'my_work_active_count' => $myActiveCount,
             'my_work_applied' => $myWorkApplied,
         ]);
@@ -333,6 +343,9 @@ class DesignItemController extends Controller
     public function store(StoreDesignItemRequest $request, DesignJob $job, string $stream): JsonResponse
     {
         $data = $this->applyOutsourcing($request, $this->dimensions->normalize($request->validated()));
+        if (array_key_exists('outsourced', $data) && $data['outsourced']) {
+            $data['assignment_source'] = 'individual';
+        }
         $data['stream'] = $stream;
         $data['destination'] = $data['destination'] ?? ($stream === DesignItem::STREAM_GRAPHIC ? 'printing' : 'production');
         $data['design_job_id'] = $job->id;
@@ -355,16 +368,28 @@ class DesignItemController extends Controller
 
     public function update(StoreDesignItemRequest $request, DesignItem $item): JsonResponse
     {
+        if ($item->status === 'not_required' && $request->input('status') !== 'not_required' && $request->has('status')) {
+            throw ValidationException::withMessages(['status' => ['Restore this task before changing its status.']]);
+        }
         $previousAssignedTo = $item->assigned_to;
         $previousStatus = $item->status;
 
         $data = $this->applyOutsourcing($request, $this->dimensions->normalize($request->validated()));
         $data['updated_by'] = auth()->id();
+        if (($data['outsourced'] ?? false) || ! empty($data['outsourced_partner_name'])) {
+            $data['assignment_source'] = 'individual';
+        }
+        if (array_key_exists('assigned_to', $data) && $data['assigned_to'] != $previousAssignedTo) {
+            $data['assignment_source'] = 'individual';
+        }
 
         if (array_key_exists('status', $data) && $data['status'] !== 'print_ready' && $previousStatus === 'print_ready') {
             $data['print_ready_at'] = null;
         }
 
+        if (array_key_exists('assigned_to', $data) && $data['assigned_to'] != $previousAssignedTo) {
+            $this->workTracking->closeForWorkflow($item, 'paused', 'switched_task');
+        }
         $item->update($data);
         $this->recordOutsourcingChange($item);
 
@@ -392,6 +417,14 @@ class DesignItemController extends Controller
             $this->notifications->notifyItemAssigned($item);
         }
 
+        if ($item->assigned_to != $previousAssignedTo) {
+            DesignUpdate::create([
+                'design_item_id' => $item->id,
+                'note' => 'Designer changed from '.($previousAssignedTo ? User::find($previousAssignedTo)?->name : 'Unassigned').' to '.($item->assignedUser?->name ?? 'Unassigned').'.',
+                'created_by' => auth()->id(),
+            ]);
+        }
+
         return response()->json([
             'message' => 'Design item updated successfully',
             'data' => new DesignItemResource($item),
@@ -400,9 +433,111 @@ class DesignItemController extends Controller
 
     public function destroy(DesignItem $item): JsonResponse
     {
+        if ($item->generated_scope_key !== null) {
+            throw ValidationException::withMessages(['item' => ['Project element tasks cannot be deleted. Mark the task Not required instead.']]);
+        }
         $item->delete();
 
         return response()->json(['message' => 'Design item deleted successfully']);
+    }
+
+    public function markNotRequired(Request $request, DesignItem $item): JsonResponse
+    {
+        $this->authorizeScopeDecision($request, $item);
+        $data = $request->validate(['reason' => ['nullable', 'string', 'max:2000']]);
+        $item = DB::transaction(function () use ($item, $data, $request) {
+            $item = DesignItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            if ($item->status === 'not_required') return $item;
+            if ($item->status === 'cancelled') {
+                throw ValidationException::withMessages(['status' => ['Cancelled work cannot be marked Not required.']]);
+            }
+            if ($item->handoffs()->whereIn('status', ['pending', 'accepted'])->exists()) {
+                throw ValidationException::withMessages(['status' => ['Resolve the downstream handoff before marking this task Not required.']]);
+            }
+            if (($item->status !== 'pending' || $item->workSessions()->exists()) && blank($data['reason'] ?? null)) {
+                throw ValidationException::withMessages(['reason' => ['Explain why this task is no longer required.']]);
+            }
+            $this->workTracking->closeForWorkflow($item, 'paused', 'not_required');
+            $item->update([
+                'status' => 'not_required', 'not_required_by' => $request->user()->id,
+                'not_required_at' => now(), 'not_required_reason' => $data['reason'] ?? null,
+                'updated_by' => $request->user()->id,
+            ]);
+            DesignUpdate::create([
+                'design_item_id' => $item->id,
+                'note' => 'Marked Not required'.(filled($data['reason'] ?? null) ? ': '.$data['reason'] : '.'),
+                'created_by' => $request->user()->id,
+            ]);
+            return $item;
+        });
+
+        return response()->json(['message' => 'Design task marked Not required.', 'data' => new DesignItemResource($item->fresh(['job', 'assignedUser:id,name', 'notRequiredActor:id,name', 'workSessions.user:id,name', 'workSessions.endedBy:id,name', ...self::HISTORY_RELATIONS]))]);
+    }
+
+    public function restoreRequired(Request $request, DesignItem $item): JsonResponse
+    {
+        $this->authorizeScopeDecision($request, $item);
+        $item = DB::transaction(function () use ($item, $request) {
+            $item = DesignItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            if ($item->status !== 'not_required') return $item;
+            $mainId = $item->stream === 'graphic'
+                ? $item->job?->graphic_main_designer_id : $item->job?->structural_main_designer_id;
+            $individual = $item->assignment_source === 'individual' && $item->assigned_to
+                ? User::find($item->assigned_to) : null;
+            $keepIndividual = $individual && $individual->is_active && $individual->hasRole('Designer');
+            $item->update([
+                'status' => 'pending', 'not_required_by' => null, 'not_required_at' => null,
+                'not_required_reason' => null,
+                'assigned_to' => $keepIndividual ? $item->assigned_to : $mainId,
+                'assignment_source' => $keepIndividual ? 'individual' : 'project_default',
+                'updated_by' => $request->user()->id,
+            ]);
+            DesignUpdate::create(['design_item_id' => $item->id, 'note' => 'Restored as required Design work.', 'created_by' => $request->user()->id]);
+            return $item;
+        });
+
+        return response()->json(['message' => 'Design task restored.', 'data' => new DesignItemResource($item->fresh(['job', 'assignedUser:id,name', 'workSessions.user:id,name', 'workSessions.endedBy:id,name', ...self::HISTORY_RELATIONS]))]);
+    }
+
+    public function useProjectDefault(Request $request, DesignItem $item): JsonResponse
+    {
+        $this->authorizeScopeDecision($request, $item);
+        $item = DB::transaction(function () use ($item, $request) {
+            $item = DesignItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            if (! $item->job?->project_enquiry_id || $item->generated_scope_key === null) {
+                throw ValidationException::withMessages(['item' => ['Only primary project element tasks can use the project designer.']]);
+            }
+            if (in_array($item->status, ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off', 'not_required'], true)) {
+                throw ValidationException::withMessages(['status' => ['Only unfinished required work can return to the project designer.']]);
+            }
+            if ($item->isOutsourced()) {
+                throw ValidationException::withMessages(['item' => ['Clear outsourcing before using the project designer.']]);
+            }
+            $mainId = $item->stream === 'graphic'
+                ? $item->job->graphic_main_designer_id : $item->job->structural_main_designer_id;
+            if ($item->assignment_source === 'project_default' && $item->assigned_to == $mainId) return $item;
+            if ($item->assigned_to != $mainId && $item->workSessions()->whereNull('ended_at')->exists()) {
+                $this->workTracking->closeForWorkflow($item, 'paused', 'switched_task');
+            }
+            $item->update(['assigned_to' => $mainId, 'assignment_source' => 'project_default', 'updated_by' => $request->user()->id]);
+            DesignUpdate::create(['design_item_id' => $item->id, 'note' => 'Assignment returned to the project '.$item->stream.' designer.', 'created_by' => $request->user()->id]);
+            return $item;
+        });
+
+        if ($item->assigned_to) $this->notifications->notifyItemAssigned($item);
+        return response()->json(['message' => 'Task now uses the project designer.', 'data' => new DesignItemResource($item->fresh(['job', 'assignedUser:id,name', ...self::HISTORY_RELATIONS]))]);
+    }
+
+    private function authorizeScopeDecision(Request $request, DesignItem $item): void
+    {
+        $user = $request->user();
+        $job = $item->job;
+        abort_unless($user && (
+            DesignAccess::userCanAccessLeadViews($user)
+            || $item->assigned_to == $user->id
+            || $job?->graphic_main_designer_id == $user->id
+            || $job?->structural_main_designer_id == $user->id
+        ), 403, 'You cannot change this task requirement.');
     }
 
     public function redesign(Request $request, DesignItem $item): JsonResponse

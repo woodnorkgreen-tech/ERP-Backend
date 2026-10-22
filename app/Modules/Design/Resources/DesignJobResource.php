@@ -23,6 +23,10 @@ class DesignJobResource extends JsonResource
             'status' => $this->status,
             'priority' => $this->priority,
             'due_date' => $this->due_date?->format('Y-m-d'),
+            'graphic_main_designer_id' => $this->graphic_main_designer_id,
+            'structural_main_designer_id' => $this->structural_main_designer_id,
+            'graphic_main_designer' => $this->whenLoaded('graphicMainDesigner', fn () => $this->graphicMainDesigner?->only(['id', 'name'])),
+            'structural_main_designer' => $this->whenLoaded('structuralMainDesigner', fn () => $this->structuralMainDesigner?->only(['id', 'name'])),
             'project_setup_date' => ProjectSetupSchedule::dateFor($this->resource),
             'designers' => $this->whenLoaded('designers', fn () => $this->designers
                 ->unique('id')->sortBy('name')->values()->map(fn ($designer) => [

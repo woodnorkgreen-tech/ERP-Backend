@@ -32,6 +32,13 @@ class DesignItem extends Model
         'description',
         'status',
         'assigned_to',
+        'assignment_source',
+        'generated_scope_key',
+        'last_synced_element_title',
+        'source_element_archived_at',
+        'not_required_by',
+        'not_required_at',
+        'not_required_reason',
         'quantity',
         'dimension_unit',
         'length_value',
@@ -74,6 +81,8 @@ class DesignItem extends Model
         'production_ready_at' => 'datetime',
         'redesign_requested_at' => 'datetime',
         'outsourced_at' => 'datetime',
+        'not_required_at' => 'datetime',
+        'source_element_archived_at' => 'datetime',
     ];
 
     public function isOutsourced(): bool
@@ -104,6 +113,11 @@ class DesignItem extends Model
     public function assignedUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_to');
+    }
+
+    public function notRequiredActor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'not_required_by');
     }
 
     public function printMaterial(): BelongsTo

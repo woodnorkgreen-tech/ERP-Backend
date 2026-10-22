@@ -66,6 +66,7 @@ class ProjectElementRegistry
             $enquiry->elements_revision = ProjectEnquiry::whereKey($enquiry->id)->value('elements_revision');
             $enquiry->unsetRelation('deliverables');
             $this->syncQuoteDrafts($enquiry);
+            $this->syncDesignAfterCommit($enquiry->id);
         });
     }
 
@@ -125,6 +126,19 @@ class ProjectElementRegistry
             ProjectEnquiry::whereKey($enquiry->id)->increment('elements_revision');
             $enquiry->unsetRelation('deliverables');
             $this->syncQuoteDrafts($enquiry);
+            $this->syncDesignAfterCommit($enquiry->id);
+        });
+    }
+
+    private function syncDesignAfterCommit(int $enquiryId): void
+    {
+        DB::afterCommit(function () use ($enquiryId) {
+            $enquiry = ProjectEnquiry::find($enquiryId);
+            if (! $enquiry) return;
+            $sync = app(\App\Modules\Design\Services\DesignProjectSyncService::class);
+            if ($sync->hasDesignWorkflow($enquiry)) {
+                $sync->syncFromEnquiry($enquiry);
+            }
         });
     }
 

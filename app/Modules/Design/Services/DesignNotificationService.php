@@ -13,6 +13,33 @@ use Illuminate\Support\Facades\Log;
 
 class DesignNotificationService
 {
+    public function notifyProjectTasksAssigned(DesignJob $job, string $stream, int $designerId, int $taskCount): void
+    {
+        $designer = User::find($designerId);
+        if (! $designer || $taskCount < 1) return;
+        $this->send(
+            type: 'design_project_tasks_assigned',
+            title: 'Project Design Tasks Assigned',
+            message: "{$taskCount} new {$stream} task(s) for {$job->title} have been assigned to you.",
+            data: ['design_job_id' => $job->id, 'stream' => $stream, 'url' => "/design/jobs/{$job->id}"],
+            users: [$designer],
+        );
+    }
+
+    public function notifyProjectDesignerChanged(DesignJob $job, string $stream, ?int $oldId, ?int $newId, int $taskCount): void
+    {
+        $users = User::query()->whereIn('id', array_filter([$oldId, $newId]))->get()->all();
+        if (! $users) return;
+
+        $this->send(
+            type: 'design_project_assignment_changed',
+            title: 'Project Design Assignment Changed',
+            message: "{$job->title}: {$stream} main designer changed; {$taskCount} unfinished task(s) reassigned.",
+            data: ['design_job_id' => $job->id, 'stream' => $stream, 'url' => "/design/jobs/{$job->id}"],
+            users: $users,
+        );
+    }
+
     public function notifyJobSynced(DesignJob $job): void
     {
         $job->loadMissing('enquiry.client');

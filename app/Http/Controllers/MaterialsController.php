@@ -2248,6 +2248,11 @@ class MaterialsController extends Controller
             app(ProjectElementRegistry::class)->syncQuoteDrafts($materialsData->task->enquiry);
             $materialsData->touch();
             MaterialsListChanged::dispatch($taskId);
+            $designSync = app(\App\Modules\Design\Services\DesignProjectSyncService::class);
+            $designEnquiry = $materialsData->task->enquiry->fresh();
+            if ($designEnquiry && $designSync->hasDesignWorkflow($designEnquiry)) {
+                $designSync->syncFromEnquiry($designEnquiry);
+            }
 
             return response()->json([
                 'message' => 'Element deleted successfully',
